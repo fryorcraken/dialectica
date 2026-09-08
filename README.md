@@ -53,9 +53,10 @@ lgs basecamp launch alice
 
 ## Where it lives
 
-Developed on [Radicle](https://radicle.xyz), with GitHub carrying CI and
-releases — the Logos module catalogue is published from GitHub Releases, so
-releases have to originate there.
+Developed on [Radicle](https://radicle.xyz) at
+`rad:z2ZEqSUxm9c3TWwxJfeeBcL9UAv4m`, with GitHub carrying CI and releases — the
+Logos module catalogue is published from GitHub Releases, so releases have to
+originate there.
 
 Published to the catalogue at
 [fryorcraken/logos-modules](https://github.com/fryorcraken/logos-modules).
