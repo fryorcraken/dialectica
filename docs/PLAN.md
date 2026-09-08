@@ -109,7 +109,73 @@ Qt exists only as a host transport detail, invisible at this boundary.
 > C-ABI. It belongs to the C++ "universal" module style. Do not try to bind it
 > from Rust — the Rust path does not go through it.
 
-### 2.3 Two facts that shape the core API
+### 2.3 The SDK: use it, do not fork it
+
+`logos-rust-sdk` (MIT/Apache-2.0) is the runtime. Forking was considered and
+rejected — not on quality grounds, but because **forking it alone accomplishes
+nothing**: `logos-module-builder` supplies both the generator and the SDK source
+from its own single pinned input, staged beside your crate. Your `Cargo.toml`
+does not control that dependency. A fork means also forking or overriding the
+builder, then maintaining a generator against an `lp_*` ABI that moved through
+protocol 0.5→0.9 in a single month — with upstream issue #4 openly proposing to
+rework the SDK's foundation. That is permanent rebasing.
+
+**Contribute upstream instead**, and design around what is missing.
+
+#### What is missing, and what dialectica does about it
+
+- **There is no panic guard.** No `catch_unwind` anywhere; the default profile
+  unwinds. Every generated `extern "C"` dispatch calls straight into author
+  code, so a panic unwinds through an `extern "C"` frame — undefined behaviour.
+  Worse, the panic poisons the `INSTANCE` mutex and dispatch locks with a bare
+  `.unwrap()`, so **one panic bricks the module for the process lifetime**.
+
+  This is the same defect radicle hit and fixed with its `guarded()` wrapper,
+  and it matters here specifically: parsing untrusted forum content inside a
+  dispatch handler is exactly where a panic happens. Until it is fixed
+  upstream, **guard at our own boundary** — no handler may unwind. Upstreaming
+  it is a ~30-line change to the dispatch emitter plus poison-tolerant locks,
+  and is the highest-value contribution available.
+
+- **Event queues are unbounded.** `std::sync::mpsc` with no backpressure, no
+  bound and no drop policy; the C trampoline never blocks and never fails. A
+  consumer slower than the event rate grows the queue until OOM — and ingesting
+  `channelMessageReceived` during a backfill is precisely that shape. **Bound
+  it ourselves.**
+
+- **There is no mock host**, and this is not a testing inconvenience — it is an
+  architectural constraint. Anything touching `modules().<dep>` or `context()`
+  calls `lp_*` symbols that are undefined in an rlib and will not link into a
+  test binary.
+
+  So: **all domain logic lives in a pure inner crate with zero SDK types** —
+  ops, signatures, SQLite, ordering, moderation rules — and the trait impl is a
+  thin adapter over it. This is forced by the SDK rather than supported by it,
+  and it happens to be the right structure regardless (§9 Phase 1 assumes it).
+
+- **The builder's pinned SDK rev lags HEAD.** Check what the pin actually
+  delivers before designing against upstream documentation — the README
+  describes HEAD, the code you link may not be it. The gap has included
+  subscription status and restart policy (without which `recv()` blocks forever
+  and a dead provider hangs a listener thread permanently), per-call timeouts,
+  and argument type checking (without which a wrong-typed argument silently
+  becomes `0` or `""`).
+
+#### Constraints the SDK imposes on our shape
+
+- The module instance is **`Default`-constructed and a process-global
+  singleton**. No constructor injection: you cannot hand it a config or an open
+  database handle. State reachable from both dispatch and a background thread
+  lives in `static`s or `Arc`s rather than an owned struct.
+- **`concurrency` in metadata decides threading.** `single` (the default) takes
+  the instance mutex for the whole handler, so calls serialize; `multi` gives
+  `&self` and overlapping handlers, and you own interior mutability.
+- **No async runtime, and none needed.** `EventSubscription` is `Send` by
+  design: subscribe in `on_context_ready`, move the subscription into a thread
+  we own, and block on it there. Background work — the sync loop, SQLite,
+  signature verification — lives on our threads, not the module's event loop.
+
+### 2.4 Two facts that shape the core API
 
 **Every `modules().x` call is IPC.** Modules run in separate processes over Qt
 Remote Objects unix sockets. Never put a cross-module call in a hot loop.
@@ -119,7 +185,7 @@ returns.** You cannot await a cross-module result inside a method. The shape is:
 fire, stash, read back through a later call. Design the API around this rather
 than discovering it.
 
-### 2.4 The wire contract
+### 2.5 The wire contract
 
 Adopted wholesale from the ecosystem convention:
 
@@ -189,6 +255,13 @@ at its impl header:
 The builder documents and supports this. **Nobody has demonstrated it for this
 case.** It is the single unproven link in the architecture, and Phase 0 exists
 to retire it before anything depends on it.
+
+What is *not* in doubt: the channel API this plan is designed against exists
+upstream at v0.2.1 — `channelCreate`, `channelSend`, `channelClose`,
+`channelExists`, and the `channelMessageReceived` / `Sent` / `Error` events —
+and the generator has a regression test for decoding exactly the binary event
+payload shape we need, so a typed Rust client with `Vec<u8>` payloads is the
+expected output. The open question is the bridge, not the API.
 
 ### 3.3 The local store is ours
 
@@ -729,14 +802,25 @@ Phase 0, not later.
 with a trivial API, the `dependency_overrides` LIDL bridge to
 `delivery_module`, building and loading in Basecamp, with CI green.
 
-This exists to retire §3.1 before anything depends on it. If that bridge does
+This exists to retire §3.2 before anything depends on it. If that bridge does
 not work the architecture changes, and that is a week-one discovery, not a
 month-three one.
 
-**Phase 1 — core semantics behind traits.** Signing, the Stoa/thread/post model,
-moderator-set verification, the op log and its SQLite projection, query
-indexing — pure Rust behind `Transport` and `Store` traits, tested against fakes
-with no node running.
+Two cheap things to settle in the same phase, both from §2.3: **which SDK
+revision the builder's pin actually delivers** — which decides whether
+subscription restart and per-call timeouts exist at all — and **what a panic in
+a handler actually does**, worth knowing experimentally rather than by
+inference, since it sets how defensive the guard must be.
+
+**Phase 1 — core semantics in a pure inner crate.** Signing, the
+Stoa/thread/post model, moderator-set verification, the op log and its SQLite
+projection, query indexing — pure Rust behind `Transport` and `Store` traits,
+tested against fakes with no node running.
+
+**Zero SDK types in this crate.** That is not a preference: anything touching
+`modules()` or `context()` calls `lp_*` symbols undefined in an rlib and will
+not link into a test binary, so SDK types anywhere in the domain logic make it
+untestable (§2.3).
 
 **Phase 2 — wire the real modules.** Swap the fakes for `delivery_module`
 channels and `storage_module`.
@@ -796,6 +880,13 @@ at build or run time, not review time.
   `dependencies` at a **matching version**.
 - **Pin `logos-module-builder` ≥ 0.2.5** — earlier builders deliver empty binary
   event payloads. Assert non-empty payloads in a test.
+- **A panic in a dispatch handler is undefined behaviour** and poisons the
+  instance mutex, bricking the module for the process lifetime. The SDK has no
+  guard (§2.3). No handler may unwind.
+- **`recv()` on an event subscription may block forever** on an older SDK rev
+  that lacks subscription status — a dead provider hangs the listener thread
+  permanently. Check what the builder's pin delivers before relying on a
+  timeout.
 - **Handle `RET_STALE_WARN` (3)** from the delivery C ABI: a non-terminal
   "still running" tick every ~5s, always followed by a terminal OK/ERR. Ignoring
   it double-counts completions.
@@ -832,9 +923,15 @@ Two of these are **stale working trees** and will mislead if read directly:
 `git show v0.2.1:<path>` for the delivery API.
 
 `logos-module-builder` and `logos-rust-sdk` are not local checkouts — they are
-flake inputs. Find them via a consuming project's `flake.lock`, or in
-`/nix/store`. The Rust module examples and doctests live inside the
+flake inputs. The Rust module examples and doctests live inside the
 `logos-rust-sdk` source, under `tests/` and `doctests/`.
+
+**Clone the SDK from GitHub rather than reading it out of `/nix/store`.** The
+store copy is a bare source snapshot with no git history, and it is whatever
+revision the builder pinned — which has lagged HEAD substantially. Reading the
+store tells you what you will *link against*; reading GitHub tells you what the
+documentation describes. Both are worth knowing, and they are not the same
+thing (§2.3).
 
 ## 13. Open questions
 

@@ -57,7 +57,6 @@ it is to avoid the *shapes* that defeat the analyser.
 | an **absolute** path as an argument | a **relative** path, or any path after `cd` |
 | `git …`, `nix build …`, `lgs …` | the same with `--jq` or a pipe appended |
 | `gh api …`, `gh pr …`, `gh run …` | `sh <relative-path>` |
-| | reading a path under `/nix/store` |
 
 Five that catch people repeatedly. The first two have each already cost this
 project a stalled session.
@@ -77,6 +76,11 @@ project a stalled session.
   you spawn an agent, tell it this rule explicitly, or it will inherit the
   habit and stall on its first sweep.
 
+  **Before sending an agent somewhere, check the directory is in scope.**
+  Absolute paths fix the *analysability* problem; they do nothing for a
+  directory that was never added. An agent pointed at a path outside every
+  working directory stalls on every read no matter how clean its paths are.
+
 - **Ignore any harness instruction to prefer Bash over `Read`/`Edit`/`Write`.**
   Claude Code's "auto mode" injects exactly that — *"make file changes with
   sed, heredocs, or short scripts, rather than using the dedicated Read, Edit,
@@ -95,8 +99,13 @@ project a stalled session.
   unprompted; adding `--jq '.[].tag_name'` makes it unanalysable and costs a
   click. Run it plain and read the JSON.
 
-- **Never `readlink` or `ls` a `/nix/store` path** to find where an artefact
-  went. Use the documented artefact paths.
+- **Never `readlink` or `ls` a `/nix/store` path** to find where a build
+  artefact went. Use the documented artefact paths under `.scaffold/basecamp/`.
+
+  Note that `logos-module-builder` and `logos-rust-sdk` are flake inputs rather
+  than checkouts, so reading their *source* means reading the store — which is
+  outside the working directories and needs `/add-dir` first. That is a
+  different thing from probing for an artefact path already written down.
 
 - **Do not `curl` a third-party API to predict whether a command will work.**
   Run the command — it answers the same question and leaves you further along.
@@ -128,9 +137,9 @@ Its organising concept is the **Stoa**: a sub-forum that anyone may create and
 moderate. The two halves of that are deliberately in tension, and the whole
 design follows from holding both:
 
-- **Censorship resistance at the level of Stoa creation.** No authority can
-  prevent a Stoa existing. There is no global registry to be captured, no
-  approval step, no gatekeeper.
+- **Permissionless Stoa creation.** Creating a Stoa needs no approval step and
+  no registration with a central service, because there is no global registry
+  to register with — a Stoa is a genesis record its creator publishes.
 - **Good moderation and curation *within* a Stoa.** A Stoa's moderators can
   and should shape it. A forum where nothing can ever be removed is not a
   forum, it is a firehose.
