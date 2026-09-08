@@ -291,11 +291,30 @@ Posts carry a **CID**; `storage_module` holds the bytes. This sidesteps the
 blobs in the op log, where they would bloat both SDS traffic and later
 snapshots.
 
-Two properties to be honest about in the UI: Logos Storage has **no identity
-concept at all**, and no persistence guarantee — *"if no one is interested in
-your files, chances are that losing your node means your data is lost."* An
-image is best-effort. Post text is an op and is as durable as the op log;
-attachments can rot. Render a missing attachment as missing, not as an error.
+Logos Storage has **no identity concept at all**, and its persistence is
+interest-driven rather than guaranteed — *"if no one is interested in your
+files, chances are that losing your node means your data is lost."*
+
+**So replication is dialectica's job, and the model is: readers become
+seeders.** Anyone who downloads an image serves it afterwards, which makes a
+popular attachment progressively better replicated — the property Storage's
+organic-replication design is built to reward. The **author seeds their own
+attachments for a long period**, so a post is not dependent on someone else
+having read it yet.
+
+Consequences to design for, none of which need solving in v1 but all of which
+should be decided before attachments ship:
+
+- **How long the author seeds**, and whether that is bounded at all. Indefinite
+  is simplest and probably right for a desktop app.
+- **Whether a reader can opt out** of re-seeding. Some will want to.
+- **A dead CID is not a broken post.** A post whose attachment cannot be
+  resolved is still a valid, verifiable post — the CID is a field in a signed
+  op, and unresolvable is a *fetch* outcome, not a validation failure. Render
+  the attachment as missing; never let it invalidate the post or the thread.
+- **No re-pinning of someone else's content by default.** Automatically
+  re-hosting whatever arrives is how a client becomes a distributor of things
+  its user never chose to store.
 
 ### 4.8 Stoa discovery
 
