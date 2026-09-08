@@ -528,6 +528,47 @@ loses whatever the user typed.
 
 ---
 
+### 5.7 Mutability: revision, not shared state
+
+**A post is never edited in place. An edit is a new version of that post,
+published and signed by the same author.**
+
+This is the whole conflict rule for post content, and it is deliberately not a
+merge strategy. Two versions of a post do not *conflict* — they are ordered:
+
+- **Authorship decides validity.** A version signed by anyone other than the
+  post's original author is invalid and dropped on read (§3.3). There is no
+  case where two authors contend for one post.
+- **Lamport order decides currency.** Among an author's own versions, the
+  highest Lamport timestamp is current, ties broken by ascending message id —
+  the same rule SDS already applies (§4.4), so nothing new is invented.
+- **History is kept.** Superseded versions stay in the op log. The UI can show
+  that a post was edited, and a moderator acting on a post is acting on a
+  version they can name.
+
+The reason this matters beyond edits: it means dialectica has **almost no
+shared mutable state**. Posts and replies are append-only; an edit appends too.
+SDS gives an order, and an order plus "only the author may revise" is a complete
+answer — no CRDT, no merge function, no last-writer-wins ambiguity.
+
+### What this rule does not cover
+
+Three pieces of state are not authored revisions of a post, and each needs its
+own answer:
+
+- **Moderation flags.** Not the author's to revise, by design. A moderator's
+  hide and the author's edit are about different things and do not contend: an
+  edit does not clear a hide, and a hide does not invalidate an edit. Among
+  *moderation* ops on the same target, last-write-wins by Lamport order, valid
+  only if the signer was a moderator at that time (§6).
+- **Stoa metadata** — title, description, policy (§7.1). Owned by the Stoa's
+  moderators rather than by any author, so the same moderator-scoped
+  last-write-wins rule applies.
+- **The moderator set itself.** Deferred with mutable moderation (§6), and the
+  one place where a real ordering decision is still open — a set edited
+  concurrently by two moderators is the first genuine merge question this design
+  has. It does not arise while the creator is the sole moderator.
+
 ## 6. Moderation
 
 **Signed ops with a Stoa moderator set.** Every op is signed by its author.
@@ -785,11 +826,10 @@ flake inputs. Find them via a consuming project's `flake.lock`, or in
   layer, there is no CRDT fallback if a channel degrades.
 - How far back does SDS-Repair realistically reach in a live Stoa? That number
   decides how urgent snapshots are.
-- What is the conflict rule for mutable state — moderation flags, thread
-  titles, the moderator set? SDS orders messages; it does not say what a
-  concurrent edit *means*. Last-write-wins by Lamport order is probably right,
-  and should be written down rather than assumed. Posts and replies are
-  append-only and immutable, so this is a small surface.
+- **How is the moderator set ordered when two moderators edit it
+  concurrently?** The one genuine merge question in the design (§5.7), and it
+  does not arise while the creator is the sole moderator — so it is answered
+  alongside mutable moderation, not before.
 - **Not whether a Stoa declares a posting policy, but when the field lands.**
   Open / invite / first-post-approval / token-threshold (§7.1) are all variants
   of one mechanism, so the genesis record wants a `policy` field even while
