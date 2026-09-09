@@ -64,8 +64,12 @@ only as a launcher tile that does nothing.
 Unit tests run outside Nix:
 
 ```
-cargo test --manifest-path dialectica/rust-lib/Cargo.toml
+cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica -p dialectica-core
 ```
+
+The `-p` flags are load-bearing. Nearly every test lives in `dialectica-core`,
+the pure inner crate; without them cargo tests only the outer package and
+reports `ok` having run almost nothing.
 
 ## Where it lives
 

@@ -6,7 +6,15 @@ version = 4
 name = "dialectica"
 version = "0.1.0"
 dependencies = [
+ "dialectica-core",
  "logos-rust-sdk",
+ "serde_json",
+]
+
+[[package]]
+name = "dialectica-core"
+version = "0.1.0"
+dependencies = [
  "serde_json",
 ]
 

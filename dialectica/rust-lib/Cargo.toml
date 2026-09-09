@@ -26,6 +26,10 @@ name = "dialectica"
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
+# The pure inner crate (PLAN.md §9). Nested inside this crate's directory rather
+# than beside it because the builder stages ONLY `codegen.rust.crate` — see the
+# placement note in its own Cargo.toml, which is where that reasoning lives.
+dialectica-core = { path = "dialectica-core" }
 serde_json = "1"
 # Supplied by the builder, staged beside this crate at the SAME rev its
 # generator came from — so generator and runtime cannot skew. This path does

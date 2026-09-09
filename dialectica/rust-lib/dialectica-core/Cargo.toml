@@ -1,0 +1,46 @@
+[package]
+name = "dialectica-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# DELIBERATELY NO `[workspace]` TABLE HERE, unlike the module crate.
+#
+# The module crate carries an empty one to avoid adopting a workspace from a
+# parent directory. Repeating it here does not add a second layer of that
+# protection — it declares a second workspace ROOT inside the first, and cargo
+# refuses outright:
+#
+#     error: multiple workspace roots found in the same workspace:
+#       .../rust-lib
+#       .../rust-lib/dialectica-core
+#
+# So this crate is a member of the module crate's workspace. That is the shape
+# the build wants anyway: one `rust-lib/Cargo.lock` covering both crates, which
+# is the single lockfile `mkLogosModule.nix` reads.
+
+# NOTE ON PLACEMENT — this crate is nested INSIDE `rust-lib/` on purpose, and
+# moving it to a sibling of `rust-lib/` breaks the Nix build.
+#
+# `mkLogosModule.nix` stages the Rust source with, verbatim:
+#
+#     cp -r ${rustCrateDir} $out/rust-lib
+#     ...
+#     sourceRoot = "logos-<name>-rust-src/rust-lib";
+#     cargoLock.lockFile = "${rustCrateDir}/Cargo.lock";
+#
+# `rustCrateDir` is exactly `codegen.rust.crate` from metadata.json. Only that
+# one directory is copied, so a crate beside it is simply absent from the build
+# and its `path = "../..."` dep fails to resolve — in Nix only, long after
+# `cargo test` has gone green locally. Nested, `cp -r` carries it along for
+# free.
+#
+# ZERO SDK TYPES, and here that is structural rather than a convention someone
+# has to remember. This crate does not depend on `logos-rust-sdk` at all, so an
+# SDK import is a COMPILE ERROR rather than something review has to catch —
+# which is the whole point of PLAN.md §9's "pure inner crate" and §2.3's reason
+# for it: anything touching `modules()` or `context()` calls `lp_*` symbols that
+# are undefined in an rlib and will not link into a test binary.
+[dependencies]
+serde_json = "1"
