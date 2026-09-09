@@ -572,7 +572,7 @@ Nothing has called `createNode` (§11: exactly once per context), so delivery
 declining is correct. **The error is delivery-side, not bridge-side** — which
 is precisely the distinction this button was built to make.
 
-### One real bug, which only a live call could find
+### One real bug, which only a live call could find — since fixed
 
 Our core wrapped delivery's error as:
 
@@ -583,21 +583,43 @@ Our core wrapped delivery's error as:
 
 `channel_exists_reply` matches `true`/`false` and refuses to guess at anything
 else — that refusal is deliberate and tested (coercing an unknown reply to
-`false` would report "channel not open" for an answer delivery never gave).
-The gap is narrower: it does not recognise delivery's **error envelope** as an
-error, so a real delivery-side failure reaches the user wrapped in a parser
-complaint, and the actual message — `Context not initialized` — survives only
-as quoted text inside it.
+`false` would report "channel not open" for an answer delivery never gave), and
+the fix kept it. The gap was narrower: it did not recognise delivery's **error
+envelope** as an error, so a real delivery-side failure reached the user wrapped
+in a parser complaint, and the actual message — `Context not initialized` —
+survived only as quoted text inside it.
 
-Fix: check for an `error` key before attempting the boolean, and propagate that
-message unchanged. Per PLAN.md §2.5 the caller should see delivery's error, not
-our confusion about it.
+`core::callee_error` now reads the envelope, and `channel_exists_reply` consults
+it **before** the boolean match. The ordering is the fix: run the check after the
+match and every decline still falls into the catch-all it was meant to escape.
+
+**Why it keys off `error` alone**, rather than the fuller `{error, success,
+value}` triple delivery actually sent — the two directions of the tradeoff are
+not symmetric:
+
+- Too strict misses a real error, which lands it back in the catch-all and
+  reproduces this exact bug for the next callee. `success` and `value` are
+  delivery's own extras; PLAN.md §2.5 makes `{"error":"..."}` the shape the
+  ecosystem shares.
+- Too loose misreads a legitimate value as a failure. What bounds that is
+  requiring a JSON **object** whose `error` holds a **string**: no success reply
+  in this contract is an object, so there is nothing to shadow. A callee whose
+  success shape *is* an object with a genuine `error` field needs its own
+  decoder — that is a contract worth noticing, not one to paper over.
+
+`callee_error` is a named function with one call site rather than an inlined
+`if`, because the trap below is general even though the exposure is not. It is
+deliberately not a shared decode/dispatch layer: there is exactly one
+cross-module call today, and CLAUDE.md's "make room for the change in front of
+you" rules out building for the ones imagined.
 
 **The general trap, worth more than the instance:** a typed client's happy path
-and its error path are separate contracts. Every generated cross-module call
-needs a test for what arrives when the callee *declines*, and no amount of
-unit-testing the success shape produces it — the tests here covered `true`,
-`false` and junk, and still missed the one reply a live provider actually sent.
+and its error path are separate contracts, and only the happy one appears in the
+generated signature — delivery declined at the *Rust* level with `Ok(...)`.
+Every generated cross-module call needs a test for what arrives when the callee
+*declines*, and no amount of unit-testing the success shape produces it: the
+tests here covered `true`, `false` and junk, and still missed the one reply a
+live provider actually sent.
 
 ---
 
