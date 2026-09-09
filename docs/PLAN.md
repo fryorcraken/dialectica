@@ -127,8 +127,17 @@ rework the SDK's foundation. That is permanent rebasing.
 - **There is no panic guard.** No `catch_unwind` anywhere; the default profile
   unwinds. Every generated `extern "C"` dispatch calls straight into author
   code, so a panic unwinds through an `extern "C"` frame — undefined behaviour.
-  Worse, the panic poisons the `INSTANCE` mutex and dispatch locks with a bare
-  `.unwrap()`, so **one panic bricks the module for the process lifetime**.
+
+  > **Measured, and worse than this predicted** (PHASE0-FINDINGS §3). The
+  > mutex-poisoning below is real code but is never reached: the process
+  > **aborts** — `failed to initiate panic, error 5`, SIGABRT — before any
+  > later dispatch can meet a poisoned lock. The caller waits out its 20s
+  > timeout, and every call after that gets `MODULE_NOT_LOADED`. So the guard
+  > is load-bearing rather than hardening, and poison tolerance is the
+  > secondary fix, not the primary one.
+
+  The mechanism that would bite if the process survived: the panic poisons the
+  `INSTANCE` mutex and dispatch locks with a bare `.unwrap()`.
 
   This is the same defect radicle hit and fixed with its `guarded()` wrapper,
   and it matters here specifically: parsing untrusted forum content inside a
@@ -821,7 +830,8 @@ inference, since it sets how defensive the guard must be.
 > **Done — see `docs/PHASE0-FINDINGS.md`.** Both modules load in Basecamp, the
 > view renders, the guard converts a panic to the error shape and the module
 > keeps serving, the bridge carries a live call into delivery's own
-> implementation, and CI is green (§10). The three questions are answered
+> implementation, and CI exists covering §10's four jobs — `gh run list` for
+> whether it is currently passing. The three questions are answered
 > there, along with what is still *not* proven — no delivery node has been
 > created, so no channel has been opened and the §4.3 channel-id trap is
 > untested; only one profile has been launched.
@@ -860,13 +870,24 @@ section, since three of the claims below turned out to be wrong.
 **Pins:**
 
 - **`lgs`: crates.io `0.3.1`, not the unreleased rev.** This section previously
-  accepted a force-push risk that dialectica does not have to take. The reason
-  radicle pins an unreleased rev is `setup --inspector`; dialectica's CI never
-  calls `setup`, and the other reason — `build --print-output`, absent from
-  v0.3.1 — turns out not to need the flag at all: scaffold's
-  `print_output_enabled()` reads `LOGOS_SCAFFOLD_PRINT_OUTPUT` from the
-  environment for every `run_logged` call. Set the env var, pin the release,
-  and the risk is retired rather than documented.
+  accepted a force-push risk that dialectica does not have to take. Radicle
+  pins an unreleased rev for two reasons, and neither applies here.
+
+  `setup --inspector` is the first, and dialectica's CI never calls `setup`.
+
+  The second is `build --print-output`, absent from v0.3.1 — and the reason it
+  does not matter is worth stating precisely, because the obvious version is
+  wrong. It is *not* that `LOGOS_SCAFFOLD_PRINT_OUTPUT` substitutes for the
+  flag: `print_output_enabled()` is only ever consulted by `run_logged`, and
+  **`lgs basecamp build` never calls it.** `run_build_portable_nix` runs
+  `cmd.output()`, capturing both streams into memory, and on failure surfaces
+  stderr through its own `bail!`. So on the build path the flag and the env var
+  are equally inert — which is exactly why the unreleased rev buys nothing, and
+  why the flag exists only for `install` at that tag. Failure output still
+  reaches the log; it arrives by the bail, not by streaming.
+
+  Pin the release, and the risk is retired rather than documented. (The env var
+  is set anyway, correctly, for an `install` job that does not exist yet.)
 - **A Nix version floor exists, and it is invisible until it bites.** Nix ≤2.24
   refuses to evaluate a lock file containing a relative path input **before**
   applying `--override-input`, so `dialectica-ui`'s `path:../dialectica` fails
@@ -876,9 +897,6 @@ section, since three of the claims below turned out to be wrong.
   and later pass. CI pins the Nix version explicitly rather than inheriting
   whatever the installer action happens to bundle. Radicle never hit this only
   because its build job uses a different installer.
-- **sitometres: latest release.** Radicle pins a git commit only to work around
-  a probe bug in published 0.1.0; that is a workaround, not a pattern to copy.
-  Not yet relevant — there is no e2e job (see below).
 
 **Anti-false-green, throughout.** Radicle's CI is built around the observation
 that a green gate which cannot see the thing it claims to check is worse than no
@@ -889,15 +907,23 @@ passes.
 
 That principle earned its place immediately, and against the template itself:
 
-- **Radicle's `qmllint` gate is dead, and ours inherited it.** It greps for
+- **Radicle's `qmllint` gate cannot fire, and ours inherited it.** It greps for
   `^.*:[0-9]+:[0-9]+: (error|Error)`, which expects `file:line:col: error:` —
-  but Qt6 prints severity *first* (`Warning: file:line:col: ...`). Verified
-  against the real binary: a deliberately broken file produces zero matches
-  while qmllint itself exits 255. The step could not fail, on anything, ever.
-  **Worth telling the radicle maintainers**, since their copy is dead the same
-  way. Gate on the exit code; silence a genuine non-defect with qmllint's own
-  `--<category> disable`, which names what it ignores, rather than a regex that
-  ignores everything.
+  but Qt6 prints severity *first*: `Warning: file:line:col: ...`. Two separate
+  facts, tested against the real binary at Qt 6.10.3 and worth keeping apart:
+
+  - **Severity-first formatting kills the regex.** An unknown type and an
+    unqualified access both produce zero matches against it.
+  - **The exit code is the signal that works.** A hard syntax error exits 255,
+    where the same regex still matches nothing.
+
+  Since the step ran the linter under `|| true`, the discarded exit code was
+  the only thing that could have caught the second case, and the regex was the
+  only gate. **Worth telling the radicle maintainers**, since their copy is
+  identical. Gate on the exit code; silence a genuine non-defect with qmllint's
+  own `--<category> disable`, which names what it ignores, rather than a regex
+  that ignores everything. Version named because output formats are a moving
+  target — re-test rather than assume.
 - **A ported assertion can be wrong for the port.** Radicle asserts a truthy
   `main` on the ui_qml packaged manifest. Dialectica's is `{}` — a QML-only
   module has no binary entry point — so the assertion would have failed a
@@ -913,7 +939,9 @@ foot of the workflow too):
 
 - **No e2e job.** The view is four buttons with no specs, and a matrixed job
   over zero specs cannot fail — the exact thing this section forbids. It
-  arrives with the specs.
+  arrives with the specs, and **sitometres is pinned to its latest release**
+  when it does: radicle pins a git commit only to work around a probe bug in
+  published 0.1.0, which is a workaround rather than a pattern to copy.
 - **No `doctor` job**, despite §11 saying to run `doctor`. Two pins WARN on
   every run by design (PHASE0-FINDINGS §8), so the job would be permanently
   red, and a permanently red gate trains people to ignore it. Run it by hand;
@@ -966,14 +994,22 @@ at build or run time, not review time.
   (`lgs basecamp paths <profile>` locates it). Requested as a first-class verb
   in logos-co/scaffold#268.
 - **Run `lgs basecamp doctor` before believing a green build.** It catches pin
-  drift and split basecamp/lgpm pin sets that no build failure surfaces.
+  drift and split basecamp/lgpm pin sets that no build failure surfaces. Expect
+  two WARNs: the basecamp/lgpm split and the delivery pin are both deliberate,
+  and PHASE0-FINDINGS §8 says why. That they are decided rather than drift is
+  also why there is no `doctor` CI job (§10) — an always-red gate trains people
+  to ignore it.
 - **The UI icon must be a 256×256 PNG**, and the UI module must declare core in
   `dependencies` at a **matching version**.
 - **Pin `logos-module-builder` ≥ 0.2.5** — earlier builders deliver empty binary
   event payloads. Assert non-empty payloads in a test.
-- **A panic in a dispatch handler is undefined behaviour** and poisons the
-  instance mutex, bricking the module for the process lifetime. The SDK has no
-  guard (§2.3). No handler may unwind.
+- **A panic in a dispatch handler aborts the module process.** Measured, not
+  inferred: `failed to initiate panic, error 5`, SIGABRT, and every later call
+  gets `MODULE_NOT_LOADED` — the caller having first waited out a 20s timeout
+  that names nothing (PHASE0-FINDINGS §3). Not the mutex poisoning §2.3
+  predicted; the process dies before a poisoned lock can be met. The SDK has no
+  guard, so **no handler may unwind** — ours is what stands between those two
+  outcomes.
 - **`recv()` on an event subscription may block forever** on an older SDK rev
   that lacks subscription status — a dead provider hangs the listener thread
   permanently. Check what the builder's pin delivers before relying on a
