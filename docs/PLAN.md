@@ -239,8 +239,18 @@ module** — what cloud_data was reaching for, built on SDS rather than beside i
 ### 3.2 The one unproven link
 
 `delivery_module` v0.2.1 does not publish a `lidl` flake output. Consuming it
-from Rust therefore needs a `dependency_overrides` entry pointing the generator
-at its impl header:
+from Rust therefore needs a `dependency_overrides` entry.
+
+> **Retired by Phase 0 — and the header form below does not work.** Pointing
+> the override at an impl header fails from a Rust module: the `--dep` path
+> feeds the *LIDL parser*, and only the C++ generator has a header frontend.
+> The working form commits a converted `.lidl` and points at that. See
+> `docs/PHASE0-FINDINGS.md` §1 for the error and the conversion, and §6 for the
+> bridge carrying a live cross-module call. The architecture stands; this
+> section's JSON does not.
+
+The form that does **not** work, kept because `impl_class` is documented as
+required for exactly this case and the failure names nothing useful:
 
 ```json
 "dependency_overrides": {
@@ -251,10 +261,6 @@ at its impl header:
   }
 }
 ```
-
-The builder documents and supports this. **Nobody has demonstrated it for this
-case.** It is the single unproven link in the architecture, and Phase 0 exists
-to retire it before anything depends on it.
 
 What is *not* in doubt: the channel API this plan is designed against exists
 upstream at v0.2.1 — `channelCreate`, `channelSend`, `channelClose`,
@@ -812,6 +818,17 @@ subscription restart and per-call timeouts exist at all — and **what a panic i
 a handler actually does**, worth knowing experimentally rather than by
 inference, since it sets how defensive the guard must be.
 
+> **Done, bar CI — see `docs/PHASE0-FINDINGS.md`.** Both modules load in
+> Basecamp, the view renders, the guard converts a panic to the error shape and
+> the module keeps serving, and the bridge carries a live call into delivery's
+> own implementation. The three questions are answered there, along with what
+> is still *not* proven (no delivery node, one profile only, no CI).
+>
+> The architecture stands. What changed is §3.2's JSON, §11's trap list, and
+> the discovery that an unguarded panic **aborts the module process** rather
+> than poisoning a mutex as §2.3 predicted — so the guard is load-bearing, not
+> hardening.
+
 **Phase 1 — core semantics in a pure inner crate.** Signing, the
 Stoa/thread/post model, moderator-set verification, the op log and its SQLite
 projection, query indexing — pure Rust behind `Transport` and `Store` traits,
@@ -874,8 +891,25 @@ at build or run time, not review time.
 - **Set `runtime_dir` to the session's real one** (e.g. `/run/user/1000`). The
   in-profile default overflows the 108-byte `sun_path` cap and **every module
   segfaults** at "Failed to register module for remote access".
-- **`lgs basecamp setup` strips every comment from `scaffold.toml`.** Run
-  `git diff scaffold.toml` after any setup.
+- **`lgs basecamp setup`, `modules` *and* `install` each strip every comment
+  from `scaffold.toml`** — not `setup` alone. Rediscovered the expensive way:
+  the comments were restored, then vanished again on the next unrelated verb.
+  Run `git diff scaffold.toml` after **any** `lgs basecamp` verb.
+- **`lgs basecamp install` does not install a module's declared
+  `dependencies`.** It builds the `[modules.*]` project sources and never reads
+  the `dependencies` array in `metadata.json`. `lgs basecamp modules` is the
+  verb that captures runtime dependencies; run it first, then `install`. Skip it
+  and the module fails to load with `Cannot resolve dependencies for: <name>`,
+  which presents as a launcher tile that does nothing when clicked — while the
+  build stays green and `modules --show` lists the dependency it never
+  installed.
+- **`pgrep basecamp` finds nothing while Basecamp is running.** The launcher is
+  `.LogosBasecamp.elf` and each module is a separate `.logos_host.elf`, both
+  under the dynamic loader. Read the PID from `<profile>/launch.state` instead
+  (`lgs basecamp paths <profile>` locates it). Requested as a first-class verb
+  in logos-co/scaffold#268.
+- **Run `lgs basecamp doctor` before believing a green build.** It catches pin
+  drift and split basecamp/lgpm pin sets that no build failure surfaces.
 - **The UI icon must be a 256×256 PNG**, and the UI module must declare core in
   `dependencies` at a **matching version**.
 - **Pin `logos-module-builder` ≥ 0.2.5** — earlier builders deliver empty binary

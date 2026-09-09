@@ -1,0 +1,33 @@
+[package]
+name = "dialectica"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# The empty table keeps cargo from adopting any workspace it finds in a parent
+# directory. The builder stages this crate under a generated source root, so an
+# inherited workspace would resolve against a tree that is not there.
+[workspace]
+
+[lib]
+name = "dialectica"
+# `staticlib` is what the builder links into the Qt plugin: it copies
+# `libdialectica.a` into the plugin build's `lib/`.
+#
+# `rlib` is here so `cargo test` has something to build. A staticlib alone has
+# no test harness, and without this the crate's unit tests cannot run at all
+# outside Nix. It costs an extra archive nothing reads and buys the whole test
+# layer.
+#
+# Note this does NOT make `lib.rs` testable — `cargo test` compiles `core.rs`
+# and stops there, because `lib.rs`'s include! of generated/provider_gen.rs is
+# absent outside the builder. That asymmetry is the reason `core.rs` exists.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+serde_json = "1"
+# Supplied by the builder, staged beside this crate at the SAME rev its
+# generator came from — so generator and runtime cannot skew. This path does
+# not exist in a plain checkout; see `cargo test` handling in CLAUDE.md/CI.
+logos-rust-sdk = { path = "../logos-rust-sdk-src" }

@@ -1,0 +1,27 @@
+{
+  "name": "dialectica_ui",
+  "display_name": "Dialectica",
+  "version": "0.1.0",
+  "type": "ui_qml",
+  "category": "general",
+  "description": "Dialectica — a decentralized forum on the Logos stack",
+  "icon": "src/icons/icon.png",
+  "view": "qml/Main.qml",
+  "dependencies": ["dialectica"],
+  "provides": [],
+  "uses": [],
+
+  "nix": {
+    "packages": {
+      "build": [],
+      "runtime": []
+    },
+    "external_libraries": [],
+    "cmake": {
+      "find_packages": [],
+      "extra_sources": [],
+      "extra_include_dirs": [],
+      "extra_link_libraries": []
+    }
+  }
+}

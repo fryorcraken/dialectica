@@ -2,8 +2,13 @@
 
 A decentralized forum, built as a [Logos](https://logos.co) module.
 
-> **Status: planning.** No code yet. [`docs/PLAN.md`](docs/PLAN.md) is the
-> design; everything below summarises it.
+> **Status: Phase 0.** The module path is proven end to end — both modules load
+> in Basecamp, the view renders, and the core reaches `delivery_module` across
+> a real cross-process call. There is no forum yet.
+>
+> [`docs/PLAN.md`](docs/PLAN.md) is the design;
+> [`docs/PHASE0-FINDINGS.md`](docs/PHASE0-FINDINGS.md) is what building it
+> actually taught us, including the parts that contradict the plan.
 
 ## Stoas
 
@@ -42,13 +47,24 @@ path.
 
 ## Building
 
-Nothing to build yet. When there is, it will be through
-[`logos-scaffold`](https://github.com/logos-co/scaffold):
+Through [`logos-scaffold`](https://github.com/logos-co/scaffold):
 
 ```
 lgs basecamp build --variant all
+lgs basecamp modules
 lgs basecamp install
 lgs basecamp launch alice
+```
+
+`lgs basecamp modules` is not optional: `install` builds the project modules
+but never reads the `dependencies` array in `metadata.json`, so without it
+`delivery_module` is missing at runtime and the plugin fails to load — visible
+only as a launcher tile that does nothing.
+
+Unit tests run outside Nix:
+
+```
+cargo test --manifest-path dialectica/rust-lib/Cargo.toml
 ```
 
 ## Where it lives
