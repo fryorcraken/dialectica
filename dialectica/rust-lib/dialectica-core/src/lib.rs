@@ -11,6 +11,7 @@
 //! no SDK crate at all, so the constraint is enforced by the compiler rather
 //! than by review. The module crate is a thin adapter that forwards to it.
 
+pub mod identity;
 pub mod wire;
 
 // The wire surface is re-exported at the crate root because it IS the module's

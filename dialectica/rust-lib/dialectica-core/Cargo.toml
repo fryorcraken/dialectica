@@ -44,3 +44,27 @@ publish = false
 # are undefined in an rlib and will not link into a test binary.
 [dependencies]
 serde_json = "1"
+
+# LEZ's signature scheme, matched deliberately rather than picked fresh.
+# PLAN.md §5.1 asks for LEZ's cryptographic seriousness, and LEZ signs with
+# BIP-340 Schnorr over secp256k1 through this exact crate
+# (`lee/state_machine/src/signature/mod.rs`), deriving public account addresses
+# as SHA-256 over a domain-separated 32-byte prefix.
+#
+# What is deliberately NOT taken: LEZ's own `lee` / `lee_core` crates. They are
+# unpublished in-tree path crates, and `lee_core` pulls `risc0-zkvm` in
+# unconditionally just to reach `risc0_zkvm::sha::Impl` — a zkVM dependency for
+# what is, on the host, plain SHA-256 with byte-identical output to `sha2`.
+# Depending on the upstream primitives instead costs ~20 lines of address
+# derivation and keeps a forum out of the proving stack entirely.
+#
+# Nor is LEZ's PRIVATE-account address construction taken. PLAN.md §5.1 cites it
+# — `SHA256(prefix || npk || vpk || identifier)` — but `vpk` there is an
+# ML-KEM-768 encapsulation key, 1184 of the preimage's 1264 bytes, and it exists
+# to encrypt account state to a recipient. A public forum (§8: all Stoas are
+# public in v1) has nothing to encrypt, so carrying it would be dead weight in
+# every address. The genesis-record hashing §5.1 actually asks for is what this
+# crate implements; see `identity.rs`.
+k256 = { version = "0.13", features = ["schnorr"] }
+sha2 = "0.10"
+hex = "0.4"
