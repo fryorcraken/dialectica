@@ -247,7 +247,10 @@ mod tests {
 
     #[test]
     fn parse_channel_id_accepts_a_string() {
-        assert_eq!(parse_channel_id(r#"{"channelId":"stoa-abc/e7"}"#).unwrap(), "stoa-abc/e7");
+        assert_eq!(
+            parse_channel_id(r#"{"channelId":"stoa-abc/e7"}"#).unwrap(),
+            "stoa-abc/e7"
+        );
     }
 
     #[test]
@@ -298,11 +301,18 @@ mod tests {
         // The trap this is here to prevent: coercing anything unrecognised to
         // `false` would make a broken call read as "the channel is not open",
         // and a caller would act on an answer delivery never gave.
-        for reply in [serde_json::json!("maybe"), serde_json::json!(1), serde_json::json!(null)] {
+        for reply in [
+            serde_json::json!("maybe"),
+            serde_json::json!(1),
+            serde_json::json!(null),
+        ] {
             let out = channel_exists_reply(&reply);
             let v: serde_json::Value = serde_json::from_str(&out).unwrap();
             assert!(v.get("error").is_some(), "for reply {reply}, got {out}");
-            assert!(v.get("exists").is_none(), "a failure must not also carry a result");
+            assert!(
+                v.get("exists").is_none(),
+                "a failure must not also carry a result"
+            );
         }
     }
 
