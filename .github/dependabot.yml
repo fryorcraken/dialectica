@@ -1,0 +1,19 @@
+# SHA-pinned actions do not rot on their own — they just get old quietly.
+# This is what makes pinning sustainable rather than a one-off that ages into
+# an unpatched dependency. Dependabot rewrites the SHA and updates the trailing
+# `# v<version>` comment with it, so the pin stays readable.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+
+  # Cargo is deliberately NOT listed. The crate's one path dependency is
+  # logos-rust-sdk, staged by the builder at the rev its flake pins — nothing
+  # dependabot can see or should try to bump (PHASE0-FINDINGS.md §2). A cargo
+  # ecosystem entry here would either find nothing or fight the builder for
+  # control of a dependency the builder owns.

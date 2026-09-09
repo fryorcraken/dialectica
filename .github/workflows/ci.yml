@@ -26,6 +26,23 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# State the token posture here rather than inheriting it from a repo setting.
+#
+# The repo default is read today, so this changes nothing now — that is the
+# point. The default lives in the web UI, is flippable by any admin with one
+# checkbox, is not carried by a fork, and would not survive a move into an org
+# whose default is write. A reader of this file cannot see any of that.
+#
+# It matters because `build` executes a large amount of third-party code — the
+# Nix build graph, `cargo install` from crates.io, `lgs` itself — while
+# `release` is the only job that needs to write anything. Without this line, a
+# default flipped to write would hand that whole dependency surface a token
+# that can push commits and mint releases, and the catalogue is served from
+# GitHub Releases (PLAN.md §2.1.1), so a bad release reaches users directly.
+# `release` overrides this with the narrower grant it actually needs.
+permissions:
+  contents: read
+
 jobs:
   # ─── lint ────────────────────────────────────────────────────────────────
   # Structural checks that need neither Nix nor Qt, so they fail in seconds
@@ -383,13 +400,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@stable
+      # SHA-pinned. `@stable` is a *branch* — the loosest ref there is, and it
+      # moves whenever a new Rust ships, so a toolchain bump would arrive
+      # unannounced in the middle of an unrelated PR.
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, 2026-09-03
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
         with:
           workspaces: dialectica/rust-lib
 
-      - uses: cachix/install-nix-action@v27
+      # SHA-pinned: a tag is a mutable ref, and this action installs the Nix
+      # daemon underneath every artefact that becomes a published module. A
+      # patched fetcher here would produce a backdoored .lgx that still passes
+      # every manifest assertion below, since those check names and fields, not
+      # payloads. Was v27, four majors stale.
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           extra_nix_config: |
@@ -588,7 +613,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: cachix/install-nix-action@v27
+      # SHA-pinned: a tag is a mutable ref, and this action installs the Nix
+      # daemon underneath every artefact that becomes a published module. A
+      # patched fetcher here would produce a backdoored .lgx that still passes
+      # every manifest assertion below, since those check names and fields, not
+      # payloads. Was v27, four majors stale.
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           extra_nix_config: |
@@ -747,7 +777,11 @@ jobs:
           name: dialectica-lgx-bundle
           path: dist
 
-      - uses: softprops/action-gh-release@v2
+      # SHA-pinned, and the pin matters most here: this is the only third-party
+      # action that runs with `contents: write`, and it is the last hop before
+      # a module reaches users through the catalogue (PLAN.md §2.1.1). Was @v2,
+      # a mutable tag a whole major behind.
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: dist/*.lgx
           generate_release_notes: true
