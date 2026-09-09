@@ -117,7 +117,10 @@ pub trait DialecticaModule: Send + 'static {
 // items. Keeping them at the root is what the generator's own fixture does,
 // and it is the arrangement its comments describe.
 #[cfg(logos_scaffold)]
-include!(concat!(env!("CARGO_MANIFEST_DIR"), "/generated/provider_gen.rs"));
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/generated/provider_gen.rs"
+));
 
 /// The module instance.
 ///

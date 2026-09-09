@@ -24,9 +24,11 @@ fn main() {
     // build input rather than a magic string.
     println!("cargo::rustc-check-cfg=cfg(logos_scaffold)");
 
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
-        .expect("CARGO_MANIFEST_DIR is always set by cargo");
-    let scaffold = Path::new(&manifest_dir).join("generated").join("provider_gen.rs");
+    let manifest_dir =
+        std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is always set by cargo");
+    let scaffold = Path::new(&manifest_dir)
+        .join("generated")
+        .join("provider_gen.rs");
 
     // Re-run when the scaffold appears or vanishes. Without this, a cached
     // build from a plain checkout would keep the cfg off even once the builder
