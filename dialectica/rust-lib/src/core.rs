@@ -125,6 +125,34 @@ pub fn parse_channel_id(request: &str) -> Result<String, String> {
     }
 }
 
+/// Delivery's error message, if this reply is a callee's error envelope.
+///
+/// A typed cross-module client's happy path and its error path are **separate
+/// contracts**, and only the happy one is visible in the generated signature.
+/// When delivery declines a call it answers `Ok(...)` at the Rust level with an
+/// envelope body — observed live as
+/// `{"error":"Context not initialized","success":false,"value":null}` when
+/// nothing had yet called `createNode`. A decoder that only knows the success
+/// shapes reads that as junk.
+///
+/// **What this keys off, and why it is `error` alone.** PLAN.md §2.5 makes
+/// `{"error":"..."}` the ecosystem's one failure shape; `success` and `value`
+/// are delivery's own extras. Requiring the fuller triple would silently miss a
+/// callee that spells its envelope with `error` only — and missing a real error
+/// is the expensive direction, since it lands back in the catch-all and
+/// reproduces exactly the bug this exists to fix.
+///
+/// The guard against the opposite risk — misreading a legitimate *value* as an
+/// error — is the two conditions here: the reply must be a JSON **object**, and
+/// `error` must hold a **string**. No success reply in this contract is an
+/// object (`channelExists` answers a bool or the FFI's `"true"`/`"false"`), so
+/// there is nothing for this to shadow. A callee whose success shape ever is an
+/// object with a genuine `error` field would need its own decoder, and that is
+/// a contract worth noticing rather than papering over.
+pub fn callee_error(reply: &serde_json::Value) -> Option<&str> {
+    reply.as_object()?.get("error")?.as_str()
+}
+
 /// Wrap delivery's reply in our own shape.
 ///
 /// Two facts meet here and neither is obvious:
@@ -140,7 +168,17 @@ pub fn parse_channel_id(request: &str) -> Result<String, String> {
 /// `false` would report "the channel is not open" for a reply that never said
 /// that — the failure mode PLAN.md §2.5 forbids, where a broken call is
 /// indistinguishable from a successful negative answer.
+///
+/// An error envelope is recognised *before* the boolean match, so delivery's
+/// own message reaches the caller unchanged rather than quoted inside a
+/// complaint about our failure to parse it.
 pub fn channel_exists_reply(reply: &serde_json::Value) -> String {
+    // Before deciding what the value means, decide whether there is a value at
+    // all. Ordering is the whole fix: run this after the match and every
+    // decline still falls into the catch-all.
+    if let Some(message) = callee_error(reply) {
+        return error_json(message);
+    }
     let exists = match reply {
         serde_json::Value::Bool(b) => *b,
         serde_json::Value::String(s) if s == "true" => true,
@@ -294,6 +332,70 @@ mod tests {
         let out = channel_exists_reply(&serde_json::json!(true));
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["exists"], true);
+    }
+
+    #[test]
+    fn channel_exists_propagates_deliverys_own_error_rather_than_wrapping_it() {
+        // The exact envelope a live delivery sent when nothing had called
+        // `createNode` yet (PHASE0-FINDINGS §6). Before the fix this fell
+        // through to the catch-all, and the one useful string —
+        // "Context not initialized" — reached the view only as quoted text
+        // inside a parser complaint about an "unrecognised value".
+        let out = channel_exists_reply(&serde_json::json!({
+            "error": "Context not initialized",
+            "success": false,
+            "value": null
+        }));
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            v["error"], "Context not initialized",
+            "delivery's own message must arrive unchanged, got {out}"
+        );
+        assert!(
+            v.get("exists").is_none(),
+            "a failure must never also carry a result — §2.5"
+        );
+    }
+
+    #[test]
+    fn callee_error_reads_an_envelope_without_demanding_deliverys_extra_fields() {
+        // Keying off the fuller {error, success, value} triple would miss a
+        // callee that spells its envelope with `error` alone — and a missed
+        // error is the expensive direction, because it lands in the catch-all
+        // and reproduces the bug.
+        assert_eq!(
+            callee_error(&serde_json::json!({"error": "boom"})),
+            Some("boom")
+        );
+        assert_eq!(
+            callee_error(&serde_json::json!({
+                "error": "boom", "success": false, "value": null
+            })),
+            Some("boom")
+        );
+    }
+
+    #[test]
+    fn callee_error_does_not_claim_an_error_for_a_legitimate_value() {
+        // The other direction of the same tradeoff: too loose a check would
+        // read a real reply as a failure. A success in this contract is never
+        // an object, and a non-string `error` is not a message we could
+        // propagate unchanged anyway.
+        for not_an_envelope in [
+            serde_json::json!(true),
+            serde_json::json!("false"),
+            serde_json::json!(null),
+            serde_json::json!(["error"]),
+            serde_json::json!({"exists": true}),
+            serde_json::json!({"error": 500}),
+            serde_json::json!({"error": null}),
+        ] {
+            assert_eq!(
+                callee_error(&not_an_envelope),
+                None,
+                "for {not_an_envelope}"
+            );
+        }
     }
 
     #[test]
