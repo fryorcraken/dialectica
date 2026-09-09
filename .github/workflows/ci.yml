@@ -364,24 +364,50 @@ jobs:
           [ "$status" -eq 0 ] && echo "ok: braces balanced in all QML files"
           exit "$status"
 
-      # qmllint exits non-zero on warnings too, and this view has warnings that
-      # are not defects, so only ERRORS fail the job. Named files, absolute
-      # intent: never a bare `qmllint`.
+      # Gate on qmllint's EXIT CODE, not on grepping its output.
+      #
+      # This step previously matched `^.*:[0-9]+:[0-9]+: (error|Error)`, ported
+      # verbatim from radicle. That pattern expects `file:line:col: error: msg`
+      # — and Qt6 prints severity FIRST:
+      #
+      #   Warning: .../Broken.qml:3:1: NoSuchTypeAnywhere was not found. [import]
+      #
+      # So the regex matched nothing, on anything, ever. Verified against the
+      # real Qt6 binary on a deliberately broken file: 0 matches, while qmllint
+      # itself exited 255. The step captured output with `|| true`, grepped,
+      # found nothing, and exited 0 — a gate that could not fail, which is
+      # precisely what PLAN.md §10 says is worse than no gate at all. It is
+      # inherited, so radicle's copy is dead the same way and worth telling
+      # them.
+      #
+      # The exit code is the signal that actually works: 0 clean, 255 on error.
+      # If this view ever acquires a warning that is not a defect, silence that
+      # specific category with `--<category> disable` (qmllint's own mechanism)
+      # rather than reinstating a grep — a suppression names what it ignores,
+      # a broken regex ignores everything silently.
+      #
+      # Named files, absolute intent: never a bare `qmllint` (a bare invocation
+      # opens a GUI file picker and hangs a CI runner forever).
       - name: qmllint
         run: |
           set -eu
           linter=""
           for cand in qmllint6 /usr/lib/qt6/bin/qmllint \
+                      /usr/lib64/qt6/bin/qmllint \
                       /usr/lib/x86_64-linux-gnu/qt6/bin/qmllint qmllint; do
             if command -v "$cand" >/dev/null 2>&1 || [ -x "$cand" ]; then linter="$cand"; break; fi
           done
           [ -n "$linter" ] || { echo "::error::no qmllint found"; exit 1; }
-          out=$("$linter" -I dialectica-ui/src/qml dialectica-ui/src/qml/*.qml 2>&1 || true)
-          echo "$out"
-          if echo "$out" | grep -qiE '^.*:[0-9]+:[0-9]+: (error|Error)'; then
-            echo "::error::qmllint reported errors"
+          echo "using $linter"
+          set +e
+          "$linter" -I dialectica-ui/src/qml dialectica-ui/src/qml/*.qml
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::qmllint failed (exit $rc) — see the output above"
             exit 1
           fi
+          echo "ok: qmllint clean"
 
   # ─── rust ────────────────────────────────────────────────────────────────
   # The core module's whole decision surface. `src/core.rs` holds every
@@ -509,7 +535,21 @@ jobs:
           import re, sys
           log = open("cargo-test.log").read()
 
-          ran = sum(int(n) for n in re.findall(r"^test result: ok\. (\d+) passed", log, re.M))
+          # Count passed AND ignored. A `#[ignore]`d test is declared in the
+          # source but reported as `ignored`, never `passed` — so counting only
+          # `passed` would turn any legitimate `#[ignore]` (a slow test, a
+          # known-flaky one) into a red build whose message blames cfg-gating,
+          # which is the one thing that would NOT be wrong. `failed` is counted
+          # too, so a failing test is caught by cargo's own exit status rather
+          # than being double-reported as a miscount here.
+          ran = sum(
+              int(p) + int(f) + int(i)
+              for p, f, i in re.findall(
+                  r"^test result: \w+\. (\d+) passed; (\d+) failed; (\d+) ignored",
+                  log,
+                  re.M,
+              )
+          )
 
           # Count `#[test]` attributes across the crate's sources. This is a
           # deliberately dumb textual count and that is fine: it is a
