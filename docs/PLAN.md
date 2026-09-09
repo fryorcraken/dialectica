@@ -303,7 +303,28 @@ badly-signed ops out. The store may hold junk; the reader never trusts it.
 
 - `contentTopic` = the Stoa, hashed and bucketed: `/dialectica/1/s/<hex>/proto`
 - `channelId` = the Stoa (plus an epoch — see below)
+- `senderId` = **derived per thread**, not per Stoa — see below
 - `threadId` and `parentPostId` live in the **payload**, never the topic
+
+**`senderId` must be per-thread, and getting this wrong silently defeats §5.2.**
+Identity is thread-scoped: a user's author key rotates between threads so that
+their posts in thread 1 cannot be linked to their posts in thread 47. A
+`senderId` derived from the Stoa — the obvious choice, and what one channel per
+Stoa invites — would carry a single stable value underneath every one of those
+keys, linking them all at the transport layer while the application layer
+carefully unlinked them. The privacy property would be nominal and the code
+would look correct.
+
+So derive it from the same `(stoa, thread)` pair the author key uses. SDS treats
+`sender_id` as an application-chosen string and §4.4 notes the spec says it "is
+not used for much", so nothing in the transport objects to this.
+
+This is the general trap, worth stating once: **a per-thread identity is only as
+unlinkable as the most Stoa-scoped identifier travelling with it.** Any future
+field attached at Stoa granularity — a session id, a presence marker, a
+per-Stoa ack token — reintroduces exactly this leak. §4.5's per-thread channel
+split makes the whole question easier later; it does not remove the need to
+answer it now.
 
 **Never put a human-readable Stoa name in a topic.** Filter, Store and
 LightPush disclose content topics to peers, linking IP to interest. Hashed
@@ -566,22 +587,92 @@ Costs the same today. If rotation ever lands, the record can hold a key *log*
 and the address survives instead of forcing a migration. Do not foreclose it by
 hashing the raw key.
 
-### 5.2 Scope: one identity per Stoa
+### 5.2 Scope: one identity per thread
 
-A user has **one identity within a Stoa**, stable across every thread in it.
-Identities are unlinkable **across** Stoas — derive the diversifier from the
-Stoa id so per-Stoa pseudonyms fall out of a single root key for free.
+A user has **one identity within a thread**, stable for every post they make in
+it. Keys **rotate between threads**, including between threads in the same Stoa.
 
-This is the trade that makes moderation work: banning an identity binds, because
-that identity is stable everywhere it can post.
+The derivation generalises §5.1 rather than replacing it: the diversifier comes
+from `(stoa, thread)` instead of from the Stoa alone, so per-thread pseudonyms
+still fall out of a single root key for free, and cross-Stoa unlinkability is
+unchanged.
 
-Revisitable later.
+**What this buys.** Per-thread unlinkability *within* a Stoa. An observer can no
+longer say "whoever argued X in thread 1 is whoever argued Y in thread 47", so a
+participant does not accumulate a profile of positions across a Stoa's history.
+That is a different property from the cross-Stoa unlinkability this section
+previously gave, and it is the one that matters for contested debate: LP-0016's
+motivation states the case well — a persistent handle accrues social history,
+readers pre-judge by it, and a minority view expressed early suppresses that
+account's later participation.
 
-### 5.3 No rotation in v1
+**What it costs: a ban reaches one thread instead of a whole Stoa.** The
+previous version of this section called per-Stoa identity "the trade that makes
+moderation work — banning an identity binds, because that identity is stable
+everywhere it can post". Thread-scoping falsifies its second clause: a ban binds
+where the identity is stable, which is now one thread. The banned person posts
+again in the next thread under a key nobody can link to the ban.
 
-Deliberate, and the reasoning is ordering: **rotation without spam protection is
-a ban-evasion feature.** Until we can distinguish "my key leaked" from "I got
-banned", rotation makes moderation unenforceable. It arrives with RLN — see §7.
+**What it does not cost, because a ban was never a protocol event.** A ban is a
+**local filter** — a peer declining to render an identity's posts — not an
+operation that removes anything from the channel. Nothing about it touches SDS:
+the thread is unaffected, no message is retracted, other peers' state is
+untouched, and a peer that disagrees renders the posts anyway. That is already
+true under per-Stoa identity and stays true here. So thread-scoping does not
+*break* banning; it narrows the blast radius of a filter that was always
+advisory and always local.
+
+This narrowing is accepted deliberately, and the reasoning is a priority
+ordering: **dialectica is investing in relevance (§7.2) ahead of moderation.** A
+forum that ranks well is more useful than one that bans well, and ranking is
+where this project's leverage is. Content moderation — a moderator hiding a post
+or a thread — is a different mechanism, is signed and verified by every peer,
+and is unaffected by any of this (§6).
+
+**The privacy gain is real but much smaller than it looks, and this plan will
+not overclaim it.** Several things still link a user's thread identities to each
+other, none of which dialectica addresses:
+
+- **The SDS `senderId`** — the concrete one, and the one that would have made
+  this change decorative. See §4.1: it is now derived per thread, because a
+  per-Stoa transport sender under per-thread author keys links every identity in
+  the Stoa at the transport layer and buys exactly nothing.
+- **Writing style.** Stylometry over forum-length text works well at the small
+  candidate-set sizes one Stoa presents. This is the largest residual leak and
+  there is no answer to it here.
+- **Timing.** Post timestamps carry a diurnal pattern and an implied timezone,
+  and every peer holds the op log needed to correlate them.
+- **The reply graph.** Which threads a key appears in, and who it replies to.
+  Following one argument across three threads is itself identifying.
+- **IP.** §4.1 already notes Filter/Store/LightPush link IP to interest, and
+  nothing here anonymises the network layer.
+
+So the honest claim is that this defeats a casual reader building a profile of a
+handle. It does not defeat a motivated observer holding the op log.
+
+**Open, and worth measuring rather than asserting:** in a Stoa with four active
+participants, per-thread rotation is theatre — the anonymity set is the
+participant set. §13 carries this.
+
+### 5.3 Rotation is the default, and what it costs
+
+This section previously said "no rotation in v1", on the grounds that **rotation
+without spam protection is a ban-evasion feature** — that until we can
+distinguish "my key leaked" from "I got banned", rotation makes moderation
+unenforceable.
+
+**That reasoning is correct and is what forces the current answer.** It was
+never an argument that rotation is bad; it is an *ordering* argument, that
+rotation is safe once a scarce credential exists which rotating cannot shed.
+§5.2 now makes rotation the default, so the ordering resolves the other way:
+since rotation is unavoidable, **anything that must bind across threads has to
+bind to something other than the key.**
+
+That is the claims layer (§5.5), and §7.2 is what makes it urgent — a relevance
+signal weighted by a credential needs the credential to be unsheddable for
+exactly the same reason a ban does. §5.1's record-hashed address is what lets
+that land without every author migrating, which is why that construction was
+chosen before anything needed it.
 
 ### 5.4 Why not the obvious alternatives
 
@@ -595,6 +686,31 @@ banned", rotation makes moderation unenforceable. It arrives with RLN — see §
   they are a financial confidentiality primitive. No rotation, no recovery, no
   sybil resistance, and an address that changes when keys do. Match their
   cryptographic seriousness, not their construction.
+
+  **And not their signature scheme either.** It is tempting to reason that
+  because LEZ proof-of-holding is coming (§7.2), dialectica should sign with
+  LEZ's scheme so the two interoperate. That reasoning is wrong, and it is worth
+  refuting explicitly because it is the plausible mistake:
+
+  - **A claim binds to a presenter-chosen key, not to a matching curve.**
+    LP-0005's journal exposes a `presenter_pubkey`, and binding works by the
+    presenter signing a verifier nonce over the journal hash. That public key is
+    carried as a length-checked byte blob chosen by the presenter — the LEZ
+    account key never appears in the journal at all, since keeping `npk` private
+    is the point. §5.5's "verified independently of how it signs" is the general
+    statement; this is the concrete mechanism.
+  - **There is no single "LEZ scheme" to match.** LEZ's own account material is
+    already mixed — `npk` is a SHA-256 chain rather than a curve point, and
+    `vpk` is an ML-KEM-768 key — and a shipped LEZ program (`sequencer_stake`)
+    verifies **ed25519** in-guest. A LEZ guest links whatever signature crate it
+    wants.
+  - **Matching a scheme LEZ may leave.** LEZ's own source notes its signature
+    keys are a hedge, to be reduced "once LEE is upgraded to use PQ signatures".
+    Matching today could mean matching something abandoned tomorrow.
+
+  So the forum's signing scheme is chosen on the forum's own criteria — key
+  derivation, parse safety, verify cost — and proof-of-holding binds to it as a
+  claim regardless.
 - **Chat module identity** is ephemeral (restarting mints a fresh identity) and
   `getIdentity()` is marked `// TODO: Deprecate`. Do not build on it.
 
@@ -609,10 +725,41 @@ a set of verified claims"**. Both later features are attestations about a
 pseudonym, verified independently of how it signs:
 
 - RLN membership → a rate-limit credential
-- LEZ proof-of-holding → "owns this NFT" → higher relevance
+- LEZ proof-of-holding → "owns this NFT" → higher relevance (§7.2)
 
 A signature-only interface cannot carry either. Costs nothing to get right now;
 surgery later.
+
+**"Verified independently of how it signs" is the load-bearing phrase**, and
+thread-scoped identity (§5.2) plus early proof-of-ownership (§7.2) is what makes
+it matter rather than being architectural good manners. A claim is an
+attestation *about* a pseudonym; it is not required to share a curve, a key
+format, or a signature scheme with the pseudonym it describes. Keeping that
+boundary clean is what stops an external credential system from dictating
+dialectica's own signing scheme.
+
+Three requirements on the interface, each of which is cheap now and structural
+later:
+
+- **A claim must be presentable under distinct pseudonyms without linking
+  them.** This is the one that thread-scoping creates. If a user proves "I hold
+  RLN membership #4271" under each of their per-thread keys, that membership id
+  links every one of those keys and §5.2's unlinkability evaporates — rotation
+  becomes cosmetic while still costing what it costs. RLN's nullifier scheme and
+  LP-0005's shielded balance proof are both built to avoid exactly this, so the
+  primitives cooperate; but it is a requirement on how they are *used*, not a
+  property that arrives for free.
+- **Claims must be revocable, and revocation must be locally checkable.**
+  §5.3 moves anything that must bind across threads onto this layer, so a claim
+  that cannot be withdrawn is a grant that cannot be undone. §6 already needs
+  equivalent machinery for the moderator set.
+- **A claim must carry its own expiry, checked on read.** An attestation about a
+  token balance is a statement about a moment. OpChan is the cautionary case: it
+  ships delegation proofs whose expiry check is commented out
+  (`delegation/index.ts:346`), so an expired or leaked signing key stays valid
+  to every verifier forever — the honest client stops signing, and every peer
+  keeps accepting. Check expiry where the claim is *used*, not where it is
+  issued.
 
 ### 5.6 The keystore
 
@@ -680,8 +827,7 @@ own answer:
 
 **Signed ops with a Stoa moderator set.** Every op is signed by its author.
 Moderation ops are valid only when signed by a current moderator, and every peer
-verifies independently — so a hide or ban binds for everyone running honest
-code.
+verifies independently — so a hide binds for everyone running honest code.
 
 ```
 genesis: {stoa_id, creator_pk, epoch}
@@ -693,6 +839,40 @@ hide:    {..., sig(mod_sk)}    ← rejected if signer ∉ moderators
 later work — which also defers the founder-as-permanent-root question rather
 than answering it prematurely. A Stoa whose moderation people dislike can be
 forked — a Stoa's participants are never locked into its moderation.
+
+### 6.0 Two mechanisms that are constantly confused
+
+Thread-scoped identity (§5.2) makes the distinction load-bearing, so it is drawn
+here before anything else in this section.
+
+**Hiding is a signed op, and it binds.** A moderator publishes a `hide`; every
+peer verifies the signature against the moderator set at that Lamport time and
+independently reaches the same answer. It is protocol, it converges, and it is
+unaffected by how author identity is scoped — a hide names an `opId`, not a
+person.
+
+**Banning is a local filter, and it does not bind.** A peer declining to render
+an identity's posts is a rendering decision. It publishes nothing, retracts
+nothing, and changes no other peer's state; a peer that disagrees renders the
+posts anyway. **Nothing about a ban touches the SDS channel** — the thread is
+not modified, no message is withdrawn, and no participant is removed, because
+SDS has no membership to remove anyone from (§4.4).
+
+That was already true under per-Stoa identity. What §5.2 changes is only the
+*reach* of that local filter: it now covers one thread rather than a Stoa. The
+mechanism is unchanged; a filter that was always advisory got narrower.
+
+The reason to be pedantic here: a design that mistakes the second for the first
+starts expecting bans to converge across peers, and then reaches for a
+consensus mechanism to make them do so. There is nothing to converge — that is
+the point.
+
+**A moderator's own identity is per-Stoa and stable**, exempt from §5.2's
+rotation. A moderator acts under a known authority; the pre-judgement argument
+that motivates per-thread pseudonyms for participants does not apply to someone
+whose function is to be publicly accountable. Without this exemption the
+moderator set could not be named across threads at all, and §6 would be
+incoherent rather than merely weaker.
 
 ### 6.1 Threshold moderation, later
 
@@ -712,13 +892,25 @@ each signer is a moderator at that Lamport time and the count meets the Stoa's
 declared threshold. Verification stays a local check — no coordination protocol,
 no aggregation service.
 
-**LP-0016** (`logos-co/lambda-prize`) is worth reading for this specifically.
-Its identity model is the opposite of ours — anonymous posting with identity
-recoverable only as punishment — so almost none of it transfers. But its N-of-M
-certificate aggregation is orthogonal to whether posters are anonymous or
-pseudonymous, and it is the one part of that solution that maps onto this
-design. Read the protocol doc and the ADRs; the code is TypeScript over plain
-Waku and does not fit here.
+**LP-0016** (`logos-co/lambda-prize`) is worth reading for this specifically,
+and **more worth reading since §5.2 went thread-scoped than it was before.**
+
+This section previously dismissed it — "its identity model is the opposite of
+ours, so almost none of it transfers" — and took only its N-of-M certificate
+aggregation. That assessment was correct while identity was per-Stoa and stable.
+It is not correct now. LP-0016 posts anonymously with identity recoverable only
+as punishment; thread-scoped rotation moves dialectica materially *toward* that
+model, so the parts previously called untransferable are now the interesting
+ones: a K-strike scheme where each post embeds a Shamir share of the author's
+nullifier secret, so that accumulating K moderation certificates reconstructs
+the secret, slashes the membership, and **retroactively links that author's
+prior posts**. That is a revocation design for exactly the situation §5.3
+describes — a sanction that binds when keys rotate freely.
+
+It is also implemented and live on LEZ testnet, which the previous text did not
+mention. Costs are real: on-chain registration and slashing, a stake, and
+seconds-scale proof generation per post. Far beyond v1, and the right thing to
+read before designing v2's revocation.
 
 This layer is not optional and not a nice-to-have: **no layer below provides
 authenticity.** SDS has no membership and its `senderId` is an
@@ -726,6 +918,18 @@ application-chosen string the spec itself notes "is not used for much".
 Moderation that anyone can forge — or forge the removal of — is not
 moderation. This is the part of dialectica that nothing else provides, and it is
 where the core's real design work lives.
+
+**This is not hypothetical, and the nearest kin project demonstrates it.**
+OpChan (`logos-messaging/OpChan`) checks moderator authority only on the send
+path — six call sites in `ForumActions.ts` — and never on the read path, where
+`transformers.ts` applies any moderation message it finds without comparing the
+signer to the cell's owner. Any peer can therefore forge a moderation, or forge
+the removal of one, in shipped code. Its anonymous authorship is unbound to any
+key as well: verification checks that the author string is *shaped like* a UUID
+while the signature is checked against a public key the message itself carries,
+so any peer may publish under any anonymous author. Read those as the empirical
+argument for this section rather than as a criticism of a sibling project —
+they are the failure this design exists to avoid.
 
 ---
 
@@ -738,15 +942,31 @@ That claim would be false if made. RLN today is free to mint
 off on the target network (`rlnRelay: false` on `logos.dev`). Registering 100
 memberships costs 100 faucet claims and buys 100× the posting rate.
 
-Later, in this order:
+Later, in this order — **and the order has changed**:
 
-1. **RLN** as a rate-limit credential — and the precondition for §5.3 rotation.
-2. **LEZ proof-of-holding** as a relevance signal, and as a Stoa access policy
-   (§7.1).
+1. **LEZ proof-of-holding**, brought forward, as the credential that bootstraps
+   relevance (§7.2) and as a Stoa access policy (§7.1).
+2. **RLN** as a rate-limit credential.
 
-Both arrive through §5.5's claims interface. Sybil resistance ultimately lives
-in the membership-allocation service's pluggable auth hook (LIP 158), which is
-unbuilt — design against it, do not claim it.
+This section previously ran RLN first, on the reasoning that rate limiting is
+the more fundamental protection and that §5.3's rotation waited on it. The
+reordering follows a deliberate priority: **relevance is where this project is
+investing (§7.2), and relevance needs a credential to weight by before it needs
+a rate limit.** RLN is also the less ready of the two — it is free to mint,
+unslashed and switched off on the target network, as above — while LP-0005 is
+live on LEZ testnet today. Taking the working primitive first is the cheaper
+sequence as well as the one that serves the priority.
+
+What the reorder gives up, said plainly: §5.3's ordering argument wanted a
+scarce credential before rotation, and a holding proof is a *weaker* scarcity
+than a rate-limit membership — tokens can be moved between accounts and one
+holding can back several presentations unless the proof prevents it. So this
+buys a relevance signal earlier and does **not** buy the spam resistance §5.3
+was waiting for. Both still arrive through §5.5's claims interface.
+
+Sybil resistance ultimately lives in the membership-allocation service's
+pluggable auth hook (LIP 158), which is unbuilt — design against it, do not
+claim it.
 
 ### 7.1 Token-gated Stoas
 
@@ -775,6 +995,159 @@ and its Basecamp module is a QML/C++ plugin rather than a `codegen.rust`
 cdylib — so its packaging is a useful reference but its module shape is not
 ours. Take the circuit and the crates, not the integration.
 
+### 7.2 Relevance
+
+**This is where dialectica is investing.** A forum that ranks well is more
+useful than one that bans well, and §5.2 has already traded away some
+moderation strength to buy privacy. Relevance is the compensating investment,
+and it is the part of a forum that is genuinely hard.
+
+#### The five rules
+
+**1. Relevance is a local projection, never an op.** No score is ever published.
+A score is a column in the SQLite view (§3.3), derived from ops and rebuilt by
+replay like everything else. This is forced anyway — ops are the authority and
+a published score is a claim no peer could verify — but it also means ranking
+can be retuned without a protocol version bump, which is the property you want
+for the one part of the system that will be tuned repeatedly.
+
+The consequence to state rather than discover: **two peers with different op
+sets rank differently, and that is correct.** It follows from §4.4's eventual
+consistency among active participants. Do not reach for a consensus mechanism
+to make scores agree; there is nothing to agree on.
+
+**2. v1 ships `new` and `active`, and no score at all.** With no sybil
+resistance (§7), a vote-weighted score is not a relevance signal — it is a dial
+the cheapest attacker turns. Two orderings that cannot be gamed by minting
+identities:
+
+- **`new`** — Lamport order descending. §4.4 already defines a total order with
+  a tie-break; reuse it exactly rather than inventing a second ordering.
+- **`active`** — threads by the Lamport timestamp of their most recent
+  non-hidden reply. Gameable only by *posting*, which moderation and rate
+  limiting already govern.
+
+This is a smaller claim than "we have a relevance model" and it is the true one,
+in the same spirit as §7's refusal to claim sybil resistance.
+
+**3. Weight by the credential, not by the vote count.** When proof-of-holding
+lands (§7's reordered step 1), count **only votes carrying a valid claim**.
+Votes from claimless identities contribute **zero**, not a discounted amount.
+
+This is the single most important design decision in this section, and it is a
+deliberate inversion of the obvious approach. The obvious approach — count all
+votes, add a bonus for credentialed ones — leaves minting identities the
+cheapest available lever, so the credential decorates a signal the attacker
+already controls. Gating instead means the credential *is* the signal.
+
+**4. Moderation filters, it does not penalise.** A post hidden by a valid
+moderator op is **excluded** from the projection, not demoted. §6 says a hide
+binds; a percentage haircut does not bind, it merely means a sufficiently
+upvoted hidden post outranks a visible one. Keep hidden posts in the op log
+(§5.7 keeps history) and let the UI offer a "show hidden" view — but the default
+feed omits them.
+
+**5. Decay must be indexable.** §2.5's paginated API has to `ORDER BY … LIMIT`
+in SQLite, and a score recomputed from the current clock on every read cannot be
+indexed. Store a decay-free score plus a timestamp and apply decay in the
+`ORDER BY` expression, or bucket age coarsely and recompute on a timer. **Decide
+this when the projection schema is designed, in Phase 1** — retrofitting an
+index onto a time-varying score is the expensive version.
+
+#### The shape to reserve now
+
+```
+score = f(engagement) · decay(age) · weight(author_claims)
+```
+
+with `weight(∅) = 0` for votes (rule 3) and moderation handled by exclusion
+rather than a term (rule 4). In v1 no claim exists, so nothing is ranked by this
+and `new`/`active` are what ship. Writing the shape down now is what lets the
+claims layer land without a schema migration.
+
+#### OpChan, and why its numbers are worth having
+
+`logos-messaging/OpChan` is the nearest kin — a Logos-ecosystem forum with a
+real relevance implementation — and it is the reason several rules above are
+stated as inversions rather than as preferences. Its scorer is
+`RelevanceCalculator.ts`; the numbers below are from the code, **not** from its
+architecture doc, which documents a completely different set of constants and
+should not be sourced.
+
+Its post score, in closed form:
+
+```
+score = ( (10 + 1.0·upvotes + 0.5·comments) · verification_multiplier
+          + 0.1·verified_upvoters + 0.05·verified_commenters )
+        · e^(−0.1·days) · (moderated ? 0.5 : 1)
+```
+
+with the multiplier 1.25 for an ENS holder, 1.10 for a connected wallet, 1.0
+otherwise. What that arithmetic actually produces, for a fresh post:
+
+| | score |
+|---|---|
+| anonymous author, 0 upvotes | 10.00 |
+| **ENS-verified** author, 0 upvotes | 12.50 |
+| anonymous author, **3 free sybil upvotes** | 13.00 |
+
+**Three throwaway identities beat holding an ENS name**, and a credentialed
+voter's premium (+0.10) is one tenth of the raw vote it rides on (+1.00). The
+credential is a garnish on an unmetered signal. That is rule 3, stated as a
+number rather than an opinion.
+
+Four more findings worth carrying, each of which a plausible design would
+otherwise repeat:
+
+- **Its moderation penalty is ×0.5**, so a well-upvoted hidden post still
+  outranks a fresh visible one. That is rule 4.
+- **Its decay reads an author-asserted timestamp** with nothing clamping it, so
+  a post claiming a future time gets a multiplier greater than 1, unbounded. Its
+  validator does notice future timestamps and produce a warning — which is never
+  called on the ingest path. **Clamp the timestamp on read**; treat an op's
+  claimed time as attacker-controlled, because it is.
+- **Its cell decay is dead code.** The reduce that finds a cell's most recent
+  post is seeded with `Date.now()`, so the seed beats every honest post and the
+  multiplier is ≈1.0 always. An empty cell scores its full undecayed base and
+  outranks an active one. A ranking bug of this shape is invisible without a
+  test that asserts *ordering*, not just that a score was produced.
+- **Its votes deduplicate last-write-wins by inequality, not by `>`**, so an
+  older vote can overwrite a newer one and peers resolve a vote-flip
+  differently depending on arrival order. Its moderation path two cases away
+  uses `>` correctly. Use Lamport order (§4.4) for this and do not invent a
+  second rule.
+
+**One thing OpChan cannot lend us, and it is the important one.** Its
+proof-of-holding was an HTTP call to a third-party indexer returning a boolean,
+cached and then trusted — every peer had to trust that service, and a peer
+without an API key computed different scores. LP-0005 (§7.1) is a *cryptographic*
+proof verified locally and offline. So bringing proof-of-holding forward is not
+repeating what OpChan did; it is doing the thing OpChan approximated with a
+centralised oracle because it had nothing better.
+
+Its holdings signal was also **binary** (`!!ordinalDetails` — one ordinal and
+fifty were identical) and was removed in a commit titled "remove bitcoin +
+appkit, use eth + viem/wagmi". That matters for how the datapoint reads:
+**the signal went out because the Bitcoin wallet stack went out, not because
+proof-of-holding was judged a bad relevance signal.** There is no ADR, issue or
+commit anywhere arguing against the approach.
+
+Two design choices OpChan never faced, because its signal was binary and free:
+
+- **Binary or graded?** LP-0005 proves "balance ≥ N" without revealing the
+  balance, so the natural port is a **threshold**, not a count. Grading would
+  need either a revealed balance or one proof per tier.
+- **Unlinkability across presentations.** Presenting the same holding proof
+  under each per-thread key (§5.2) links every one of those keys unless the
+  proof is nullifier-based. LP-0005's shielded construction is built for this,
+  but it is a requirement on §5.5's interface, not a property that arrives free
+  — and bringing the claim forward makes it load-bearing now rather than later.
+
+Finally, **OpChan has no per-Stoa standing to copy**: one global identity, one
+global claim, one global multiplier, with a per-cell hide bolted on. If
+dialectica wants relevance scoped to a Stoa, that is a design to originate
+rather than port.
+
 ---
 
 ## 8. Privacy posture
@@ -797,8 +1170,16 @@ That makes it a **coordination item**, not merely a scheduling one: worth
 raising with the chat module's maintainers early, since a second consumer
 needing persistent identity is an argument for prioritising it.
 
-What is protected today: cross-Stoa unlinkability (§5.2), and hashed topic
-buckets so peers cannot map interest from topic names (§4.1).
+What is protected today: cross-Stoa unlinkability, per-thread unlinkability
+*within* a Stoa (§5.2), and hashed topic buckets so peers cannot map interest
+from topic names (§4.1).
+
+**The second of those is the weakest and must not be quoted without its
+qualification.** Per-thread unlinkability is defeated by writing style, posting
+time, the reply graph, and the network layer — none of which dialectica
+addresses, and all of which are available to any peer holding the op log. It
+defeats a casual reader profiling a handle; it does not defeat a motivated
+observer. §5.2 carries the full list.
 
 ---
 
@@ -1081,3 +1462,25 @@ thing (§2.3).
   of one mechanism, so the genesis record wants a `policy` field even while
   `open` is the only implemented value. Adding it in Phase 1 costs an enum with
   one variant; adding it later means migrating every Stoa already created.
+
+  **Sharpened by §5.2**: two of those variants — invite and first-post-approval
+  — require recognising a person *across* threads, which thread-scoped identity
+  removes. They are now not merely unimplemented but incompatible with the
+  identity model until claims land (§5.5). The field should still exist; the
+  variants it can express have narrowed.
+- **What is the anonymity set for a thread-scoped identity in a small Stoa?**
+  In a Stoa with four active participants, per-thread rotation is theatre — the
+  anonymity set is the participant set, and rotation changes nothing an
+  observer cannot undo by counting. This is measurable rather than a matter of
+  taste, and the answer decides whether §5.2's cost is worth paying at small
+  scale or whether the property should be claimed only above some size.
+- **Is a threshold the right shape for proof-of-holding as a relevance signal,
+  and what threshold?** §7.2 argues a threshold rather than a graded count,
+  because LP-0005 proves "balance ≥ N" without revealing the balance. But the
+  choice of N is a policy decision per Stoa, and a badly-chosen N makes the
+  signal either universal or empty. Likely a `policy` field question (above).
+- **What does a v1 moderator do about a persistently abusive participant?**
+  Content moderation binds (§6) and a ban reaches one thread (§5.2). Whether
+  that is sufficient in practice, or whether an interim measure is needed before
+  credential revocation lands, is the concrete product consequence of the
+  identity change and deserves an answer from use rather than from design.
