@@ -823,11 +823,15 @@ jobs:
           # names: four correctly-named files that fail to load in an AppImage,
           # with one warning line and nothing else. Assert the variants.
           for f in dist/logos-dialectica-module-lib.lgx dist/logos-dialectica_ui-module.lgx; do
-            tar tzf "$f" | grep -q '^variants/linux-amd64/' \
+            # `grep -c`, not `grep -q`: -q exits at the first match, tar then
+            # dies of SIGPIPE. Invisible under bare `set -eu`, but the moment
+            # anyone adds `-o pipefail` to this step it becomes a spurious 141.
+            # Radicle hit this and switched; the port had reverted it.
+            [ "$(tar tzf "$f" | grep -c '^variants/linux-amd64/')" -gt 0 ] \
               || { echo "::error::$f is not a portable build — dev/portable swapped?"; exit 1; }
           done
           for f in dist/logos-dialectica-module-lib-dev.lgx dist/logos-dialectica_ui-module-dev.lgx; do
-            tar tzf "$f" | grep -q '^variants/linux-amd64-dev/' \
+            [ "$(tar tzf "$f" | grep -c '^variants/linux-amd64-dev/')" -gt 0 ] \
               || { echo "::error::$f is not a dev build — dev/portable swapped?"; exit 1; }
           done
           ls -la dist/
