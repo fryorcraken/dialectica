@@ -654,21 +654,31 @@ jobs:
       #     harness, so no job here calls `setup` at all.
       #   * `build --print-output` really is absent from v0.3.1 (checked in the
       #     scaffold checkout: at that tag only `install` carries the flag).
-      #     BUT `src/process.rs` reads LOGOS_SCAFFOLD_PRINT_OUTPUT from the
-      #     environment in `print_output_enabled()`, globally, for every
-      #     `run_logged` call — so the env var below gets `build` streaming at
-      #     the released version.
+      #     And the reason that does not matter is NOT that the env var
+      #     substitutes for it — that reading is wrong and was corrected here
+      #     after review. `print_output_enabled()` is only ever consulted by
+      #     `run_logged`, and `lgs basecamp build` never calls `run_logged`:
+      #     `run_build_portable_nix` uses `cmd.output()`, capturing both
+      #     streams, and surfaces stderr through its own `bail!` on failure.
+      #     At v0.3.1 `run_logged` has three call sites — basecamp, lgpm, and
+      #     the install path — and none is the build. So on this path the flag
+      #     and the env var are equally inert, which is exactly why the flag
+      #     exists only for `install` at that tag.
       #
-      # So the only thing the unreleased rev buys dialectica is a nicer
-      # spelling of a variable. Pinned to the release instead, deliberately.
+      # So the unreleased rev buys dialectica nothing at all. Pinned to the
+      # release instead, deliberately.
       #
-      # If a build failure here ever prints a one-line status and nothing else,
-      # the env var is what stopped working — check `print_output_enabled()` at
-      # whatever version this pins.
+      # If a build failure here prints a one-line status and nothing else, do
+      # NOT go reading `print_output_enabled()` — it is working, and it is not
+      # on this path. `nix build`'s stderr arrives via the bail, so a failure
+      # with no detail means nix wrote nothing to stderr, not that streaming
+      # broke.
       LGS_VERSION: "0.3.1"
-      # Streams nix's output into this step's log instead of writing it to
-      # .scaffold/logs/ on a runner that is about to be destroyed. It matters
-      # only when a build FAILS — but that is the only time anyone reads it.
+      # Kept, but honestly: this does NOTHING for `lgs basecamp build` (see
+      # above — that path never reaches `run_logged`). It is correct and
+      # already in place for an `install` job, which does, and which this
+      # workflow does not have yet. Harmless where it sits; do not read a
+      # streamed build log as evidence that it works.
       LOGOS_SCAFFOLD_PRINT_OUTPUT: "1"
     steps:
       - uses: actions/checkout@v7
