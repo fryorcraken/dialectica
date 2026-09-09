@@ -1,0 +1,813 @@
+name: CI
+
+# Modelled on radicle-logos-module's ci.yml (PLAN.md §10 names it the
+# template), but adapted rather than transcribed. The two repos have different
+# shapes and several of radicle's jobs check things dialectica does not have:
+#
+#   * radicle is a C++-universal module with a Rust FFI staticlib; dialectica
+#     is a `codegen.rust` cdylib core with NO C++ at all.
+#   * radicle's UI has a C++ backend and a dozen QML components; dialectica's
+#     UI is ONE QML file with four buttons and no backend.
+#   * radicle has a sitometres e2e suite; dialectica has no e2e harness yet.
+#
+# What did NOT get ported, and why, is written at each job rather than left to
+# be inferred from an absence. See also the "Not yet a job" section at the
+# bottom of this file.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+# A push that lands while an earlier run is still going supersedes it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─── lint ────────────────────────────────────────────────────────────────
+  # Structural checks that need neither Nix nor Qt, so they fail in seconds
+  # rather than after a toolchain build. Everything here is a fact about files
+  # in the checkout.
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Same shape as radicle's, with two dialectica-specific rules added and
+      # one radicle rule dropped.
+      #
+      # DROPPED: radicle asserts `main == "<name>_plugin"` only for `type ==
+      # "core"`, which dialectica also satisfies — kept. What is NOT ported is
+      # anything about a C++ impl header, since there is none.
+      #
+      # ADDED: the `codegen.rust` block. It is the whole reason this module
+      # builds the way it does, and a metadata.json that lost it would still be
+      # valid JSON and would silently build a C++ module with no sources.
+      - name: metadata.json is valid and self-consistent
+        run: |
+          set -eu
+          for dir in dialectica dialectica-ui; do
+            meta="$dir/metadata.json"
+            python3 - "$meta" <<'PY'
+          import json, sys
+          path = sys.argv[1]
+          with open(path) as fh:
+              meta = json.load(fh)
+
+          for key in ("name", "version", "type"):
+              assert key in meta, f"{path}: missing '{key}'"
+
+          # `name` is used as a C identifier by the generated glue.
+          name = meta["name"]
+          assert name.isidentifier(), f"{path}: name '{name}' is not a valid C identifier"
+
+          if meta["type"] == "core":
+              # Basecamp resolves a core module's entry point as <name>_plugin.
+              assert meta.get("main") == f"{name}_plugin", \
+                  f"{path}: main must be '{name}_plugin', got {meta.get('main')!r}"
+
+              # The Rust path is what this module IS (PLAN.md §2.2). Without
+              # this block the builder falls back to the C++ path, finds no
+              # sources, and the failure names neither Rust nor this file.
+              #
+              # `trait` must name the trait actually declared in src/lib.rs —
+              # asserted against the source, not against a copy, by the next
+              # step.
+              cg = meta.get("codegen", {}).get("rust")
+              assert cg, f"{path}: core module lost its codegen.rust block"
+              assert cg.get("crate"), f"{path}: codegen.rust needs a 'crate'"
+              assert cg.get("trait"), f"{path}: codegen.rust needs a 'trait'"
+
+          if meta["type"] == "ui_qml":
+              # A ui_qml plugin with no `view` is silently skipped by basecamp
+              # — the app appears in the sidebar and clicking it does nothing.
+              # PHASE0-FINDINGS §4 catalogues five separate causes of that same
+              # dead tile; this rules one of them out cheaply.
+              assert meta.get("view"), f"{path}: ui_qml requires 'view'"
+              assert meta.get("icon"), f"{path}: ui_qml requires 'icon'"
+
+          print(f"{path}: ok ({meta['type']})")
+          PY
+          done
+
+      # The contract trait is derived from src/lib.rs at build time, so
+      # metadata.json naming a trait that does not exist there is a build that
+      # fails late with a generator error. Worse, PHASE0-FINDINGS §4 records
+      # that a trait moved into a submodule or behind a cfg is SILENTLY lost —
+      # the generator reads lib.rs as text — producing a smaller .lidl and a
+      # build that still succeeds.
+      #
+      # So this asserts the trait is declared at the top level of lib.rs,
+      # unindented and outside any cfg, which is the arrangement that survives.
+      # Deriving the name from metadata.json rather than hardcoding it is what
+      # keeps this self-invalidating: rename the trait in both places and the
+      # check follows; rename it in one and the check fires.
+      - name: the contract trait exists where the generator can see it
+        run: |
+          python3 - <<'PY'
+          import json, re, sys
+          meta = json.load(open("dialectica/metadata.json"))
+          trait = meta["codegen"]["rust"]["trait"]
+          crate = meta["codegen"]["rust"]["crate"]
+          src = open(f"dialectica/{crate}/src/lib.rs").read()
+
+          # Top level means column zero. An indented match would be inside a
+          # `mod`, which is exactly the failure this guards.
+          if not re.search(rf"^pub trait {re.escape(trait)}\b", src, re.M):
+              print(f"::error::src/lib.rs declares no top-level 'pub trait {trait}' — "
+                    "metadata.json names it, and the generator reads this file as text, "
+                    "so a trait in a submodule or behind a cfg is silently lost")
+              sys.exit(1)
+
+          # A cfg attribute immediately above the trait would hide it from the
+          # generator in exactly the same silent way.
+          before = src[: src.index(f"pub trait {trait}")]
+          last = [l for l in before.splitlines() if l.strip()][-1]
+          if last.strip().startswith("#[cfg"):
+              print(f"::error::'pub trait {trait}' is preceded by {last.strip()} — "
+                    "a cfg-gated trait is a trait the contract loses")
+              sys.exit(1)
+          print(f"ok: {trait} is top-level and ungated in dialectica/{crate}/src/lib.rs")
+          PY
+
+      # Both modules ship as a pair from one tag and the catalogue references
+      # them by version, so a bump touching only one file publishes a
+      # mismatched pair — which basecamp declines to load (CLAUDE.md's module
+      # contract traps).
+      - name: UI declares the core module as a dependency, at the same version
+        run: |
+          python3 - <<'PY'
+          import json
+          core = json.load(open("dialectica/metadata.json"))
+          ui   = json.load(open("dialectica-ui/metadata.json"))
+          assert core["name"] in ui["dependencies"], \
+              f"dialectica-ui must declare '{core['name']}' in dependencies"
+          assert core["version"] == ui["version"], \
+              (f"module versions disagree: dialectica {core['version']} vs "
+               f"dialectica_ui {ui['version']} — bump both")
+          print(f"ok: dialectica-ui depends on {core['name']}, both at {core['version']}")
+          PY
+
+      # The icon must be a 256x256 PNG (CLAUDE.md). A wrongly-sized icon is one
+      # of the five causes of the same dead launcher tile (PHASE0-FINDINGS §4),
+      # and it is the only one of the five that a file check can rule out
+      # without building anything. Read with struct rather than Pillow so the
+      # job needs no pip install.
+      - name: the UI icon is a 256x256 PNG
+        run: |
+          python3 - <<'PY'
+          import json, struct, sys
+          ui = json.load(open("dialectica-ui/metadata.json"))
+          path = f"dialectica-ui/{ui['icon']}"
+          data = open(path, "rb").read()
+          if data[:8] != b"\x89PNG\r\n\x1a\n":
+              print(f"::error file={path}::not a PNG")
+              sys.exit(1)
+          # IHDR is always the first chunk: width and height at bytes 16..24.
+          w, h = struct.unpack(">II", data[16:24])
+          if (w, h) != (256, 256):
+              print(f"::error file={path}::icon is {w}x{h}, basecamp requires 256x256")
+              sys.exit(1)
+          print(f"ok: {path} is {w}x{h} PNG")
+          PY
+
+      # Ported from radicle, and it still earns its place with one QML file:
+      # a local Foo.qml whose name matches a QtQuick(.Controls) type is
+      # silently ignored — the built-in wins, and the failure surfaces much
+      # later as "Cannot assign to non-existent property".
+      #
+      # Note `Main.qml` is safe: `Main` is not a Qt built-in. The check is here
+      # for the second component, not the first.
+      - name: no QML component shadows a Qt built-in
+        run: |
+          set -eu
+          reserved="TabBar SearchField Button Label TextField ComboBox ScrollView
+                    StackView Page Pane Frame Control Popup Menu Dialog Slider
+                    Switch CheckBox RadioButton ToolBar SpinBox Drawer Action
+                    Item Text Rectangle Image Row Column Grid Flow Repeater"
+          fail=0
+          for f in dialectica-ui/src/qml/*.qml; do
+            n=$(basename "$f" .qml)
+            for r in $reserved; do
+              if [ "$n" = "$r" ]; then
+                echo "::error file=$f::'$n' shadows the Qt built-in type of the same name — rename it"
+                fail=1
+              fi
+            done
+          done
+          [ "$fail" -eq 0 ] && echo "ok: no shadowed component names"
+
+      - name: every QML file importing layouts declares the import
+        run: |
+          set -eu
+          fail=0
+          for f in dialectica-ui/src/qml/*.qml; do
+            if grep -qE '\b(ColumnLayout|RowLayout|GridLayout|StackLayout|Layout\.)' "$f" \
+               && ! grep -q 'import QtQuick.Layouts' "$f"; then
+              echo "::error file=$f::uses a Layout type without 'import QtQuick.Layouts'"
+              fail=1
+            fi
+          done
+          [ "$fail" -eq 0 ] && echo "ok: layout imports present"
+
+      # scaffold.toml is destroyed a little on every `lgs basecamp` verb:
+      # PHASE0-FINDINGS §4 records that `setup`, `modules` AND `install` each
+      # strip every comment from it, and that the comments were lost twice
+      # because PLAN.md §11 named only `setup`.
+      #
+      # Those comments are the record of bugs that each cost a debugging
+      # session and are not recoverable from the values alone, so a commit that
+      # silently drops them is a real loss that no build failure would show.
+      # A count floor is the cheapest gate that notices: it cannot fail when a
+      # comment is EDITED, only when the block is wiped, which is the actual
+      # failure mode.
+      - name: scaffold.toml kept its comments
+        run: |
+          python3 - <<'PY'
+          import sys
+          lines = open("scaffold.toml").read().splitlines()
+          comments = [l for l in lines if l.lstrip().startswith("#")]
+          # A floor, not an exact count, so editing prose does not fail CI.
+          # It is deliberately well under the real number: this fires when a
+          # `lgs basecamp` verb wiped the file, not when someone tightened a
+          # paragraph. Raise it only if the block genuinely grows a lot.
+          floor = 40
+          if len(comments) < floor:
+              print(f"::error::scaffold.toml has {len(comments)} comment lines, expected >= {floor} — "
+                    "did an `lgs basecamp setup|modules|install` strip them? "
+                    "Run `git diff scaffold.toml` after ANY lgs basecamp verb.")
+              sys.exit(1)
+          print(f"ok: scaffold.toml has {len(comments)} comment lines")
+          PY
+
+  # ─── qml ─────────────────────────────────────────────────────────────────
+  # WHAT THIS JOB CANNOT SEE, stated up front because PLAN.md §10 asks for it:
+  #
+  #   There are NO QML component tests in this repo yet, so this job does not
+  #   run any. It proves the view PARSES and lints clean; it proves nothing
+  #   about what `Main.qml`'s call() function does with a reply.
+  #
+  # radicle's equivalent job runs `run-qml-tests.sh` over a dozen tst_*.qml
+  # specs with REQUIRE_QML_TESTS=1 and asserts the reported totals equal the
+  # spec count. That assertion is deliberately NOT ported as a stub: a
+  # spec-count check over zero specs is the exact false green PLAN.md §10 warns
+  # about — it passes loudest when there is nothing to run.
+  #
+  # `Main.qml`'s call() IS testable (it parses JSON, branches on an `error`
+  # key, and reports a missing `logos` bridge), and a QtTest spec injecting a
+  # fake bridge would pin that down. That is the first thing to add here; the
+  # runner-discovery and REQUIRE_QML_TESTS machinery to copy is
+  # radicle-ui/tests/run-qml-tests.sh, which exists precisely because a
+  # `qmltestrunner` on PATH is often the Qt5 one and fails against Qt6 QML with
+  # an empty error and a bare exit 1 — indistinguishable from a broken test.
+  qml:
+    name: QML lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Qt6. The Qt5 tools are a trap here (see the note above), so the package
+      # names are the qt6 ones and the tool lookup below prefers qt6 paths.
+      - name: Install Qt
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            qt6-base-dev qt6-declarative-dev \
+            qt6-declarative-dev-tools \
+            qml6-module-qtquick qml6-module-qtquick-controls \
+            qml6-module-qtquick-layouts qml6-module-qtquick-templates \
+            qml6-module-qtquick-window \
+            libgl1-mesa-dev
+
+      # qmllint does NOT catch a syntax error — radicle watched it report "ok"
+      # on a file Qt then refused with "Unexpected token `}'", and basecamp
+      # surfaces that failure nowhere a user can see: the app just does nothing
+      # when clicked. So parse every file for real, FIRST.
+      #
+      # qmlformat is the parser here because it parses and exits non-zero on a
+      # syntax error without needing a resource path (qmlcachegen insists on
+      # one) and without opening a window. Every invocation names an explicit
+      # file: a Qt tool called with no argument can fall back to prompting
+      # interactively, which in CI hangs until the job times out.
+      #
+      # The brace-balance fallback runs regardless, as a second opinion that
+      # needs no Qt at all — so this step still checks SOMETHING if the Qt
+      # install above ever silently stops shipping qmlformat.
+      - name: QML parses
+        run: |
+          set -eu
+          formatter=""
+          for cand in qmlformat6 /usr/lib/qt6/bin/qmlformat \
+                      /usr/lib/x86_64-linux-gnu/qt6/bin/qmlformat qmlformat; do
+            if command -v "$cand" >/dev/null 2>&1 || [ -x "$cand" ]; then formatter="$cand"; break; fi
+          done
+          status=0
+          if [ -n "$formatter" ]; then
+            for f in dialectica-ui/src/qml/*.qml; do
+              if ! out=$("$formatter" "$f" 2>&1 >/dev/null); then
+                echo "::error file=$f::QML syntax error"
+                echo "$out"
+                status=1
+              fi
+            done
+            [ "$status" -eq 0 ] && echo "ok: all QML files parse ($formatter)"
+          else
+            # NOT a silent skip. Losing the real parser leaves only the brace
+            # check below, which is much weaker, and a job that quietly
+            # downgrades what it checks is the false green this whole file is
+            # written against.
+            echo "::error::no qmlformat found — the real parse check did not run"
+            status=1
+          fi
+          for f in dialectica-ui/src/qml/*.qml; do
+            python3 - "$f" <<'PY' || status=1
+          import sys, re
+          path = sys.argv[1]
+          src = open(path).read()
+          # Strip comments and strings so braces inside them do not count.
+          src = re.sub(r'//[^\n]*', '', src)
+          src = re.sub(r'/\*.*?\*/', '', src, flags=re.S)
+          src = re.sub(r'"(?:[^"\\]|\\.)*"', '""', src)
+          src = re.sub(r"'(?:[^'\\]|\\.)*'", "''", src)
+          depth = 0
+          for lineno, line in enumerate(src.split("\n"), 1):
+              depth += line.count("{") - line.count("}")
+              if depth < 0:
+                  print(f"::error file={path},line={lineno}::unbalanced '}}' — more closing than opening braces")
+                  raise SystemExit(1)
+          if depth != 0:
+              print(f"::error file={path}::unbalanced braces — {depth} unclosed '{{'")
+              raise SystemExit(1)
+          PY
+          done
+          [ "$status" -eq 0 ] && echo "ok: braces balanced in all QML files"
+          exit "$status"
+
+      # qmllint exits non-zero on warnings too, and this view has warnings that
+      # are not defects, so only ERRORS fail the job. Named files, absolute
+      # intent: never a bare `qmllint`.
+      - name: qmllint
+        run: |
+          set -eu
+          linter=""
+          for cand in qmllint6 /usr/lib/qt6/bin/qmllint \
+                      /usr/lib/x86_64-linux-gnu/qt6/bin/qmllint qmllint; do
+            if command -v "$cand" >/dev/null 2>&1 || [ -x "$cand" ]; then linter="$cand"; break; fi
+          done
+          [ -n "$linter" ] || { echo "::error::no qmllint found"; exit 1; }
+          out=$("$linter" -I dialectica-ui/src/qml dialectica-ui/src/qml/*.qml 2>&1 || true)
+          echo "$out"
+          if echo "$out" | grep -qiE '^.*:[0-9]+:[0-9]+: (error|Error)'; then
+            echo "::error::qmllint reported errors"
+            exit 1
+          fi
+
+  # ─── rust ────────────────────────────────────────────────────────────────
+  # The core module's whole decision surface. `src/core.rs` holds every
+  # decision and `src/lib.rs` holds none, and that shape is FORCED rather than
+  # stylistic: PHASE0-FINDINGS §4 records that `cargo test` cannot compile the
+  # module surface at all, because `lib.rs` includes a scaffold the builder
+  # generates into its own staged copy of the crate. Anything not in core.rs is
+  # untestable, so this job is the only gate that sees any of the logic.
+  #
+  # Run on plain cargo rather than through Nix, for the same reason radicle
+  # does: the module build does not run these tests, so without this job
+  # nothing in CI would execute a single one of them.
+  rust:
+    name: Rust core tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: dialectica/rust-lib
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      # THE STEP WITHOUT WHICH `cargo test` CANNOT EVEN RESOLVE THE MANIFEST.
+      #
+      # `dialectica/rust-lib/Cargo.toml` has
+      #   logos-rust-sdk = { path = "../logos-rust-sdk-src" }
+      # and that directory is gitignored — inside the Nix build the BUILDER
+      # stages its own copy there, at the rev it pins. In a plain checkout it
+      # does not exist, and cargo fails before compiling anything with
+      #
+      #   error: failed to load manifest for dependency `logos-rust-sdk`
+      #   Caused by: failed to read .../dialectica/logos-rust-sdk-src/Cargo.toml
+      #
+      # which names neither Nix nor the builder. So the SDK has to be staged
+      # first, from the SAME builder the module links against.
+      #
+      # The rev is READ OUT OF dialectica/flake.lock rather than written here.
+      # That is the self-invalidating half and it is the point: a literal rev
+      # in this file would be a second source of truth, and the failure mode of
+      # a stale one is not an error — it is `cargo test` passing against an SDK
+      # the module does not actually link, which is a green gate testing the
+      # wrong thing. PHASE0-FINDINGS §2 is the whole essay on why an SDK's
+      # capabilities are a property of the builder pin and move with it.
+      #
+      # (The .gitignore's example command names tag 0.2.6. Do not copy that
+      # number: dialectica/flake.nix deliberately pins PAST the newest tag
+      # because 0.2.6 cannot build a Rust module on a cold cache —
+      # PHASE0-FINDINGS §8. Reading the lock is what keeps this correct
+      # whichever way the pin moves.)
+      - name: Stage the logos-rust-sdk source the builder pins
+        run: |
+          set -eu
+          rev=$(python3 - <<'PY'
+          import json, sys
+          lock = json.load(open("dialectica/flake.lock"))
+          root = lock["nodes"][lock["root"]]
+          key = root["inputs"]["logos-module-builder"]
+          node = lock["nodes"][key]["locked"]
+          # A `follows` node has no rev of its own, and a non-github input
+          # would need a different flake ref below. Say so rather than
+          # producing a plausible-looking empty string.
+          assert node.get("type") == "github", f"unexpected builder input type {node.get('type')!r}"
+          assert node.get("rev"), "logos-module-builder node has no rev"
+          print(f"{node['owner']}/{node['repo']}/{node['rev']}")
+          PY
+          )
+          echo "builder pin from dialectica/flake.lock: $rev"
+          nix build "github:$rev#rust-sdk-src" -o dialectica/logos-rust-sdk-src -L
+          test -f dialectica/logos-rust-sdk-src/Cargo.toml
+
+      - name: Formatting
+        run: cargo fmt --manifest-path dialectica/rust-lib/Cargo.toml --check
+
+      # Scoped to `-p dialectica`. The staged SDK is a PATH dependency, so it
+      # is a workspace member as far as `--all-targets` is concerned, and it
+      # carries dead-code warnings that are upstream's business and not this
+      # repo's. Without the scope, `-D warnings` would fail this job on
+      # somebody else's code every time the builder pin moves.
+      - name: Clippy
+        run: |
+          cargo clippy --manifest-path dialectica/rust-lib/Cargo.toml \
+            -p dialectica --all-targets -- -D warnings
+
+      # `| tee` then assert on the output. A runner that exits 0 having
+      # executed nothing passes silently, and this crate has a specific reason
+      # to care: the module surface is behind a `logos_scaffold` cfg, so if
+      # that cfg or the crate-type ever changed, `cargo test` would compile
+      # less and less while still reporting ok.
+      #
+      # The count is asserted against the number of `#[test]` functions in the
+      # source rather than against a hardcoded number. A literal floor is
+      # itself a false green — nothing keeps it in sync, and it silently
+      # tolerates a whole module of tests being cfg'd out as long as enough
+      # others remain. Deriving it means DELETING a test fails the build unless
+      # the test is deleted too, which is the property worth having.
+      - name: Tests
+        run: |
+          set -eu -o pipefail
+          cargo test --manifest-path dialectica/rust-lib/Cargo.toml \
+            | tee cargo-test.log
+          python3 - <<'PY'
+          import re, sys
+          log = open("cargo-test.log").read()
+
+          ran = sum(int(n) for n in re.findall(r"^test result: ok\. (\d+) passed", log, re.M))
+
+          # Count `#[test]` attributes across the crate's sources. This is a
+          # deliberately dumb textual count and that is fine: it is a
+          # cross-check on the runner, not a parser. It over-counts nothing in
+          # this crate today (no `#[test]` inside a string or a doc comment),
+          # and if it ever did, the mismatch is a loud failure rather than a
+          # quiet pass.
+          import pathlib
+          declared = 0
+          for p in pathlib.Path("dialectica/rust-lib/src").rglob("*.rs"):
+              declared += len(re.findall(r"^\s*#\[test\]\s*$", p.read_text(), re.M))
+
+          print(f"tests reported by cargo: {ran}")
+          print(f"#[test] functions in src: {declared}")
+
+          if declared == 0:
+              print("::error::no #[test] functions found — has the suite been deleted, "
+                    "or moved out of dialectica/rust-lib/src?")
+              sys.exit(1)
+          if ran != declared:
+              print(f"::error::cargo ran {ran} tests but the source declares {declared}. "
+                    "A test that is compiled out (a cfg, a removed mod) does not fail — "
+                    "it silently stops being checked.")
+              sys.exit(1)
+          print(f"ok: all {declared} declared tests ran and passed")
+          PY
+
+      # The panic guard is the one piece of this crate whose absence is
+      # catastrophic and invisible: PHASE0-FINDINGS §3 measured that an
+      # unguarded panic ABORTS the module process (signal 6), the caller is
+      # told `timeout` after 20s, the next call reports MODULE_NOT_LOADED, and
+      # the word "panic" appears only in a daemon log.
+      #
+      # §3 also records that the guard tests were watched failing before they
+      # passed — stubbing `guarded` out to `f()` turns them red — which is
+      # exactly the "verify a new test fails before it passes" discipline
+      # PLAN.md §10 asks CI to carry. CI cannot re-run that experiment, but it
+      # CAN assert the tests still exist, so that deleting them alongside the
+      # guard cannot pass quietly.
+      #
+      # This asserts presence, not behaviour. The behaviour is asserted by the
+      # tests themselves in the step above; this is the guard against the suite
+      # being trimmed.
+      - name: the panic guard is still exercised
+        run: |
+          python3 - <<'PY'
+          import re, sys
+          src = open("dialectica/rust-lib/src/core.rs").read()
+          if "catch_unwind" not in src:
+              print("::error::core.rs no longer calls catch_unwind. The SDK has no panic "
+                    "guard of its own (PHASE0-FINDINGS §2), so removing this one means "
+                    "any panic in any handler aborts the module process.")
+              sys.exit(1)
+          guard_tests = re.findall(r"fn (guard_\w+|panic_probe_\w+)\s*\(", src)
+          if len(guard_tests) < 2:
+              print(f"::error::only {len(guard_tests)} guard test(s) left in core.rs — "
+                    "the guard must not become a claim nothing exercises")
+              sys.exit(1)
+          print(f"ok: catch_unwind present, {len(guard_tests)} guard tests: {guard_tests}")
+          PY
+
+  # ─── build ───────────────────────────────────────────────────────────────
+  # Both modules, both variants, through `lgs` — which resolves each module's
+  # flake ref, orders the builds by dependency, and derives the sibling
+  # `--override-input dialectica path:../dialectica` for dialectica-ui by
+  # parsing its flake.nix (which is why that input must stay on ONE LINE:
+  # scaffold's parser is line-based, PLAN.md §11).
+  #
+  # This needs NO `lgs basecamp setup`. setup exists to build the basecamp and
+  # lgpm binaries and seed the alice/bob profiles, none of which a build
+  # touches, and `lgs basecamp docs` names CI as a supported hand-authored
+  # `[modules.*]` case. Verified: this runs green on a checkout with no
+  # `.scaffold/` in it.
+  build:
+    name: Build LGX
+    runs-on: ubuntu-latest
+    env:
+      # Released, from crates.io. Radicle's CI pins an unreleased git rev here
+      # and PLAN.md §10 records that as an accepted risk — "that rev lives on
+      # an unmerged PR branch, and a force-push or branch deletion makes every
+      # CI job fail inside cargo install".
+      #
+      # Dialectica does NOT need to take that risk, and the reason is worth
+      # writing down because the conclusion is not obvious. Radicle needs the
+      # rev for TWO flags: `setup --inspector` and `build --print-output`.
+      #
+      #   * `--inspector` builds a Basecamp with the QML inspector compiled in,
+      #     which sitometres needs to drive the UI. Dialectica has no e2e
+      #     harness, so no job here calls `setup` at all.
+      #   * `build --print-output` really is absent from v0.3.1 (checked in the
+      #     scaffold checkout: at that tag only `install` carries the flag).
+      #     BUT `src/process.rs` reads LOGOS_SCAFFOLD_PRINT_OUTPUT from the
+      #     environment in `print_output_enabled()`, globally, for every
+      #     `run_logged` call — so the env var below gets `build` streaming at
+      #     the released version.
+      #
+      # So the only thing the unreleased rev buys dialectica is a nicer
+      # spelling of a variable. Pinned to the release instead, deliberately.
+      #
+      # If a build failure here ever prints a one-line status and nothing else,
+      # the env var is what stopped working — check `print_output_enabled()` at
+      # whatever version this pins.
+      LGS_VERSION: "0.3.1"
+      # Streams nix's output into this step's log instead of writing it to
+      # .scaffold/logs/ on a runner that is about to be destroyed. It matters
+      # only when a build FAILS — but that is the only time anyone reads it.
+      LOGOS_SCAFFOLD_PRINT_OUTPUT: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      # Cache the BINARY, not `~/.cargo`. `cargo install` builds in a throwaway
+      # target dir, so caching the registry saves only the download and still
+      # pays the full compile every run; and caching all of `~/.cargo/bin`
+      # would overlay this runner image's cargo/rustc shims onto a future one.
+      #
+      # Exact-match key with NO restore-keys, deliberately: a prefix match
+      # would restore a different version's binary and the gate below would
+      # then skip installing the version actually pinned. Bumping LGS_VERSION
+      # starts a clean cache, which is the point.
+      - name: Cache lgs
+        id: lgs-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/bin/lgs
+          key: lgs-${{ runner.os }}-${{ env.LGS_VERSION }}
+
+      # Gated on the cache miss rather than using `--force`: on a hit there is
+      # nothing to do, and a plain `cargo install` over an existing binary
+      # exits 101 with "binary `lgs` already exists in destination".
+      - name: Install logos-scaffold
+        if: steps.lgs-cache.outputs.cache-hit != 'true'
+        run: cargo install logos-scaffold --version ${{ env.LGS_VERSION }} --locked
+
+      # Artefacts land at deterministic paths, one directory per variant:
+      #   .scaffold/basecamp/lgx/<NN>-<module>.lgx        (dev)
+      #   .scaffold/basecamp/portable/<NN>-<module>.lgx   (portable)
+      # as symlinks into the nix store, NN being the load-order index. Every
+      # step below depends on that per-module, per-variant addressing.
+      - name: Build both modules (dev + portable)
+        run: lgs basecamp build --variant all
+
+      # The `view` field must survive packaging: without it basecamp skips the
+      # plugin silently, and the symptom is a launcher tile that does nothing
+      # when clicked — the same symptom as four other unrelated causes
+      # (PHASE0-FINDINGS §4), which is what makes ruling one out here worth a
+      # step.
+      #
+      # NOT a transcription of radicle's version. Radicle asserts a truthy
+      # `main` on the ui_qml manifest; dialectica's packaged UI manifest has
+      # `"main": {}` — an empty object, because a QML-only module has no
+      # binary entry point — and that assertion would fail on a correct build.
+      # The core's `main` is a per-variant MAP (`{"linux-amd64": "..."}`),
+      # not the string metadata.json carries, so it is checked separately and
+      # by shape.
+      - name: Packaged manifests kept their entry points
+        run: |
+          set -eu
+          for variant in lgx portable; do
+            tar xzf .scaffold/basecamp/$variant/02-dialectica_ui.lgx -O manifest.json > ui.json
+            tar xzf .scaffold/basecamp/$variant/01-dialectica.lgx    -O manifest.json > core.json
+            python3 - "$variant" <<'PY'
+          import json, sys
+          variant = sys.argv[1]
+
+          ui = json.load(open("ui.json"))
+          assert ui["name"] == "dialectica_ui", f"unexpected module {ui['name']!r} at 02-"
+          assert ui.get("view"), "packaged ui manifest lost its 'view' — basecamp will skip this plugin"
+          assert ui.get("icon"), "packaged ui manifest lost its 'icon'"
+          # The builder relocates a ui_qml icon to a top-level assets/ entry
+          # (manifest 0.6.0). That relocation is the reason [repos.lgpm] is
+          # pinned past its newest tag — PHASE0-FINDINGS §8 — so a manifest
+          # where the icon stopped being under assets/ would mean the pin note
+          # has gone stale and should be revisited, not that CI should adapt.
+          assert ui["icon"].startswith("assets/"), \
+              f"ui icon is {ui['icon']!r}, expected an assets/ path (manifest 0.6.0)"
+          assert ui.get("dependencies"), "packaged ui manifest lost its dependencies"
+
+          core = json.load(open("core.json"))
+          assert core["name"] == "dialectica", f"unexpected module {core['name']!r} at 01-"
+          # A per-variant map, not a string. Empty means the plugin was not
+          # packaged for any platform and the module cannot load anywhere.
+          assert isinstance(core.get("main"), dict) and core["main"], \
+              f"packaged core manifest has main={core.get('main')!r} — no entry point for any variant"
+          # PLAN.md §3.2's bridge only exists if this survives; the module
+          # fails to load with "Cannot resolve dependencies for: dialectica"
+          # without it (PHASE0-FINDINGS §4).
+          assert "delivery_module" in core.get("dependencies", []), \
+              "packaged core manifest lost its delivery_module dependency"
+
+          print(f"ok ({variant}): {ui['name']} view={ui['view']}, "
+                f"{core['name']} main={core['main']}")
+          PY
+          done
+          rm -f ui.json core.json
+
+      # The release contract is the filename: the `release` job publishes
+      # exactly these four names and the catalogue references them, so they are
+      # spelled out rather than derived. `lgs` names its symlinks
+      # `<NN>-<module>.lgx` for load-order legibility — a different scheme with
+      # a different purpose — so this maps one to the other explicitly.
+      # `cp -L` dereferences the symlink into the store.
+      #
+      # The NN prefixes are load-order indices, so this mapping is
+      # position-dependent: adding a third module can renumber them. `stage`
+      # therefore asserts each package's own manifest name matches the module
+      # expected at that position, turning a renumbering into a named error
+      # rather than the wrong binary published under a catalogue-referenced
+      # name.
+      - name: Stage artifacts
+        run: |
+          set -eu
+          rm -rf dist
+          mkdir -p dist
+          stage() {   # stage <lgx> <expected module> <release filename>
+            name=$(tar xzf "$1" -O manifest.json \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin)["name"])')
+            [ "$name" = "$2" ] || {
+              echo "::error::$1 packages module '$name', expected '$2' — has the load order changed?"
+              exit 1
+            }
+            cp -L "$1" "dist/$3"
+          }
+          stage .scaffold/basecamp/portable/01-dialectica.lgx    dialectica    logos-dialectica-module-lib.lgx
+          stage .scaffold/basecamp/portable/02-dialectica_ui.lgx dialectica_ui logos-dialectica_ui-module.lgx
+          stage .scaffold/basecamp/lgx/01-dialectica.lgx         dialectica    logos-dialectica-module-lib-dev.lgx
+          stage .scaffold/basecamp/lgx/02-dialectica_ui.lgx      dialectica_ui logos-dialectica_ui-module-dev.lgx
+          # The portable and dev source directories differ by ONE path segment,
+          # so transposing them would publish dev artefacts under the portable
+          # names: four correctly-named files that fail to load in an AppImage,
+          # with one warning line and nothing else. Assert the variants.
+          for f in dist/logos-dialectica-module-lib.lgx dist/logos-dialectica_ui-module.lgx; do
+            tar tzf "$f" | grep -q '^variants/linux-amd64/' \
+              || { echo "::error::$f is not a portable build — dev/portable swapped?"; exit 1; }
+          done
+          for f in dist/logos-dialectica-module-lib-dev.lgx dist/logos-dialectica_ui-module-dev.lgx; do
+            tar tzf "$f" | grep -q '^variants/linux-amd64-dev/' \
+              || { echo "::error::$f is not a dev build — dev/portable swapped?"; exit 1; }
+          done
+          ls -la dist/
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dialectica-lgx-bundle
+          path: dist/*.lgx
+
+  # ─── release ─────────────────────────────────────────────────────────────
+  # GitHub is the release substrate and cannot be dropped: the Logos module
+  # catalogue is hosted on GitHub Releases, and `lgpd`/`lgpm` fetch packages
+  # from there, so a module not released on GitHub cannot be installed by the
+  # standard tooling (PLAN.md §2.1.1). Radicle stays the canonical home.
+  release:
+    name: Release
+    needs: [lint, qml, rust, build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dialectica-lgx-bundle
+          path: dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.lgx
+          generate_release_notes: true
+          body: |
+            Dialectica modules for Logos Basecamp.
+
+            | file | install into |
+            |---|---|
+            | `logos-dialectica-module-lib.lgx` | basecamp AppImage (portable) |
+            | `logos-dialectica_ui-module.lgx` | basecamp AppImage (portable) |
+            | `*-dev.lgx` | a basecamp built from source (`lgs basecamp`) |
+
+            Install the core module first, then the UI.
+
+# ─── Not yet a job, and why ────────────────────────────────────────────────
+#
+# Each of these is a real gap rather than an oversight. Written down so the
+# next person adds the one that has become affordable rather than rediscovering
+# why it was absent.
+#
+# * NO END-TO-END UI WORKFLOW. Radicle carries a whole second file
+#   (ui-tests.yml, 692 lines) running sitometres specs against a Basecamp built
+#   with the QML inspector. Dialectica has no specs to run: the view is four
+#   buttons, and PHASE0-FINDINGS §6 records that its end-to-end behaviour was
+#   established by a person clicking them. A matrixed e2e workflow over zero
+#   specs would be a job that cannot fail.
+#
+#   When that changes, the expensive lessons to inherit from radicle's file
+#   are: build `#lgx-portable` and pass `--variant linux-amd64` (the dev
+#   default is wrong for the bundle and the failure is a silent non-load);
+#   derive the Basecamp rev from `[repos.basecamp].pin` rather than repeating
+#   it, or the store cache silently keys on the wrong rev and every run is slow
+#   with nothing erroring; and `--strict`, because sitometres exits 0 on
+#   INCONCLUSIVE by design.
+#
+# * NOTHING INSTALLS OR LAUNCHES. `lgs basecamp install` would need `setup`
+#   first (it builds basecamp and lgpm and seeds the profiles), and `launch` is
+#   a GUI app. If an install step is ever added, it MUST run
+#   `lgs basecamp modules` BEFORE `install`: install builds the `[modules.*]`
+#   project sources and never reads the `dependencies` array in metadata.json,
+#   so without it delivery_module is absent at runtime and the core fails to
+#   load — while the build stays green and `modules --show` lists the
+#   dependency it never installed (PHASE0-FINDINGS §4).
+#
+# * NOTHING RUNS `lgs basecamp doctor`. PLAN.md §11 says to run it before
+#   believing a green build, and it is right — but PHASE0-FINDINGS §8 records
+#   two pins it warns about on EVERY run, both deliberate: the split
+#   basecamp/lgpm pair (the matched pair cannot install the UI at all, because
+#   lgpm at the scaffold default rejects manifest 0.6.0's top-level `assets/`)
+#   and the delivery_module rev (ours is the one §1 and §6 were proven
+#   against). A doctor job would be red on every run for reasons nobody should
+#   act on, which trains people to ignore it. Add it when it can be green, or
+#   when it can be told which warnings are decided.
+#
+# * NOTHING CHECKS THE CHECKED-IN delivery_module CONTRACT FOR DRIFT.
+#   `dialectica/contracts/delivery_module.lidl` is a copy of somebody else's
+#   contract, converted out of band because the Rust generator has no header
+#   frontend (PHASE0-FINDINGS §1). It can go stale silently, and the dangerous
+#   case is a CHANGED SIGNATURE rather than a removed method — a removed method
+#   stops compiling, a changed one might not. Regenerating it in CI needs
+#   `logos-cpp-generator` and delivery's source at the pinned rev; the script
+#   that does it is `dialectica/contracts/regenerate-delivery-lidl.sh`, and the
+#   gate would be a `git diff --exit-code` after running it.
