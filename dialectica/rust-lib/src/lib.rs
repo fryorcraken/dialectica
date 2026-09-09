@@ -14,7 +14,17 @@
 //! the generator reads `src/lib.rs` as text with `syn`, so a trait moved into a
 //! submodule or hidden behind a feature gate is a trait the contract loses.
 
-pub mod core;
+// The pure inner crate holds every decision (PLAN.md §9). This crate holds the
+// contract trait, the adapter, and nothing else worth testing — which is the
+// arrangement §2.3 forces, since nothing in THIS file can be reached by
+// `cargo test` at all.
+//
+// Gated to match its only consumers, the adapter impl below. Outside the
+// builder that impl is `cfg`'d out and this import is genuinely unused, so an
+// ungated `use` warns on every plain `cargo build` — and a warning that is
+// expected is a warning nobody reads.
+#[cfg(logos_scaffold)]
+use dialectica_core as core;
 
 // `RustModuleContext` is defined by the generated scaffold. The contract trait
 // below mentions it and must stay ungated (the generator reads this file as

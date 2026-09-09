@@ -1,16 +1,13 @@
-//! Everything dialectica actually decides, with ZERO SDK types.
+//! The wire contract: the guard, and the handler bodies behind it.
 //!
-//! This split is forced, not stylistic (PLAN.md §2.3). The crate's `lib.rs`
-//! `include!`s a scaffold the *builder* generates, and that scaffold calls
-//! `lp_*` symbols which are undefined outside a real module image. So `lib.rs`
-//! cannot be compiled by `cargo test`, and anything reachable only from
-//! `lib.rs` is untestable.
+//! This is the module's public surface (PLAN.md §2.5) — every method takes JSON
+//! and returns JSON, and failure is always `{"error":"..."}`. The forum's
+//! semantics live in the sibling modules; this one is the boundary they are
+//! reached through.
 //!
-//! This module is the answer: it holds the guard and the handler bodies,
-//! depends on nothing but `serde_json`, and compiles standalone. `lib.rs` is a
-//! thin adapter that forwards to it. Phase 1 grows this into the pure inner
-//! crate the plan describes; the seam is here from the first commit precisely
-//! so that growth is not a migration.
+//! Phase 0 wrote this as `core.rs` inside the module crate, against the day it
+//! would become the pure inner crate PLAN.md §9 describes. That day is this
+//! commit, and the seam held: the move was a rename, not a rewrite.
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
