@@ -818,16 +818,18 @@ subscription restart and per-call timeouts exist at all — and **what a panic i
 a handler actually does**, worth knowing experimentally rather than by
 inference, since it sets how defensive the guard must be.
 
-> **Done, bar CI — see `docs/PHASE0-FINDINGS.md`.** Both modules load in
-> Basecamp, the view renders, the guard converts a panic to the error shape and
-> the module keeps serving, and the bridge carries a live call into delivery's
-> own implementation. The three questions are answered there, along with what
-> is still *not* proven (no delivery node, one profile only, no CI).
+> **Done — see `docs/PHASE0-FINDINGS.md`.** Both modules load in Basecamp, the
+> view renders, the guard converts a panic to the error shape and the module
+> keeps serving, the bridge carries a live call into delivery's own
+> implementation, and CI is green (§10). The three questions are answered
+> there, along with what is still *not* proven — no delivery node has been
+> created, so no channel has been opened and the §4.3 channel-id trap is
+> untested; only one profile has been launched.
 >
-> The architecture stands. What changed is §3.2's JSON, §11's trap list, and
-> the discovery that an unguarded panic **aborts the module process** rather
-> than poisoning a mutex as §2.3 predicted — so the guard is load-bearing, not
-> hardening.
+> The architecture stands. What changed is §3.2's JSON, §10's pins, §11's trap
+> list, and the discovery that an unguarded panic **aborts the module process**
+> rather than poisoning a mutex as §2.3 predicted — so the guard is
+> load-bearing, not hardening.
 
 **Phase 1 — core semantics in a pure inner crate.** Signing, the
 Stoa/thread/post model, moderator-set verification, the op log and its SQLite
@@ -851,16 +853,32 @@ channels and `storage_module`.
 Radicle's `ci.yml` is the template: `lint` / `qml` / `rust` / `build` /
 `release`, plus a matrixed sitometres e2e workflow.
 
+**Built — `.github/workflows/ci.yml` is the artefact, and it carries its own
+reasoning per job.** What follows is what building it changed about this
+section, since three of the claims below turned out to be wrong.
+
 **Pins:**
 
-- **`lgs`: the unreleased rev.** `setup --inspector` builds a Basecamp with the
-  QML inspector compiled in, which sitometres needs to drive the UI, and it does
-  not exist in v0.3.1. Accepted risk, recorded here so it is diagnosable: that
-  rev lives on an unmerged PR branch, and a force-push or branch deletion makes
-  every CI job fail inside `cargo install`. If every job in both workflows
-  suddenly fails there, this is the first thing to check.
+- **`lgs`: crates.io `0.3.1`, not the unreleased rev.** This section previously
+  accepted a force-push risk that dialectica does not have to take. The reason
+  radicle pins an unreleased rev is `setup --inspector`; dialectica's CI never
+  calls `setup`, and the other reason — `build --print-output`, absent from
+  v0.3.1 — turns out not to need the flag at all: scaffold's
+  `print_output_enabled()` reads `LOGOS_SCAFFOLD_PRINT_OUTPUT` from the
+  environment for every `run_logged` call. Set the env var, pin the release,
+  and the risk is retired rather than documented.
+- **A Nix version floor exists, and it is invisible until it bites.** Nix ≤2.24
+  refuses to evaluate a lock file containing a relative path input **before**
+  applying `--override-input`, so `dialectica-ui`'s `path:../dialectica` fails
+  to build while the core — which has no such input — builds fine. The error
+  names the input, which makes it read like a missing override when the
+  override is present and correct. Bisected: 2.22.4 and 2.24.14 fail, 2.26.4
+  and later pass. CI pins the Nix version explicitly rather than inheriting
+  whatever the installer action happens to bundle. Radicle never hit this only
+  because its build job uses a different installer.
 - **sitometres: latest release.** Radicle pins a git commit only to work around
   a probe bug in published 0.1.0; that is a workaround, not a pattern to copy.
+  Not yet relevant — there is no e2e job (see below).
 
 **Anti-false-green, throughout.** Radicle's CI is built around the observation
 that a green gate which cannot see the thing it claims to check is worse than no
@@ -868,6 +886,45 @@ gate. Copy the habits, not just the jobs: assert test *counts* against spec
 counts, assert packaged manifests kept their entry points, assert dev and
 portable variants were not transposed, and verify a new test fails before it
 passes.
+
+That principle earned its place immediately, and against the template itself:
+
+- **Radicle's `qmllint` gate is dead, and ours inherited it.** It greps for
+  `^.*:[0-9]+:[0-9]+: (error|Error)`, which expects `file:line:col: error:` —
+  but Qt6 prints severity *first* (`Warning: file:line:col: ...`). Verified
+  against the real binary: a deliberately broken file produces zero matches
+  while qmllint itself exits 255. The step could not fail, on anything, ever.
+  **Worth telling the radicle maintainers**, since their copy is dead the same
+  way. Gate on the exit code; silence a genuine non-defect with qmllint's own
+  `--<category> disable`, which names what it ignores, rather than a regex that
+  ignores everything.
+- **A ported assertion can be wrong for the port.** Radicle asserts a truthy
+  `main` on the ui_qml packaged manifest. Dialectica's is `{}` — a QML-only
+  module has no binary entry point — so the assertion would have failed a
+  correct build. Check by shape, and re-derive every inherited assertion
+  against what this repo actually produces.
+- **Assert against a derived number, never a literal.** The test-count check
+  compares cargo's result against the count of `#[test]` attributes in `src/`,
+  so it cannot rot. A hardcoded floor that nothing keeps in sync is itself a
+  false green.
+
+**Deliberately not built, each with its re-entry condition** (recorded at the
+foot of the workflow too):
+
+- **No e2e job.** The view is four buttons with no specs, and a matrixed job
+  over zero specs cannot fail — the exact thing this section forbids. It
+  arrives with the specs.
+- **No `doctor` job**, despite §11 saying to run `doctor`. Two pins WARN on
+  every run by design (PHASE0-FINDINGS §8), so the job would be permanently
+  red, and a permanently red gate trains people to ignore it. Run it by hand;
+  add the job when the pins are back on a matched set.
+- **No `install`/`launch` job**, and no drift check on the checked-in delivery
+  contract.
+
+**The `qml` job is the weakest gate that exists**, and it is labelled as such in
+the workflow rather than left to be discovered: it proves `Main.qml` parses and
+nothing about `call()`'s JSON parsing, its error branch, or the missing-bridge
+path. That logic is genuinely testable and currently untested.
 
 ---
 
@@ -969,8 +1026,11 @@ thing (§2.3).
 
 ## 13. Open questions
 
-- Does the `dependency_overrides` LIDL bridge to `delivery_module` work?
-  (Phase 0 answers this.)
+- ~~Does the `dependency_overrides` LIDL bridge to `delivery_module` work?~~
+  **Answered: yes, with a conversion step §3.2 did not anticipate.** The header
+  form does not work from Rust; a committed `.lidl` does, and the bridge has
+  carried a live call into delivery's own implementation
+  (PHASE0-FINDINGS §1, §6).
 - What is the actual participant ceiling for one SDS channel? Unmeasured, and
   the answer sets when §4.5 stops being optional. With SDS now the *only* sync
   layer, there is no CRDT fallback if a channel degrades.
