@@ -414,8 +414,15 @@ jobs:
       # patched fetcher here would produce a backdoored .lgx that still passes
       # every manifest assertion below, since those check names and fields, not
       # payloads. Was v27, four majors stale.
+      #
+      # `install_url` matches the `build` job's. This job does NOT need the
+      # version floor — it builds one `github:` flake with no relative path
+      # input — but two jobs installing two different Nixes is a difference
+      # nobody would think to check when only one of them breaks. See the long
+      # note on the same step in `build` for what the floor is and why.
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:
+          install_url: https://releases.nixos.org/nix/nix-2.35.2/install
           nix_path: nixpkgs=channel:nixos-unstable
           extra_nix_config: |
             experimental-features = nix-command flakes
@@ -618,8 +625,39 @@ jobs:
       # patched fetcher here would produce a backdoored .lgx that still passes
       # every manifest assertion below, since those check names and fields, not
       # payloads. Was v27, four majors stale.
+      #
+      # `install_url` pins the NIX VERSION, and that pin is load-bearing for a
+      # reason that has nothing to do with the SHA above.
+      #
+      # THE UI MODULE CANNOT BUILD ON NIX <= 2.24. `dialectica-ui/flake.nix`
+      # declares `dialectica.url = "path:../dialectica"` — a relative path input
+      # that escapes its own flake's tree — and Nix up to 2.24 refuses to
+      # evaluate a lock file containing one:
+      #
+      #   error: lock file contains unlocked input
+      #          '{"path":"../dialectica","type":"path"}'
+      #
+      # `lgs` DOES derive `--override-input dialectica path:<abs>` correctly (it
+      # parses the one-line input out of flake.nix — PLAN.md §11), and the
+      # override is on the command line. It does not help: old Nix rejects the
+      # lock file before the override is applied, so the failure looks like a
+      # missing override and is not one. Bisected locally against the real
+      # checkout: 2.22.4 and 2.24.14 fail, 2.26.4 and 2.28.5 succeed, with the
+      # exact same command and the override present in every case. The core
+      # module builds fine at every version, because it has no relative path
+      # input — which is why a failing run shows four green minutes and then
+      # this.
+      #
+      # The version therefore has to be stated rather than inherited: the
+      # action's own default has moved before and the floor is invisible from
+      # here. Was `@v27`, whose bundled default was 2.22.1 — under the floor,
+      # which is what took CI red.
+      #
+      # If this is ever lowered, build `dialectica-ui` — not just `dialectica` —
+      # at the candidate version first.
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:
+          install_url: https://releases.nixos.org/nix/nix-2.35.2/install
           nix_path: nixpkgs=channel:nixos-unstable
           extra_nix_config: |
             experimental-features = nix-command flakes
