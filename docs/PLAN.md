@@ -1076,8 +1076,16 @@ thing (§2.3).
   concurrently?** The one genuine merge question in the design (§5.7), and it
   does not arise while the creator is the sole moderator — so it is answered
   alongside mutable moderation, not before.
-- **Not whether a Stoa declares a posting policy, but when the field lands.**
-  Open / invite / first-post-approval / token-threshold (§7.1) are all variants
-  of one mechanism, so the genesis record wants a `policy` field even while
-  `open` is the only implemented value. Adding it in Phase 1 costs an enum with
-  one variant; adding it later means migrating every Stoa already created.
+- ~~**When the `policy` field lands.**~~ **Answered: it is in the genesis
+  record now**, with `open` as its only accepted value — `dialectica-core`'s
+  `stoa::Policy`. The reasoning stands as written and is why it landed early: a
+  genesis record is immutable and address-determining, so adding the field later
+  would have changed the address of every Stoa already created.
+
+  Two decisions made while implementing it, both worth knowing before adding the
+  second variant. An unknown policy discriminant is **refused, never defaulted
+  to `open`** — defaulting is how a token-gated Stoa silently becomes
+  world-postable on an older client, and refusing to display a Stoa is the
+  recoverable direction. And the encoding carries a **version discriminant**, so
+  a record from a newer client fails as "unknown version" rather than as a
+  misparse.
