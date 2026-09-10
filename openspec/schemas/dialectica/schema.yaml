@@ -1,0 +1,115 @@
+name: dialectica
+version: 1
+description: PLAN to spec to code to test, with decisions recorded in an ADR
+artifacts:
+  - id: specs
+    generates: "specs/**/*.md"
+    description: The behaviour contract, derived from PLAN.md
+    template: spec.md
+    instruction: |
+      Write the behaviour contract for this change, derived from `docs/PLAN.md`.
+
+      PLAN.md holds intent. Your job is to turn the part of it this change
+      implements into a contract: what the system does, observable from outside.
+
+      **What belongs in a spec**
+      - Observable behaviour a user or a peer relies on
+      - Inputs, outputs, and every error condition
+      - Security and privacy properties, stated as requirements
+      - Scenarios that can be tested
+
+      **What does NOT belong, and where it goes instead**
+      - Why a decision went one way and not the other -> `adr.md`
+      - Rejected alternatives, traps, what a spike found -> stays in PLAN.md
+      - Internal type and function names, library choices -> nowhere in the spec
+
+      The test: if the implementation could change without changing externally
+      visible behaviour, it does not belong here.
+
+      **Format**
+      - `### Requirement: <name>`, then SHALL/MUST prose
+      - `#### Scenario: <name>` with WHEN/THEN bullets — exactly four hashes
+      - Every requirement needs at least one scenario
+
+      **Every scenario must be testable, and a reviewer checks that one is.**
+      Do not write a scenario that cannot be tested — if a field has one variant
+      and cannot be varied through the API, describe what CAN be checked (that
+      it is carried in the encoding at a fixed offset) rather than what cannot
+      (that two records differing in it produce different output).
+
+      One scenario may be covered by several tests, and one test may cover
+      several scenarios. Do not try to force one-to-one.
+    requires: []
+
+  - id: adr
+    generates: adr.md
+    description: Why the technical decisions went the way they did
+    template: adr.md
+    instruction: |
+      Record the reasoning behind this change's technical decisions.
+
+      The spec says WHAT the system does; this says WHY it is built that way.
+      It is the half that no test can check and that a reader cannot recover
+      from the code, so it is worth more than either.
+
+      **One entry per decision**, each carrying:
+      - **Decision** — what was chosen, in one sentence
+      - **Context** — the constraint that forced the question
+      - **Alternatives** — what else was considered, and what ruled each out.
+        This is the most valuable part. A decision with no alternatives listed
+        reads as though there was no choice, and the next person will re-litigate
+        it from scratch.
+      - **Consequences** — what this costs, including what it forecloses
+
+      **Record a decision when** it was not obvious, when a plausible reader
+      would choose differently, or when getting it wrong would be expensive to
+      undo. Do not record decisions the language or the framework made for you.
+
+      **Write the alternative down even when it lost badly.** "All-0xFF is a
+      valid Edwards point, so the obvious invalid-key constant does not work" is
+      exactly the kind of fact that costs an hour to rediscover.
+
+      Cross-reference PLAN.md where this change acts on a decision recorded
+      there, rather than restating it.
+    requires:
+      - specs
+
+  - id: tasks
+    generates: tasks.md
+    description: Implementation checklist, ordered so failures are visible first
+    template: tasks.md
+    instruction: |
+      Break the work into tasks, each stating how to verify it.
+
+      **Ordering rule, specific to this project:** a test that pins existing or
+      changed behaviour must be written and WATCHED FAILING before the code that
+      satisfies it. A regression test that has never failed proves nothing. Put
+      those tasks first and say explicitly what failure is expected.
+
+      **For any test asserting a security property, add a mutation task**:
+      break the property deliberately, confirm the test fails, restore. Three
+      times in this project's history a test has passed for the wrong reason;
+      mutation is the only thing that reliably caught it.
+
+      Format:
+      - Group under `## <n>. <heading>`
+      - Every task is `- [ ] X.Y <description, including how to verify>`
+      - Order by dependency
+
+      Reference the spec for what to build and `adr.md` for why.
+    requires:
+      - specs
+      - adr
+
+apply:
+  requires: [tasks]
+  tracks: tasks.md
+  instruction: |
+    Work the tasks in order, marking each complete as you go.
+
+    Write the code from the SPEC, not from the tasks — the tasks are an ordering,
+    the spec is the contract. Where the spec is silent, check `adr.md` before
+    inventing an answer, and record a new decision there if you had to make one.
+
+    Stop and say so if a task cannot be done as written. A task list that was
+    wrong is information; silently doing something else is not.
