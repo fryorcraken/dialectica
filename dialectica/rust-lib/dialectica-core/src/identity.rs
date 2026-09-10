@@ -2,32 +2,36 @@
 //!
 //! # The scheme, and why it is this one
 //!
-//! **BIP-340 Schnorr over secp256k1, with SHA-256 addresses** — the scheme LEZ
-//! uses, matched on purpose rather than chosen fresh (PLAN.md §5.1 asks to
-//! match LEZ's cryptographic seriousness). Concretely LEZ signs via `k256`'s
-//! `schnorr` feature and derives a public account address as SHA-256 over a
-//! domain-separated 32-byte prefix; this module does the same with its own
-//! prefixes.
+//! **Ed25519 with SHA-256 addresses**, chosen on this forum's own criteria.
 //!
-//! Matching the *primitive* is the part worth having. Matching LEZ's *crates*
-//! is not: `lee` and `lee_core` are unpublished in-tree crates, and `lee_core`
-//! depends on `risc0-zkvm` solely to reach `risc0_zkvm::sha::Impl`, whose
-//! output on the host is byte-identical to `sha2`. The Cargo.toml records that
-//! trade in full.
+//! The alternative considered and rejected was BIP-340 Schnorr over secp256k1,
+//! to match LEZ so that LEZ proof-of-holding (PLAN.md §7.2) would interoperate.
+//! PLAN.md §5.4 refutes that reasoning: a claim binds to a *presenter-chosen*
+//! key rather than to a matching curve, and there is no single "LEZ scheme" to
+//! match in any case. With that constraint gone, the deciding criterion is key
+//! derivation — see [`derive_thread_key`] — followed by parse safety and verify
+//! cost. The Cargo.toml carries the full comparison, including the honest
+//! counter-argument.
 //!
 //! # What is deliberately not here
 //!
-//! **No key rotation** (§5.3). Not an omission — rotation without spam
-//! resistance is a ban-evasion feature, so it arrives with RLN, not before.
-//! What this module owes that future is only that it must not *foreclose* it,
-//! which is what hashing a record rather than a bare key achieves.
+//! **No key rotation *mechanism* beyond derivation** (§5.3). Identity is
+//! thread-scoped, so rotation is the default rather than a feature to add; what
+//! §5.3 defers is a rotation that carries an identity *forward*, which needs
+//! the claims layer. Hashing a record rather than a bare key is what keeps that
+//! door open.
 //!
 //! **No keystore.** §5.6 specifies one (encrypted key at a fixed path, three
 //! unlock paths, never prompt). It is filesystem work, and a pure crate that
 //! cannot touch the disk is the wrong place for it; this module defines the key
 //! types that a keystore will hand back.
 
-use k256::schnorr::signature::{Signer, Verifier};
+// `Signer` is the trait behind `.sign()`. There is deliberately no `Verifier`
+// import: that trait's `verify()` is the LENIENT check, and `verify_strict` is
+// an inherent method on `VerifyingKey`. Importing `Verifier` would put a
+// same-named, weaker `verify` in scope right beside the one call that must not
+// use it — see `verify_op_bytes`.
+use ed25519_dalek::Signer;
 use sha2::{Digest, Sha256};
 
 /// Domain separation for an author address.
@@ -54,6 +58,12 @@ const STOA_ADDRESS_PREFIX: &[u8; 32] = b"/dialectica/1/Address/Stoa\0\0\0\0\0\0"
 /// purpose, so an author's signature over a post can never be presented as
 /// their signature over a moderation action.
 const OP_SIGNING_PREFIX: &[u8; 32] = b"/dialectica/1/Signed/Op\0\0\0\0\0\0\0\0\0";
+
+/// HKDF salt for thread-key derivation ([`derive_thread_key`]).
+///
+/// Versioned, so a future derivation scheme produces different keys from the
+/// same root rather than silently colliding with this one.
+const THREAD_KEY_SALT: &[u8] = b"/dialectica/1/Identity/Thread";
 
 /// A 32-byte address: an author's, or a Stoa's.
 ///
@@ -112,45 +122,36 @@ impl std::fmt::Display for AddressError {
 /// BIP-340 keys are **x-only** — 32 bytes, no parity byte. That is the whole
 /// serialised form.
 #[derive(Clone)]
-pub struct PublicKey(k256::schnorr::VerifyingKey);
+pub struct PublicKey(ed25519_dalek::VerifyingKey);
 
 impl PublicKey {
-    /// Parse an x-only public key from wire bytes.
+    /// Parse a public key from wire bytes.
     ///
-    /// **The length check is load-bearing and must not be "simplified" into the
-    /// delegation below.** `k256::schnorr::VerifyingKey::from_bytes` returns a
-    /// `Result`, which makes it look total — but it opens with
-    /// `FieldBytes::from_slice(bytes)`, and that is `generic-array`'s
-    /// `from_slice`, which **panics** on a length mismatch rather than
-    /// returning an error:
+    /// **The length is enforced by the type, not by a guard**, and that is the
+    /// point of the scheme choice. This takes a slice because callers hold
+    /// wire bytes, converts to `&[u8; 32]` with a checked `try_into`, and hands
+    /// that to a constructor whose signature cannot accept anything else.
     ///
-    /// ```text
-    /// panicked at generic-array/src/lib.rs:576: assertion `left == right`
-    /// failed: left: 0, right: 32
-    /// ```
+    /// The rejected alternative made this a hazard worth naming. `k256`'s
+    /// equivalent returns a `Result`, which reads as total — and then opens
+    /// with `FieldBytes::from_slice(bytes)`, `generic-array`'s, which **panics**
+    /// on a length mismatch. A public key arrives inside every inbound op, so
+    /// that panic was remotely triggerable, and PHASE0-FINDINGS §3 measured the
+    /// consequence: the module process **aborts**, the caller waits out a 20s
+    /// timeout, and every later call reports MODULE_NOT_LOADED. `guarded()`
+    /// does not help, because the abort happens below it.
     ///
-    /// This function parses attacker-supplied bytes off the network — a
-    /// public key arrives inside every inbound op — so reaching that panic is
-    /// remotely triggerable. PHASE0-FINDINGS §3 measured what a panic in a
-    /// dispatch handler actually does: the module process **aborts**, the
-    /// caller waits out a 20s timeout, and every later call reports
-    /// MODULE_NOT_LOADED. A one-line length guard is what stands between a
-    /// malformed field and that.
-    ///
-    /// (`SecretKey::from_bytes` needs no such guard — `NonZeroScalar::try_from`
-    /// rejects a wrong length as an error. The asymmetry is real, which is
-    /// exactly why it is written down here rather than assumed either way.)
+    /// A guard would have been enough. A type that cannot express the mistake
+    /// is better, because it does not depend on the next person remembering.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, KeyError> {
-        if bytes.len() != 32 {
-            return Err(KeyError::NotAValidPublicKey);
-        }
-        k256::schnorr::VerifyingKey::from_bytes(bytes)
+        let bytes: &[u8; 32] = bytes.try_into().map_err(|_| KeyError::NotAValidPublicKey)?;
+        ed25519_dalek::VerifyingKey::from_bytes(bytes)
             .map(PublicKey)
             .map_err(|_| KeyError::NotAValidPublicKey)
     }
 
     pub fn to_bytes(&self) -> [u8; 32] {
-        self.0.to_bytes().into()
+        self.0.to_bytes()
     }
 
     pub fn to_hex(&self) -> String {
@@ -179,9 +180,9 @@ impl PublicKey {
 }
 
 impl std::fmt::Debug for PublicKey {
-    // Derived Debug on the inner k256 type would print the curve point's
-    // internals. A public key is not secret, but it is noise in a test failure;
-    // the hex is what a reader can act on.
+    // Derived Debug on the inner type would print the curve point's internals.
+    // A public key is not secret, but it is noise in a test failure; the hex is
+    // what a reader can act on.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "PublicKey({})", self.to_hex())
     }
@@ -200,29 +201,48 @@ impl Eq for PublicKey {}
 /// Deliberately NOT `Clone`, `Debug` or `Serialize`. Each of those is a way a
 /// secret key ends up somewhere it should not be — a log line, a JSON reply, a
 /// second copy nobody tracks — and none of them is needed to sign.
-pub struct SecretKey(k256::schnorr::SigningKey);
+pub struct SecretKey(ed25519_dalek::SigningKey);
 
 impl SecretKey {
     /// Generate a fresh key from the OS random source.
+    ///
+    /// Fills a seed and uses the infallible constructor rather than
+    /// `SigningKey::generate`, which wants a `CryptoRng` that `rand_core` 0.10
+    /// no longer supplies an `OsRng` for. Identical result, one dependency
+    /// instead of the `rand` stack.
+    ///
+    /// Panics if the OS random source fails. That is the right response and not
+    /// a shortcut: there is no safe fallback for "I could not get entropy", and
+    /// continuing with a predictable key would forge every signature this
+    /// identity ever makes. It is also not reachable from a dispatch handler —
+    /// key generation happens at keystore setup (§5.6), not while serving an
+    /// inbound op.
     pub fn generate() -> Self {
-        SecretKey(k256::schnorr::SigningKey::random(
-            &mut k256::elliptic_curve::rand_core::OsRng,
-        ))
+        let mut seed = [0u8; 32];
+        getrandom::fill(&mut seed).expect("the OS random source must be available to mint a key");
+        SecretKey(ed25519_dalek::SigningKey::from_bytes(&seed))
     }
 
     /// Rebuild a key from stored bytes — what a keystore (§5.6) will call.
+    ///
+    /// **Every 32-byte string is a valid Ed25519 seed**, so the only failure
+    /// mode is the length, and the `try_into` is what checks it. This is a real
+    /// difference from the rejected scheme rather than a stylistic one: a
+    /// secp256k1 scalar must land in `[1, n)`, so the equivalent needs a
+    /// rejection path for a value that is the right length and still unusable.
+    /// See [`derive_thread_key`], where that difference stops being cosmetic.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, KeyError> {
-        k256::schnorr::SigningKey::from_bytes(bytes)
-            .map(SecretKey)
-            .map_err(|_| KeyError::NotAValidSecretKey)
+        let bytes: &[u8; 32] = bytes.try_into().map_err(|_| KeyError::NotAValidSecretKey)?;
+        Ok(SecretKey(ed25519_dalek::SigningKey::from_bytes(bytes)))
     }
 
+    /// The 32-byte seed. What a keystore stores.
     pub fn to_bytes(&self) -> [u8; 32] {
-        self.0.to_bytes().into()
+        self.0.to_bytes()
     }
 
     pub fn public_key(&self) -> PublicKey {
-        PublicKey(*self.0.verifying_key())
+        PublicKey(self.0.verifying_key())
     }
 
     /// Sign a message that has already been domain-separated by [`signing_digest`].
@@ -230,9 +250,54 @@ impl SecretKey {
     /// Private on purpose: everything dialectica signs goes through
     /// [`sign_op_bytes`], so there is no way to reach this with an
     /// undifferentiated message.
+    ///
+    /// Ed25519 hashes its input internally, so the 32-byte digest is signed as
+    /// a *message* rather than as a pre-hash. Domain separation is unaffected —
+    /// it is already inside those 32 bytes — but the distinction is real enough
+    /// that a test pins it.
     fn sign_digest(&self, digest: &[u8; 32]) -> Signature {
         Signature(self.0.sign(digest))
     }
+}
+
+/// Derive the signing key for one thread from a root secret.
+///
+/// **This function is why the scheme is Ed25519** (PLAN.md §5.4). Identity is
+/// thread-scoped (§5.2): a user holds one root secret and posts under a
+/// different key in every thread, so deriving many keypairs from one root is a
+/// first-class requirement rather than a convenience.
+///
+/// Here that is one HKDF-SHA512 expansion into an **infallible** constructor,
+/// because every 32-byte string is a valid seed. The BIP-340 equivalent needs a
+/// rejection loop for scalars outside `[1, n)`, BIP-341's conditional parity
+/// negation (`seckey = n - seckey` when the point has odd y), and raw `Scalar`
+/// arithmetic that `k256::schnorr` does not expose at all. Each is a place for
+/// a silent bug in the identity path — one that signs happily and verifies
+/// against a different key.
+///
+/// **What this deliberately does not provide is public derivation.** There is no
+/// way to compute a thread's *public* key from the root *public* key, and that
+/// is the property §5.2 depends on: if there were, anyone holding the root
+/// public key could link every one of a user's thread identities, which is
+/// exactly the unlinkability being bought. SLIP-0010 declines to define
+/// non-hardened derivation for Ed25519 for cryptographic reasons; here that
+/// refusal is a feature.
+///
+/// The salt is a version string, so a future derivation scheme yields different
+/// keys from the same root rather than colliding with this one.
+pub fn derive_thread_key(root: &[u8; 32], stoa: &Address, thread_id: &str) -> SecretKey {
+    // `stoa` is fixed-width and `thread_id` is not, so the thread id goes LAST.
+    // Concatenating a variable-length field before a fixed one is how two
+    // different (stoa, thread) pairs end up with the same info string.
+    let mut info = Vec::with_capacity(32 + thread_id.len());
+    info.extend_from_slice(stoa.as_bytes());
+    info.extend_from_slice(thread_id.as_bytes());
+
+    let hk = hkdf::Hkdf::<sha2::Sha512>::new(Some(THREAD_KEY_SALT), root);
+    let mut seed = [0u8; 32];
+    hk.expand(&info, &mut seed)
+        .expect("32 bytes is far below HKDF-SHA512's output limit");
+    SecretKey(ed25519_dalek::SigningKey::from_bytes(&seed))
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -254,32 +319,29 @@ impl std::fmt::Display for KeyError {
 
 /// A 64-byte BIP-340 signature.
 #[derive(Clone, PartialEq, Eq)]
-pub struct Signature(k256::schnorr::Signature);
+pub struct Signature(ed25519_dalek::Signature);
 
 impl Signature {
     /// Parse a 64-byte signature from wire bytes.
     ///
-    /// **The length check is load-bearing**, for the same reason as
-    /// [`PublicKey::from_bytes`] and via a different upstream panic. `k256`'s
-    /// `TryFrom<&[u8]> for Signature` opens with
-    /// `bytes.split_at(Self::BYTE_SIZE / 2)`, and `split_at` panics when the
-    /// slice is shorter than the midpoint:
+    /// Like [`PublicKey::from_bytes`], the length is a type constraint rather
+    /// than a guard, and the rejected scheme is why that is worth stating:
+    /// `k256`'s `TryFrom<&[u8]> for Signature` returns a `Result` and then
+    /// opens with `bytes.split_at(BYTE_SIZE / 2)`, which panics `mid > len` on
+    /// anything shorter than 32 bytes.
     ///
-    /// ```text
-    /// panicked at k256-0.13.4/src/schnorr.rs:146: mid > len
-    /// ```
+    /// Every signature on the wire reaches this function, so that was the
+    /// second remotely-triggerable abort in as many types. Here the constructor
+    /// takes `&[u8; 64]` and cannot be handed the wrong thing.
     ///
-    /// A `TryFrom` returning `Result` reads as total, and is not. Both this and
-    /// the public-key case were found by a test asserting malformed wire bytes
-    /// are *rejected* rather than fatal — which is the only way to find them,
-    /// since neither is visible in the signature of what it calls.
+    /// **Any 64 bytes parse.** Ed25519 defers every validity question to
+    /// verification, so a successful parse means "this is 64 bytes", not "this
+    /// is a good signature". That is the correct split — [`verify_op_bytes`] is
+    /// where a signature is judged — but it does mean this returning `Ok` says
+    /// nothing about authenticity.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, KeyError> {
-        if bytes.len() != 64 {
-            return Err(KeyError::NotAValidSignature);
-        }
-        k256::schnorr::Signature::try_from(bytes)
-            .map(Signature)
-            .map_err(|_| KeyError::NotAValidSignature)
+        let bytes: &[u8; 64] = bytes.try_into().map_err(|_| KeyError::NotAValidSignature)?;
+        Ok(Signature(ed25519_dalek::Signature::from_bytes(bytes)))
     }
 
     pub fn to_bytes(&self) -> [u8; 64] {
@@ -322,8 +384,24 @@ pub fn sign_op_bytes(key: &SecretKey, bytes: &[u8]) -> Signature {
 /// never trusts it") — so distinguishing *why* it failed would offer a choice
 /// that does not exist, and inviting a caller to branch on it is how a
 /// "recoverable" verification failure becomes an accepted op.
+///
+/// **`verify_strict`, never `verify`, and this is a correctness requirement
+/// rather than belt-and-braces.** RFC 8032 permits both cofactored and
+/// uncofactored verification, and `verify` accepts low-order public keys and
+/// non-canonical encodings that `verify_strict` rejects. Every peer verifies
+/// independently (§3.3, §6), so two peers using different rules would disagree
+/// about whether the same op is validly signed — a partition in a system whose
+/// whole moderation story rests on peers reaching the same verdict from the
+/// same bytes.
+///
+/// The same reasoning is why `verify_batch` is not used and the `batch` feature
+/// is off: it does not perform the strict check, so batching would reintroduce
+/// exactly this divergence, and a batch failure does not say which signature
+/// failed — which is a denial-of-service lever when the inputs are hostile.
 pub fn verify_op_bytes(key: &PublicKey, bytes: &[u8], signature: &Signature) -> bool {
-    key.0.verify(&signing_digest(bytes), &signature.0).is_ok()
+    key.0
+        .verify_strict(&signing_digest(bytes), &signature.0)
+        .is_ok()
 }
 
 /// A Stoa's address, derived from its genesis record's canonical bytes.
@@ -498,17 +576,163 @@ mod tests {
 
     #[test]
     fn malformed_key_and_signature_bytes_are_rejected_rather_than_panicking() {
-        // These parse attacker-supplied bytes off the wire. An unwrap here
-        // would be a remote abort of the module process (PHASE0-FINDINGS §3),
-        // so returning an error is the whole contract.
-        assert!(PublicKey::from_bytes(&[]).is_err());
-        assert!(PublicKey::from_bytes(&[0u8; 31]).is_err());
-        assert!(PublicKey::from_bytes(&[0u8; 33]).is_err());
-        // All-zero is not a valid curve point.
-        assert!(PublicKey::from_bytes(&[0u8; 32]).is_err());
-        assert!(SecretKey::from_bytes(&[]).is_err());
-        assert!(SecretKey::from_bytes(&[0u8; 32]).is_err());
-        assert!(Signature::from_bytes(&[]).is_err());
-        assert!(Signature::from_bytes(&[0u8; 63]).is_err());
+        // These parse attacker-supplied bytes off the wire, so the contract is
+        // that a wrong length is an ERROR and never an abort. This test is what
+        // caught two remotely-triggerable panics in the previously-chosen
+        // scheme, where `Result`-returning parsers panicked on a short slice.
+        //
+        // Under Ed25519 the constructors take fixed-size arrays, so these now
+        // pass by construction rather than by a guard someone remembered. The
+        // test is KEPT anyway: it is the regression evidence, and it is what
+        // would fail if anyone reintroduced a slice-taking parser.
+        for n in [0usize, 31, 33, 64] {
+            assert!(
+                PublicKey::from_bytes(&vec![0u8; n]).is_err(),
+                "a {n}-byte public key must be rejected"
+            );
+            assert!(
+                SecretKey::from_bytes(&vec![0u8; n]).is_err(),
+                "a {n}-byte secret key must be rejected"
+            );
+        }
+        for n in [0usize, 63, 65] {
+            assert!(
+                Signature::from_bytes(&vec![0u8; n]).is_err(),
+                "a {n}-byte signature must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn an_all_zero_secret_key_is_accepted_because_every_seed_is_valid() {
+        // Deliberately pinned, because it is a real behaviour difference from
+        // the rejected scheme and the sort of thing a reader would otherwise
+        // assume was an oversight. A secp256k1 scalar must land in `[1, n)`, so
+        // all-zero is invalid there; an Ed25519 secret key is a SEED that gets
+        // hashed, so every 32-byte string is valid — including this one.
+        //
+        // It is not a weakness: the seed is hashed and clamped internally, and
+        // an attacker who can choose your seed has already won. What matters is
+        // that `from_bytes` reports length problems and nothing else, which is
+        // what the test above asserts.
+        assert!(SecretKey::from_bytes(&[0u8; 32]).is_ok());
+    }
+
+    #[test]
+    fn a_low_order_public_key_cannot_verify_anything() {
+        // 32 zero bytes DECODE fine — they are a valid low-order Edwards point,
+        // not garbage — so parsing accepts them. That is not the bug it looks
+        // like; it is why `verify_op_bytes` uses `verify_strict`, which rejects
+        // low-order public keys at verification time.
+        //
+        // This is the attack the strict check exists for: with lenient
+        // `verify()`, a small-order key can be made to accept signatures it
+        // never authorised, so an attacker publishing ops under such a key
+        // could have them treated as validly signed. Pinning it here means
+        // anyone who "simplifies" `verify_strict` to `verify` gets a red test
+        // rather than a silent authenticity hole.
+        let attacker_key = PublicKey::from_bytes(&[0u8; 32])
+            .expect("all-zero decodes as a low-order point, which is the premise here");
+        let honest = SecretKey::generate();
+        let sig = sign_op_bytes(&honest, b"an op");
+        assert!(
+            !verify_op_bytes(&attacker_key, b"an op", &sig),
+            "a low-order key must never verify"
+        );
+
+        // And it cannot verify a signature made under its own seed either.
+        let zero_seed = SecretKey::from_bytes(&[0u8; 32]).unwrap();
+        let self_sig = sign_op_bytes(&zero_seed, b"an op");
+        assert!(
+            !verify_op_bytes(&attacker_key, b"an op", &self_sig),
+            "verify_strict must reject the low-order key regardless of who signed"
+        );
+    }
+
+    #[test]
+    fn a_derived_thread_key_is_deterministic() {
+        // The whole point: a user must be able to re-derive the key they posted
+        // with, from the root, on any device. If this is not stable, they lose
+        // the ability to edit their own posts (§5.7 — authorship decides
+        // validity).
+        let root = [7u8; 32];
+        let stoa = stoa_address(b"a genesis record");
+        let a = derive_thread_key(&root, &stoa, "thread-1");
+        let b = derive_thread_key(&root, &stoa, "thread-1");
+        assert_eq!(a.public_key(), b.public_key());
+    }
+
+    #[test]
+    fn different_threads_get_unlinkable_keys() {
+        // §5.2's core property. Two threads in the SAME Stoa, same root: the
+        // keys must differ, or per-thread rotation is not happening at all.
+        let root = [7u8; 32];
+        let stoa = stoa_address(b"a genesis record");
+        assert_ne!(
+            derive_thread_key(&root, &stoa, "thread-1").public_key(),
+            derive_thread_key(&root, &stoa, "thread-2").public_key()
+        );
+    }
+
+    #[test]
+    fn the_same_thread_id_in_different_stoas_gets_different_keys() {
+        // Cross-Stoa unlinkability (§5.2), which thread-scoping must not have
+        // quietly dropped. Thread ids are not globally unique, so "thread-1" in
+        // two Stoas is the exact collision to check.
+        let root = [7u8; 32];
+        assert_ne!(
+            derive_thread_key(&root, &stoa_address(b"stoa one"), "thread-1").public_key(),
+            derive_thread_key(&root, &stoa_address(b"stoa two"), "thread-1").public_key()
+        );
+    }
+
+    #[test]
+    fn different_roots_get_different_keys_in_the_same_thread() {
+        // Two users in one thread must not collide.
+        let stoa = stoa_address(b"a genesis record");
+        assert_ne!(
+            derive_thread_key(&[1u8; 32], &stoa, "thread-1").public_key(),
+            derive_thread_key(&[2u8; 32], &stoa, "thread-1").public_key()
+        );
+    }
+
+    #[test]
+    fn thread_key_derivation_is_not_ambiguous_across_the_stoa_thread_boundary() {
+        // The concatenation trap. `stoa` is fixed-width and `thread_id` is not,
+        // so if the two were joined the other way round — or if the fixed width
+        // were ever relaxed — then (stoa=AB, thread=C) and (stoa=A, thread=BC)
+        // would produce the SAME info string and therefore the same key.
+        //
+        // Addresses are always 32 bytes so this cannot arise today; the test
+        // exists so that a future change making them variable-length fails here
+        // rather than silently merging two identities.
+        let root = [7u8; 32];
+        let stoa = stoa_address(b"a genesis record");
+        assert_ne!(
+            derive_thread_key(&root, &stoa, "x").public_key(),
+            derive_thread_key(&root, &stoa, "").public_key(),
+            "a thread id must not be absorbable into the preceding field"
+        );
+    }
+
+    #[test]
+    fn a_derived_key_signs_and_verifies_like_any_other() {
+        // Derivation must produce a usable key, not merely a distinct one.
+        let root = [7u8; 32];
+        let stoa = stoa_address(b"a genesis record");
+        let sk = derive_thread_key(&root, &stoa, "thread-1");
+        let sig = sign_op_bytes(&sk, b"a post");
+        assert!(verify_op_bytes(&sk.public_key(), b"a post", &sig));
+    }
+
+    #[test]
+    fn a_derived_key_round_trips_through_a_keystore() {
+        // Derivation and storage must agree: what §5.6 persists is the seed,
+        // and reloading it must give back the same posting identity.
+        let root = [7u8; 32];
+        let stoa = stoa_address(b"a genesis record");
+        let sk = derive_thread_key(&root, &stoa, "thread-1");
+        let restored = SecretKey::from_bytes(&sk.to_bytes()).unwrap();
+        assert_eq!(restored.public_key(), sk.public_key());
     }
 }
