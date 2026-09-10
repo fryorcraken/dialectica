@@ -361,10 +361,18 @@ impl std::fmt::Debug for Signature {
 
 /// What a signature over an op actually commits to.
 ///
-/// `SHA256(OP_SIGNING_PREFIX || bytes)`. The prefix is the whole point: it
-/// makes a signature meaningful only as "this author signed this op", so no
-/// signature produced anywhere else in the system — or by any other system
-/// sharing these keys — can be replayed as one.
+/// `SHA256(OP_SIGNING_PREFIX || bytes)`. The prefix separates a dialectica op
+/// signature from a signature over anything else — another protocol reusing
+/// these keys, or a future non-op thing this project signs. That is what it
+/// buys, and it is worth having.
+///
+/// **What it does NOT buy, because there is one prefix for all ops:**
+/// separation between op *kinds*. A post and a moderation action both go
+/// through here, so a signature is not intrinsically bound to which sort of op
+/// it authorises — that separation has to come from the canonical bytes being
+/// unambiguously typed, which is the serialiser's job and the serialiser does
+/// not exist yet. When it lands, the op kind belongs in this digest, so the
+/// property is structural rather than a convention the encoder must maintain.
 pub fn signing_digest(bytes: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(OP_SIGNING_PREFIX);
@@ -386,13 +394,16 @@ pub fn sign_op_bytes(key: &SecretKey, bytes: &[u8]) -> Signature {
 /// "recoverable" verification failure becomes an accepted op.
 ///
 /// **`verify_strict`, never `verify`, and this is a correctness requirement
-/// rather than belt-and-braces.** RFC 8032 permits both cofactored and
-/// uncofactored verification, and `verify` accepts low-order public keys and
-/// non-canonical encodings that `verify_strict` rejects. Every peer verifies
-/// independently (§3.3, §6), so two peers using different rules would disagree
-/// about whether the same op is validly signed — a partition in a system whose
-/// whole moderation story rests on peers reaching the same verdict from the
-/// same bytes.
+/// rather than belt-and-braces.** The difference is not the cofactored /
+/// cofactorless axis — both of dalek's verifiers are cofactorless — it is that
+/// `verify_strict` additionally rejects low-order public keys and non-canonical
+/// encodings of `R` and `A`. Every peer verifies independently (§3.3, §6), so
+/// all peers must run the *same* predicate: two on different rules would
+/// disagree about whether the same op is validly signed, which is a partition
+/// in a system whose whole moderation story rests on peers reaching the same
+/// verdict from the same bytes. The implication runs one way — plain `verify`
+/// accepts a strict superset, so a peer that called it would admit ops the
+/// others reject.
 ///
 /// The same reasoning is why `verify_batch` is not used and the `batch` feature
 /// is off: it does not perform the strict check, so batching would reintroduce
@@ -404,6 +415,52 @@ pub fn verify_op_bytes(key: &PublicKey, bytes: &[u8], signature: &Signature) -> 
         .is_ok()
 }
 
+/// Verify an op that arrived over the wire, as bytes, claiming an author.
+///
+/// **This is the function the ingest path should call, and the reason it exists
+/// is the address check.** Verifying a signature under a key proves that
+/// whoever holds that key's secret signed the bytes — and *nothing about who
+/// they are*. An attacker can generate a key, sign anything with it, and attach
+/// any author address they like; only re-deriving the address from the key
+/// catches that. §5.1's record-hashed address is what makes the check possible,
+/// and this is where it gets made.
+///
+/// Splitting the steps across a caller is how that check goes missing: parse
+/// key, parse signature, verify, and the one line that binds the key to the
+/// claimed identity is the easiest of the four to forget, because the other
+/// three are visibly load-bearing and this one looks like bookkeeping. CLAUDE.md
+/// puts it as "a guard is a job — keep it separate, so 'is it called
+/// everywhere?' stays a question with an answer." One function is that answer.
+///
+/// Takes raw bytes rather than parsed types because raw bytes are what a caller
+/// has: every one of these fields arrives inside an inbound op, all of them
+/// attacker-controlled. Malformed input of any shape is a `false`, never a
+/// panic.
+///
+/// Returns a plain `bool`, for the same reason [`verify_op_bytes`] does — the
+/// only thing to do with a bad op is drop it (§3.3).
+pub fn verify_authored_op(
+    author: &Address,
+    key_bytes: &[u8],
+    op_bytes: &[u8],
+    signature_bytes: &[u8],
+) -> bool {
+    let Ok(key) = PublicKey::from_bytes(key_bytes) else {
+        return false;
+    };
+    // Before checking the signature at all: does this key even belong to the
+    // author being claimed? A valid signature by the wrong key is exactly the
+    // forgery this rejects, and doing it first means an attacker cannot spend
+    // our verification time on a key that was never going to be accepted.
+    if key.address() != *author {
+        return false;
+    }
+    let Ok(signature) = Signature::from_bytes(signature_bytes) else {
+        return false;
+    };
+    verify_op_bytes(&key, op_bytes, &signature)
+}
+
 /// A Stoa's address, derived from its genesis record's canonical bytes.
 ///
 /// This is what makes a pasted Stoa address **self-authenticating** (§4.8):
@@ -411,6 +468,12 @@ pub fn verify_op_bytes(key: &PublicKey, bytes: &[u8], signature: &Signature) -> 
 /// you were given or it does not, so a tampered record cannot masquerade as the
 /// Stoa you meant to join. No registry is consulted, which is what keeps
 /// permissionless creation (§1) from needing one.
+///
+/// **The caller owns canonicalisation.** "The record's canonical bytes" is an
+/// obligation this function cannot discharge: it hashes whatever it is given, so
+/// two encodings of the same logical record yield two different addresses. The
+/// serialiser that fixes a canonical form does not exist yet (`serde_json` does
+/// not produce canonical JSON), and it arrives with the op model.
 pub fn stoa_address(genesis_bytes: &[u8]) -> Address {
     let mut hasher = Sha256::new();
     hasher.update(STOA_ADDRESS_PREFIX);
@@ -467,9 +530,42 @@ mod tests {
     }
 
     #[test]
-    fn an_address_is_stable_for_a_key() {
-        let sk = SecretKey::generate();
-        assert_eq!(sk.public_key().address(), sk.public_key().address());
+    fn the_wire_constants_are_pinned_to_known_answers() {
+        // EVERY constant in this file is consensus-critical: change one byte of
+        // a prefix, the record count, or the HKDF salt, and every address and
+        // signature this peer produces stops matching everyone else's — with no
+        // error anywhere, because each peer is internally consistent.
+        //
+        // Every other test here is self-consistent and would pass unchanged if
+        // someone edited a prefix string. This one would not. That is its whole
+        // job, and it is why the expected values are hardcoded hex rather than
+        // recomputed from the constants.
+        //
+        // If this fails, do NOT update the expected values to match. Work out
+        // what changed and whether the network can survive it.
+        let sk = SecretKey::from_bytes(&[7u8; 32]).unwrap();
+        assert_eq!(
+            sk.public_key().address().to_hex(),
+            "f875158a79d255a6dd83307d5918298cd819eafb8218ef14cd34ebf2bc385ef4",
+            "author address derivation changed"
+        );
+        assert_eq!(
+            stoa_address(b"a genesis record").to_hex(),
+            "6b1f1c28061e99c72e3340fb4fd07e8192b394e1327012e140f240a990d89cd8",
+            "Stoa address derivation changed"
+        );
+        assert_eq!(
+            hex::encode(signing_digest(b"an op")),
+            "c36ef2e92cbeb698b11f9acb8526252e9b5a6e1cadd47b9dcdd4126f55e5f83a",
+            "op signing digest changed"
+        );
+        assert_eq!(
+            hex::encode(
+                derive_stoa_key(&[7u8; 32], &stoa_address(b"a genesis record")).to_bytes()
+            ),
+            "b62b6b592aeb0779541bbe8beac60d8f505342c37c6a9bc990920d93e68026cf",
+            "per-Stoa key derivation changed"
+        );
     }
 
     #[test]
@@ -498,16 +594,16 @@ mod tests {
 
     #[test]
     fn an_author_address_and_a_stoa_address_never_collide() {
-        // Distinct prefixes, so no byte string is valid as both. Without this,
-        // a Stoa address could be presented as an author's and vice versa.
+        // The prefixes are what separate the two derivations, so the test has
+        // to hold everything else equal: feed `stoa_address` the EXACT preimage
+        // that `address()` hashes internally (`0x01 || key`), and the only
+        // remaining difference is the prefix. Comparing two hashes of unrelated
+        // inputs would pass whether or not the prefixes differed, which is the
+        // trap here — it looks like a test and proves nothing.
+        //
+        // Without this, one byte string could be valid as both an author and a
+        // Stoa address, and either could be presented as the other.
         let sk = SecretKey::generate();
-        let record = {
-            let mut h = Sha256::new();
-            h.update([1u8]);
-            h.update(sk.public_key().to_bytes());
-            h.finalize().to_vec()
-        };
-        // Same underlying bytes, two derivations: they must differ.
         let mut author_preimage = vec![1u8];
         author_preimage.extend_from_slice(&sk.public_key().to_bytes());
         assert_ne!(
@@ -515,7 +611,6 @@ mod tests {
             stoa_address(&author_preimage),
             "author and Stoa derivations must be domain-separated"
         );
-        assert_ne!(stoa_address(&record), sk.public_key().address());
     }
 
     #[test]
@@ -705,6 +800,78 @@ mod tests {
         let sk = derive_stoa_key(&root, &stoa);
         let restored = SecretKey::from_bytes(&sk.to_bytes()).unwrap();
         assert_eq!(restored.public_key(), sk.public_key());
+    }
+
+    #[test]
+    fn an_authored_op_verifies_when_the_key_matches_the_claimed_author() {
+        let sk = SecretKey::generate();
+        let pk = sk.public_key();
+        let sig = sign_op_bytes(&sk, b"a post");
+        assert!(verify_authored_op(
+            &pk.address(),
+            &pk.to_bytes(),
+            b"a post",
+            &sig.to_bytes()
+        ));
+    }
+
+    #[test]
+    fn a_validly_signed_op_under_the_wrong_key_is_still_rejected() {
+        // THE forgery this function exists to stop, and the one a caller doing
+        // the steps by hand would miss: the signature is perfectly valid, the
+        // bytes are untampered, and the op is still not from the author it
+        // claims. Only re-deriving the address from the key catches it.
+        let victim = SecretKey::generate();
+        let attacker = SecretKey::generate();
+        let sig = sign_op_bytes(&attacker, b"a post");
+
+        // The attacker signs with their own key but claims the victim's address.
+        assert!(!verify_authored_op(
+            &victim.public_key().address(),
+            &attacker.public_key().to_bytes(),
+            b"a post",
+            &sig.to_bytes()
+        ));
+
+        // And the signature itself is genuinely valid — so a caller who checked
+        // only the signature would have accepted this.
+        assert!(verify_op_bytes(
+            &attacker.public_key(),
+            b"a post",
+            &sig
+        ));
+    }
+
+    #[test]
+    fn an_authored_op_is_rejected_when_the_bytes_were_tampered_with() {
+        let sk = SecretKey::generate();
+        let pk = sk.public_key();
+        let sig = sign_op_bytes(&sk, b"a post");
+        assert!(!verify_authored_op(
+            &pk.address(),
+            &pk.to_bytes(),
+            b"a different post",
+            &sig.to_bytes()
+        ));
+    }
+
+    #[test]
+    fn an_authored_op_with_malformed_fields_is_false_rather_than_fatal() {
+        // Every field here arrives inside an inbound op and is
+        // attacker-controlled. A panic would abort the module process
+        // (PHASE0-FINDINGS §3), so wrong lengths and junk must be a plain
+        // `false` on every field independently.
+        let sk = SecretKey::generate();
+        let pk = sk.public_key();
+        let sig = sign_op_bytes(&sk, b"a post");
+        let addr = pk.address();
+
+        for bad_key in [vec![], vec![0u8; 31], vec![0u8; 33], vec![9u8; 64]] {
+            assert!(!verify_authored_op(&addr, &bad_key, b"a post", &sig.to_bytes()));
+        }
+        for bad_sig in [vec![], vec![0u8; 63], vec![0u8; 65], vec![9u8; 32]] {
+            assert!(!verify_authored_op(&addr, &pk.to_bytes(), b"a post", &bad_sig));
+        }
     }
 
     #[test]
