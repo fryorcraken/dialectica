@@ -71,6 +71,12 @@ const STOA_KEY_SALT: &[u8] = b"/dialectica/1/Identity/Stoa";
 /// One type for both because they are the same construction over different
 /// prefixes, and because a `String` here would invite a caller to compare an
 /// address to a display form. Comparison is on the bytes.
+///
+/// `Ord` and `Hash` are here for the store (§3.3), which keys and indexes by
+/// address: they make an `Address` usable as a map key and give a deterministic
+/// sort, which matters because every peer must order a rebuilt projection the
+/// same way. The order itself is lexicographic over a hash and therefore
+/// meaningless — do not read it as ranking anything.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct Address([u8; 32]);
 
@@ -202,6 +208,16 @@ impl Eq for PublicKey {}
 /// Deliberately NOT `Clone`, `Debug` or `Serialize`. Each of those is a way a
 /// secret key ends up somewhere it should not be — a log line, a JSON reply, a
 /// second copy nobody tracks — and none of them is needed to sign.
+///
+/// **What that does not cover, said plainly so the omission is not mistaken for
+/// coverage: memory.** `ed25519-dalek` zeroizes its own `SigningKey` on drop
+/// (the `zeroize` feature is on by default), but [`SecretKey::to_bytes`] hands
+/// out a plain `[u8; 32]` this type no longer controls, and the seed locals in
+/// [`SecretKey::generate`] and [`derive_stoa_key`] are ordinary stack arrays.
+/// Those copies are where the keystore (§5.6) takes over, and zeroizing them is
+/// its job — a crate that cannot touch the disk cannot own a secret's lifetime
+/// anyway. The denials above are about a key reaching a *log or a wire*, which
+/// is the reachable threat here; memory hygiene is deferred, not solved.
 pub struct SecretKey(ed25519_dalek::SigningKey);
 
 impl SecretKey {
