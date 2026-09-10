@@ -874,11 +874,10 @@ later:
   needs equivalent machinery for the moderator set.
 - **A claim must carry its own expiry, checked on read.** An attestation about a
   token balance is a statement about a moment. OpChan is the cautionary case: it
-  ships delegation proofs whose expiry check is commented out
-  (`delegation/index.ts:346`), so an expired or leaked signing key stays valid
-  to every verifier forever — the honest client stops signing, and every peer
-  keeps accepting. Check expiry where the claim is *used*, not where it is
-  issued.
+  ships delegation proofs whose expiry check is commented out, so an expired or
+  leaked signing key stays valid to every verifier forever — the honest client
+  stops signing, and every peer keeps accepting. Check expiry where the claim is
+  *used*, not where it is issued.
 
 ### 5.6 The keystore
 
@@ -1025,17 +1024,11 @@ Moderation that anyone can forge — or forge the removal of — is not
 moderation. This is the part of dialectica that nothing else provides, and it is
 where the core's real design work lives.
 
-**This is not hypothetical, and the nearest kin project demonstrates it.**
-OpChan (`logos-messaging/OpChan`) checks moderator authority only on the send
-path — six call sites in `ForumActions.ts` — and never on the read path, where
-`transformers.ts` applies any moderation message it finds without comparing the
-signer to the cell's owner. Any peer can therefore forge a moderation, or forge
-the removal of one, in shipped code. Its anonymous authorship is unbound to any
-key as well: verification checks that the author string is *shaped like* a UUID
-while the signature is checked against a public key the message itself carries,
-so any peer may publish under any anonymous author. Read those as the empirical
-argument for this section rather than as a criticism of a sibling project —
-they are the failure this design exists to avoid.
+**This is not hypothetical.** The nearest kin project checks moderator authority
+only on the send path and never on the read path, so any peer can forge a
+moderation — or forge the removal of one — in shipped code. Appendix A has the
+detail. Read it as the empirical argument for this section rather than as a
+criticism of a sibling project: it is the failure this design exists to avoid.
 
 ---
 
@@ -1174,74 +1167,18 @@ rather than a term (rule 4). In v1 no claim exists, so nothing is ranked by this
 and `new`/`active` are what ship. Writing the shape down now is what lets the
 claims layer land without a schema migration.
 
-#### OpChan, and why its numbers are worth having
+#### Where the rules come from
 
-`logos-messaging/OpChan` is the nearest kin — a Logos-ecosystem forum with a
-real relevance implementation — and it is the reason several rules above are
-stated as inversions rather than as preferences. Its scorer is
-`RelevanceCalculator.ts`; the numbers below are from the code, **not** from its
-architecture doc, which documents a completely different set of constants and
-should not be sourced.
+Every rule above is stated as an inversion because `logos-messaging/OpChan` —
+the nearest kin, a Logos-ecosystem forum with a real relevance implementation —
+shipped the un-inverted version. **Appendix A** has the arithmetic and the
+citations; the one number worth carrying inline is that in OpChan's scorer,
+**three free sybil upvotes outrank holding an ENS name**, and a credentialed
+voter's premium is one tenth of the raw vote it rides on. That is rule 3 as a
+measurement rather than an opinion.
 
-Its post score, in closed form:
-
-```
-score = ( (10 + 1.0·upvotes + 0.5·comments) · verification_multiplier
-          + 0.1·verified_upvoters + 0.05·verified_commenters )
-        · e^(−0.1·days) · (moderated ? 0.5 : 1)
-```
-
-with the multiplier 1.25 for an ENS holder, 1.10 for a connected wallet, 1.0
-otherwise. What that arithmetic actually produces, for a fresh post:
-
-| | score |
-|---|---|
-| anonymous author, 0 upvotes | 10.00 |
-| **ENS-verified** author, 0 upvotes | 12.50 |
-| anonymous author, **3 free sybil upvotes** | 13.00 |
-
-**Three throwaway identities beat holding an ENS name**, and a credentialed
-voter's premium (+0.10) is one tenth of the raw vote it rides on (+1.00). The
-credential is a garnish on an unmetered signal. That is rule 3, stated as a
-number rather than an opinion.
-
-Four more findings worth carrying, each of which a plausible design would
-otherwise repeat:
-
-- **Its moderation penalty is ×0.5**, so a well-upvoted hidden post still
-  outranks a fresh visible one. That is rule 4.
-- **Its decay reads an author-asserted timestamp** with nothing clamping it, so
-  a post claiming a future time gets a multiplier greater than 1, unbounded. Its
-  validator does notice future timestamps and produce a warning — which is never
-  called on the ingest path. **Clamp the timestamp on read**; treat an op's
-  claimed time as attacker-controlled, because it is.
-- **Its cell decay is dead code.** The reduce that finds a cell's most recent
-  post is seeded with `Date.now()`, so the seed beats every honest post and the
-  multiplier is ≈1.0 always. An empty cell scores its full undecayed base and
-  outranks an active one. A ranking bug of this shape is invisible without a
-  test that asserts *ordering*, not just that a score was produced.
-- **Its votes deduplicate last-write-wins by inequality, not by `>`**, so an
-  older vote can overwrite a newer one and peers resolve a vote-flip
-  differently depending on arrival order. Its moderation path two cases away
-  uses `>` correctly. Use Lamport order (§4.4) for this and do not invent a
-  second rule.
-
-**One thing OpChan cannot lend us, and it is the important one.** Its
-proof-of-holding was an HTTP call to a third-party indexer returning a boolean,
-cached and then trusted — every peer had to trust that service, and a peer
-without an API key computed different scores. LP-0005 (§7.1) is a *cryptographic*
-proof verified locally and offline. So bringing proof-of-holding forward is not
-repeating what OpChan did; it is doing the thing OpChan approximated with a
-centralised oracle because it had nothing better.
-
-Its holdings signal was also **binary** (`!!ordinalDetails` — one ordinal and
-fifty were identical) and was removed in a commit titled "remove bitcoin +
-appkit, use eth + viem/wagmi". That matters for how the datapoint reads:
-**the signal went out because the Bitcoin wallet stack went out, not because
-proof-of-holding was judged a bad relevance signal.** There is no ADR, issue or
-commit anywhere arguing against the approach.
-
-Two design choices OpChan never faced, because its signal was binary and free:
+Two design choices for proof-of-holding that OpChan never faced, because its
+signal was binary and free:
 
 - **Binary or graded?** LP-0005 proves "balance ≥ N" without revealing the
   balance, so the natural port is a **threshold**, not a count. Grading would
@@ -1251,13 +1188,7 @@ Two design choices OpChan never faced, because its signal was binary and free:
   the proof is nullifier-based — collapsing the cross-Stoa unlinkability §5.2
   claims, which is the one privacy property v1 has. LP-0005's shielded
   construction is built for this, but it is a requirement on §5.5's interface,
-  not a property that arrives free — and bringing the claim forward makes it
-  load-bearing now rather than later.
-
-Finally, **OpChan has no per-Stoa standing to copy**: one global identity, one
-global claim, one global multiplier, with a per-cell hide bolted on. If
-dialectica wants relevance scoped to a Stoa, that is a design to originate
-rather than port.
+  not a property that arrives free.
 
 ---
 
@@ -1538,6 +1469,7 @@ development machine, none of them vendored into this repo.
 | λAccount / VLAD identity roadmap and FURPS | `/home/fryorcraken/src/logos-co/roadmap/content/anoncomms/` |
 | A real delivery consumer (older API, still instructive) | `/home/fryorcraken/src/logos-co/logos-delivery-demo` |
 | `logos-scaffold` source, docs and bundled skills | `/home/fryorcraken/src/logos-co/logos-scaffold` |
+| OpChan — the nearest kin forum, read for Appendix A. **No local checkout**; clone from GitHub | `logos-messaging/OpChan` |
 
 Two of these are **stale working trees** and will mislead if read directly:
 `logos-delivery-module` sits on a pre-channels branch, and
@@ -1589,3 +1521,96 @@ thing (§2.3).
   behaviour. Under per-Stoa identity this leaks nothing the channel does not
   already leak, which is why it is a question rather than a blocker; it becomes
   one again for any future narrower scope.
+
+---
+
+## Appendix A. OpChan's relevance implementation, measured
+
+Supporting evidence for §7.2. Here rather than inline because it is a reading of
+someone else's code at a moment in time: it will drift, and §7.2's rules must
+not depend on it staying accurate. Read it once to see why each rule is an
+inversion, then trust the rules.
+
+`logos-messaging/OpChan` is a Logos-ecosystem forum — TypeScript over plain
+Waku, no SDS, no module packaging — so **no code transfers**. The design does,
+mostly as a negative example.
+
+**Source the code, not the docs.** The scorer is `RelevanceCalculator.ts`. Its
+architecture doc documents a completely different set of constants, in an
+additive rather than multiplicative form; it does not describe what runs.
+
+### The score
+
+```
+score = ( (10 + 1.0·upvotes + 0.5·comments) · verification_multiplier
+          + 0.1·verified_upvoters + 0.05·verified_commenters )
+        · e^(−0.1·days) · (moderated ? 0.5 : 1)
+```
+
+`verification_multiplier` is 1.25 for an ENS holder, 1.10 for a connected
+wallet, 1.0 otherwise. Comments score the same way from a base of 5, with
+upvotes only. Cells use a different formula again.
+
+For a fresh post:
+
+| | score |
+|---|---|
+| anonymous author, 0 upvotes | 10.00 |
+| **ENS-verified** author, 0 upvotes | 12.50 |
+| anonymous author, **3 free sybil upvotes** | 13.00 |
+
+**Three throwaway identities beat holding an ENS name**, and a credentialed
+voter's premium (+0.10) is a tenth of the raw vote it rides on (+1.00). The
+credential garnishes an unmetered signal instead of gating it — §7.2 rule 3.
+
+Downvotes are collected, attached to posts, and then filtered out of every
+scorer. The signal is upvote-only.
+
+### Four more findings, each a rule
+
+- **The moderation penalty is ×0.5**, so a well-upvoted hidden post outranks a
+  fresh visible one. A haircut does not bind (rule 4).
+- **Decay reads an author-asserted timestamp** with nothing clamping it, so a
+  post claiming a future time gets an unbounded multiplier above 1. The
+  validator does notice future timestamps and produce a warning — which is never
+  called on the ingest path. Clamp on read; an op's claimed time is
+  attacker-controlled.
+- **Cell decay is dead code.** The reduce finding a cell's most recent post is
+  seeded with `Date.now()`, so the seed beats every honest post and the
+  multiplier is ≈1.0 always — an empty cell scores its full undecayed base and
+  outranks an active one. Invisible without a test asserting *ordering* rather
+  than that a score was produced.
+- **Vote dedup is last-write-wins by inequality, not `>`**, so an older vote
+  can overwrite a newer one and peers resolve a vote-flip differently by arrival
+  order. The moderation path two cases away uses `>` correctly. Use Lamport
+  order (§4.4); do not invent a second rule.
+
+### Moderation authority is never checked on read
+
+Six call sites check that the actor is a cell admin — all on the *send* path.
+The read path applies any moderation message it finds without comparing the
+signer to the cell's owner. **Any peer can forge a moderation, or forge the
+removal of one**, in shipped code. Anonymous authorship is likewise unbound: the
+check is that the author string is shaped like a UUID, while the signature is
+verified against a public key the message itself carries.
+
+This is §6's central claim demonstrated rather than argued.
+
+### Proof-of-holding, and why the datapoint is not what it looks like
+
+OpChan's was an HTTP call to a third-party indexer returning a boolean, cached
+and trusted — every peer had to trust that service, and a peer without an API
+key computed different scores. LP-0005 (§7.1) is a cryptographic proof verified
+locally and offline, so §7's reordering is not repeating this.
+
+The signal was **binary** (one holding and fifty were identical) and was removed
+in a commit titled *"remove bitcoin + appkit, use eth + viem/wagmi"* — **it went
+out because the Bitcoin wallet stack went out, not because proof-of-holding was
+judged a bad signal.** No ADR, issue or commit anywhere argues against the
+approach. An earlier reading of this repo concluded the opposite; that reading
+was wrong, and the correction is why §7 could reorder with a clear conscience.
+
+### No per-Stoa standing to copy
+
+One global identity, one global claim, one global multiplier, with a per-cell
+hide bolted on. Relevance scoped to a Stoa is a design to originate, not port.
