@@ -302,7 +302,8 @@ badly-signed ops out. The store may hold junk; the reader never trusts it.
 `channelCreate(channelId, contentTopic, senderId)` decouples channel from topic.
 
 - `contentTopic` = the Stoa, hashed and bucketed: `/dialectica/1/s/<hex>/proto`
-- `channelId` = the Stoa (plus an epoch — see below)
+- `channelId` = the Stoa, and **the same value for every peer in it** — it is the
+  rendezvous, not a local handle (§4.3)
 - `senderId` = **one per Stoa, permanent** — the SDS sender identifier, a
   transport self-filter rather than an author identity; see below
 - `threadId` and `parentPostId` live in the **payload**, never the topic
@@ -327,8 +328,7 @@ duty is dialectica's, and §5.2's per-Stoa identity is what discharges it.
 channel's lifetime. With one channel per Stoa and one permanent identity per
 Stoa (§5.2), these agree by construction — the `senderId` is stable exactly
 where SDS wants it stable, and no rotation machinery is needed. Changing it
-would mean closing and re-opening the channel, which §4.3 makes a crash risk on
-every id reuse and therefore requires a fresh epoch.
+would mean closing and re-opening the channel, which §4.3 makes a crash risk.
 
 **What a reliable channel discloses.** Every receiving peer is handed the sender
 id with every message — `event channelMessageReceived(channelId, senderId,
@@ -382,28 +382,53 @@ subscribes to all shards in the cluster regardless, filtering locally.
 and costs real money: LIP-23 measures Store query response time doubling from
 10 to 100 content topics. One topic per thread would be actively wrong.
 
-### 4.3 The channel-id trap
+### 4.3 The channel id is the rendezvous
 
-Re-creating a channel with an id that was **closed after receiving a peer
-message** takes down the whole node process (logos-delivery#4116) — not just
-the call. The module unloads, the node is gone, every later API call fails, and
-any other module sharing that node loses it too. The crash is inside
-`createReliableChannel` → `sdsPersistence` → `openJob`, non-deterministic in
-kind (SIGSEGV and an IndexDefect from the same path), which points at corrupt
-persistency state rather than a missing nil check.
+**`channelId` names the conversation, not our handle on it.** Every peer in a
+Stoa must compute the same value or they cannot see each other. The Reliable
+Channel docs put it plainly: the channel name "acts as an identifier to the
+conversation, participants will try to ensure they all have the same messages
+within a given channel."
+
+The contrast with `senderId` in the same API is the tell. `senderId` is
+explicitly per-participant — "every participant **must** have a different id" —
+while `channelId` is the thing they must agree on. Two fields, adjacent in one
+call, with opposite requirements.
+
+**So the channel id can carry no per-peer state.** Not a session counter, not a
+local sequence number, not anything that varies with one peer's history. A value
+that differs between peers does not produce an error: it produces two Stoas that
+cannot see each other, silently and permanently. §4.5 states the same rule from
+the other direction — derive `channelId` as a pure function of the addressed
+object.
+
+This is a permanent property of the design. What follows is a current upstream
+bug that makes it bite sooner.
+
+#### A bug to be aware of: reopening a channel crashes the node
+
+`logos-delivery#4116`, open at time of writing. Re-creating a channel with an id
+that was **closed after receiving a peer message** takes down the whole node
+process — not just the call. The module unloads, the node is gone, every later
+API call fails, and any other module sharing that node loses it too. The crash
+is inside `createReliableChannel` → `sdsPersistence` → `openJob`, and it is
+non-deterministic in kind (SIGSEGV and an IndexDefect from the same path), which
+points at corrupt persistency state rather than a missing nil check.
 
 The v0.2.1 docstring claims the opposite — "persisted channel state survives
-channelClose, so re-creating with the same id restores it". Trust the bug.
+channelClose, so re-creating with the same id restores it" — so following the
+documentation is what walks you into it. Trust the bug.
 
 **All three conditions are required**, and the issue is explicit that removing
-any one of them makes it safe:
+any one makes it safe:
 
 1. the channel **received** a message from a peer (a send alone does not do it),
 2. then `channelClose`,
 3. then `channelCreate` with the **same** id.
 
 Create → close → create with a *different* id is fine. So is the whole cycle
-with no peer traffic received.
+with no peer traffic received. Note this needs real peers to reproduce, so it
+passes single-node testing.
 
 **Dialectica closes a channel in two places: when a user leaves a Stoa, and on
 shutdown.** Both, and the second is the one that looks optional and is not.
@@ -427,33 +452,47 @@ closed the application. Leaving it behind is a leak in someone else's process.
 That is why both cases close: leaving a Stoa and shutting down are the same
 situation — a channel that must not outlive the app that opened it.
 
-**Which puts every close squarely into condition 2, so condition 3 is what
-dialectica must break.** The epoch is therefore not belt-and-braces, it is the
-whole defence. **Carry an epoch in the channel id** — `stoa-abc/e7` — and bump
-it on every open, so `channelCreate` never sees an id it has seen before:
+Every close dialectica makes therefore satisfies condition 2, which leaves
+conditions 1 and 3.
 
-- shutdown closes `stoa-abc/e7`; the next launch opens `stoa-abc/e8`
-- leaving closes `stoa-abc/e8`; rejoining opens `stoa-abc/e9`
+**The tempting fix — an epoch in the channel id, bumped on each open — is ruled
+out by the section above**, and this is exactly what a per-peer value in a
+rendezvous field costs. Peer A reopens at `stoa-abc/e8` while peer B is still on
+`stoa-abc/e7`, and they stop seeing each other with no error anywhere: a worse
+outcome than the crash, because it is silent. (An epoch derived from something
+*every* peer computes identically — a field in the genesis record, a coarse
+clock bucket — would be legitimate, but neither is designed here and neither
+varies per session in the way this would need.)
 
-**The epoch must be persisted across restarts.** A counter that resets to zero
-on launch recreates the exact collision it exists to prevent, and it does so on
-the second run — early enough to look like a different bug entirely. This is the
-one piece of state the scheme requires, and losing it is indistinguishable from
-never having had it until the node dies.
+**So v1 breaks the sequence instead: never close and reopen the same channel
+inside one node's lifetime.** Condition 1 is not ours to avoid — an active Stoa
+receives peer messages, that is the point of it — and condition 3 must not move.
+But all three have to occur within a single node, and dialectica controls
+whether that ever happens. Concretely:
 
-The failure presents far from its cause: the node dies during startup inside
-`createReliableChannel`, while the code responsible ran in the *previous*
-session's shutdown path. Someone would debug the wrong process.
+- **Open each Stoa's channel once per node lifetime.** Do not close and reopen
+  as a way of recovering from an error, refreshing state, or reacting to
+  connectivity changes. Reopen only after the node itself has gone away.
+- **On leaving a Stoa, close and do not reopen in that session.** Rejoining
+  before restart is the one user-visible path into the bug; make it re-create
+  the node, or defer the rejoin, or accept it as a known limitation until #4116
+  is fixed.
 
-The epoch is worth having regardless — it doubles as the version marker that
-lets peers migrate across the §4.5 split without the two regimes colliding.
+That leaves the ordinary restart safe — the node is new, so the in-process
+close-then-create sequence never happens — and leaves exactly one awkward case
+(leave-then-rejoin) rather than a broken rendezvous scheme.
 
-**What is not established**, and it decides how much weight the epoch carries:
-the issue reproduces close-and-reopen *within one running node*. Whether
-persisted SDS state surviving a full process restart corrupts a fresh
-`createNode` the same way is untested. If it does, the epoch is the only thing
-standing between an ordinary restart and a dead node — which is an argument for
-treating a lost or reset epoch as a serious bug rather than a cosmetic one.
+**What is not established, and it matters more now.** The issue reproduces
+close-and-reopen *within one running node*. Whether persisted SDS state
+surviving a full process restart corrupts a fresh `createNode` the same way is
+**untested**, and the v1 approach above depends on it not doing so. If it does,
+restart-safety is not free and the rendezvous-preserving epoch has to be
+designed properly. **Test this before relying on any of it** — two runs against
+a real node, with peer traffic received in the first, is the whole experiment.
+
+The failure would present far from its cause: the node dies during startup
+inside `createReliableChannel`, while the code responsible ran in the previous
+session. Someone would debug the wrong process.
 
 ### 4.4 What SDS does and does not promise
 
@@ -719,9 +758,7 @@ Three things decided against it, in ascending order of how conclusive they are:
   and still answered to, and `senderId` binds at `channelCreate` for a channel's
   lifetime (§4.1). One channel per Stoa plus one permanent identity per Stoa
   makes the transport identifier stable exactly where SDS wants it, with no
-  rotation machinery to build. (The channel *id* still carries a bumping epoch —
-  §4.3 requires that of every open — but the `senderId` inside it does not
-  change, which is what SDS-R depends on.)
+  rotation machinery to build.
 
 The last is the decisive one, and it is independent of the privacy argument: it
 would rule out narrower scopes even if the unlinkability gain were larger than
@@ -1302,7 +1339,7 @@ inference, since it sets how defensive the guard must be.
 > implementation, and CI exists covering §10's four jobs — `gh run list` for
 > whether it is currently passing. The three questions are answered
 > there, along with what is still *not* proven — no delivery node has been
-> created, so no channel has been opened and the §4.3 channel-id trap is
+> created, so no channel has been opened and the §4.3 channel reopen trap is
 > untested; only one profile has been launched.
 >
 > The architecture stands. What changed is §3.2's JSON, §10's pins, §11's trap
