@@ -304,8 +304,10 @@ badly-signed ops out. The store may hold junk; the reader never trusts it.
 - `contentTopic` = the Stoa, hashed and bucketed: `/dialectica/1/s/<hex>/proto`
 - `channelId` = the Stoa, and **the same value for every peer in it** — it is the
   rendezvous, not a local handle (§4.3)
-- `senderId` = **one per Stoa, permanent** — the SDS sender identifier, a
-  transport self-filter rather than an author identity; see below
+- `senderId` = **one per user per Stoa, permanent** — every participant's is
+  different (the API requires it); what is stable is that a given user keeps
+  theirs across sessions. A transport self-filter, not an author identity; see
+  below
 - `threadId` and `parentPostId` live in the **payload**, never the topic
 
 **`senderId` is not an author identity, and the plan should not treat it as
@@ -324,11 +326,12 @@ backend covers partial reassembly, and identity is in neither. The Reliable
 Channel API says it SHOULD be "unique and persisted between sessions" — that
 duty is dialectica's, and §5.2's per-Stoa identity is what discharges it.
 
-**It binds at channel creation**, so one channel means one `senderId` for that
-channel's lifetime. With one channel per Stoa and one permanent identity per
-Stoa (§5.2), these agree by construction — the `senderId` is stable exactly
-where SDS wants it stable, and no rotation machinery is needed. Changing it
-would mean closing and re-opening the channel, which §4.3 makes a crash risk.
+**It binds at channel creation**, so a peer's own `senderId` is fixed for as
+long as it holds that channel open. With one channel per Stoa and one permanent
+identity per user per Stoa (§5.2), these agree by construction — a user's
+`senderId` is stable exactly where SDS wants it stable, and no rotation
+machinery is needed. Changing it would mean closing and re-opening the channel,
+which §4.3 makes a crash risk.
 
 **What a reliable channel discloses.** Every receiving peer is handed the sender
 id with every message — `event channelMessageReceived(channelId, senderId,
@@ -342,9 +345,9 @@ scope question: reliability is what introduces the identifier, so the identifier
 can be avoided exactly where reliability is not needed.
 
 **The trap this leaves for anyone revisiting §4.5.** A per-thread channel split
-would keep a Stoa-level channel carrying the thread index, and that channel's
-one `senderId` would sit beside each announced `threadId` — relinking every
-thread a user created, and defeating the point of splitting. The rule to apply
+would keep a Stoa-level channel carrying the thread index, and a user announces
+every thread they start on that one channel under a single `senderId` — relinking
+every thread they created, and defeating the point of splitting. The rule to apply
 if that day comes: reliable channels where the participant set is already the
 anonymity set, plain pub/sub where it is not, since `senderId` exists only to
 serve SDS reliability and a thread index needs availability rather than
@@ -361,9 +364,9 @@ ack token — reintroduces exactly this leak.
 repair backoff computes a distance from the original `sender_id`, and its
 response-group membership is derived from it so that a sender is always in the
 group for its own messages; it also adds `sender_id` to `HistoryEntry`, exposing
-sender ids for other people's messages. A permanent per-Stoa `senderId`
-satisfies all of that; an identity changing more often than the channel would
-not. This is an independent reason the scope in §5.2 is the Stoa rather than
+sender ids for other people's messages. A `senderId` that a user keeps for as
+long as they are in the Stoa satisfies all of that; one changing more often than
+the channel would not. This is an independent reason the scope in §5.2 is the Stoa rather than
 anything narrower — and the SDS spec expects `sender_id`'s "importance ... to
 increase once a p2p retrieval mechanism is added", so the tension grows rather
 than fades.
@@ -756,9 +759,9 @@ Three things decided against it, in ascending order of how conclusive they are:
 - **It is incompatible with SDS-R, which this design wants.** SDS Repair's
   backoff and response-group arithmetic both assume a sender id that is stable
   and still answered to, and `senderId` binds at `channelCreate` for a channel's
-  lifetime (§4.1). One channel per Stoa plus one permanent identity per Stoa
-  makes the transport identifier stable exactly where SDS wants it, with no
-  rotation machinery to build.
+  lifetime (§4.1). One channel per Stoa, plus an identity each user keeps for
+  that Stoa, makes the transport identifier stable exactly where SDS wants it,
+  with no rotation machinery to build.
 
 The last is the decisive one, and it is independent of the privacy argument: it
 would rule out narrower scopes even if the unlinkability gain were larger than
