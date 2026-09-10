@@ -1080,9 +1080,10 @@ ours. Take the circuit and the crates, not the integration.
 ### 7.2 Relevance
 
 **This is where dialectica is investing.** A forum that ranks well is more
-useful than one that bans well, and §5.2 has already traded away some
-moderation strength to buy privacy. Relevance is the compensating investment,
-and it is the part of a forum that is genuinely hard.
+useful than one that bans well: moderation decides what a Stoa refuses, and
+relevance decides what it is *like* to read. The second is the harder problem
+and the one with more leverage, and it is why §7's ordering now brings a
+relevance credential forward ahead of a rate limit.
 
 #### The five rules
 
