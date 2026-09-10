@@ -405,33 +405,14 @@ cannot see each other, silently and permanently. §4.5 states the same rule from
 the other direction — derive `channelId` as a pure function of the addressed
 object.
 
-This is a permanent property of the design. What follows is a current upstream
-bug that makes it bite sooner.
+**Live bug, read it before touching channel lifecycle:
+`logos-messaging/logos-delivery#4116`.** Closing a channel that has received a
+peer message and then re-creating it with the same id kills the whole node
+process — and the v0.2.1 docstring claims the opposite, so following the
+documentation is what walks you into it. The issue has the conditions and the
+repro; do not restate them here, they will be wrong once it is fixed.
 
-#### A bug to be aware of: reopening a channel crashes the node
-
-`logos-delivery#4116`, open at time of writing. Re-creating a channel with an id
-that was **closed after receiving a peer message** takes down the whole node
-process — not just the call. The module unloads, the node is gone, every later
-API call fails, and any other module sharing that node loses it too. The crash
-is inside `createReliableChannel` → `sdsPersistence` → `openJob`, and it is
-non-deterministic in kind (SIGSEGV and an IndexDefect from the same path), which
-points at corrupt persistency state rather than a missing nil check.
-
-The v0.2.1 docstring claims the opposite — "persisted channel state survives
-channelClose, so re-creating with the same id restores it" — so following the
-documentation is what walks you into it. Trust the bug.
-
-**All three conditions are required**, and the issue is explicit that removing
-any one makes it safe:
-
-1. the channel **received** a message from a peer (a send alone does not do it),
-2. then `channelClose`,
-3. then `channelCreate` with the **same** id.
-
-Create → close → create with a *different* id is fine. So is the whole cycle
-with no peer traffic received. Note this needs real peers to reproduce, so it
-passes single-node testing.
+What it costs *us* is the shape below, which stands on its own.
 
 **Dialectica closes a channel in two places: when a user leaves a Stoa, and on
 shutdown.** Both, and the second is the one that looks optional and is not.
@@ -455,23 +436,21 @@ closed the application. Leaving it behind is a leak in someone else's process.
 That is why both cases close: leaving a Stoa and shutting down are the same
 situation — a channel that must not outlive the app that opened it.
 
-Every close dialectica makes therefore satisfies condition 2, which leaves
-conditions 1 and 3.
+So dialectica closes channels, and #4116 makes a close followed by a re-create
+dangerous. Two ways out, and the first is ruled out by this section's own rule.
 
-**The tempting fix — an epoch in the channel id, bumped on each open — is ruled
-out by the section above**, and this is exactly what a per-peer value in a
-rendezvous field costs. Peer A reopens at `stoa-abc/e8` while peer B is still on
-`stoa-abc/e7`, and they stop seeing each other with no error anywhere: a worse
-outcome than the crash, because it is silent. (An epoch derived from something
-*every* peer computes identically — a field in the genesis record, a coarse
-clock bucket — would be legitimate, but neither is designed here and neither
-varies per session in the way this would need.)
+**The tempting fix — an epoch in the channel id, bumped on each open — would
+partition the Stoa.** That is what a per-peer value in a rendezvous field costs:
+peer A reopens at `stoa-abc/e8` while peer B is still on `stoa-abc/e7`, and they
+stop seeing each other with no error anywhere, which is worse than the crash
+because it is silent. (An epoch derived from something *every* peer computes
+identically — a genesis-record field, a coarse clock bucket — would be
+legitimate, but neither is designed here and neither varies per session in the
+way this would need.)
 
-**So v1 breaks the sequence instead: never close and reopen the same channel
-inside one node's lifetime.** Condition 1 is not ours to avoid — an active Stoa
-receives peer messages, that is the point of it — and condition 3 must not move.
-But all three have to occur within a single node, and dialectica controls
-whether that ever happens. Concretely:
+**So v1 leaves the id alone and never re-creates a channel inside one node's
+lifetime.** The bug needs a close and a re-create in the same node; dialectica
+controls whether that ever happens. Concretely:
 
 - **Open each Stoa's channel once per node lifetime.** Do not close and reopen
   as a way of recovering from an error, refreshing state, or reacting to
@@ -481,21 +460,14 @@ whether that ever happens. Concretely:
   the node, or defer the rejoin, or accept it as a known limitation until #4116
   is fixed.
 
-That leaves the ordinary restart safe — the node is new, so the in-process
-close-then-create sequence never happens — and leaves exactly one awkward case
-(leave-then-rejoin) rather than a broken rendezvous scheme.
+That leaves the ordinary restart safe, since the node is new.
 
-**What is not established, and it matters more now.** The issue reproduces
-close-and-reopen *within one running node*. Whether persisted SDS state
-surviving a full process restart corrupts a fresh `createNode` the same way is
-**untested**, and the v1 approach above depends on it not doing so. If it does,
-restart-safety is not free and the rendezvous-preserving epoch has to be
-designed properly. **Test this before relying on any of it** — two runs against
-a real node, with peer traffic received in the first, is the whole experiment.
-
-The failure would present far from its cause: the node dies during startup
-inside `createReliableChannel`, while the code responsible ran in the previous
-session. Someone would debug the wrong process.
+**Untested, and the approach above rests on it:** #4116 reproduces within one
+running node. Whether persisted SDS state surviving a full process restart
+corrupts a fresh `createNode` the same way is unknown. Two runs against a real
+node, with peer traffic received in the first, settles it — worth doing before
+relying on any of this, because the failure surfaces at startup while the code
+responsible ran in the previous session.
 
 ### 4.4 What SDS does and does not promise
 
@@ -734,8 +706,9 @@ across sessions. Identities are unlinkable **across** Stoas — derive the
 diversifier from the Stoa id so per-Stoa pseudonyms fall out of a single root
 key for free.
 
-This is the trade that makes moderation work: banning an identity binds, because
-that identity is stable everywhere it can post.
+A stable pseudonym is what lets anything at all accumulate against an identity —
+a moderator's judgement, and more importantly the relevance signals §7.2 is
+built on. An identity that does not persist is one nothing can be said about.
 
 **Thread-scoped identity was explored and rejected**, and the reasoning is worth
 keeping because the motivation was real. Rotating keys between threads would buy
@@ -747,9 +720,9 @@ participation.
 
 Three things decided against it, in ascending order of how conclusive they are:
 
-- **It narrows banning to a single thread.** A ban binds where the identity is
-  stable, so a banned person simply posts in the next thread under an unlinkable
-  key. (Not fatal on its own — a ban is a local filter, §6.0 — but a real loss.)
+- **Nothing can accumulate against an identity that lasts one thread.** That is
+  a loss for moderation, but the sharper cost is to §7.2: relevance weighted by
+  a credential needs the credential to attach to something that persists.
 - **The privacy gain is much smaller than it looks.** Writing style, posting
   time, the reply graph and the network layer all still link a user's thread
   identities, and every peer holds the op log needed to do it. It defeats a
@@ -774,18 +747,21 @@ Stoa's posts to that one pseudonym and no further.
 
 ### 5.3 No rotation in v1
 
-Deliberate, and the reasoning is ordering: **rotation without spam protection is
-a ban-evasion feature.** Until we can distinguish "my key leaked" from "I got
-banned", rotation makes moderation unenforceable. It arrives with RLN — see §7.
+Deliberate, and the reasoning is ordering: **a key that can be discarded at will
+is a key nothing can be attached to.** Rotation lets a user shed whatever has
+accumulated against their identity — a moderator's judgement, a poor standing,
+and in §7.2's terms any credential-weighted relevance they would rather not
+carry — and it does so indistinguishably from a legitimate "my key leaked".
 
-§5.2's rejection of thread-scoped identity is the same argument applied to a
-scope rather than to an event: mandatory rotation between threads is still
-rotation, and it would still shed a ban that had nothing else to bind to.
+Until the thing that persists is something *other than the key*, rotation
+subtracts from the design without adding anything. §5.2's rejection of
+thread-scoped identity is the same argument applied to a scope rather than to an
+event.
 
-What unblocks rotation later is the claims layer (§5.5), where the thing that
-must persist is a credential rather than a key — and §5.1's record-hashed
-address is what lets a key log land without every author migrating, which is why
-that construction was chosen before anything needed it.
+What unblocks rotation is therefore the claims layer (§5.5), where standing
+attaches to a revocable credential rather than to a keypair — and §5.1's
+record-hashed address is what lets a key log land without every author
+migrating, which is why that construction was chosen before anything needed it.
 
 ### 5.4 Why not the obvious alternatives
 
@@ -970,34 +946,28 @@ later work — which also defers the founder-as-permanent-root question rather
 than answering it prematurely. A Stoa whose moderation people dislike can be
 forked — a Stoa's participants are never locked into its moderation.
 
-### 6.0 Two mechanisms that are constantly confused
+### 6.0 Hiding is the only moderation mechanism, and it is a signed op
 
-Drawn before anything else in this section, because the two are routinely
-conflated and the difference decides what a design may expect of each.
+**There is no ban.** Dialectica has no way to remove a participant, and it is
+worth saying outright because every forum design reaches for one. SDS has no
+membership to remove anyone from (§4.4), nothing stops a peer publishing to a
+channel, and a client that declines to render someone is making a local
+rendering decision that no other peer is bound by. Removing a *person* is not a
+thing this protocol can do.
 
-**Hiding is a signed op, and it binds.** A moderator publishes a `hide`; every
-peer verifies the signature against the moderator set at that Lamport time and
-independently reaches the same answer. It is protocol, it converges, and it is
-unaffected by how author identity is scoped — a hide names an `opId`, not a
-person.
+What it can do is hide *content*. **A moderator publishes a `hide`; every peer
+verifies the signature against the moderator set at that Lamport time and
+independently reaches the same answer.** It is protocol, it converges, and it
+names an `opId` rather than a person.
 
-**Banning is a local filter, and it does not bind.** A peer declining to render
-an identity's posts is a rendering decision. It publishes nothing, retracts
-nothing, and changes no other peer's state; a peer that disagrees renders the
-posts anyway. **Nothing about a ban touches the SDS channel** — the thread is
-not modified, no message is withdrawn, and no participant is removed, because
-SDS has no membership to remove anyone from (§4.4).
+The reason to be pedantic: a design that assumes it has a ban starts expecting
+local decisions to converge across peers, and then reaches for a consensus
+mechanism to make them do so. There is nothing to converge.
 
-The reason to be pedantic here: a design that mistakes the second for the first
-starts expecting bans to converge across peers, and then reaches for a
-consensus mechanism to make them do so. There is nothing to converge — that is
-the point.
-
-It also sets what a ban's *reach* actually depends on. A local filter can only
-be as broad as the identity it filters, so §5.2's per-Stoa identity is what
-makes a ban cover a Stoa; a narrower identity scope would narrow the filter
-without changing anything else about the mechanism. That is one of the three
-reasons §5.2 gives for keeping the scope where it is.
+**The response to a persistently unwanted participant is therefore relevance,
+not removal** (§7.2) — what a Stoa surfaces, rather than who it can expel. That
+is the substitution this design makes deliberately, and it is why §5.2 keeps an
+identity stable enough for a signal to attach to.
 
 ### 6.1 Threshold moderation, later
 
@@ -1027,10 +997,11 @@ Read one more part than that, though, against the day §5.3's rotation arrives:
 its **K-strike revocation**, where each post embeds a Shamir share of the
 author's nullifier secret, so that accumulating K moderation certificates
 reconstructs the secret, slashes the membership, and retroactively links that
-author's prior posts. That is a sanction that binds to a credential rather than
-to a key — which is exactly the shape §5.3 says a ban must take once keys can
-rotate. It is implemented and live on LEZ testnet. Costs are real: on-chain
-registration and slashing, a stake, and seconds-scale proof generation per post.
+author's prior posts. It is the worked example of standing attached to a
+revocable credential rather than to a keypair — which is what §5.3 says has to
+exist before rotation can. It is implemented and live on LEZ testnet. Costs are
+real: on-chain registration and slashing, a stake, and seconds-scale proof
+generation per post.
 Far beyond v1, and the right thing to read before designing v2's revocation
 rather than now.
 
@@ -1119,11 +1090,12 @@ ours. Take the circuit and the crates, not the integration.
 
 ### 7.2 Relevance
 
-**This is where dialectica is investing.** A forum that ranks well is more
-useful than one that bans well: moderation decides what a Stoa refuses, and
-relevance decides what it is *like* to read. The second is the harder problem
-and the one with more leverage, and it is why §7's ordering now brings a
-relevance credential forward ahead of a rate limit.
+**This is where dialectica is investing, and it is doing the work a ban would
+do elsewhere.** There is no ban (§6.0) — no way to remove a participant — so
+what a Stoa surfaces is the only lever it has over what reading it is like.
+Moderation decides what a Stoa refuses; relevance decides everything else, which
+is the larger part. It is why §7's ordering brings a relevance credential
+forward ahead of a rate limit.
 
 #### The five rules
 
