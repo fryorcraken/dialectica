@@ -45,26 +45,71 @@ publish = false
 [dependencies]
 serde_json = "1"
 
-# LEZ's signature scheme, matched deliberately rather than picked fresh.
-# PLAN.md §5.1 asks for LEZ's cryptographic seriousness, and LEZ signs with
-# BIP-340 Schnorr over secp256k1 through this exact crate
-# (`lee/state_machine/src/signature/mod.rs`), deriving public account addresses
-# as SHA-256 over a domain-separated 32-byte prefix.
+# Ed25519, chosen on the forum's OWN criteria rather than to match anything.
 #
-# What is deliberately NOT taken: LEZ's own `lee` / `lee_core` crates. They are
-# unpublished in-tree path crates, and `lee_core` pulls `risc0-zkvm` in
-# unconditionally just to reach `risc0_zkvm::sha::Impl` — a zkVM dependency for
-# what is, on the host, plain SHA-256 with byte-identical output to `sha2`.
-# Depending on the upstream primitives instead costs ~20 lines of address
-# derivation and keeps a forum out of the proving stack entirely.
+# The rejected alternative was BIP-340 Schnorr over secp256k1 (`k256`), on the
+# reasoning that it matches LEZ so that LEZ proof-of-holding (PLAN.md §7.2)
+# would interoperate. PLAN.md §5.4 refutes that: a claim binds to a
+# PRESENTER-CHOSEN key — LP-0005's journal carries `presenter_pubkey` as a
+# length-checked byte blob and the LEZ account key never appears in it — and
+# there is no single "LEZ scheme" to match anyway, since `npk` is a SHA-256
+# chain, `vpk` is ML-KEM-768, and the shipped `sequencer_stake` program verifies
+# ed25519 in-guest. With the compatibility constraint gone, the criteria are:
 #
-# Nor is LEZ's PRIVATE-account address construction taken. PLAN.md §5.1 cites it
-# — `SHA256(prefix || npk || vpk || identifier)` — but `vpk` there is an
-# ML-KEM-768 encapsulation key, 1184 of the preimage's 1264 bytes, and it exists
-# to encrypt account state to a recipient. A public forum (§8: all Stoas are
-# public in v1) has nothing to encrypt, so carrying it would be dead weight in
-# every address. The genesis-record hashing §5.1 actually asks for is what this
-# crate implements; see `identity.rs`.
-k256 = { version = "0.13", features = ["schnorr"] }
-sha2 = "0.10"
+#  * KEY DERIVATION, which decides it. Identity is thread-scoped (§5.2), so many
+#    keypairs are derived from one root. Here that is HKDF-SHA512 into
+#    `SigningKey::from_bytes(&[u8; 32])` — INFALLIBLE, because every 32-byte
+#    string is a valid Ed25519 seed. The BIP-340 equivalent needs a rejection
+#    loop (the scalar must land in `[1, n)`), plus BIP-341's conditional parity
+#    negation, plus dropping out of `k256::schnorr` into raw `Scalar` arithmetic
+#    the module does not expose. That is hand-rolled curve maths in the identity
+#    path, and it is where a silent bug would live.
+#
+#    Note what is NOT wanted: non-hardened / public derivation, which SLIP-0010
+#    declines to support for ed25519. Deriving a child PUBLIC key from a parent
+#    public key is exactly the linkability §5.2 exists to prevent — anyone
+#    holding the root public key could link every thread identity. The feature
+#    Ed25519 lacks is one this design must not ship.
+#
+#  * PARSE SAFETY. `k256` 0.13 guards by convention: `VerifyingKey::from_bytes`
+#    and `TryFrom<&[u8]> for Signature` both return `Result` and both PANIC on a
+#    wrong-length slice anyway (see the tests, which found this). Here the types
+#    forbid it — `&[u8; 32]` and `&[u8; 64]` — so hostile bytes are a compile-
+#    time impossibility rather than a guard someone must remember. Given
+#    PHASE0-FINDINGS §3 (a panic ABORTS the module process), unrepresentable
+#    beats guarded.
+#
+#  * VERIFY COST on the hot path — rendering a thread verifies many signatures.
+#    Ed25519 is roughly 2-4x faster here; pure-Rust k256 pays a penalty against
+#    C libsecp256k1 that dialectica cannot avoid, since it ships pure Rust.
+#
+# Honest counter-argument, recorded because it is real: `k256` has the more
+# relevant third-party audit (NCC Group reviewed the Schnorr implementation),
+# and `k256` 0.14 fixes both panics structurally. Neither moves the derivation
+# argument, which is why this still goes to Ed25519.
+#
+# `hazmat` is deliberately NOT enabled — it is off by default, and it gates the
+# decoupled-key API behind RUSTSEC-2022-0093 (a double-public-key signing oracle
+# enabling private key recovery). `batch` is likewise off: `verify_batch` skips
+# `verify_strict`'s weak-key check, which would reintroduce the very peer
+# disagreement `verify_strict` is pinned for below.
+ed25519-dalek = { version = "3", features = ["rand_core"] }
+# Subkey derivation for thread-scoped identity. HMAC-SHA512 based, matching
+# Ed25519's own hash.
+hkdf = "0.13"
+# 0.11 rather than 0.10, and the version is not free to drift: `ed25519-dalek` 3
+# and `hkdf` 0.13 both build on `sha2` 0.11's `digest` generation, and pinning
+# 0.10 here puts TWO incompatible `sha2` versions in the tree — which does not
+# fail as a version conflict but as a wall of unsatisfied trait bounds on
+# `CoreWrapper<CtVariableCoreWrapper<...>>`, naming neither `sha2` nor the
+# version. If that ever reappears, check `cargo tree -i sha2` first.
+sha2 = "0.11"
 hex = "0.4"
+# The OS random source, for key generation only.
+#
+# Reached directly rather than through `rand`/`OsRng`: `rand_core` 0.10 (what
+# `ed25519-dalek` 3 builds on) no longer re-exports `OsRng`, so
+# `SigningKey::generate` needs a `CryptoRng` from somewhere. Filling a 32-byte
+# seed and using the infallible `from_bytes` is the same operation with one
+# small dependency instead of the `rand` stack.
+getrandom = "0.4"
