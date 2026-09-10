@@ -225,9 +225,10 @@ Considered and rejected, and the reasoning is architectural rather than a
 judgement on the code.
 
 `cloud_data_module` solves convergence with **CRDTs over plain pub/sub**. It
-does not use SDS, and does not need to: every op is idempotent by `opId`, safe
-to apply out of order or repeatedly, so convergence comes from merge semantics
-rather than from transport ordering.
+does not use SDS, and does not need to: every op (a signed operation — §3.3
+defines the term) is idempotent by `opId`, safe to apply out of order or
+repeatedly, so convergence comes from merge semantics rather than from transport
+ordering.
 
 Dialectica takes **SDS as the primary reliability layer** (§4). Those are
 *alternatives, not layers*. Running both would pay SDS's per-message bloom
@@ -280,9 +281,21 @@ expected output. The open question is the bridge, not the API.
 
 ### 3.3 The local store is ours
 
+**An "op" is a signed operation, and it is the unit everything else is built
+from.** Creating a Stoa, posting, publishing a revision of your own post (§5.7),
+hiding something as a moderator (§6), voting — each is one op, signed by its
+author and published to the Stoa's channel. Nothing else crosses the wire, and
+the forum's whole state is a function of the ops a peer has seen.
+
 Each peer keeps a **local SQLite store** holding every op it has seen, plus a
 materialised view of the forum derived from it. Ops are the authority; the view
 is a cache that can be rebuilt by replay.
+
+Two peers routinely hold **different sets of ops** — one was offline, one joined
+late, a message has not propagated yet — so they can legitimately disagree about
+what the forum currently looks like. §4.4's eventual consistency is what closes
+that gap over time, and §7.2 rule 1 is what stops the divergence being mistaken
+for a bug.
 
 This is the piece cloud_data would have provided, and owning it is what lets us
 index for the queries a forum actually makes — newest threads, paginated
@@ -302,8 +315,74 @@ badly-signed ops out. The store may hold junk; the reader never trusts it.
 `channelCreate(channelId, contentTopic, senderId)` decouples channel from topic.
 
 - `contentTopic` = the Stoa, hashed and bucketed: `/dialectica/1/s/<hex>/proto`
-- `channelId` = the Stoa (plus an epoch — see below)
+- `channelId` = the Stoa, and **the same value for every peer in it** — it is the
+  rendezvous, not a local handle (§4.3)
+- `senderId` = **one per user per Stoa, permanent** — every participant's is
+  different (the API requires it); what is stable is that a given user keeps
+  theirs across sessions. A transport self-filter, not an author identity; see
+  below
 - `threadId` and `parentPostId` live in the **payload**, never the topic
+
+**`senderId` is not an author identity, and the plan should not treat it as
+one.** It exists so SDS can tell a participant's own messages from everyone
+else's: the spec notes that "outside of filtering messages originating from the
+sender itself, the `sender_id` field is not used for much", and the receive step
+is a SHOULD to "ignore the message if it has a `sender_id` matching its own".
+Acknowledgement accounting runs off message ids carried in causal history and
+bloom filters, not off sender ids — so reliability does not depend on a
+`senderId` meaning anything in particular.
+
+**The application owns it.** `channelCreate(channelId, contentTopic, senderId)`
+takes it as a parameter, and nothing in the delivery module persists it: the SDS
+persistence backend covers causal history and outgoing buffers, the segmentation
+backend covers partial reassembly, and identity is in neither. The Reliable
+Channel API says it SHOULD be "unique and persisted between sessions" — that
+duty is dialectica's, and §5.2's per-Stoa identity is what discharges it.
+
+**It binds at channel creation**, so a peer's own `senderId` is fixed for as
+long as it holds that channel open. With one channel per Stoa and one permanent
+identity per user per Stoa (§5.2), these agree by construction — a user's
+`senderId` is stable exactly where SDS wants it stable, and no rotation
+machinery is needed. Changing it would mean closing and re-opening the channel,
+which §4.3 makes a crash risk.
+
+**What a reliable channel discloses.** Every receiving peer is handed the sender
+id with every message — `event channelMessageReceived(channelId, senderId,
+payload, timestamp)` in `dialectica/contracts/delivery_module.lidl`. So a
+`senderId` links everything sent on its channel, which under per-Stoa identity
+is the intended scope: it links a Stoa's posts to one pseudonym and no further.
+Plain messaging carries no such field — `method send(contentTopic, payload)` and
+`event messageReceived(messageHash, contentTopic, payload, timestamp)` in the
+same contract have no sender at all. That asymmetry is the lever for any future
+scope question: reliability is what introduces the identifier, so the identifier
+can be avoided exactly where reliability is not needed.
+
+**The trap this leaves for anyone revisiting §4.5.** A per-thread channel split
+would keep a Stoa-level channel carrying the thread index, and a user announces
+every thread they start on that one channel under a single `senderId` — relinking
+every thread they created, and defeating the point of splitting. The rule to apply
+if that day comes: reliable channels where the participant set is already the
+anonymity set, plain pub/sub where it is not, since `senderId` exists only to
+serve SDS reliability and a thread index needs availability rather than
+ordering. Note that this removes a protocol-level identifier, not a
+network-level one — publishing still emits a signal, and Filter/Store/LightPush
+disclose content topics to peers (below).
+
+**The general trap, worth stating once:** a pseudonym is only as unlinkable as
+the most broadly-scoped identifier travelling with it. Any field attached at a
+scope wider than the pseudonym — a session id, a presence marker, a per-Stoa
+ack token — reintroduces exactly this leak.
+
+**SDS Repair (SDS-R) is wanted where available, and it constrains this.** Its
+repair backoff computes a distance from the original `sender_id`, and its
+response-group membership is derived from it so that a sender is always in the
+group for its own messages; it also adds `sender_id` to `HistoryEntry`, exposing
+sender ids for other people's messages. A `senderId` that a user keeps for as
+long as they are in the Stoa satisfies all of that; one changing more often than
+the channel would not. This is an independent reason the scope in §5.2 is the Stoa rather than
+anything narrower — and the SDS spec expects `sender_id`'s "importance ... to
+increase once a p2p retrieval mechanism is added", so the tension grows rather
+than fades.
 
 **Never put a human-readable Stoa name in a topic.** Filter, Store and
 LightPush disclose content topics to peers, linking IP to interest. Hashed
@@ -319,22 +398,121 @@ subscribes to all shards in the cluster regardless, filtering locally.
 and costs real money: LIP-23 measures Store query response time doubling from
 10 to 100 content topics. One topic per thread would be actively wrong.
 
-### 4.3 The channel-id trap
+### 4.3 The channel id is the rendezvous
 
-Reusing a `channelId` after `channelClose` on a channel that had received a peer
-message **crashes the node** (logos-delivery#4116) — and the v0.2.1 header
-docstring claims the opposite ("persisted channel state survives channelClose").
-Trust the bug, not the docstring.
+**`channelId` names the conversation, not our handle on it.** Every peer in a
+Stoa must compute the same value or they cannot see each other. The clearest
+statement is in the JS SDK tutorial (`docs.waku.org`, "Reliable channels"),
+which is informal prose rather than a normative spec but describes the intent
+exactly: the channel name "acts as an identifier to the conversation,
+participants will try to ensure they all have the same messages within a given
+channel."
 
-Since our channel id derives from the Stoa, **every normal restart is a
-close-and-reopen with the same id**: first run creates `stoa-abc` and closes it
-on shutdown; the next run recreates `stoa-abc` and crashes the node.
+The contrast with `senderId` is the tell — two adjacent parameters in one call
+with opposite requirements, one to be agreed on and one to differ. Where that
+requirement is stated matters, because the layers disagree in strength:
 
-**Carry an epoch in the channel id** — `stoa-abc/e7` — and bump it whenever the
-id would otherwise be reused. Same Stoa, a fresh channel id each session, the
-bug never triggered. Free now, painful to retrofit, and it doubles as the
-version marker that lets peers migrate across the §4.5 split without the two
-regimes colliding.
+- **SDS is the strong one.** A Participant ID is "globally unique, immutable"
+  (`sds.md`, design assumptions), and the sender "MUST include its own globally
+  unique identifier in the `sender_id` field".
+- **The Reliable Channel API is weaker**, asking only that `senderId` "SHOULD be
+  unique and persisted between sessions".
+
+So uniqueness is a MUST underneath and a SHOULD at the surface, and the
+immutability SDS assumes is what §5.2's permanent per-user identity supplies.
+(The tutorial's bolded "every participant **must** have a different id" is that
+same requirement in informal prose — quote the spec, not the tutorial, when the
+strength of the obligation is the point.)
+
+**So the channel id can carry no per-peer state.** Not a session counter, not a
+local sequence number, not anything that varies with one peer's history. A value
+that differs between peers does not produce an error: it produces two Stoas that
+cannot see each other, silently and permanently. §4.5 states the same rule from
+the other direction — derive `channelId` as a pure function of the addressed
+object.
+
+**Live bug, read it before touching channel lifecycle:
+`logos-messaging/logos-delivery#4116`.** Closing a channel that has received a
+peer message and then re-creating it with the same id kills the whole node
+process — and the v0.2.1 docstring claims the opposite (the issue reproduces on
+0.2.0; whether it was re-confirmed at 0.2.1 is not recorded), so following the
+documentation is what walks you into it. The issue has the conditions and the
+repro; do not restate them here, they will be wrong once it is fixed.
+
+What it costs *us* is the shape below, which stands on its own.
+
+**Dialectica closes a channel in two places: when a user leaves a Stoa, and on
+shutdown.** Both, and the second is the one that looks optional and is not.
+
+**The delivery node is not ours to stop, and it outlives us.**
+`delivery_module` is a separate, shared process — `createNode` is called once
+per context (§11), and issue #4116 notes in passing that when the node dies "any
+other module sharing that node loses it too". So dialectica exiting does not
+stop the node, and the node's own `stop()` is not the alternative: calling it
+would tear delivery down for every other module using it, which is not
+dialectica's call to make.
+
+**So the unsubscribe that a close performs is the point.** A channel left open
+keeps the shared node doing work for a Stoa belonging to an app nobody has open,
+and what that costs depends on the node's mode:
+
+- **Edge mode**: filter subscriptions and the remote peer slots serving them
+  stay alive. That reaches past our process and consumes someone else's
+  resources.
+- **Core mode**: the topic keeps running its handler chain and SDS loops. Local
+  CPU rather than network membership — §4.2 already establishes that a Core node
+  subscribes to every shard in the cluster regardless and filters locally, so
+  **dropping a content topic does not leave a gossipsub mesh.** Any argument
+  that it does contradicts §4.2 and is wrong.
+
+Either way it is work done on behalf of a user who has closed the application.
+
+Two caveats, because the close is less decisive than it looks: the unsubscribe
+is **refcounted by content topic**, so it only takes effect when the last
+channel on that topic goes; and it is **best-effort**, with failures logged at
+debug and not surfaced. The module contract's docstring for `channelClose` says
+only "stops its SDS loops" and does not mention the unsubscribe at all.
+
+That is why both cases close: leaving a Stoa and shutting down are the same
+situation — a channel that must not outlive the app that opened it.
+
+So dialectica closes channels, and #4116 makes a close followed by a re-create
+dangerous. Three ways out; the first is ruled out by this section's own rule.
+
+**Ruled out — a per-peer epoch in the channel id, bumped on each open.** That is
+what a per-peer value in a rendezvous field costs: peer A reopens at
+`stoa-abc/e8` while peer B is still on `stoa-abc/e7`, and they stop seeing each
+other with no error anywhere, which is worse than the crash because it is
+silent.
+
+**Legitimate but unbuilt — a *deterministic* epoch every peer computes
+identically**, from a genesis-record field or a coarse clock bucket. The issue
+confirms that create → close → create with a *different* id does not reproduce,
+so this genuinely avoids both the crash and the partition. It is not designed
+here, and the hard part is that a value which changes must change for everyone
+at once — a rendezvous problem at each boundary. **This is the option to revisit
+if the assumption below fails.**
+
+**Chosen for v1 — leave the id alone and never re-create a channel inside one
+node's lifetime.** The bug needs a close and a re-create in the same node;
+dialectica controls whether that ever happens. Concretely:
+
+- **Open each Stoa's channel once per node lifetime.** Do not close and reopen
+  as a way of recovering from an error, refreshing state, or reacting to
+  connectivity changes. Reopen only after the node itself has gone away.
+- **On leaving a Stoa, close and do not reopen in that session.** Rejoining
+  before restart is the one user-visible path into the bug; make it re-create
+  the node, or defer the rejoin, or accept it as a known limitation until #4116
+  is fixed.
+
+That leaves the ordinary restart safe, since the node is new.
+
+**Untested, and the approach above rests on it:** #4116 reproduces within one
+running node. Whether persisted SDS state surviving a full process restart
+corrupts a fresh `createNode` the same way is unknown. Two runs against a real
+node, with peer traffic received in the first, settles it — worth doing before
+relying on any of this, because the failure surfaces at startup while the code
+responsible ran in the previous session.
 
 ### 4.4 What SDS does and does not promise
 
@@ -566,22 +744,69 @@ Costs the same today. If rotation ever lands, the record can hold a key *log*
 and the address survives instead of forcing a migration. Do not foreclose it by
 hashing the raw key.
 
-### 5.2 Scope: one identity per Stoa
+### 5.2 Scope: one identity per Stoa, permanent
 
-A user has **one identity within a Stoa**, stable across every thread in it.
-Identities are unlinkable **across** Stoas — derive the diversifier from the
-Stoa id so per-Stoa pseudonyms fall out of a single root key for free.
+A user has **one identity within a Stoa**, stable across every thread in it and
+across sessions. Identities are unlinkable **across** Stoas — derive the
+diversifier from the Stoa id so per-Stoa pseudonyms fall out of a single root
+key for free.
 
-This is the trade that makes moderation work: banning an identity binds, because
-that identity is stable everywhere it can post.
+A stable pseudonym is what lets anything at all accumulate against an identity —
+a moderator's judgement, and more importantly the relevance signals §7.2 is
+built on. An identity that does not persist is one nothing can be said about.
 
-Revisitable later.
+**Thread-scoped identity was explored and rejected**, and the reasoning is worth
+keeping because the motivation was real. Rotating keys between threads would buy
+per-thread unlinkability *within* a Stoa — an observer could not say "whoever
+argued X in thread 1 is whoever argued Y in thread 47" — and LP-0016 makes that
+case well: a persistent handle accrues social history, readers pre-judge by it,
+and a minority view expressed early suppresses that account's later
+participation.
+
+Three things decided against it, in ascending order of how conclusive they are:
+
+- **Nothing can accumulate against an identity that lasts one thread.** That is
+  a loss for moderation, but the sharper cost is to §7.2: relevance weighted by
+  a credential needs the credential to attach to something that persists.
+- **The privacy gain is much smaller than it looks.** Writing style, posting
+  time, the reply graph and the network layer all still link a user's thread
+  identities, and every peer holds the op log needed to do it. It defeats a
+  casual reader profiling a handle; it does not defeat a motivated observer. In
+  a Stoa with four active participants it is theatre outright — the anonymity
+  set is the participant set.
+- **It is incompatible with SDS-R, which this design wants.** SDS Repair's
+  backoff and response-group arithmetic both assume a sender id that is stable
+  and still answered to, and `senderId` binds at `channelCreate` for a channel's
+  lifetime (§4.1). One channel per Stoa, plus an identity each user keeps for
+  that Stoa, makes the transport identifier stable exactly where SDS wants it,
+  with no rotation machinery to build.
+
+The last is the decisive one, and it is independent of the privacy argument: it
+would rule out narrower scopes even if the unlinkability gain were larger than
+it is.
+
+**What is protected, stated exactly:** cross-Stoa unlinkability. A user's
+identity in Stoa A cannot be tied to their identity in Stoa B by the protocol.
+Within a Stoa, a pseudonym is stable by design, and §4.1's `senderId` links a
+Stoa's posts to that one pseudonym and no further.
 
 ### 5.3 No rotation in v1
 
-Deliberate, and the reasoning is ordering: **rotation without spam protection is
-a ban-evasion feature.** Until we can distinguish "my key leaked" from "I got
-banned", rotation makes moderation unenforceable. It arrives with RLN — see §7.
+Deliberate, and the reasoning is ordering: **a key that can be discarded at will
+is a key nothing can be attached to.** Rotation lets a user shed whatever has
+accumulated against their identity — a moderator's judgement, a poor standing,
+and in §7.2's terms any credential-weighted relevance they would rather not
+carry — and it does so indistinguishably from a legitimate "my key leaked".
+
+Until the thing that persists is something *other than the key*, rotation
+subtracts from the design without adding anything. §5.2's rejection of
+thread-scoped identity is the same argument applied to a scope rather than to an
+event.
+
+What unblocks rotation is therefore the claims layer (§5.5), where standing
+attaches to a revocable credential rather than to a keypair — and §5.1's
+record-hashed address is what lets a key log land without every author
+migrating, which is why that construction was chosen before anything needed it.
 
 ### 5.4 Why not the obvious alternatives
 
@@ -595,6 +820,72 @@ banned", rotation makes moderation unenforceable. It arrives with RLN — see §
   they are a financial confidentiality primitive. No rotation, no recovery, no
   sybil resistance, and an address that changes when keys do. Match their
   cryptographic seriousness, not their construction.
+
+  **And not their signature scheme either.** It is tempting to reason that
+  because LEZ proof-of-holding is coming (§7.2), dialectica should sign with
+  LEZ's scheme so the two interoperate. That reasoning is wrong, and it is worth
+  refuting explicitly because it is the plausible mistake:
+
+  - **A claim binds to a key named in its own journal, not to a matching
+    curve.** LP-0005's journal exposes a `presenter_pubkey` carried as a
+    length-checked byte blob, and binding works by the presenter signing a
+    verifier nonce over the journal hash. **The LEZ account key never appears in
+    the journal at all**, since keeping `npk` private is the point — which is
+    the part that matters here. (Do not read the presenter key as freely
+    chosen: an early gate allowed that, and error `3010` was added precisely to
+    require the signer *be* the attested account. The conclusion survives, the
+    freedom does not.) §5.5's "verified independently of how it signs" is the
+    general statement; this is the concrete mechanism.
+  - **There is no single "LEZ scheme" to match.** LEZ's own account material is
+    already mixed — `npk` is a SHA-256 chain rather than a curve point, and
+    `vpk` is an ML-KEM-768 key — and a shipped LEZ program (`sequencer_stake`)
+    verifies **ed25519** in-guest. A LEZ guest links whatever signature crate it
+    wants.
+  - **Matching a scheme LEZ may leave.** LEZ's own source notes its signature
+    keys are a hedge, to be reduced "once LEE is upgraded to use PQ signatures".
+    Matching today could mean matching something abandoned tomorrow.
+
+  So the forum's signing scheme is chosen on the forum's own criteria — key
+  derivation, parse safety, verify cost — and proof-of-holding binds to it as a
+  claim regardless.
+
+  **The scheme is Ed25519**, decided on those criteria, over BIP-340 Schnorr on
+  secp256k1 (`k256`) — which was the LEZ-matching candidate the bullets above
+  dispose of.
+
+  Parse safety was the clearest criterion and is not a matter of taste. In
+  `k256` 0.13, `VerifyingKey::from_bytes` and `TryFrom<&[u8]> for Signature`
+  each take a byte slice, return a `Result`, and **panic** anyway on a wrong
+  length — one via `generic-array`'s `from_slice`, the other via `split_at`. A
+  public key and a signature arrive inside every inbound op, so both were
+  remotely reachable, and PHASE0-FINDINGS §3 measured what a panic in a dispatch
+  handler does: the module process aborts, and the guard cannot help because the
+  abort happens below it. Ed25519's constructors take fixed-size arrays, so the
+  mistake cannot be expressed rather than having to be guarded against. (`k256`
+  0.14 fixes both structurally; the choice was not close enough for that to
+  reopen it, since key derivation decided it — see below.)
+
+  **Verification must use `verify_strict`, and every peer must use the same
+  predicate.** The requirement is *pinning*, not a reading of RFC 8032: the two
+  functions differ in rejecting small-order `A` and `R` and non-canonical `R` —
+  torsion malleability — rather than in the cofactored/cofactorless choice, and
+  both dalek verifiers are cofactorless. What matters is that peers verify
+  independently (§3.3, §6), so any disagreement about which predicate applies is
+  a partition in the one place this design cannot tolerate one. The implication
+  runs one way: a peer accidentally calling plain `verify` accepts a strict
+  superset, so it admits ops that strict peers reject.
+
+  Worth recording because no command will tell you: dalek's own `verify_strict`
+  doc comment quotes the RFC's cofactor sentence and describes behaviour the
+  code does not implement (upstream `curve25519-dalek#663`). So this is a
+  semantics choice pinned to a library whose documentation is wrong about it —
+  which is why the call site names the required checks explicitly, so that a
+  dependency bump is visible rather than silent.
+
+  ZIP-215 is worth reading here and reaches the *opposite* answer from the same
+  premise: it removes the torsion checks and multiplies by the cofactor,
+  because for consensus it wanted the more deterministic option. That is a
+  legitimate alternative pin; what is not legitimate is peers disagreeing.
 - **Chat module identity** is ephemeral (restarting mints a fresh identity) and
   `getIdentity()` is marked `// TODO: Deprecate`. Do not build on it.
 
@@ -609,10 +900,46 @@ a set of verified claims"**. Both later features are attestations about a
 pseudonym, verified independently of how it signs:
 
 - RLN membership → a rate-limit credential
-- LEZ proof-of-holding → "owns this NFT" → higher relevance
+- LEZ proof-of-holding → "owns this NFT" → higher relevance (§7.2)
 
 A signature-only interface cannot carry either. Costs nothing to get right now;
 surgery later.
+
+**"Verified independently of how it signs" is the load-bearing phrase**, and
+early proof-of-ownership (§7.2) is what makes it matter rather than being
+architectural good manners. A claim is an attestation *about* a pseudonym; it is
+not required to share a curve, a key format, or a signature scheme with the
+pseudonym it describes. Keeping that boundary clean is what stops an external
+credential system from dictating dialectica's own signing scheme — see §5.4,
+where that exact reasoning decided the scheme.
+
+Three requirements on the interface, each of which is cheap now and structural
+later:
+
+- **A claim must be presentable under distinct pseudonyms without linking
+  them.** Identities are unlinkable across Stoas (§5.2), so a user proving "I
+  hold RLN membership #4271" under their pseudonym in each of two Stoas would
+  link those pseudonyms by the membership id — collapsing the one privacy
+  property v1 actually claims.
+
+  **Do not assume the primitives supply this.** RLN's per-epoch nullifiers are
+  built around the shape and plausibly do. **LP-0005 does not claim it**: its
+  stated property is *threshold privacy* — the verifier learns neither the
+  balance, the account identity, nor the `npk` — which is a different guarantee
+  from two presentations being unlinkable *to each other*. Its later revision
+  points the other way, adding error `3010` ("signer is not the attested
+  account") so that every presentation authenticates the same underlying LEZ
+  account. Unverified, load-bearing, and carried in §13.
+- **Claims must be revocable, and revocation must be locally checkable.**
+  §5.3 defers rotation until a credential exists that rotating cannot shed, so a
+  claim that cannot be withdrawn is a grant that cannot be undone. §6 already
+  needs equivalent machinery for the moderator set.
+- **A claim must carry its own expiry, checked on read.** An attestation about a
+  token balance is a statement about a moment. OpChan is the cautionary case: it
+  ships delegation proofs whose expiry check is commented out, so an expired or
+  leaked signing key stays valid to every verifier forever — the honest client
+  stops signing, and every peer keeps accepting. Check expiry where the claim is
+  *used*, not where it is issued.
 
 ### 5.6 The keystore
 
@@ -680,8 +1007,7 @@ own answer:
 
 **Signed ops with a Stoa moderator set.** Every op is signed by its author.
 Moderation ops are valid only when signed by a current moderator, and every peer
-verifies independently — so a hide or ban binds for everyone running honest
-code.
+verifies independently — so a hide binds for everyone running honest code.
 
 ```
 genesis: {stoa_id, creator_pk, epoch}
@@ -694,7 +1020,45 @@ later work — which also defers the founder-as-permanent-root question rather
 than answering it prematurely. A Stoa whose moderation people dislike can be
 forked — a Stoa's participants are never locked into its moderation.
 
-### 6.1 Threshold moderation, later
+### 6.1 What moderation can and cannot reach
+
+**Nobody can be prevented from publishing, and there is no membership to
+revoke.** SDS has no member list (§4.4) and nothing stops a peer putting a
+message on a channel. So moderation cannot remove a person from a Stoa; it can
+only change what conforming peers *render*. That is the honest ceiling, and it
+is worth stating because every forum design assumes a stronger one.
+
+Within that ceiling, a moderation op binds properly. **A moderator publishes a
+`hide`; every peer verifies the signature against the moderator set at that
+Lamport time and independently reaches the same answer.** It is protocol, it
+converges, and it names an `opId`.
+
+**An author-scoped suppression op is equally available, and is not ruled out.**
+Nothing stops a moderator publishing a signed op naming an *identity* — suppress
+this pseudonym in this Stoa — which converges exactly as `hide` does: §5.2 makes
+the identity stable and Stoa-scoped, and §5.7's moderator-scoped
+last-write-wins already orders it. It differs from `hide` only in what it names,
+and it is the closest thing to a ban this design can have. **Deferred with the
+mutable moderator set (§6), not rejected** — a single creator-moderator has
+little use for it, and it wants the same care about reversibility that `hide`
+does.
+
+What is *not* available at any point is a ban that stops publication. A
+suppression op tells honest peers not to render someone; a peer running modified
+code renders them anyway, and the messages still occupy the channel.
+
+The reason to be pedantic: a design that assumes it can expel someone starts
+expecting a stronger guarantee than the transport provides, and reaches for
+consensus machinery to get it. There is nothing to converge that a signed op
+does not already converge.
+
+**Relevance carries most of the load regardless** (§7.2), and its local,
+never-published nature is a deliberate difference in kind rather than a weaker
+version of the same thing: a moderation op is one authority's binding judgement
+about one target, while a ranking is every peer's own reading of what it has
+seen. It is why §5.2 keeps an identity stable enough for a signal to attach to.
+
+### 6.2 Threshold moderation, later
 
 The intended direction, once a Stoa has several moderators: a moderation action
 takes effect when **N of M** moderators have signed it, rather than on any
@@ -714,11 +1078,26 @@ no aggregation service.
 
 **LP-0016** (`logos-co/lambda-prize`) is worth reading for this specifically.
 Its identity model is the opposite of ours — anonymous posting with identity
-recoverable only as punishment — so almost none of it transfers. But its N-of-M
+recoverable only as punishment — so most of it does not transfer. But its N-of-M
 certificate aggregation is orthogonal to whether posters are anonymous or
-pseudonymous, and it is the one part of that solution that maps onto this
-design. Read the protocol doc and the ADRs; the code is TypeScript over plain
-Waku and does not fit here.
+pseudonymous, and that is the part that maps onto this design.
+
+Read one more part than that, though, against the day §5.3's rotation arrives:
+its **K-strike revocation**, where each post embeds a Shamir share of the
+author's nullifier secret, so that accumulating K moderation certificates
+reconstructs the secret, slashes the membership, and retroactively links that
+author's prior posts. It is the worked example of standing attached to a
+revocable credential rather than to a keypair — which is what §5.3 says has to
+exist before rotation can. **Read its status carefully before copying it**: by
+its authors' own account the Basecamp packaging is in progress, one deployed
+instance exercises parameterisation on chain but not posting or slashing, and
+the N-of-M aggregation this section calls the transferable part is demonstrated
+with the backend holding all N moderator secrets and signing N votes itself. The
+logic exists; the multi-party property does not yet. Costs are
+real: on-chain registration and slashing, a stake, and seconds-scale proof
+generation per post.
+Far beyond v1, and the right thing to read before designing v2's revocation
+rather than now.
 
 This layer is not optional and not a nice-to-have: **no layer below provides
 authenticity.** SDS has no membership and its `senderId` is an
@@ -726,6 +1105,12 @@ application-chosen string the spec itself notes "is not used for much".
 Moderation that anyone can forge — or forge the removal of — is not
 moderation. This is the part of dialectica that nothing else provides, and it is
 where the core's real design work lives.
+
+**This is not hypothetical.** The nearest kin project checks moderator authority
+only on the send path and never on the read path, so any peer can forge a
+moderation — or forge the removal of one — in shipped code. Appendix A has the
+detail. Read it as the empirical argument for this section rather than as a
+criticism of a sibling project: it is the failure this design exists to avoid.
 
 ---
 
@@ -738,15 +1123,36 @@ That claim would be false if made. RLN today is free to mint
 off on the target network (`rlnRelay: false` on `logos.dev`). Registering 100
 memberships costs 100 faucet claims and buys 100× the posting rate.
 
-Later, in this order:
+Later, in this order — **and the order has changed**:
 
-1. **RLN** as a rate-limit credential — and the precondition for §5.3 rotation.
-2. **LEZ proof-of-holding** as a relevance signal, and as a Stoa access policy
-   (§7.1).
+1. **LEZ proof-of-holding**, brought forward, as a Stoa access policy (§7.1).
+2. **RLN** as a rate-limit credential — and the precondition for §7.2's scoring
+   and for §5.3's rotation.
 
-Both arrive through §5.5's claims interface. Sybil resistance ultimately lives
-in the membership-allocation service's pluggable auth hook (LIP 158), which is
-unbuilt — design against it, do not claim it.
+This section previously ran RLN first, on the reasoning that rate limiting is
+the more fundamental protection and that §5.3's rotation waited on it.
+
+**What the reorder actually buys is a policy mechanism, not a relevance
+signal.** §7.1's token-gated Stoas work the moment a holding proof exists, and
+they need no sybil resistance to be meaningful — a Stoa either admits you or
+does not. That is deliverable today, because LP-0005 was live on LEZ testnet
+when this was written while RLN's `MembershipFee` was 0, slashing was a `# TODO`
+and `rlnRelay` was `false` on `logos.dev`. **Re-check both before acting on this
+order** — the ordering is a claim about readiness at a moment, and readiness is
+exactly the sort of thing that changes.
+
+**It does not unblock §7.2's scoring**, and the plan should not pretend
+otherwise. Rule 2 ships no score precisely because sybil resistance is absent,
+and that is RLN's job rather than a holding proof's: §5.3's ordering argument
+wanted a credential that rotating cannot shed, and a holding proof is weaker —
+tokens move between accounts, and one holding can back several presentations
+unless it is nullifier-bound (rule 3). So the sequence is: policy gating first
+because it is ready, scoring when RLN lands. Both arrive through §5.5's claims
+interface.
+
+Sybil resistance ultimately lives in the membership-allocation service's
+pluggable auth hook (LIP 158), which is unbuilt — design against it, do not
+claim it.
 
 ### 7.1 Token-gated Stoas
 
@@ -770,10 +1176,128 @@ naive balance gate on a transparent chain reveals who holds what; here the gate
 learns only that the threshold was met, which is the right default for a forum
 where membership itself may be sensitive.
 
-Caveats for whoever picks this up: single contributor, 0.1.0 since May 2026,
-and its Basecamp module is a QML/C++ plugin rather than a `codegen.rust`
-cdylib — so its packaging is a useful reference but its module shape is not
-ours. Take the circuit and the crates, not the integration.
+**That property is threshold privacy and nothing more.** It is not presentation
+unlinkability — two proofs by the same holder are not established to be
+unlinkable to each other, and the gate's `3010` binding requires the signer to
+*be* the attested account. §5.5's first requirement therefore does not follow
+from this primitive; §13 carries it as open.
+
+Caveats for whoever picks this up: single contributor, and its Basecamp module
+is a QML/C++ plugin rather than a `codegen.rust` cdylib — so its packaging is a
+useful reference but its module shape is not ours. Take the circuit and the
+crates, not the integration. Check its revision history before designing
+against it: the gate was substantively rebound partway through, and an earlier
+deployed shallow gate verifies no proof at all.
+
+### 7.2 Relevance
+
+**This is where dialectica is investing.** Nobody can be prevented from
+publishing (§6.1), so what a Stoa *surfaces* is its main lever over what reading
+it is like. Moderation decides what a Stoa refuses; relevance decides the
+ordering of everything it does not, which is the larger part.
+
+#### The five rules
+
+**1. Relevance is a local projection, never an op.** No score is ever published.
+A score is a column in the SQLite view (§3.3), derived from ops and rebuilt by
+replay like everything else. This is forced anyway — ops are the authority and
+a published score is a claim no peer could verify — but it also means ranking
+can be retuned without a protocol version bump, which is the property you want
+for the one part of the system that will be tuned repeatedly.
+
+The consequence to state rather than discover: **two peers that have seen
+different ops rank differently, and that is correct** (§3.3 — divergent op sets
+are the normal case, not a fault). It follows from §4.4's eventual consistency
+among active participants. Do not reach for a consensus mechanism to make scores
+agree; there is nothing to agree on.
+
+**2. v1 ships `new` and `active`, and no score at all.** With no sybil
+resistance (§7), a vote-weighted score is not a relevance signal — it is a dial
+the cheapest attacker turns. Two orderings that cannot be gamed by minting
+identities:
+
+- **`new`** — Lamport order descending. §4.4 already defines a total order with
+  a tie-break; reuse it exactly rather than inventing a second ordering.
+- **`active`** — threads by the Lamport timestamp of their most recent
+  non-hidden reply. Gameable only by *posting*, which moderation and rate
+  limiting already govern.
+
+This is a smaller claim than "we have a relevance model" and it is the true one,
+in the same spirit as §7's refusal to claim sybil resistance.
+
+**3. Weight by the credential, not by the vote count.** When proof-of-holding
+lands (§7's reordered step 1), count **only votes carrying a valid claim**.
+Votes from claimless identities contribute **zero**, not a discounted amount.
+
+This is the single most important design decision in this section, and it is a
+deliberate inversion of the obvious approach. The obvious approach — count all
+votes, add a bonus for credentialed ones — leaves minting identities the
+cheapest available lever, so the credential decorates a signal the attacker
+already controls. Gating instead means the credential *is* the signal.
+
+**The gate holds only if the credential cannot be presented more than once per
+voter, and nothing available today establishes that.** §7 is explicit that a
+holding proof is weaker scarcity than a rate-limit membership: tokens move
+between accounts, and one holding can back several presentations unless the
+proof prevents it. The requirement is a vote-bearing proof **nullifier-bound per
+(Stoa, epoch)** — but LP-0005 does not claim that property (§5.5), so it cannot
+currently be assumed from the primitive.
+
+Which is why the rule is stated as a *shape* and not shipped: **this gate waits
+on RLN**, whose per-epoch nullifiers are built for exactly this, rather than on
+the holding proof §7 brings forward for policy gating. Until then, rule 2
+stands — no score at all. Gating on a re-presentable credential would raise the
+unit cost of a sybil vote without stopping one, and would claim more than it
+delivers.
+
+**4. Moderation filters, it does not penalise.** A post hidden by a valid
+moderator op is **excluded** from the projection, not demoted. §6 says a hide
+binds; a percentage haircut does not bind, it merely means a sufficiently
+upvoted hidden post outranks a visible one. Keep hidden posts in the op log
+(§5.7 keeps history) and let the UI offer a "show hidden" view — but the default
+feed omits them.
+
+**5. Decay must be indexable.** §2.5's paginated API has to `ORDER BY … LIMIT`
+in SQLite, and a score recomputed from the current clock on every read cannot be
+indexed. Store a decay-free score plus a timestamp and apply decay in the
+`ORDER BY` expression, or bucket age coarsely and recompute on a timer. **Decide
+this when the projection schema is designed, in Phase 1** — retrofitting an
+index onto a time-varying score is the expensive version.
+
+#### The shape to reserve now
+
+```
+score = f(engagement) · decay(age) · weight(author_claims)
+```
+
+with `weight(∅) = 0` for votes (rule 3) and moderation handled by exclusion
+rather than a term (rule 4). In v1 no claim exists, so nothing is ranked by this
+and `new`/`active` are what ship. Writing the shape down now is what lets the
+claims layer land without a schema migration.
+
+#### Where the rules come from
+
+Every rule above is stated as an inversion because `logos-messaging/OpChan` —
+the nearest kin, a Logos-ecosystem forum with a real relevance implementation —
+shipped the un-inverted version. **Appendix A** has the arithmetic and the
+citations; the one number worth carrying inline is that in OpChan's scorer,
+**three free sybil upvotes outrank holding an ENS name**, and a credentialed
+voter's premium is one tenth of the raw vote it rides on. That is rule 3 as a
+measurement rather than an opinion.
+
+Two design choices for proof-of-holding that OpChan never faced, because its
+signal was binary and free:
+
+- **Binary or graded?** LP-0005 proves "balance ≥ N" without revealing the
+  balance, so the natural port is a **threshold**, not a count. Grading would
+  need either a revealed balance or one proof per tier.
+- **Unlinkability across presentations — unverified, and it may not hold.**
+  Presenting the same holding proof under a user's pseudonym in two different
+  Stoas links those pseudonyms unless each presentation is nullifier-separated,
+  collapsing the cross-Stoa unlinkability §5.2 claims. LP-0005 claims threshold
+  privacy, **not** presentation unlinkability, and its `3010` account-binding
+  may preclude it (§5.5, §13). Settle this before a holding proof carries any
+  weight in ranking.
 
 ---
 
@@ -799,6 +1323,17 @@ needing persistent identity is an argument for prioritising it.
 
 What is protected today: cross-Stoa unlinkability (§5.2), and hashed topic
 buckets so peers cannot map interest from topic names (§4.1).
+
+**Within a Stoa, a pseudonym is stable and deliberately so** — §5.2 explains why
+narrower scopes were rejected. So a Stoa's posts are linkable to one pseudonym
+by anyone, and the SDS `senderId` links them at the transport layer as well
+(§4.1). The property v1 claims is that the pseudonym does not reach across
+Stoas, and nothing more.
+
+Worth stating because it bounds even that claim: writing style, posting time,
+the reply graph and the network layer are all available to any peer holding the
+op log, and none of them is addressed here. Cross-Stoa unlinkability is a
+protocol property, not an anonymity guarantee.
 
 ---
 
@@ -833,7 +1368,7 @@ inference, since it sets how defensive the guard must be.
 > implementation, and CI exists covering §10's four jobs — `gh run list` for
 > whether it is currently passing. The three questions are answered
 > there, along with what is still *not* proven — no delivery node has been
-> created, so no channel has been opened and the §4.3 channel-id trap is
+> created, so no channel has been opened and the §4.3 channel reopen trap is
 > untested; only one profile has been launched.
 >
 > The architecture stands. What changed is §3.2's JSON, §10's pins, §11's trap
@@ -1043,6 +1578,9 @@ development machine, none of them vendored into this repo.
 | λAccount / VLAD identity roadmap and FURPS | `/home/fryorcraken/src/logos-co/roadmap/content/anoncomms/` |
 | A real delivery consumer (older API, still instructive) | `/home/fryorcraken/src/logos-co/logos-delivery-demo` |
 | `logos-scaffold` source, docs and bundled skills | `/home/fryorcraken/src/logos-co/logos-scaffold` |
+| OpChan — the nearest kin forum, read for Appendix A. **No local checkout**; clone from GitHub | `logos-messaging/OpChan` |
+| λ-Prize LP-0005 / LP-0016 / LP-0017 — **submission write-ups only, not code.** The solution repos are not cloned here, so every claim about them is the builders' self-assessment | `/home/fryorcraken/src/logos-co/lambda-prize/` |
+| The JS SDK reliable-channels tutorial — informal prose, and §4.3's clearest statement of what a channel id is | `/home/fryorcraken/src/logos-messaging/docs.waku.org/` |
 
 Two of these are **stale working trees** and will mislead if read directly:
 `logos-delivery-module` sits on a pre-channels branch, and
@@ -1081,3 +1619,138 @@ thing (§2.3).
   of one mechanism, so the genesis record wants a `policy` field even while
   `open` is the only implemented value. Adding it in Phase 1 costs an enum with
   one variant; adding it later means migrating every Stoa already created.
+
+- **Is a threshold the right shape for proof-of-holding as a relevance signal,
+  and what threshold?** §7.2 argues a threshold rather than a graded count,
+  because LP-0005 proves "balance ≥ N" without revealing the balance. But the
+  choice of N is a policy decision per Stoa, and a badly-chosen N makes the
+  signal either universal or empty. Likely a `policy` field question (above).
+- **Does adopting SDS-R change anything about what a peer discloses?** §5.2
+  takes SDS-R as wanted, and §4.1 records that it exposes `sender_id` in
+  `HistoryEntry` — so a repair-enabled peer sees sender ids attached to other
+  people's message history, and answering repairs is itself observable
+  behaviour. Under per-Stoa identity this leaks nothing the channel does not
+  already leak, which is why it is a question rather than a blocker; it becomes
+  one again for any future narrower scope.
+- **Can a claim be presented under two pseudonyms without linking them, with
+  the primitives that actually exist?** §5.5 requires it and §7.2 rule 3 needs
+  it, but **LP-0005 does not claim it** — its property is threshold privacy, and
+  its `3010` binding requires the signer to be the attested account, which
+  points the other way. RLN's per-epoch nullifiers are the better candidate and
+  are also unverified here. This is the load-bearing unknown in the claims
+  design: settle it before any credential carries weight in ranking or gating.
+- **Does #4116 survive a process restart?** §4.3's approach — never re-create a
+  channel inside one node's lifetime — assumes persisted SDS state does not
+  corrupt a fresh `createNode`. Two runs against a real node, with peer traffic
+  received in the first, settles it.
+- **Are votes an op in v1 at all?** §3.3 lists voting among the op types and
+  §7.2 rule 2 ships no score, so v1 either collects vote ops nothing reads or
+  has no votes. Collecting them early is cheap and makes the history available
+  when scoring lands; deciding by accident is not.
+- **Is a hide reversible?** §5.7 orders "moderation ops on the same target" by
+  last-write-wins, which only means something if a hide can be undone. §6's op
+  sketch shows only `hide`. Name the inverse op or say hides are terminal.
+
+---
+
+## Appendix A. OpChan's relevance implementation, measured
+
+Supporting evidence for §7.2. Here rather than inline because it is a reading of
+someone else's code at a moment in time: it will drift, and §7.2's rules must
+not depend on it staying accurate. Read it once to see why each rule is an
+inversion, then trust the rules.
+
+`logos-messaging/OpChan` is a Logos-ecosystem forum — TypeScript over plain
+Waku, no SDS, no module packaging — so **no code transfers**. The design does,
+mostly as a negative example.
+
+**Read at `main` as of 2026-09-09**, commit `d48f975`. Every claim below is from
+that revision; re-read before treating any of it as current, and note that a fix
+upstream does not invalidate the corresponding rule in §7.2 — the rules are
+positions this project holds, not observations about someone else's repo.
+
+**Source the code, not the docs.** The scorer is
+`packages/core/src/lib/forum/RelevanceCalculator.ts`. Its architecture doc
+(`packages/core/docs/architecture.md`) documents a completely different set of
+constants, in an additive rather than multiplicative form; it does not describe
+what runs.
+
+### The score
+
+```
+score = ( (10 + 1.0·upvotes + 0.5·comments) · verification_multiplier
+          + 0.1·verified_upvoters + 0.05·verified_commenters )
+        · e^(−0.1·days) · (moderated ? 0.5 : 1)
+```
+
+`verification_multiplier` is 1.25 for an ENS holder, 1.10 for a connected
+wallet, 1.0 otherwise. Comments score the same way from a base of 5, with
+upvotes only. Cells use a different formula again.
+
+For a fresh post:
+
+| | score |
+|---|---|
+| anonymous author, 0 upvotes | 10.00 |
+| **ENS-verified** author, 0 upvotes | 12.50 |
+| anonymous author, **3 free sybil upvotes** | 13.00 |
+
+**Three throwaway identities outweigh holding an ENS name** — 13.00 against
+12.50 — though the fairer statement of the same fact is the ratio: a
+credentialed voter's premium (+0.10) is a *tenth* of the raw vote it rides on
+(+1.00), and the author multiplier is a flat 25% however many votes are in play.
+The credential garnishes an unmetered signal instead of gating it, which is
+§7.2 rule 3 as a measurement. (The table compares an ENS holder at zero votes;
+one with the same three votes scores 16.25. The ratio is the durable point.)
+
+Downvotes are collected, attached to posts, and then filtered out of every
+scorer. The signal is upvote-only.
+
+### Four more findings, each a rule
+
+- **The moderation penalty is ×0.5**, so a well-upvoted hidden post outranks a
+  fresh visible one. A haircut does not bind (rule 4).
+- **Decay reads an author-asserted timestamp** with nothing clamping it, so a
+  post claiming a future time gets an unbounded multiplier above 1. The
+  validator does notice future timestamps and produce a warning — which is never
+  called on the ingest path. Clamp on read; an op's claimed time is
+  attacker-controlled.
+- **Cell decay is dead code.** The reduce finding a cell's most recent post is
+  seeded with `Date.now()`, so the seed beats every honest post and the
+  multiplier is ≈1.0 always — an empty cell scores its full undecayed base and
+  outranks an active one. Invisible without a test asserting *ordering* rather
+  than that a score was produced.
+- **Vote dedup is last-write-wins by inequality, not `>`**, so an older vote
+  can overwrite a newer one and peers resolve a vote-flip differently by arrival
+  order. The moderation path two cases away uses `>` correctly. Use Lamport
+  order (§4.4); do not invent a second rule.
+
+### Moderation authority is never checked on read
+
+Six call sites check that the actor is a cell admin — all on the *send* path.
+The read path applies any moderation message it finds without comparing the
+signer to the cell's owner. **Any peer can forge a moderation, or forge the
+removal of one**, in shipped code. Anonymous authorship is likewise unbound: the
+check is that the author string is shaped like a UUID, while the signature is
+verified against a public key the message itself carries.
+
+This is §6's central claim demonstrated rather than argued.
+
+### Proof-of-holding, and why the datapoint is not what it looks like
+
+OpChan's was an HTTP call to a third-party indexer returning a boolean, cached
+and trusted — every peer had to trust that service, and a peer without an API
+key computed different scores. LP-0005 (§7.1) is a cryptographic proof verified
+locally and offline, so §7's reordering is not repeating this.
+
+The signal was **binary** (one holding and fifty were identical) and was removed
+in a commit titled *"remove bitcoin + appkit, use eth + viem/wagmi"* — **it went
+out because the Bitcoin wallet stack went out, not because proof-of-holding was
+judged a bad signal.** No ADR, issue or commit anywhere argues against the
+approach. An earlier reading of this repo concluded the opposite; that reading
+was wrong, and the correction is why §7 could reorder with a clear conscience.
+
+### No per-Stoa standing to copy
+
+One global identity, one global claim, one global multiplier, with a per-cell
+hide bolted on. Relevance scoped to a Stoa is a design to originate, not port.
