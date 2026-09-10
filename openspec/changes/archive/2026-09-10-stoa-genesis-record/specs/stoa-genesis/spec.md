@@ -40,14 +40,16 @@ This is what makes an address reproducible: two peers holding the same record co
 - **THEN** their encodings differ
 - **AND** their addresses differ
 
-#### Scenario: Field boundaries are unambiguous
+#### Scenario: A variable-length field's length is carried, not inferred
 
-- **WHEN** two records differ only in where a boundary between two adjacent variable-length fields falls
-- **THEN** their encodings differ
+- **WHEN** a record's encoding is followed by an extra byte
+- **THEN** decoding fails rather than absorbing that byte into the adjacent variable-length field
 
 ### Requirement: A tampered or truncated record is rejected
 
-Decoding SHALL reject any input that is not the canonical encoding of a valid record, including truncated input, trailing bytes, a length prefix disagreeing with the data present, and an unrecognised policy discriminant.
+Decoding SHALL reject any input that is not the canonical encoding of a valid record: truncated input, trailing bytes, a length prefix disagreeing with the data present in either direction, an unrecognised version, an unrecognised policy discriminant, a title that is not valid UTF-8, and a creator key that is not a valid public key.
+
+Each SHALL be reported distinguishably. A decoder that says only "invalid" sends the reader looking in the wrong place.
 
 A record arriving from a peer is attacker-controlled. Rejection SHALL happen at the decoding boundary, before the record reaches any state machine, and SHALL NOT be reported as a valid record carrying default values.
 
@@ -72,6 +74,18 @@ A record arriving from a peer is attacker-controlled. Rejection SHALL happen at 
 - **WHEN** a length prefix claims fewer bytes than the input provides
 - **THEN** decoding fails
 - **AND** the remaining bytes are not silently ignored
+
+#### Scenario: A title that is not valid UTF-8 is refused
+
+- **WHEN** a record's title bytes are not valid UTF-8
+- **THEN** decoding fails
+- **AND** the bytes are not lossily converted, which would map distinct inputs onto one record
+
+#### Scenario: A creator key that is not a valid public key is refused
+
+- **WHEN** a record carries a creator key that is not a valid public key
+- **THEN** decoding fails
+- **AND** the failure is distinguishable from a malformed encoding
 
 #### Scenario: An unknown policy is refused rather than defaulted
 
