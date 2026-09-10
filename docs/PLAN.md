@@ -303,28 +303,70 @@ badly-signed ops out. The store may hold junk; the reader never trusts it.
 
 - `contentTopic` = the Stoa, hashed and bucketed: `/dialectica/1/s/<hex>/proto`
 - `channelId` = the Stoa (plus an epoch — see below)
-- `senderId` = **derived per thread**, not per Stoa — see below
+- `senderId` = **one per Stoa, permanent** — the SDS sender identifier, a
+  transport self-filter rather than an author identity; see below
 - `threadId` and `parentPostId` live in the **payload**, never the topic
 
-**`senderId` must be per-thread, and getting this wrong silently defeats §5.2.**
-Identity is thread-scoped: a user's author key rotates between threads so that
-their posts in thread 1 cannot be linked to their posts in thread 47. A
-`senderId` derived from the Stoa — the obvious choice, and what one channel per
-Stoa invites — would carry a single stable value underneath every one of those
-keys, linking them all at the transport layer while the application layer
-carefully unlinked them. The privacy property would be nominal and the code
-would look correct.
+**`senderId` is not an author identity, and the plan should not treat it as
+one.** It exists so SDS can tell a participant's own messages from everyone
+else's: the spec notes that "outside of filtering messages originating from the
+sender itself, the `sender_id` field is not used for much", and the receive step
+is a SHOULD to "ignore the message if it has a `sender_id` matching its own".
+Acknowledgement accounting runs off message ids carried in causal history and
+bloom filters, not off sender ids — so reliability does not depend on a
+`senderId` meaning anything in particular.
 
-So derive it from the same `(stoa, thread)` pair the author key uses. SDS treats
-`sender_id` as an application-chosen string and §4.4 notes the spec says it "is
-not used for much", so nothing in the transport objects to this.
+**The application owns it.** `channelCreate(channelId, contentTopic, senderId)`
+takes it as a parameter, and nothing in the delivery module persists it: the SDS
+persistence backend covers causal history and outgoing buffers, the segmentation
+backend covers partial reassembly, and identity is in neither. The Reliable
+Channel API says it SHOULD be "unique and persisted between sessions" — that
+duty is dialectica's, and §5.2's per-Stoa identity is what discharges it.
 
-This is the general trap, worth stating once: **a per-thread identity is only as
-unlinkable as the most Stoa-scoped identifier travelling with it.** Any future
-field attached at Stoa granularity — a session id, a presence marker, a
-per-Stoa ack token — reintroduces exactly this leak. §4.5's per-thread channel
-split makes the whole question easier later; it does not remove the need to
-answer it now.
+**It binds at channel creation**, so one channel means one `senderId` for that
+channel's lifetime. With one channel per Stoa and one permanent identity per
+Stoa (§5.2), these agree by construction — the `senderId` is stable exactly
+where SDS wants it stable, and no rotation machinery is needed. Changing it
+would mean closing and re-opening the channel, which §4.3 makes a crash risk on
+every id reuse and therefore requires a fresh epoch.
+
+**What a reliable channel discloses.** Every receiving peer is handed the sender
+id with every message — `event channelMessageReceived(channelId, senderId,
+payload, timestamp)` in `dialectica/contracts/delivery_module.lidl`. So a
+`senderId` links everything sent on its channel, which under per-Stoa identity
+is the intended scope: it links a Stoa's posts to one pseudonym and no further.
+Plain messaging carries no such field — `method send(contentTopic, payload)` and
+`event messageReceived(messageHash, contentTopic, payload, timestamp)` in the
+same contract have no sender at all. That asymmetry is the lever for any future
+scope question: reliability is what introduces the identifier, so the identifier
+can be avoided exactly where reliability is not needed.
+
+**The trap this leaves for anyone revisiting §4.5.** A per-thread channel split
+would keep a Stoa-level channel carrying the thread index, and that channel's
+one `senderId` would sit beside each announced `threadId` — relinking every
+thread a user created, and defeating the point of splitting. The rule to apply
+if that day comes: reliable channels where the participant set is already the
+anonymity set, plain pub/sub where it is not, since `senderId` exists only to
+serve SDS reliability and a thread index needs availability rather than
+ordering. Note that this removes a protocol-level identifier, not a
+network-level one — publishing still emits a signal, and Filter/Store/LightPush
+disclose content topics to peers (below).
+
+**The general trap, worth stating once:** a pseudonym is only as unlinkable as
+the most broadly-scoped identifier travelling with it. Any field attached at a
+scope wider than the pseudonym — a session id, a presence marker, a per-Stoa
+ack token — reintroduces exactly this leak.
+
+**SDS Repair (SDS-R) is wanted where available, and it constrains this.** Its
+repair backoff computes a distance from the original `sender_id`, and its
+response-group membership is derived from it so that a sender is always in the
+group for its own messages; it also adds `sender_id` to `HistoryEntry`, exposing
+sender ids for other people's messages. A permanent per-Stoa `senderId`
+satisfies all of that; an identity changing more often than the channel would
+not. This is an independent reason the scope in §5.2 is the Stoa rather than
+anything narrower — and the SDS spec expects `sender_id`'s "importance ... to
+increase once a p2p retrieval mechanism is added", so the tension grows rather
+than fades.
 
 **Never put a human-readable Stoa name in a topic.** Filter, Store and
 LightPush disclose content topics to peers, linking IP to interest. Hashed
@@ -587,92 +629,65 @@ Costs the same today. If rotation ever lands, the record can hold a key *log*
 and the address survives instead of forcing a migration. Do not foreclose it by
 hashing the raw key.
 
-### 5.2 Scope: one identity per thread
+### 5.2 Scope: one identity per Stoa, permanent
 
-A user has **one identity within a thread**, stable for every post they make in
-it. Keys **rotate between threads**, including between threads in the same Stoa.
+A user has **one identity within a Stoa**, stable across every thread in it and
+across sessions. Identities are unlinkable **across** Stoas — derive the
+diversifier from the Stoa id so per-Stoa pseudonyms fall out of a single root
+key for free.
 
-The derivation generalises §5.1 rather than replacing it: the diversifier comes
-from `(stoa, thread)` instead of from the Stoa alone, so per-thread pseudonyms
-still fall out of a single root key for free, and cross-Stoa unlinkability is
-unchanged.
+This is the trade that makes moderation work: banning an identity binds, because
+that identity is stable everywhere it can post.
 
-**What this buys.** Per-thread unlinkability *within* a Stoa. An observer can no
-longer say "whoever argued X in thread 1 is whoever argued Y in thread 47", so a
-participant does not accumulate a profile of positions across a Stoa's history.
-That is a different property from the cross-Stoa unlinkability this section
-previously gave, and it is the one that matters for contested debate: LP-0016's
-motivation states the case well — a persistent handle accrues social history,
-readers pre-judge by it, and a minority view expressed early suppresses that
-account's later participation.
+**Thread-scoped identity was explored and rejected**, and the reasoning is worth
+keeping because the motivation was real. Rotating keys between threads would buy
+per-thread unlinkability *within* a Stoa — an observer could not say "whoever
+argued X in thread 1 is whoever argued Y in thread 47" — and LP-0016 makes that
+case well: a persistent handle accrues social history, readers pre-judge by it,
+and a minority view expressed early suppresses that account's later
+participation.
 
-**What it costs: a ban reaches one thread instead of a whole Stoa.** The
-previous version of this section called per-Stoa identity "the trade that makes
-moderation work — banning an identity binds, because that identity is stable
-everywhere it can post". Thread-scoping falsifies its second clause: a ban binds
-where the identity is stable, which is now one thread. The banned person posts
-again in the next thread under a key nobody can link to the ban.
+Three things decided against it, in ascending order of how conclusive they are:
 
-**What it does not cost, because a ban was never a protocol event.** A ban is a
-**local filter** — a peer declining to render an identity's posts — not an
-operation that removes anything from the channel. Nothing about it touches SDS:
-the thread is unaffected, no message is retracted, other peers' state is
-untouched, and a peer that disagrees renders the posts anyway. That is already
-true under per-Stoa identity and stays true here. So thread-scoping does not
-*break* banning; it narrows the blast radius of a filter that was always
-advisory and always local.
+- **It narrows banning to a single thread.** A ban binds where the identity is
+  stable, so a banned person simply posts in the next thread under an unlinkable
+  key. (Not fatal on its own — a ban is a local filter, §6.0 — but a real loss.)
+- **The privacy gain is much smaller than it looks.** Writing style, posting
+  time, the reply graph and the network layer all still link a user's thread
+  identities, and every peer holds the op log needed to do it. It defeats a
+  casual reader profiling a handle; it does not defeat a motivated observer. In
+  a Stoa with four active participants it is theatre outright — the anonymity
+  set is the participant set.
+- **It is incompatible with SDS-R, which this design wants.** SDS Repair's
+  backoff and response-group arithmetic both assume a sender id that is stable
+  and still answered to, and `senderId` binds at `channelCreate` for a channel's
+  lifetime (§4.1). One channel per Stoa plus one permanent identity per Stoa
+  makes the transport identifier stable exactly where SDS wants it — no rotation
+  machinery, no epoch churn, and no fight with §4.3's channel-id reuse crash.
 
-This narrowing is accepted deliberately, and the reasoning is a priority
-ordering: **dialectica is investing in relevance (§7.2) ahead of moderation.** A
-forum that ranks well is more useful than one that bans well, and ranking is
-where this project's leverage is. Content moderation — a moderator hiding a post
-or a thread — is a different mechanism, is signed and verified by every peer,
-and is unaffected by any of this (§6).
+The last is the decisive one, and it is independent of the privacy argument: it
+would rule out narrower scopes even if the unlinkability gain were larger than
+it is.
 
-**The privacy gain is real but much smaller than it looks, and this plan will
-not overclaim it.** Several things still link a user's thread identities to each
-other, none of which dialectica addresses:
+**What is protected, stated exactly:** cross-Stoa unlinkability. A user's
+identity in Stoa A cannot be tied to their identity in Stoa B by the protocol.
+Within a Stoa, a pseudonym is stable by design, and §4.1's `senderId` links a
+Stoa's posts to that one pseudonym and no further.
 
-- **The SDS `senderId`** — the concrete one, and the one that would have made
-  this change decorative. See §4.1: it is now derived per thread, because a
-  per-Stoa transport sender under per-thread author keys links every identity in
-  the Stoa at the transport layer and buys exactly nothing.
-- **Writing style.** Stylometry over forum-length text works well at the small
-  candidate-set sizes one Stoa presents. This is the largest residual leak and
-  there is no answer to it here.
-- **Timing.** Post timestamps carry a diurnal pattern and an implied timezone,
-  and every peer holds the op log needed to correlate them.
-- **The reply graph.** Which threads a key appears in, and who it replies to.
-  Following one argument across three threads is itself identifying.
-- **IP.** §4.1 already notes Filter/Store/LightPush link IP to interest, and
-  nothing here anonymises the network layer.
+### 5.3 No rotation in v1
 
-So the honest claim is that this defeats a casual reader building a profile of a
-handle. It does not defeat a motivated observer holding the op log.
+Deliberate, and the reasoning is ordering: **rotation without spam protection is
+a ban-evasion feature.** Until we can distinguish "my key leaked" from "I got
+banned", rotation makes moderation unenforceable. It arrives with RLN — see §7.
 
-**Open, and worth measuring rather than asserting:** in a Stoa with four active
-participants, per-thread rotation is theatre — the anonymity set is the
-participant set. §13 carries this.
+§5.2's rejection of thread-scoped identity is the same argument applied to a
+scope rather than to an event: mandatory rotation between threads is still
+rotation, and it would still shed a ban that had nothing else to bind to.
 
-### 5.3 Rotation is the default, and what it costs
-
-This section previously said "no rotation in v1", on the grounds that **rotation
-without spam protection is a ban-evasion feature** — that until we can
-distinguish "my key leaked" from "I got banned", rotation makes moderation
-unenforceable.
-
-**That reasoning is correct and is what forces the current answer.** It was
-never an argument that rotation is bad; it is an *ordering* argument, that
-rotation is safe once a scarce credential exists which rotating cannot shed.
-§5.2 now makes rotation the default, so the ordering resolves the other way:
-since rotation is unavoidable, **anything that must bind across threads has to
-bind to something other than the key.**
-
-That is the claims layer (§5.5), and §7.2 is what makes it urgent — a relevance
-signal weighted by a credential needs the credential to be unsheddable for
-exactly the same reason a ban does. §5.1's record-hashed address is what lets
-that land without every author migrating, which is why that construction was
-chosen before anything needed it.
+What unblocks rotation later is the claims layer (§5.5), where the thing that
+must persist is a credential rather than a key — and §5.1's record-hashed
+address is what lets a key log land without every author migrating, which is why
+that construction was chosen before anything needed it.
 
 ### 5.4 Why not the obvious alternatives
 
@@ -711,6 +726,23 @@ chosen before anything needed it.
   So the forum's signing scheme is chosen on the forum's own criteria — key
   derivation, parse safety, verify cost — and proof-of-holding binds to it as a
   claim regardless.
+
+  **The scheme is Ed25519**, decided on those criteria. Parse safety is the
+  clearest of them and it is not a matter of taste: the alternative's key and
+  signature parsers each take a byte slice, return a `Result`, and **panic**
+  anyway on a wrong length — one via `generic-array`'s `from_slice`, the other
+  via `split_at`. A public key and a signature arrive inside every inbound op,
+  so both were remotely reachable, and PHASE0-FINDINGS §3 measured what a panic
+  in a dispatch handler does: the module process aborts, and the guard cannot
+  help because the abort happens below it. Ed25519's constructors take
+  fixed-size arrays, so the mistake cannot be expressed rather than having to be
+  guarded against.
+
+  Verification must use the **strict** check, not the permissive one. RFC 8032
+  allows both cofactored and uncofactored verification, and every peer verifies
+  independently (§3.3, §6) — two peers on different rules would disagree about
+  whether the same op is validly signed, which is a partition in the one place
+  this design cannot tolerate one.
 - **Chat module identity** is ephemeral (restarting mints a fresh identity) and
   `getIdentity()` is marked `// TODO: Deprecate`. Do not build on it.
 
@@ -731,28 +763,28 @@ A signature-only interface cannot carry either. Costs nothing to get right now;
 surgery later.
 
 **"Verified independently of how it signs" is the load-bearing phrase**, and
-thread-scoped identity (§5.2) plus early proof-of-ownership (§7.2) is what makes
-it matter rather than being architectural good manners. A claim is an
-attestation *about* a pseudonym; it is not required to share a curve, a key
-format, or a signature scheme with the pseudonym it describes. Keeping that
-boundary clean is what stops an external credential system from dictating
-dialectica's own signing scheme.
+early proof-of-ownership (§7.2) is what makes it matter rather than being
+architectural good manners. A claim is an attestation *about* a pseudonym; it is
+not required to share a curve, a key format, or a signature scheme with the
+pseudonym it describes. Keeping that boundary clean is what stops an external
+credential system from dictating dialectica's own signing scheme — see §5.4,
+where that exact reasoning decided the scheme.
 
 Three requirements on the interface, each of which is cheap now and structural
 later:
 
 - **A claim must be presentable under distinct pseudonyms without linking
-  them.** This is the one that thread-scoping creates. If a user proves "I hold
-  RLN membership #4271" under each of their per-thread keys, that membership id
-  links every one of those keys and §5.2's unlinkability evaporates — rotation
-  becomes cosmetic while still costing what it costs. RLN's nullifier scheme and
-  LP-0005's shielded balance proof are both built to avoid exactly this, so the
-  primitives cooperate; but it is a requirement on how they are *used*, not a
-  property that arrives for free.
+  them.** Identities are unlinkable across Stoas (§5.2), so a user proving "I
+  hold RLN membership #4271" under their pseudonym in each of two Stoas would
+  link those pseudonyms by the membership id — collapsing the one privacy
+  property v1 actually claims. RLN's nullifier scheme and LP-0005's shielded
+  balance proof are both built to avoid exactly this, so the primitives
+  cooperate; but it is a requirement on how they are *used*, not a property that
+  arrives for free.
 - **Claims must be revocable, and revocation must be locally checkable.**
-  §5.3 moves anything that must bind across threads onto this layer, so a claim
-  that cannot be withdrawn is a grant that cannot be undone. §6 already needs
-  equivalent machinery for the moderator set.
+  §5.3 defers rotation until a credential exists that rotating cannot shed, so a
+  claim that cannot be withdrawn is a grant that cannot be undone. §6 already
+  needs equivalent machinery for the moderator set.
 - **A claim must carry its own expiry, checked on read.** An attestation about a
   token balance is a statement about a moment. OpChan is the cautionary case: it
   ships delegation proofs whose expiry check is commented out
@@ -842,8 +874,8 @@ forked — a Stoa's participants are never locked into its moderation.
 
 ### 6.0 Two mechanisms that are constantly confused
 
-Thread-scoped identity (§5.2) makes the distinction load-bearing, so it is drawn
-here before anything else in this section.
+Drawn before anything else in this section, because the two are routinely
+conflated and the difference decides what a design may expect of each.
 
 **Hiding is a signed op, and it binds.** A moderator publishes a `hide`; every
 peer verifies the signature against the moderator set at that Lamport time and
@@ -858,21 +890,16 @@ posts anyway. **Nothing about a ban touches the SDS channel** — the thread is
 not modified, no message is withdrawn, and no participant is removed, because
 SDS has no membership to remove anyone from (§4.4).
 
-That was already true under per-Stoa identity. What §5.2 changes is only the
-*reach* of that local filter: it now covers one thread rather than a Stoa. The
-mechanism is unchanged; a filter that was always advisory got narrower.
-
 The reason to be pedantic here: a design that mistakes the second for the first
 starts expecting bans to converge across peers, and then reaches for a
 consensus mechanism to make them do so. There is nothing to converge — that is
 the point.
 
-**A moderator's own identity is per-Stoa and stable**, exempt from §5.2's
-rotation. A moderator acts under a known authority; the pre-judgement argument
-that motivates per-thread pseudonyms for participants does not apply to someone
-whose function is to be publicly accountable. Without this exemption the
-moderator set could not be named across threads at all, and §6 would be
-incoherent rather than merely weaker.
+It also sets what a ban's *reach* actually depends on. A local filter can only
+be as broad as the identity it filters, so §5.2's per-Stoa identity is what
+makes a ban cover a Stoa; a narrower identity scope would narrow the filter
+without changing anything else about the mechanism. That is one of the three
+reasons §5.2 gives for keeping the scope where it is.
 
 ### 6.1 Threshold moderation, later
 
@@ -892,25 +919,22 @@ each signer is a moderator at that Lamport time and the count meets the Stoa's
 declared threshold. Verification stays a local check — no coordination protocol,
 no aggregation service.
 
-**LP-0016** (`logos-co/lambda-prize`) is worth reading for this specifically,
-and **more worth reading since §5.2 went thread-scoped than it was before.**
+**LP-0016** (`logos-co/lambda-prize`) is worth reading for this specifically.
+Its identity model is the opposite of ours — anonymous posting with identity
+recoverable only as punishment — so most of it does not transfer. But its N-of-M
+certificate aggregation is orthogonal to whether posters are anonymous or
+pseudonymous, and that is the part that maps onto this design.
 
-This section previously dismissed it — "its identity model is the opposite of
-ours, so almost none of it transfers" — and took only its N-of-M certificate
-aggregation. That assessment was correct while identity was per-Stoa and stable.
-It is not correct now. LP-0016 posts anonymously with identity recoverable only
-as punishment; thread-scoped rotation moves dialectica materially *toward* that
-model, so the parts previously called untransferable are now the interesting
-ones: a K-strike scheme where each post embeds a Shamir share of the author's
-nullifier secret, so that accumulating K moderation certificates reconstructs
-the secret, slashes the membership, and **retroactively links that author's
-prior posts**. That is a revocation design for exactly the situation §5.3
-describes — a sanction that binds when keys rotate freely.
-
-It is also implemented and live on LEZ testnet, which the previous text did not
-mention. Costs are real: on-chain registration and slashing, a stake, and
-seconds-scale proof generation per post. Far beyond v1, and the right thing to
-read before designing v2's revocation.
+Read one more part than that, though, against the day §5.3's rotation arrives:
+its **K-strike revocation**, where each post embeds a Shamir share of the
+author's nullifier secret, so that accumulating K moderation certificates
+reconstructs the secret, slashes the membership, and retroactively links that
+author's prior posts. That is a sanction that binds to a credential rather than
+to a key — which is exactly the shape §5.3 says a ban must take once keys can
+rotate. It is implemented and live on LEZ testnet. Costs are real: on-chain
+registration and slashing, a stake, and seconds-scale proof generation per post.
+Far beyond v1, and the right thing to read before designing v2's revocation
+rather than now.
 
 This layer is not optional and not a nice-to-have: **no layer below provides
 authenticity.** SDS has no membership and its `senderId` is an
@@ -1138,10 +1162,12 @@ Two design choices OpChan never faced, because its signal was binary and free:
   balance, so the natural port is a **threshold**, not a count. Grading would
   need either a revealed balance or one proof per tier.
 - **Unlinkability across presentations.** Presenting the same holding proof
-  under each per-thread key (§5.2) links every one of those keys unless the
-  proof is nullifier-based. LP-0005's shielded construction is built for this,
-  but it is a requirement on §5.5's interface, not a property that arrives free
-  — and bringing the claim forward makes it load-bearing now rather than later.
+  under a user's pseudonym in two different Stoas links those pseudonyms unless
+  the proof is nullifier-based — collapsing the cross-Stoa unlinkability §5.2
+  claims, which is the one privacy property v1 has. LP-0005's shielded
+  construction is built for this, but it is a requirement on §5.5's interface,
+  not a property that arrives free — and bringing the claim forward makes it
+  load-bearing now rather than later.
 
 Finally, **OpChan has no per-Stoa standing to copy**: one global identity, one
 global claim, one global multiplier, with a per-cell hide bolted on. If
@@ -1170,16 +1196,19 @@ That makes it a **coordination item**, not merely a scheduling one: worth
 raising with the chat module's maintainers early, since a second consumer
 needing persistent identity is an argument for prioritising it.
 
-What is protected today: cross-Stoa unlinkability, per-thread unlinkability
-*within* a Stoa (§5.2), and hashed topic buckets so peers cannot map interest
-from topic names (§4.1).
+What is protected today: cross-Stoa unlinkability (§5.2), and hashed topic
+buckets so peers cannot map interest from topic names (§4.1).
 
-**The second of those is the weakest and must not be quoted without its
-qualification.** Per-thread unlinkability is defeated by writing style, posting
-time, the reply graph, and the network layer — none of which dialectica
-addresses, and all of which are available to any peer holding the op log. It
-defeats a casual reader profiling a handle; it does not defeat a motivated
-observer. §5.2 carries the full list.
+**Within a Stoa, a pseudonym is stable and deliberately so** — §5.2 explains why
+narrower scopes were rejected. So a Stoa's posts are linkable to one pseudonym
+by anyone, and the SDS `senderId` links them at the transport layer as well
+(§4.1). The property v1 claims is that the pseudonym does not reach across
+Stoas, and nothing more.
+
+Worth stating because it bounds even that claim: writing style, posting time,
+the reply graph and the network layer are all available to any peer holding the
+op log, and none of them is addressed here. Cross-Stoa unlinkability is a
+protocol property, not an anonymity guarantee.
 
 ---
 
@@ -1463,24 +1492,15 @@ thing (§2.3).
   `open` is the only implemented value. Adding it in Phase 1 costs an enum with
   one variant; adding it later means migrating every Stoa already created.
 
-  **Sharpened by §5.2**: two of those variants — invite and first-post-approval
-  — require recognising a person *across* threads, which thread-scoped identity
-  removes. They are now not merely unimplemented but incompatible with the
-  identity model until claims land (§5.5). The field should still exist; the
-  variants it can express have narrowed.
-- **What is the anonymity set for a thread-scoped identity in a small Stoa?**
-  In a Stoa with four active participants, per-thread rotation is theatre — the
-  anonymity set is the participant set, and rotation changes nothing an
-  observer cannot undo by counting. This is measurable rather than a matter of
-  taste, and the answer decides whether §5.2's cost is worth paying at small
-  scale or whether the property should be claimed only above some size.
 - **Is a threshold the right shape for proof-of-holding as a relevance signal,
   and what threshold?** §7.2 argues a threshold rather than a graded count,
   because LP-0005 proves "balance ≥ N" without revealing the balance. But the
   choice of N is a policy decision per Stoa, and a badly-chosen N makes the
   signal either universal or empty. Likely a `policy` field question (above).
-- **What does a v1 moderator do about a persistently abusive participant?**
-  Content moderation binds (§6) and a ban reaches one thread (§5.2). Whether
-  that is sufficient in practice, or whether an interim measure is needed before
-  credential revocation lands, is the concrete product consequence of the
-  identity change and deserves an answer from use rather than from design.
+- **Does adopting SDS-R change anything about what a peer discloses?** §5.2
+  takes SDS-R as wanted, and §4.1 records that it exposes `sender_id` in
+  `HistoryEntry` — so a repair-enabled peer sees sender ids attached to other
+  people's message history, and answering repairs is itself observable
+  behaviour. Under per-Stoa identity this leaks nothing the channel does not
+  already leak, which is why it is a question rather than a blocker; it becomes
+  one again for any future narrower scope.
