@@ -37,12 +37,12 @@
 //! moderator-scoped state and belongs with mutable moderation. The creator is
 //! the sole moderator (§6), which follows from `creator` without storing a set.
 //!
-//! **No epoch, session counter, or any other per-peer value.** The record is
-//! hashed by every peer to obtain the Stoa's address, so a field that varies
-//! with one peer's history gives that peer a different address for the same
-//! Stoa — which is not an error anyone sees, it is two Stoas that cannot see
-//! each other. §4.3 states the same rule for the channel id, which is derived
-//! from this address: it "can carry no per-peer state".
+//! **No per-peer value of any kind** — no session counter, no local sequence
+//! number. The record is hashed by every peer to obtain the Stoa's address, so
+//! a field that varies with one peer's history gives that peer a different
+//! address for the same Stoa — which is not an error anyone sees, it is two
+//! Stoas that cannot see each other. §4.3 states the same rule for the channel
+//! id, which is derived from this address: it "can carry no per-peer state".
 
 use crate::identity::{stoa_address, Address, KeyError, PublicKey};
 
@@ -325,17 +325,13 @@ mod tests {
     fn the_title_length_is_encoded_and_not_merely_implied() {
         // The concatenation trap, and the reason the title is length-prefixed.
         //
-        // An earlier version of this test compared "ab" with "abc" and PASSED
-        // even with the prefix deleted — different-length titles produce
-        // different bytes either way, so it proved nothing about the prefix.
-        // Watched failing against a stubbed-out prefix, which is the only way
-        // that was visible.
-        //
-        // What actually needs asserting is that the length is CARRIED, not
-        // inferred from where the input happens to end. Encode a record, then
-        // hand the decoder the same bytes with one extra byte appended: with a
-        // prefix the title stays put and the extra byte is trailing garbage;
-        // without one the title would silently absorb it.
+        // What needs asserting is that the length is CARRIED, not inferred from
+        // where the input happens to end. Comparing two different-length titles
+        // does NOT test that — they encode differently with or without a
+        // prefix. So: encode a record, then hand the decoder the same bytes
+        // with one extra byte appended. With a prefix the title stays put and
+        // the extra byte is trailing garbage; without one it silently absorbs
+        // it.
         let g = Genesis {
             title: "ab".to_string(),
             ..a_record()
@@ -408,6 +404,22 @@ mod tests {
     }
 
     #[test]
+    fn a_length_prefix_shorter_than_the_title_is_refused() {
+        // The other direction of a lying prefix. Under-claiming is refused as
+        // TrailingBytes rather than LengthMismatch — the decoder reads the
+        // title it was promised, then finds bytes after it. Different error,
+        // same refusal, and the distinction is worth pinning: a caller that
+        // matched only on LengthMismatch would mishandle this.
+        let g = Genesis {
+            title: "abcdef".to_string(),
+            ..a_record()
+        };
+        let mut bytes = g.canonical_bytes();
+        bytes[TITLE_LEN_AT..TITLE_LEN_AT + 4].copy_from_slice(&2u32.to_be_bytes());
+        assert_eq!(Genesis::decode(&bytes), Err(GenesisError::TrailingBytes));
+    }
+
+    #[test]
     fn an_unknown_policy_is_refused_rather_than_defaulted() {
         // The security-relevant one. Defaulting an unrecognised policy to Open
         // is how a token-gated Stoa becomes world-postable on an old client.
@@ -424,6 +436,28 @@ mod tests {
         let mut bytes = a_record().canonical_bytes();
         bytes[0] = 99;
         assert_eq!(Genesis::decode(&bytes), Err(GenesisError::UnknownVersion(99)));
+    }
+
+    #[test]
+    fn an_invalid_creator_key_is_refused() {
+        // Roughly half of all 32-byte strings are not valid Edwards points, so
+        // this branch is reachable from any peer that sends a malformed record
+        // — not a theoretical arm. It is also the branch enforcing this
+        // module's own claim that "a record without a valid [creator] does not
+        // describe a Stoa at all", which was asserted by nothing until review
+        // pointed out every other error variant had a test and this one did not.
+        let mut bytes = a_record().canonical_bytes();
+        // `[0x02; 32]` is not a valid compressed Edwards point. Picked by
+        // probing rather than assumed: all-ones IS valid, so the obvious
+        // "obviously bogus" constant would have made this test pass for the
+        // wrong reason.
+        for b in bytes.iter_mut().skip(1).take(32) {
+            *b = 0x02;
+        }
+        assert_eq!(
+            Genesis::decode(&bytes),
+            Err(GenesisError::InvalidCreator(KeyError::NotAValidPublicKey))
+        );
     }
 
     #[test]
@@ -470,15 +504,31 @@ mod tests {
     }
 
     #[test]
+    fn the_title_reaches_the_address() {
+        // The other half of "the title is not identity": the test above varies
+        // only the creator, so it stays green even if `address()` ignored the
+        // title entirely. Two Stoas by the SAME creator differing only in title
+        // must still be distinct, or renaming a Stoa would silently collide it
+        // with another of the creator's.
+        let one = a_record();
+        let two = Genesis {
+            title: "A different name".to_string(),
+            ..a_record()
+        };
+        assert_eq!(one.creator, two.creator);
+        assert_ne!(one.address(), two.address());
+    }
+
+    #[test]
     fn the_policy_is_in_the_encoding_at_a_fixed_offset() {
         // Policy has one variant today, so this cannot be tested by building
         // two records and comparing.
         //
-        // An earlier version mutated a byte of an already-produced encoding and
-        // asserted the hash moved. That tests SHA-256, not this encoding: it
-        // passes even with the policy deleted from `canonical_bytes()`
-        // entirely, because some other field then occupies that offset. Caught
-        // in review by exactly that mutation.
+        // Do NOT reach for the obvious alternative — mutating a byte of an
+        // already-produced encoding and asserting the hash moves. That tests
+        // SHA-256, not this encoding, and still passes with the policy deleted
+        // from `canonical_bytes()` entirely, because another field slides into
+        // that offset.
         //
         // Pinning the layout is what actually fails when the field is dropped.
         let g = a_record();

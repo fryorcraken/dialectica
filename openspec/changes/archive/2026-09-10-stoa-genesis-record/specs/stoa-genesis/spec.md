@@ -6,7 +6,7 @@ Defines what a Stoa's genesis record contains and how it encodes to bytes, so th
 
 ### Requirement: A Stoa is defined by its genesis record
 
-A Stoa SHALL be defined by a genesis record carrying its creator's public key, an epoch, a posting policy, and a human-readable title.
+A Stoa SHALL be defined by a genesis record carrying its creator's public key, a posting policy, and a human-readable title.
 
 The record SHALL be immutable. Creating a Stoa requires no approval and no registration with any service: publishing the record is the whole act of creation.
 
@@ -62,10 +62,16 @@ A record arriving from a peer is attacker-controlled. Rejection SHALL happen at 
 - **WHEN** input carries a valid encoding followed by extra bytes
 - **THEN** decoding fails
 
-#### Scenario: A lying length prefix is refused
+#### Scenario: A length prefix claiming more than the input holds is refused
 
-- **WHEN** a length prefix claims more or fewer bytes than the input provides
+- **WHEN** a length prefix claims more bytes than the input provides
 - **THEN** decoding fails
+
+#### Scenario: A length prefix claiming less than the input holds is refused
+
+- **WHEN** a length prefix claims fewer bytes than the input provides
+- **THEN** decoding fails
+- **AND** the remaining bytes are not silently ignored
 
 #### Scenario: An unknown policy is refused rather than defaulted
 
@@ -105,10 +111,11 @@ The field is present now because the record is immutable and address-determining
 - **WHEN** a record declaring the open policy is encoded and decoded
 - **THEN** the decoded record declares the open policy
 
-#### Scenario: The policy is part of the address
+#### Scenario: The policy is carried in the encoding
 
-- **WHEN** two records differ only in their policy
-- **THEN** their addresses differ
+- **WHEN** a record is encoded
+- **THEN** the encoding carries the declared policy at a fixed position
+- **AND** the encoding's length accounts for it, so it cannot be dropped without the encoding changing
 
 ### Requirement: The encoding declares its version
 
@@ -122,10 +129,10 @@ A genesis record is immutable and address-determining, so a future field cannot 
 - **THEN** decoding fails
 - **AND** the failure is distinguishable from a malformed record
 
-#### Scenario: The version is part of the address
+#### Scenario: The version is carried in the encoding
 
-- **WHEN** two records differ only in their version discriminant
-- **THEN** their addresses differ
+- **WHEN** a record is encoded
+- **THEN** the version discriminant is the first byte of the encoding
 
 ### Requirement: The record carries no per-peer state
 

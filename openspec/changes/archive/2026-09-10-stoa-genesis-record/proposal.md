@@ -19,8 +19,8 @@ changes every existing Stoa's address — there is no in-place upgrade.
 
 ## What Changes
 
-- A `Genesis` type carrying the Stoa's creator public key, epoch, and posting
-  policy, plus its human-readable title.
+- A `Genesis` type carrying the Stoa's creator public key and posting policy,
+  plus its human-readable title.
 - A **canonical byte encoding** with exactly one valid form per record,
   length-prefixed so no two distinct records can encode to the same bytes.
 - A `Policy` enum with `Open` as its only variant today, reserving the
