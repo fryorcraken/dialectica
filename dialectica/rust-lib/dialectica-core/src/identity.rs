@@ -120,8 +120,8 @@ impl std::fmt::Display for AddressError {
 
 /// A public key: the verifying half, and what an author is known by on the wire.
 ///
-/// BIP-340 keys are **x-only** — 32 bytes, no parity byte. That is the whole
-/// serialised form.
+/// An Ed25519 public key is a **compressed Edwards point** — 32 bytes, and that
+/// is the whole serialised form.
 #[derive(Clone)]
 pub struct PublicKey(ed25519_dalek::VerifyingKey);
 
@@ -317,7 +317,7 @@ impl std::fmt::Display for KeyError {
     }
 }
 
-/// A 64-byte BIP-340 signature.
+/// A 64-byte Ed25519 signature — `R` and `s`, 32 bytes each.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Signature(ed25519_dalek::Signature);
 
