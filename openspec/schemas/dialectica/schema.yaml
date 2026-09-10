@@ -111,5 +111,10 @@ apply:
     the spec is the contract. Where the spec is silent, check `adr.md` before
     inventing an answer, and record a new decision there if you had to make one.
 
+    Write tests as you go, and keep them. A separate agent owns the final suite
+    and will adapt, keep or remove them — but developing untested is not the
+    alternative, and a test written while implementing usually encodes an edge
+    case that would otherwise have to be rediscovered.
+
     Stop and say so if a task cannot be done as written. A task list that was
     wrong is information; silently doing something else is not.

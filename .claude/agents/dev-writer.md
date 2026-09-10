@@ -21,8 +21,14 @@ Follow `CLAUDE.md`. The parts that bite here:
   panic aborts the module process.
 - **One failure shape.** `{"error":"..."}`, never a partial success.
 
-Do not write the tests — a separate agent does that from the spec. You may write
-whatever scratch checks you need while developing, but delete them.
+**Write tests as you go.** You are not the owner of the final suite — a separate
+agent writes tests from the spec, and will adapt, keep or remove yours — but do
+not develop untested and do not delete what you wrote. A test you needed while
+implementing usually encodes an edge case you found in the code, and that is
+information the tester would otherwise have to rediscover.
+
+Say which of your tests you are least confident in, and where the spec was
+silent and you had to choose. That is the most useful thing you can hand over.
 
 Stop and say so if a task cannot be done as written. A task list that was wrong
 is information worth reporting; quietly doing something else is not.

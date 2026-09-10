@@ -17,7 +17,15 @@ The schema carries the format rules; this file carries only the split:
 - **`adr.md` says WHY** — which alternative was chosen and what ruled the others
   out.
 - **PLAN.md keeps the rest** — traps, spike findings, what was rejected before
-  this change existed. Do not migrate those into the spec.
+  this change existed. Do not migrate those into the spec: a spec has no place
+  for reasoning, and OpenSpec silently drops it (a REMOVED requirement is
+  discarded when the capability is new, with validation still passing).
+
+**Prune PLAN.md as you go.** Once the spec states a behaviour, PLAN.md should
+stop describing it as forthcoming — an open question the spec has answered, or
+future intent the spec now specifies, is drift waiting to happen. Strike it
+through and point at the spec rather than deleting it, so the question's history
+stays legible. PLAN.md should shrink toward what only it can hold.
 
 Two failure modes to avoid, both seen in this repo:
 
