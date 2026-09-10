@@ -12,6 +12,7 @@
 //! than by review. The module crate is a thin adapter that forwards to it.
 
 pub mod identity;
+pub mod stoa;
 pub mod wire;
 
 // The wire surface is re-exported at the crate root because it IS the module's
