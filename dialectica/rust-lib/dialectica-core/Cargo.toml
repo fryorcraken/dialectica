@@ -56,8 +56,8 @@ serde_json = "1"
 # chain, `vpk` is ML-KEM-768, and the shipped `sequencer_stake` program verifies
 # ed25519 in-guest. With the compatibility constraint gone, the criteria are:
 #
-#  * KEY DERIVATION, which decides it. Identity is thread-scoped (§5.2), so many
-#    keypairs are derived from one root. Here that is HKDF-SHA512 into
+#  * KEY DERIVATION, which decides it. A user has one identity per Stoa (§5.2),
+#    so many keypairs are derived from one root. Here that is HKDF-SHA512 into
 #    `SigningKey::from_bytes(&[u8; 32])` — INFALLIBLE, because every 32-byte
 #    string is a valid Ed25519 seed. The BIP-340 equivalent needs a rejection
 #    loop (the scalar must land in `[1, n)`), plus BIP-341's conditional parity
@@ -68,8 +68,8 @@ serde_json = "1"
 #    Note what is NOT wanted: non-hardened / public derivation, which SLIP-0010
 #    declines to support for ed25519. Deriving a child PUBLIC key from a parent
 #    public key is exactly the linkability §5.2 exists to prevent — anyone
-#    holding the root public key could link every thread identity. The feature
-#    Ed25519 lacks is one this design must not ship.
+#    holding the root public key could link a user's pseudonyms across every
+#    Stoa. The feature Ed25519 lacks is one this design must not ship.
 #
 #  * PARSE SAFETY. `k256` 0.13 guards by convention: `VerifyingKey::from_bytes`
 #    and `TryFrom<&[u8]> for Signature` both return `Result` and both PANIC on a
@@ -94,7 +94,7 @@ serde_json = "1"
 # `verify_strict`'s weak-key check, which would reintroduce the very peer
 # disagreement `verify_strict` is pinned for below.
 ed25519-dalek = { version = "3", features = ["rand_core"] }
-# Subkey derivation for thread-scoped identity. HMAC-SHA512 based, matching
+# Per-Stoa subkey derivation from one root secret. HMAC-SHA512 based, matching
 # Ed25519's own hash.
 hkdf = "0.13"
 # 0.11 rather than 0.10, and the version is not free to drift: `ed25519-dalek` 3

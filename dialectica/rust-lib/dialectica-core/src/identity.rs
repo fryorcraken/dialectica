@@ -9,17 +9,18 @@
 //! PLAN.md §5.4 refutes that reasoning: a claim binds to a *presenter-chosen*
 //! key rather than to a matching curve, and there is no single "LEZ scheme" to
 //! match in any case. With that constraint gone, the deciding criterion is key
-//! derivation — see [`derive_thread_key`] — followed by parse safety and verify
+//! derivation — see [`derive_stoa_key`] — followed by parse safety and verify
 //! cost. The Cargo.toml carries the full comparison, including the honest
 //! counter-argument.
 //!
 //! # What is deliberately not here
 //!
-//! **No key rotation *mechanism* beyond derivation** (§5.3). Identity is
-//! thread-scoped, so rotation is the default rather than a feature to add; what
-//! §5.3 defers is a rotation that carries an identity *forward*, which needs
-//! the claims layer. Hashing a record rather than a bare key is what keeps that
-//! door open.
+//! **No key rotation** (§5.3). A user's per-Stoa identity is permanent: keys are
+//! *derived* per Stoa, never rolled over within one. That is not an omission —
+//! §5.3's argument is that a key which can be discarded at will is a key nothing
+//! can be attached to, so rotation waits until standing lives on a revocable
+//! credential (§5.5) rather than on a keypair. Hashing a record rather than a
+//! bare key (see [`PublicKey::address`]) is what keeps that door open.
 //!
 //! **No keystore.** §5.6 specifies one (encrypted key at a fixed path, three
 //! unlock paths, never prompt). It is filesystem work, and a pure crate that
@@ -59,11 +60,11 @@ const STOA_ADDRESS_PREFIX: &[u8; 32] = b"/dialectica/1/Address/Stoa\0\0\0\0\0\0"
 /// their signature over a moderation action.
 const OP_SIGNING_PREFIX: &[u8; 32] = b"/dialectica/1/Signed/Op\0\0\0\0\0\0\0\0\0";
 
-/// HKDF salt for thread-key derivation ([`derive_thread_key`]).
+/// HKDF salt for per-Stoa key derivation ([`derive_stoa_key`]).
 ///
 /// Versioned, so a future derivation scheme produces different keys from the
 /// same root rather than silently colliding with this one.
-const THREAD_KEY_SALT: &[u8] = b"/dialectica/1/Identity/Thread";
+const STOA_KEY_SALT: &[u8] = b"/dialectica/1/Identity/Stoa";
 
 /// A 32-byte address: an author's, or a Stoa's.
 ///
@@ -230,7 +231,7 @@ impl SecretKey {
     /// difference from the rejected scheme rather than a stylistic one: a
     /// secp256k1 scalar must land in `[1, n)`, so the equivalent needs a
     /// rejection path for a value that is the right length and still unusable.
-    /// See [`derive_thread_key`], where that difference stops being cosmetic.
+    /// See [`derive_stoa_key`], where that difference stops being cosmetic.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, KeyError> {
         let bytes: &[u8; 32] = bytes.try_into().map_err(|_| KeyError::NotAValidSecretKey)?;
         Ok(SecretKey(ed25519_dalek::SigningKey::from_bytes(bytes)))
@@ -260,12 +261,12 @@ impl SecretKey {
     }
 }
 
-/// Derive the signing key for one thread from a root secret.
+/// Derive a user's signing key for one Stoa from their root secret.
 ///
-/// **This function is why the scheme is Ed25519** (PLAN.md §5.4). Identity is
-/// thread-scoped (§5.2): a user holds one root secret and posts under a
-/// different key in every thread, so deriving many keypairs from one root is a
-/// first-class requirement rather than a convenience.
+/// **This function is why the scheme is Ed25519** (PLAN.md §5.4). A user has one
+/// identity per Stoa (§5.2), so every Stoa they join needs its own keypair from
+/// one root secret — deriving many keypairs from one root is a first-class
+/// requirement rather than a convenience.
 ///
 /// Here that is one HKDF-SHA512 expansion into an **infallible** constructor,
 /// because every 32-byte string is a valid seed. The BIP-340 equivalent needs a
@@ -276,26 +277,25 @@ impl SecretKey {
 /// against a different key.
 ///
 /// **What this deliberately does not provide is public derivation.** There is no
-/// way to compute a thread's *public* key from the root *public* key, and that
-/// is the property §5.2 depends on: if there were, anyone holding the root
-/// public key could link every one of a user's thread identities, which is
-/// exactly the unlinkability being bought. SLIP-0010 declines to define
+/// way to compute a Stoa key's *public* half from the root *public* key, and
+/// that is the property §5.2's cross-Stoa unlinkability depends on: if there
+/// were, anyone holding the root public key could link a user's pseudonyms
+/// across every Stoa they participate in. SLIP-0010 declines to define
 /// non-hardened derivation for Ed25519 for cryptographic reasons; here that
-/// refusal is a feature.
+/// refusal is exactly what is wanted.
+///
+/// **The result must be stable for the lifetime of the identity.** §5.2 makes
+/// the per-Stoa pseudonym permanent, and §4.1 ties the SDS `senderId` to it —
+/// which SDS assumes is immutable. So the same `(root, stoa)` must always yield
+/// the same key: no session counter, no time input, nothing that varies between
+/// runs. That is why this takes exactly two arguments.
 ///
 /// The salt is a version string, so a future derivation scheme yields different
 /// keys from the same root rather than colliding with this one.
-pub fn derive_thread_key(root: &[u8; 32], stoa: &Address, thread_id: &str) -> SecretKey {
-    // `stoa` is fixed-width and `thread_id` is not, so the thread id goes LAST.
-    // Concatenating a variable-length field before a fixed one is how two
-    // different (stoa, thread) pairs end up with the same info string.
-    let mut info = Vec::with_capacity(32 + thread_id.len());
-    info.extend_from_slice(stoa.as_bytes());
-    info.extend_from_slice(thread_id.as_bytes());
-
-    let hk = hkdf::Hkdf::<sha2::Sha512>::new(Some(THREAD_KEY_SALT), root);
+pub fn derive_stoa_key(root: &[u8; 32], stoa: &Address) -> SecretKey {
+    let hk = hkdf::Hkdf::<sha2::Sha512>::new(Some(STOA_KEY_SALT), root);
     let mut seed = [0u8; 32];
-    hk.expand(&info, &mut seed)
+    hk.expand(stoa.as_bytes(), &mut seed)
         .expect("32 bytes is far below HKDF-SHA512's output limit");
     SecretKey(ed25519_dalek::SigningKey::from_bytes(&seed))
 }
@@ -650,68 +650,39 @@ mod tests {
     }
 
     #[test]
-    fn a_derived_thread_key_is_deterministic() {
+    fn a_derived_stoa_key_is_deterministic() {
         // The whole point: a user must be able to re-derive the key they posted
-        // with, from the root, on any device. If this is not stable, they lose
-        // the ability to edit their own posts (§5.7 — authorship decides
-        // validity).
+        // with, from the root, on any device and after any restart. §5.2 makes
+        // the per-Stoa identity permanent and §4.1 ties the SDS `senderId` to
+        // it, so instability here is not a private inconvenience — it changes
+        // the identifier other peers know them by.
         let root = [7u8; 32];
         let stoa = stoa_address(b"a genesis record");
-        let a = derive_thread_key(&root, &stoa, "thread-1");
-        let b = derive_thread_key(&root, &stoa, "thread-1");
+        let a = derive_stoa_key(&root, &stoa);
+        let b = derive_stoa_key(&root, &stoa);
         assert_eq!(a.public_key(), b.public_key());
     }
 
     #[test]
-    fn different_threads_get_unlinkable_keys() {
-        // §5.2's core property. Two threads in the SAME Stoa, same root: the
-        // keys must differ, or per-thread rotation is not happening at all.
+    fn different_stoas_get_unlinkable_keys() {
+        // §5.2's one privacy property: a user's identity in Stoa A must not be
+        // tied to their identity in Stoa B by the protocol. Same root, two
+        // Stoas, and the keys must differ.
         let root = [7u8; 32];
-        let stoa = stoa_address(b"a genesis record");
         assert_ne!(
-            derive_thread_key(&root, &stoa, "thread-1").public_key(),
-            derive_thread_key(&root, &stoa, "thread-2").public_key()
+            derive_stoa_key(&root, &stoa_address(b"stoa one")).public_key(),
+            derive_stoa_key(&root, &stoa_address(b"stoa two")).public_key()
         );
     }
 
     #[test]
-    fn the_same_thread_id_in_different_stoas_gets_different_keys() {
-        // Cross-Stoa unlinkability (§5.2), which thread-scoping must not have
-        // quietly dropped. Thread ids are not globally unique, so "thread-1" in
-        // two Stoas is the exact collision to check.
-        let root = [7u8; 32];
-        assert_ne!(
-            derive_thread_key(&root, &stoa_address(b"stoa one"), "thread-1").public_key(),
-            derive_thread_key(&root, &stoa_address(b"stoa two"), "thread-1").public_key()
-        );
-    }
-
-    #[test]
-    fn different_roots_get_different_keys_in_the_same_thread() {
-        // Two users in one thread must not collide.
+    fn different_roots_get_different_keys_in_the_same_stoa() {
+        // Two users in one Stoa must not collide — and SDS requires their
+        // sender ids to differ (§4.1), which this is what supplies.
         let stoa = stoa_address(b"a genesis record");
         assert_ne!(
-            derive_thread_key(&[1u8; 32], &stoa, "thread-1").public_key(),
-            derive_thread_key(&[2u8; 32], &stoa, "thread-1").public_key()
-        );
-    }
-
-    #[test]
-    fn thread_key_derivation_is_not_ambiguous_across_the_stoa_thread_boundary() {
-        // The concatenation trap. `stoa` is fixed-width and `thread_id` is not,
-        // so if the two were joined the other way round — or if the fixed width
-        // were ever relaxed — then (stoa=AB, thread=C) and (stoa=A, thread=BC)
-        // would produce the SAME info string and therefore the same key.
-        //
-        // Addresses are always 32 bytes so this cannot arise today; the test
-        // exists so that a future change making them variable-length fails here
-        // rather than silently merging two identities.
-        let root = [7u8; 32];
-        let stoa = stoa_address(b"a genesis record");
-        assert_ne!(
-            derive_thread_key(&root, &stoa, "x").public_key(),
-            derive_thread_key(&root, &stoa, "").public_key(),
-            "a thread id must not be absorbable into the preceding field"
+            derive_stoa_key(&[1u8; 32], &stoa).public_key(),
+            derive_stoa_key(&[2u8; 32], &stoa).public_key()
         );
     }
 
@@ -720,7 +691,7 @@ mod tests {
         // Derivation must produce a usable key, not merely a distinct one.
         let root = [7u8; 32];
         let stoa = stoa_address(b"a genesis record");
-        let sk = derive_thread_key(&root, &stoa, "thread-1");
+        let sk = derive_stoa_key(&root, &stoa);
         let sig = sign_op_bytes(&sk, b"a post");
         assert!(verify_op_bytes(&sk.public_key(), b"a post", &sig));
     }
@@ -731,8 +702,22 @@ mod tests {
         // and reloading it must give back the same posting identity.
         let root = [7u8; 32];
         let stoa = stoa_address(b"a genesis record");
-        let sk = derive_thread_key(&root, &stoa, "thread-1");
+        let sk = derive_stoa_key(&root, &stoa);
         let restored = SecretKey::from_bytes(&sk.to_bytes()).unwrap();
         assert_eq!(restored.public_key(), sk.public_key());
+    }
+
+    #[test]
+    fn a_derived_key_is_not_the_root_key() {
+        // The root secret must never itself sign anything: it is the one value
+        // that, if leaked, yields every Stoa identity a user has. Deriving is
+        // what keeps a compromised per-Stoa key from being a compromised root.
+        let root = [7u8; 32];
+        let stoa = stoa_address(b"a genesis record");
+        let root_as_key = SecretKey::from_bytes(&root).unwrap();
+        assert_ne!(
+            derive_stoa_key(&root, &stoa).public_key(),
+            root_as_key.public_key()
+        );
     }
 }
