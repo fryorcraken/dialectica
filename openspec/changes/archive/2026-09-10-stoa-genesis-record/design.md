@@ -61,10 +61,12 @@ and re-encoded) still want the byte-oriented entry point. Adding
 `Genesis::address()` alongside it means the common path cannot forget to
 canonicalise, without narrowing the primitive.
 
-### A fixed-width epoch
+### The record carries only what every peer agrees on
 
-`u64` big-endian. Fixed width keeps it out of the length-prefixing question
-entirely, and big-endian so the bytes sort in the same order as the values.
+Every peer hashes the record to obtain the address, so any value varying with
+one peer's history gives that peer a different address for the same Stoa — two
+Stoas that cannot see each other, with no error anyone observes. §4.3 states the
+same rule for the channel id derived from this address.
 
 ## Risks / Trade-offs
 

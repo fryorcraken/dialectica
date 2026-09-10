@@ -4,7 +4,7 @@
 
 - [x] 1.1 Create `dialectica-core/src/stoa.rs` with `Policy` (one variant,
       `Open`, with an explicit discriminant) and `Genesis` (version, creator
-      `PublicKey`, epoch `u64`, policy, title `String`). Register the module in
+      `PublicKey`, policy, title `String`). Register the module in
       `lib.rs` and verify `cargo build` succeeds.
 - [x] 1.2 Add `GenesisError` covering unknown version, unknown policy,
       truncated input, trailing bytes, and a length prefix disagreeing with the
@@ -17,19 +17,15 @@
 - [x] 2.1 Write `encodes_identically_every_time` and
       `two_records_differing_in_any_field_encode_differently` (vary each field
       in turn). Verify both FAIL before `canonical_bytes` exists.
-- [x] 2.2 Implement `Genesis::canonical_bytes()`: version, creator key, epoch
-      big-endian, policy discriminant, then the title length-prefixed. Verify
-      2.1's tests pass.
+- [x] 2.2 Implement `Genesis::canonical_bytes()`: version, creator key, policy
+      discriminant, then the title length-prefixed. Verify 2.1's tests pass.
 - [x] 2.3 Write a test proving the title's length is CARRIED, not inferred from
       where input ends, and verify it FAILS with the length prefix stubbed out.
 
-      Done, and the verification earned its keep: the first version
-      (`a_title_boundary_cannot_be_moved`, comparing "ab" with "abc") PASSED
-      with the prefix deleted — different-length titles differ either way, so it
-      proved nothing. Replaced with
-      `the_title_length_is_encoded_and_not_merely_implied`, which appends a byte
-      to a valid encoding and requires `TrailingBytes`; without the prefix the
-      title absorbs it and the test fails with `Truncated`.
+      `the_title_length_is_encoded_and_not_merely_implied` appends a byte to a
+      valid encoding and requires `TrailingBytes`; without the prefix the title
+      absorbs it and the test fails with `Truncated`. Note that comparing two
+      different-length titles does NOT test this — they differ either way.
 
 ## 3. Strict decoding
 
@@ -52,9 +48,13 @@
       and verify 4.1's tests pass.
 - [x] 4.3 Write `two_stoas_with_the_same_title_have_different_addresses`
       (differing creator keys) and verify it passes — the title is not identity.
-- [x] 4.4 Verify `policy`, `epoch` and `version` each participate in the
-      address, by asserting a record differing only in that field yields a
-      different address.
+- [x] 4.4 Verify `policy` and `version` are each carried in the encoding.
+
+      `Policy` has one variant and the version is a private `const`, so neither
+      can be varied through the API — these are pinned by layout assertion: each
+      sits at its documented offset carrying its value, and the total length
+      matches the layout so a dropped field cannot be masked by another sliding
+      into its place.
 
 ## 5. Gates
 
