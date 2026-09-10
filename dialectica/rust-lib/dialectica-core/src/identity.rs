@@ -389,7 +389,13 @@ impl std::fmt::Debug for Signature {
 /// unambiguously typed, which is the serialiser's job and the serialiser does
 /// not exist yet. When it lands, the op kind belongs in this digest, so the
 /// property is structural rather than a convention the encoder must maintain.
-pub fn signing_digest(bytes: &[u8]) -> [u8; 32] {
+/// `pub(crate)`, deliberately. This is the raw value a signature is made over,
+/// and exporting it is an invitation to hand-roll a verification path — which
+/// is exactly the split [`verify_authored_op`] exists to prevent, since the
+/// step that goes missing is always the address binding. Callers outside this
+/// crate get [`sign_op_bytes`] and [`verify_authored_op`]; §2.5 says widening
+/// the surface is a deliberate act, and this does not need widening.
+pub(crate) fn signing_digest(bytes: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(OP_SIGNING_PREFIX);
     hasher.update(bytes);
@@ -403,6 +409,14 @@ pub fn sign_op_bytes(key: &SecretKey, bytes: &[u8]) -> Signature {
 
 /// Verify a signature over an op's canonical bytes.
 ///
+/// # This proves possession of a key, not identity
+///
+/// A `true` here means "whoever holds this key's secret signed these bytes" and
+/// says **nothing about who they are**. An inbound op arrives with a claimed
+/// author, and binding the key to that claim is a separate step —
+/// [`verify_authored_op`] is the ingest path's entry point and does both. Reach
+/// for this one only when the key is already known to be the right key.
+///
 /// Returns a plain `bool`. There is exactly one thing a caller may do with a
 /// bad signature — drop the op (§3.3: "the store may hold junk; the reader
 /// never trusts it") — so distinguishing *why* it failed would offer a choice
@@ -410,16 +424,19 @@ pub fn sign_op_bytes(key: &SecretKey, bytes: &[u8]) -> Signature {
 /// "recoverable" verification failure becomes an accepted op.
 ///
 /// **`verify_strict`, never `verify`, and this is a correctness requirement
-/// rather than belt-and-braces.** The difference is not the cofactored /
-/// cofactorless axis — both of dalek's verifiers are cofactorless — it is that
-/// `verify_strict` additionally rejects low-order public keys and non-canonical
-/// encodings of `R` and `A`. Every peer verifies independently (§3.3, §6), so
-/// all peers must run the *same* predicate: two on different rules would
-/// disagree about whether the same op is validly signed, which is a partition
-/// in a system whose whole moderation story rests on peers reaching the same
-/// verdict from the same bytes. The implication runs one way — plain `verify`
-/// accepts a strict superset, so a peer that called it would admit ops the
-/// others reject.
+/// rather than belt-and-braces.** The difference is narrower than it is often
+/// described, and worth stating exactly: in dalek 3 it is *only* the small-order
+/// check on `R` and on `A` (`verifying.rs:380`). It is **not** the
+/// cofactored/cofactorless axis — both verifiers are cofactorless — and it is
+/// not canonicality: non-canonical `R` is rejected by both (upstream says so at
+/// `verifying.rs:501`), and non-canonical `A` by neither.
+///
+/// Every peer verifies independently (§3.3, §6), so all peers must run the
+/// *same* predicate: two on different rules would disagree about whether the
+/// same op is validly signed, which is a partition in a system whose whole
+/// moderation story rests on peers reaching the same verdict from the same
+/// bytes. The implication runs one way — plain `verify` accepts a strict
+/// superset, so a peer calling it admits ops the others reject.
 ///
 /// The same reasoning is why `verify_batch` is not used and the `batch` feature
 /// is off: it does not perform the strict check, so batching would reintroduce
@@ -661,6 +678,36 @@ mod tests {
     }
 
     #[test]
+    fn a_right_length_public_key_that_is_not_a_point_is_rejected() {
+        // The rejection path an attacker actually controls. Getting the LENGTH
+        // right is trivial in a real op — the interesting case is 32 bytes that
+        // are not a decompressable Edwards point, which is the `map_err` arm in
+        // `PublicKey::from_bytes` that the wrong-length tests never reach.
+        //
+        // y = 2 (little-endian, sign bit clear). Solving the curve equation for
+        // that y gives an x² with no square root mod p, so decompression fails.
+        // Checked with an independent computation rather than guessed — the
+        // first candidate tried here, 0xFF..FF, turned out to decode.
+        let not_a_point = {
+            let mut b = [0u8; 32];
+            b[0] = 2;
+            b
+        };
+        assert!(PublicKey::from_bytes(&not_a_point).is_err());
+
+        // And through the wire-level entry point, where it must be `false`
+        // rather than a panic.
+        let sk = SecretKey::generate();
+        let sig = sign_op_bytes(&sk, b"a post");
+        assert!(!verify_authored_op(
+            &sk.public_key().address(),
+            &not_a_point,
+            b"a post",
+            &sig.to_bytes()
+        ));
+    }
+
+    #[test]
     fn a_public_key_survives_a_byte_round_trip() {
         let sk = SecretKey::generate();
         let pk = sk.public_key();
@@ -732,16 +779,22 @@ mod tests {
     #[test]
     fn a_low_order_public_key_cannot_verify_anything() {
         // 32 zero bytes DECODE fine — they are a valid low-order Edwards point,
-        // not garbage — so parsing accepts them. That is not the bug it looks
-        // like; it is why `verify_op_bytes` uses `verify_strict`, which rejects
-        // low-order public keys at verification time.
+        // not garbage — so parsing accepts them, and a caller might reasonably
+        // expect an all-zero key to have been rejected earlier. It is not: the
+        // rejection happens at verification, which is why `verify_op_bytes` uses
+        // `verify_strict`.
         //
-        // This is the attack the strict check exists for: with lenient
-        // `verify()`, a small-order key can be made to accept signatures it
-        // never authorised, so an attacker publishing ops under such a key
-        // could have them treated as validly signed. Pinning it here means
-        // anyone who "simplifies" `verify_strict` to `verify` gets a red test
-        // rather than a silent authenticity hole.
+        // **What this test does NOT do is pin `verify_strict` itself.** Both
+        // assertions below would also hold under plain `verify`, because neither
+        // signature was made under the zero key — so swapping the call would not
+        // turn this red. Pinning the strict check properly needs a crafted
+        // small-order forgery, which is fiddly enough that it is not here; the
+        // guard against that swap is the doc comment on `verify_op_bytes` and
+        // the deliberate absence of a `Verifier` import, not this test.
+        //
+        // What it does pin is the surprising decode behaviour above, so that
+        // anyone who later "fixes" `PublicKey::from_bytes` to reject all-zero
+        // finds out that something already depended on it parsing.
         let attacker_key = PublicKey::from_bytes(&[0u8; 32])
             .expect("all-zero decodes as a low-order point, which is the premise here");
         let honest = SecretKey::generate();

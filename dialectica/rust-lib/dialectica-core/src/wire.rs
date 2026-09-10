@@ -28,18 +28,25 @@ pub fn error_json(message: &str) -> String {
 /// `extern "C"` dispatch calls straight into author code, so an unwind crosses
 /// an `extern "C"` frame, which is undefined behaviour.
 ///
-/// The worse half is not the UB. The generated dispatch holds
-/// `INSTANCE.0.lock().unwrap()` across the call, so a panic POISONS that mutex
-/// and every later dispatch `.unwrap()`s a poisoned lock and panics again:
-/// **one panic bricks the module for the process lifetime.** That is why this
-/// guard wraps every handler rather than only the ones that look risky.
+/// The worse half is not the UB. **PHASE0-FINDINGS §3 measured what actually
+/// happens: the module process ABORTS** — `failed to initiate panic, error 5`,
+/// SIGABRT — the caller waits out its 20s timeout, and every later call reports
+/// `MODULE_NOT_LOADED`. That is why this guard wraps every handler rather than
+/// only the ones that look risky.
+///
+/// An earlier version of this comment predicted mutex poisoning instead: the
+/// generated dispatch does hold `INSTANCE.0.lock().unwrap()` across the call, so
+/// a surviving panic would poison it. That code is real and is never reached,
+/// because the abort comes first. Recorded because the prediction was
+/// reasonable and wrong, and the difference matters — poisoning would be
+/// recoverable by tolerating it, and an abort is not recoverable at all.
 ///
 /// `AssertUnwindSafe` is load-bearing rather than a silencer: the closure
 /// borrows `&mut` state, which is not `UnwindSafe` by default. The assertion we
 /// are making is that a handler does not leave *observable* state half-written
 /// before panicking — which is a reason to keep handler bodies free of partial
 /// mutation, not a reason to drop the guard. Without the guard the alternative
-/// is not "safe state", it is a poisoned lock and a dead module.
+/// is not "safe state", it is a dead module process.
 pub fn guarded<F: FnOnce() -> String>(method: &str, f: F) -> String {
     match catch_unwind(AssertUnwindSafe(f)) {
         Ok(v) => v,

@@ -93,7 +93,10 @@ serde_json = "1"
 # enabling private key recovery). `batch` is likewise off: `verify_batch` skips
 # `verify_strict`'s weak-key check, which would reintroduce the very peer
 # disagreement `verify_strict` is pinned for below.
-ed25519-dalek = { version = "3", features = ["rand_core"] }
+# No `rand_core` feature: it only gates `SigningKey::generate`, and
+# `SecretKey::generate` deliberately fills a seed with `getrandom` instead (see
+# its doc comment). Enabling it would pull a dependency nothing calls.
+ed25519-dalek = "3"
 # Per-Stoa subkey derivation from one root secret. HMAC-SHA512 based, matching
 # Ed25519's own hash.
 hkdf = "0.13"
