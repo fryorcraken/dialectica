@@ -36,6 +36,13 @@
 //! **No mutable metadata and no moderator set.** Editable title/description is
 //! moderator-scoped state and belongs with mutable moderation. The creator is
 //! the sole moderator (§6), which follows from `creator` without storing a set.
+//!
+//! **No epoch, session counter, or any other per-peer value.** The record is
+//! hashed by every peer to obtain the Stoa's address, so a field that varies
+//! with one peer's history gives that peer a different address for the same
+//! Stoa — which is not an error anyone sees, it is two Stoas that cannot see
+//! each other. §4.3 states the same rule for the channel id, which is derived
+//! from this address: it "can carry no per-peer state".
 
 use crate::identity::{stoa_address, Address, KeyError, PublicKey};
 
@@ -94,12 +101,6 @@ pub struct Genesis {
     /// sole moderator (§6) — a record without a valid one does not describe a
     /// Stoa at all.
     pub creator: PublicKey,
-    /// Bumped whenever the Stoa's channel id would otherwise be reused.
-    ///
-    /// Carried HERE, in the addressed object, so that channel identity stays a
-    /// pure function of the Stoa and never leaks into payloads or storage keys
-    /// (§4.5).
-    pub epoch: u64,
     /// Declared at creation and immutable thereafter.
     pub policy: Policy,
     /// Human-readable, and explicitly NOT identity: names are never unique, and
@@ -141,8 +142,7 @@ impl Genesis {
     ///
     /// ```text
     /// version   1 byte
-    /// creator   32 bytes            (fixed width)
-    /// epoch     8 bytes, big-endian (fixed width; sorts as the value does)
+    /// creator   32 bytes  (fixed width)
     /// policy    1 byte
     /// title     4-byte BE length, then that many bytes of UTF-8
     /// ```
@@ -153,10 +153,9 @@ impl Genesis {
     /// in a later version without the boundary between them becoming ambiguous.
     pub fn canonical_bytes(&self) -> Vec<u8> {
         let title = self.title.as_bytes();
-        let mut out = Vec::with_capacity(1 + 32 + 8 + 1 + 4 + title.len());
+        let mut out = Vec::with_capacity(1 + 32 + 1 + 4 + title.len());
         out.push(VERSION_1);
         out.extend_from_slice(&self.creator.to_bytes());
-        out.extend_from_slice(&self.epoch.to_be_bytes());
         out.push(self.policy.to_byte());
         // `as u32` cannot truncate meaningfully here: a title long enough to
         // overflow u32 is far past any size this record is ever encoded at, and
@@ -181,10 +180,6 @@ impl Genesis {
         let creator_bytes = cursor.take(32)?;
         let creator = PublicKey::from_bytes(creator_bytes).map_err(GenesisError::InvalidCreator)?;
 
-        let mut epoch = [0u8; 8];
-        epoch.copy_from_slice(cursor.take(8)?);
-        let epoch = u64::from_be_bytes(epoch);
-
         let policy = Policy::from_byte(cursor.take(1)?[0])?;
 
         let mut len = [0u8; 4];
@@ -204,7 +199,6 @@ impl Genesis {
 
         Ok(Genesis {
             creator,
-            epoch,
             policy,
             title,
         })
@@ -280,11 +274,15 @@ mod tests {
     fn a_record() -> Genesis {
         Genesis {
             creator: a_key(1),
-            epoch: 7,
             policy: Policy::Open,
             title: "Agora".to_string(),
         }
     }
+
+    /// Offset of the policy byte in a canonical encoding.
+    const POLICY_AT: usize = 1 + 32;
+    /// Offset of the title's 4-byte length prefix.
+    const TITLE_LEN_AT: usize = POLICY_AT + 1;
 
     #[test]
     fn encodes_identically_every_time() {
@@ -304,16 +302,12 @@ mod tests {
             creator: a_key(2),
             ..base.clone()
         };
-        let different_epoch = Genesis {
-            epoch: 8,
-            ..base.clone()
-        };
         let different_title = Genesis {
             title: "Stoa".to_string(),
             ..base.clone()
         };
 
-        for other in [different_creator, different_epoch, different_title] {
+        for other in [different_creator, different_title] {
             assert_ne!(
                 base.canonical_bytes(),
                 other.canonical_bytes(),
@@ -357,7 +351,7 @@ mod tests {
 
         // And the length prefix is really present in the encoding: the four
         // bytes before the title spell its length.
-        let len_at = 1 + 32 + 8 + 1;
+        let len_at = TITLE_LEN_AT;
         assert_eq!(
             u32::from_be_bytes(g.canonical_bytes()[len_at..len_at + 4].try_into().unwrap()),
             2,
@@ -407,7 +401,7 @@ mod tests {
     #[test]
     fn a_lying_length_prefix_is_refused() {
         let mut bytes = a_record().canonical_bytes();
-        let len_at = 1 + 32 + 8 + 1;
+        let len_at = TITLE_LEN_AT;
         // Claim the title is far longer than the input holds.
         bytes[len_at..len_at + 4].copy_from_slice(&u32::MAX.to_be_bytes());
         assert_eq!(Genesis::decode(&bytes), Err(GenesisError::LengthMismatch));
@@ -418,7 +412,7 @@ mod tests {
         // The security-relevant one. Defaulting an unrecognised policy to Open
         // is how a token-gated Stoa becomes world-postable on an old client.
         let mut bytes = a_record().canonical_bytes();
-        bytes[1 + 32 + 8] = 99;
+        bytes[POLICY_AT] = 99;
         assert_eq!(Genesis::decode(&bytes), Err(GenesisError::UnknownPolicy(99)));
     }
 
@@ -437,7 +431,7 @@ mod tests {
         let g = a_record();
         let mut bytes = g.canonical_bytes();
         // Replace the title's first byte with a lone continuation byte.
-        let title_at = 1 + 32 + 8 + 1 + 4;
+        let title_at = TITLE_LEN_AT + 4;
         bytes[title_at] = 0x80;
         assert_eq!(Genesis::decode(&bytes), Err(GenesisError::InvalidTitle));
     }
@@ -476,39 +470,38 @@ mod tests {
     }
 
     #[test]
-    fn the_policy_participates_in_the_address() {
+    fn the_policy_is_in_the_encoding_at_a_fixed_offset() {
         // Policy has one variant today, so this cannot be tested by building
-        // two records. Assert against the ENCODING instead: flip the policy
-        // byte and the address must move. Without this, a policy dropped from
-        // canonical_bytes() would go unnoticed until a second variant existed.
+        // two records and comparing.
+        //
+        // An earlier version mutated a byte of an already-produced encoding and
+        // asserted the hash moved. That tests SHA-256, not this encoding: it
+        // passes even with the policy deleted from `canonical_bytes()`
+        // entirely, because some other field then occupies that offset. Caught
+        // in review by exactly that mutation.
+        //
+        // Pinning the layout is what actually fails when the field is dropped.
         let g = a_record();
-        let mut bytes = g.canonical_bytes();
-        bytes[1 + 32 + 8] = 1;
-        assert_ne!(
-            stoa_address(&bytes),
-            g.address(),
-            "the policy byte must be inside the address preimage"
+        let bytes = g.canonical_bytes();
+        assert_eq!(
+            bytes[POLICY_AT],
+            Policy::OPEN,
+            "the policy byte must be encoded at its documented offset"
+        );
+        // And the encoding is exactly as long as the layout says, so a field
+        // cannot be dropped while another silently slides into its place.
+        assert_eq!(bytes.len(), TITLE_LEN_AT + 4 + g.title.len());
+    }
+
+    #[test]
+    fn the_version_is_the_first_byte_of_the_encoding() {
+        // Same defect, same fix as the policy test above.
+        let bytes = a_record().canonical_bytes();
+        assert_eq!(
+            bytes[0],
+            VERSION_1,
+            "the version must be the first byte of the encoding"
         );
     }
 
-    #[test]
-    fn the_version_participates_in_the_address() {
-        let g = a_record();
-        let mut bytes = g.canonical_bytes();
-        bytes[0] = 2;
-        assert_ne!(stoa_address(&bytes), g.address());
-    }
-
-    #[test]
-    fn the_epoch_survives_a_round_trip() {
-        // Big-endian and fixed width, so a value with a zero byte in it is the
-        // case worth checking — a length-oriented encoding would lose it.
-        for epoch in [0, 1, 256, u64::MAX] {
-            let g = Genesis {
-                epoch,
-                ..a_record()
-            };
-            assert_eq!(Genesis::decode(&g.canonical_bytes()).unwrap().epoch, epoch);
-        }
-    }
 }

@@ -128,16 +128,14 @@ A genesis record is immutable and address-determining, so a future field cannot 
 - **WHEN** two records differ only in their version discriminant
 - **THEN** their addresses differ
 
-### Requirement: The epoch is carried in the record
+### Requirement: The record carries no per-peer state
 
-A genesis record SHALL carry an epoch, so that a Stoa's channel identity can be derived as a function of the addressed object without the channel identity leaking into payloads or storage keys.
+A genesis record SHALL contain only values every peer agrees on. It SHALL NOT carry a session counter, a local sequence number, or any other value that varies with an individual peer's history.
 
-#### Scenario: The epoch is part of the address
+Every peer hashes the record to obtain the Stoa's address, so a per-peer value gives each peer a different address for the same Stoa. That failure is silent: it produces two Stoas that cannot see each other rather than an error anyone observes. The channel id derived from this address inherits the same constraint.
 
-- **WHEN** two records differ only in their epoch
-- **THEN** their addresses differ
+#### Scenario: Every peer computes the same address for the same Stoa
 
-#### Scenario: The epoch survives a round trip
-
-- **WHEN** a record is encoded and decoded
-- **THEN** the decoded epoch equals the original
+- **WHEN** two peers independently encode the same genesis record
+- **THEN** both produce identical bytes
+- **AND** both compute the same Stoa address
