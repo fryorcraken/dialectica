@@ -520,38 +520,68 @@ mod tests {
     }
 
     #[test]
-    fn the_policy_is_in_the_encoding_at_a_fixed_offset() {
-        // Policy has one variant today, so this cannot be tested by building
-        // two records and comparing.
+    fn the_wire_format_is_pinned_to_a_known_answer() {
+        // EVERY constant here is consensus-critical. The version byte and the
+        // policy discriminant are both inside the address preimage, so changing
+        // either re-mints the address of every Stoa in existence — with no error
+        // anywhere, because each peer stays internally consistent. Two peers on
+        // different builds simply stop seeing the same Stoa.
         //
-        // Do NOT reach for the obvious alternative — mutating a byte of an
-        // already-produced encoding and asserting the hash moves. That tests
-        // SHA-256, not this encoding, and still passes with the policy deleted
-        // from `canonical_bytes()` entirely, because another field slides into
-        // that offset.
+        // Every other test in this module is SELF-CONSISTENT: it compares the
+        // encoder's output against the constants the encoder just wrote, so it
+        // passes unchanged if someone edits one. This one does not. That is its
+        // whole job, and it is why the expected values are hardcoded hex rather
+        // than recomputed from the constants.
         //
-        // Pinning the layout is what actually fails when the field is dropped.
+        // Two earlier attempts at this test were self-referential and were
+        // caught by mutation: `VERSION_1: 1 -> 7` and `Policy::OPEN: 0 -> 42`
+        // each left all 66 tests green. `assert_eq!(bytes[0], VERSION_1)` cannot
+        // fail — it asks the implementation what it wrote and agrees.
+        // `identity.rs` had this right first; see
+        // `the_wire_constants_are_pinned_to_known_answers` there.
+        //
+        // If this fails, do NOT update the expected values to match. Work out
+        // what changed and whether the network can survive it.
         let g = a_record();
-        let bytes = g.canonical_bytes();
+
         assert_eq!(
-            bytes[POLICY_AT],
-            Policy::OPEN,
-            "the policy byte must be encoded at its documented offset"
+            hex::encode(g.canonical_bytes()),
+            "018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c\
+             000000000541676f7261",
+            "the genesis wire format changed"
         );
-        // And the encoding is exactly as long as the layout says, so a field
-        // cannot be dropped while another silently slides into its place.
-        assert_eq!(bytes.len(), TITLE_LEN_AT + 4 + g.title.len());
+        assert_eq!(
+            g.address().to_hex(),
+            "80329cf05603a0c9ce7a749a53e271253307ba89d4924856e4017459d03a025f",
+            "Stoa address derivation changed"
+        );
     }
 
     #[test]
-    fn the_version_is_the_first_byte_of_the_encoding() {
-        // Same defect, same fix as the policy test above.
-        let bytes = a_record().canonical_bytes();
-        assert_eq!(
-            bytes[0],
-            VERSION_1,
-            "the version must be the first byte of the encoding"
-        );
+    fn a_genesis_record_yields_a_32_byte_address() {
+        // The type makes this unbreakable today (`Address` wraps `[u8; 32]`),
+        // but the spec states it and a reimplementation would work from the
+        // spec. It becomes a real check the moment `Address` gains a second
+        // constructor.
+        assert_eq!(a_record().address().as_bytes().len(), 32);
+    }
+
+    #[test]
+    fn the_encoding_is_exactly_as_long_as_the_layout_says() {
+        // A field cannot be dropped while another silently slides into its
+        // place. Complements the known-answer test above: that one catches a
+        // changed VALUE, this one catches a changed SHAPE for any title.
+        for title in ["", "Agora", "🏛"] {
+            let g = Genesis {
+                title: title.to_string(),
+                ..a_record()
+            };
+            assert_eq!(
+                g.canonical_bytes().len(),
+                TITLE_LEN_AT + 4 + title.len(),
+                "unexpected encoding length for title {title:?}"
+            );
+        }
     }
 
 }

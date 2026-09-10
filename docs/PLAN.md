@@ -1010,10 +1010,16 @@ Moderation ops are valid only when signed by a current moderator, and every peer
 verifies independently — so a hide binds for everyone running honest code.
 
 ```
-genesis: {stoa_id, creator_pk, epoch}
+genesis: {version, creator_pk, policy, title}   ← built; see the stoa-genesis spec
 post:    {..., sig(author_sk)}
 hide:    {..., sig(mod_sk)}    ← rejected if signer ∉ moderators
 ```
+
+This sketch previously carried an `epoch`. It does not, and must not: every peer
+hashes the genesis record to obtain the Stoa's address, so a value varying with
+one peer's history gives that peer a different address for the same Stoa — two
+Stoas that cannot see each other, with no error anyone observes. §4.3 states the
+same rule for the channel id derived from that address.
 
 **The creator is the sole moderator initially.** A mutable moderator set is
 later work — which also defers the founder-as-permanent-root question rather
