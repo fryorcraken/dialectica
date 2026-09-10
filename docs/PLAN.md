@@ -225,9 +225,10 @@ Considered and rejected, and the reasoning is architectural rather than a
 judgement on the code.
 
 `cloud_data_module` solves convergence with **CRDTs over plain pub/sub**. It
-does not use SDS, and does not need to: every op is idempotent by `opId`, safe
-to apply out of order or repeatedly, so convergence comes from merge semantics
-rather than from transport ordering.
+does not use SDS, and does not need to: every op (a signed operation — §3.3
+defines the term) is idempotent by `opId`, safe to apply out of order or
+repeatedly, so convergence comes from merge semantics rather than from transport
+ordering.
 
 Dialectica takes **SDS as the primary reliability layer** (§4). Those are
 *alternatives, not layers*. Running both would pay SDS's per-message bloom
@@ -280,9 +281,21 @@ expected output. The open question is the bridge, not the API.
 
 ### 3.3 The local store is ours
 
+**An "op" is a signed operation, and it is the unit everything else is built
+from.** Creating a Stoa, posting, publishing a revision of your own post (§5.7),
+hiding something as a moderator (§6), voting — each is one op, signed by its
+author and published to the Stoa's channel. Nothing else crosses the wire, and
+the forum's whole state is a function of the ops a peer has seen.
+
 Each peer keeps a **local SQLite store** holding every op it has seen, plus a
 materialised view of the forum derived from it. Ops are the authority; the view
 is a cache that can be rebuilt by replay.
+
+Two peers routinely hold **different sets of ops** — one was offline, one joined
+late, a message has not propagated yet — so they can legitimately disagree about
+what the forum currently looks like. §4.4's eventual consistency is what closes
+that gap over time, and §7.2 rule 1 is what stops the divergence being mistaken
+for a bug.
 
 This is the piece cloud_data would have provided, and owning it is what lets us
 index for the queries a forum actually makes — newest threads, paginated
@@ -1106,10 +1119,11 @@ a published score is a claim no peer could verify — but it also means ranking
 can be retuned without a protocol version bump, which is the property you want
 for the one part of the system that will be tuned repeatedly.
 
-The consequence to state rather than discover: **two peers with different op
-sets rank differently, and that is correct.** It follows from §4.4's eventual
-consistency among active participants. Do not reach for a consensus mechanism
-to make scores agree; there is nothing to agree on.
+The consequence to state rather than discover: **two peers that have seen
+different ops rank differently, and that is correct** (§3.3 — divergent op sets
+are the normal case, not a fault). It follows from §4.4's eventual consistency
+among active participants. Do not reach for a consensus mechanism to make scores
+agree; there is nothing to agree on.
 
 **2. v1 ships `new` and `active`, and no score at all.** With no sybil
 resistance (§7), a vote-weighted score is not a relevance signal — it is a dial
