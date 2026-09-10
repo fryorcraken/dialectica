@@ -384,20 +384,76 @@ and costs real money: LIP-23 measures Store query response time doubling from
 
 ### 4.3 The channel-id trap
 
-Reusing a `channelId` after `channelClose` on a channel that had received a peer
-message **crashes the node** (logos-delivery#4116) — and the v0.2.1 header
-docstring claims the opposite ("persisted channel state survives channelClose").
-Trust the bug, not the docstring.
+Re-creating a channel with an id that was **closed after receiving a peer
+message** takes down the whole node process (logos-delivery#4116) — not just
+the call. The module unloads, the node is gone, every later API call fails, and
+any other module sharing that node loses it too. The crash is inside
+`createReliableChannel` → `sdsPersistence` → `openJob`, non-deterministic in
+kind (SIGSEGV and an IndexDefect from the same path), which points at corrupt
+persistency state rather than a missing nil check.
 
-Since our channel id derives from the Stoa, **every normal restart is a
-close-and-reopen with the same id**: first run creates `stoa-abc` and closes it
-on shutdown; the next run recreates `stoa-abc` and crashes the node.
+The v0.2.1 docstring claims the opposite — "persisted channel state survives
+channelClose, so re-creating with the same id restores it". Trust the bug.
 
-**Carry an epoch in the channel id** — `stoa-abc/e7` — and bump it whenever the
-id would otherwise be reused. Same Stoa, a fresh channel id each session, the
-bug never triggered. Free now, painful to retrofit, and it doubles as the
-version marker that lets peers migrate across the §4.5 split without the two
-regimes colliding.
+**All three conditions are required**, and the issue is explicit that removing
+any one of them makes it safe:
+
+1. the channel **received** a message from a peer (a send alone does not do it),
+2. then `channelClose`,
+3. then `channelCreate` with the **same** id.
+
+Create → close → create with a *different* id is fine. So is the whole cycle
+with no peer traffic received.
+
+**Dialectica closes a channel in two places: when a user leaves a Stoa, and on
+shutdown.** Both, and the second is the one that looks optional and is not.
+
+**The delivery node is not ours to stop, and it outlives us.**
+`delivery_module` is a separate, shared process — `createNode` is called once
+per context (§11), and issue #4116 notes in passing that when the node dies "any
+other module sharing that node loses it too". So dialectica exiting does not
+stop the node, and the node's own `stop()` is not the alternative: calling it
+would tear delivery down for every other module using it, which is not
+dialectica's call to make.
+
+**So the unsubscribe that `closeChannel` performs is the point, and it reaches
+past our own process.** A content-topic subscription is not merely local
+bookkeeping: it feeds the node's **gossipsub shard subscriptions**, so a channel
+left open keeps the shared node subscribed to — and meshed on — a shard for a
+Stoa belonging to an app nobody has open. That is bandwidth and processing spent
+by our node, and mesh traffic pushed to peers, on behalf of a user who has
+closed the application. Leaving it behind is a leak in someone else's process.
+
+That is why both cases close: leaving a Stoa and shutting down are the same
+situation — a channel that must not outlive the app that opened it.
+
+**Which puts every close squarely into condition 2, so condition 3 is what
+dialectica must break.** The epoch is therefore not belt-and-braces, it is the
+whole defence. **Carry an epoch in the channel id** — `stoa-abc/e7` — and bump
+it on every open, so `channelCreate` never sees an id it has seen before:
+
+- shutdown closes `stoa-abc/e7`; the next launch opens `stoa-abc/e8`
+- leaving closes `stoa-abc/e8`; rejoining opens `stoa-abc/e9`
+
+**The epoch must be persisted across restarts.** A counter that resets to zero
+on launch recreates the exact collision it exists to prevent, and it does so on
+the second run — early enough to look like a different bug entirely. This is the
+one piece of state the scheme requires, and losing it is indistinguishable from
+never having had it until the node dies.
+
+The failure presents far from its cause: the node dies during startup inside
+`createReliableChannel`, while the code responsible ran in the *previous*
+session's shutdown path. Someone would debug the wrong process.
+
+The epoch is worth having regardless — it doubles as the version marker that
+lets peers migrate across the §4.5 split without the two regimes colliding.
+
+**What is not established**, and it decides how much weight the epoch carries:
+the issue reproduces close-and-reopen *within one running node*. Whether
+persisted SDS state surviving a full process restart corrupts a fresh
+`createNode` the same way is untested. If it does, the epoch is the only thing
+standing between an ordinary restart and a dead node — which is an argument for
+treating a lost or reset epoch as a serious bug rather than a cosmetic one.
 
 ### 4.4 What SDS does and does not promise
 
@@ -662,8 +718,10 @@ Three things decided against it, in ascending order of how conclusive they are:
   backoff and response-group arithmetic both assume a sender id that is stable
   and still answered to, and `senderId` binds at `channelCreate` for a channel's
   lifetime (§4.1). One channel per Stoa plus one permanent identity per Stoa
-  makes the transport identifier stable exactly where SDS wants it — no rotation
-  machinery, no epoch churn, and no fight with §4.3's channel-id reuse crash.
+  makes the transport identifier stable exactly where SDS wants it, with no
+  rotation machinery to build. (The channel *id* still carries a bumping epoch —
+  §4.3 requires that of every open — but the `senderId` inside it does not
+  change, which is what SDS-R depends on.)
 
 The last is the decisive one, and it is independent of the privacy argument: it
 would rule out narrower scopes even if the unlinkability gain were larger than
