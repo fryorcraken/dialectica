@@ -1,0 +1,143 @@
+# stoa-genesis Specification
+
+## Purpose
+Defines what a Stoa's genesis record contains and how it encodes to bytes, so that a Stoa's address is reproducible by any peer and pasting an address is enough to verify what was joined.
+
+## Requirements
+
+### Requirement: A Stoa is defined by its genesis record
+
+A Stoa SHALL be defined by a genesis record carrying its creator's public key, an epoch, a posting policy, and a human-readable title.
+
+The record SHALL be immutable. Creating a Stoa requires no approval and no registration with any service: publishing the record is the whole act of creation.
+
+The creator's key in this record is what makes the creator the Stoa's initial sole moderator, so a record whose creator key is absent or malformed does not describe a Stoa at all.
+
+#### Scenario: A genesis record yields a Stoa address
+
+- **WHEN** a genesis record is encoded and hashed
+- **THEN** the result is a 32-byte Stoa address
+
+#### Scenario: The title is not identity
+
+- **WHEN** two different Stoas are created with the same title
+- **THEN** their addresses differ
+- **AND** neither is treated as the other
+
+### Requirement: The encoding is canonical
+
+A genesis record SHALL have exactly one valid byte encoding. Every variable-length field SHALL be length-prefixed, so that no two distinct records encode to the same bytes.
+
+This is what makes an address reproducible: two peers holding the same record compute the same address, and a peer cannot be shown a record that hashes to an address it does not describe.
+
+#### Scenario: The same record always encodes identically
+
+- **WHEN** the same genesis record is encoded twice
+- **THEN** the two byte strings are identical
+
+#### Scenario: Distinct records never share an encoding
+
+- **WHEN** two genesis records differ in any field
+- **THEN** their encodings differ
+- **AND** their addresses differ
+
+#### Scenario: Field boundaries are unambiguous
+
+- **WHEN** two records differ only in where a boundary between two adjacent variable-length fields falls
+- **THEN** their encodings differ
+
+### Requirement: A tampered or truncated record is rejected
+
+Decoding SHALL reject any input that is not the canonical encoding of a valid record, including truncated input, trailing bytes, a length prefix disagreeing with the data present, and an unrecognised policy discriminant.
+
+A record arriving from a peer is attacker-controlled. Rejection SHALL happen at the decoding boundary, before the record reaches any state machine, and SHALL NOT be reported as a valid record carrying default values.
+
+#### Scenario: Truncated input is refused
+
+- **WHEN** a genesis record's encoding is truncated at any point
+- **THEN** decoding fails
+- **AND** no partially-populated record is produced
+
+#### Scenario: Trailing bytes are refused
+
+- **WHEN** input carries a valid encoding followed by extra bytes
+- **THEN** decoding fails
+
+#### Scenario: A lying length prefix is refused
+
+- **WHEN** a length prefix claims more or fewer bytes than the input provides
+- **THEN** decoding fails
+
+#### Scenario: An unknown policy is refused rather than defaulted
+
+- **WHEN** a record carries a policy discriminant this version does not recognise
+- **THEN** decoding fails
+- **AND** the record is not treated as an open Stoa
+
+### Requirement: An address verifies the record it names
+
+A peer given a Stoa address and a candidate genesis record SHALL be able to determine, without consulting any registry or third party, whether the record is the one that address names.
+
+This is what makes a pasted address self-authenticating, and it is a security boundary: §4.8 has Stoa addresses appearing inside posts, which is attacker-supplied content.
+
+#### Scenario: A matching record verifies
+
+- **WHEN** a record is checked against the address computed from it
+- **THEN** verification succeeds
+
+#### Scenario: A substituted record fails verification
+
+- **WHEN** a record differing in any field is checked against the original address
+- **THEN** verification fails
+
+#### Scenario: Verification consults nothing external
+
+- **WHEN** a record is verified against an address
+- **THEN** the check uses only the address and the record
+
+### Requirement: A posting policy is declared at creation
+
+A genesis record SHALL carry a posting policy. `open` SHALL be the only policy this version accepts, and the field SHALL be present in the encoding rather than implied by its absence.
+
+The field is present now because the record is immutable and address-determining: adding it later would change the address of every Stoa already created, and there is no in-place upgrade path. Open, invite, first-post-approval and token-threshold are variants of one mechanism, so the space is reserved even while one variant is implemented.
+
+#### Scenario: An open Stoa round-trips
+
+- **WHEN** a record declaring the open policy is encoded and decoded
+- **THEN** the decoded record declares the open policy
+
+#### Scenario: The policy is part of the address
+
+- **WHEN** two records differ only in their policy
+- **THEN** their addresses differ
+
+### Requirement: The encoding declares its version
+
+The encoding SHALL begin with a version discriminant, and decoding SHALL reject a version it does not recognise.
+
+A genesis record is immutable and address-determining, so a future field cannot be added in place — it changes the address of every Stoa already created. The version discriminant is what makes that a legible refusal on an old client rather than a misparse, and what lets two encoding generations coexist on the network.
+
+#### Scenario: An unknown version is refused
+
+- **WHEN** a record declares a version this build does not recognise
+- **THEN** decoding fails
+- **AND** the failure is distinguishable from a malformed record
+
+#### Scenario: The version is part of the address
+
+- **WHEN** two records differ only in their version discriminant
+- **THEN** their addresses differ
+
+### Requirement: The epoch is carried in the record
+
+A genesis record SHALL carry an epoch, so that a Stoa's channel identity can be derived as a function of the addressed object without the channel identity leaking into payloads or storage keys.
+
+#### Scenario: The epoch is part of the address
+
+- **WHEN** two records differ only in their epoch
+- **THEN** their addresses differ
+
+#### Scenario: The epoch survives a round trip
+
+- **WHEN** a record is encoded and decoded
+- **THEN** the decoded epoch equals the original
