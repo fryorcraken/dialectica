@@ -44,6 +44,7 @@
 //! Stoas that cannot see each other. §4.3 states the same rule for the channel
 //! id, which is derived from this address: it "can carry no per-peer state".
 
+use crate::cursor::{Cursor, OutOfBounds};
 use crate::identity::{stoa_address, Address, KeyError, PublicKey};
 
 /// The encoding generation.
@@ -190,6 +191,22 @@ impl std::fmt::Display for GenesisError {
     }
 }
 
+impl From<OutOfBounds> for GenesisError {
+    /// The shared read head reports only *that* it ran out; this says what
+    /// running out means for a genesis record.
+    ///
+    /// Kept as a `From` rather than spelled at each call site so that every
+    /// bounds failure in `decode` maps the same way. The one site that means
+    /// something else — a length prefix claiming more than the input holds — is
+    /// mapped explicitly there, and reads as the deliberate exception it is.
+    fn from(e: OutOfBounds) -> Self {
+        match e {
+            OutOfBounds::Truncated => GenesisError::Truncated,
+            OutOfBounds::Trailing => GenesisError::TrailingBytes,
+        }
+    }
+}
+
 impl Genesis {
     /// The canonical encoding. Exactly one valid byte string per record.
     ///
@@ -243,9 +260,7 @@ impl Genesis {
 
         let policy = Policy::from_byte(cursor.take(1)?[0])?;
 
-        let mut len = [0u8; 4];
-        len.copy_from_slice(cursor.take(4)?);
-        let len = u32::from_be_bytes(len) as usize;
+        let len = cursor.take_length()?;
         // Checked BEFORE the read, so an over-long title costs nothing to
         // refuse — and so the decoder rejects exactly what the encoder refuses
         // to produce.
@@ -290,50 +305,6 @@ impl Genesis {
     /// cannot be the one any address names.
     pub fn matches(&self, address: &Address) -> bool {
         self.address().is_ok_and(|a| &a == address)
-    }
-}
-
-/// A bounds-checked read head.
-///
-/// Exists so that "did the input end?" is asked in ONE place. Hand-rolled
-/// slicing at each field is how a decoder acquires a panicking index — and a
-/// panic here is reached from inbound peer data, where PHASE0-FINDINGS §3
-/// measured what an unguarded panic costs: the module process aborts.
-///
-/// Private because there is exactly one decoder. If a second op wants the same
-/// bounds-checked reads, `pub(crate)` and a move is cheap — but generalising
-/// from one instance would be a guess, and a genesis record is an odd template:
-/// it is self-identifying by hash, its encoding being its address preimage,
-/// where other ops carry their own id and a signature.
-struct Cursor<'a> {
-    bytes: &'a [u8],
-    at: usize,
-}
-
-impl<'a> Cursor<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
-        Cursor { bytes, at: 0 }
-    }
-
-    /// The next `n` bytes, or `Truncated`. Never panics, never wraps:
-    /// `checked_add` because `at + n` on a hostile length could overflow and
-    /// wrap to a value that passes a naive bounds check.
-    fn take(&mut self, n: usize) -> Result<&'a [u8], GenesisError> {
-        let end = self.at.checked_add(n).ok_or(GenesisError::Truncated)?;
-        let slice = self
-            .bytes
-            .get(self.at..end)
-            .ok_or(GenesisError::Truncated)?;
-        self.at = end;
-        Ok(slice)
-    }
-
-    fn finish(self) -> Result<(), GenesisError> {
-        if self.at == self.bytes.len() {
-            Ok(())
-        } else {
-            Err(GenesisError::TrailingBytes)
-        }
     }
 }
 
