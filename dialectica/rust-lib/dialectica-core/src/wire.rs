@@ -1,16 +1,13 @@
-//! Everything dialectica actually decides, with ZERO SDK types.
+//! The wire contract: the guard, and the handler bodies behind it.
 //!
-//! This split is forced, not stylistic (PLAN.md §2.3). The crate's `lib.rs`
-//! `include!`s a scaffold the *builder* generates, and that scaffold calls
-//! `lp_*` symbols which are undefined outside a real module image. So `lib.rs`
-//! cannot be compiled by `cargo test`, and anything reachable only from
-//! `lib.rs` is untestable.
+//! This is the module's public surface (PLAN.md §2.5) — every method takes JSON
+//! and returns JSON, and failure is always `{"error":"..."}`. The forum's
+//! semantics live in the sibling modules; this one is the boundary they are
+//! reached through.
 //!
-//! This module is the answer: it holds the guard and the handler bodies,
-//! depends on nothing but `serde_json`, and compiles standalone. `lib.rs` is a
-//! thin adapter that forwards to it. Phase 1 grows this into the pure inner
-//! crate the plan describes; the seam is here from the first commit precisely
-//! so that growth is not a migration.
+//! Phase 0 wrote this as `core.rs` inside the module crate, against the day it
+//! would become the pure inner crate PLAN.md §9 describes. That day is this
+//! commit, and the seam held: the move was a rename, not a rewrite.
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -31,18 +28,25 @@ pub fn error_json(message: &str) -> String {
 /// `extern "C"` dispatch calls straight into author code, so an unwind crosses
 /// an `extern "C"` frame, which is undefined behaviour.
 ///
-/// The worse half is not the UB. The generated dispatch holds
-/// `INSTANCE.0.lock().unwrap()` across the call, so a panic POISONS that mutex
-/// and every later dispatch `.unwrap()`s a poisoned lock and panics again:
-/// **one panic bricks the module for the process lifetime.** That is why this
-/// guard wraps every handler rather than only the ones that look risky.
+/// The worse half is not the UB. **PHASE0-FINDINGS §3 measured what actually
+/// happens: the module process ABORTS** — `failed to initiate panic, error 5`,
+/// SIGABRT — the caller waits out its 20s timeout, and every later call reports
+/// `MODULE_NOT_LOADED`. That is why this guard wraps every handler rather than
+/// only the ones that look risky.
+///
+/// An earlier version of this comment predicted mutex poisoning instead: the
+/// generated dispatch does hold `INSTANCE.0.lock().unwrap()` across the call, so
+/// a surviving panic would poison it. That code is real and is never reached,
+/// because the abort comes first. Recorded because the prediction was
+/// reasonable and wrong, and the difference matters — poisoning would be
+/// recoverable by tolerating it, and an abort is not recoverable at all.
 ///
 /// `AssertUnwindSafe` is load-bearing rather than a silencer: the closure
 /// borrows `&mut` state, which is not `UnwindSafe` by default. The assertion we
 /// are making is that a handler does not leave *observable* state half-written
 /// before panicking — which is a reason to keep handler bodies free of partial
 /// mutation, not a reason to drop the guard. Without the guard the alternative
-/// is not "safe state", it is a poisoned lock and a dead module.
+/// is not "safe state", it is a dead module process.
 pub fn guarded<F: FnOnce() -> String>(method: &str, f: F) -> String {
     match catch_unwind(AssertUnwindSafe(f)) {
         Ok(v) => v,

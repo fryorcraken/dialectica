@@ -517,15 +517,21 @@ jobs:
       - name: Formatting
         run: cargo fmt --manifest-path dialectica/rust-lib/Cargo.toml --check
 
-      # Scoped to `-p dialectica`. The staged SDK is a PATH dependency, so it
-      # is a workspace member as far as `--all-targets` is concerned, and it
-      # carries dead-code warnings that are upstream's business and not this
-      # repo's. Without the scope, `-D warnings` would fail this job on
-      # somebody else's code every time the builder pin moves.
+      # Scoped to OUR two packages by name. The staged SDK is a PATH dependency,
+      # so it is a workspace member as far as `--all-targets` is concerned, and
+      # it carries dead-code warnings that are upstream's business and not this
+      # repo's. Without the scope, `-D warnings` would fail this job on somebody
+      # else's code every time the builder pin moves.
+      #
+      # `-p dialectica-core` is named EXPLICITLY rather than relying on it being
+      # pulled in as a dependency of `-p dialectica`: clippy lints the package
+      # it is given, and a dependency is compiled but not linted. Without this
+      # second `-p`, the crate holding every decision this project makes would
+      # be the one crate no lint ever ran against.
       - name: Clippy
         run: |
           cargo clippy --manifest-path dialectica/rust-lib/Cargo.toml \
-            -p dialectica --all-targets -- -D warnings
+            -p dialectica -p dialectica-core --all-targets -- -D warnings
 
       # `| tee` then assert on the output. A runner that exits 0 having
       # executed nothing passes silently, and this crate has a specific reason
@@ -539,10 +545,18 @@ jobs:
       # tolerates a whole module of tests being cfg'd out as long as enough
       # others remain. Deriving it means DELETING a test fails the build unless
       # the test is deleted too, which is the property worth having.
+      #
+      # Scoped by `-p`, NOT `--workspace`. The staged SDK is a workspace member
+      # here (it is a path dependency), so `--workspace` would run upstream's
+      # test suite too and inflate `ran` against a `declared` count that only
+      # ever scans our own sources — a mismatch that would fail this job for a
+      # reason having nothing to do with this repo. Naming our packages keeps
+      # the two numbers measuring the same thing.
       - name: Tests
         run: |
           set -eu -o pipefail
           cargo test --manifest-path dialectica/rust-lib/Cargo.toml \
+            -p dialectica -p dialectica-core \
             | tee cargo-test.log
           python3 - <<'PY'
           import re, sys
@@ -570,17 +584,34 @@ jobs:
           # this crate today (no `#[test]` inside a string or a doc comment),
           # and if it ever did, the mismatch is a loud failure rather than a
           # quiet pass.
+          #
+          # BOTH crates are scanned, and the inner one is where the tests
+          # actually live. `dialectica-core/` sits INSIDE `rust-lib/`, so a
+          # single rglob from `rust-lib/` would cover it — but it would also
+          # walk `target/`, and it would keep passing if the inner crate were
+          # moved out. Listing the two source roots explicitly means a missing
+          # one is a loud failure rather than a silently smaller count.
           import pathlib
+          roots = [
+              pathlib.Path("dialectica/rust-lib/src"),
+              pathlib.Path("dialectica/rust-lib/dialectica-core/src"),
+          ]
           declared = 0
-          for p in pathlib.Path("dialectica/rust-lib/src").rglob("*.rs"):
-              declared += len(re.findall(r"^\s*#\[test\]\s*$", p.read_text(), re.M))
+          for root in roots:
+              if not root.is_dir():
+                  print(f"::error::expected source root {root} does not exist — a crate "
+                        "was moved or renamed, and this count is now measuring less "
+                        "than it claims to.")
+                  sys.exit(1)
+              for p in root.rglob("*.rs"):
+                  declared += len(re.findall(r"^\s*#\[test\]\s*$", p.read_text(), re.M))
 
           print(f"tests reported by cargo: {ran}")
           print(f"#[test] functions in src: {declared}")
 
           if declared == 0:
               print("::error::no #[test] functions found — has the suite been deleted, "
-                    "or moved out of dialectica/rust-lib/src?")
+                    f"or moved out of {' / '.join(str(r) for r in roots)}?")
               sys.exit(1)
           if ran != declared:
               print(f"::error::cargo ran {ran} tests but the source declares {declared}. "
@@ -609,16 +640,27 @@ jobs:
       - name: the panic guard is still exercised
         run: |
           python3 - <<'PY'
-          import re, sys
-          src = open("dialectica/rust-lib/src/core.rs").read()
+          import re, sys, pathlib
+          # The guard moved with the wire contract into the pure inner crate.
+          # Opening the path directly (rather than searching for wherever
+          # `catch_unwind` happens to live) is deliberate: if this file is moved
+          # again, this step must FAIL and be updated, not quietly re-find the
+          # guard somewhere else and keep reporting ok.
+          path = pathlib.Path("dialectica/rust-lib/dialectica-core/src/wire.rs")
+          if not path.is_file():
+              print(f"::error::{path} does not exist. The panic guard lived here; if it "
+                    "moved, point this check at its new home rather than deleting the "
+                    "check.")
+              sys.exit(1)
+          src = path.read_text()
           if "catch_unwind" not in src:
-              print("::error::core.rs no longer calls catch_unwind. The SDK has no panic "
-                    "guard of its own (PHASE0-FINDINGS §2), so removing this one means "
-                    "any panic in any handler aborts the module process.")
+              print(f"::error::{path.name} no longer calls catch_unwind. The SDK has no "
+                    "panic guard of its own (PHASE0-FINDINGS §2), so removing this one "
+                    "means any panic in any handler aborts the module process.")
               sys.exit(1)
           guard_tests = re.findall(r"fn (guard_\w+|panic_probe_\w+)\s*\(", src)
           if len(guard_tests) < 2:
-              print(f"::error::only {len(guard_tests)} guard test(s) left in core.rs — "
+              print(f"::error::only {len(guard_tests)} guard test(s) left in {path.name} — "
                     "the guard must not become a claim nothing exercises")
               sys.exit(1)
           print(f"ok: catch_unwind present, {len(guard_tests)} guard tests: {guard_tests}")
