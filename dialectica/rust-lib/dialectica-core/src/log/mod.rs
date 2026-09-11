@@ -71,6 +71,7 @@ use crate::arrival::{cmp_ops, Arrival, OpEntry};
 use crate::identity::Address;
 use crate::op::{OpId, OpKind, SignedOp};
 use std::collections::HashMap;
+use std::fmt;
 
 /// One op as the log holds it: what arrived, and what the transport said.
 ///
@@ -143,6 +144,98 @@ pub enum Appended {
 
 /// What went wrong reaching the store — never what the store held.
 ///
+/// What went wrong reaching the store — never what the store held.
+///
+/// # Why the trait is fallible when the only implementation cannot fail
+///
+/// [`MemoryOpLog`] returns `Ok` unconditionally, so a reader could reasonably
+/// ask what this buys. Two answers, and the second is the load-bearing one:
+///
+/// 1. §3.3 specifies a store on disk, and a disk fails for reasons that have
+///    nothing to do with the ops on it — it fills, a permission is revoked, a
+///    file was written by a version that is not this one.
+/// 2. **A panic aborts the module process.** PHASE0-FINDINGS §3 measured it: the
+///    caller is told `timeout` after 20 seconds, the next call reports
+///    `MODULE_NOT_LOADED`, and the word "panic" appears only in a daemon log. An
+///    `unwrap` on a disk error is therefore a denial of service against the
+///    peer, reachable by filling a disk — so the error has to be in the
+///    signature, where a caller cannot not see it.
+///
+/// The asymmetry is the cheap half of a deliberate trade. The alternative is a
+/// fallible trait for one implementation and an infallible one for the other,
+/// which is two traits, which is no trait.
+///
+/// # Absence is not a failure, and the nesting is what says so
+///
+/// [`OpLog::get`] returns `Result<Option<Entry>, OpLogError>` and not
+/// `Option<Result<..>>`. The outer layer answers "could the store be
+/// consulted", the inner "did it hold this". §3.3 makes a peer holding a
+/// partial set the normal case, so an op that is simply absent must never
+/// arrive as a failure — and inverted, a caller would have to unwrap a failure
+/// to ask the question before learning whether the question was answerable.
+///
+/// # What a caller should do with one
+///
+/// There is no caller yet, so this is recorded rather than demonstrated.
+///
+/// At the wire boundary a storage failure becomes `{"error":"..."}` — §2.5's
+/// shape, never a partial success. Specifically **not** an empty feed: an empty
+/// feed is indistinguishable from a Stoa nobody has posted in, so swallowing
+/// this would render a forum whose store is broken as a forum that is merely
+/// quiet. That is the same confusion the `Option`/`Result` nesting above exists
+/// to prevent, reintroduced one layer up.
+///
+/// [`crate::guarded`] is not the mechanism. It converts a *panic* into the
+/// error shape; this type exists so that there is no panic to convert.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OpLogError {
+    /// The store could not be reached, opened, read or written.
+    ///
+    /// Carries the underlying description as a `String` rather than a database
+    /// crate's own error type. `OpLogError` is part of the trait's contract, and
+    /// a variant naming one implementation's dependency would put that
+    /// dependency in a signature every implementation has to satisfy —
+    /// including the one with no database behind it.
+    Storage(String),
+    /// The store declares a storage layout this build does not understand.
+    ///
+    /// **Refused rather than read on a best-effort basis.** Ops are the
+    /// authority for every piece of forum state (§3.3), so a layout misread
+    /// yields a forum state that is wrong with no error anywhere. A store that
+    /// cannot be opened is a visible problem; a store opened wrongly is not.
+    UnknownLayoutVersion { found: i32, expected: i32 },
+    /// A stored op could not be decoded back into an op.
+    ///
+    /// Distinct from [`OpLogError::Storage`] because the store worked perfectly
+    /// and what it handed back did not — which points at a corrupted or
+    /// hand-edited file rather than at the disk, and calls for a different
+    /// response.
+    CorruptEntry(String),
+}
+
+impl fmt::Display for OpLogError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            OpLogError::Storage(why) => {
+                write!(f, "the op log's storage could not be used: {why}")
+            }
+            OpLogError::UnknownLayoutVersion { found, expected } => write!(
+                f,
+                "this op log was written with storage layout version {found}, and this \
+                 build understands version {expected}; open it with a build that knows \
+                 that layout rather than upgrading it in place"
+            ),
+            OpLogError::CorruptEntry(why) => write!(
+                f,
+                "an op stored in this log could not be read back: {why}; the storage is \
+                 readable but its contents are not what this build wrote"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for OpLogError {}
+
 /// What a peer stores, and what a reader may ask of it.
 ///
 /// # Why this is a trait, and what is about to implement it
@@ -201,13 +294,15 @@ pub trait OpLog {
     /// Choosing the last would make a peer's order depend on how many times each
     /// op happened to reach it, which differs per peer — the divergence
     /// [`arrival`](crate::arrival) exists to prevent, reintroduced at the store.
-    fn append(&mut self, op: SignedOp, arrival: Arrival) -> Appended;
+    fn append(&mut self, op: SignedOp, arrival: Arrival) -> Result<Appended, OpLogError>;
 
     /// One op by its id, or absence.
     ///
     /// Absence is a defined answer, not an error: the op may simply not have
-    /// reached this peer yet.
-    fn get(&self, id: &OpId) -> Option<Entry>;
+    /// reached this peer yet. A failure means the store could not be consulted,
+    /// which is a different fact — see [`OpLogError`] for why the two nest this
+    /// way round rather than the other.
+    fn get(&self, id: &OpId) -> Result<Option<Entry>, OpLogError>;
 
     /// Every op, in [`cmp_ops`] order.
     ///
@@ -215,14 +310,14 @@ pub trait OpLog {
     /// fold over exactly this sequence, so there is no separate `replay()` verb
     /// — it would be a second name for one job, and CLAUDE.md asks for one
     /// function, one job.
-    fn iter(&self) -> Vec<Entry>;
+    fn iter(&self) -> Result<Vec<Entry>, OpLogError>;
 
     /// Every op in one Stoa, in [`cmp_ops`] order.
     ///
     /// The Stoa address, never a channel id (§4.5): "never let channel identity
     /// leak into payloads or storage keys", so that per-thread channels later
     /// become a routing change rather than a migration.
-    fn iter_stoa(&self, stoa: &Address) -> Vec<Entry>;
+    fn iter_stoa(&self, stoa: &Address) -> Result<Vec<Entry>, OpLogError>;
 
     /// Every op naming `target` — **an op** — in [`cmp_ops`] order.
     ///
@@ -257,10 +352,10 @@ pub trait OpLog {
     ///
     /// An op is never its own target: this returns the ops acting *on* `target`,
     /// not `target` itself.
-    fn iter_target(&self, target: &OpId) -> Vec<Entry>;
+    fn iter_target(&self, target: &OpId) -> Result<Vec<Entry>, OpLogError>;
 
     /// How many distinct ops the log holds.
-    fn len(&self) -> usize;
+    fn len(&self) -> Result<usize, OpLogError>;
 
     /// Whether the log holds no ops.
     ///
@@ -270,8 +365,8 @@ pub trait OpLog {
     /// Note it answers only "has this peer seen anything at all" — "is this Stoa
     /// quiet" is `iter_stoa(..).is_empty()`, which is a different question this
     /// cannot stand in for.
-    fn is_empty(&self) -> bool {
-        self.len() == 0
+    fn is_empty(&self) -> Result<bool, OpLogError> {
+        Ok(self.len()? == 0)
     }
 }
 
@@ -335,40 +430,45 @@ impl MemoryOpLog {
     }
 }
 
+/// Every method returns `Ok`, and nothing here can fail.
+///
+/// A `HashMap` has no failure mode to report. See [`OpLogError`] for why the
+/// trait is fallible anyway and why that asymmetry is the cheap half of the
+/// trade rather than a wart.
 impl OpLog for MemoryOpLog {
-    fn append(&mut self, op: SignedOp, arrival: Arrival) -> Appended {
+    fn append(&mut self, op: SignedOp, arrival: Arrival) -> Result<Appended, OpLogError> {
         let id = op.op.id();
         // `entry().or_insert()` rather than `contains_key` then `insert`: the
         // first-wins rule is then structural rather than a branch that a later
         // edit could invert. There is no code path here that overwrites an
         // existing entry, so no code path can replace recorded arrival metadata.
-        match self.entries.entry(id) {
+        Ok(match self.entries.entry(id) {
             std::collections::hash_map::Entry::Occupied(_) => Appended::AlreadyPresent,
             std::collections::hash_map::Entry::Vacant(slot) => {
                 slot.insert(Entry { op, arrival });
                 Appended::Stored
             }
-        }
+        })
     }
 
-    fn get(&self, id: &OpId) -> Option<Entry> {
-        self.entries.get(id).cloned()
+    fn get(&self, id: &OpId) -> Result<Option<Entry>, OpLogError> {
+        Ok(self.entries.get(id).cloned())
     }
 
-    fn iter(&self) -> Vec<Entry> {
-        self.sorted(|_| true)
+    fn iter(&self) -> Result<Vec<Entry>, OpLogError> {
+        Ok(self.sorted(|_| true))
     }
 
-    fn iter_stoa(&self, stoa: &Address) -> Vec<Entry> {
-        self.sorted(|e| &e.op.op.stoa == stoa)
+    fn iter_stoa(&self, stoa: &Address) -> Result<Vec<Entry>, OpLogError> {
+        Ok(self.sorted(|e| &e.op.op.stoa == stoa))
     }
 
-    fn iter_target(&self, target: &OpId) -> Vec<Entry> {
-        self.sorted(|e| e.target().as_ref() == Some(target))
+    fn iter_target(&self, target: &OpId) -> Result<Vec<Entry>, OpLogError> {
+        Ok(self.sorted(|e| e.target().as_ref() == Some(target)))
     }
 
-    fn len(&self) -> usize {
-        self.entries.len()
+    fn len(&self) -> Result<usize, OpLogError> {
+        Ok(self.entries.len())
     }
 }
 
@@ -407,11 +507,11 @@ mod tests {
         let mut log = MemoryOpLog::new();
         let id = forged.op.id();
         assert_eq!(
-            log.append(forged.clone(), Arrival::unordered()),
+            log.append(forged.clone(), Arrival::unordered()).unwrap(),
             Appended::Stored
         );
-        assert_eq!(log.get(&id).map(|e| e.op), Some(forged));
-        assert_eq!(log.iter().len(), 1);
+        assert_eq!(log.get(&id).unwrap().map(|e| e.op), Some(forged));
+        assert_eq!(log.iter().unwrap().len(), 1);
     }
 
     #[test]
@@ -436,9 +536,9 @@ mod tests {
 
         let mut log = MemoryOpLog::new();
         let id = hide.op.id();
-        log.append(hide, Arrival::unordered());
+        log.append(hide, Arrival::unordered()).unwrap();
         assert!(
-            log.get(&id).is_some(),
+            log.get(&id).unwrap().is_some(),
             "an unauthorised moderation is stored"
         );
     }
@@ -450,9 +550,10 @@ mod tests {
         let mut log = MemoryOpLog::new();
         let op = signed(a_post("exact"));
         let id = op.op.id();
-        log.append(op.clone(), Arrival::ordered(5, a_message_id(3)));
+        log.append(op.clone(), Arrival::ordered(5, a_message_id(3)))
+            .unwrap();
 
-        let entry = log.get(&id).unwrap();
+        let entry = log.get(&id).unwrap().unwrap();
         assert_eq!(entry.op, op);
         assert_eq!(entry.op.to_bytes(), op.to_bytes());
         assert_eq!(entry.id(), id);
@@ -469,15 +570,15 @@ mod tests {
         let mut log = MemoryOpLog::new();
         let op = signed(a_post("once"));
         assert_eq!(
-            log.append(op.clone(), Arrival::unordered()),
+            log.append(op.clone(), Arrival::unordered()).unwrap(),
             Appended::Stored
         );
         assert_eq!(
-            log.append(op.clone(), Arrival::unordered()),
+            log.append(op.clone(), Arrival::unordered()).unwrap(),
             Appended::AlreadyPresent
         );
-        assert_eq!(log.len(), 1);
-        assert_eq!(log.iter().len(), 1);
+        assert_eq!(log.len().unwrap(), 1);
+        assert_eq!(log.iter().unwrap().len(), 1);
     }
 
     #[test]
@@ -489,15 +590,18 @@ mod tests {
         let one = signed(a_post("one"));
         let two = signed(a_post("two"));
         assert_eq!(
-            log.append(one.clone(), Arrival::unordered()),
+            log.append(one.clone(), Arrival::unordered()).unwrap(),
             Appended::Stored
         );
-        assert_eq!(log.append(two, Arrival::unordered()), Appended::Stored);
         assert_eq!(
-            log.append(one, Arrival::unordered()),
+            log.append(two, Arrival::unordered()).unwrap(),
+            Appended::Stored
+        );
+        assert_eq!(
+            log.append(one, Arrival::unordered()).unwrap(),
             Appended::AlreadyPresent
         );
-        assert_eq!(log.len(), 2);
+        assert_eq!(log.len().unwrap(), 2);
     }
 
     #[test]
@@ -510,11 +614,11 @@ mod tests {
         let (one_id, two_id) = (one.op.id(), two.op.id());
         assert_ne!(one_id, two_id);
 
-        log.append(one.clone(), Arrival::unordered());
-        log.append(two.clone(), Arrival::unordered());
-        assert_eq!(log.len(), 2);
-        assert_eq!(log.get(&one_id).map(|e| e.op), Some(one));
-        assert_eq!(log.get(&two_id).map(|e| e.op), Some(two));
+        log.append(one.clone(), Arrival::unordered()).unwrap();
+        log.append(two.clone(), Arrival::unordered()).unwrap();
+        assert_eq!(log.len().unwrap(), 2);
+        assert_eq!(log.get(&one_id).unwrap().map(|e| e.op), Some(one));
+        assert_eq!(log.get(&two_id).unwrap().map(|e| e.op), Some(two));
     }
 
     #[test]
@@ -530,12 +634,12 @@ mod tests {
         let second = op.sign(&a_key(2));
         assert_eq!(first.op.id(), second.op.id(), "the fixture is one op");
 
-        log.append(first, Arrival::unordered());
+        log.append(first, Arrival::unordered()).unwrap();
         assert_eq!(
-            log.append(second, Arrival::unordered()),
+            log.append(second, Arrival::unordered()).unwrap(),
             Appended::AlreadyPresent
         );
-        assert_eq!(log.len(), 1);
+        assert_eq!(log.len().unwrap(), 1);
     }
 
     // ─── The first arrival's metadata wins ────────────────────────────────
@@ -550,10 +654,11 @@ mod tests {
         let op = signed(a_post("re-delivered"));
         let id = op.op.id();
 
-        log.append(op.clone(), Arrival::ordered(5, a_message_id(1)));
-        log.append(op, Arrival::ordered(9, a_message_id(2)));
+        log.append(op.clone(), Arrival::ordered(5, a_message_id(1)))
+            .unwrap();
+        log.append(op, Arrival::ordered(9, a_message_id(2))).unwrap();
 
-        let entry = log.get(&id).unwrap();
+        let entry = log.get(&id).unwrap().unwrap();
         assert_eq!(entry.arrival.lamport(), Some(5));
         assert_eq!(entry.arrival.message_id(), Some(&a_message_id(1)));
     }
@@ -579,10 +684,10 @@ mod tests {
         let op = signed(a_post("poor first, rich second"));
         let id = op.op.id();
 
-        log.append(op.clone(), Arrival::unordered());
-        log.append(op, Arrival::ordered(7, a_message_id(1)));
+        log.append(op.clone(), Arrival::unordered()).unwrap();
+        log.append(op, Arrival::ordered(7, a_message_id(1))).unwrap();
 
-        let entry = log.get(&id).unwrap();
+        let entry = log.get(&id).unwrap().unwrap();
         assert_eq!(
             entry.arrival.lamport(),
             None,
@@ -607,10 +712,11 @@ mod tests {
         let op = signed(a_post("ordered once"));
         let id = op.op.id();
 
-        log.append(op.clone(), Arrival::ordered(7, a_message_id(1)));
-        log.append(op, Arrival::unordered());
+        log.append(op.clone(), Arrival::ordered(7, a_message_id(1)))
+            .unwrap();
+        log.append(op, Arrival::unordered()).unwrap();
 
-        let entry = log.get(&id).unwrap();
+        let entry = log.get(&id).unwrap().unwrap();
         assert_eq!(entry.arrival.lamport(), Some(7));
         assert!(entry.arrival.is_ordered_by_transport());
     }
@@ -625,16 +731,19 @@ mod tests {
         let (low, high) = two_posts_by_ascending_id();
 
         let mut log = MemoryOpLog::new();
-        log.append(low.clone(), Arrival::ordered(1, a_message_id(1)));
-        log.append(high.clone(), Arrival::ordered(2, a_message_id(1)));
+        log.append(low.clone(), Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
+        log.append(high.clone(), Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
 
-        let before: Vec<OpId> = log.iter().iter().map(|e| e.id()).collect();
+        let before: Vec<OpId> = log.iter().unwrap().iter().map(|e| e.id()).collect();
         assert_eq!(before, vec![high.op.id(), low.op.id()]);
 
         // Re-deliver the low op claiming a Lamport value that would put it first.
-        log.append(low.clone(), Arrival::ordered(99, a_message_id(1)));
+        log.append(low.clone(), Arrival::ordered(99, a_message_id(1)))
+            .unwrap();
 
-        let after: Vec<OpId> = log.iter().iter().map(|e| e.id()).collect();
+        let after: Vec<OpId> = log.iter().unwrap().iter().map(|e| e.id()).collect();
         assert_eq!(after, vec![high.op.id(), low.op.id()], "the order moved");
     }
 
@@ -663,13 +772,13 @@ mod tests {
         let with_id = Arrival::from_parts(None, Some(a_message_id(1)));
         assert_ne!(plain, with_id, "the fixture needs two different arrivals");
 
-        log.append(op.clone(), plain.clone());
-        log.append(op, with_id);
+        log.append(op.clone(), plain.clone()).unwrap();
+        log.append(op, with_id).unwrap();
 
-        assert_eq!(log.len(), 1, "one op id is one entry");
-        assert_eq!(log.iter().len(), 1, "no duplicate reaches the sort");
+        assert_eq!(log.len().unwrap(), 1, "one op id is one entry");
+        assert_eq!(log.iter().unwrap().len(), 1, "no duplicate reaches the sort");
         // And the first-wins rule decided which arrival survived.
-        assert_eq!(log.get(&id).unwrap().arrival, plain);
+        assert_eq!(log.get(&id).unwrap().unwrap().arrival, plain);
     }
 
     #[test]
@@ -693,12 +802,12 @@ mod tests {
         // Every op delivered under every arrival: 12 appends, 3 distinct ops.
         for arrival in arrivals.iter() {
             for op in ops.iter() {
-                log.append(op.clone(), arrival.clone());
+                log.append(op.clone(), arrival.clone()).unwrap();
             }
         }
-        assert_eq!(log.len(), 3);
+        assert_eq!(log.len().unwrap(), 3);
 
-        let mut ids: Vec<OpId> = log.iter().iter().map(|e| e.id()).collect();
+        let mut ids: Vec<OpId> = log.iter().unwrap().iter().map(|e| e.id()).collect();
         assert_eq!(ids.len(), 3);
         ids.sort();
         ids.dedup();
@@ -721,10 +830,12 @@ mod tests {
         let (low_id, high_id) = two_posts_by_ascending_id();
 
         let mut log = MemoryOpLog::new();
-        log.append(low_id.clone(), Arrival::ordered(1, a_message_id(1)));
-        log.append(high_id.clone(), Arrival::ordered(2, a_message_id(1)));
+        log.append(low_id.clone(), Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
+        log.append(high_id.clone(), Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
 
-        let ids: Vec<OpId> = log.iter().iter().map(|e| e.id()).collect();
+        let ids: Vec<OpId> = log.iter().unwrap().iter().map(|e| e.id()).collect();
         assert_eq!(
             ids,
             vec![high_id.op.id(), low_id.op.id()],
@@ -742,10 +853,12 @@ mod tests {
 
         let mut log = MemoryOpLog::new();
         // The op with the LOWER op id carries the HIGHER message id.
-        log.append(low_id.clone(), Arrival::ordered(7, a_message_id(9)));
-        log.append(high_id.clone(), Arrival::ordered(7, a_message_id(1)));
+        log.append(low_id.clone(), Arrival::ordered(7, a_message_id(9)))
+            .unwrap();
+        log.append(high_id.clone(), Arrival::ordered(7, a_message_id(1)))
+            .unwrap();
 
-        let ids: Vec<OpId> = log.iter().iter().map(|e| e.id()).collect();
+        let ids: Vec<OpId> = log.iter().unwrap().iter().map(|e| e.id()).collect();
         assert_eq!(
             ids,
             vec![high_id.op.id(), low_id.op.id()],
@@ -767,15 +880,15 @@ mod tests {
 
         let mut forwards = MemoryOpLog::new();
         for (op, arrival) in ops.iter() {
-            forwards.append(op.clone(), arrival.clone());
+            forwards.append(op.clone(), arrival.clone()).unwrap();
         }
         let mut backwards = MemoryOpLog::new();
         for (op, arrival) in ops.iter().rev() {
-            backwards.append(op.clone(), arrival.clone());
+            backwards.append(op.clone(), arrival.clone()).unwrap();
         }
 
-        let a: Vec<OpId> = forwards.iter().iter().map(|e| e.id()).collect();
-        let b: Vec<OpId> = backwards.iter().iter().map(|e| e.id()).collect();
+        let a: Vec<OpId> = forwards.iter().unwrap().iter().map(|e| e.id()).collect();
+        let b: Vec<OpId> = backwards.iter().unwrap().iter().map(|e| e.id()).collect();
         assert_eq!(a, b);
         assert_eq!(a.len(), 4, "the fixture must exercise all four");
     }
@@ -788,10 +901,10 @@ mod tests {
         let (low, high) = two_posts_by_ascending_id();
 
         let mut log = MemoryOpLog::new();
-        log.append(high.clone(), Arrival::unordered());
-        log.append(low.clone(), Arrival::unordered());
+        log.append(high.clone(), Arrival::unordered()).unwrap();
+        log.append(low.clone(), Arrival::unordered()).unwrap();
 
-        let ids: Vec<OpId> = log.iter().iter().map(|e| e.id()).collect();
+        let ids: Vec<OpId> = log.iter().unwrap().iter().map(|e| e.id()).collect();
         assert_eq!(ids, vec![low.op.id(), high.op.id()]);
     }
 
@@ -807,10 +920,11 @@ mod tests {
         let (unordered, ordered_zero) = two_posts_by_ascending_id();
 
         let mut log = MemoryOpLog::new();
-        log.append(unordered.clone(), Arrival::unordered());
-        log.append(ordered_zero.clone(), Arrival::ordered(0, a_message_id(1)));
+        log.append(unordered.clone(), Arrival::unordered()).unwrap();
+        log.append(ordered_zero.clone(), Arrival::ordered(0, a_message_id(1)))
+            .unwrap();
 
-        let ids: Vec<OpId> = log.iter().iter().map(|e| e.id()).collect();
+        let ids: Vec<OpId> = log.iter().unwrap().iter().map(|e| e.id()).collect();
         assert_eq!(
             ids,
             vec![ordered_zero.op.id(), unordered.op.id()],
@@ -826,16 +940,19 @@ mod tests {
         let mut log = MemoryOpLog::new();
         let ordered = signed(a_post("ordered"));
         let unordered = signed(a_post("unordered"));
-        log.append(ordered.clone(), Arrival::ordered(1, a_message_id(1)));
-        log.append(unordered.clone(), Arrival::unordered());
+        log.append(ordered.clone(), Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
+        log.append(unordered.clone(), Arrival::unordered()).unwrap();
 
         assert!(log
             .get(&ordered.op.id())
+            .unwrap()
             .unwrap()
             .arrival
             .is_ordered_by_transport());
         assert!(!log
             .get(&unordered.op.id())
+            .unwrap()
             .unwrap()
             .arrival
             .is_ordered_by_transport());
@@ -858,14 +975,28 @@ mod tests {
         });
 
         let mut log = MemoryOpLog::new();
-        log.append(here.clone(), Arrival::unordered());
-        log.append(there.clone(), Arrival::unordered());
+        log.append(here.clone(), Arrival::unordered()).unwrap();
+        log.append(there.clone(), Arrival::unordered()).unwrap();
 
-        let ids: Vec<OpId> = log.iter_stoa(&agora).iter().map(|e| e.id()).collect();
+        let ids: Vec<OpId> = log
+            .iter_stoa(&agora)
+            .unwrap()
+            .iter()
+            .map(|e| e.id())
+            .collect();
         assert_eq!(ids, vec![here.op.id()]);
-        let ids: Vec<OpId> = log.iter_stoa(&lyceum).iter().map(|e| e.id()).collect();
+        let ids: Vec<OpId> = log
+            .iter_stoa(&lyceum)
+            .unwrap()
+            .iter()
+            .map(|e| e.id())
+            .collect();
         assert_eq!(ids, vec![there.op.id()]);
-        assert_eq!(log.iter().len(), 2, "both are in the unrestricted read");
+        assert_eq!(
+            log.iter().unwrap().len(),
+            2,
+            "both are in the unrestricted read"
+        );
     }
 
     #[test]
@@ -907,12 +1038,22 @@ mod tests {
         });
 
         let mut log = MemoryOpLog::new();
-        log.append(here.clone(), Arrival::unordered());
-        log.append(there.clone(), Arrival::unordered());
+        log.append(here.clone(), Arrival::unordered()).unwrap();
+        log.append(there.clone(), Arrival::unordered()).unwrap();
 
-        let ids: Vec<OpId> = log.iter_stoa(&addr_one).iter().map(|e| e.id()).collect();
+        let ids: Vec<OpId> = log
+            .iter_stoa(&addr_one)
+            .unwrap()
+            .iter()
+            .map(|e| e.id())
+            .collect();
         assert_eq!(ids, vec![here.op.id()], "a prefix match leaked a Stoa");
-        let ids: Vec<OpId> = log.iter_stoa(&addr_two).iter().map(|e| e.id()).collect();
+        let ids: Vec<OpId> = log
+            .iter_stoa(&addr_two)
+            .unwrap()
+            .iter()
+            .map(|e| e.id())
+            .collect();
         assert_eq!(ids, vec![there.op.id()]);
     }
 
@@ -961,11 +1102,12 @@ mod tests {
             moderate_one.clone(),
             moderate_two.clone(),
         ] {
-            log.append(op, Arrival::unordered());
+            log.append(op, Arrival::unordered()).unwrap();
         }
 
         let ids: Vec<OpId> = log
             .iter_target(&target_one)
+            .unwrap()
             .iter()
             .map(|e| e.id())
             .collect();
@@ -976,6 +1118,7 @@ mod tests {
         );
         let ids: Vec<OpId> = log
             .iter_target(&target_two)
+            .unwrap()
             .iter()
             .map(|e| e.id())
             .collect();
@@ -988,11 +1131,12 @@ mod tests {
         // where a read that ignored its argument would return everything rather
         // than nothing.
         let mut log = MemoryOpLog::new();
-        log.append(signed(a_post("in the agora")), Arrival::unordered());
+        log.append(signed(a_post("in the agora")), Arrival::unordered())
+            .unwrap();
 
         let elsewhere = a_stoa("Never Used");
-        assert_eq!(log.iter_stoa(&elsewhere).len(), 0);
-        assert_eq!(log.len(), 1, "the log is genuinely non-empty");
+        assert_eq!(log.iter_stoa(&elsewhere).unwrap().len(), 0);
+        assert_eq!(log.len().unwrap(), 1, "the log is genuinely non-empty");
     }
 
     #[test]
@@ -1014,12 +1158,16 @@ mod tests {
                 kind,
             }
             .sign(&author);
-            log.append(op, Arrival::unordered());
+            log.append(op, Arrival::unordered()).unwrap();
         }
         // Hardcoded rather than `every_op_kind().len()`, which would agree with
         // the fixture however wrong the fixture became. Update both together
         // when an op kind lands.
-        assert_eq!(log.len(), 6, "an op kind was filtered on the way in");
+        assert_eq!(
+            log.len().unwrap(),
+            6,
+            "an op kind was filtered on the way in"
+        );
     }
 
     #[test]
@@ -1062,15 +1210,20 @@ mod tests {
 
         let mut log = MemoryOpLog::new();
         for op in [post.clone(), revise.clone(), moderate.clone(), vote.clone()] {
-            log.append(op, Arrival::unordered());
+            log.append(op, Arrival::unordered()).unwrap();
         }
 
-        let mut got: Vec<OpId> = log.iter_target(&target).iter().map(|e| e.id()).collect();
+        let mut got: Vec<OpId> = log
+            .iter_target(&target)
+            .unwrap()
+            .iter()
+            .map(|e| e.id())
+            .collect();
         let mut expected = vec![revise.op.id(), moderate.op.id(), vote.op.id()];
         got.sort();
         expected.sort();
         assert_eq!(got, expected, "all three kinds naming the target");
-        assert_eq!(log.len(), 4, "the post itself is still stored");
+        assert_eq!(log.len().unwrap(), 4, "the post itself is still stored");
     }
 
     #[test]
@@ -1091,15 +1244,15 @@ mod tests {
         });
 
         let mut log = MemoryOpLog::new();
-        log.append(parent, Arrival::unordered());
-        log.append(reply.clone(), Arrival::unordered());
+        log.append(parent, Arrival::unordered()).unwrap();
+        log.append(reply.clone(), Arrival::unordered()).unwrap();
 
         assert_eq!(
-            log.iter_target(&parent_id).len(),
+            log.iter_target(&parent_id).unwrap().len(),
             0,
             "a reply is not an op acting on its parent"
         );
-        assert_eq!(log.len(), 2, "both are stored");
+        assert_eq!(log.len().unwrap(), 2, "both are stored");
     }
 
     #[test]
@@ -1126,15 +1279,20 @@ mod tests {
         .sign(&author);
 
         let mut log = MemoryOpLog::new();
-        log.append(post.clone(), Arrival::unordered());
-        log.append(metadata.clone(), Arrival::unordered());
+        log.append(post.clone(), Arrival::unordered()).unwrap();
+        log.append(metadata.clone(), Arrival::unordered()).unwrap();
 
         assert_eq!(
-            log.iter_target(&post.op.id()).len(),
+            log.iter_target(&post.op.id()).unwrap().len(),
             0,
             "a metadata op does not act on another op"
         );
-        let ids: Vec<OpId> = log.iter_stoa(&stoa).iter().map(|e| e.id()).collect();
+        let ids: Vec<OpId> = log
+            .iter_stoa(&stoa)
+            .unwrap()
+            .iter()
+            .map(|e| e.id())
+            .collect();
         assert!(
             ids.contains(&metadata.op.id()),
             "but it is stored and reachable by Stoa"
@@ -1149,8 +1307,8 @@ mod tests {
         let post = signed(a_post("the subject"));
         let target = post.op.id();
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::unordered());
-        assert_eq!(log.iter_target(&target).len(), 0);
+        log.append(post, Arrival::unordered()).unwrap();
+        assert_eq!(log.iter_target(&target).unwrap().len(), 0);
     }
 
     #[test]
@@ -1188,11 +1346,18 @@ mod tests {
         .sign(&author);
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1)));
-        log.append(older.clone(), Arrival::ordered(2, a_message_id(1)));
-        log.append(newer.clone(), Arrival::ordered(3, a_message_id(1)));
+        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(older.clone(), Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
+        log.append(newer.clone(), Arrival::ordered(3, a_message_id(1)))
+            .unwrap();
 
-        let ids: Vec<OpId> = log.iter_target(&target).iter().map(|e| e.id()).collect();
+        let ids: Vec<OpId> = log
+            .iter_target(&target)
+            .unwrap()
+            .iter()
+            .map(|e| e.id())
+            .collect();
         assert_eq!(
             ids,
             vec![newer.op.id(), older.op.id()],
@@ -1207,12 +1372,17 @@ mod tests {
         // §3.3: a peer cannot establish that its set is complete, so a read that
         // needed completeness could never answer at all.
         let log = MemoryOpLog::new();
-        assert_eq!(log.len(), 0);
-        assert!(log.is_empty());
-        assert_eq!(log.iter().len(), 0);
-        assert_eq!(log.iter_stoa(&a_stoa("Agora")).len(), 0);
-        assert_eq!(log.iter_target(&signed(a_post("absent")).op.id()).len(), 0);
-        assert_eq!(log.get(&signed(a_post("absent")).op.id()), None);
+        assert_eq!(log.len().unwrap(), 0);
+        assert!(log.is_empty().unwrap());
+        assert_eq!(log.iter().unwrap().len(), 0);
+        assert_eq!(log.iter_stoa(&a_stoa("Agora")).unwrap().len(), 0);
+        assert_eq!(
+            log.iter_target(&signed(a_post("absent")).op.id())
+                .unwrap()
+                .len(),
+            0
+        );
+        assert_eq!(log.get(&signed(a_post("absent")).op.id()).unwrap(), None);
     }
 
     #[test]
@@ -1235,16 +1405,17 @@ mod tests {
         .sign(&author);
 
         let mut log = MemoryOpLog::new();
-        log.append(orphan.clone(), Arrival::unordered());
+        log.append(orphan.clone(), Arrival::unordered()).unwrap();
 
         assert_eq!(
-            log.get(&missing_target),
+            log.get(&missing_target).unwrap(),
             None,
             "the target really is absent"
         );
-        assert_eq!(log.iter().len(), 1);
+        assert_eq!(log.iter().unwrap().len(), 1);
         let ids: Vec<OpId> = log
             .iter_target(&missing_target)
+            .unwrap()
             .iter()
             .map(|e| e.id())
             .collect();
@@ -1265,8 +1436,11 @@ mod tests {
             ..a_post("unused")
         });
         let id = reply.op.id();
-        assert_eq!(log.append(reply, Arrival::unordered()), Appended::Stored);
-        assert!(log.get(&id).is_some());
+        assert_eq!(
+            log.append(reply, Arrival::unordered()).unwrap(),
+            Appended::Stored
+        );
+        assert!(log.get(&id).unwrap().is_some());
     }
 
     // ─── Hostile input ────────────────────────────────────────────────────
@@ -1298,7 +1472,7 @@ mod tests {
                 }
                 .sign(&author);
                 let id = op.op.id();
-                log.append(op, arrival.clone());
+                log.append(op, arrival.clone()).unwrap();
                 let _ = log.get(&id);
                 let _ = log.iter();
                 let _ = log.iter_stoa(&stoa);
@@ -1316,9 +1490,13 @@ mod tests {
     #[test]
     fn looking_up_an_absent_op_is_a_defined_absence() {
         let mut log = MemoryOpLog::new();
-        log.append(signed(a_post("present")), Arrival::unordered());
-        assert_eq!(log.get(&signed(a_post("absent")).op.id()), None);
-        assert_eq!(log.get(&OpId::from_hex(&"00".repeat(32)).unwrap()), None);
+        log.append(signed(a_post("present")), Arrival::unordered())
+            .unwrap();
+        assert_eq!(log.get(&signed(a_post("absent")).op.id()).unwrap(), None);
+        assert_eq!(
+            log.get(&OpId::from_hex(&"00".repeat(32)).unwrap()).unwrap(),
+            None
+        );
     }
 
     // ─── What the trait buys, exercised through the trait ─────────────────
@@ -1336,6 +1514,7 @@ mod tests {
         // over the read each uses.
         fn latest_moderation<L: OpLog>(log: &L, target: &OpId) -> Option<ModerationAction> {
             log.iter_target(target)
+                .unwrap()
                 .into_iter()
                 .find_map(|e| match &e.op.op.kind {
                     OpKind::Moderate { action, .. } => Some(*action),
@@ -1366,9 +1545,10 @@ mod tests {
         .sign(&moderator);
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1)));
-        log.append(hide, Arrival::ordered(2, a_message_id(1)));
-        log.append(unhide, Arrival::ordered(3, a_message_id(1)));
+        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(hide, Arrival::ordered(2, a_message_id(1))).unwrap();
+        log.append(unhide, Arrival::ordered(3, a_message_id(1)))
+            .unwrap();
 
         // Last write wins by Lamport order (§5.7): the unhide is current.
         assert_eq!(

@@ -114,7 +114,7 @@
 //! flat model (every version naming the original) is what keeps a late arrival a
 //! *re-resolution* rather than a jump onto a different branch.
 
-use crate::log::{Entry, OpLog};
+use crate::log::{Entry, OpLog, OpLogError};
 use crate::op::{OpId, OpKind};
 
 /// A post's current version, and the post it is a version of.
@@ -215,18 +215,25 @@ impl CurrentVersion {
 ///
 /// # What each outcome means
 ///
-/// `None` is returned when the log holds no op with this id, **and** when it
+/// `Ok(None)` is returned when the log holds no op with this id, **and** when it
 /// holds one that is not an [`OpKind::Post`]. The two are one outcome
 /// deliberately: only a post has versions, and a caller holding a vote's op id
 /// has made a category mistake for which there is no rendering either way. Two
 /// outcomes is what a caller can act on — there is something to render, or there
 /// is not.
 ///
-/// `Some` is returned otherwise, and it is never an error: a peer holding fewer
-/// revisions than its neighbour resolves over the ones it has, and a peer
-/// holding none resolves to the original. §3.3 makes different op sets the
-/// normal case, so "not enough information" is not an outcome any peer could
-/// distinguish from "this is all there is".
+/// `Ok(Some)` is returned otherwise: a peer holding fewer revisions than its
+/// neighbour resolves over the ones it has, and a peer holding none resolves to
+/// the original. §3.3 makes different op sets the normal case, so "not enough
+/// information" is not an outcome any peer could distinguish from "this is all
+/// there is".
+///
+/// `Err` is a **third** thing and not a kind of absence: the store could not be
+/// consulted at all, so this function has no opinion about the post rather than
+/// the opinion that it is missing. Rendering the two the same way would show a
+/// peer with a broken disk a forum that looks merely empty, which is why the
+/// distinction is in the type where a caller cannot skip it. See
+/// [`OpLogError`], which records what a caller should do with one.
 ///
 /// # What is dropped, and in what order
 ///
@@ -235,19 +242,24 @@ impl CurrentVersion {
 /// supplies the second; the two checks here supply the rest, in that order —
 /// see this module's documentation for why verifying first is load-bearing
 /// rather than tidy.
-pub fn current_version<L: OpLog>(log: &L, post: &OpId) -> Option<CurrentVersion> {
-    let original = log.get(post)?;
+pub fn current_version<L: OpLog>(
+    log: &L,
+    post: &OpId,
+) -> Result<Option<CurrentVersion>, OpLogError> {
+    let Some(original) = log.get(post)? else {
+        return Ok(None);
+    };
 
     // Only a post has versions. A `Revise`, a `Vote` or a `Moderate` reaching
     // this point means the caller named something that has no body to replace,
     // and resolving it as though it did would let a revision naming a vote
     // substitute content into a reader's view of it.
     if !matches!(original.op.op.kind, OpKind::Post { .. }) {
-        return None;
+        return Ok(None);
     }
 
     let current = log
-        .iter_target(post)
+        .iter_target(post)?
         .into_iter()
         // `find`, not `max_by` or a sort: `iter_target` is already in `cmp_ops`
         // order, so the first match IS the one the ordering rule places first.
@@ -264,7 +276,7 @@ pub fn current_version<L: OpLog>(log: &L, post: &OpId) -> Option<CurrentVersion>
         // pays one clone on the no-revision path.
         .unwrap_or_else(|| original.clone());
 
-    Some(CurrentVersion { original, current })
+    Ok(Some(CurrentVersion { original, current }))
 }
 
 /// Whether `candidate` is a version of `original` that a reader may trust.
@@ -421,9 +433,9 @@ mod tests {
         let post = a_post("as published");
         let id = post.op.id();
         let mut log = MemoryOpLog::new();
-        log.append(post.clone(), Arrival::unordered());
+        log.append(post.clone(), Arrival::unordered()).unwrap();
 
-        let resolved = current_version(&log, &id).unwrap();
+        let resolved = current_version(&log, &id).unwrap().unwrap();
         assert_eq!(resolved.original.id(), id);
         assert_eq!(resolved.current.id(), id);
         assert_eq!(resolved.body(), "as published");
@@ -435,7 +447,9 @@ mod tests {
         // §3.3: absence is a defined answer, not an error. A peer may simply not
         // have received the post yet.
         let log = MemoryOpLog::new();
-        assert!(current_version(&log, &a_post("never received").op.id()).is_none());
+        assert!(current_version(&log, &a_post("never received").op.id())
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -449,15 +463,15 @@ mod tests {
         let revision = a_revision(target, "revises something we lack");
 
         let mut log = MemoryOpLog::new();
-        log.append(revision.clone(), Arrival::unordered());
+        log.append(revision.clone(), Arrival::unordered()).unwrap();
 
         assert!(
-            current_version(&log, &target).is_none(),
+            current_version(&log, &target).unwrap().is_none(),
             "a revision must not stand in for the post it revises"
         );
         // And the revision is genuinely in the log, so this is not passing
         // because nothing was stored.
-        assert!(log.get(&revision.op.id()).is_some());
+        assert!(log.get(&revision.op.id()).unwrap().is_some());
     }
 
     // ─── Authorship decides validity ──────────────────────────────────────
@@ -481,10 +495,12 @@ mod tests {
         assert_ne!(intruder.op.author, post.op.author);
 
         let mut log = MemoryOpLog::new();
-        log.append(post.clone(), Arrival::ordered(1, a_message_id(1)));
-        log.append(intruder, Arrival::ordered(2, a_message_id(1)));
+        log.append(post.clone(), Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
+        log.append(intruder, Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
 
-        let resolved = current_version(&log, &id).unwrap();
+        let resolved = current_version(&log, &id).unwrap().unwrap();
         assert_eq!(resolved.body(), "mine");
         assert_eq!(resolved.current.id(), id);
         assert!(!resolved.is_revised());
@@ -502,21 +518,28 @@ mod tests {
         let theirs = a_revision_by(&stranger(), id, "hijacked");
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1)));
-        log.append(mine.clone(), Arrival::ordered(2, a_message_id(1)));
+        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(mine.clone(), Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
         // The stranger's is strictly MORE recent, so it heads `iter_target`.
-        log.append(theirs.clone(), Arrival::ordered(3, a_message_id(1)));
+        log.append(theirs.clone(), Arrival::ordered(3, a_message_id(1)))
+            .unwrap();
 
         // Confirm the fixture: the stranger's op really does lead the order, so
         // the resolver had to reject it rather than never having seen it.
-        let ordered: Vec<OpId> = log.iter_target(&id).iter().map(|e| e.id()).collect();
+        let ordered: Vec<OpId> = log
+            .iter_target(&id)
+            .unwrap()
+            .iter()
+            .map(|e| e.id())
+            .collect();
         assert_eq!(
             ordered,
             vec![theirs.op.id(), mine.op.id()],
             "the fixture must put the stranger's revision first"
         );
 
-        let resolved = current_version(&log, &id).unwrap();
+        let resolved = current_version(&log, &id).unwrap().unwrap();
         assert_eq!(resolved.body(), "v2 by me");
         assert_eq!(resolved.current.id(), mine.op.id());
     }
@@ -526,13 +549,17 @@ mod tests {
         let post = a_post("mine");
         let id = post.op.id();
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::unordered());
+        log.append(post, Arrival::unordered()).unwrap();
         log.append(
             a_revision_by(&stranger(), id, "hijacked"),
             Arrival::ordered(9, a_message_id(1)),
-        );
+        )
+        .unwrap();
 
-        assert_eq!(current_version(&log, &id).unwrap().body(), "mine");
+        assert_eq!(
+            current_version(&log, &id).unwrap().unwrap().body(),
+            "mine"
+        );
     }
 
     #[test]
@@ -542,7 +569,7 @@ mod tests {
         let post = a_post("mine");
         let id = post.op.id();
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(0, a_message_id(0)));
+        log.append(post, Arrival::ordered(0, a_message_id(0))).unwrap();
 
         for seed in [3u8, 4, 5, 9, 200, 255] {
             let key = a_key(seed);
@@ -550,10 +577,11 @@ mod tests {
             log.append(
                 a_revision_by(&key, id, "hijacked"),
                 Arrival::ordered(seed as u64 + 10, a_message_id(seed)),
-            );
+            )
+            .unwrap();
         }
 
-        let resolved = current_version(&log, &id).unwrap();
+        let resolved = current_version(&log, &id).unwrap().unwrap();
         assert_eq!(
             resolved.body(),
             "mine",
@@ -581,10 +609,14 @@ mod tests {
         assert_eq!(forged.op.author, post.op.author);
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1)));
-        log.append(forged, Arrival::ordered(2, a_message_id(1)));
+        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(forged, Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
 
-        assert_eq!(current_version(&log, &id).unwrap().body(), "mine");
+        assert_eq!(
+            current_version(&log, &id).unwrap().unwrap().body(),
+            "mine"
+        );
     }
 
     #[test]
@@ -598,15 +630,22 @@ mod tests {
         assert!(!forged.verify());
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1)));
-        log.append(genuine.clone(), Arrival::ordered(2, a_message_id(1)));
-        log.append(forged.clone(), Arrival::ordered(3, a_message_id(1)));
+        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(genuine.clone(), Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
+        log.append(forged.clone(), Arrival::ordered(3, a_message_id(1)))
+            .unwrap();
 
         // The forgery really does lead the order.
-        let ordered: Vec<OpId> = log.iter_target(&id).iter().map(|e| e.id()).collect();
+        let ordered: Vec<OpId> = log
+            .iter_target(&id)
+            .unwrap()
+            .iter()
+            .map(|e| e.id())
+            .collect();
         assert_eq!(ordered, vec![forged.op.id(), genuine.op.id()]);
 
-        let resolved = current_version(&log, &id).unwrap();
+        let resolved = current_version(&log, &id).unwrap().unwrap();
         assert_eq!(resolved.body(), "v2 by me");
         assert_eq!(resolved.current.id(), genuine.op.id());
     }
@@ -623,10 +662,13 @@ mod tests {
         assert_eq!(junk.op.author, post.op.author, "the author still matches");
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1)));
-        log.append(junk, Arrival::ordered(2, a_message_id(1)));
+        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(junk, Arrival::ordered(2, a_message_id(1))).unwrap();
 
-        assert_eq!(current_version(&log, &id).unwrap().body(), "mine");
+        assert_eq!(
+            current_version(&log, &id).unwrap().unwrap().body(),
+            "mine"
+        );
     }
 
     #[test]
@@ -648,10 +690,14 @@ mod tests {
         assert!(!lifted.verify());
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1)));
-        log.append(lifted, Arrival::ordered(2, a_message_id(1)));
+        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(lifted, Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
 
-        assert_eq!(current_version(&log, &id).unwrap().body(), "mine");
+        assert_eq!(
+            current_version(&log, &id).unwrap().unwrap().body(),
+            "mine"
+        );
     }
 
     // ─── Lamport order decides currency ───────────────────────────────────
@@ -668,12 +714,14 @@ mod tests {
         let v4 = a_revision(id, "v4");
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1)));
-        log.append(v3.clone(), Arrival::ordered(3, a_message_id(1)));
-        log.append(v2, Arrival::ordered(2, a_message_id(1)));
-        log.append(v4.clone(), Arrival::ordered(4, a_message_id(1)));
+        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(v3.clone(), Arrival::ordered(3, a_message_id(1)))
+            .unwrap();
+        log.append(v2, Arrival::ordered(2, a_message_id(1))).unwrap();
+        log.append(v4.clone(), Arrival::ordered(4, a_message_id(1)))
+            .unwrap();
 
-        let resolved = current_version(&log, &id).unwrap();
+        let resolved = current_version(&log, &id).unwrap().unwrap();
         assert_eq!(resolved.body(), "v4");
         assert_eq!(resolved.current.id(), v4.op.id());
         assert!(resolved.is_revised());
@@ -682,7 +730,7 @@ mod tests {
         assert_eq!(resolved.original.op.op.kind, a_post("v1").op.kind);
         // And the superseded version is untouched in the log (§5.7: history is
         // kept), nameable by its own id.
-        assert!(log.get(&v3.op.id()).is_some());
+        assert!(log.get(&v3.op.id()).unwrap().is_some());
     }
 
     #[test]
@@ -698,11 +746,13 @@ mod tests {
         let (low_id, high_id) = two_revisions_by_ascending_id(id);
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1)));
-        log.append(low_id.clone(), Arrival::ordered(9, a_message_id(1)));
-        log.append(high_id.clone(), Arrival::ordered(8, a_message_id(1)));
+        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(low_id.clone(), Arrival::ordered(9, a_message_id(1)))
+            .unwrap();
+        log.append(high_id.clone(), Arrival::ordered(8, a_message_id(1)))
+            .unwrap();
 
-        let resolved = current_version(&log, &id).unwrap();
+        let resolved = current_version(&log, &id).unwrap().unwrap();
         assert_eq!(
             resolved.current.id(),
             low_id.op.id(),
@@ -720,11 +770,13 @@ mod tests {
         let (low_id, high_id) = two_revisions_by_ascending_id(id);
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1)));
-        log.append(low_id.clone(), Arrival::ordered(7, a_message_id(9)));
-        log.append(high_id.clone(), Arrival::ordered(7, a_message_id(1)));
+        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(low_id.clone(), Arrival::ordered(7, a_message_id(9)))
+            .unwrap();
+        log.append(high_id.clone(), Arrival::ordered(7, a_message_id(1)))
+            .unwrap();
 
-        let resolved = current_version(&log, &id).unwrap();
+        let resolved = current_version(&log, &id).unwrap().unwrap();
         assert_eq!(
             resolved.current.id(),
             high_id.op.id(),
@@ -746,11 +798,11 @@ mod tests {
         let (low_id, high_id) = two_revisions_by_ascending_id(id);
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::unordered());
-        log.append(high_id.clone(), Arrival::unordered());
-        log.append(low_id.clone(), Arrival::unordered());
+        log.append(post, Arrival::unordered()).unwrap();
+        log.append(high_id.clone(), Arrival::unordered()).unwrap();
+        log.append(low_id.clone(), Arrival::unordered()).unwrap();
 
-        let resolved = current_version(&log, &id).unwrap();
+        let resolved = current_version(&log, &id).unwrap().unwrap();
         assert_eq!(resolved.current.id(), low_id.op.id());
     }
 
@@ -765,11 +817,12 @@ mod tests {
         let (unordered, ordered_zero) = two_revisions_by_ascending_id(id);
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::unordered());
-        log.append(unordered.clone(), Arrival::unordered());
-        log.append(ordered_zero.clone(), Arrival::ordered(0, a_message_id(1)));
+        log.append(post, Arrival::unordered()).unwrap();
+        log.append(unordered.clone(), Arrival::unordered()).unwrap();
+        log.append(ordered_zero.clone(), Arrival::ordered(0, a_message_id(1)))
+            .unwrap();
 
-        let resolved = current_version(&log, &id).unwrap();
+        let resolved = current_version(&log, &id).unwrap().unwrap();
         assert_eq!(
             resolved.current.id(),
             ordered_zero.op.id(),
@@ -796,16 +849,20 @@ mod tests {
 
         let mut forwards = MemoryOpLog::new();
         for (op, arrival) in ops.iter() {
-            forwards.append(op.clone(), arrival.clone());
+            forwards.append(op.clone(), arrival.clone()).unwrap();
         }
         let mut backwards = MemoryOpLog::new();
         for (op, arrival) in ops.iter().rev() {
-            backwards.append(op.clone(), arrival.clone());
+            backwards.append(op.clone(), arrival.clone()).unwrap();
         }
-        assert_eq!(forwards.len(), 5, "the fixture must exercise all five");
+        assert_eq!(
+            forwards.len().unwrap(),
+            5,
+            "the fixture must exercise all five"
+        );
 
-        let a = current_version(&forwards, &id).unwrap();
-        let b = current_version(&backwards, &id).unwrap();
+        let a = current_version(&forwards, &id).unwrap().unwrap();
+        let b = current_version(&backwards, &id).unwrap().unwrap();
         assert_eq!(a.current.id(), b.current.id());
         assert_eq!(a.body(), b.body());
         // And the stranger's — which leads both logs' order — is not the answer.
@@ -833,18 +890,37 @@ mod tests {
         let v3 = a_revision(id, "v3");
 
         let mut complete = MemoryOpLog::new();
-        complete.append(post.clone(), Arrival::ordered(1, a_message_id(1)));
-        complete.append(v2.clone(), Arrival::ordered(2, a_message_id(1)));
-        complete.append(v3.clone(), Arrival::ordered(3, a_message_id(1)));
+        complete
+            .append(post.clone(), Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
+        complete
+            .append(v2.clone(), Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
+        complete
+            .append(v3.clone(), Arrival::ordered(3, a_message_id(1)))
+            .unwrap();
 
         let mut behind = MemoryOpLog::new();
-        behind.append(post, Arrival::ordered(1, a_message_id(1)));
-        behind.append(v2.clone(), Arrival::ordered(2, a_message_id(1)));
+        behind
+            .append(post, Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
+        behind
+            .append(v2.clone(), Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
 
-        assert_eq!(current_version(&complete, &id).unwrap().body(), "v3");
-        assert_eq!(current_version(&behind, &id).unwrap().body(), "v2");
+        assert_eq!(
+            current_version(&complete, &id).unwrap().unwrap().body(),
+            "v3"
+        );
+        assert_eq!(
+            current_version(&behind, &id).unwrap().unwrap().body(),
+            "v2"
+        );
         // Both are revised, and neither is an error.
-        assert!(current_version(&behind, &id).unwrap().is_revised());
+        assert!(current_version(&behind, &id)
+            .unwrap()
+            .unwrap()
+            .is_revised());
     }
 
     #[test]
@@ -869,16 +945,18 @@ mod tests {
         let (low_id, high_id) = two_revisions_by_ascending_id(id);
 
         let mut complete = MemoryOpLog::new();
-        complete.append(post.clone(), Arrival::unordered());
-        complete.append(low_id.clone(), Arrival::unordered());
-        complete.append(high_id.clone(), Arrival::unordered());
+        complete.append(post.clone(), Arrival::unordered()).unwrap();
+        complete.append(low_id.clone(), Arrival::unordered()).unwrap();
+        complete
+            .append(high_id.clone(), Arrival::unordered())
+            .unwrap();
 
         let mut behind = MemoryOpLog::new();
-        behind.append(post, Arrival::unordered());
-        behind.append(low_id.clone(), Arrival::unordered());
+        behind.append(post, Arrival::unordered()).unwrap();
+        behind.append(low_id.clone(), Arrival::unordered()).unwrap();
 
-        let ahead = current_version(&complete, &id).unwrap();
-        let back = current_version(&behind, &id).unwrap();
+        let ahead = current_version(&complete, &id).unwrap().unwrap();
+        let back = current_version(&behind, &id).unwrap().unwrap();
 
         // Both answer, neither errors — the regime-neutral half.
         assert!(ahead.is_revised());
@@ -896,11 +974,13 @@ mod tests {
         // The answer is a function of the SET held, not of arrival sequence:
         // the same two ops appended the other way round agree with `complete`.
         let mut reversed = MemoryOpLog::new();
-        reversed.append(high_id.clone(), Arrival::unordered());
-        reversed.append(low_id, Arrival::unordered());
-        reversed.append(a_post("v1"), Arrival::unordered());
+        reversed
+            .append(high_id.clone(), Arrival::unordered())
+            .unwrap();
+        reversed.append(low_id, Arrival::unordered()).unwrap();
+        reversed.append(a_post("v1"), Arrival::unordered()).unwrap();
         assert_eq!(
-            current_version(&reversed, &id).unwrap().current.id(),
+            current_version(&reversed, &id).unwrap().unwrap().current.id(),
             ahead.current.id()
         );
     }
@@ -918,21 +998,24 @@ mod tests {
         let post = a_post("v1");
         let id = post.op.id();
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1)));
-        assert_eq!(current_version(&log, &id).unwrap().body(), "v1");
+        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        assert_eq!(current_version(&log, &id).unwrap().unwrap().body(),"v1");
 
-        log.append(a_revision(id, "v2"), Arrival::ordered(2, a_message_id(1)));
-        assert_eq!(current_version(&log, &id).unwrap().body(), "v2");
+        log.append(a_revision(id, "v2"), Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
+        assert_eq!(current_version(&log, &id).unwrap().unwrap().body(),"v2");
 
-        log.append(a_revision(id, "v3"), Arrival::ordered(3, a_message_id(1)));
-        assert_eq!(current_version(&log, &id).unwrap().body(), "v3");
+        log.append(a_revision(id, "v3"), Arrival::ordered(3, a_message_id(1)))
+            .unwrap();
+        assert_eq!(current_version(&log, &id).unwrap().unwrap().body(),"v3");
 
         // An OLDER revision arriving late does not move the answer backwards.
         log.append(
             a_revision(id, "late v0"),
             Arrival::ordered(0, a_message_id(1)),
-        );
-        assert_eq!(current_version(&log, &id).unwrap().body(), "v3");
+        )
+        .unwrap();
+        assert_eq!(current_version(&log, &id).unwrap().unwrap().body(),"v3");
     }
 
     #[test]
@@ -951,19 +1034,19 @@ mod tests {
         let (low_id, high_id) = two_revisions_by_ascending_id(id);
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::unordered());
+        log.append(post, Arrival::unordered()).unwrap();
         // The HIGHER op id arrives first and is current while it is alone.
-        log.append(high_id.clone(), Arrival::unordered());
+        log.append(high_id.clone(), Arrival::unordered()).unwrap();
         assert_eq!(
-            current_version(&log, &id).unwrap().current.id(),
+            current_version(&log, &id).unwrap().unwrap().current.id(),
             high_id.op.id()
         );
 
         // The LOWER op id arrives later and takes over, because the degraded
         // order is ascending op id and knows nothing of arrival sequence.
-        log.append(low_id.clone(), Arrival::unordered());
+        log.append(low_id.clone(), Arrival::unordered()).unwrap();
         assert_eq!(
-            current_version(&log, &id).unwrap().current.id(),
+            current_version(&log, &id).unwrap().unwrap().current.id(),
             low_id.op.id(),
             "the degraded order re-resolves rather than advancing"
         );
@@ -1004,16 +1087,17 @@ mod tests {
             let id = op.op.id();
 
             let mut log = MemoryOpLog::new();
-            log.append(op, Arrival::ordered(1, a_message_id(1)));
+            log.append(op, Arrival::ordered(1, a_message_id(1))).unwrap();
             // A perfectly valid revision naming it, by its own author.
             let tempting = a_revision(id, "should not be reachable");
-            log.append(tempting.clone(), Arrival::ordered(2, a_message_id(1)));
+            log.append(tempting.clone(), Arrival::ordered(2, a_message_id(1)))
+                .unwrap();
             // The revision really does name it, so the kind check is what
             // rejects this rather than an empty `iter_target`.
-            assert_eq!(log.iter_target(&id).len(), 1);
+            assert_eq!(log.iter_target(&id).unwrap().len(), 1);
 
             assert!(
-                current_version(&log, &id).is_none(),
+                current_version(&log, &id).unwrap().is_none(),
                 "only a post has versions"
             );
         }
@@ -1047,25 +1131,26 @@ mod tests {
         let id = post.op.id();
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::unordered());
+        log.append(post, Arrival::unordered()).unwrap();
         // Top of the order, so only the kind check can exclude it.
-        log.append(metadata.clone(), Arrival::ordered(u64::MAX, a_message_id(0)));
+        log.append(metadata.clone(), Arrival::ordered(u64::MAX, a_message_id(0)))
+            .unwrap();
 
         // It names no op, so it never reaches a target-restricted read.
         assert_eq!(
-            log.iter_target(&id).len(),
+            log.iter_target(&id).unwrap().len(),
             0,
             "a metadata op names the Stoa, not an op"
         );
 
         // The post is unaffected: not revised, own body.
-        let resolved = current_version(&log, &id).unwrap();
+        let resolved = current_version(&log, &id).unwrap().unwrap();
         assert!(!resolved.is_revised());
         assert_eq!(resolved.body(), "the real body");
 
         // And it is not itself a post with versions.
         assert!(
-            current_version(&log, &metadata_id).is_none(),
+            current_version(&log, &metadata_id).unwrap().is_none(),
             "only a post has versions"
         );
     }
@@ -1091,13 +1176,14 @@ mod tests {
         let id = reply.op.id();
 
         let mut log = MemoryOpLog::new();
-        log.append(reply, Arrival::ordered(1, a_message_id(1)));
+        log.append(reply, Arrival::ordered(1, a_message_id(1))).unwrap();
         log.append(
             a_revision(id, "an edited reply"),
             Arrival::ordered(2, a_message_id(1)),
-        );
+        )
+        .unwrap();
 
-        let resolved = current_version(&log, &id).unwrap();
+        let resolved = current_version(&log, &id).unwrap().unwrap();
         assert_eq!(resolved.body(), "an edited reply");
         assert!(resolved.is_revised());
     }
@@ -1124,20 +1210,22 @@ mod tests {
         let chained = a_revision(v2.op.id(), "v3 via chain");
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1)));
-        log.append(v2.clone(), Arrival::ordered(2, a_message_id(1)));
-        log.append(chained.clone(), Arrival::ordered(3, a_message_id(1)));
+        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(v2.clone(), Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
+        log.append(chained.clone(), Arrival::ordered(3, a_message_id(1)))
+            .unwrap();
 
-        let resolved = current_version(&log, &id).unwrap();
+        let resolved = current_version(&log, &id).unwrap().unwrap();
         assert_eq!(resolved.body(), "v2");
         assert_eq!(resolved.current.id(), v2.op.id());
 
         // The chained op is in the log and names v2 — so it was dropped by the
         // flat rule, not by never having been stored.
-        assert!(log.get(&chained.op.id()).is_some());
-        assert_eq!(log.iter_target(&v2.op.id()).len(), 1);
+        assert!(log.get(&chained.op.id()).unwrap().is_some());
+        assert_eq!(log.iter_target(&v2.op.id()).unwrap().len(), 1);
         // And resolving the revision itself is absence: it is not a post.
-        assert!(current_version(&log, &v2.op.id()).is_none());
+        assert!(current_version(&log, &v2.op.id()).unwrap().is_none());
     }
 
     #[test]
@@ -1147,15 +1235,20 @@ mod tests {
         let post = a_post("v1");
         let id = post.op.id();
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1)));
+        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
         for (n, lamport) in [("v2", 2u64), ("v3", 3), ("v4", 4), ("v5", 5)] {
             log.append(
                 a_revision(id, n),
                 Arrival::ordered(lamport, a_message_id(1)),
-            );
+            )
+            .unwrap();
         }
-        assert_eq!(log.iter_target(&id).len(), 4, "all four name the post");
-        assert_eq!(current_version(&log, &id).unwrap().body(), "v5");
+        assert_eq!(
+            log.iter_target(&id).unwrap().len(),
+            4,
+            "all four name the post"
+        );
+        assert_eq!(current_version(&log, &id).unwrap().unwrap().body(),"v5");
     }
 
     // ─── History is kept ──────────────────────────────────────────────────
@@ -1168,26 +1261,30 @@ mod tests {
         let post = a_post("v1");
         let id = post.op.id();
         let mut log = MemoryOpLog::new();
-        log.append(post.clone(), Arrival::ordered(1, a_message_id(1)));
-        log.append(a_revision(id, "v2"), Arrival::ordered(2, a_message_id(1)));
-        log.append(a_revision(id, "v3"), Arrival::ordered(3, a_message_id(1)));
+        log.append(post.clone(), Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
+        log.append(a_revision(id, "v2"), Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
+        log.append(a_revision(id, "v3"), Arrival::ordered(3, a_message_id(1)))
+            .unwrap();
         log.append(
             a_revision_by(&stranger(), id, "dropped"),
             Arrival::ordered(4, a_message_id(1)),
-        );
+        )
+        .unwrap();
 
-        let before: Vec<Vec<u8>> = log.iter().iter().map(|e| e.op.to_bytes()).collect();
+        let before: Vec<Vec<u8>> = log.iter().unwrap().iter().map(|e| e.op.to_bytes()).collect();
         let count = log.len();
 
         let _ = current_version(&log, &id).unwrap();
 
-        let after: Vec<Vec<u8>> = log.iter().iter().map(|e| e.op.to_bytes()).collect();
+        let after: Vec<Vec<u8>> = log.iter().unwrap().iter().map(|e| e.op.to_bytes()).collect();
         assert_eq!(before, after, "resolving altered the log");
         assert_eq!(log.len(), count);
-        assert_eq!(count, 4, "including the dropped stranger's revision");
+        assert_eq!(count.unwrap(), 4, "including the dropped stranger's revision");
         // Even the version that was dropped on read is still there and still
         // verifiable as the authentic op it is.
-        assert!(log.iter().iter().all(|e| e.op.verify()));
+        assert!(log.iter().unwrap().iter().all(|e| e.op.verify()));
     }
 
     #[test]
@@ -1200,14 +1297,16 @@ mod tests {
         let v3 = a_revision(id, "v3");
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1)));
-        log.append(v2.clone(), Arrival::ordered(2, a_message_id(1)));
-        log.append(v3.clone(), Arrival::ordered(3, a_message_id(1)));
+        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(v2.clone(), Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
+        log.append(v3.clone(), Arrival::ordered(3, a_message_id(1)))
+            .unwrap();
 
-        let resolved = current_version(&log, &id).unwrap();
+        let resolved = current_version(&log, &id).unwrap().unwrap();
         assert_eq!(resolved.current.id(), v3.op.id());
-        assert_eq!(log.get(&v2.op.id()).unwrap().op, v2);
-        assert_eq!(log.get(&id).unwrap().id(), id);
+        assert_eq!(log.get(&v2.op.id()).unwrap().unwrap().op, v2);
+        assert_eq!(log.get(&id).unwrap().unwrap().id(), id);
     }
 
     // ─── What the resolved version reports ────────────────────────────────
@@ -1241,10 +1340,11 @@ mod tests {
         .sign(&author());
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1)));
-        log.append(revised, Arrival::ordered(2, a_message_id(1)));
+        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(revised, Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
 
-        let resolved = current_version(&log, &id).unwrap();
+        let resolved = current_version(&log, &id).unwrap().unwrap();
         assert_eq!(resolved.attachments(), ["new-cid", "another"]);
         assert_eq!(resolved.body(), "v2");
     }
@@ -1267,9 +1367,9 @@ mod tests {
         .sign(&author());
         let id = post.op.id();
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::unordered());
+        log.append(post, Arrival::unordered()).unwrap();
 
-        let resolved = current_version(&log, &id).unwrap();
+        let resolved = current_version(&log, &id).unwrap().unwrap();
         assert_eq!(resolved.body(), "only ever this");
         assert_eq!(resolved.attachments(), ["cid"]);
         assert!(!resolved.is_revised());
@@ -1285,10 +1385,11 @@ mod tests {
         let cleared = a_revision(id, "");
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1)));
-        log.append(cleared.clone(), Arrival::ordered(2, a_message_id(1)));
+        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(cleared.clone(), Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
 
-        let resolved = current_version(&log, &id).unwrap();
+        let resolved = current_version(&log, &id).unwrap().unwrap();
         assert_eq!(resolved.body(), "");
         assert!(resolved.is_revised());
         assert_eq!(resolved.current.id(), cleared.op.id());
@@ -1316,10 +1417,11 @@ mod tests {
         );
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1)));
-        log.append(same_again.clone(), Arrival::ordered(2, a_message_id(1)));
+        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(same_again.clone(), Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
 
-        let resolved = current_version(&log, &id).unwrap();
+        let resolved = current_version(&log, &id).unwrap().unwrap();
         assert!(
             resolved.is_revised(),
             "a revision to identical content is still a revision"
@@ -1358,12 +1460,18 @@ mod tests {
 
         for candidate in dropped {
             let mut log = MemoryOpLog::new();
-            log.append(post.clone(), Arrival::ordered(1, a_message_id(1)));
+            log.append(post.clone(), Arrival::ordered(1, a_message_id(1)))
+                .unwrap();
             // At the top of the order, so only the drop can exclude it.
-            log.append(candidate.clone(), Arrival::ordered(9, a_message_id(1)));
-            assert_eq!(log.iter_target(&id).len(), 1, "the candidate does name it");
+            log.append(candidate.clone(), Arrival::ordered(9, a_message_id(1)))
+                .unwrap();
+            assert_eq!(
+                log.iter_target(&id).unwrap().len(),
+                1,
+                "the candidate does name it"
+            );
 
-            let resolved = current_version(&log, &id).unwrap();
+            let resolved = current_version(&log, &id).unwrap().unwrap();
             assert!(
                 !resolved.is_revised(),
                 "a dropped version must not report the post as edited"
@@ -1409,10 +1517,11 @@ mod tests {
         .sign(&author());
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1)));
-        log.append(stripped.clone(), Arrival::ordered(2, a_message_id(1)));
+        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(stripped.clone(), Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
 
-        let resolved = current_version(&log, &id).unwrap();
+        let resolved = current_version(&log, &id).unwrap().unwrap();
         assert_eq!(
             resolved.attachments(),
             [] as [String; 0],
@@ -1460,16 +1569,24 @@ mod tests {
         .sign(&key);
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1)));
-        log.append(v2.clone(), Arrival::ordered(2, a_message_id(1)));
-        log.append(hide.clone(), Arrival::ordered(8, a_message_id(1)));
-        log.append(vote.clone(), Arrival::ordered(9, a_message_id(1)));
+        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(v2.clone(), Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
+        log.append(hide.clone(), Arrival::ordered(8, a_message_id(1)))
+            .unwrap();
+        log.append(vote.clone(), Arrival::ordered(9, a_message_id(1)))
+            .unwrap();
 
         // The fixture must genuinely put them first.
-        let ordered: Vec<OpId> = log.iter_target(&id).iter().map(|e| e.id()).collect();
+        let ordered: Vec<OpId> = log
+            .iter_target(&id)
+            .unwrap()
+            .iter()
+            .map(|e| e.id())
+            .collect();
         assert_eq!(ordered, vec![vote.op.id(), hide.op.id(), v2.op.id()]);
 
-        let resolved = current_version(&log, &id).unwrap();
+        let resolved = current_version(&log, &id).unwrap().unwrap();
         assert_eq!(resolved.current.id(), v2.op.id());
         assert_eq!(resolved.body(), "v2");
     }
@@ -1490,8 +1607,9 @@ mod tests {
         let key = author();
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::unordered());
-        log.append(v2.clone(), Arrival::ordered(1, a_message_id(9)));
+        log.append(post, Arrival::unordered()).unwrap();
+        log.append(v2.clone(), Arrival::ordered(1, a_message_id(9)))
+            .unwrap();
         for kind in [
             OpKind::Moderate {
                 target: id,
@@ -1510,11 +1628,17 @@ mod tests {
                 }
                 .sign(&key),
                 Arrival::ordered(u64::MAX, MessageId::new(vec![0x00])),
-            );
+            )
+            .unwrap();
         }
 
         // The fixture must genuinely place them ahead of the revision.
-        let ordered: Vec<OpId> = log.iter_target(&id).iter().map(|e| e.id()).collect();
+        let ordered: Vec<OpId> = log
+            .iter_target(&id)
+            .unwrap()
+            .iter()
+            .map(|e| e.id())
+            .collect();
         assert_eq!(ordered.len(), 3);
         assert_eq!(
             ordered[2],
@@ -1522,7 +1646,7 @@ mod tests {
             "the revision must be LAST, so only the kind check can reject the other two"
         );
 
-        let resolved = current_version(&log, &id).unwrap();
+        let resolved = current_version(&log, &id).unwrap().unwrap();
         assert_eq!(resolved.current.id(), v2.op.id());
         assert_eq!(resolved.body(), "v2");
     }
@@ -1547,10 +1671,10 @@ mod tests {
         .sign(&author());
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1)));
-        log.append(reply, Arrival::ordered(9, a_message_id(1)));
+        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(reply, Arrival::ordered(9, a_message_id(1))).unwrap();
 
-        let resolved = current_version(&log, &id).unwrap();
+        let resolved = current_version(&log, &id).unwrap().unwrap();
         assert_eq!(resolved.body(), "the parent");
         assert!(!resolved.is_revised());
     }
@@ -1565,20 +1689,27 @@ mod tests {
         assert_ne!(first_id, second_id);
 
         let mut log = MemoryOpLog::new();
-        log.append(first, Arrival::ordered(1, a_message_id(1)));
-        log.append(second, Arrival::ordered(1, a_message_id(2)));
+        log.append(first, Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
+        log.append(second, Arrival::ordered(1, a_message_id(2)))
+            .unwrap();
         log.append(
             a_revision(first_id, "first v2"),
             Arrival::ordered(5, a_message_id(1)),
-        );
+        )
+        .unwrap();
         log.append(
             a_revision(second_id, "second v2"),
             Arrival::ordered(9, a_message_id(1)),
-        );
+        )
+        .unwrap();
 
-        assert_eq!(current_version(&log, &first_id).unwrap().body(), "first v2");
         assert_eq!(
-            current_version(&log, &second_id).unwrap().body(),
+            current_version(&log, &first_id).unwrap().unwrap().body(),
+            "first v2"
+        );
+        assert_eq!(
+            current_version(&log, &second_id).unwrap().unwrap().body(),
             "second v2"
         );
     }
@@ -1598,27 +1729,32 @@ mod tests {
         let stoa = a_stoa();
 
         let mut log = MemoryOpLog::new();
-        log.append(post.clone(), Arrival::unordered());
+        log.append(post.clone(), Arrival::unordered()).unwrap();
         log.append(
             a_forged_revision(&post.op.author, &stranger(), id, "forged"),
             Arrival::ordered(u64::MAX, a_message_id(0)),
-        );
+        )
+        .unwrap();
         log.append(
             a_revision_by(&stranger(), id, "stranger"),
             Arrival::ordered(0, MessageId::new(vec![])),
-        );
+        )
+        .unwrap();
         log.append(
             a_revision(absent, "dangling"),
             Arrival::from_parts(Some(1), None),
-        );
+        )
+        .unwrap();
         log.append(
             a_revision(id, &"x".repeat(64 * 1024)),
             Arrival::from_parts(None, Some(a_message_id(1))),
-        );
+        )
+        .unwrap();
         log.append(
             a_revision(id, "\u{0}\u{feff}🏛"),
             Arrival::ordered(u64::MAX, MessageId::new(vec![0xFF; 1024])),
-        );
+        )
+        .unwrap();
         for kind in [
             OpKind::Moderate {
                 target: id,
@@ -1640,16 +1776,17 @@ mod tests {
                 }
                 .sign(&key),
                 Arrival::ordered(u64::MAX, MessageId::new(vec![0x00])),
-            );
+            )
+            .unwrap();
         }
 
         // Every op id in the log, plus ids naming nothing at all.
-        let mut ids: Vec<OpId> = log.iter().iter().map(|e| e.id()).collect();
+        let mut ids: Vec<OpId> = log.iter().unwrap().iter().map(|e| e.id()).collect();
         ids.push(absent);
         ids.push(OpId::from_hex(&"00".repeat(32)).unwrap());
         ids.push(OpId::from_hex(&"ff".repeat(32)).unwrap());
         for probe in ids {
-            if let Some(resolved) = current_version(&log, &probe) {
+            if let Ok(Some(resolved)) = current_version(&log, &probe) {
                 let _ = resolved.body();
                 let _ = resolved.attachments();
                 let _ = resolved.is_revised();
@@ -1659,7 +1796,7 @@ mod tests {
         // And the post still resolves to something sane despite all of it: the
         // only valid revisions are the author's own two, and the ordering rule
         // places the Lamport-u64::MAX one first.
-        let resolved = current_version(&log, &id).unwrap();
+        let resolved = current_version(&log, &id).unwrap().unwrap();
         assert_eq!(resolved.body(), "\u{0}\u{feff}🏛");
     }
 
@@ -1672,14 +1809,15 @@ mod tests {
         let post = a_post("the subject");
         let id = post.op.id();
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::unordered());
+        log.append(post, Arrival::unordered()).unwrap();
 
         // A revision naming the post, then a second revision naming THAT — the
         // nearest thing to a cycle the format permits, plus a self-targeting
         // vote.
         let v2 = a_revision(id, "v2");
-        log.append(v2.clone(), Arrival::unordered());
-        log.append(a_revision(v2.op.id(), "v3"), Arrival::unordered());
+        log.append(v2.clone(), Arrival::unordered()).unwrap();
+        log.append(a_revision(v2.op.id(), "v3"), Arrival::unordered())
+            .unwrap();
         let key = author();
         let self_vote = {
             let vote = Op {
@@ -1701,11 +1839,16 @@ mod tests {
             }
             .sign(&key)
         };
-        log.append(self_vote.clone(), Arrival::unordered());
+        log.append(self_vote.clone(), Arrival::unordered()).unwrap();
 
-        assert_eq!(current_version(&log, &id).unwrap().current.id(), v2.op.id());
-        assert!(current_version(&log, &v2.op.id()).is_none());
-        assert!(current_version(&log, &self_vote.op.id()).is_none());
+        assert_eq!(
+            current_version(&log, &id).unwrap().unwrap().current.id(),
+            v2.op.id()
+        );
+        assert!(current_version(&log, &v2.op.id()).unwrap().is_none());
+        assert!(current_version(&log, &self_vote.op.id())
+            .unwrap()
+            .is_none());
     }
 
     // ─── Written against the trait, not the implementation ────────────────
@@ -1720,14 +1863,17 @@ mod tests {
         // Pinned by calling it through a generic function, which does not
         // compile if `current_version` names a concrete log type.
         fn resolve_through_the_trait<L: OpLog>(log: &L, post: &OpId) -> Option<String> {
-            current_version(log, post).map(|v| v.body().to_string())
+            current_version(log, post)
+                .unwrap()
+                .map(|v| v.body().to_string())
         }
 
         let post = a_post("v1");
         let id = post.op.id();
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1)));
-        log.append(a_revision(id, "v2"), Arrival::ordered(2, a_message_id(1)));
+        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(a_revision(id, "v2"), Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
 
         assert_eq!(resolve_through_the_trait(&log, &id), Some("v2".to_string()));
     }
