@@ -1026,10 +1026,13 @@ own answer:
   carries what the Stoa is called *today*. A reader prefers the latest valid
   op and falls back to the genesis values.
 
-  The op itself is not built. What it needs, beyond the last-write-wins rule:
-  whether a metadata op may change `policy` as well as the display fields —
-  tightening a policy retroactively changes who may post, which is a different
-  kind of act from a rename and may warrant a different rule.
+  **The op is built** — `op.rs`'s `StoaMetadata` kind, carrying a title and a
+  description (see the `stoa-metadata` spec). It carries **no `policy`**; the
+  reasoning, and what would have to be true to add one, is in the
+  `stoa-metadata-op` change's `design.md`.
+
+  **Resolution is not built**, and cannot be until the ordering gap at the end
+  of §13 closes. The op accumulates; nothing reads it yet.
 - **The moderator set itself.** Deferred with mutable moderation (§6), and the
   one place where a real ordering decision is still open — a set edited
   concurrently by two moderators is the first genuine merge question this design
@@ -1665,6 +1668,18 @@ thing (§2.3).
   recoverable direction. And the encoding carries a **version discriminant**, so
   a record from a newer client fails as "unknown version" rather than as a
   misparse.
+
+- ~~**May a Stoa metadata op change `policy` as well as the display fields?**~~
+  **Answered: no, not in that op.** §5.7 raised it; `op.rs`'s `StoaMetadata`
+  kind carries a title and a description and no policy. The argument and the
+  alternatives are in the `stoa-metadata-op` change's `design.md` — do not
+  restate them here.
+
+  What reopens it, in one line each, because these are the conditions and not
+  the reasoning: `Policy` gains a second accepted variant; §13's ordering gap
+  below closes; and a policy fallback rule is specified separately from the
+  display one, as fail-closed. Adding it then costs an unused op-kind
+  discriminant, not a wire-format version and not any Stoa's address.
 
 - **Is a threshold the right shape for proof-of-holding as a relevance signal,
   and what threshold?** §7.2 argues a threshold rather than a graded count,

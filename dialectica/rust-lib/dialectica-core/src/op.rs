@@ -68,6 +68,11 @@
 //! session counter, not a local sequence number, not anything that varies with
 //! one peer's history" — applies with equal force to a value inside a signed op
 //! that every peer must agree about.
+//!
+//! **No posting policy, in the one kind that might have carried one.**
+//! [`OpKind::StoaMetadata`] supersedes a Stoa's *display* metadata and not its
+//! policy; the reasoning is on that variant, and at length in the
+//! `stoa-metadata-op` change's `design.md`.
 
 use crate::cursor::{Cursor, OutOfBounds};
 use crate::identity::{
@@ -329,14 +334,59 @@ pub enum OpKind {
         target: OpId,
         direction: VoteDirection,
     },
+    /// What the Stoa is called *today* (§5.7).
+    ///
+    /// The genesis record's title is a **founding** value: it is inside the
+    /// address preimage, so changing it mints a different Stoa. This op carries
+    /// the current one. §5.7 states the relationship — "genesis values are what
+    /// the *address commits to* and can never change; the metadata op carries
+    /// what the Stoa is called *today*. A reader prefers the latest valid op and
+    /// falls back to the genesis values."
+    ///
+    /// The Stoa this applies to is [`Op::stoa`], like every other kind; the
+    /// signer is [`Op::author`]. Neither is repeated here.
+    ///
+    /// **No `policy`, and that is the answer to §5.7's open question** rather
+    /// than an omission. Three reasons, at length in the `stoa-metadata-op`
+    /// change's `design.md`; the one that decides it: §5.7's own reader rule
+    /// falls back to the genesis value when no op has been seen, and a peer that
+    /// missed a *tightening* would fall back to the **looser** founding policy.
+    /// That is the widening `stoa.rs` refuses on decode — "treating an
+    /// unrecognised policy as open is how a token-gated Stoa silently becomes
+    /// world-postable" — arriving instead by resolution. Refusing to default a
+    /// policy and then handing one back by fallback closes the front door only.
+    ///
+    /// Leaving it out costs no version to add later, and that was checked rather
+    /// than assumed. §13 records that `policy` landed in the *genesis* record
+    /// early because "adding the field later would have changed the address of
+    /// every Stoa already created" — that pressure does not transfer, because an
+    /// op's id is the hash of that one op. A future policy-changing act takes
+    /// the next free kind discriminant and an older client meets it as
+    /// [`OpError::UnknownKind`], changing no existing op's id and no Stoa's
+    /// address.
+    StoaMetadata {
+        /// The displayed title, superseding the genesis title for display.
+        title: String,
+        /// A field the genesis record deliberately does not have at all.
+        ///
+        /// A description is not identity, so it has no business in an address
+        /// preimage where every re-wording would mint a new Stoa. Carrying it
+        /// here is part of what makes this a metadata op rather than a
+        /// title-override op: the genesis record is the minimum needed to
+        /// *identify* a Stoa, this is what a reader needs to *render* one.
+        description: String,
+    },
 }
 
 impl OpKind {
-    // On the wire and inside every signature. Explicit, and never reordered.
+    // On the wire and inside every signature. Explicit, and never reordered:
+    // inserting a value into the used range would re-mean every op already
+    // signed. A new kind takes the next free value and nothing else moves.
     const POST: u8 = 0;
     const REVISE: u8 = 1;
     const MODERATE: u8 = 2;
     const VOTE: u8 = 3;
+    const STOA_METADATA: u8 = 4;
 
     fn to_byte(&self) -> u8 {
         match self {
@@ -344,6 +394,7 @@ impl OpKind {
             OpKind::Revise { .. } => Self::REVISE,
             OpKind::Moderate { .. } => Self::MODERATE,
             OpKind::Vote { .. } => Self::VOTE,
+            OpKind::StoaMetadata { .. } => Self::STOA_METADATA,
         }
     }
 }
@@ -504,6 +555,14 @@ impl Op {
                 out.extend_from_slice(target.as_bytes());
                 out.push(direction.to_byte());
             }
+            OpKind::StoaMetadata { title, description } => {
+                // Two adjacent variable-length fields, so both are prefixed
+                // through the same helper the other kinds use. Without prefixes
+                // title "ab" + description "c" and title "a" + description "bc"
+                // encode identically — two different acts with one op id.
+                put_bytes(&mut out, title.as_bytes());
+                put_bytes(&mut out, description.as_bytes());
+            }
         }
         out
     }
@@ -552,6 +611,12 @@ impl Op {
             OpKind::VOTE => OpKind::Vote {
                 target: OpId(cursor.take_array::<32>()?),
                 direction: VoteDirection::from_byte(cursor.take(1)?[0])?,
+            },
+            OpKind::STOA_METADATA => OpKind::StoaMetadata {
+                // Through `take_string`, so the length cap and the bounds check
+                // come from the shared path rather than a second copy of them.
+                title: take_string(&mut cursor)?,
+                description: take_string(&mut cursor)?,
             },
             other => return Err(OpError::UnknownKind(other)),
         };
@@ -810,10 +875,18 @@ mod tests {
             },
             Op {
                 stoa,
-                author,
+                author: author.clone(),
                 kind: OpKind::Vote {
                     target: an_id(11),
                     direction: VoteDirection::Up,
+                },
+            },
+            Op {
+                stoa,
+                author,
+                kind: OpKind::StoaMetadata {
+                    title: "The Agora, renamed".to_string(),
+                    description: "A marketplace of arguments".to_string(),
                 },
             },
         ]
@@ -1607,5 +1680,427 @@ mod tests {
             expected,
             "the encoding has a field the layout does not account for"
         );
+    }
+
+    // ─── The Stoa metadata op ─────────────────────────────────────────────
+
+    fn a_metadata_op() -> Op {
+        Op {
+            stoa: a_stoa(),
+            author: a_key(2).public_key(),
+            kind: OpKind::StoaMetadata {
+                title: "Renamed".to_string(),
+                description: "Now with a description".to_string(),
+            },
+        }
+    }
+
+    #[test]
+    fn the_metadata_fields_participate_in_the_encoding() {
+        // Varying each in turn catches one left out of the encode arm, which a
+        // round-trip test cannot see: the value comes back from the struct it
+        // never left.
+        let base = a_metadata_op();
+        let others = [
+            Op {
+                kind: OpKind::StoaMetadata {
+                    title: "A different name".to_string(),
+                    description: "Now with a description".to_string(),
+                },
+                ..base.clone()
+            },
+            Op {
+                kind: OpKind::StoaMetadata {
+                    title: "Renamed".to_string(),
+                    description: "A different description".to_string(),
+                },
+                ..base.clone()
+            },
+        ];
+        for other in others {
+            assert_ne!(
+                base.canonical_bytes(),
+                other.canonical_bytes(),
+                "a metadata field is missing from the encoding"
+            );
+            assert_ne!(
+                base.id(),
+                other.id(),
+                "a metadata field is missing from the id"
+            );
+        }
+    }
+
+    #[test]
+    fn a_metadata_ops_title_and_description_cannot_be_confused() {
+        // The concatenation trap, and the reason both fields are prefixed.
+        // Title "ab" + description "c" against title "a" + description "bc":
+        // the same concatenated text, split differently. Without the length
+        // prefixes these encode identically — two different acts, one op id.
+        let stoa = a_stoa();
+        let author = a_key(2).public_key();
+        let one = Op {
+            stoa,
+            author: author.clone(),
+            kind: OpKind::StoaMetadata {
+                title: "ab".to_string(),
+                description: "c".to_string(),
+            },
+        };
+        let two = Op {
+            stoa,
+            author,
+            kind: OpKind::StoaMetadata {
+                title: "a".to_string(),
+                description: "bc".to_string(),
+            },
+        };
+        assert_ne!(
+            one.canonical_bytes(),
+            two.canonical_bytes(),
+            "two distinct metadata ops must not share an encoding"
+        );
+        assert_ne!(one.id(), two.id());
+    }
+
+    #[test]
+    fn a_metadata_op_and_a_revision_do_not_share_a_preimage() {
+        // THE property, at the level of the bytes, and the fixture is the whole
+        // test: two ops whose kind-specific tails are byte-identical, so that
+        // the ONLY thing separating their preimages is the kind byte. Delete
+        // `out.push(self.kind.to_byte())` and these encode alike.
+        //
+        // A `Revise` tail is  target[32] | len(4) | body | count(4)
+        // A metadata tail is  len(4) | title | len(4) | description
+        //
+        // Aligning them: let the target's first four bytes spell the title's
+        // length, so 00 00 00 24 (36). The title is then the target's remaining
+        // 28 bytes, followed by the body's own 4-byte prefix and the body —
+        // 28 + 4 + 4 = 36, as claimed. What follows in the Revise is the
+        // attachment count, four zero bytes, which the metadata reads as a
+        // zero-length description.
+        let stoa = a_stoa();
+        let author = a_key(2).public_key();
+
+        let mut target_bytes = [0u8; 32];
+        target_bytes[3] = 36;
+        // The tail 28 bytes must be valid UTF-8, since they become the title.
+        for (i, b) in target_bytes[4..].iter_mut().enumerate() {
+            *b = b'a' + (i as u8 % 26);
+        }
+
+        let mut title = String::from_utf8(target_bytes[4..].to_vec()).unwrap();
+        title.push_str("\u{0}\u{0}\u{0}\u{4}"); // the body's length prefix
+        title.push_str("wxyz"); // the body
+
+        let revise = Op {
+            stoa,
+            author: author.clone(),
+            kind: OpKind::Revise {
+                target: OpId(target_bytes),
+                body: "wxyz".to_string(),
+                attachments: vec![],
+            },
+        };
+        let metadata = Op {
+            stoa,
+            author,
+            kind: OpKind::StoaMetadata {
+                title,
+                description: String::new(),
+            },
+        };
+
+        // Assert the fixture really is aligned before asserting the property.
+        // Without this the test would pass whenever the two merely differ,
+        // which they do for a dozen reasons having nothing to do with the kind
+        // byte — the trap this project has shipped three times.
+        let head = 1 + 1 + 32 + 32;
+        assert_eq!(
+            revise.canonical_bytes()[head..],
+            metadata.canonical_bytes()[head..],
+            "the fixture must differ ONLY in the kind byte"
+        );
+        assert_ne!(
+            revise.canonical_bytes(),
+            metadata.canonical_bytes(),
+            "a revision and a metadata op must not share a signing preimage"
+        );
+        assert_ne!(revise.id(), metadata.id());
+    }
+
+    #[test]
+    fn a_signature_over_a_metadata_op_does_not_verify_as_a_moderation() {
+        // The consequence at the level that matters, and the pairing that makes
+        // it worth having: a metadata op and a moderation are BOTH
+        // moderator-signed acts by the same key in the same Stoa. If a
+        // signature did not commit to which, a moderator persuaded to rename a
+        // Stoa would have signed a hide.
+        let key = a_key(2);
+        let stoa = a_stoa();
+
+        let metadata = Op {
+            stoa,
+            author: key.public_key(),
+            kind: OpKind::StoaMetadata {
+                title: "Renamed".to_string(),
+                description: String::new(),
+            },
+        };
+        let signed_metadata = metadata.sign(&key);
+
+        let forged = SignedOp {
+            op: Op {
+                stoa,
+                author: key.public_key(),
+                kind: OpKind::Moderate {
+                    target: an_id(1),
+                    action: ModerationAction::Hide,
+                },
+            },
+            signature: signed_metadata.signature.clone(),
+        };
+        assert!(
+            !forged.verify(),
+            "a rename's signature must not authorise a hide"
+        );
+        // And the original is genuinely valid, so this is not passing because
+        // both are broken.
+        assert!(signed_metadata.verify());
+    }
+
+    #[test]
+    fn a_metadata_op_carries_no_policy_and_no_ordering_field() {
+        // The layout pinned against hardcoded sizes, as
+        // `an_op_carries_no_ordering_fields` does for a post. A `policy` byte,
+        // a Lamport value or a sequence number cannot be added to the encode
+        // arm without this failing — which is what makes each omission enforced
+        // rather than merely documented.
+        //
+        // The title and description lengths are the LITERALS below, not
+        // `title.len()` read back off the fixture: asking the implementation
+        // what it wrote and agreeing is the defect this project has shipped
+        // three times.
+        let op = Op {
+            stoa: a_stoa(),
+            author: a_key(2).public_key(),
+            kind: OpKind::StoaMetadata {
+                title: "abcde".to_string(),         // 5 bytes
+                description: "fghijkl".to_string(), // 7 bytes
+            },
+        };
+        let expected = 1  // version
+            + 1           // kind
+            + 32          // stoa
+            + 32          // author
+            + 4 + 5       // title, length-prefixed
+            + 4 + 7; // description, length-prefixed
+        assert_eq!(
+            op.canonical_bytes().len(),
+            expected,
+            "the metadata encoding has a field the layout does not account for"
+        );
+    }
+
+    #[test]
+    fn an_over_long_metadata_title_is_refused_before_allocating() {
+        // A 4-byte prefix can claim 4 GiB, and SDS caps a message at 150 KiB
+        // (§4.4), so a field larger than that could never have arrived
+        // legitimately. The refusal must come from the CAP rather than from
+        // running out of input, which is why this asserts the specific error.
+        let op = a_metadata_op();
+        let mut bytes = op.canonical_bytes();
+        let title_len_at = 1 + 1 + 32 + 32;
+        bytes[title_len_at..title_len_at + 4].copy_from_slice(&u32::MAX.to_be_bytes());
+        assert_eq!(
+            Op::decode(&bytes),
+            Err(OpError::FieldTooLong(u32::MAX as usize))
+        );
+    }
+
+    #[test]
+    fn an_over_long_metadata_description_is_refused_before_allocating() {
+        // The second field needs its own case: a cap applied to the first
+        // string only would leave this one an open memory-exhaustion lever.
+        let op = Op {
+            stoa: a_stoa(),
+            author: a_key(2).public_key(),
+            kind: OpKind::StoaMetadata {
+                title: "ab".to_string(),
+                description: "cd".to_string(),
+            },
+        };
+        let mut bytes = op.canonical_bytes();
+        // Title is 2 bytes, so the description's prefix follows it.
+        let description_len_at = 1 + 1 + 32 + 32 + 4 + 2;
+        bytes[description_len_at..description_len_at + 4].copy_from_slice(&u32::MAX.to_be_bytes());
+        assert_eq!(
+            Op::decode(&bytes),
+            Err(OpError::FieldTooLong(u32::MAX as usize))
+        );
+    }
+
+    #[test]
+    fn invalid_utf8_in_metadata_is_refused() {
+        // Both fields, and not lossily converted — `from_utf8_lossy` would map
+        // distinct inputs onto one op, which is the ambiguity a canonical
+        // encoding exists to remove.
+        let op = Op {
+            stoa: a_stoa(),
+            author: a_key(2).public_key(),
+            kind: OpKind::StoaMetadata {
+                title: "ab".to_string(),
+                description: "cd".to_string(),
+            },
+        };
+        let title_at = 1 + 1 + 32 + 32 + 4;
+        let description_at = title_at + 2 + 4;
+        for at in [title_at, description_at] {
+            let mut bytes = op.canonical_bytes();
+            bytes[at] = 0x80; // a lone continuation byte
+            assert_eq!(Op::decode(&bytes), Err(OpError::InvalidText));
+        }
+    }
+
+    #[test]
+    fn a_metadata_op_round_trips_through_multibyte_and_empty_text() {
+        // Empty is legitimate and must not be confused with absent — a zero
+        // length prefix is a real encoding.
+        for (title, description) in [
+            ("", ""),
+            ("Ἀγορά", "ἡ ἀγορά — the marketplace"),
+            ("🏛", ""),
+            ("", "a\0b"),
+        ] {
+            let op = Op {
+                kind: OpKind::StoaMetadata {
+                    title: title.to_string(),
+                    description: description.to_string(),
+                },
+                ..a_metadata_op()
+            };
+            assert_eq!(Op::decode(&op.canonical_bytes()).unwrap(), op);
+        }
+    }
+
+    #[test]
+    fn renaming_a_stoa_does_not_change_its_address() {
+        // The whole point of the split. The genesis record is immutable and
+        // address-determining; the metadata op carries the current name. A
+        // rename that moved the address would not be a rename, it would be a
+        // different Stoa — which is exactly what editing the genesis title
+        // does, and why this op exists.
+        let genesis = Genesis {
+            creator: a_key(1).public_key(),
+            policy: Policy::Open,
+            title: "Agora".to_string(),
+        };
+        let address = genesis.address();
+
+        let rename = Op {
+            stoa: address,
+            author: a_key(1).public_key(),
+            kind: OpKind::StoaMetadata {
+                title: "The Agora".to_string(),
+                description: "Renamed".to_string(),
+            },
+        };
+        assert!(rename.sign(&a_key(1)).verify());
+
+        // The address is still the genesis record's, and the genesis record
+        // still carries its FOUNDING title — both remain answerable.
+        assert_eq!(genesis.address(), address);
+        assert_eq!(genesis.title, "Agora");
+        // And the hardcoded address from `stoa.rs`'s pinned known-answer test,
+        // so this is checked against a value no code in this test produced.
+        assert_eq!(
+            address.to_hex(),
+            "80329cf05603a0c9ce7a749a53e271253307ba89d4924856e4017459d03a025f",
+            "a rename must not move the Stoa address"
+        );
+    }
+
+    #[test]
+    fn a_metadata_op_by_a_non_moderator_is_authentic() {
+        // Specified, by the "authenticity, not authority" requirement: a
+        // metadata op signed by a peer who is not a moderator really IS from
+        // that peer and must verify. Whether the rename BINDS needs the Stoa's
+        // moderator set, which this type does not have and §3.3 puts on read.
+        //
+        // Pinned so that nobody reads `verify() == true` as "this Stoa is now
+        // called that" — which is precisely the conflation §6.2 measured in the
+        // nearest kin project.
+        let random_peer = a_key(9);
+        let op = Op {
+            stoa: a_stoa(),
+            author: random_peer.public_key(),
+            kind: OpKind::StoaMetadata {
+                title: "Hijacked".to_string(),
+                description: String::new(),
+            },
+        };
+        assert!(
+            op.sign(&random_peer).verify(),
+            "authenticity holds regardless of authority"
+        );
+    }
+
+    #[test]
+    fn a_metadata_op_replayed_into_another_stoa_does_not_verify() {
+        // A rename lifted from one Stoa's channel and put on another's must
+        // fail, rather than arriving as a rename of a Stoa its signer never
+        // addressed. The Stoa is inside the signed bytes, which is what makes
+        // this hold.
+        let key = a_key(2);
+        let signed = a_metadata_op().sign(&key);
+        let elsewhere = SignedOp {
+            op: Op {
+                stoa: crate::identity::stoa_address(b"a different stoa"),
+                ..signed.op.clone()
+            },
+            signature: signed.signature.clone(),
+        };
+        assert!(!elsewhere.verify());
+    }
+
+    #[test]
+    fn the_next_free_kind_discriminant_is_refused_as_unknown() {
+        // Metadata takes 4, so 5 is what an older client would meet if a future
+        // policy-changing act lands as its own kind. That it refuses with a
+        // NAMED error rather than misparsing is what makes the reservation
+        // free: adding a kind later costs an unused discriminant, not a version
+        // bump and not a re-addressing of any Stoa.
+        let mut bytes = a_metadata_op().canonical_bytes();
+        bytes[KIND_AT] = 5;
+        assert_eq!(Op::decode(&bytes), Err(OpError::UnknownKind(5)));
+    }
+
+    #[test]
+    fn the_metadata_kind_discriminant_is_pinned_to_a_known_answer() {
+        // Consensus-critical: the discriminant is inside every signature and
+        // every op id, so changing it re-mints the id of every metadata op in
+        // existence with no error anywhere, because each peer stays internally
+        // consistent.
+        //
+        // Hardcoded, not read back from `OpKind::STOA_METADATA` — asking the
+        // implementation what it wrote and agreeing is the defect this project
+        // has shipped three times. If this fails, do NOT update the expected
+        // value: work out what changed and whether the network survives it.
+        assert_eq!(
+            a_metadata_op().canonical_bytes()[KIND_AT],
+            4,
+            "the Stoa metadata kind discriminant changed"
+        );
+        // And it is distinct from every discriminant already allocated.
+        for op in one_of_each_kind() {
+            if matches!(op.kind, OpKind::StoaMetadata { .. }) {
+                continue;
+            }
+            assert_ne!(
+                op.canonical_bytes()[KIND_AT],
+                4,
+                "another kind reuses the Stoa metadata discriminant"
+            );
+        }
     }
 }
