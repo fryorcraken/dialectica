@@ -79,23 +79,32 @@ vouched set is per-reader local state and no capability currently owns any kind 
 every capability so far projects from the shared op log. That is a real design
 question, not a paragraph, so it gets its own proposal. See `design.md` §11–§12.
 
-## And: two axes, because one conflates quality with agreement
+## And: one vote axis, a vouch, and a report
 
-The owner also identified that upvote/downvote merges two unrelated judgements —
-*is this spam or good content?* and *do I agree?* — so a forum named for
-dialectic would ship the mechanism by which web2 forums punish disagreement.
+The owner identified that upvote/downvote merges two unrelated judgements — *is
+this spam?* and *do I agree?* — so a forum named for dialectic risks shipping the
+mechanism by which web2 forums punish disagreement.
 
-**PLAN §7.4** splits them: an **assessment** axis (`constructive`/`noise`) and a
-**response** axis (`agree`/`disagree`, both optional). **Only assessment ranks**;
-response never sums, and is shown as a distribution rather than a net. That
-asymmetry is the design — two vote buttons added together would rank consensus
-and be worthless. A negative assessment is an **evaluation, not a report**: it
-acts in the assessor's own ranking immediately rather than petitioning an
-authority that §6.1 says does not exist, and it never accumulates into hiding.
+**An earlier draft of §7.4 answered that with two vote axes. A commissioned
+literature review contradicted it and the design changed.** The two-axis split
+has **no published evaluation anywhere**; the only large quasi-causal study of
+vote mechanisms finds no fault with up+down; the only randomised removal of
+downvotes improved nothing behavioural; and the one evaluated rich-moderation
+precedent found the binding constraint is **latency, not expressiveness** — which
+a p2p forum inherits in a worse form.
 
-Both axes fit the existing one-byte discriminant with **no wire-format version
-bump**, and unknown discriminants are already refused rather than defaulted, so
-older peers fail closed.
+**§7.4 now specifies one vote axis + §7.3's vouch + a report to the moderator.**
+The report is what makes the single axis defensible: separating "rank this" from
+"this breaks the rules" is the split that has a track record, and a moderator's
+hide **binds** where an assessment would only have ranked.
+
+**The problem is still real and is recorded, not dissolved:** users do downvote
+disagreement, at scale, and the cost to dissenters is quantified. §7.4 names
+**bridging-based ranking** as the evidenced remedy and why it is not v1 — it is
+fragile under permissionless identity, and vouch is the candidate replacement for
+the sybil resistance it needs, so it is downstream of vouch rather than parallel.
+
+No new op and no version bump.
 
 ## Impact
 
@@ -103,8 +112,8 @@ older peers fail closed.
   shape corrected.
 - `docs/PLAN.md` §7.3 — new, design-only: vouching's vocabulary, why it is never
   published, and how weight accrues from assessments the reader already makes.
-- `docs/PLAN.md` §7.4 — new: the assessment/response split, and why only
-  assessment orders.
+- `docs/PLAN.md` §7.4 — new: one vote axis, vouch, report; what the literature
+  rejected and why; bridging as the named future direction.
 - New capability `relevance-ordering` (delta only; not merged here). **No spec
   delta for vouching** — deliberately, so this change carries one argument.
 - **The projection schema must reserve three columns before it is written.**

@@ -602,6 +602,17 @@ attack.
 suppression is not better than public suppression, it is a filter bubble with a
 ranking engine behind it.
 
+**The gap the single axis leaves here, stated rather than papered over.** §13's
+two-axis design would have let weight accrue from *assessed quality* alone, so a
+reader could build standing for someone they consistently disagreed with and
+consistently found worth reading. With one axis an upvote blends "worth reading"
+with "I agree", so **a reader who upvotes only what they agree with builds a
+vouched set that agrees with them, and nothing in v1 prevents that.** The honest
+claim for vouching is therefore narrower than it was: it makes a reader's
+weighting **explicit and revocable**, not viewpoint-neutral. Bridging (§14) is
+the mechanism that would address it; PLAN §7.3 carries the same caveat so a
+reader of the plan alone is not misled.
+
 **It does not expire under rule 6.** When the credential gate lands and plain
 votes drop to zero, vouched votes survive — a vouch *is* a credential, issued by
 the reader rather than the system. That is the argument for building it rather
@@ -629,7 +640,29 @@ all questions with more than one defensible answer.
 So PLAN §7.3 records the decision and the vocabulary; the mechanism gets its own
 proposal.
 
-## 13. Two axes, and why only one of them ranks
+## 13. Two axes — proposed, then withdrawn on evidence
+
+**Outcome: rejected. The design is one vote axis, plus §7.3's vouch, plus a
+report to the moderator.** This section is kept in full because the reasoning
+that produced the wrong answer is worth more than the answer, and because
+someone will propose the two-axis split again.
+
+**What overturned it** is recorded in §14 along with the literature. The short
+version: the split was an untested design intuition, the two forums that deploy
+it have never measured it, and the one large quasi-causal study of vote
+mechanisms finds no fault with up+down. **I proposed a mechanism whose only
+real-world deployments have never been evaluated, and did not know that when I
+proposed it** — the check that would have caught it is looking for prior art
+*before* designing rather than after.
+
+**What survives, and matters:** the *problem* is real and measured. Users do
+downvote disagreement, at scale and against every platform's stated norm, and
+the cost to dissenters is quantified. The argument below for why that is bad is
+correct. Only the proposed remedy was wrong.
+
+The original reasoning follows unaltered.
+
+### The original argument (rejected)
 
 The owner raised a second extension: the upvote/downvote model conflates *quality*
 (spam versus good content) with *agreement* ("I don't agree with you but it's
@@ -686,20 +719,154 @@ response secondary and optional, with both degradations acceptable. Unlike the
 sybil arithmetic, this cannot be settled by reasoning; it wants observation, and
 the first finding that contradicts §7.4 should be treated as §7.4's answer.
 
-## 14. Decision: three shapes for the two axes, and why C is recommended
+## 14. Decision: four shapes considered, and the literature that settled it
 
-**Status: open. The owner is reviewing §7.4 as written (shape B) and has not
-chosen.** Recorded now because the comparison survives whichever way it goes, and
-because a design examined and rejected is worth more written down than
-rediscovered.
+**Status: DECIDED. The owner chose Reddit's single axis + vouch + report.** A
+fourth shape (D) was proposed by the owner after A–C were written, a literature
+review was commissioned, and **the evidence contradicted the author's own
+recommendation.** All four are kept: the rejected ones are why the decision is
+defensible.
 
-### Reddit's `controversial` deserved more credit than §13's first pass gave it
+### What the literature says, and where it is silent
 
-The prompt for this comparison was the observation that **Reddit did a good job,
-and has a `controversial` ordering**. That is correct and §13 under-credited it.
-`controversial` uses disagreement as a **discovery** signal rather than a
-penalty, which is the one thing a conflated axis can still do well, and it is the
-same instinct §7.4 is built on.
+Commissioned specifically to test the owner's instinct that Reddit's design is
+good. Summarised here because it is what decided the question; the citations are
+in the review itself rather than duplicated into this repository, since a
+bibliography here would rot without anyone noticing.
+
+**Against a second axis:**
+
+- The only large **quasi-causal** study of vote mechanisms — difference-in-
+  differences across 55 political subreddits that changed their reaction
+  mechanism, 155M comments — finds up-only *and* up+down both associate with
+  more deliberative discourse, and the most demagogic case is **no reaction
+  mechanism at all**. Downvotes are not indicted.
+- The only **randomised** removal of downvotes (field experiment, 3M-member
+  subreddit) moved the scoreboard and not the behaviour: negative scores fell
+  sharply, moderator removals did not change, newcomers became *less* likely to
+  return.
+- **Two-axis voting has no published evaluation anywhere.** Two large forums
+  have run it for years. Their own design discussion reports the axes moving
+  together the large majority of the time.
+- The one *evaluated* rich-moderation precedent found the binding constraint is
+  **latency, not expressiveness** — and only about half of unfair moderations
+  were ever corrected. A p2p forum inherits a worse version of that, so a more
+  expressive vote spends the budget in the wrong place.
+
+**Confirming the problem is real:**
+
+- Users downvote disagreement at scale, in defiance of stated norms.
+- The cost is quantified: engaging with opposing views measurably reduces the
+  upvotes a user receives in their own community.
+- Negative feedback percolates — downvoted authors post more, worse, and go on
+  to downvote others.
+
+**Where the literature is silent, which is itself a finding:** whether a second
+axis helps (never measured), whether a controversial sort surfaces anything
+worth reading (never studied), and whether user reports are precise enough to act
+on in a *decentralised* setting (never measured — federated moderation studies
+find operators fall back on instance blocklists instead).
+
+### The four shapes
+
+**A — Reddit-faithful: one axis, derived orderings.** Keep `up`/`down`. Derive
+`top`, a controversial sort, and a weak noise filter.
+
+- *Wins:* zero new ops, ships immediately.
+- *Loses:* spam and disagreement stay one byte forever, foreclosing a
+  non-brigadeable quality signal later.
+
+**B — two explicit axes.** What §7.4 originally specified.
+
+- *Wins:* `noise` would mean spam and nothing else.
+- *Loses:* **no evidence behind it anywhere**, and its risk is *silent* — a
+  signal nobody supplies looks identical to one that does not work.
+
+**C — one control, two gestures.** Downvote means "disagree, still worth
+reading" and *raises*; a secondary gesture means spam.
+
+- *Wins:* one primary control; the striking property that **disagreeing makes a
+  post more visible**.
+- *Loses:* inverts a decade of learned behaviour. Users may feel *misled* rather
+  than confused, which is a trust problem. The author's claim that this is
+  "fixable through copy" was flagged at the time as the weakest sentence in its
+  case — an untested assertion about users — and that judgement stands.
+
+**D — Reddit + vouch + report (CHOSEN).** One axis; §7.3's vouch decides whose
+votes weigh more; spam and abuse leave the ranking system entirely and go to a
+moderator with binding authority.
+
+- *Wins:* every point above, plus the one that decided it — **separating "rank
+  this" from "this breaks the rules" is the axis split that actually has a track
+  record**, and a moderator's hide *binds* where an assessment would only have
+  ranked. B was solving with a vote a problem that moderation solves properly.
+- *Loses:* the single axis still taxes disagreement, and the report path is
+  unmeasured in decentralised settings and demonstrably weaponisable elsewhere.
+  Both are recorded in §7.4 rather than dissolved.
+
+### The author's recommendation was wrong, and how
+
+Before the literature review this document recommended **C**. That recommendation
+rested on reasoning about interaction cost and a four-corner argument about
+expressiveness, with **no prior art checked**. The review found the deciding
+facts were all empirical and all pointed elsewhere.
+
+Two lessons worth keeping over the conclusion itself:
+
+- **"All four corners are populated" proves a distinction exists, not that a
+  control should collect it.** The four-corner test is a good test of
+  *independence* and says nothing about whether users will supply the second
+  signal, which is the question that actually decided this.
+- **The strongest argument for C — that its risk is discoverable where B's is
+  silent — was correct and still lost**, because D has neither risk. An argument
+  can be sound and still be beaten by an option outside the comparison. The
+  comparison was A/B/C because those were the shapes the author generated; the
+  owner supplied D.
+
+### Bridging-based ranking: the evidenced answer, deferred
+
+The review surfaced one mechanism with **measured success at the exact goal B was
+designed for** — surfacing content rated positively across a disagreement
+divide. It ranks by whether people who usually disagree both rate something
+helpful, and crucially **it is not a second vote axis**: it infers the
+disagreement dimension by factorising the existing single-axis matrix, so the
+interface is unchanged.
+
+It is not v1 because it is **fragile under permissionless identity** — published
+analyses show fewer than ten strategically placed ratings can push a meaningful
+fraction of low-quality items over threshold, and the deployed instance resists
+this only through platform-supplied sybil resistance that §7 is explicit
+dialectica lacks. **§7.3's vouch is the candidate replacement for that layer**,
+which is a stronger argument for vouching than §7.3 makes on its own — and it
+means bridging is *downstream* of vouch being populated, not parallel to it.
+
+Recorded in PLAN §7.4 and §13 as a named future direction, so that the next
+person reaching for a second axis finds the better mechanism first.
+
+### Reddit's `controversial`: credited, then also rejected
+
+The prompt for this comparison was the owner's observation that **Reddit did a
+good job, and has a `controversial` ordering**. That is correct and an earlier
+pass under-credited it: `controversial` uses disagreement as a **discovery**
+signal rather than a penalty, which is the one thing a conflated axis can still
+do well.
+
+**But the literature review then rejected `controversial` too**, and this
+document had already specced a two-axis version of it. Two findings:
+
+- A 50/50 vote split is, by the structural analysis behind the percolation
+  result, **exactly where a voter network is most polarised**. So a
+  controversial sort is mechanically a "most polarising content" sort, which is
+  not the same thing as "good arguments I disagree with."
+- Separate work finds much controversial content is **merely off-topic**, and
+  the sort has **never been studied** for whether it surfaces anything worth
+  reading.
+
+**Bridging is what `contested` was reaching for**, and it is a different
+mechanism. That is why no contested ordering ships.
+
+The analysis of *why* Reddit's version is imprecise remains correct and is kept,
+because it is the clearest statement of what bridging solves:
 
 **The reason it still fails is the instructive part, and it is the argument for
 separating the axes, arrived at by taking the counter-example seriously:**
@@ -709,87 +876,23 @@ separating the axes, arrived at by taking the counter-example seriously:**
 
 That inference cannot separate *contested* from *ignored*. A post at +1/−1 and a
 post at +400/−398 both read as "near zero". Hence the volume correction every
-implementation carries, hence its surfacing of mediocre-and-ignored posts, and
-hence its status as a tab nobody opens rather than a primary ordering. A
-separated design reads the quantity directly instead of inferring it.
+implementation carries, and hence its surfacing of mediocre-and-ignored posts.
+Bridging reads the disagreement structure directly instead of inferring it from a
+net, which is exactly the imprecision described here.
 
-### The three shapes
+### One idea from shape C worth not losing
 
-**A — Reddit-faithful: one axis, derived orderings.** Keep `up`/`down` as
-merged. Derive `top` (`up − down`), `contested` (volume × evenness), and a noise
-filter (low ratio at low volume).
+Shape C proposed that a downvote should *raise* a post — that disagreeing makes
+something more visible. It was rejected with the rest, and the reason is worth
+recording because the idea is attractive enough to recur: it **inverts a decade
+of learned behaviour**, and a user who discovers that their downvote promoted
+something feels *misled* rather than confused, which is a trust problem rather
+than a usability one. The claim that this was "fixable through copy" was flagged
+when written as an untested assertion about users, and nothing since has tested
+it.
 
-- *Wins:* zero new ops, zero UI change, ships immediately. `contested` comes free.
-- *Loses:* the conflation is never resolved, only inferred around. A disagreeing
-  downvote still lowers `top`, so §7.4's top-right cell gets a side door rather
-  than a seat. Spam and disagreement stay indistinguishable, which forecloses any
-  later quality signal that is not brigadeable.
-
-**B — two explicit axes.** What §7.4 currently specifies.
-
-- *Wins:* the axes are genuinely separate, so `noise` means spam and nothing
-  else, and `contested` is precise rather than inferred.
-- *Loses:* two controls, and most readers will use neither if asked to think.
-  This is the risk flagged throughout and it is behavioural, not reasoned.
-
-**C — one control, two gestures.** One primary control with four outcomes:
-upvote = agree + worth reading; **downvote = disagree, still worth reading**;
-a secondary gesture (long-press) = `noise`; nothing = nothing. Then
-`top = up + down` — both directions signal worth-reading — `noise` is excluded
-from `top` entirely and never sums, and `contested` is the near-even split at
-high volume.
-
-- *Wins:* one primary control, so most of B's cost evaporates. Ordinary users
-  learn nothing new — they up/down as always, and the meaning shift is invisible
-  at the point of clicking. Spam reporting is rare, so a less convenient gesture
-  matches its real frequency.
-- *Loses:* see the risk below, stated at full strength.
-
-### The property that makes C worth the risk
-
-**On this forum, disagreeing with something makes it more visible, not less.**
-
-If that holds it is a **design principle rather than a feature**, and it belongs
-near §1's Stoa tension rather than inside a ranking subsection — it is §1's
-argument about removal, restated about attention, and it is a claim that could go
-on the front page and be true.
-
-### The risk, at equal billing
-
-**A downvote that raises a post violates a decade of learned behaviour.** Users
-arrive with a model built by every forum they have used, and C silently inverts
-its consequence. Some will feel misled when they discover it — not confused,
-*misled*, which is worse and is a trust problem rather than a usability one.
-
-**And "discoverable and fixable through copy" is a claim about users that nobody
-here has tested.** It is the kind of assertion that sounds reasonable in a design
-document and is contradicted by the first real cohort. It should be read as the
-weakest sentence in the case for C, not as its mitigation.
-
-C is also the hardest of the three to explain in one sentence, and a ranking rule
-that cannot be explained is one users construct folklore about.
-
-### Recommendation, and what would change it
-
-**C, with B as the fallback.** C gets most of B's separation at a fraction of the
-interaction cost, and its risk is *discoverable* — it shows up in confused
-feedback and can be answered with copy, placement, or reverting to B. B's risk is
-that nobody uses the second control, which is silent, and a signal nobody
-supplies is indistinguishable from a signal that does not work.
-
-**A is the honest fallback if the whole two-axis line is over-engineering.** It
-is not wrong. It is permanently stuck with spam and disagreement being the same
-byte, which is a real cost paid later rather than now.
-
-**What would move the recommendation to B:** evidence that users do supply a
-second signal when asked, or a decision that the surprise in C is unacceptable
-regardless of frequency. **What would move it to A:** deciding `contested` alone
-justifies neither the second axis nor the gesture, since A gets an approximate
-version of it for free.
-
-**`contested` ships under all three**, which is why §7.4 now names it as an
-ordering rather than leaving it implicit in a display. That part is not
-contingent on this decision.
+The underlying sentiment — *on this forum, disagreeing with something should not
+bury it* — survives the rejection and is what bridging would deliver properly.
 
 ## 15. What this document got wrong, corrected in review
 

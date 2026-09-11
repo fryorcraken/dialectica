@@ -64,9 +64,14 @@ Not done here and deliberately not started.
 - [x] Confirm it adds no schema requirement, and relay the class-count change.
 - [x] Establish that an explicit-only vouch list ships dead, and that weight
       must accrue from what the reader already does (PLAN §7.3).
-- [x] Settle that **assessments accrue and responses do not** — weight earned by
-      agreement would build a machine that finds a reader more of what they
-      already think.
+- [x] Settle that **only upvotes accrue** — accruing negative weight would let a
+      reader's disagreements quietly build a filter that hides a viewpoint from
+      them, which is worse for being invisible.
+- [x] **Record the gap the single axis leaves**, rather than papering over it: an
+      upvote blends "worth reading" with "I agree", so a reader who upvotes only
+      what they agree with builds a vouched set that agrees with them. Nothing in
+      v1 prevents this; the honest claim is that vouching is explicit and
+      revocable, not viewpoint-neutral.
 - [ ] **Its own proposal**, covering the question this change does not answer:
       where per-reader local state lives, how it persists across replay, whether
       it is exported between devices, and what a vouch naming an identity the
@@ -75,47 +80,64 @@ Not done here and deliberately not started.
       input §7.2 rule 5 says does not exist, so it is a property specified and a
       mechanism deferred.
 
-## 6. Two axes (PLAN §7.4)
+## 6. One axis, vouch, report (PLAN §7.4)
 
-- [x] Establish the axes are independent (all four corners populated) rather
-      than assuming a second control is warranted.
-- [x] Settle the asymmetry: assessment orders, response never sums.
-- [x] Confirm both fit the existing one-byte discriminant, and that unknown
-      discriminants already fail closed.
-- [x] Spec the axis separation and the never-becomes-moderation property.
-- [x] Ship `contested` as an ordering rather than leaving it implicit in a
-      display, and state what makes it better than Reddit's inferred version.
-      **Not contingent on the A/B/C decision** — it holds under all three.
-- [x] Record the three candidate shapes with C recommended (`design.md` §14),
-      including the risk at equal billing to the recommendation.
-- [ ] Implementation, when accepted, needs these tests specifically:
-  - [ ] A target's position is **identical** under unanimous agreement,
-        unanimous disagreement, and no responses. This is the requirement that
-        fails if anyone later "simplifies" the two axes back into one.
-  - [ ] A response carrying no assessment moves nothing.
-  - [ ] Unanimous negative assessment leaves a target present and not hidden,
-        including when the assessor is the Stoa's moderator.
-  - [ ] An older peer refuses an unknown discriminant rather than counting it —
-        pin the discriminant values with hardcoded `assert_eq!`, since
-        `cargo mutants` cannot see a wrong `const`.
-  - [ ] **`contested` separates disputed from ignored**: a target with one
-        response each way does not outrank one the whole Stoa split over. This
-        is the fixture that must make the two rules disagree — build it so a
-        division-only implementation and a division-plus-volume one give
-        *opposite* answers, or it passes either way.
-  - [ ] Which side holds the majority confers no advantage — construct two
-        targets with mirrored divisions and assert neither leads.
-- [ ] **Measurement, not reasoning**: ship able to observe whether `noise`
-      drifts into meaning "disagree". §7.4 says the first finding that
-      contradicts it is its answer, and that is only true if it can be observed.
-- [ ] **Parked, deliberately undesigned:** whether a disagreeing reply counts as
-      an implicit assessment (§7.4, §13). Do not build it before the explicit
-      controls have been observed — if they are used, this is redundant; if they
-      are not, it was always going to be the real signal. The measurement above
-      is what tells the two apart, which is the second reason it is not
-      optional.
+- [x] Commission a literature review before committing to a vote model, and
+      **follow it when it contradicted this document's own recommendation**.
+- [x] Withdraw the two-axis design; keep the rejected argument in `design.md`
+      §13 with the reason it failed, so it is not re-proposed.
+- [x] Withdraw `contested` — a 50/50 split is where a voter network is *most*
+      polarised, which is not "good arguments I disagree with", and the sort has
+      never been studied.
+- [x] Record bridging as the evidenced future direction, and why it is
+      downstream of vouch rather than parallel (PLAN §7.4, §13; `design.md` §14).
+- [x] Record the report's own limitations rather than dissolving them: it
+      petitions, the queue has one reader, it is weaponisable with no backstop,
+      and its precision is unmeasured in any decentralised system.
+- [ ] **Parked, deliberately undesigned:** whether a disagreeing reply is itself
+      a quality signal (§7.4, §13). Weigh against bridging, which addresses the
+      same gap with measured results but needs a rating-matrix density and a
+      sybil-resistance layer this forum lacks.
 
-## 7. Not in scope
+## 7. Requirement → test, with the gaps named
+
+**No requirement below is covered today. Nothing in this change is code**, so
+this is a plan for the implementing change, not a coverage claim. The right-hand
+column says what would make each scenario fail — a scenario with no answer there
+is one that should not have been written (agents README: "never write a scenario
+that cannot be tested").
+
+| Requirement | Testable by | Fails if |
+|---|---|---|
+| An ordering is derived from ops and published as nothing | Encode every op kind; assert no score field. Two logs, differing by one vote, produce different orderings with no error | a score reaches the wire, or peers reconcile |
+| A hidden post is excluded, never ranked down | Hidden post with more votes than any other; assert absent at every position | exclusion becomes a score penalty |
+| Exclusion follows the moderation resolver | Compare stored `is_hidden` against a direct resolve; feed a non-binding `hide` | a second copy of the authority rule drifts |
+| Counts distinct voting identities | One identity votes twice; assert count is one | repeated votes accumulate |
+| A vote counts only where authentic and in scope | Forged vote; cross-Stoa vote; assert neither moves a position | verification or scope check is skipped |
+| Weight comes from system or reader, never voter | Op asserting its author's standing; assert no weight change | a self-asserted property is honoured |
+| A weight amplifies promotion, never suppression | Moderator upvote vs downvote, mirrored; assert magnitudes differ | `K` is "tidied" into applying both ways |
+| Negative engagement floors at zero | **Pair**: largest downvote total that still places last, and one past it, both present | a one-sided test lets the floor drift |
+| Neither vote nor report becomes moderation | Unanimous downvotes; many reports; assert present and not hidden for a non-reporting reader | a threshold sneaks in |
+| A report affects only the reporter's view | One reader reports; assert every other ordering unchanged | a local action leaks into shared state |
+| An ordering is total | Paginate an all-zero-score Stoa; assert each post once | the op-id tiebreak is dropped as "redundant" |
+| Age only via a value no author supplies | Op carrying a time-like field; assert unread | a wall clock is reintroduced |
+| Never aborts | Adversarial log; votes naming votes; overflow the accumulator | a panic reaches the module boundary |
+
+**Gaps to state plainly rather than imply away:**
+
+- **Every row is untested until a scorer exists.** This change ships no code.
+- **The `is_hidden` backfill on late genesis** needs a genesis record arriving
+  after the ops it authorises — constructible, but it depends on the projection,
+  which is another change.
+- **`K_mod`, `K_vouch` and the earned-weight cap are unpinned numbers.** No test
+  can assert a value nobody derived; what a test *can* pin is the **ordering**
+  `plain < earned < K_vouch < K_mod`, and that is what should be written.
+- **Nothing here tests the vouch mechanism**, which is a separate proposal (§5).
+- **The single axis's conflation is not testable at all.** It is a claim about
+  user behaviour, and the only honest response is instrumentation, not a unit
+  test.
+
+## 8. Not in scope
 
 - Decay. There is no age to decay; the column pair is reserved and unused.
 - Any system credential other than the moderator set. Rule 3 owns that.
@@ -126,9 +148,11 @@ Not done here and deliberately not started.
   design with its own evidence, never a parameter added to this one.
 - Any UI surfacing vouch counts. That is a published vouch graph reconstructed
   by eye, with all three of §7.3's problems.
-- **Any net agreement figure, anywhere.** A net is what makes disagreement feel
-  like damage, and it discards which of §7.4's four corners produced it. The
-  response axis is displayed as a distribution or not at all.
-- A third axis. Two controls is already the part of this design most likely to
-  be too much; adding a third on reasoning rather than evidence would repeat the
-  mistake at greater cost.
+- **A second vote axis**, in any form. Rejected on evidence (`design.md` §13,
+  §14), not on taste — it has no published evaluation anywhere, and the measured
+  constraint on distributed moderation is latency rather than expressiveness.
+- **A `contested` or controversial ordering.** A 50/50 split is mechanically the
+  polarisation maximum, and the sort has never been studied for whether it
+  surfaces anything worth reading. Bridging is what it was reaching for.
+- **Bridging-based ranking**, for now. It is the evidenced answer and it is
+  downstream of vouch data existing and of a sybil-resistance story (§7.4).

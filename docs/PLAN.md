@@ -1318,20 +1318,19 @@ cannot be gamed by minting identities, plus one that can:
 - **`active`** — threads by the Lamport timestamp of their most recent
   non-hidden reply. Gameable only by *posting*, which moderation and rate
   limiting already govern.
-- **`top`** — **assessment** ops (§7.4) counted per distinct identity, weighted
-  by **how much this reader weighs that assessor's opinion**. A moderator's
-  `constructive` weighs `K_mod`; a **vouched** assessor's weighs `K_vouch`
-  (§7.3); every other weighs 1 — *some* score rather than zero, which is the
-  interim's whole premise and what rule 3 removes later. A post's score is
-  **floored at zero**, so `noise` can order a post last but never remove it.
-  **The response axis (`agree`/`disagree`) contributes nothing to this or any
-  *score*** — §7.4 is where that asymmetry is argued, and it is load-bearing
-  rather than a refinement.
-- **`contested`** — high assessed quality, split response (§7.4). Not a score
-  and not a variant of `top`: it is a *conjunction* of the two axes, so it ranks
-  nothing up or down and cannot be gamed by pushing either axis alone. On a
-  forum named for dialectic this is plausibly the most valuable ordering in the
-  product, and it is the concrete payoff for asking readers for a second signal.
+- **`top`** — vote ops counted per distinct identity, weighted by **how much
+  this reader weighs that voter's opinion**. A moderator's upvote weighs
+  `K_mod`; a **vouched** voter's weighs `K_vouch` (§7.3); every other weighs
+  1 — *some* score rather than zero, which is the interim's whole premise and
+  what rule 3 removes later. A post's score is **floored at zero**, so
+  downvoting can order a post last but never remove it.
+
+**One vote axis, not two.** §7.4 records why: a two-axis split separating
+quality from agreement has no published evaluation anywhere, and the measured
+constraint on distributed moderation is latency rather than expressiveness.
+Spam and abuse leave the ranking system entirely and go to the moderator as a
+**report** (§7.4), which is the separation that has a track record — and which
+binds, where a second vote axis would only have ranked.
 
 **`top` is an engagement ordering, not a relevance signal, and the distinction
 is the whole of the claim.** It reports how many distinct identities voted,
@@ -1409,9 +1408,10 @@ post outranks a visible one. Keep hidden posts in the op log (§5.7 keeps
 history) and let the UI offer a "show hidden" view — but the default feed omits
 them.
 
-**A moderator's *`noise` assessment* is the same mistake arriving from the other
-direction**, and rule 2's weights therefore apply to `constructive` **only** —
-for a moderator's assessment and equally for a vouched or earned one (§7.3). This rule originally stopped a `hide` from being *weakened* into a
+**A moderator's *downvote* is the same mistake arriving from the other
+direction**, and rule 2's weights therefore apply to an **upvote only** — for a
+moderator's vote and equally for a vouched or earned one (§7.3). This rule
+originally stopped a `hide` from being *weakened* into a
 ranking nudge; nothing stopped a ranking nudge being *strengthened* by moderator
 authority into a soft hide. An amplified downvote has none of a moderation op's
 properties — it does not bind (a well-upvoted post survives it), it names no
@@ -1467,9 +1467,9 @@ filtering and ranking again. It must never be encoded as a large negative score
 offset: that would be indexable too and would silently restore the haircut rule
 4 rejects, since a sufficiently upvoted hidden post would climb back.
 
-**This is why rule 4's restriction of the weights to `constructive` is
-load-bearing for the schema and not only for the semantics.** Had a moderator's
-`noise` been given exclusion-like force — a threshold at which a post disappears — hidden-ness
+**This is why rule 4's restriction of the weights to upvotes is load-bearing for
+the schema and not only for the semantics.** Had a moderator's downvote been
+given exclusion-like force — a threshold at which a post disappears — hidden-ness
 would depend on a continuously accumulating vote count over an unbounded set of
 rows with no enumerable invalidation points, and it would genuinely become rule
 5's problem.
@@ -1623,22 +1623,27 @@ a reader to maintain a curation list is asking for work they did not come to do,
 so the vouched set stays empty and §7.3 has no effect. The mechanism has to
 start from behaviour the reader is already exhibiting.
 
-**So a reader's own assessments accrue weight toward the identities they
-assess.** Repeatedly marking someone's posts `constructive` (§7.4) raises that
-identity's weight in this reader's ranking, without anyone declaring anything.
-Call it **earned** weight, against a **declared** vouch, and keep the two
-distinguishable in the UI: one is something the reader chose and can revoke in a
-click, the other is something they should be told has happened and be able to
-undo.
+**So a reader's own upvotes accrue weight toward the identities they upvote.**
+Repeatedly upvoting someone raises that identity's weight in this reader's
+ranking, without anyone declaring anything. Call it **earned** weight, against a
+**declared** vouch, and keep the two distinguishable in the UI: one is something
+the reader chose and can revoke in a click, the other is something they should be
+told has happened and be able to undo.
 
-**It is the assessment axis that accrues, never the response axis** — and that
-is §7.4's asymmetry doing real work here rather than restating it. Weight
-earned by agreement would build a machine that finds a reader more of what they
-already think, which is the failure mode this whole design is arranged against.
-Weight earned by *assessed quality* does the opposite: it can, and should, raise
-the weight of someone the reader consistently disagrees with and consistently
-finds worth reading. **That is the single most valuable thing this system can
-do, and it is only reachable because the axes are separate.**
+**Only upvotes accrue. A downvote moves nothing.** The asymmetry matters for the
+same reason it does in rule 4: accruing *negative* weight from downvotes would
+let a reader's disagreements quietly build a filter that hides a viewpoint from
+them, which is the failure mode this design is arranged against and is worse for
+being invisible. Earned weight only ever raises.
+
+**This is where §7.4's abandoned second axis leaves a real gap, stated rather
+than papered over.** With one axis, an upvote means "worth reading" and "I
+agree" at once, so weight accrues from a blend of the two — and the literature
+§7.4 cites measures exactly that conflation. A reader who upvotes only what they
+agree with will build a vouched set that agrees with them. **Nothing in v1
+prevents that**, and the honest claim is that vouching makes a reader's
+weighting *explicit and revocable* rather than making it viewpoint-neutral.
+Bridging (§7.4) is the mechanism that would address it, and it is future work.
 
 Two bounds, both structural:
 
@@ -1661,12 +1666,12 @@ record, where a vouch is one reader's private judgement, so the more accountable
 credential should not weigh less. `K_vouch` around 2 against `K_mod` of 3 keeps
 both inside §7.2's bracket.
 
-**Vouching amplifies `constructive` only**, exactly as rule 4 requires of a
-moderator's assessment, and for the same reason: an amplified `noise` is
-suppression without moderation's properties. That it is *private* suppression
-makes it no better — a reader who silently buries what their vouched set
-dislikes has built a filter bubble with a ranking engine, which is at least a
-product failure and arguably the thing a dialectic forum exists not to be.
+**Vouching amplifies upvotes only**, exactly as rule 4 requires of a moderator's
+vote, and for the same reason: an amplified downvote is suppression without
+moderation's properties. That it is *private* suppression makes it no better — a
+reader who silently buries what their vouched set dislikes has built a filter
+bubble with a ranking engine, which is at least a product failure and arguably
+the thing a dialectic forum exists not to be.
 
 #### What it does not become
 
@@ -1693,167 +1698,187 @@ building rather than a stopgap: it is the only weight class here that stays
 meaningful in the end state, and it is what stops that end state from counting
 nobody but token holders.
 
-### 7.4 Two axes: assessment and response
+### 7.4 One vote axis, a vouch, and a report
 
-**The single vote axis is wrong for this forum, and it is wrong in a way that
-attacks §1.** One control collects two unrelated judgements — *is this well
-made?* and *do I agree?* — and a downvote for either reason cancels an upvote
-for either reason. A forum named for **dialectic** cannot ship the mechanism by
-which every web2 forum punishes disagreement; the Δ would be arguing against
-itself.
+**An earlier draft of this section specified two vote axes — quality separated
+from agreement — and a literature review contradicted it.** The design is now
+Reddit's single axis plus §7.3's vouch plus a report to the moderator. What
+follows is why, because the reasoning is the part worth keeping: the *problem*
+the two-axis design was solving is real and measured, and the two-axis design is
+simply not the intervention the evidence supports.
 
-#### The two judgements are genuinely independent
+#### What the evidence says, including against the obvious design
 
-The test is whether all four corners are populated. They are:
+**Against a second axis:**
 
-| | **I agree** | **I disagree** |
-|---|---|---|
-| **Well made** | ordinary agreement | **the most valuable content on this forum** |
-| **Badly made** | my own side arguing badly | spam, abuse, noise |
+- The only large quasi-causal study of vote mechanisms finds **no fault with
+  up+down**. Difference-in-differences across 55 political subreddits that
+  *changed* their reaction mechanism, 155M comments: up-only and up+down both
+  associate with more deliberative, more civic discourse, and the **most
+  demagogic** case is subreddits with **no reaction mechanism at all**.
+- The one **randomised** removal of downvotes (a field experiment on a 3M-member
+  subreddit) improved the scoreboard and **not the behaviour**: negative scores
+  fell sharply, moderator removals did not move, and newcomers became *less*
+  likely to comment again. Removing the downvote is not a proven intervention.
+- **Two-axis voting has no published evaluation anywhere.** Two large forums
+  have run karma-plus-agreement for years with no measurement of any kind, and
+  their own design discussion reported the axes moving together the large
+  majority of the time. Specifying it here would have meant shipping a mechanism
+  whose only real deployments have never been assessed.
+- The one *evaluated* rich-moderation precedent (labelled categories plus
+  metamoderation) found the binding constraint was **latency, not
+  expressiveness** — much of a conversation passes before the best and worst
+  comments are identified, and only about half of unfair moderations were ever
+  corrected. **A peer-to-peer forum inherits a worse version of that**, so
+  spending the interaction budget on more expressive voting spends it in the
+  wrong place.
 
-Top-right is the cell a single axis **cannot express**, and it is exactly what a
-dialectic forum exists to surface: the best argument against your position. A
-one-axis model forces that reader to choose between endorsing a view they reject
-and burying an argument they respect. Bottom-left is the other cell that goes
-missing, and it is the one that keeps a community honest about its own side.
+**And yet the problem is real, which is why this section still exists:**
 
-So: **two axes, recorded separately, never summed.**
+- Users **do** downvote disagreement, at scale and in defiance of every
+  platform's stated norm. Half a million comments of users discussing their own
+  voting show downvoting used as a suppression tool against views that challenge
+  a community's norms.
+- The cost to dissenters is **quantified**: users who engage with opposing views
+  receive measurably fewer upvotes in their home communities. **Single-axis
+  voting taxes good-faith disagreement.**
+- Negative feedback **percolates**: downvoted authors post more, post worse, and
+  go on to downvote others.
 
-- **Assessment** — *is this a genuine, constructive contribution?*
-  `constructive` / `noise`.
-- **Response** — *where do I stand on it?* `agree` / `disagree`, and **both are
-  optional**; declining to answer is the ordinary case, not a missing value.
+So the conflation is real and a second vote axis is not the answer to it. The
+answer the evidence points at is a different ranking *function* over the same
+single axis — see the bridging note below — and that is future work rather than
+v1.
 
-#### Only assessment ranks. Response never sums.
+#### The three controls
 
-This asymmetry is the design, and everything else follows from it. It is what
-separates this from "two vote buttons", which would be worthless.
+- **Vote — `up` / `down`.** Exactly as §7.2 rule 2 describes, weighted by how
+  much this reader weighs that voter (moderator, vouched, earned, plain). One
+  axis, familiar, and no new op.
+- **Vouch — §7.3.** The reader's own answer to "whose judgement do I weigh",
+  accruing from votes they already cast. This is what makes the single axis
+  tolerable: a reader who finds someone consistently worth reading weights them
+  up **regardless of whether they agree with them**, which is where "I disagree
+  with you but you argue well" now lives.
+- **Report — to the Stoa's moderator.** Spam and abuse leave the ranking system
+  entirely and go to someone with binding authority (§6). This is the axis split
+  that actually has a track record: separating "rank this" from "this breaks the
+  rules" is what the forums that work already do.
 
-**`top` is computed from the assessment axis alone.** If agreement contributed
-to ranking, the forum would rank *consensus* — the majority view would rise and
-the dialectic would die exactly as it does elsewhere, with an extra button. **A
-disagree therefore costs a post nothing.**
+**The report is what makes the single axis defensible.** The two-axis design
+existed to stop spam and disagreement being the same signal — and a report
+separates them *better*, because a moderator's hide **binds** (§6) where an
+assessment would only have ranked.
 
-**Response is never aggregated into a score at all.** Its two jobs are:
+#### A report petitions, and that is its limitation as well as its point
 
-- **It calibrates the reader's own weighting** (§7.3). An identity a reader
-  repeatedly assesses as `constructive` earns weight in that reader's ranking
-  **whether the reader agrees with them or not** — which is the mechanism that
-  makes "I disagree with you but you argue well" a first-class signal instead of
-  a shrug.
-- **It is displayed as a distribution, never as a net.** "Constructive; 40%
-  agree" tells a reader something true and interesting. A single number
-  reading +3 tells them nothing about which of the four corners produced it.
-  **A net agreement count must never be shown**, because a net score is what
-  makes disagreement feel like damage, and the display is where that pressure
-  actually lands.
+An earlier draft argued a report is the wrong frame here because it petitions an
+authority rather than expressing a judgement. That objection was right and is
+kept, because it names the real cost rather than being dissolved by the
+decision:
 
-#### `contested` is a shipped ordering, and it is the payoff
+- **A report does nothing for the reader who filed it** until someone acts. A
+  vote changes their feed immediately; a report disappears into a queue with
+  exactly one reader.
+- **That queue does not scale.** One moderator per Stoa, no trust-and-safety
+  team, and the Slashdot finding above says latency is already the constraint.
+- **Reports are weaponisable and there is no backstop.** Mass reporting as a
+  harassment technique is well documented on centralised platforms, where
+  targets at least have an appeals path. A Stoa has none.
+- **Nobody has measured whether reports are precise enough to act on in a
+  decentralised system.** Studies of federated moderation find operators fall
+  back on instance-level blocklists rather than reports — which over-block and
+  fragment the network. If this design rests on "reports reach the right
+  moderator and are mostly valid", **that assumption is unmeasured anywhere**.
 
-Separating the axes buys an ordering that a single axis can only approximate:
-**`contested` — high assessed quality, split response.** Posts a Stoa agrees are
-worth reading and disagrees about. On a forum named for dialectic that is
-arguably the most valuable ordering in the product, and it should ship alongside
-`new`, `active` and `top` rather than being left implicit in a distribution
-display.
+The mitigation that keeps the reader's objection satisfied: **a report also acts
+locally and immediately** — it drops the post out of the reporter's own feed at
+once, rather than only entering a queue. The reader is then evaluating *and*
+petitioning, the control visibly does something, and a report that changes
+nothing observable does not get repurposed as a super-downvote.
 
-**Reddit's `controversial` is the prior art and it is better than a first pass
-credits.** It uses disagreement as a *discovery* signal rather than a penalty,
-which is the right instinct and the one thing a conflated axis can still express.
+**A report is not a moderation.** It does not hide, and it never accumulates
+toward hiding however many arrive — §7.2 rule 4's principle holds unchanged:
+suppression is a binding judgement or it is nothing. A report is a *signal a
+moderator may read*, plus a local filter for the reader who sent it.
 
-**What makes this version different is that Reddit has to infer the split from a
-net near zero**, because up and down are one number by then. That inference
-cannot distinguish *contested* from *ignored*: a post at +1/−1 and a post at
-+400/−398 both read as "near zero", and a post nobody cared about scores the same
-as one the Stoa split over. That is why `controversial` also surfaces mediocre
-posts, and why it ends up a tab nobody opens rather than a primary ordering.
+#### Encoding
 
-With the axes genuinely separate, the quantity is read directly rather than
-inferred: **assessment supplies "is this worth reading", response supplies "do we
-agree", and `contested` is the conjunction.** A post nobody assessed is not
-contested, it is ignored, and the two are distinguishable without a volume
-heuristic. **That distinction is the argument for the second axis in one
-sentence.**
+**No new op and no version bump for the vote**, which keeps its existing shape.
+A report is a local action in v1 — it changes the reporter's own view and
+surfaces to the moderator — so the question of whether it ever becomes a
+published op is deferred rather than answered here. If it does, the vote op's
+one-byte discriminant has 254 unused values and refuses unknown ones rather than
+defaulting them (§11), so the extension stays fail-closed and cheap.
 
-#### Why this is an evaluation and not a report
+#### Future: bridging-based ranking, and why it is not v1
 
-The owner's objection is exactly right and worth recording, because the obvious
-implementation is a "report spam" button and it would be wrong here.
+**This is the mechanism the evidence actually supports for surfacing good
+arguments a reader disagrees with**, and it is worth recording precisely so that
+nobody re-derives the two-axis design later.
 
-**A report is a petition to an authority**; it asks someone else to act, and it
-is answered or ignored. §6.1 already establishes there is no authority whose
-reach extends past rendering, so a report has nobody to petition. **An
-assessment is a datum**: the reader is not asking for anything, they are stating
-what they think, and it takes effect in their own ranking and their own trust
-graph immediately and without anyone's permission.
+Bridging ranks by whether people who *usually disagree with each other* both
+rate something positively. Crucially **it is not a second vote axis** — it infers
+the disagreement dimension from the existing single-axis rating matrix by
+factorising it, so the interface stays exactly as above. The deployed instance
+(a large platform's crowd-sourced fact-check system) has real measured effects:
+substantial reductions in agreement with misleading claims and in resharing,
+independently replicated.
 
-That difference is not cosmetic. It means the control **always does something
-visible to the person who used it** — the post drops in their feed, the author's
-weight moves — rather than disappearing into a queue. A control that visibly
-works is used honestly; a report button that changes nothing observable trains
-people to use it as a super-downvote, which is how `noise` would otherwise
-become the disagree button we just removed.
+**Why it is not v1, and what has to be true first:**
 
-#### `noise` is not moderation, and must not become it
+- **It is fragile under permissionless identity.** Published analyses show fewer
+  than ten strategically placed ratings can push a meaningful fraction of
+  low-quality items over the display threshold. The deployed system resists this
+  only because the platform supplies sybil resistance out of band — phone
+  verification, rater enrolment, per-rater impact scores. **§7 is explicit that
+  dialectica has none of that.**
+- **§7.3's vouch is the candidate replacement for that missing layer**, which is
+  a stronger argument for vouching than §7.3 makes on its own. But it only works
+  once vouch data exists, so bridging is **downstream of vouch being populated**,
+  not parallel to it.
+- It needs a rating matrix with enough density to factorise, which a new Stoa
+  does not have.
 
-`noise` is one reader's assessment. It is **not** a hide, it does not accumulate
-toward one (§7.2 rule 2's floor and the no-auto-hide rule bind here), and a Stoa
-with a hundred `noise` assessments on a post has still hidden nothing. Only a
-moderator's signed op hides (§6), and that remains the only thing that does.
+So the sequence is: single axis and vouch now; bridging when there is both a
+matrix to factorise and a sybil-resistance story to protect it. **Revisit it
+alongside rule 6's triggers**, since the condition that retires the interim
+score is close to the condition that makes bridging both possible and necessary.
 
-The relationship worth stating: `noise` assessments are a **signal a moderator
-may choose to read**, in the same way relevance is a signal a reader reads. They
-are never an input the system acts on by itself. §7.2 rule 4's principle holds —
-suppression is a binding judgement or it is nothing.
+#### What was rejected, so it is not re-proposed
 
-#### Encoding, and what it costs
+- **A second vote axis** (quality separated from agreement). Unevaluated
+  anywhere, spends the interaction budget on expressiveness where the measured
+  constraint is latency, and its own precedents report the axes moving together.
+- **A `contested` ordering built on a split-response signal.** The single-axis
+  version of this — ranking by an even split — is **mechanically a "most
+  polarising content" sort**: the structural analysis behind the percolation
+  finding above shows a 50/50 split is exactly where a voter network is most
+  polarised, and separate work finds much controversial content is merely
+  off-topic. It has also **never been studied** for whether it surfaces anything
+  worth reading. Bridging is the thing this was reaching for, and it is a
+  different mechanism.
+- **Auto-hiding on accumulated negative signal**, in any form. Refused
+  structurally by §7.2 rule 2's floor.
 
-The vote op already carries a one-byte direction with 254 unused values, so
-**both axes fit in the existing wire format with no version bump**: an
-assessment is a discriminant, a response is another. `VoteDirection::from_byte`
-**refuses** an unknown discriminant rather than defaulting it (§11), so a peer on
-an older build rejects an assessment it cannot interpret instead of miscounting
-it as a vote. That is the fail-closed direction, and it is why this extension is
-cheap rather than a migration.
+#### Open: a disagreeing reply is a quality signal the vote axis loses
 
-`up` and `down` remain as they are, meaning what §7.2 already says they mean, so
-nothing already published is reinterpreted.
+**Parked, not designed**, and it survives the move to one axis — arguably it
+matters *more* now, because the single axis is exactly what cannot express it.
 
-#### What it costs the interface, which is the real cost
-
-Two controls are harder than one, and **most readers will use neither if asked
-to think.** The mitigation is that the axes are not equally prominent:
-assessment is the primary control because it is the one that ranks; response is
-secondary and optional. A reader who only ever assesses gets a working forum,
-and a reader who only ever responds changes nothing but their own weights —
-both are acceptable degradations.
-
-**This is the part most likely to be wrong**, and unlike the sybil arithmetic it
-cannot be settled by reasoning. It wants observation: whether people use two
-controls at all, whether `noise` drifts into meaning "disagree" despite the
-separation, and whether the distribution display reads as informative or as
-noise itself. Ship it able to be measured, and treat the first finding that
-contradicts this section as the section's answer.
-
-#### Open: a disagreeing reply is itself an assessment
-
-**Parked, not designed.** Recorded here because the observation is good and
-would otherwise be lost.
-
-**Replying to say "I disagree" is implicitly "this is good quality, and I am
-engaging with it."** Nobody writes a rebuttal to spam — they scroll past. So a
-disagreeing reply lands in the top-right cell of the table above, and it is the
-cell that is hardest to collect explicitly.
+**Replying to say "I disagree" is implicitly "this is worth my time."** Nobody
+writes a rebuttal to spam; they scroll past. So a disagreeing reply carries the
+judgement the vote axis conflates away — and the reader who writes one may well
+*downvote* the same post, which is the measured behaviour §7.4 cites.
 
 Three reasons it is worth taking seriously rather than filing as a nicety:
 
-- **It is the organic form of the signal this section exists to capture.** A
-  reader who would never click two buttons has already expressed the judgement
-  by writing.
+- **It is an organic signal, needing no new control.** A reader who would never
+  use an extra button has already expressed the judgement by writing.
 - **It is costly, which makes it hard to fake.** Unlike a click, a substantive
   reply takes effort, so it resists the minting attack §7.2 rule 2 admits it
-  cannot stop. That makes it a *better* signal than the explicit control, not a
-  weaker proxy for one.
+  cannot stop. That makes it a *better* signal than any button, not a weaker
+  proxy for one.
 - **It needs no new op.** A reply is already a `Post` with a parent (§11), so
   the data is present in the log today.
 
@@ -1861,22 +1886,22 @@ Three reasons it is worth taking seriously rather than filing as a nicety:
 
 - **A reply is not necessarily a disagreement**, and inferring which from text
   is sentiment analysis — an expensive, locale-specific, wrong-by-default
-  classifier that this project should not own. The candidate answers are an
-  explicit response axis attached to the reply itself (cheap, honest, but back
-  to asking the reader to declare) or counting *any* substantive reply as a
-  weak assessment regardless of stance (no classifier, but it also rewards
-  pile-ons and flame wars, which is the failure mode of every engagement
-  metric ever shipped).
-- **It creates an incentive to reply rather than to assess**, and a forum that
+  classifier that this project should not own. The alternative is counting *any*
+  substantive reply as a weak positive signal regardless of stance, which needs
+  no classifier but rewards pile-ons and flame wars — the failure mode of every
+  engagement metric ever shipped.
+- **It creates an incentive to reply rather than to vote**, and a forum that
   rewards replying is a forum that rewards argument volume. That may be
   acceptable here — argument is the point — but it is the kind of thing that
   looks fine in design and is corrosive in practice.
 - **Self-replies and reply chains** would need excluding or bounding, or an
   author raises their own post by arguing with their critics.
 
-Settle it against observation of whether the explicit controls are used at all.
-If they are, this is redundant; if they are not, this is the fallback that was
-always going to be the real signal.
+**Weigh it against bridging** rather than in isolation: both address the same
+gap, bridging has measured results behind it and this does not, but this needs
+no rating-matrix density and no sybil-resistance layer. If bridging proves out
+of reach for a permissionless forum, this is the fallback that was always going
+to be the real signal.
 
 ---
 
@@ -2193,12 +2218,20 @@ thing (§2.3).
   concurrently?** The one genuine merge question in the design (§5.7), and it
   does not arise while the creator is the sole moderator — so it is answered
   alongside mutable moderation, not before.
-- **Should a disagreeing reply count as an assessment?** Written up in §7.4 —
-  replying to disagree is implicitly "good quality, and I engage", it is costly
-  enough to resist minting, and it needs no new op. Blocked on avoiding
-  sentiment analysis, and on whether rewarding replies rewards argument volume.
-  **Decide it against observation of whether the explicit controls get used**,
-  not before.
+- **Should a disagreeing reply count as a quality signal?** Written up in §7.4 —
+  replying to disagree is implicitly "worth my time", it is costly enough to
+  resist minting, and it needs no new op. Blocked on avoiding sentiment
+  analysis, and on whether rewarding replies rewards argument volume. **Weigh it
+  against bridging**, which addresses the same gap with measured results but
+  needs a dense rating matrix and a sybil-resistance layer this forum lacks.
+- **Does bridging-based ranking work without platform-supplied sybil
+  resistance?** §7.4 records it as the evidenced answer to surfacing good
+  arguments a reader disagrees with, and records why it is not v1: published
+  analyses show fewer than ten placed ratings can push low-quality items over
+  threshold, and the deployed instance relies on out-of-band identity checks §7
+  says dialectica has none of. **§7.3's vouch is the candidate replacement** —
+  whether it is sufficient is the open question, and it cannot be answered until
+  vouch data exists.
 - ~~**When the `policy` field lands.**~~ **Answered: it is in the genesis
   record now**, with `open` as its only accepted value — `dialectica-core`'s
   `stoa::Policy`. The reasoning stands as written and is why it landed early: a
