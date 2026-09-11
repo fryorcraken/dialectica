@@ -22,10 +22,10 @@
 //! credential (§5.5) rather than on a keypair. Hashing a record rather than a
 //! bare key (see [`PublicKey::address`]) is what keeps that door open.
 //!
-//! **No keystore.** §5.6 specifies one (encrypted key at a fixed path, three
-//! unlock paths, never prompt). It is filesystem work, and a pure crate that
-//! cannot touch the disk is the wrong place for it; this module defines the key
-//! types that a keystore will hand back.
+//! **No key storage.** That is [`crate::keystore`]'s job — this module defines
+//! the key types it hands back, and deliberately knows nothing about files,
+//! passphrases or where a secret lives. The split is what keeps the signing and
+//! derivation primitives testable without a filesystem.
 
 // `Signer` is the trait behind `.sign()`. There is deliberately no `Verifier`
 // import: that trait's `verify()` is the LENIENT check, and `verify_strict` is
@@ -248,10 +248,13 @@ impl Eq for PublicKey {}
 /// (the `zeroize` feature is on by default), but [`SecretKey::to_bytes`] hands
 /// out a plain `[u8; 32]` this type no longer controls, and the seed locals in
 /// [`SecretKey::generate`] and [`derive_stoa_key`] are ordinary stack arrays.
-/// Those copies are where the keystore (§5.6) takes over, and zeroizing them is
-/// its job — a crate that cannot touch the disk cannot own a secret's lifetime
-/// anyway. The denials above are about a key reaching a *log or a wire*, which
-/// is the reachable threat here; memory hygiene is deferred, not solved.
+///
+/// **Those copies are [`crate::keystore`]'s to own, and it does** — it holds
+/// the root in a `Zeroizing` buffer and wipes the array `to_bytes` hands it.
+/// The denials above remain about a key reaching a *log or a wire*, which is
+/// the reachable threat at this layer; the lifetime of a secret in memory is
+/// owned one layer up, because that is the layer that knows when a secret stops
+/// being needed.
 pub struct SecretKey(ed25519_dalek::SigningKey);
 
 impl SecretKey {
@@ -266,7 +269,7 @@ impl SecretKey {
     /// a shortcut: there is no safe fallback for "I could not get entropy", and
     /// continuing with a predictable key would forge every signature this
     /// identity ever makes. It is also not reachable from a dispatch handler —
-    /// key generation happens at keystore setup (§5.6), not while serving an
+    /// key generation happens at keystore setup, not while serving an
     /// inbound op.
     pub fn generate() -> Self {
         let mut seed = [0u8; 32];
@@ -274,7 +277,7 @@ impl SecretKey {
         SecretKey(ed25519_dalek::SigningKey::from_bytes(&seed))
     }
 
-    /// Rebuild a key from stored bytes — what a keystore (§5.6) will call.
+    /// Rebuild a key from stored bytes — what [`crate::keystore`] calls.
     ///
     /// **Every 32-byte string is a valid Ed25519 seed**, so the only failure
     /// mode is the length, and the `try_into` is what checks it. This is a real
@@ -764,7 +767,7 @@ mod tests {
 
     #[test]
     fn a_secret_key_survives_a_byte_round_trip() {
-        // What a keystore (§5.6) will do on unlock: bytes in, same identity out.
+        // What the keystore does on unlock: bytes in, same identity out.
         let sk = SecretKey::generate();
         let restored = SecretKey::from_bytes(&sk.to_bytes()).unwrap();
         assert_eq!(restored.public_key(), sk.public_key());
@@ -948,7 +951,7 @@ mod tests {
 
     #[test]
     fn a_derived_key_round_trips_through_a_keystore() {
-        // Derivation and storage must agree: what §5.6 persists is the seed,
+        // Derivation and storage must agree: what the keystore persists is the seed,
         // and reloading it must give back the same posting identity.
         let root = [7u8; 32];
         let stoa = stoa_address(b"a genesis record");

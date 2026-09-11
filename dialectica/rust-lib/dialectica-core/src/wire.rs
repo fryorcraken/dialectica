@@ -102,13 +102,17 @@ pub fn panic_probe(request: &str) -> String {
     })
 }
 
-// ─── The capability probe (PLAN.md §5.6) ──────────────────────────────────
+// ─── The capability probe ─────────────────────────────────────────────────
+//
+// The contract is the `posting-capability` spec; the reasoning behind these
+// shapes is in that change's `design.md`. What is repeated here is only what a
+// reader of THIS code needs in order not to undo it.
 
 /// What a caller may do right now, and why not if not.
 ///
 /// **The two states are one enum rather than a struct with two `Option`s**, and
 /// that is the whole reason this type exists instead of the handler building
-/// JSON inline. §5.6 gives the shape as
+/// JSON inline. The contract is
 /// `{"canPost":bool, "identity":"…" | "reason":"…"}` — the `|` is exclusive —
 /// and §2.5 forbids a reply that is partly a success. A
 /// `{ can_post, identity: Option, reason: Option }` can express three states
@@ -124,9 +128,10 @@ pub fn panic_probe(request: &str) -> String {
 pub enum Capability {
     /// Posting is possible, under this author address (hex).
     CanPost { identity: String },
-    /// Posting is not possible. The reason **names the fix** — §5.6's
-    /// requirement, and the difference between a view that can help a user and
-    /// one that can only display "unlocked: false".
+    /// Posting is not possible. The reason **names the fix** — the
+    /// `posting-capability` spec requires it, and it is the difference between
+    /// a view that can help a user and one that can only display
+    /// "unlocked: false".
     CannotPost { reason: String },
 }
 
@@ -194,9 +199,9 @@ pub fn get_capabilities(
 /// The probe's decision, separated from its JSON and its guard.
 ///
 /// Split out because this is the part worth testing directly: the mapping from
-/// "what the keystore said" to "what a view is told" is where the §5.6
-/// requirement that a reason names a fix actually lives, and asserting on it
-/// through a JSON string would be asserting on serialisation at the same time.
+/// "what the keystore said" to "what a view is told" is where the requirement
+/// that a reason names a fix actually lives, and asserting on it through a JSON
+/// string would be asserting on serialisation at the same time.
 pub fn capability_for(
     stoa: &crate::identity::Address,
     lookup: impl FnOnce(&crate::identity::Address) -> Result<String, crate::keystore::KeystoreError>,
@@ -568,7 +573,7 @@ mod tests {
 
     #[test]
     fn a_successful_probe_carries_no_reason_and_a_failed_one_no_identity() {
-        // §5.6 gives the shape as `"identity":"…" | "reason":"…"` — the bar is
+        // The contract is `"identity":"…" | "reason":"…"` — the bar is
         // exclusive. §2.5 forbids a reply that is partly a success, and a
         // compose box gated on `canPost` while a stale `identity` field sits
         // beside it is exactly how the wrong one gets rendered.
@@ -710,7 +715,7 @@ mod tests {
 
     #[test]
     fn the_capability_json_is_pinned_to_the_exact_shape_the_plan_specifies() {
-        // Hardcoded strings, both of them. §5.6 writes the contract as
+        // Hardcoded strings, both of them. The contract is
         // `{"canPost":bool, "identity":"…" | "reason":"…"}`, and a view is
         // written against those exact key names — renaming one is a breaking
         // change that no type checker would catch.

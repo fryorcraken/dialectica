@@ -1,15 +1,21 @@
-//! The keystore: a root secret on disk, and what may open it (PLAN.md §5.6).
+//! The keystore: a root secret on disk, and what may open it.
 //!
-//! `identity.rs` mints and derives keys and has nowhere to put one — its own
-//! doc says so. This is that place, and it is the only code in the project that
-//! writes secret material to disk.
+//! The contract is the `keystore` spec; every choice below — the cipher, the
+//! KDF, the two unlock paths, the refusals — is argued in that change's
+//! `design.md`, including what was rejected. What is repeated here is only what
+//! a reader of THIS file needs in order not to undo it.
 //!
 //! # The bar this is held to
 //!
-//! §5.6 names the reference and the counter-example in the same breath: copy
-//! radicle's model, and *"LEZ's own keystore is plaintext JSON at 0644
-//! containing every secret, with `// TODO: Use password for storage
+//! PLAN.md's §5.6 named the reference and the counter-example in the same
+//! breath: copy radicle's model, and *"LEZ's own keystore is plaintext JSON at
+//! 0644 containing every secret, with `// TODO: Use password for storage
 //! encryption`. Match the crypto, not the key handling."*
+//!
+//! Radicle's model was then read rather than assumed, and **two of its
+//! properties turn out to be gaps**: it never checks the key file's permissions
+//! on read, and its writer truncates in place. Both are closed here — see
+//! [`check_permissions`] and [`write_atomically`].
 //!
 //! # Three properties that shape everything here
 //!
@@ -40,7 +46,7 @@
 //!
 //! # What is deliberately not here
 //!
-//! **No agent.** §5.6 names three unlock paths and this ships two — unencrypted
+//! **No agent.** Three unlock paths were specified and this ships two — unencrypted
 //! and passphrase-by-environment. An agent is a long-lived process holding
 //! decrypted material and answering a socket, which is a second security
 //! boundary to design and a daemon to supervise, and it buys nothing until a
@@ -205,7 +211,7 @@ pub enum Unlock {
 
 /// The environment variable a passphrase arrives in.
 ///
-/// Named after radicle's `RAD_PASSPHRASE`, which is the model §5.6 points at.
+/// Named after radicle's `RAD_PASSPHRASE`, the model this keystore follows.
 ///
 /// **This unlock path has a documented limitation, and it is documented rather
 /// than mitigated because it cannot be mitigated from here.** A process's
@@ -220,7 +226,7 @@ pub enum Unlock {
 /// unencrypted secret key."* That is slightly too strong — it still defeats the
 /// stolen-disk case — but it is the right direction to err in.
 ///
-/// The agent path (§5.6's third) is what closes this, and is deferred; see the
+/// The agent path is what closes this, and is deferred; see the
 /// module doc.
 pub const PASSPHRASE_ENV: &str = "DIALECTICA_PASSPHRASE";
 
@@ -374,9 +380,10 @@ pub enum KeystoreError {
 }
 
 impl std::fmt::Display for KeystoreError {
-    /// **Every message names the fix**, not merely the fault. §5.6 requires it
-    /// of the probe's `reason`, and the probe's reasons are these strings — so
-    /// putting the guidance anywhere else would mean maintaining it twice.
+    /// **Every message names the fix**, not merely the fault. The
+    /// `posting-capability` spec requires it of the probe's `reason`, and the
+    /// probe's reasons ARE these strings — so putting the guidance anywhere
+    /// else would mean maintaining it twice and watching the two drift.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             KeystoreError::NotFound => write!(
@@ -1541,9 +1548,10 @@ mod tests {
 
     #[test]
     fn every_error_message_names_a_fix() {
-        // §5.6's requirement on the probe's `reason`, enforced where the
-        // strings actually live. "Unlocked: false" states a fault; a reason has
-        // to say what to do about it.
+        // The `posting-capability` requirement on the probe's `reason`,
+        // enforced where the strings actually live — so it covers every
+        // variant at once, including ones added later. "Unlocked: false"
+        // states a fault; a reason has to say what to do about it.
         //
         // NO SPEC: "names a fix" is checked as "contains an imperative verb
         // from this list". The spec requires actionable guidance and cannot
@@ -1839,7 +1847,7 @@ mod tests {
         // catch. Hardcoded rather than compared to itself.
         assert_eq!(PASSPHRASE_ENV, "DIALECTICA_PASSPHRASE");
         // And the locked reason names it, which is what makes that reason
-        // actionable — §5.6's requirement, checked where a view would read it.
+        // actionable, checked where a view would read it.
         assert!(KeystoreError::Locked
             .to_string()
             .contains("DIALECTICA_PASSPHRASE"));

@@ -1,0 +1,359 @@
+# Design
+
+## Context
+
+See proposal.md — Why. `identity.rs` supplies `SecretKey`, `derive_stoa_key`
+and the address construction, and says in its own module doc that a keystore is
+missing and that the memory hygiene of secret copies is "deferred, not solved"
+and belongs here. This change is that file, plus the probe a view gates on.
+
+PLAN.md §5.6 names radicle as the model, so the model was read rather than
+assumed. Two of its properties turn out to be **gaps** rather than choices, and
+this design closes both — see the Decisions on permissions and on atomic writes.
+
+## Goals / Non-Goals
+
+**Goals**
+
+- A root secret that survives a restart and is not readable from the file alone.
+- A probe truthful enough that a view can gate a compose box on it.
+- Every failure on this path a returned error, never a prompt and never a panic.
+
+**Non-Goals**
+
+- **No agent.** §5.6's third unlock path. See the Decision below.
+- **No rotation, no key change in place.** §5.3 defers rotation; changing a
+  passphrase is `write_to` and nothing else.
+- **No path discovery.** The crate is handed the file. Where it lives is the
+  module crate's decision, from the host's `instance_persistence_path`.
+- **No signing through the keystore.** It hands back a `SecretKey`; `op.rs` owns
+  what is signed.
+- **No multi-identity.** One root secret, one file. §5.2's per-Stoa identities
+  are derived, not stored.
+
+## Decisions
+
+### XChaCha20-Poly1305, not an OpenSSH-format key
+
+The literal reading of §5.6 — "copy radicle's proven model" — is to use
+`ssh-key` and write an OpenSSH-format private key, which is what heartwood does:
+`aes256-ctr` under a `bcrypt-pbkdf` KDF at 16 rounds, all of it the `ssh-key`
+crate's defaults rather than anything heartwood chose.
+
+Rejected, for three reasons in ascending order of weight:
+
+- **It imports a key-file format to store 32 bytes.** PEM armouring, a public
+  half written as a second file, a legacy cipher suite, and a parser for all of
+  it. `dialectica-core` decodes hostile input for a living and the cost of a
+  format is its parser.
+- **The interoperability it buys is the deferred half.** An OpenSSH file is
+  worth having because `ssh-agent` and `ssh-keygen` can act on it — and the
+  agent path is out of scope here. Paying the format cost for a benefit this
+  change does not take is the wrong order.
+- **`aes256-ctr` is unauthenticated.** heartwood's file has no MAC over the
+  ciphertext, so a wrong passphrase decrypts to *something*; the check is a
+  magic-value comparison inside the decrypted blob. That is the property this
+  design is least willing to give up — see the next Decision.
+
+**bcrypt_pbkdf** was rejected with PBKDF2 for the same reason, under
+"Argon2id" below.
+
+So: an AEAD over a small binary format of our own, with the same version
+discriminant and strict-decoding discipline `stoa.rs` and `op.rs` already carry.
+
+**XChaCha20-Poly1305 over ChaCha20-Poly1305 and AES-256-GCM:**
+
+- Over **AES-GCM**: dialectica ships pure Rust everywhere, and AES without
+  hardware support is a table lookup whose timing depends on the key. ChaCha is
+  constant-time by construction.
+- Over the **96-bit-nonce ChaCha20-Poly1305**: at 96 bits a random nonce needs a
+  birthday-bound argument, which means the format would have to carry a counter
+  and every future writer would have to respect it. At XChaCha's 192 bits a
+  fresh random nonce per write is safe outright, so nonce reuse stops being
+  something a later contributor can get wrong. A keystore is rewritten rarely,
+  but "rarely" is not a property a format should rest on.
+
+### Authentication is the load-bearing half, not the confidentiality
+
+The reason an AEAD rather than a cipher plus a passphrase check: **without
+authentication, anyone with write access to the keystore can substitute the
+identity the user posts under.** They cannot read the old secret, but they can
+replace it with one they know, and the user then posts — signed, verifiably,
+under a key the attacker holds. Nothing downstream can detect it, because every
+op is genuinely well-formed.
+
+Confidentiality protects against a stolen disk. Authentication protects against
+a hostile local process, which is the more likely of the two on a desktop
+sharing a machine with other Logos modules. Both matter; only one of them is
+missing from the model §5.6 points at.
+
+The **header is the associated data** — version, protection scheme, salt, nonce
+— so a downgraded protection byte or a swapped salt fails the tag. The KDF
+parameters are deliberately *not* in the AAD: they are inputs to the key, so
+editing them produces a different key and the tag fails anyway.
+
+### Argon2id, with the parameters recorded in the file
+
+Over PBKDF2 and bcrypt_pbkdf. The threat is an offline attack on a stolen file,
+where the attacker's budget is hardware: both alternatives parallelise cheaply
+on a GPU, and Argon2id is memory-hard, which is what makes that hardware cost
+money. It is also the only one of the three with a standards recommendation
+behind it (RFC 9106) rather than incumbency.
+
+RFC 9106's **second** recommended option (64 MiB, t=3, p=4), not its first
+(2 GiB). A forum module shares a machine with a desktop session and with other
+Logos modules, and a 2 GiB allocation on unlock is an availability problem of
+its own.
+
+**The parameters are written into the file**, not assumed. Assuming them means
+that changing the cost turns every existing keystore into a "wrong passphrase" —
+the single most misleading thing this code could tell a user, because the fix it
+implies (retype the passphrase) cannot work.
+
+### A ceiling on the recorded cost, which a test found
+
+Recording the parameters creates a hole: they are values anyone with write
+access to the file chooses, and `argon2::Params::new` accepts an `m_cost` up to
+`u32::MAX` — a request to allocate four terabytes. The blanket hostile-input
+sweep flipped one byte of a recorded cost and the **OOM killer took the test
+binary with SIGKILL**.
+
+In a module process that is the same death PHASE0-FINDINGS §3 measured, and it
+is worse than a panic: reached with no unwinding anywhere, so `guarded` has
+nothing to catch. `MAX_ACCEPTED_M_COST_KIB` and its two siblings are the fix,
+checked *before* `Params::new` because the allocation happens in
+`hash_password_into` and a check after the fact runs too late for nothing.
+
+The ceilings are 16x the memory this build writes and ten times its iterations,
+so a file from a future build with harder parameters still opens — which is the
+portability the recording exists for. What they exclude is only the range that
+is an allocation attack rather than a KDF.
+
+**This is the one finding here that was not predicted.** It is recorded because
+the general lesson generalises: any field this crate reads from untrusted bytes
+and then *sizes an allocation on* needs a ceiling, and the op decoder already
+learned the same thing about its length prefixes.
+
+### Two unlock paths now; the agent deferred, and the shape grows one
+
+§5.6 names three. This ships two:
+
+- **Unencrypted** — a real configuration on a machine whose disk is already
+  encrypted. Recorded in the file rather than inferred, so that "no passphrase
+  was ever set" and "your passphrase is wrong" stay distinguishable. The empty
+  passphrase is refused outright, because "encrypted under a key anyone can
+  derive" reads as protection and is none.
+- **Passphrase by environment variable** (`DIALECTICA_PASSPHRASE`, named after
+  `RAD_PASSPHRASE`).
+
+**The agent is deferred**, and the reason is proportion rather than difficulty:
+an agent is a long-lived process holding decrypted material and answering a
+socket — a second security boundary to design and a daemon to supervise — and
+it buys nothing until a human is repeatedly typing a passphrase, which nobody
+is yet. It is also the only one of the three that cannot be done at all from
+inside a sandboxed module without a transport this project has not chosen.
+
+**Adding it later is not a breaking change**, and that is by construction. The
+extension point is `Unlock`, an enum on the *input* side: `Unlock::Agent { .. }`
+is a new variant, every existing caller keeps compiling, no reply shape moves,
+and the file format is untouched — an agent changes who holds the passphrase,
+not how the file is encrypted. Had the API been
+`open(path, Option<&Passphrase>)`, adding an agent would have meant changing
+that signature at every call site.
+
+### The passphrase environment variable, and its documented limitation
+
+A process's environment is readable by the same user through
+`/proc/<pid>/environ`, is inherited by every child, and is commonly captured
+whole by crash reporters and supervisors. So this path protects against an
+attacker who has the *file* and not the running machine — the stolen-disk case,
+which is what the encryption is for — and not against one already running code
+as this user.
+
+That is stated in the code rather than mitigated, because it cannot be mitigated
+from here; the agent path is what closes it. radicle documents the same thing
+more bluntly in its man page: *"this is not secure and is equivalent to having
+an unencrypted secret key."* That is slightly too strong — it still defeats the
+stolen-disk case — but it is the right direction to err in.
+
+### The file is asked before the environment
+
+`unlock_from_env` reads the file's protection byte first and consults the
+environment second. The reverse order — "a passphrase is set, so assume
+encryption" — reports an unencrypted keystore as a protection mismatch, and
+reports a missing passphrase against an unencrypted keystore as a locked one.
+Neither is true, and both send the user to fix something that is not broken.
+
+An **empty variable counts as unset**, matching `ssh-keygen` and radicle. The
+alternative would attempt an unlock with a key anyone can derive and then report
+`WrongPassphrase`, blaming the user for a value they never set.
+
+### Refuse a too-open keystore; do not warn
+
+**radicle does not do this, and that is a gap rather than a decision.**
+heartwood never stats the key file; the `0600` on creation comes from `ssh-key`,
+whose reader carries an unimplemented `// TODO(tarcieri): verify file
+permissions match UNIX_FILE_PERMISSIONS`. So radicle loads a world-readable key
+without complaint, unlike OpenSSH itself.
+
+Dialectica refuses, and refuses rather than warning, for a reason specific to
+this architecture: **a warning here is a message nobody sees.** The module has
+no terminal, and its only caller is a view that would have to choose to render
+it — which is the same reasoning that makes the probe a gate rather than a hint.
+
+The error names the *whole* fix, which is two things and not one: restrict the
+mode, **and replace the key**, because a secret that has been readable by every
+local process is a secret to replace rather than to keep using.
+
+The check runs **before any content is read**. Checking afterwards would have
+already loaded a file the function is about to declare unsafe to use. It is on
+the permission bits only, not on ownership: a file owned by someone else is
+unreadable anyway, and the OS reports that.
+
+### Atomic writes, which radicle also does not do
+
+`ssh-key`'s writer is `create + truncate + write_all` — no temp file, no
+rename, no fsync. An interrupted write truncates the key in place, and the root
+secret exists nowhere else, so that is every identity the user has. heartwood's
+mitigation is a refuse-to-clobber guard, which is a different property and does
+nothing for a crash mid-write.
+
+Here: write to a **sibling** temporary at `0600`, `sync_all`, then `rename` over
+the destination. A sibling rather than `/tmp` because a rename across
+filesystems is a copy and loses the atomicity. The mode is set at open time
+rather than chmod'ed afterwards, because between a create at 0644 and a chmod
+there is a window in which the secret is world-readable, and a window is all a
+local attacker polling the directory needs.
+
+`create` additionally refuses to overwrite, keeping heartwood's guard as well —
+the two answer different questions and both are worth having.
+
+### The probe is an enum, so the illegal states cannot be written
+
+§5.6's shape is `{"canPost":bool, "identity":"…" | "reason":"…"}` and the bar is
+exclusive. A `{ can_post, identity: Option, reason: Option }` can express three
+states the contract does not have — both, neither, and `canPost:true` with no
+identity — and each would then have to be prevented at every construction site.
+
+`Capability` is an enum with one payload per variant, so serialisation is total
+and the handler has no branch to get wrong. This is CLAUDE.md's standing
+instruction applied: a data shape is right everywhere at once, where a guard has
+to be got right at each call site.
+
+### A keystore failure is an answer, not an error reply
+
+The probe returns `canPost:false` with a reason for **every** keystore state,
+including ones that are plainly errors — unreadable file, malformed file, wrong
+passphrase. §2.5's `{"error":"..."}` is reserved for the one failure that is not
+about capability: a request this function could not parse.
+
+The reason is what a caller would otherwise have to do. A view handling both
+"you cannot post, because X" and "I could not determine whether you can post"
+has two negative branches, and the second has no sensible rendering. A malformed
+*request* is a caller bug; a malformed *keystore* is a user state.
+
+### The reason is the keystore error's own message
+
+Not a rewording of it. `KeystoreError::Display` already names the fix for every
+variant — a documented obligation on it, with a test — so paraphrasing at the
+probe would mean maintaining the same guidance in two places and watching the
+two drift. The consequence is that "the reason names the fix" is enforced where
+the strings live, on every variant at once, including ones added later.
+
+### The probe takes a Stoa, because there is no "the" identity
+
+§5.2 gives a user one identity *per Stoa*. "Who would post" has no answer until
+a Stoa is named, so the probe takes one. A probe that ignored it would report
+one Stoa's pseudonym while the user posted under another's.
+
+### Nothing here discovers a path or reads the environment at init
+
+`Keystore` is given the file to work on. A fixed path baked into a pure crate is
+untestable and would mean this crate reading the environment at a moment its
+caller does not control; the module crate has the host-stamped
+`instance_persistence_path` from `on_context_ready` and passes it in.
+`default_path_in(dir)` is the naming convention applied to a directory the
+caller supplies — the *name* is fixed, the *directory* is not.
+
+### Secret material is zeroized, closing a gap identity.rs names
+
+`identity.rs` states plainly that its `to_bytes` hands out a copy it no longer
+controls and that "those copies are where the keystore (§5.6) takes over, and
+zeroizing them is its job". So: the root is `Zeroizing<[u8; 32]>`, the derived
+cipher key and the decrypted plaintext likewise, the `Passphrase` wraps
+`Zeroizing<Vec<u8>>`, and `chacha20poly1305`'s `zeroize` feature wipes the
+cipher's own expanded key state.
+
+**What that does not cover, said plainly so the omission is not mistaken for
+coverage:** Rust can move a value before it is dropped, and a `Vec` that
+reallocates leaves its old buffer unwiped. Argon2's internal memory blocks are
+the crate's to manage, not ours. And nothing here prevents the pages being
+swapped to disk — `mlock` is not attempted, because it needs a privilege the
+module may not have and failing it silently would be worse than not claiming it.
+Zeroization here raises the cost of a memory disclosure; it does not eliminate
+one.
+
+### No timing side channel is introduced
+
+The passphrase check is the AEAD's own tag verification, which is constant-time,
+and there is **no separate stored verifier** to compare against. That is the
+shape an implementation reaches for by reflex — store a hash of the passphrase,
+compare on unlock — and an ordinary `==` on one short-circuits, leaking how much
+of a guess was right and turning an offline attack into a faster one.
+
+The other comparisons in the file are on public values: the magic byte, the
+version, the protection discriminant, the permission mode. None is secret, so
+none needs constant time.
+
+### Errors carry no key material
+
+Every variant of `KeystoreError` carries either nothing, a public number (a
+permission mode, a version discriminant), or an OS message that names a path and
+an errno. None carries ciphertext, a passphrase, or a secret — checked by a test
+that feeds distinctive markers through and greps every message and `Debug` form,
+because the sort of thing that breaks this is a later
+`format!("... {ciphertext:?}")` added while debugging.
+
+`WrongPassphrase` deliberately does not distinguish "wrong passphrase" from
+"someone edited the ciphertext". It cannot — both are one tag failure — and
+guessing between them would be telling the user something unverified.
+
+## Risks / Trade-offs
+
+- **The environment-variable path is visible to other local processes.** →
+  Documented rather than mitigated, because it cannot be mitigated from here.
+  The agent path closes it and is deferred; the shape grows one without a
+  breaking change.
+- **An unencrypted keystore is supported at all.** → It is a real configuration
+  on an encrypted disk, and refusing it pushes users to worse workarounds. The
+  mitigation is that it is *recorded*, so no caller can mistake it for
+  protection and the probe can say which state a user is in.
+- **A too-open keystore is refused, which can lock a user out of their own
+  identity.** → Deliberate, and the error says to chmod it. The alternative —
+  loading it — is what radicle does, and it means posting under a key every
+  process on the machine has had a chance to copy.
+- **Refusing to overwrite means "I forgot my passphrase" has no recovery.** →
+  Correct, and inherent: §5.3 has no rotation, so a lost root secret is a lost
+  identity. The error says to remove the file deliberately, and says that the
+  existing key cannot be recovered afterwards.
+- **A 64 MiB allocation on every unlock.** → The tradeoff Argon2id is for. It
+  is once per process, not per operation.
+- **The cost ceiling could reject a genuinely-harder future file.** → Only above
+  1 GiB / t=32 / p=16, which is well past anything RFC 9106 recommends. Raising
+  it is a two-line change, and the test hardcodes the ceilings so raising one
+  has to be deliberate in two places.
+- **Windows has no permission check.** → Stated in the code rather than silently
+  skipped. Windows ACLs are a different mechanism needing their own
+  implementation; dialectica targets Linux (PLAN.md's Basecamp traps are
+  Linux-specific), and the arm exists to keep the crate portable rather than to
+  serve a supported platform.
+
+## Open Questions
+
+- **Where the module crate puts the keystore.** This change fixes the file
+  *name* and leaves the directory to the caller. The adapter will use the
+  host-stamped `instance_persistence_path`, which is per-instance — so two
+  Basecamp profiles get two identities. That is probably right and is not
+  decided here, because deciding it needs the adapter, which is out of scope.
+- **Whether a passphrase change should re-encrypt without re-minting.**
+  `write_to` already does it; nothing has asked for a verb with that name yet.
