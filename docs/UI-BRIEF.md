@@ -277,6 +277,16 @@ This is obligation 2b again, now applying to the thing **every post is
 attributed to**, which is a far larger surface than Stoa titles: a feed renders
 a name on every row.
 
+**Uniqueness is not merely unbuilt — it is unavailable, and asking for it asks
+for something worse.** Checking a name against every other name needs a registry,
+which is the central service this project does not have; and the check would have
+to span Stoas, which is exactly the cross-Stoa correlation constraint 2 exists to
+prevent. **Uniqueness and unlinkability are in direct conflict, and unlinkability
+wins.** Nor does a bigger wordlist help: it lengthens the odds of an *accidental*
+collision while costing a deliberate impersonator only a constant factor, and
+refresh is unlimited. Treat "two identities can present the same name" as
+permanent.
+
 Two people in one Stoa can hold the same name by chance, and a name resembling
 anyone else's can be obtained **by pressing refresh** — there is no cost to
 lean on, and the design deliberately does not pretend otherwise. What an
