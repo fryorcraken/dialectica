@@ -45,7 +45,7 @@ The passphrase SHALL be stretched by a memory-hard key derivation function with 
 - **WHEN** a keystore is opened with a passphrase other than the one it was written under
 - **THEN** unlocking fails
 - **AND** no key material is returned
-- **AND** the failure is reported as a wrong passphrase rather than as a corrupt file
+- **AND** the failure is reported as a wrong passphrase rather than as a structurally malformed file
 
 #### Scenario: Two keystores holding the same secret under the same passphrase differ
 
@@ -310,13 +310,14 @@ The keystore file SHALL NOT contain any value that can be checked against a pass
 
 Such a value is what an ordinary equality comparison gets used on, and an equality comparison on a secret-derived value short-circuits: it leaks how much of a guess was right, turning an offline attack on the file into a faster one. Having no verifier at all removes the temptation rather than relying on every future comparison being written carefully.
 
-It also bounds what a stolen file discloses: without a verifier, an attacker cannot tell a wrong passphrase from a corrupt file any faster than the authenticated decryption can.
+It also bounds what a stolen file discloses: without a verifier, an attacker cannot tell a wrong passphrase from an altered ciphertext any faster than the authenticated decryption can. This indistinguishability is confined to the sealed bytes. A file that fails **structurally** — the wrong magic, an unrecognised version or protection discriminant, a truncation, trailing bytes — is refused before any decryption is attempted, and is reported as such; that refusal discloses nothing about the passphrase, because no passphrase was tried.
 
-#### Scenario: A wrong passphrase and a tampered file are indistinguishable
+#### Scenario: A wrong passphrase and a tampered ciphertext are indistinguishable
 
 - **WHEN** unlocking fails because the passphrase is wrong
 - **AND** unlocking fails because the ciphertext was altered
-- **THEN** the two failures are reported identically
+- **THEN** the two failures are reported identically, as a wrong passphrase
+- **AND** the report does not claim to know which of the two occurred
 
 #### Scenario: The file is exactly its declared layout, with no room for a verifier
 

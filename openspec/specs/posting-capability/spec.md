@@ -52,6 +52,8 @@ When posting is not possible, the reason SHALL state what the user or operator m
 
 The reasons SHALL be distinguishable from one another, at minimum: no keystore exists, the keystore exists but is locked and no passphrase was supplied, the supplied passphrase was wrong, the keystore's permissions are too open, the keystore's directory is writable by others, and the keystore is unreadable or malformed.
 
+"The supplied passphrase was wrong" is the reason reported whenever the sealed bytes fail to open, which `keystore` does not and SHALL NOT separate from an altered ciphertext. The distinction this list requires is against the **structural** failures — a file that is not a keystore, an unrecognised version, a truncation — each of which is established before a passphrase is tried.
+
 #### Scenario: No keystore
 
 - **WHEN** no keystore exists at the location consulted
@@ -77,7 +79,8 @@ The reasons SHALL be distinguishable from one another, at minimum: no keystore e
 
 - **WHEN** the keystore cannot be parsed
 - **THEN** the reason says so
-- **AND** is distinguishable from a wrong passphrase
+- **AND** is distinguishable from a wrong passphrase, because a structural failure is found before any decryption is attempted
+- **AND** this is not a claim that a wrong passphrase can be told from an altered ciphertext, which `keystore` deliberately does not provide
 
 ### Requirement: Reason text is for a reader, not for a caller to match on
 
