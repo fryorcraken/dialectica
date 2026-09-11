@@ -824,6 +824,347 @@ identity in Stoa A cannot be tied to their identity in Stoa B by the protocol.
 Within a Stoa, a pseudonym is stable by design, and §4.1's `senderId` links a
 Stoa's posts to that one pseudonym and no further.
 
+### 5.2.1 What an identity is called
+
+**A display name is generated from the identity's public key, never typed.** Two
+adjectives and a noun, drawn from science-fiction literature — *vermilion
+patient sandworm*, not `user_8f3a` and not a handle someone registered.
+
+**But a user is not handed one.** At onboarding they are shown a slate of five
+generated identities and pick one, and they may refresh the slate as many times
+as they like. So a name is *chosen* in the ordinary sense — it carries intent,
+and a user who refreshed forty times meant the one they kept.
+
+**What is being chosen is the key, and the name is the key's shadow.** This
+distinction is not pedantry and it is the single most important sentence in this
+section for anyone writing copy: *"pick your identity"* is true, *"pick your
+username"* is false. A user who believes they picked a name will later ask to
+change it, and they cannot — §5.3 has no rotation, so an identity is permanent
+within its Stoa and the name is a pure function of it. The only way to get a
+different name is a different identity, which is a different person as far as
+this Stoa is concerned. An interface that obscures this generates a support
+question it cannot answer.
+
+Placed here, immediately after the section that defines what an identity *is*,
+because "what does an identity look like on screen?" is the next question a
+reader of §5.2 asks, and the answer is a consequence of §5.2 rather than an
+independent feature. Every constraint below falls out of per-Stoa permanent
+pseudonymity: there is no registry to hold chosen names, no cross-Stoa profile
+to carry one, and no rotation to let a user abandon one.
+
+#### Why drawn rather than typed
+
+The slate makes this a choice, so the question is not "chosen or not" but
+**"chosen from a generated set, or typed into a box"**. Three reasons for the
+former, in ascending order of how conclusive they are.
+
+- **A 32-byte address is unreadable, and unreadable identity is not
+  pseudonymity in any useful sense.** A reader who cannot tell two participants
+  apart at a glance cannot follow an argument between them, which is the one
+  thing this forum is named for. A hex prefix technically distinguishes them and
+  is read by nobody.
+- **There is no registry, so chosen names cannot be unique.** §1's
+  permissionless property is not a preference here — there is no service to
+  hold a namespace and no authority to arbitrate a claim. A chosen-name system
+  with no uniqueness is strictly worse than a generated one: it *invites* the
+  impersonation it cannot prevent, because choosing implies a claim was granted.
+- **A typed name is a cross-Stoa correlation channel, and it defeats §5.2.**
+  This is the decisive one. The same human typing `fryorcraken` into six Stoas
+  has linked six identities the protocol went to real trouble to keep apart —
+  key derivation per Stoa, a hashed topic bucket, a `senderId` scoped to one
+  channel — and has done it with a text field. A drawn name cannot carry
+  arbitrary information across Stoas, because the user selects from what the
+  keys happen to produce rather than supplying the string.
+
+  **The slate weakens this rather than preserving it whole, and that is worth
+  being exact about.** A determined user can refresh until each of their Stoa
+  identities lands on the same noun, and has then built a weak cross-Stoa
+  signal by hand. It is far worse than a text field — one shared word among
+  three, deniable, and costing many refreshes per Stoa — but it is not zero, and
+  the honest claim is that drawing raises the cost of self-linkage rather than
+  removing the channel. Nothing here can prevent a user who wants to be
+  correlated from correlating themselves, and it is not obvious that anything
+  should.
+
+That third point generalises past names, and is worth stating as a rule: **any
+user-supplied string that persists across Stoas is a linkage channel.** The same
+argument will apply to avatars, signatures, bios and anything else a future
+version is tempted to let people carry between Stoas.
+
+#### The derivation
+
+```
+name = words(H(NAME_PREFIX || public_key))
+```
+
+with `NAME_PREFIX` a fixed 32-byte domain separator in the style §5.1 already
+uses for addresses — versioned, so a future wordlist or scheme mints different
+names from identical keys rather than silently colliding with this one.
+
+Four properties this has to have, each of which decides something:
+
+- **Deterministic and total.** The same key yields the same name on every peer,
+  forever, with no lookup and no state. This is why it is a hash of the key and
+  not an op: **a name is not published and cannot be**, because a published name
+  is one two peers could disagree about, and two peers rendering one identity
+  differently is a bug users report as impersonation.
+- **Derived from the public key, not from the address.** The address is already
+  `H(prefix || genesis_record)` and §5.1 keeps that record extensible against a
+  future key log. Deriving the name from the *key* means a name tracks the key
+  that signs, which is what a reader is actually being shown. If rotation ever
+  lands (§5.3), this is the seam where the question "does the name change?"
+  arrives, and it should arrive loudly rather than being pre-answered here by
+  an accident of which input was hashed.
+- **Distinct domain separation from every address prefix.** `identity.rs`
+  already keeps author and Stoa addresses in separate domains so no byte string
+  is both. The name domain joins that set for the same reason.
+- **Index extraction is from distinct hash bytes per slot**, so that the two
+  adjectives and the noun are independent draws rather than three views of the
+  same bits.
+
+#### The ten universes, and why these
+
+The owner named Dune, Asimov and Altered Carbon and asked for roughly the top
+ten SF book universes. The selection is a taste call, but it has three real
+constraints, and the constraints do most of the work:
+
+- **Literary, not screen.** A book universe has a vocabulary someone wrote down;
+  a screen franchise has a vocabulary someone trademarked and merchandised.
+  This matters practically (below) and tonally — the forum is named in Greek
+  after a method of argument.
+- **The words must survive being torn out of context.** A wordlist entry is read
+  by people who have not read the book. `sandworm`, `ansible` and `sprawl` are
+  evocative alone; a character's surname is noise, and a proper noun invites the
+  trademark question with no compensating benefit.
+- **No single universe may dominate.** A name drawn from one universe reads as
+  an allegiance the user did not declare. Spreading the draw across ten makes
+  the source invisible, which is the intent — the flavour should be *science
+  fiction*, not *Dune*.
+
+| Universe | Author | What it supplies |
+|---|---|---|
+| Dune | Herbert | ecology, desert, feudal-ritual vocabulary |
+| the Foundation and Robot novels | Asimov | psychohistory, positronics, imperial scale |
+| Altered Carbon | Morgan | embodiment, sleeves, noir-industrial texture |
+| the Culture | Banks | ships, Minds, post-scarcity irony |
+| Hyperion | Simmons | pilgrimage, time-debt, baroque strangeness |
+| Neuromancer and the Sprawl | Gibson | ice, decks, the original cyberspace lexicon |
+| the Xenogenesis / Patternist books | Butler | symbiosis, ooloi, biology as politics |
+| the Hainish cycle | Le Guin | ansible, ambiguity, anthropological register |
+| Blindsight and Rifters | Watts | vampires-as-predators, deep-sea, hard bleakness |
+| Revelation Space | Reynolds | lighthuggers, plague, deep-time engineering |
+
+**What was considered and left out, because the exclusions are the argument.**
+Star Wars, Star Trek, Warhammer 40,000 and the Marvel/DC properties are screen-
+or game-first and aggressively trademarked; a generated name is a *product
+surface*, and `imperial stormtrooper` in a shipped app is a conversation nobody
+wants. Tolkien is fantasy rather than SF and is the single most litigated estate
+in the genre. Lovecraft is public domain and tempting for exactly that reason,
+and is excluded on the author's politics being a live and legitimate objection
+for a forum that will have to defend its word list to its own users.
+
+**The trademark position, stated honestly rather than confidently.** Individual
+common words — `sandworm`, `ansible`, `lighthugger` — are not what trademark
+protects; marks attach to names used in commerce, and `Dune` is a mark while
+`sandworm` is a noun. Coined proper nouns are the risk (`Bene Gesserit`,
+`Shrike`, `Ubik`), and the wordlist must contain none of them. **This is a
+design constraint and not a legal opinion**, and if the project ever wants one,
+this paragraph is the thing to hand a lawyer rather than a defence to rely on.
+
+#### The arithmetic, and what it does not buy
+
+With N adjectives and M nouns and an ordered adjective pair drawn with
+replacement, the space is `N²M`. For N = M = 256 that is exactly 2²⁴, about
+16.8 million. Birthday collision probability for k identities in one Stoa is
+approximately `1 − exp(−k(k−1)/2S)`:
+
+| Identities in one Stoa | P(some pair collides), S = 2²⁴ |
+|---|---|
+| 100 | 0.03% |
+| 1,000 | 2.9% |
+| 2,000 | 11% |
+| 5,000 | 53% |
+
+Doubling both lists to 512 gives 2²⁷ and moves 5,000 participants from 53% to
+about 9%. That is a real improvement and it is **not the reason to choose a
+size**, because of the next subsection.
+
+**So: collisions are expected, not exceptional.** A Stoa of a few thousand will
+have one. The interface consequence is therefore not "handle the rare case" but
+a standing rule:
+
+> **A name is never presented as unique, and never used as an identifier.** The
+> address is the identity. This is the same rule §4.8 and §5.7 already state for
+> Stoa titles, arriving a second time by a different route — which is the
+> strongest evidence it is the right rule rather than a local patch.
+
+What the interface does on collision is therefore nothing special: it
+disambiguates the same way it always should, by showing the address alongside
+the name where it matters. **What it must not do is renumber.** Appending `#2`
+to the second `vermilion patient sandworm` requires agreeing which one was
+second, which is arrival order — a per-peer fact (§3.3), so two peers would
+number them oppositely and each would be sure the other was the impostor.
+
+**A second collision question the slate introduces: two identical names in one
+picker.** Five draws from 2²⁴ collide with probability about `5·4/2S` — roughly
+one slate in 1.7 million. A user will never see it; a shipped product across
+enough onboardings eventually will, and it reads as broken rather than as
+unlikely.
+
+This one *is* worth handling, and it is cheap precisely because it is local:
+the slate is generated on one peer, at one moment, with nothing published. So
+**the picker discards and redraws a duplicate before displaying**, which is a
+presentation rule with no protocol consequence whatsoever — unlike the
+cross-identity collision above, where discarding is impossible because both
+identities already exist and neither peer may decide which one is real. The two
+cases look alike and are not: one is a choice about what to draw, the other is a
+fact about what exists.
+
+**Regeneration discards keys, and the user cannot see it.** Each refresh mints
+five keypairs and keeps at most one; the rest are gone, unrecoverable, and were
+never anywhere. This sounds alarming and is not: a discarded key was never an
+identity — it signed nothing, appeared in no op, and no peer ever heard of it.
+There is nothing to lose. **The only case that would matter is if a refresh
+could discard a key the user had already used**, which is why selection and use
+must be one step: an identity becomes real when it signs, and nothing signs
+during onboarding. Whether the keystore writes on every refresh or only on
+selection is an implementation question with no user-visible consequence, and is
+deliberately not decided here.
+
+#### Grinding — and the slate makes this the central finding
+
+The question was what it costs an attacker to mint keys until one derives a name
+resembling a moderator's. **Refreshable onboarding is that attack, shipped as a
+feature.**
+
+This is worth stating as plainly as possible because it inverts the usual
+framing. An earlier draft of this section argued that grinding was cheap —
+about S derivations to hit one specific name, 16.8 million at 2²⁴, seconds on
+one core — and concluded that enlarging the wordlist could not fix it. Both
+halves are still true and both are now *beside the point*: **with unlimited
+regeneration the attacker does not need a script.** They press refresh. The
+difference between a user refreshing for a name they like and an attacker
+refreshing for a name that impersonates a moderator is **intent, not mechanism**,
+and no interface can distinguish them, because there is nothing to distinguish.
+
+**This is not a reason to remove regeneration.** The slate is good onboarding
+and the attack exists without it — a key is a key, and anyone willing to run a
+loop had this already. What it removes is the *option of leaning on cost*. Any
+argument of the form "an attacker would have to grind for that" is unavailable
+here, and this section must not contain one.
+
+So: what actually defends against impersonation?
+
+**Nothing does, and the address is the identity.** That is the honest answer and
+it is already this project's answer for Stoa titles (§4.8, §5.7) — a title is
+moderator-chosen, unverified and freely duplicable, so a join confirmation
+showing only a title has shown the reader precisely the forgeable half. A
+generated name is the same shape in a second location: **freely reachable by
+anyone willing to press a button, attached to an address nobody can forge.**
+
+What the attacker gets is a *lookalike name on a different address*. They cannot
+forge the 256-bit address and they cannot forge a signature, so nothing they
+publish is attributable to the impersonated identity. The whole attack is
+social: a reader who recognises people by name is fooled; a reader who has the
+address in front of them is not.
+
+**The interface consequence is therefore identical in shape to the join
+confirmation, and belongs on §11.1's list:**
+
+> **A name alone is the forgeable half.** Wherever recognition carries weight —
+> a moderator's name above all, because that is what converts a button press
+> into apparent authority — the address must be present and not one click away.
+> A name is never unique and never an identifier.
+
+Enlarging the wordlist remains the wrong instinct, and the reason survives the
+reframing: a list big enough to resist search — say 2⁶⁴ — is a list nobody
+curated, which forfeits every property in "what was left out" above. It would be
+scraped and it would ship slurs. **Curation and search-resistance are in direct
+opposition, and curation wins**, because search-resistance was never achievable
+by this route and is now not even the relevant axis.
+
+Two mitigations available and deliberately not taken, recorded so nobody
+re-proposes them as fixes. **Deriving the name from the key and the Stoa address
+together** helps not at all: the attacker grinds within one Stoa and would
+simply grind against that Stoa's derivation. **Rate-limiting the refresh** helps
+not at all either: it inconveniences the honest user at onboarding, which is the
+worst possible moment to add friction, while an attacker who is willing to run
+the derivation outside the app — which is trivial, since it is a hash — never
+touches the control being limited.
+
+#### Word-level failure modes
+
+- **Combinations, not just words.** Two individually innocuous adjectives can
+  compose into a slur or an insult aimed at a real group. Vetting single words
+  is insufficient; the generated *pair* is what ships. With 256² ordered
+  adjective pairs this is not exhaustively reviewable by hand, so the practical
+  requirement is a denylist applied at generation — a derived name landing on a
+  refused combination is re-derived from the next hash bytes, deterministically,
+  so every peer skips identically.
+- **The list is versioned and effectively frozen.** Removing a word after
+  release changes the name of every identity that had it, on peers that update
+  and not on peers that do not. That is the two-peers-disagree failure this
+  whole scheme exists to avoid. So a word removal is a **scheme version bump**,
+  handled like any other versioned change, and the denylist above is why the
+  first version should be conservative.
+- **ASCII-only, and this is a bidi decision rather than a parochial one.** These
+  are display strings composed by us from a fixed list, so unlike post bodies
+  they are the one piece of rendered text the project fully controls. Keeping
+  them ASCII means a generated name can never itself carry a bidi override or a
+  homoglyph — it removes the attack from this surface entirely rather than
+  mitigating it. **The bidi obligation still applies to everything a name is
+  rendered *next to*** (§11.1), which is the usual case, and a name sitting
+  beside an attacker-controlled body can still be visually captured by it.
+
+#### Rendering obligations this creates
+
+Collected here for §11.1 ("Rendering obligations, collected"), which arrives
+with the `vouching-state` change and is not in this file until that lands. Each
+is a place where core's honest answer is incomplete without something the view
+says, which is that section's general shape:
+
+- **A name is never unique and never an identifier.** The address is the
+  identity. This is the obligation Stoa titles already carry, now applying to
+  the thing *every post is attributed to* — a much larger surface, since a feed
+  renders a name per row.
+- **A name alone is the forgeable half.** Wherever recognition carries weight,
+  and above all wherever a **moderator** is named, the address must be present
+  rather than one click away. Anyone can reach any name by pressing refresh.
+- **Never imply a user's names are linked across Stoas**, and never build a
+  screen that puts them side by side without the owner deciding to (below). The
+  names are unlinkable by construction and an interface that groups them has
+  undone §5.2 in the presentation layer.
+- **Never present a name as changeable.** It is a function of a permanent key
+  (§5.3). Copy that says "pick your username" promises a settings screen that
+  cannot exist.
+
+#### What is not decided here
+
+- **Whether the same human sees their own names across Stoas in one place.**
+  They necessarily know their own identities, so a local, never-published "your
+  identities" list leaks nothing to anyone else — but it is a screen whose whole
+  content is the correlation §5.2 protects, and building it makes that
+  correlation one screenshot away. Not decided; it is a real convenience against
+  a real hazard, and it wants the owner's judgement rather than a default.
+- **Exact list sizes and the lists themselves.** 256/256 is the working
+  assumption because it makes the arithmetic above legible and the curation
+  achievable; nothing above depends on it, and the grinding argument is
+  indifferent to it.
+- **Whether a name is accompanied by a visual identicon derived from the same
+  key.** It would give recognition a second channel, and the grinding
+  reframing above makes it *more* interesting rather than less: a near-match in
+  an image is harder to reach by refreshing than a near-match in three words,
+  because a reader compares images whole rather than reading them token by
+  token. Genuinely promising, entirely undesigned, and **not a substitute for
+  showing the address** — a second forgeable channel is still forgeable.
+- **How many refreshes is too many to be honest about.** If a user refreshes
+  two hundred times, the interface has watched someone hunt for a specific name
+  and has no idea whether they are picking a favourite or building an
+  impersonation. Saying nothing is the current assumption and is probably right;
+  the alternative — some nudge after N refreshes — would annoy every honest user
+  to inconvenience no attacker, per the rate-limiting argument above. Recorded
+  because it will be proposed.
+
 ### 5.3 No rotation in v1
 
 Deliberate, and the reasoning is ordering: **a key that can be discarded at will
