@@ -1094,6 +1094,16 @@ something by mistake cannot currently un-hide it by publishing an `Unhide`
 alone. That is deliberate — the alternative was the veto — and it resolves
 itself when §13's upstream gap closes, with no change to this code.
 
+**This becomes a UI requirement the moment a hide button exists**, and there is
+no user-facing surface yet to carry it, so it is recorded here for whoever
+builds one. A moderator pressing "hide" is currently taking an action that
+cannot be undone on the peers that matter, and nothing in the core will warn
+them — `moderation::resolve` answers what is hidden, not what a future reversal
+would do. The honest interface says so at the point of action rather than
+offering an "unhide" that silently fails to bind. When the transport supplies
+Lamport values the warning is removed along with the tie-break, and the two
+should be removed together.
+
 The record carries **no per-peer value** — no epoch, no session counter. Every
 peer hashes it to obtain the Stoa's address, so a value varying with one peer's
 history gives that peer a different address for the same Stoa: two Stoas that
@@ -1760,12 +1770,20 @@ thing (§2.3).
   found the signal is upvote-only — what to *count* is the scorer's decision,
   where §7.2 can change it, rather than the format's, where changing it costs a
   version.
-- ~~**Is a hide reversible?**~~ **Answered: yes — the inverse is named.**
+- ~~**Is a hide reversible?**~~ **Answered: yes — the inverse is named. But it
+  cannot currently win, and that half is not settled.**
   `op.rs` carries one `Moderate` kind with an `action` of `Hide` or `Unhide`,
   rather than two kinds, because §6.2's threshold certificate signs "the same
   `(target, action, epoch)` tuple" and a tuple needs `action` to be a field.
   Last-write-wins over a set of one was not an ordering, and a moderation
   system with no correction path makes every mistake permanent.
+
+  **In the degraded order, an `Unhide` loses to a `Hide` of the same target
+  regardless of when it was published** — the resolver prefers `Hide` where the
+  transport ordered neither, because otherwise a pre-emptive `Unhide` would veto
+  every future `Hide` permanently. So reversibility exists in the format and is
+  suspended in practice until the Lamport gap above closes. §6 has the full
+  statement; do not read this entry as "reversal works today".
 - ~~**§5.7's ordering rule has no input at the contract we have.**~~
   **Answered: the rule stands unchanged; its input is missing upstream, and the
   gap is a layer below the LIDL contract.** `dialectica-core`'s `arrival::Arrival`

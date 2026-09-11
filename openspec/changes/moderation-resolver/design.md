@@ -292,6 +292,27 @@ comparator has no business knowing that one op kind's payload is safer to
 prefer; and `cmp_ops` orders *all* ops, so a bias there would silently reach the
 revision resolver too.
 
+**The rule has three cases, not two, and the third is untested.** Written out:
+
+1. the leading candidate was transport-ordered → it decides;
+2. otherwise, if any candidate is a binding `Hide` → that one decides;
+3. otherwise → the leading candidate decides, by the ordering rule's position
+   alone (`unwrap_or(first)`).
+
+Case 3 is the fall-through when every binding candidate is an `Unhide`, and
+**nothing exercises it today**. Two binding `Unhide`s of one target require two
+distinct authors who both moderate the Stoa, which requires the mutable
+moderator set §13 defers — so the arm is unreachable from any fixture that can
+currently be built. It is written rather than omitted because omitting it would
+mean no answer at all in that case, and because it is what the ordering rule
+already says; but a reader should know it is reasoning, not tested behaviour.
+
+This is recorded here specifically because the honest statements about it live
+in a test comment and in `tasks.md`, and **both of those are archived with the
+change** while this file is the durable record. When the mutable moderator set
+lands, the fixture to add is two moderators each publishing an `Unhide` of one
+target, and case 3 is what it should pin.
+
 **What it costs, stated plainly.** Until Lamport values arrive, an `Unhide`
 cannot reverse a `Hide` of the same target — reversibility, which §13 asked for
 and `op.rs` named `Unhide` to provide, is suspended in the degraded order. That

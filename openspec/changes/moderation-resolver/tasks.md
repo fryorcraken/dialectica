@@ -25,8 +25,10 @@
 
 ## 3. Tests
 
-27 tests in `moderation.rs`. Each spec requirement's scenarios, plus the fixture
-work the requirement did not itself demand.
+Each spec requirement's scenarios, plus the fixture work the requirement did not
+itself demand. For the count, run the suite — CLAUDE.md: do not write down what a
+command can answer. (An earlier draft of this section said "27 tests", which was
+stale and contradicted §10 of this same file.)
 
 - [x] **Authority on read.** `a_moderation_by_a_non_moderator_does_not_hide_anything`
       (authentic, no authority — asserts `verify()` is true first, so it is the
@@ -40,7 +42,10 @@ work the requirement did not itself demand.
       Without it every negative test would pass for a resolver that hides nothing.
 - [x] **Skip, not stop.** `an_unauthorised_op_does_not_displace_an_authorised_one`
       — the forgery is strictly newer, so "skip and continue" and "take newest
-      then validate" demand opposite answers.
+      then validate" demand opposite answers. Pins the **transport-ordered**
+      branch only; `..._in_the_degraded_order` is its twin on the branch
+      production actually runs, with the Stoa searched so the forgery really
+      does sort first.
 - [x] **Convergence.** `the_answer_depends_on_nothing_but_the_ops_and_the_moderator_set`
       — two logs, opposite append sequences, same answer and same named op.
 - [x] **The moderator set.** `the_creator_is_a_moderator_and_nobody_else_is`,
@@ -56,8 +61,24 @@ work the requirement did not itself demand.
       Stoas**, so the Stoa comparison is the only rule that can separate the ops).
 - [x] **Ordering.** `the_order_is_by_lamport_and_not_by_op_id` (higher op id
       carries higher Lamport, so the two rules disagree);
-      `the_degraded_order_decides_when_the_transport_ordered_nothing` (the order
-      production actually runs today).
+      `a_non_binding_op_leading_the_degraded_read_is_skipped`.
+
+      The second was called
+      `the_degraded_order_decides_when_the_transport_ordered_nothing` and this
+      bullet claimed it covered "the order production actually runs today".
+      **That claim is retracted** — see §9. It never decided anything, because
+      its candidate vector held one element. The op-id fallback between two
+      *binding* candidates remains uncovered and is listed below.
+- [x] **The degraded tie-break.** `a_hide_is_not_defeated_by_the_unhide_hashing_lower`
+      (the veto, with the hash order determined not assumed);
+      `the_hide_bias_applies_whichever_way_the_hashes_fall` (the opposite
+      arrangement, searched, so the bias removes the coin flip rather than
+      flipping it); `a_transport_ordered_unhide_still_reverses_a_hide` and
+      `the_ordered_branch_is_chosen_by_the_leading_op_not_by_all_of_them` (the
+      confinement, in both its directions);
+      `the_hide_bias_searches_only_ops_that_already_bind` and
+      `a_hide_that_binds_still_wins_over_hides_that_do_not` (that the preference
+      cannot resurrect a forgery — see §9).
 - [x] **Reversibility, both directions.** `a_later_unhide_reverses_an_earlier_hide`,
       `a_later_hide_reverses_an_earlier_unhide`.
 - [x] **Kinds.** `a_revision_does_not_clear_a_hide`;
@@ -84,11 +105,19 @@ Stated rather than implied, because a false coverage claim is worse than a
 missing test.
 
 - **Two distinct moderators.** Needs a mutable moderator set, which does not
-  exist. `a_moderator_may_reverse_a_moderation_they_did_not_place` therefore
-  tests the checkable half — that authority is a membership test consulting
-  nothing about who placed earlier ops — and carries a `NO SPEC:` marker saying
-  so. It does not test two-moderator behaviour, because that behaviour cannot
-  be built today.
+  exist. `the_authority_predicate_consults_the_set_and_not_the_earlier_ops_author`
+  therefore tests the checkable half — that authority is a membership test
+  consulting nothing about who placed earlier ops — and carries a `NO SPEC:`
+  marker saying so. It does not test two-moderator behaviour, because that
+  behaviour cannot be built today. (It was named
+  `a_moderator_may_reverse_a_moderation_they_did_not_place`, which overstated
+  what its fixture could show; see §9.)
+- **The op-id fallback between two binding candidates.** `resolve`'s third case,
+  `unwrap_or(first)`, decides when every binding candidate is an `Unhide`. Two
+  binding `Unhide`s of one target need two moderators, so the arm is unreachable
+  from any fixture buildable today. Recorded in `design.md` as well as here,
+  because this file is archived with the change and that one is the durable
+  record.
 - **The moderator set as of an op's Lamport position.** Indistinguishable from
   the constant set today. `design.md` records it as the first thing to change.
 - **`Genesis::matches` being enforced by the resolver.** It is not, by design,
@@ -132,9 +161,23 @@ creator.
 - [x] Appendix A's "Moderation authority is never checked on read" left as it is
       — it describes another project and does not rot.
 
-## 6. Rebase onto the rebased `phase2/op-log`
+## 6. Rebases onto `phase2/op-log`
 
-- [x] `--onto origin/phase2/op-log 9e9e6c9`, one commit replayed, no conflicts.
+**Two of them**, recorded separately because the first being marked done is what
+made the second easy to miss. `git log --oneline -1 origin/phase2/op-log` is the
+check that never goes stale; a "rebased ✓" tick is not.
+
+- [x] **First**, `--onto origin/phase2/op-log 9e9e6c9` (op-log at `83bbad9`),
+      one commit replayed, no conflicts.
+- [x] **Second**, `--onto origin/phase2/op-log 83bbad9` (op-log now `931bf93`),
+      three commits replayed, no conflicts. Design review caught the staleness:
+      a two-dot diff against the *current* op-log showed this change apparently
+      deleting five op-log tests, three spec scenarios and a design section —
+      upstream additions made after the first rebase, one of which
+      (`two_targets_sharing_an_op_id_prefix_are_not_confused`) guards
+      `iter_target`, the read this resolver folds over. Nothing was ever deleted,
+      but the diff as presented read as a moderation change removing a
+      prefix-confusion test. The diff is now purely additive.
 - [x] **The clean rebase did not compile**, exactly as warned. Main made
       `Genesis::address` fallible; `Moderators::of` and ~46 fixture call sites
       broke, all inside `#[cfg(test)]` for the fixtures — which a plain
@@ -264,7 +307,9 @@ missing.
 
 ## 10. Gates
 
-- [x] `cargo test -p dialectica-core` — 213 pass (178 inherited, 35 ours)
+- [x] `cargo test -p dialectica-core` — green. Run it for the count; it moves
+      with every upstream rebase, which is exactly why this file should not
+      assert one.
 - [x] `cargo clippy -p dialectica-core --all-targets -- -D warnings` — clean
 - [x] `cargo fmt -p dialectica-core --check` — **14 pre-existing hunks**,
       measured by stashing this change and re-running, 0 introduced. Three were
