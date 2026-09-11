@@ -964,22 +964,16 @@ later:
 
 ### 5.6 The keystore
 
-Copy radicle's proven model: encrypted key at a fixed path, public key yields
-the handle, three unlock paths (plaintext keystore / passphrase env / agent),
-and **the module never prompts** — it fails with a message naming the fix.
+**Built** — see the `keystore` and `posting-capability` specs. An encrypted root
+secret at a caller-supplied path, two non-interactive unlock paths, and
+`getCapabilities()` for a view to gate posting on. The module never prompts.
 
-Ship a capability probe and gate every posting affordance on it:
-
-```
-getCapabilities() -> {"canPost":bool, "identity":"…" | "reason":"…"}
-```
-
-Gate on the probe, never on a build flag. A compose box that cannot be submitted
-loses whatever the user typed.
-
-> LEZ's own keystore is plaintext JSON at 0644 containing every secret, with
-> `// TODO: Use password for storage encryption`. Match the crypto, not the
-> key handling.
+What is **not** built: the third unlock path, an **agent**. Deferred on
+proportion rather than difficulty — it is a long-lived process holding decrypted
+material and answering a socket, and it buys nothing until a human is repeatedly
+typing a passphrase. Until it exists, the passphrase-by-environment path is
+readable by other processes running as the same user, which is a real limitation
+of that path rather than a bug in it.
 
 ---
 

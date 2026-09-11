@@ -18,6 +18,7 @@ mod cursor;
 
 pub mod arrival;
 pub mod identity;
+pub mod keystore;
 pub mod op;
 pub mod stoa;
 pub mod wire;
@@ -26,6 +27,6 @@ pub mod wire;
 // contract — the adapter calls these by name, and a caller should not have to
 // know which submodule a handler happens to live in.
 pub use wire::{
-    callee_error, channel_exists_reply, error_json, guarded, panic_probe, parse_channel_id, ping,
-    version,
+    callee_error, channel_exists_reply, error_json, get_capabilities, guarded, panic_probe,
+    parse_channel_id, ping, version,
 };

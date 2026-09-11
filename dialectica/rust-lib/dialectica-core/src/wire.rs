@@ -102,6 +102,146 @@ pub fn panic_probe(request: &str) -> String {
     })
 }
 
+// ─── The capability probe ─────────────────────────────────────────────────
+//
+// The contract is the `posting-capability` spec; the reasoning behind these
+// shapes is in that change's `design.md`. What is repeated here is only what a
+// reader of THIS code needs in order not to undo it.
+
+/// What a caller may do right now, and why not if not.
+///
+/// **The two states are one enum rather than a struct with two `Option`s**, and
+/// that is the whole reason this type exists instead of the handler building
+/// JSON inline. The contract is
+/// `{"canPost":bool, "identity":"…" | "reason":"…"}` — the `|` is exclusive —
+/// and §2.5 forbids a reply that is partly a success. A
+/// `{ can_post, identity: Option, reason: Option }` can express three states
+/// the contract does not have (both, neither, and a `canPost:true` with no
+/// identity), and each would then have to be prevented at every construction
+/// site.
+///
+/// CLAUDE.md's standing instruction is to put the complexity in the data
+/// structure: here that is an enum with one payload each, so the illegal
+/// states cannot be written down. Serialisation is total and the handler has
+/// no branch to get wrong.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Capability {
+    /// Posting is possible, under this author address (hex).
+    CanPost { identity: String },
+    /// Posting is not possible. The reason **names the fix** — the
+    /// `posting-capability` spec requires it, and it is the difference between
+    /// a view that can help a user and one that can only display
+    /// "unlocked: false".
+    CannotPost { reason: String },
+}
+
+impl Capability {
+    /// The wire form. Exactly one of `identity` and `reason` is present, by
+    /// construction rather than by a check here.
+    pub fn to_json(&self) -> String {
+        match self {
+            Capability::CanPost { identity } => {
+                serde_json::json!({ "canPost": true, "identity": identity }).to_string()
+            }
+            Capability::CannotPost { reason } => {
+                serde_json::json!({ "canPost": false, "reason": reason }).to_string()
+            }
+        }
+    }
+}
+
+/// The probe handler: `{}` in, `{"canPost":…}` out.
+///
+/// # This answers; it does not fail
+///
+/// **Every state comes back as a `Capability`, including the ones that are
+/// plainly errors** — an unreadable keystore, a malformed file, a wrong
+/// passphrase. That is a deliberate departure from the usual shape, and the
+/// reason is what the caller would otherwise have to do: a view handling both
+/// "you cannot post, because X" and "I could not determine whether you can
+/// post" has two negative branches, and the second has no sensible rendering.
+/// Collapsing them means a view checks exactly one thing.
+///
+/// §2.5's `{"error":"..."}` is still reachable, and only for the one failure
+/// that is not about capability: input this function could not interpret. A
+/// malformed *request* is a caller bug; a malformed *keystore* is a user state.
+///
+/// # What it is given, and why
+///
+/// Both the unlock state and the Stoa are the caller's to supply. This crate
+/// cannot read the environment or know the host's persistence path, and a probe
+/// that went looking would be doing discovery at a moment its caller does not
+/// control — the adapter has both and passes them in. The `stoa` is needed
+/// because there is no such thing as "the" identity: §5.2 gives a user one
+/// identity *per Stoa*, so "who would post" has no answer until a Stoa is
+/// named.
+///
+/// # `Fn`, not `FnOnce`
+///
+/// The spec says the probe is callable repeatedly — a view asks it whenever it
+/// renders, not once per process. Review flagged `FnOnce` as making that
+/// scenario unsatisfiable.
+///
+/// **That turned out to be half right, and the correction is worth recording
+/// because the obvious reading is wrong.** `FnOnce` is a supertrait of `Fn`,
+/// so a `&F` where `F: Fn` satisfies it — the repeatability scenario *was*
+/// testable under `FnOnce`, by passing a reference. Verified by reverting the
+/// signature and watching the test still pass, twice, including with a
+/// capturing closure.
+///
+/// `Fn` stays because it is the **honest** constraint rather than the minimum
+/// one: nothing here consumes the lookup, `FnOnce` said it might, and a caller
+/// reading the signature would reasonably conclude it had to build a fresh
+/// closure per call. A signature that overstates what it takes is a signature
+/// callers work around.
+///
+/// What this does NOT do is make a mutation detectable — reverting to `FnOnce`
+/// leaves the suite green, and the mutation table says so rather than claiming
+/// a kill it does not have.
+pub fn get_capabilities(
+    request: &str,
+    lookup: impl Fn(&crate::identity::Address) -> Result<String, crate::keystore::KeystoreError>,
+) -> String {
+    guarded("get_capabilities", || {
+        let parsed: serde_json::Value = match serde_json::from_str(request) {
+            Ok(v) => v,
+            Err(e) => return error_json(&format!("invalid JSON: {e}")),
+        };
+        let stoa = match parsed.get("stoa") {
+            Some(serde_json::Value::String(s)) => match crate::identity::Address::from_hex(s) {
+                Ok(a) => a,
+                Err(e) => return error_json(&format!("stoa: {e}")),
+            },
+            Some(_) => return error_json("stoa must be a string"),
+            None => return error_json("missing field: stoa"),
+        };
+        capability_for(&stoa, lookup).to_json()
+    })
+}
+
+/// The probe's decision, separated from its JSON and its guard.
+///
+/// Split out because this is the part worth testing directly: the mapping from
+/// "what the keystore said" to "what a view is told" is where the requirement
+/// that a reason names a fix actually lives, and asserting on it through a JSON
+/// string would be asserting on serialisation at the same time.
+pub fn capability_for(
+    stoa: &crate::identity::Address,
+    lookup: impl Fn(&crate::identity::Address) -> Result<String, crate::keystore::KeystoreError>,
+) -> Capability {
+    match lookup(stoa) {
+        Ok(identity) => Capability::CanPost { identity },
+        // The reason IS the error's message, not a rewording of it.
+        // `KeystoreError::Display` already names the fix for each case — that
+        // is a documented obligation on it, with a test — so paraphrasing here
+        // would mean maintaining the same guidance in two places, and the two
+        // would drift.
+        Err(e) => Capability::CannotPost {
+            reason: e.to_string(),
+        },
+    }
+}
+
 // ─── The two halves of the delivery bridge that CAN be tested ─────────────
 //
 // `modules().delivery_module` cannot appear in this file: it calls `lp_*`
@@ -422,6 +562,321 @@ mod tests {
         }
     }
 
+    // ─── The capability probe ─────────────────────────────────────────────
+
+    use crate::identity::{stoa_address, Address};
+    use crate::keystore::KeystoreError;
+
+    fn a_stoa() -> Address {
+        stoa_address(b"a genesis record")
+    }
+
+    /// The probe with a lookup that succeeds.
+    fn probe_ok(request: &str, identity: &str) -> serde_json::Value {
+        // Cloned per call rather than moved, now that `lookup` is `Fn`. That
+        // is the helper paying the cost of the property being testable at all
+        // — see `the_probe_is_callable_repeatedly_with_one_lookup`.
+        serde_json::from_str(&get_capabilities(request, |_| Ok(identity.to_string()))).unwrap()
+    }
+
+    /// The probe with a lookup that fails for this reason.
+    ///
+    /// Takes a FACTORY rather than an error, because `lookup` is `Fn` and
+    /// `KeystoreError` is not `Clone`. Deriving `Clone` on it to satisfy a
+    /// test helper would be widening the library's surface for the
+    /// convenience of testing it — the same trade `err_of` exists to avoid
+    /// over `Debug`.
+    fn probe_err_with(request: &str, make: impl Fn() -> KeystoreError) -> serde_json::Value {
+        serde_json::from_str(&get_capabilities(request, |_| Err(make()))).unwrap()
+    }
+
+    #[test]
+    fn the_probe_reports_an_identity_when_posting_is_possible() {
+        // The expected identity is a literal, not something read back from the
+        // lookup — otherwise the assertion is the test agreeing with itself.
+        let v = probe_ok(
+            &format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex()),
+            "ff00ff00",
+        );
+        assert_eq!(v["canPost"], true);
+        assert_eq!(v["identity"], "ff00ff00");
+    }
+
+    #[test]
+    fn the_probe_is_callable_repeatedly_with_one_lookup() {
+        // A view asks whenever it renders, not once per process. This was
+        // **unsatisfiable through this API** until `lookup` became `Fn`:
+        // `FnOnce` meant the probe could not be called twice with the same
+        // closure, so the scenario could never have been tested. Review caught
+        // a spec requirement that the code made impossible to check.
+        let request = format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex());
+        let calls = std::cell::Cell::new(0usize);
+        let lookup = |_: &Address| {
+            calls.set(calls.get() + 1);
+            Ok("abcd".to_string())
+        };
+
+        // NO SPEC: this test does not distinguish `Fn` from `FnOnce`, and
+        // saying so is the point. `FnOnce` is a supertrait of `Fn`, so `&F`
+        // satisfies it — reverting the signature leaves this green, checked
+        // rather than assumed. What the test pins is the OBSERVABLE half of
+        // the requirement: repeated calls agree, and each one re-consults the
+        // lookup rather than caching. The signature choice is argued in
+        // `get_capabilities`' doc comment and is not mutation-detectable.
+        let first = get_capabilities(&request, lookup);
+        let second = get_capabilities(&request, lookup);
+        let third = get_capabilities(&request, lookup);
+
+        assert_eq!(first, second, "the probe's answer must be stable");
+        assert_eq!(second, third);
+        assert_eq!(calls.get(), 3, "each call must consult the lookup afresh");
+
+        // A lookup that OWNS something, which is the shape a real adapter has
+        // — it holds the keystore path, or the keystore itself. Included
+        // because it is the realistic case, not because it distinguishes the
+        // two bounds; `&owning` satisfies either.
+        let owned_path = std::path::PathBuf::from("/keys/identity.key");
+        let owning = move |_: &Address| {
+            Ok(owned_path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned())
+        };
+        let a = get_capabilities(&request, &owning);
+        let b = get_capabilities(&request, &owning);
+        assert_eq!(a, b, "a lookup owning its state must be reusable");
+    }
+
+    #[test]
+    fn the_reported_identity_is_the_one_an_op_is_actually_signed_under() {
+        // END TO END, through a real keystore and a real signature. Every
+        // other probe test hands back the literal "abcd", so none of them
+        // could see the probe reporting one identity while the user posted
+        // under another — which is the thing this requirement exists to stop.
+        //
+        // The keystore's root is fixed, so the expected address comes from a
+        // derivation this test performs independently rather than from the
+        // probe's own answer.
+        use crate::identity::{derive_stoa_key, sign_op_bytes, verify_authored_op};
+
+        let root = [7u8; 32];
+        let stoa = a_stoa();
+        let request = format!(r#"{{"stoa":"{}"}}"#, stoa.to_hex());
+
+        let out = get_capabilities(&request, |s| {
+            Ok(derive_stoa_key(&root, s).public_key().address().to_hex())
+        });
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["canPost"], true, "got {out}");
+        let reported = v["identity"].as_str().unwrap();
+
+        // Now sign something as that identity would, and verify the op is
+        // attributed to the address the probe named.
+        let key = derive_stoa_key(&root, &stoa);
+        let sig = sign_op_bytes(&key, b"a post");
+        let author = Address::from_hex(reported).expect("the probe reports a parseable address");
+        assert!(
+            verify_authored_op(&author, &key.public_key().to_bytes(), b"a post", &sig.to_bytes()),
+            "an op signed by this identity is not attributed to the address the \
+             probe reported"
+        );
+
+        // And the negative: a DIFFERENT Stoa's key must not verify against the
+        // reported address, or the assertion above would hold for any key.
+        let other = derive_stoa_key(&root, &stoa_address(b"some other stoa"));
+        let other_sig = sign_op_bytes(&other, b"a post");
+        assert!(
+            !verify_authored_op(
+                &author,
+                &other.public_key().to_bytes(),
+                b"a post",
+                &other_sig.to_bytes()
+            ),
+            "another Stoa's key verified against this Stoa's reported identity"
+        );
+    }
+
+    #[test]
+    fn a_successful_probe_carries_no_reason_and_a_failed_one_no_identity() {
+        // The contract is `"identity":"…" | "reason":"…"` — the bar is
+        // exclusive. §2.5 forbids a reply that is partly a success, and a
+        // compose box gated on `canPost` while a stale `identity` field sits
+        // beside it is exactly how the wrong one gets rendered.
+        let stoa = format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex());
+
+        let yes = probe_ok(&stoa, "abcd");
+        assert!(yes.get("reason").is_none(), "got {yes}");
+
+        let no = probe_err_with(&stoa, || KeystoreError::NotFound);
+        assert_eq!(no["canPost"], false);
+        assert!(no.get("identity").is_none(), "got {no}");
+    }
+
+    #[test]
+    fn each_failure_state_produces_a_distinguishable_reason() {
+        // The probe's whole value to a view is that the five states a user can
+        // actually be in are told apart. Collapsing any two means one of the
+        // two reasons is wrong, and a wrong reason sends someone to fix
+        // something that is not broken.
+        let stoa = format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex());
+        let mut seen = Vec::new();
+        let makers: [fn() -> KeystoreError; 7] = [
+            || KeystoreError::NotFound,
+            || KeystoreError::Locked,
+            || KeystoreError::WrongPassphrase,
+            || KeystoreError::PermissionsTooOpen { mode: 0o644 },
+            || KeystoreError::DirectoryWritableByOthers { mode: 0o777 },
+            || KeystoreError::NotAKeystore,
+            || KeystoreError::Truncated,
+        ];
+        for make in makers {
+            let v = probe_err_with(&stoa, make);
+            let reason = v["reason"].as_str().unwrap().to_string();
+            assert!(
+                !seen.contains(&reason),
+                "two keystore states produced the same reason: {reason}"
+            );
+            seen.push(reason);
+        }
+    }
+
+    #[test]
+    fn no_passphrase_and_a_wrong_passphrase_are_different_reasons() {
+        // Named separately from the sweep above because this is the pair a
+        // reader is most likely to think is one state. "Set the variable" and
+        // "you set it to the wrong thing" send a user to completely different
+        // places, and merging them leaves someone re-typing a passphrase that
+        // was never being read.
+        let stoa = format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex());
+        let locked = probe_err_with(&stoa, || KeystoreError::Locked);
+        let wrong = probe_err_with(&stoa, || KeystoreError::WrongPassphrase);
+        assert_ne!(locked["reason"], wrong["reason"]);
+        // And each says enough to act on: one names the variable to set, the
+        // other says the supplied value was rejected.
+        assert!(
+            locked["reason"]
+                .as_str()
+                .unwrap()
+                .contains("DIALECTICA_PASSPHRASE"),
+            "got {locked}"
+        );
+        assert!(
+            wrong["reason"].as_str().unwrap().contains("rejected"),
+            "got {wrong}"
+        );
+    }
+
+    #[test]
+    fn a_keystore_failure_is_an_answer_and_not_an_error_reply() {
+        // The deliberate departure. A view handling both "you cannot post,
+        // because X" and "I could not determine whether you can post" has two
+        // negative branches, and the second has no sensible rendering.
+        let stoa = format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex());
+        let makers: [fn() -> KeystoreError; 4] = [
+            || KeystoreError::NotFound,
+            || KeystoreError::Io("disk on fire".into()),
+            || KeystoreError::NotAKeystore,
+            || KeystoreError::PermissionsTooOpen { mode: 0o777 },
+        ];
+        for make in makers {
+            let v = probe_err_with(&stoa, make);
+            assert!(
+                v.get("error").is_none(),
+                "a keystore state must not become the error shape, got {v}"
+            );
+            assert_eq!(v["canPost"], false);
+        }
+    }
+
+    #[test]
+    fn a_malformed_request_is_the_error_shape_rather_than_a_capability() {
+        // The other side of the same line: a malformed REQUEST is a caller bug
+        // and not a user state, so it is the one thing here that is still
+        // §2.5's error shape. Answering `canPost:false` to unparseable input
+        // would tell a view something about the keystore that was never
+        // checked.
+        for bad in [
+            "not json",
+            r#"{}"#,
+            r#"{"stoa":7}"#,
+            r#"{"stoa":"nothex"}"#,
+            r#"{"stoa":"00ff"}"#,
+        ] {
+            let out = get_capabilities(bad, |_| Ok("abcd".to_string()));
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(v.get("error").is_some(), "for {bad:?}, got {out}");
+            assert!(
+                v.get("canPost").is_none(),
+                "a failure must never also carry a result — §2.5"
+            );
+        }
+    }
+
+    #[test]
+    fn the_probe_reports_the_identity_for_the_stoa_it_was_asked_about() {
+        // §5.2 gives a user one identity PER STOA, so "who would post" has no
+        // answer until a Stoa is named. A probe that ignored the field would
+        // report one Stoa's pseudonym while the user posted under another's.
+        let seen = std::cell::RefCell::new(None);
+        let asked = stoa_address(b"stoa two");
+        let _ = get_capabilities(&format!(r#"{{"stoa":"{}"}}"#, asked.to_hex()), |s| {
+            *seen.borrow_mut() = Some(*s);
+            Ok("abcd".to_string())
+        });
+        assert_eq!(seen.into_inner(), Some(asked));
+    }
+
+    #[test]
+    fn the_probe_is_never_a_panic_even_when_the_lookup_panics() {
+        // The guard, on the one handler a view calls before rendering
+        // anything. A panic here does not make one button unavailable — it
+        // aborts the module process (PHASE0-FINDINGS §3) and the entire
+        // interface is unrenderable.
+        let out = get_capabilities(
+            &format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex()),
+            |_| panic!("the keystore layer exploded"),
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_some(), "got {out}");
+        assert!(v.get("canPost").is_none());
+    }
+
+    #[test]
+    fn the_capability_json_is_pinned_to_the_exact_shape_the_plan_specifies() {
+        // Hardcoded strings, both of them. The contract is
+        // `{"canPost":bool, "identity":"…" | "reason":"…"}`, and a view is
+        // written against those exact key names — renaming one is a breaking
+        // change that no type checker would catch.
+        assert_eq!(
+            Capability::CanPost {
+                identity: "abcd".into()
+            }
+            .to_json(),
+            r#"{"canPost":true,"identity":"abcd"}"#
+        );
+        assert_eq!(
+            Capability::CannotPost {
+                reason: "no keystore".into()
+            }
+            .to_json(),
+            r#"{"canPost":false,"reason":"no keystore"}"#
+        );
+    }
+
+    #[test]
+    fn a_reason_containing_json_metacharacters_stays_valid_json() {
+        // A reason carries an OS error message, which can carry a path, which
+        // a user chose. Naive concatenation emits malformed JSON and the view
+        // sees a parse error instead of the reason.
+        let out = Capability::CannotPost {
+            reason: r#"at "C:\keys" — he said "no""#.into(),
+        }
+        .to_json();
+        let v: serde_json::Value = serde_json::from_str(&out).expect("must stay valid JSON");
+        assert_eq!(v["reason"], r#"at "C:\keys" — he said "no""#);
+    }
+
     #[test]
     fn every_handler_answers_with_an_object_carrying_exactly_one_top_level_shape() {
         // The wire contract is only useful if it holds for EVERY method, so
@@ -431,6 +886,10 @@ mod tests {
             ping(r#"{"payload":1}"#),
             ping("garbage"),
             panic_probe("{}"),
+            get_capabilities(&format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex()), |_| Ok(
+                "abcd".to_string()
+            )),
+            get_capabilities("garbage", |_| Ok("abcd".to_string())),
         ] {
             let v: serde_json::Value = serde_json::from_str(&out)
                 .unwrap_or_else(|e| panic!("handler emitted invalid JSON ({e}): {out}"));

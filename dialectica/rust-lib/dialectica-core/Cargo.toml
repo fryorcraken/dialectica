@@ -116,3 +116,36 @@ hex = "0.4"
 # seed and using the infallible `from_bytes` is the same operation with one
 # small dependency instead of the `rand` stack.
 getrandom = "0.4"
+
+# ─── The keystore ─────────────────────────────────────────────────────────
+#
+# THREE DEPENDENCIES, and this is the first change to widen §2.3's wall.
+#
+# **The reasoning lives in `design.md`, under "Three dependencies, and what was
+# refused"** — the crypto comparisons, why each crate is smaller than the
+# alternative, and the two crates deliberately NOT taken. It is not repeated
+# here, and that is deliberate: it was in both places once and had already
+# diverged (this file omitted the AES-GCM comparison design.md makes), which is
+# exactly the failure the document model exists to prevent.
+#
+# What stays here is only what a reader editing THIS file needs: which feature
+# flags are load-bearing, and why.
+#
+# `zeroize` on: it wipes the cipher's own expanded key state on drop, which is
+# the copy this crate cannot otherwise reach.
+chacha20poly1305 = { version = "0.11", features = ["zeroize"] }
+
+# `default-features = false` plus `alloc` is load-bearing, not tidying: the
+# default pulls `password-hash` and `getrandom` for PHC-string parsing and salt
+# generation, and this crate does neither — the salt comes from `getrandom`
+# directly and the parameters are carried in our own binary format, not a PHC
+# string. What is needed is the raw `hash_password_into` KDF and nothing else.
+argon2 = { version = "0.6", default-features = false, features = ["alloc", "zeroize"] }
+
+# NO FEATURES. `zeroize_derive` was enabled here and nothing used it — there is
+# no `derive(Zeroize)` in this crate and there is not meant to be, since every
+# secret is held in a `Zeroizing` wrapper rather than in a type that derives the
+# trait. Removed rather than kept as future-proofing: an enabled feature nobody
+# calls is the unexamined widening §2.3 is about, and a proc-macro crate is the
+# kind of surface worth not carrying on a guess.
+zeroize = "1"
