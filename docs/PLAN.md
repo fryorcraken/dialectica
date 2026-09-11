@@ -546,11 +546,12 @@ Does not promise:
 - **No delivery to absent peers.** ACK means "some participants received it".
 - **No ordering metadata reaching the application.** The Lamport total order and
   the message-id tie-break above are real and are what SDS orders its own log
-  by — but they stop below us. The Reliable Channel API's received-message event
-  carries the payload alone, so neither value reaches a consumer, and
-  `channelMessageReceived` cannot forward what it never got. **Read the promises
-  above as internal to SDS, not as an interface.** §13 has the finding and what
-  each upstream layer would have to add.
+  by — but they stop below us. A received-message event reaches us with
+  `channelId`, `senderId`, `payload` and a `timestamp` that is the *receiving
+  peer's own clock read* — so nothing in it orders anything. **Read the promises
+  above as internal to SDS, not as an interface.** §13 has the finding, the
+  layer the values are actually dropped at, and what each upstream layer would
+  have to add.
 - **150 KiB max message size**, hard cap — a network-wide gossipsub validation
   limit, not unilaterally raisable. See §4.6.
 
@@ -2847,18 +2848,36 @@ thing (§2.3).
   SDS's rule — insert by Lamport timestamp, ties by ascending message id — is
   already §5.7's.
 
-  The investigation moved where the gap is. It is **not** that
-  `delivery_module.lidl` forgot to forward the fields: the Reliable Channel API's
-  `MessageReceivedEvent`, which the delivery module consumes, carries exactly one
-  field — the reassembled payload — so `channelMessageReceived` never receives
-  them either. Closing this needs a change at both layers, and neither is
-  dialectica's; `openspec/changes/op-ordering/design.md` records the field names
-  and types for filing.
+  The investigation moved where the gap is, **twice**, and the second move
+  matters for anyone filing upstream. It is **not** that
+  `delivery_module.lidl` forgot to forward the fields. Nor — as this entry
+  previously claimed — is it that the Reliable Channel API's received-message
+  event carries the payload alone: **reading the pinned revisions, that event
+  carries three fields**, and the values are dropped **one layer lower still**,
+  in SDS. `SdsDeliverable` is built with only `content` and `senderId`, and
+  `msg.messageId` is used as a stash key and discarded as a value in a single
+  statement.
 
-  Two findings worth carrying forward. **`channelMessageReceived`'s `timestamp`
-  is unusable for ordering** — it is the receiving peer's own `CLOCK_REALTIME`
-  read taken when its callback fires, so it differs per peer for one message,
-  which is worse than §11's units problem and worth filing separately as a bug.
+  **So three types must change, not two** — a fix at the two layers named
+  before would forward a value that never arrived.
+  `openspec/changes/op-ordering/design.md` records the field names and types
+  for filing. Dialectica's own conclusion is unaffected: the values do not
+  reach us either way.
+
+  One caveat kept rather than hidden: nim-sds's `Message` type had no realised
+  copy to read, so "the Lamport timestamp is available on `msg` and not copied"
+  is inferred from the persistency sort key. **An upstream filing should quote
+  the declaration**, not this entry.
+
+  Two findings worth carrying forward. **The `timestamp` we do receive is
+  unusable for ordering** — it is the receiving peer's own `CLOCK_REALTIME`
+  read taken when its callback fires, so it differs per peer for one message.
+  It is not a preference for a local clock over a wire value: **there is no
+  wire timestamp on this event at all.** Exactly one event
+  (`messageReceived`) reads a real wire timestamp, which is why only that one
+  shows §11's units divergence — the two traps are one divergence seen from
+  both ends.
+
   And **a dialectica-side Lamport clock is the one thing not to build**: SDS's
   clock advances on traffic no application sees and is initialised from epoch-ms,
   so a clock advanced on op arrivals could not be made to agree with it — and two
