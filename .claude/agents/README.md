@@ -27,37 +27,30 @@ While a change is in flight it lives in `openspec/changes/<name>/`, and its
 1. **merges the delta into `openspec/specs/`** — the live, current contract;
 2. **moves the folder** to `openspec/changes/archive/<date>-<name>/`.
 
-Everything stays in git and stays greppable. What changes is the *index*: the
-archive is organised by change, so a cross-cutting question ("why is the title
-length-prefixed?") means knowing which change did it, or grepping every folder.
-That gets worse as the archive grows.
+Everything stays in version control and stays greppable. The archive is
+organised by change, so finding a past decision means grepping it — which is
+what it is there for.
 
-### The two rules that keep them from drifting
+### PLAN.md sheds in two directions
 
-- **PLAN.md is not where "why" lives.** Decisions go in `design.md` under
-  Decisions, and stay there. PLAN.md carries what is **not built yet**, plus a
-  one-line summary of what is — that a thing exists, never why it works that
-  way. Someone investigating a past decision goes and reads the archive; that is
-  what it is for.
-- **PLAN.md sheds as specs are written.** Behaviour it described as forthcoming
-  gets struck through and pointed at the spec.
+As a change lands, the part of PLAN.md it implements moves out:
 
-The failure mode is two copies, not a missing one. Reasoning duplicated between
-PLAN.md and a `design.md` drifts, and the wrong copy gets read.
+- **Behaviour → the spec.** Struck through in PLAN.md, with a one-line summary
+  that the thing exists.
+- **Reasoning → `design.md`** under Decisions, and removed from PLAN.md. Someone
+  investigating a past decision reads the archive; that is what it is for.
+
+PLAN.md is left with what is **not built yet**, plus one line per built area
+saying it exists — never why it works that way. Keeping a second copy of the
+reasoning is the failure mode: two copies drift and the wrong one gets read.
 
 Reasoning never goes in a spec at all. OpenSpec silently drops a REMOVED
 requirement when the capability is new, with validation still passing.
 
-### PLAN.md is not being migrated wholesale
-
-It currently holds a lot of reasoning that, under the rule above, would live in
-a `design.md` — §2.3's SDK gaps, §11's traps, why BIP-340 was rejected. **Leave
-it.** Two reasons: most of it has no change to attach to (§11's traps were
-learned across Phase 0, with no OpenSpec change behind them), and a bulk move
-would be a large one-way edit to this project's most valuable document.
-
-The rule applies **going forward**. New reasoning lands in a `design.md`, and
-PLAN.md sheds an area as a change touches it. It shrinks by attrition.
+**This applies to changes as they land, not as a migration.** PLAN.md's existing
+~1800 lines hold plenty that would now live in a `design.md` — §2.3's SDK gaps,
+§11's traps, why BIP-340 was rejected — and most of it has no change to attach
+to. Leave it. It shrinks by attrition as changes touch each area.
 
 ## The roles
 

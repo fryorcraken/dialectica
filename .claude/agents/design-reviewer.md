@@ -39,22 +39,23 @@ change reasoned against a superseded section is a real defect that has happened
 here: a workaround was designed against a §4.3 that had since been rewritten to
 say the opposite.
 
-Report both a decision contradicting PLAN.md, and one that silently re-decides
-something PLAN.md already settled without saying so.
+Report a decision that contradicts PLAN.md **without justifying the departure**,
+and one whose justification is weak. Contradicting PLAN.md is legitimate — PLAN
+is intent, and implementing teaches things — but it has to be argued, not done
+in passing.
 
-## 4. Did reasoning get left in PLAN.md?
+## 4. Was reasoning moved out of PLAN.md into design.md?
 
-The reverse of what you might expect. Decisions belong in `design.md`, and the
-archive keeps them in git and greppable — someone investigating a past decision
-goes and reads it there. PLAN.md carries what is **not built yet**, plus a short
-summary of what is.
+**Reasoning migrates.** When a change acts on something PLAN.md explained — a
+rejected alternative, a spike result, a "why X and not Y" — that explanation
+moves into `design.md` under Decisions and is removed from PLAN.md.
 
-So report reasoning that stayed in PLAN.md once this change acted on it: a
-rejected alternative, a spike result, a "why X not Y" that now has a home in
-`design.md`. Two copies drift and the wrong one gets read.
+PLAN.md is left carrying what is **not built yet**, plus a one-line summary of
+what is. A line saying a thing exists is correct; a paragraph explaining why it
+works that way is a finding.
 
-A one-line summary in PLAN.md saying a thing exists is correct and is not a
-finding. A paragraph explaining why it works that way is.
+Report reasoning this change acted on that is still in PLAN.md, and reasoning
+duplicated across both — two copies drift and the wrong one gets read.
 
 ## What a good Decisions entry contains
 

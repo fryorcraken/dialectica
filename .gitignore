@@ -46,18 +46,15 @@ dialectica/logos-rust-sdk-src
 .obsidian/
 
 # AI tool directories. Generated or machine-local: `openspec init`'s skills and
-# commands, settings.local.json, worktrees.
+# commands, settings.local.json, worktrees. Hand-written, not produced by any
+# tool — `lgs init` appends `.scaffold` and nothing else.
 #
-# NOT written by `lgs init`, whatever an earlier version of this comment said —
-# `lgs init` appends `.scaffold` and nothing else (scaffold's docs/commands.md).
-# These were added by hand in the first commit.
+# The role agents are the exception: they are part of the process rather than
+# one machine's settings, so they belong in the repo.
 #
-# EXCEPT the role agents for the spec-driven flow, which are part of the process
-# rather than one machine's settings, so they belong in the repo.
-#
-# Written as `.claude/*` rather than `.claude/` because git will not re-include
-# a file whose parent DIRECTORY is excluded — with a `.claude/` rule the
-# negation below is never consulted.
+# `.claude/*` rather than `.claude/` because git will not re-include a file
+# whose parent DIRECTORY is excluded — with a `.claude/` rule the negation below
+# is never consulted.
 .claude/*
 !.claude/agents/
 .cursor/

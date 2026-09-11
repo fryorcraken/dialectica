@@ -56,11 +56,9 @@ Also watch for a test whose name promises more than its body checks (varying
 field A while named for field B), and a constant assumed invalid that is not
 (all-`0xFF` is a *valid* Ed25519 point).
 
-**Then mutate to settle what reading cannot.** Prioritise: anything guarding a
+**Then mutate to settle what reading cannot**, prioritising anything guarding a
 consensus-critical constant, anything asserting a security property, and any
-test you suspect but cannot convict by reading. Exhaustive mutation of every
-test is not expected — it costs more than it returns once the shape is
-understood.
+test you suspect but cannot convict by reading. Sampling, not exhaustive.
 
 Report every test that survives a mutation of the property it names, and say
 which mutations you ran. Restore the tree and confirm you did.

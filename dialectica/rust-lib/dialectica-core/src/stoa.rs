@@ -352,13 +352,14 @@ mod tests {
     fn the_title_length_is_encoded_and_not_merely_implied() {
         // The concatenation trap, and the reason the title is length-prefixed.
         //
-        // What needs asserting is that the length is CARRIED, not inferred from
-        // where the input happens to end. Comparing two different-length titles
-        // does NOT test that — they encode differently with or without a
-        // prefix. So: encode a record, then hand the decoder the same bytes
-        // with one extra byte appended. With a prefix the title stays put and
-        // the extra byte is trailing garbage; without one it silently absorbs
-        // it.
+        // The property is that the length is CARRIED, not inferred from where
+        // the input happens to end. Appending a byte to a valid encoding is
+        // what shows it: with a prefix the title stays put and the extra byte
+        // is trailing garbage; without one the title absorbs it.
+        //
+        // Comparing two different-length titles looks equivalent and is not —
+        // they encode differently with or without a prefix, so such a test
+        // passes either way.
         let g = Genesis {
             title: "ab".to_string(),
             ..a_record()
@@ -556,16 +557,10 @@ mod tests {
         //
         // Every other test in this module is SELF-CONSISTENT: it compares the
         // encoder's output against the constants the encoder just wrote, so it
-        // passes unchanged if someone edits one. This one does not. That is its
-        // whole job, and it is why the expected values are hardcoded hex rather
-        // than recomputed from the constants.
-        //
-        // Two earlier attempts at this test were self-referential and were
-        // caught by mutation: `VERSION_1: 1 -> 7` and `Policy::OPEN: 0 -> 42`
-        // each left all 66 tests green. `assert_eq!(bytes[0], VERSION_1)` cannot
-        // fail — it asks the implementation what it wrote and agrees.
-        // `identity.rs` had this right first; see
-        // `the_wire_constants_are_pinned_to_known_answers` there.
+        // passes unchanged if someone edits one. This one does not, which is
+        // its whole job — hence hardcoded hex rather than values recomputed
+        // from the constants. `identity.rs` does the same in
+        // `the_wire_constants_are_pinned_to_known_answers`.
         //
         // If this fails, do NOT update the expected values to match. Work out
         // what changed and whether the network can survive it.
@@ -592,8 +587,8 @@ mod tests {
         // input would encode every policy as Open — silently, since the
         // discriminant is inside the address.
         //
-        // Iterating every variant is what makes this fail then rather than
-        // needing to be remembered. Add new variants to ALL_POLICIES.
+        // Iterating every variant is what makes this fail then, rather than
+        // needing to be remembered. Add new variants to `Policy::ALL`.
         for policy in Policy::ALL {
             assert_eq!(
                 Policy::from_byte(policy.to_byte()),
