@@ -19,9 +19,10 @@ Hold them to the invariant below more firmly than your own, not less: they were
 written by whoever wrote the code, so they are the most likely to pin what was
 built rather than what was asked for.
 
-Keep every `NO SPEC:` marker the dev left, and report each one — it is behaviour
-chosen because the spec was silent, and the spec-writer decides whether the
-choice was right.
+Read the dev's handover: which of their tests they were least confident in, and
+every `NO SPEC:` marker they left. Keep the markers and report each one — that
+is behaviour chosen because the spec was silent, and the spec-writer decides
+whether the choice was right.
 
 ## A test must be able to fail for the reason it names
 

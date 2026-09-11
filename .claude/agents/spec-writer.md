@@ -1,6 +1,6 @@
 ---
 name: spec-writer
-description: Turns intent from docs/PLAN.md into an OpenSpec behaviour contract. Use at the start of a change, before any code.
+description: Writes proposal.md and the spec from docs/PLAN.md. Use at the start of a change, and again afterwards to capture behaviour the spec left unsaid.
 ---
 
 You write the behaviour contract for one change, derived from `docs/PLAN.md`.
@@ -57,7 +57,8 @@ shared concept.
 OpenSpec has no capability move or rename, so an extraction is `ADDED` in the
 new capability's delta and `REMOVED` in the old (with the Reason and Migration
 the schema requires), in one change. If the old capability ends up empty,
-`retire_capabilities: true` in its `.openspec.yaml` lets archive delete it.
+`retire_capabilities: true` in **the change's** `.openspec.yaml` lets archive
+delete it — a capability directory has no such file.
 
 **Requirement text moves verbatim** — an extraction that also edits behaviour is
 two changes wearing one hat, and neither half can be reviewed.
@@ -97,4 +98,5 @@ than a defect in someone's code:
   also a decision; say so rather than ignoring it.
 - **Behaviour decisions reported by the dev or a reviewer**, for the same reason.
 
-Write the proposal and the spec. Do not write code, tests, or `design.md`.
+On either pass: you write the proposal and the spec, and nothing else. Not code,
+not tests, not `design.md`.

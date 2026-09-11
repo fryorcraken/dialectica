@@ -12,13 +12,14 @@ follow what each gives you.
 and revise it as the code teaches you things. Commit the final reasoning, not a
 record of how you arrived at it.
 
-Sketch `design.md` before `tasks.md` — the schema makes `tasks` require it, and
-a task list written against no approach is a guess.
+Sketch `design.md` before `tasks.md` — a task list written against no approach
+is a guess.
 
-The schema asks for a `design.md` when a change involves a new data format, a
-security boundary, a new dependency, or significant migration or performance
-complexity. Its **Decisions** section is where the "why" lives, and this project
-cares more about that than about the "what".
+`design.md` is conditional: OpenSpec lets you skip it, and `tasks` listing it as
+a dependency does not make it mandatory. Write one whenever the change involves
+a new data format, a security boundary, a new dependency, or migration or
+performance complexity. Its **Decisions** section is where the "why" lives, and
+this project cares more about that than about the "what".
 
 **The spec is the contract.** Build what it says, not what the task list happens
 to describe — the tasks are an ordering, the spec is the requirement. If the

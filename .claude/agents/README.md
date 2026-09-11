@@ -24,9 +24,11 @@ This is OpenSpec's own behaviour, not a convention of ours.
 While a change is in flight it lives in `openspec/changes/<name>/`, and its
 `specs/` holds a **delta** (`## ADDED Requirements`). `openspec archive` then:
 
-1. **merges the delta into `openspec/specs/`** — the live, current contract;
-2. **moves the folder** to `openspec/changes/archive/<date>-<name>/`, the date
-   coming from `formatLocalDate()` and not stacked if one is already there.
+1. **offers to merge the delta into `openspec/specs/`** — the live, current
+   contract. It is a prompt, and declining it archives without promoting the
+   spec, so take the sync;
+2. **moves the folder** to `openspec/changes/archive/<date>-<name>/`, dated
+   today unless the name already carries a date, which is never stacked.
 
 So the change's `proposal.md`, `design.md` and `tasks.md` are moved, not
 deleted: they stay in version control and stay greppable. Finding a past
@@ -74,9 +76,10 @@ Leave it. It shrinks by attrition as changes touch each area.
   finding about behaviour goes back to `spec-writer`; about the code, to
   `dev-writer`; about a test, to `tester`. Re-run only the reviewers whose
   findings led to changes.
-- **`openspec validate` and `openspec archive`.** Archive is what merges the
-  delta into `openspec/specs/` — skip it and the change ships with its spec
-  never promoted. Do it once the change is otherwise done.
+- **`openspec validate` and `openspec archive`.** Archive is where the delta is
+  merged into `openspec/specs/` — skip the step, or decline its sync prompt, and
+  the change ships with its spec never promoted. Do it once the change is
+  otherwise done, and take the sync.
 
 The three reviewers split deliberately, and run in parallel:
 

@@ -483,15 +483,43 @@ mod tests {
         // Asserting the absence of `(` and `::` is what makes this fail if
         // someone derives Display or falls back to Debug, rather than only
         // checking that some string came out.
-        let errors = [
-            GenesisError::UnknownVersion(9),
-            GenesisError::UnknownPolicy(99),
-            GenesisError::Truncated,
-            GenesisError::TrailingBytes,
-            GenesisError::LengthMismatch,
-            GenesisError::InvalidTitle,
-            GenesisError::InvalidCreator(KeyError::NotAValidPublicKey),
-        ];
+        //
+        // The `match` below is the reason this list cannot silently fall behind
+        // the enum. A bare array would compile forever while covering fewer and
+        // fewer variants — which is exactly what happened when `TitleTooLong`
+        // was added. Adding a variant now fails to compile until it is listed.
+        fn every_variant() -> Vec<GenesisError> {
+            let all = vec![
+                GenesisError::UnknownVersion(9),
+                GenesisError::UnknownPolicy(99),
+                GenesisError::Truncated,
+                GenesisError::TrailingBytes,
+                GenesisError::LengthMismatch,
+                GenesisError::InvalidTitle,
+                GenesisError::InvalidCreator(KeyError::NotAValidPublicKey),
+                // The weak-key case renders through KeyError's own Display, so
+                // it is a second path worth covering rather than a repeat.
+                GenesisError::InvalidCreator(KeyError::WeakPublicKey),
+                GenesisError::TitleTooLong(2000),
+            ];
+            // Non-exhaustive match => compile error when a variant is added.
+            // Never executed; it exists only to make the compiler check the
+            // list above.
+            if let Some(e) = all.first() {
+                match e {
+                    GenesisError::UnknownVersion(_)
+                    | GenesisError::UnknownPolicy(_)
+                    | GenesisError::Truncated
+                    | GenesisError::TrailingBytes
+                    | GenesisError::LengthMismatch
+                    | GenesisError::InvalidTitle
+                    | GenesisError::InvalidCreator(_)
+                    | GenesisError::TitleTooLong(_) => {}
+                }
+            }
+            all
+        }
+        let errors = every_variant();
         for e in errors {
             let rendered = e.to_string();
             assert!(!rendered.is_empty(), "{e:?} rendered empty");
