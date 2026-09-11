@@ -106,7 +106,7 @@
 //! there is no "last". It is not, and the branch above is the consequence.
 
 use crate::identity::{Address, PublicKey};
-use crate::log::{Entry, OpLog};
+use crate::log::{Entry, OpLog, OpLogError};
 use crate::op::{ModerationAction, OpId, OpKind};
 use crate::stoa::{Genesis, GenesisError};
 
@@ -236,8 +236,20 @@ impl Moderators {
 ///
 /// Third, a bool invites a caller to store it, and §6.2's whole finding is about a
 /// check that stopped being run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Moderation<'a> {
+/// # Owned, because a log that persists cannot lend
+///
+/// The two op-carrying variants held `&'a Entry` borrowed from the log until
+/// [`OpLog`]'s reads became owned. A database cannot lend a reference to a row
+/// it has not materialised, so there is no longer a log-owned entry to point at.
+/// See [`OpLog`]'s documentation for why that is structural rather than a
+/// preference.
+///
+/// **Nothing about the resolution changed.** The fold, the three checks and the
+/// fail-closed posture are untouched; what changed is that the deciding op is
+/// carried rather than referenced. `Copy` goes with the references — this is
+/// `Clone` only, which is what an owned `Entry` permits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Moderation {
     /// No binding moderation of this target reached this peer.
     ///
     /// Not distinguishable from "nobody moderated it", and that is correct rather
@@ -246,13 +258,13 @@ pub enum Moderation<'a> {
     /// the same from here. Convergence closes the gap.
     Unmoderated,
     /// A moderator hid it, and this is the op that did.
-    Hidden(&'a Entry),
+    Hidden(Entry),
     /// A moderator hid it and a moderator lifted that, or a moderator published a
     /// bare unhide. This is the op that decided it.
-    Unhidden(&'a Entry),
+    Unhidden(Entry),
 }
 
-impl<'a> Moderation<'a> {
+impl Moderation {
     /// Whether a conforming peer stops rendering the target.
     ///
     /// §6.1 is careful about the ceiling and so is this name: moderation "can only
@@ -262,7 +274,11 @@ impl<'a> Moderation<'a> {
     }
 
     /// The op that decided this, if one did.
-    pub fn deciding_op(&self) -> Option<&'a Entry> {
+    ///
+    /// Borrows from `self` rather than from the log, which is the only change
+    /// the ownership move made here: the entry now lives in this value, so its
+    /// lifetime is this value's.
+    pub fn deciding_op(&self) -> Option<&Entry> {
         match self {
             Moderation::Unmoderated => None,
             Moderation::Hidden(e) | Moderation::Unhidden(e) => Some(e),
@@ -291,9 +307,30 @@ impl<'a> Moderation<'a> {
 /// anything that sorted first, which is a censorship-resistance failure reached
 /// through a validation check.
 ///
+/// # A read failure is not a moderation outcome
+///
+/// `Err` means the store could not be consulted, so this function has no opinion
+/// about the target — which is a different thing from
+/// [`Moderation::Unmoderated`], the opinion that nothing binds.
+///
+/// **It is a `Result` rather than a fourth variant, and the reason is that a
+/// variant would fail OPEN.** [`Moderation::is_hidden`] is
+/// `matches!(self, Moderation::Hidden(_))`, so a new variant returns `false`
+/// there and every existing caller silently renders the post. Forcing
+/// `is_hidden` to answer `true` for it instead would make a disk error
+/// indistinguishable from a moderator's decision at the one call site that
+/// matters, and would let [`Moderation::deciding_op`] return `None` for
+/// something reported as hidden — a state this type currently makes impossible.
+///
+/// A `Result` has the opposite failure mode: a caller who ignores it gets a
+/// compile error rather than a wrong render, which is the same
+/// make-it-unrepresentable property as [`Moderators::of`] being the sole
+/// constructor and `Entry::target`'s match carrying no wildcard. What a caller
+/// should do with one is recorded on [`OpLogError`].
+///
 /// # Defined over a partial set
 ///
-/// Every outcome is an answer, and none is an error. A target the log holds no ops
+/// Every other outcome is an answer, and none is an error. A target the log holds no ops
 /// about is [`Moderation::Unmoderated`]; so is a target whose only moderations are
 /// forged. A target op the peer never received is irrelevant — the moderation ops
 /// naming it are what decide, and `iter_target` returns those whether or not the
@@ -358,9 +395,16 @@ impl<'a> Moderation<'a> {
 /// answer. It lives here rather than in [`cmp_ops`](crate::arrival::cmp_ops)
 /// because it is moderation semantics: a general comparator has no business
 /// knowing that one op kind's payload is safer to prefer.
-pub fn resolve<'a, L: OpLog>(log: &'a L, moderators: &Moderators, target: &OpId) -> Moderation<'a> {
-    let binding: Vec<&Entry> = log
-        .iter_target(target)
+pub fn resolve<L: OpLog>(
+    log: &L,
+    moderators: &Moderators,
+    target: &OpId,
+) -> Result<Moderation, OpLogError> {
+    // `Vec<Entry>` rather than `Vec<&Entry>`: the log's reads are owned now, so
+    // there is nothing to borrow from. The filter and its order are untouched —
+    // see this function's documentation, every word of which still applies.
+    let binding: Vec<Entry> = log
+        .iter_target(target)?
         .into_iter()
         // The kind filter is the resolver's job, not the log's: `iter_target`
         // answers "what acts on this subject?" for every kind, so that a fifth
@@ -369,22 +413,26 @@ pub fn resolve<'a, L: OpLog>(log: &'a L, moderators: &Moderators, target: &OpId)
         .filter(|e| matches!(e.op.op.kind, OpKind::Moderate { .. }) && moderators.authorises(e))
         .collect();
 
-    let Some(first) = binding.first().copied() else {
-        return Moderation::Unmoderated;
+    let Some(first) = binding.first() else {
+        return Ok(Moderation::Unmoderated);
     };
 
     // Where the transport ordered the leading op, its position is a real
     // last-write-wins answer and nothing here second-guesses it.
-    let deciding = if first.arrival.is_ordered_by_transport() {
-        first
+    //
+    // An INDEX rather than a reference, so that the chosen entry can be moved
+    // out of `binding` at the end. Selecting by index changes nothing about
+    // WHICH entry is selected — the two branches are the same two branches —
+    // and it keeps the fail-closed `Hide` preference below identical in shape.
+    let deciding_index = if first.arrival.is_ordered_by_transport() {
+        0
     } else {
         // Otherwise every candidate is in the degraded order, where position
         // carries no recency at all. Prefer a `Hide` if any binding one exists,
         // and fall back to the rule's first entry when none does.
         binding
             .iter()
-            .copied()
-            .find(|e| {
+            .position(|e| {
                 matches!(
                     e.op.op.kind,
                     OpKind::Moderate {
@@ -393,7 +441,24 @@ pub fn resolve<'a, L: OpLog>(log: &'a L, moderators: &Moderators, target: &OpId)
                     }
                 )
             })
-            .unwrap_or(first)
+            .unwrap_or(0)
+    };
+    // `nth`, not `binding[deciding_index]`. The index is sound by construction —
+    // it is either 0 over a vector the `let ... else` above proved non-empty, or
+    // a value `position` returned from this same vector — but indexing PANICS if
+    // that reasoning is ever broken by an edit, and PHASE0-FINDINGS §3 measured
+    // that a panic aborts the module process. The fallible form costs nothing
+    // and turns a future bug into a rendering rather than a denial of service.
+    let Some(deciding) = binding.into_iter().nth(deciding_index) else {
+        // Unreachable by the reasoning above. Reported as unmoderated for the
+        // same reason the unreachable-kind arm below is: a bug in this
+        // function's own index arithmetic is not evidence that anything was
+        // moderated, and this module runs on attacker-supplied content.
+        //
+        // NOT an `Err`: `OpLogError` is about reaching the STORE, and the store
+        // answered perfectly here. Reporting a bug in this function as a
+        // storage failure would send a reader looking at their disk.
+        return Ok(Moderation::Unmoderated);
     };
 
     // Matched on the ACTION rather than on the kind, so that a fifth op kind
@@ -410,8 +475,17 @@ pub fn resolve<'a, L: OpLog>(log: &'a L, moderators: &Moderators, target: &OpId)
     // Destructuring the action first makes the exhaustiveness the compiler's to
     // check over `ModerationAction`, and turns the kind mismatch into a stated
     // impossibility rather than a silent fallthrough.
-    match &deciding.op.op.kind {
-        OpKind::Moderate { action, .. } => match action {
+    // The action is COPIED out before `deciding` is moved into the variant.
+    // `ModerationAction` is `Copy`, so this costs nothing and it keeps the match
+    // reading on the action — which is the property the comment above is about,
+    // and which a match on `&deciding` followed by a move would have forced into
+    // a clone instead.
+    let action = match &deciding.op.op.kind {
+        OpKind::Moderate { action, .. } => Some(*action),
+        _ => None,
+    };
+    Ok(match action {
+        Some(action) => match action {
             ModerationAction::Hide => Moderation::Hidden(deciding),
             ModerationAction::Unhide => Moderation::Unhidden(deciding),
         },
@@ -419,8 +493,8 @@ pub fn resolve<'a, L: OpLog>(log: &'a L, moderators: &Moderators, target: &OpId)
         // Reported as unmoderated rather than guessed at — a non-moderation op
         // deciding a moderation question is a bug in the filter, and the safe
         // reading of a bug is that nothing was moderated.
-        _ => Moderation::Unmoderated,
-    }
+        None => Moderation::Unmoderated,
+    })
 }
 
 #[cfg(test)]
@@ -602,7 +676,7 @@ mod tests {
         let post = a_post(address_of(&agora()), &a_key(2), "the subject");
         let id = post.op.id();
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1)));
+        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
         (log, id)
     }
 
@@ -633,11 +707,14 @@ mod tests {
             hide.verify(),
             "the fixture must be an AUTHENTIC op with no authority"
         );
-        log.append(hide, Arrival::ordered(2, a_message_id(1)));
+        log.append(hide, Arrival::ordered(2, a_message_id(1))).unwrap();
 
         let moderators = moderators_of(&agora());
-        assert_eq!(resolve(&log, &moderators, &target), Moderation::Unmoderated);
-        assert!(!resolve(&log, &moderators, &target).is_hidden());
+        assert_eq!(
+            resolve(&log, &moderators, &target).unwrap(),
+            Moderation::Unmoderated
+        );
+        assert!(!resolve(&log, &moderators, &target).unwrap().is_hidden());
     }
 
     #[test]
@@ -661,9 +738,12 @@ mod tests {
         // The authority check alone would accept this: the claimed author IS the
         // moderator.
         assert!(moderators.contains(&forged.op.author));
-        log.append(forged, Arrival::ordered(2, a_message_id(1)));
+        log.append(forged, Arrival::ordered(2, a_message_id(1))).unwrap();
 
-        assert_eq!(resolve(&log, &moderators, &target), Moderation::Unmoderated);
+        assert_eq!(
+            resolve(&log, &moderators, &target).unwrap(),
+            Moderation::Unmoderated
+        );
     }
 
     #[test]
@@ -678,9 +758,9 @@ mod tests {
             ModerationAction::Hide,
         );
         let hide_id = hide.op.id();
-        log.append(hide, Arrival::ordered(2, a_message_id(1)));
+        log.append(hide, Arrival::ordered(2, a_message_id(1))).unwrap();
 
-        let resolved = resolve(&log, &moderators_of(&agora()), &target);
+        let resolved = resolve(&log, &moderators_of(&agora()), &target).unwrap();
         assert!(resolved.is_hidden());
         assert_eq!(resolved.deciding_op().map(|e| e.id()), Some(hide_id));
     }
@@ -713,10 +793,11 @@ mod tests {
             target,
             ModerationAction::Unhide,
         );
-        log.append(hide, Arrival::ordered(2, a_message_id(1)));
-        log.append(bogus_unhide, Arrival::ordered(3, a_message_id(1)));
+        log.append(hide, Arrival::ordered(2, a_message_id(1))).unwrap();
+        log.append(bogus_unhide, Arrival::ordered(3, a_message_id(1)))
+            .unwrap();
 
-        let resolved = resolve(&log, &moderators_of(&agora()), &target);
+        let resolved = resolve(&log, &moderators_of(&agora()), &target).unwrap();
         assert!(resolved.is_hidden(), "a forged unhide lifted a real hide");
         assert_eq!(resolved.deciding_op().map(|e| e.id()), Some(hide_id));
     }
@@ -752,16 +833,16 @@ mod tests {
 
         let mut forwards = MemoryOpLog::new();
         for (op, arrival) in ops.iter() {
-            forwards.append(op.clone(), arrival.clone());
+            forwards.append(op.clone(), arrival.clone()).unwrap();
         }
         let mut backwards = MemoryOpLog::new();
         for (op, arrival) in ops.iter().rev() {
-            backwards.append(op.clone(), arrival.clone());
+            backwards.append(op.clone(), arrival.clone()).unwrap();
         }
 
         let moderators = moderators_of(&agora());
-        let a = resolve(&forwards, &moderators, &target);
-        let b = resolve(&backwards, &moderators, &target);
+        let a = resolve(&forwards, &moderators, &target).unwrap();
+        let b = resolve(&backwards, &moderators, &target).unwrap();
         assert!(a.is_hidden() && b.is_hidden());
         assert_eq!(
             a.deciding_op().map(|e| e.id()),
@@ -865,9 +946,13 @@ mod tests {
         assert!(elsewhere.verify());
         let moderators = moderators_of(&agora());
         assert!(moderators.contains(&elsewhere.op.author));
-        log.append(elsewhere, Arrival::ordered(2, a_message_id(1)));
+        log.append(elsewhere, Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
 
-        assert_eq!(resolve(&log, &moderators, &target), Moderation::Unmoderated);
+        assert_eq!(
+            resolve(&log, &moderators, &target).unwrap(),
+            Moderation::Unmoderated
+        );
     }
 
     #[test]
@@ -901,20 +986,22 @@ mod tests {
         let lyceum_unhide_id = lyceum_unhide.op.id();
         // Lyceum's op is the more recent, so a resolver that ignored the Stoa
         // would report Unhidden under BOTH sets.
-        log.append(agora_hide, Arrival::ordered(2, a_message_id(1)));
-        log.append(lyceum_unhide, Arrival::ordered(3, a_message_id(1)));
+        log.append(agora_hide, Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
+        log.append(lyceum_unhide, Arrival::ordered(3, a_message_id(1)))
+            .unwrap();
 
-        let under_agora = resolve(&log, &moderators_of(&agora()), &target);
+        let under_agora = resolve(&log, &moderators_of(&agora()), &target).unwrap();
         assert!(under_agora.is_hidden());
         assert_eq!(
             under_agora.deciding_op().map(|e| e.id()),
             Some(agora_hide_id)
         );
 
-        let under_lyceum = resolve(&log, &moderators_of(&lyceum), &target);
+        let under_lyceum = resolve(&log, &moderators_of(&lyceum), &target).unwrap();
         assert_eq!(
             under_lyceum,
-            Moderation::Unhidden(log.get(&lyceum_unhide_id).unwrap())
+            Moderation::Unhidden(log.get(&lyceum_unhide_id).unwrap().unwrap())
         );
     }
 
@@ -939,10 +1026,11 @@ mod tests {
             ModerationAction::Unhide,
         );
         let unhide_id = unhide.op.id();
-        log.append(hide, Arrival::ordered(2, a_message_id(1)));
-        log.append(unhide, Arrival::ordered(3, a_message_id(1)));
+        log.append(hide, Arrival::ordered(2, a_message_id(1))).unwrap();
+        log.append(unhide, Arrival::ordered(3, a_message_id(1)))
+            .unwrap();
 
-        let resolved = resolve(&log, &moderators_of(&agora()), &target);
+        let resolved = resolve(&log, &moderators_of(&agora()), &target).unwrap();
         assert!(!resolved.is_hidden());
         assert_eq!(resolved.deciding_op().map(|e| e.id()), Some(unhide_id));
         // And it is distinguishable from a target nobody moderated.
@@ -968,10 +1056,11 @@ mod tests {
             ModerationAction::Hide,
         );
         let hide_id = hide.op.id();
-        log.append(unhide, Arrival::ordered(2, a_message_id(1)));
-        log.append(hide, Arrival::ordered(3, a_message_id(1)));
+        log.append(unhide, Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
+        log.append(hide, Arrival::ordered(3, a_message_id(1))).unwrap();
 
-        let resolved = resolve(&log, &moderators_of(&agora()), &target);
+        let resolved = resolve(&log, &moderators_of(&agora()), &target).unwrap();
         assert!(resolved.is_hidden());
         assert_eq!(resolved.deciding_op().map(|e| e.id()), Some(hide_id));
     }
@@ -1017,10 +1106,10 @@ mod tests {
 
         // The HIGH op id gets the HIGH Lamport value, so it decides under §5.7
         // and would NOT decide under the op-id fallback.
-        log.append(low, Arrival::ordered(2, a_message_id(1)));
-        log.append(high, Arrival::ordered(9, a_message_id(1)));
+        log.append(low, Arrival::ordered(2, a_message_id(1))).unwrap();
+        log.append(high, Arrival::ordered(9, a_message_id(1))).unwrap();
 
-        let resolved = resolve(&log, &moderators_of(&agora()), &target);
+        let resolved = resolve(&log, &moderators_of(&agora()), &target).unwrap();
         assert_eq!(
             resolved.deciding_op().map(|e| e.id()),
             Some(high_id),
@@ -1068,10 +1157,10 @@ mod tests {
         let binding_id = binding.op.id();
 
         // Appended in the order that would be wrong if insertion order leaked.
-        log.append(binding, Arrival::unordered());
-        log.append(not_binding, Arrival::unordered());
+        log.append(binding, Arrival::unordered()).unwrap();
+        log.append(not_binding, Arrival::unordered()).unwrap();
 
-        let resolved = resolve(&log, &moderators_of(&agora()), &target);
+        let resolved = resolve(&log, &moderators_of(&agora()), &target).unwrap();
         assert!(!resolved.is_hidden());
         assert_eq!(
             resolved.deciding_op().map(|e| e.id()),
@@ -1100,10 +1189,10 @@ mod tests {
         let hide_id = hide.op.id();
 
         let mut log = MemoryOpLog::new();
-        log.append(forged_unhide, Arrival::unordered());
-        log.append(hide, Arrival::unordered());
+        log.append(forged_unhide, Arrival::unordered()).unwrap();
+        log.append(hide, Arrival::unordered()).unwrap();
 
-        let resolved = resolve(&log, &moderators_of(&stoa), &target);
+        let resolved = resolve(&log, &moderators_of(&stoa), &target).unwrap();
         assert!(
             resolved.is_hidden(),
             "a forgery leading the degraded order displaced a genuine hide"
@@ -1156,10 +1245,10 @@ mod tests {
         // Both unordered: the only order production reaches today. The unhide is
         // appended FIRST, so insertion order cannot produce the expected answer
         // by accident either.
-        log.append(unhide, Arrival::unordered());
-        log.append(hide, Arrival::unordered());
+        log.append(unhide, Arrival::unordered()).unwrap();
+        log.append(hide, Arrival::unordered()).unwrap();
 
-        let resolved = resolve(&log, &moderators_of(&agora()), &target);
+        let resolved = resolve(&log, &moderators_of(&agora()), &target).unwrap();
         assert!(
             resolved.is_hidden(),
             "an unhide that merely hashes lower defeated a hide permanently"
@@ -1189,10 +1278,10 @@ mod tests {
         let hide_id = hide.op.id();
 
         let mut log = MemoryOpLog::new();
-        log.append(hide, Arrival::unordered());
-        log.append(unhide, Arrival::unordered());
+        log.append(hide, Arrival::unordered()).unwrap();
+        log.append(unhide, Arrival::unordered()).unwrap();
 
-        let resolved = resolve(&log, &moderators_of(&stoa), &target);
+        let resolved = resolve(&log, &moderators_of(&stoa), &target).unwrap();
         assert!(resolved.is_hidden());
         assert_eq!(resolved.deciding_op().map(|e| e.id()), Some(hide_id));
     }
@@ -1268,10 +1357,10 @@ mod tests {
             forged_hide,
             cross_stoa_hide,
         ] {
-            log.append(op, Arrival::unordered());
+            log.append(op, Arrival::unordered()).unwrap();
         }
 
-        let resolved = resolve(&log, &moderators_of(&agora()), &target);
+        let resolved = resolve(&log, &moderators_of(&agora()), &target).unwrap();
         assert!(
             !resolved.is_hidden(),
             "a Hide that does not bind won the tie-break — any peer can now \
@@ -1323,10 +1412,10 @@ mod tests {
                 ModerationAction::Hide,
             ),
         ] {
-            log.append(op, Arrival::unordered());
+            log.append(op, Arrival::unordered()).unwrap();
         }
 
-        let resolved = resolve(&log, &moderators_of(&agora()), &target);
+        let resolved = resolve(&log, &moderators_of(&agora()), &target).unwrap();
         assert!(resolved.is_hidden());
         assert_eq!(
             resolved.deciding_op().map(|e| e.id()),
@@ -1374,18 +1463,19 @@ mod tests {
             ModerationAction::Hide,
         );
 
-        log.append(ordered_unhide, Arrival::ordered(5, a_message_id(1)));
-        log.append(unordered_hide, Arrival::unordered());
+        log.append(ordered_unhide, Arrival::ordered(5, a_message_id(1)))
+            .unwrap();
+        log.append(unordered_hide, Arrival::unordered()).unwrap();
 
         // The fixture must really be mixed, or it exercises neither reading.
-        let entries = log.iter_target(&target);
+        let entries = log.iter_target(&target).unwrap();
         assert!(
             entries.iter().any(|e| e.arrival.is_ordered_by_transport())
                 && entries.iter().any(|e| !e.arrival.is_ordered_by_transport()),
             "the fixture must carry BOTH arrival kinds"
         );
 
-        let resolved = resolve(&log, &moderators_of(&agora()), &target);
+        let resolved = resolve(&log, &moderators_of(&agora()), &target).unwrap();
         assert!(
             !resolved.is_hidden(),
             "an ordered leading op must decide on its own terms, rather than \
@@ -1422,10 +1512,11 @@ mod tests {
         );
         let unhide_id = unhide.op.id();
 
-        log.append(hide, Arrival::ordered(2, a_message_id(1)));
-        log.append(unhide, Arrival::ordered(3, a_message_id(1)));
+        log.append(hide, Arrival::ordered(2, a_message_id(1))).unwrap();
+        log.append(unhide, Arrival::ordered(3, a_message_id(1)))
+            .unwrap();
 
-        let resolved = resolve(&log, &moderators_of(&agora()), &target);
+        let resolved = resolve(&log, &moderators_of(&agora()), &target).unwrap();
         assert!(
             !resolved.is_hidden(),
             "a real Lamport order must still let an unhide reverse a hide"
@@ -1472,14 +1563,15 @@ mod tests {
             target,
             ModerationAction::Hide,
         );
-        log.append(hide.clone(), Arrival::ordered(2, a_message_id(1)));
+        log.append(hide.clone(), Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
 
         // The authority predicate consults the moderator set and nothing about
         // the ops already present — so it cannot be conditioning on who placed
         // what.
         let moderators = moderators_of(&agora());
-        let entry = log.get(&hide.op.id()).unwrap();
-        assert!(moderators.authorises(entry));
+        let entry = log.get(&hide.op.id()).unwrap().unwrap();
+        assert!(moderators.authorises(&entry));
         assert!(moderators.contains(&creator().public_key()));
     }
 
@@ -1494,7 +1586,7 @@ mod tests {
         let post = a_post(address_of(&agora()), &a_key(2), "the subject");
         let target = post.op.id();
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1)));
+        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
 
         let hide = a_moderation(
             address_of(&agora()),
@@ -1514,10 +1606,11 @@ mod tests {
             },
         }
         .sign(&author);
-        log.append(hide, Arrival::ordered(2, a_message_id(1)));
-        log.append(revision, Arrival::ordered(3, a_message_id(1)));
+        log.append(hide, Arrival::ordered(2, a_message_id(1))).unwrap();
+        log.append(revision, Arrival::ordered(3, a_message_id(1)))
+            .unwrap();
 
-        let resolved = resolve(&log, &moderators_of(&agora()), &target);
+        let resolved = resolve(&log, &moderators_of(&agora()), &target).unwrap();
         assert!(resolved.is_hidden(), "an edit cleared a hide");
         assert_eq!(resolved.deciding_op().map(|e| e.id()), Some(hide_id));
     }
@@ -1531,7 +1624,7 @@ mod tests {
         let post = a_post(address_of(&agora()), &creator(), "the subject");
         let target = post.op.id();
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1)));
+        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
 
         let revision = Op {
             stoa: address_of(&agora()),
@@ -1544,17 +1637,21 @@ mod tests {
         }
         .sign(&creator());
         let revision_id = revision.op.id();
-        log.append(revision, Arrival::ordered(2, a_message_id(1)));
+        log.append(revision, Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
 
         let moderators = moderators_of(&agora());
         // Every check but the kind check passes on this very entry — asserted
         // directly, so the test cannot pass because the fixture was accidentally
         // unauthorised for some other reason.
         assert!(
-            moderators.authorises(log.get(&revision_id).unwrap()),
+            moderators.authorises(&log.get(&revision_id).unwrap().unwrap()),
             "the fixture must clear authenticity, authority and scope"
         );
-        assert_eq!(resolve(&log, &moderators, &target), Moderation::Unmoderated);
+        assert_eq!(
+            resolve(&log, &moderators, &target).unwrap(),
+            Moderation::Unmoderated
+        );
     }
 
     #[test]
@@ -1572,10 +1669,10 @@ mod tests {
         }
         .sign(&creator());
         assert!(vote.verify());
-        log.append(vote, Arrival::ordered(2, a_message_id(1)));
+        log.append(vote, Arrival::ordered(2, a_message_id(1))).unwrap();
 
         assert_eq!(
-            resolve(&log, &moderators_of(&agora()), &target),
+            resolve(&log, &moderators_of(&agora()), &target).unwrap(),
             Moderation::Unmoderated
         );
     }
@@ -1587,7 +1684,7 @@ mod tests {
         let (log, _) = a_log_with_a_post();
         let never_moderated = a_post(address_of(&agora()), &a_key(2), "untouched").op.id();
         assert_eq!(
-            resolve(&log, &moderators_of(&agora()), &never_moderated),
+            resolve(&log, &moderators_of(&agora()), &never_moderated).unwrap(),
             Moderation::Unmoderated
         );
     }
@@ -1597,7 +1694,7 @@ mod tests {
         let log = MemoryOpLog::new();
         let target = a_post(address_of(&agora()), &a_key(2), "absent").op.id();
         assert_eq!(
-            resolve(&log, &moderators_of(&agora()), &target),
+            resolve(&log, &moderators_of(&agora()), &target).unwrap(),
             Moderation::Unmoderated
         );
     }
@@ -1618,14 +1715,16 @@ mod tests {
             ModerationAction::Hide,
         );
         let mut log = MemoryOpLog::new();
-        log.append(hide, Arrival::ordered(2, a_message_id(1)));
+        log.append(hide, Arrival::ordered(2, a_message_id(1))).unwrap();
 
         assert_eq!(
-            log.get(&missing_target),
+            log.get(&missing_target).unwrap(),
             None,
             "the target really is absent"
         );
-        assert!(resolve(&log, &moderators_of(&agora()), &missing_target).is_hidden());
+        assert!(resolve(&log, &moderators_of(&agora()), &missing_target)
+            .unwrap()
+            .is_hidden());
     }
 
     #[test]
@@ -1650,17 +1749,27 @@ mod tests {
         );
 
         let mut behind = MemoryOpLog::new();
-        behind.append(post.clone(), Arrival::ordered(1, a_message_id(1)));
-        behind.append(hide.clone(), Arrival::ordered(2, a_message_id(1)));
+        behind
+            .append(post.clone(), Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
+        behind
+            .append(hide.clone(), Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
 
         let mut current = MemoryOpLog::new();
-        current.append(post, Arrival::ordered(1, a_message_id(1)));
-        current.append(hide, Arrival::ordered(2, a_message_id(1)));
-        current.append(unhide, Arrival::ordered(3, a_message_id(1)));
+        current
+            .append(post, Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
+        current
+            .append(hide, Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
+        current
+            .append(unhide, Arrival::ordered(3, a_message_id(1)))
+            .unwrap();
 
         let moderators = moderators_of(&agora());
-        assert!(resolve(&behind, &moderators, &target).is_hidden());
-        assert!(!resolve(&current, &moderators, &target).is_hidden());
+        assert!(resolve(&behind, &moderators, &target).unwrap().is_hidden());
+        assert!(!resolve(&current, &moderators, &target).unwrap().is_hidden());
     }
 
     // ─── The result names the op ──────────────────────────────────────────
@@ -1678,9 +1787,12 @@ mod tests {
             ModerationAction::Hide,
         );
         let hide_id = hide.op.id();
-        log.append(hide, Arrival::ordered(2, a_message_id(1)));
+        log.append(hide, Arrival::ordered(2, a_message_id(1))).unwrap();
 
-        let entry = resolve(&log, &moderators_of(&agora()), &target)
+        // The resolution is bound rather than chained, because `deciding_op`
+        // now borrows from the `Moderation` value instead of from the log.
+        let moderation = resolve(&log, &moderators_of(&agora()), &target).unwrap();
+        let entry = moderation
             .deciding_op()
             .expect("a hidden target names its op");
         assert_eq!(entry.id(), hide_id);
@@ -1699,7 +1811,9 @@ mod tests {
         let (log, _) = a_log_with_a_post();
         let target = a_post(address_of(&agora()), &a_key(2), "untouched").op.id();
         assert_eq!(
-            resolve(&log, &moderators_of(&agora()), &target).deciding_op(),
+            resolve(&log, &moderators_of(&agora()), &target)
+                .unwrap()
+                .deciding_op(),
             None
         );
     }
@@ -1736,12 +1850,12 @@ mod tests {
             target,
             ModerationAction::Unhide,
         );
-        log.append(unhide, Arrival::ordered(2, a_message_id(1)));
+        log.append(unhide, Arrival::ordered(2, a_message_id(1))).unwrap();
         let untouched = a_post(address_of(&agora()), &a_key(2), "untouched").op.id();
 
         let moderators = moderators_of(&agora());
-        let restored = resolve(&log, &moderators, &target);
-        let never = resolve(&log, &moderators, &untouched);
+        let restored = resolve(&log, &moderators, &target).unwrap();
+        let never = resolve(&log, &moderators, &untouched).unwrap();
         assert!(!restored.is_hidden() && !never.is_hidden());
         assert_ne!(restored, never, "a bool would have collapsed these");
         assert!(restored.deciding_op().is_some());
@@ -1830,12 +1944,12 @@ mod tests {
             Arrival::from_parts(Some(u64::MAX), None),
         ];
         for (n, op) in junk.into_iter().enumerate() {
-            log.append(op, arrivals[n % arrivals.len()].clone());
+            log.append(op, arrivals[n % arrivals.len()].clone()).unwrap();
         }
 
         let moderators = moderators_of(&agora());
         assert_eq!(
-            resolve(&log, &moderators, &target),
+            resolve(&log, &moderators, &target).unwrap(),
             Moderation::Unmoderated,
             "a forgery bound"
         );
@@ -1867,7 +1981,8 @@ mod tests {
             ModerationAction::Hide,
         );
         let genuine_id = genuine.op.id();
-        log.append(genuine, Arrival::ordered(2, a_message_id(1)));
+        log.append(genuine, Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
 
         for (n, op) in [
             a_moderation(
@@ -1893,10 +2008,11 @@ mod tests {
         .into_iter()
         .enumerate()
         {
-            log.append(op, Arrival::ordered(10 + n as u64, a_message_id(1)));
+            log.append(op, Arrival::ordered(10 + n as u64, a_message_id(1)))
+                .unwrap();
         }
 
-        let resolved = resolve(&log, &moderators_of(&agora()), &target);
+        let resolved = resolve(&log, &moderators_of(&agora()), &target).unwrap();
         assert!(resolved.is_hidden());
         assert_eq!(resolved.deciding_op().map(|e| e.id()), Some(genuine_id));
     }

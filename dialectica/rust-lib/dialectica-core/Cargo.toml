@@ -142,6 +142,33 @@ chacha20poly1305 = { version = "0.11", features = ["zeroize"] }
 # string. What is needed is the raw `hash_password_into` KDF and nothing else.
 argon2 = { version = "0.6", default-features = false, features = ["alloc", "zeroize"] }
 
+# ─── The op log on disk ───────────────────────────────────────────────────
+#
+# **The reasoning lives in the `sqlite-projection` change's `design.md`**, under
+# "`rusqlite` with `bundled`, argued against the keystore posture" — why a
+# SQLite binding is unavoidable rather than convenient, and the four things
+# deliberately NOT taken (rusqlite's `serde_json` integration, `chrono`/`time`,
+# a migration framework, a connection pool). Not repeated here, for the reason
+# the keystore block gives: it was in both places once and had already diverged.
+#
+# What stays here is what a reader editing THIS file needs.
+#
+# `bundled` IS LOAD-BEARING. Without it, `libsqlite3-sys` links the HOST's
+# libsqlite3 — and on the `codegen.rust` path `mkLogosModule.nix` owns the
+# vendoring, so a module's flake has no override point at which to declare a
+# `buildInputs` (see `dialectica/flake.nix`, which records that the escape hatch
+# the radicle module uses does not exist here). A system-library dependency
+# would surface as a link failure inside a build this repo cannot edit.
+#
+# It also makes the SQLite version a property of `Cargo.lock` rather than of
+# whatever the host ships, which matters more here than it usually would: this
+# store is the authority for all forum state, so a store read by a
+# machine-dependent SQLite is a forum whose behaviour varies by machine.
+#
+# 43 of the 48 features are off, including every type-integration feature.
+# Ops are stored as the canonical BLOB `op.rs` signs, never as JSON.
+rusqlite = { version = "0.40", features = ["bundled"] }
+
 # NO FEATURES. `zeroize_derive` was enabled here and nothing used it — there is
 # no `derive(Zeroize)` in this crate and there is not meant to be, since every
 # secret is held in a `Zeroizing` wrapper rather than in a type that derives the
