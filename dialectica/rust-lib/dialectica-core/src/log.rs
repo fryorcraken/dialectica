@@ -204,14 +204,28 @@ pub trait OpLog {
     /// become a routing change rather than a migration.
     fn iter_stoa(&self, stoa: &Address) -> Vec<&Entry>;
 
-    /// Every op naming `target`, in [`cmp_ops`] order.
+    /// Every op naming `target` — **an op** — in [`cmp_ops`] order.
     ///
-    /// The shape both resolvers fold over. A revision resolver reads this and
-    /// keeps the first entry that is a `Revise` by the target's author; a
-    /// moderation resolver reads it and keeps the first entry that is a
-    /// `Moderate` by a then-moderator. Both want "the ops about this subject, in
-    /// the order that decides which is current", which is one question and so is
-    /// one method.
+    /// The shape the revision and moderation resolvers fold over. A revision
+    /// resolver reads this and keeps the first entry that is a `Revise` by the
+    /// target's author; a moderation resolver reads it and narrows to the
+    /// `Moderate` ops a then-moderator signed. Both want "the ops about this
+    /// op, in the order that decides which is current", which is one question
+    /// and so is one method.
+    ///
+    /// **The subject is an [`OpId`], and that is a real limit rather than a
+    /// parameter choice.** [`Entry::target`] maps an op kind to the op it acts
+    /// upon, so a subject addressed any other way is not expressible here. Stoa
+    /// metadata (§5.7) is the case known to be coming: a metadata op names the
+    /// **Stoa**, an [`Address`], so it needs its own read rather than a widened
+    /// `target` — structurally it is the moderation resolver with a different
+    /// subject, and it will reuse that resolver's authority check unchanged.
+    /// Relevance scoring (§7.2) does *not* need one; it folds over [`iter`] or
+    /// [`iter_stoa`] and consumes a resolver's output rather than being a peer
+    /// of these two.
+    ///
+    /// [`iter`]: OpLog::iter
+    /// [`iter_stoa`]: OpLog::iter_stoa
     ///
     /// **Taking the first entry is not the same as taking the most recent.**
     /// [`cmp_ops`] leads with the highest Lamport timestamp only when the
