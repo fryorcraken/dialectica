@@ -1028,11 +1028,11 @@ answer — no CRDT, no merge function, no last-writer-wins ambiguity.
 Three pieces of state are not authored revisions of a post, and each needs its
 own answer:
 
-- **Moderation flags.** Not the author's to revise, by design. A moderator's
-  hide and the author's edit are about different things and do not contend: an
-  edit does not clear a hide, and a hide does not invalidate an edit. Among
-  *moderation* ops on the same target, last-write-wins by Lamport order, valid
-  only if the signer was a moderator at that time (§6).
+- ~~**Moderation flags.**~~ **Built; see the `moderation-resolution` spec.** Not
+  the author's to revise, by design — a moderator's hide and the author's edit
+  are about different things and do not contend. Among *moderation* ops on the
+  same target, last-write-wins by Lamport order, valid only if the signer was a
+  moderator at that time (§6).
 - **Stoa metadata** — title, description, policy (§7.1). Owned by the Stoa's
   moderators rather than by any author, so the same moderator-scoped
   last-write-wins rule applies.
@@ -1069,6 +1069,13 @@ post:    {..., sig(author_sk)}
 hide:    {..., sig(mod_sk)}    ← rejected if signer ∉ moderators
 ```
 
+**The read-path check is built** — see the `moderation-resolution` spec.
+`dialectica-core`'s `moderation::resolve` answers whether a target is hidden,
+checking authenticity, authority and the op's own Stoa on every read, and names
+the op that decided. `Moderate` carries `Hide` or `Unhide`, ordered by §5.7's
+rule. Not built: applying it in a materialised view, and everything below that
+depends on a mutable moderator set.
+
 The record carries **no per-peer value** — no epoch, no session counter. Every
 peer hashes it to obtain the Stoa's address, so a value varying with one peer's
 history gives that peer a different address for the same Stoa: two Stoas that
@@ -1091,7 +1098,9 @@ is worth stating because every forum design assumes a stronger one.
 Within that ceiling, a moderation op binds properly. **A moderator publishes a
 `hide`; every peer verifies the signature against the moderator set at that
 Lamport time and independently reaches the same answer.** It is protocol, it
-converges, and it names an `opId`.
+converges, and it names an `opId`. Built, against the constant set a sole
+creator-moderator gives; "at that Lamport time" becomes a real distinction only
+when the set can change.
 
 **An author-scoped suppression op is equally available, and is not ruled out.**
 Nothing stops a moderator publishing a signed op naming an *identity* — suppress

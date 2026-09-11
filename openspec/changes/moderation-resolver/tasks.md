@@ -1,0 +1,168 @@
+# Tasks
+
+## 1. Spec
+
+- [x] `proposal.md` — why the change, which capabilities it touches.
+- [x] `specs/moderation-resolution/spec.md` — the delta, eight requirements.
+- [x] `design.md` — the fail-closed argument, the three checks and why the third
+      is not redundant, what has to change when the moderator set becomes mutable.
+
+## 2. The resolver
+
+- [x] `Moderators`, constructed only from a `Genesis`, holding the Stoa address
+      and the creator key. **Fallible**, because main's genesis title cap makes
+      `Genesis::address` fallible, and a record with no address names no Stoa.
+      `Genesis` is a plain struct a caller may build directly, so an over-cap
+      title never passes the decoder that would refuse it — `unwrap`ping inside
+      the library would turn peer input into a process abort.
+- [x] `Moderators::authorises` — scope, authority and authenticity in one
+      predicate, with one call site.
+- [x] `Moderation<'a>` — `Unmoderated` / `Hidden(&Entry)` / `Unhidden(&Entry)`,
+      with `is_hidden()` and `deciding_op()`.
+- [x] `resolve(log, moderators, target)` — first binding `Moderate` over
+      `iter_target`, generic over `OpLog`.
+- [x] `pub mod moderation;` in `lib.rs`.
+
+## 3. Tests
+
+27 tests in `moderation.rs`. Each spec requirement's scenarios, plus the fixture
+work the requirement did not itself demand.
+
+- [x] **Authority on read.** `a_moderation_by_a_non_moderator_does_not_hide_anything`
+      (authentic, no authority — asserts `verify()` is true first, so it is the
+      authority check under test and not the signature check);
+      `a_moderation_forging_a_moderators_authorship_does_not_hide_anything` (claims
+      the moderator, signed by someone else — asserts `contains()` is true first,
+      so it is the signature check under test). The pair is deliberate: each
+      fixture defeats exactly one check, so neither test can pass because the
+      other's check happened to fire.
+- [x] **The positive case.** `a_moderation_by_the_creator_hides_the_target`.
+      Without it every negative test would pass for a resolver that hides nothing.
+- [x] **Skip, not stop.** `an_unauthorised_op_does_not_displace_an_authorised_one`
+      — the forgery is strictly newer, so "skip and continue" and "take newest
+      then validate" demand opposite answers.
+- [x] **Convergence.** `the_answer_depends_on_nothing_but_the_ops_and_the_moderator_set`
+      — two logs, opposite append sequences, same answer and same named op.
+- [x] **The moderator set.** `the_creator_is_a_moderator_and_nobody_else_is`,
+      `the_moderator_set_names_the_stoa_the_record_addresses`,
+      `a_different_creator_yields_a_different_moderator_set`,
+      `a_moderator_set_cannot_be_built_from_a_record_that_has_no_address` — the
+      title-cap boundary as a **pair** (exactly at the cap accepted, one byte
+      over refused with the specific variant), so a cap that drifted upward
+      cannot leave a one-sided test green.
+- [x] **Scope.** `a_moderators_op_naming_another_stoa_does_not_bind` (Agora's
+      moderator signs an op naming Lyceum — authentic, real moderator key);
+      `each_stoas_moderator_binds_only_in_their_own_stoa` (**one creator, two
+      Stoas**, so the Stoa comparison is the only rule that can separate the ops).
+- [x] **Ordering.** `the_order_is_by_lamport_and_not_by_op_id` (higher op id
+      carries higher Lamport, so the two rules disagree);
+      `the_degraded_order_decides_when_the_transport_ordered_nothing` (the order
+      production actually runs today).
+- [x] **Reversibility, both directions.** `a_later_unhide_reverses_an_earlier_hide`,
+      `a_later_hide_reverses_an_earlier_unhide`.
+- [x] **Kinds.** `a_revision_does_not_clear_a_hide`;
+      `a_revision_by_the_moderator_themselves_still_does_not_moderate` (asserts
+      `authorises()` passes on that very entry, so only the kind check refuses
+      it); `a_vote_by_a_moderator_does_not_moderate`.
+- [x] **Partial sets.** `a_target_no_op_names_is_not_hidden`,
+      `an_empty_log_answers_and_does_not_error`,
+      `a_hide_binds_even_when_the_target_op_never_arrived`,
+      `a_peer_missing_the_newest_unhide_still_reports_hidden` (asserted as a pair).
+- [x] **Naming the op.** `the_deciding_op_carries_its_author_and_action`,
+      `an_unmoderated_target_names_no_op`,
+      `a_restored_target_is_distinguishable_from_one_nobody_moderated`.
+- [x] **Hostile input.** `a_log_full_of_forgeries_resolves_without_a_panic_and_hides_nothing`
+      — seven ops naming the target, each failing exactly one check, under five
+      arrival shapes. Asserts `Unmoderated`, not merely "no panic".
+      `one_genuine_hide_among_the_forgeries_still_binds` is its complement, and
+      is what stops the first being satisfiable by a resolver that returns
+      `Unmoderated` unconditionally.
+
+### Coverage this change does NOT have
+
+Stated rather than implied, because a false coverage claim is worse than a
+missing test.
+
+- **Two distinct moderators.** Needs a mutable moderator set, which does not
+  exist. `a_moderator_may_reverse_a_moderation_they_did_not_place` therefore
+  tests the checkable half — that authority is a membership test consulting
+  nothing about who placed earlier ops — and carries a `NO SPEC:` marker saying
+  so. It does not test two-moderator behaviour, because that behaviour cannot
+  be built today.
+- **The moderator set as of an op's Lamport position.** Indistinguishable from
+  the constant set today. `design.md` records it as the first thing to change.
+- **`Genesis::matches` being enforced by the resolver.** It is not, by design,
+  and the requirement on `Moderators::of` is documentation rather than a check.
+  That is stated in `design.md`'s Risks.
+
+## 4. Mutation verification
+
+Every property claimed above was broken in the source, the suite run, the
+failures recorded, and the source restored. Seven mutations; the table is in the
+report.
+
+- [x] Authority check removed → 5 tests fail
+- [x] `verify()` removed → 3 fail
+- [x] Stoa scope check removed → 4 fail (2 before a fixture defect was fixed)
+- [x] Ordering reversed → 5 fail
+- [x] `Unhide` no longer reverses → 5 fail
+- [x] Kind filter widened → 8 fail
+- [x] Validate-after-select instead of skip-and-continue → 4 fail
+
+**One defect found this way.** `each_stoas_moderator_binds_only_in_their_own_stoa`
+originally gave the two Stoas different creators, so the authority check alone
+excluded the other Stoa's op and the test survived the scope-check mutation. It
+was the exact fixture trap `.claude/agents/README.md` describes — two candidate
+rules producing the same answer — and it is fixed by giving both Stoas one
+creator.
+
+## 5. PLAN.md
+
+- [x] §6 reasoning moved to `design.md`; §6 left with a one-line statement that
+      the resolver exists plus what is still not built.
+- [x] §5.7's moderation-flag bullet marked as built.
+- [x] Appendix A's "Moderation authority is never checked on read" left as it is
+      — it describes another project and does not rot.
+
+## 6. Rebase onto the rebased `phase2/op-log`
+
+- [x] `--onto origin/phase2/op-log 9e9e6c9`, one commit replayed, no conflicts.
+- [x] **The clean rebase did not compile**, exactly as warned. Main made
+      `Genesis::address` fallible; `Moderators::of` and ~46 fixture call sites
+      broke, all inside `#[cfg(test)]` for the fixtures — which a plain
+      `cargo build` does not compile. `--all-targets` is what surfaced it.
+      Fixed at the two producers (`address_of`, `moderators_of` helpers) rather
+      than scattering `.expect()` across every call site.
+- [x] **Checked whether the new title cap silently retired a test.** It did not:
+      the only oversized values here are a `MessageId` and `u64::MAX` Lamport
+      values, neither of which passes through a genesis title. Every fixture
+      title is a short literal.
+- [x] **Two assertions of ours were falsified** by the `iter_target` doc change
+      that this change's own finding caused. Both corrected — see §7.
+
+## 7. Assertions falsified by the upstream fix, and corrected
+
+The degraded-order finding reported from this branch went into `arrival.rs` and
+then into `log.rs`, whose `iter_target` doc no longer claims recency. That made
+our own restatements of it false:
+
+- `moderation.rs`'s module doc and `resolve`'s doc both said `iter_target` is
+  "most recent first". Now: the first entry is taken **because that is the
+  position the ordering rule defines as current**, with the recency point cited
+  to `arrival.rs` and `log.rs` rather than restated.
+- `design.md`'s ordering decision said the same, and said "Both are 'most recent
+  first' as far as this fold is concerned". Now states the weaker property the
+  fold actually needs — the rule defines a first position and every peer computes
+  the same one — which is what holds under both branches.
+- The spec's ordering requirement now says "whichever of them the ordering rule
+  places first" and adds an explicit SHALL NOT against reading the leading op as
+  the most recently published one.
+
+## 8. Gates
+
+- [x] `cargo test -p dialectica-core` — 206 pass (178 inherited, 28 ours)
+- [x] `cargo clippy -p dialectica-core --all-targets -- -D warnings` — clean
+- [x] `cargo fmt -p dialectica-core --check` — **14 pre-existing hunks**,
+      measured by stashing this change and re-running, 0 introduced. Three were
+      introduced by the `address_of(&lyceum)` substitution pushing lines past
+      100 columns, and were hand-fixed. Never bare `cargo fmt`.
