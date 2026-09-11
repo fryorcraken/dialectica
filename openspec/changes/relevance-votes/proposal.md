@@ -79,12 +79,32 @@ vouched set is per-reader local state and no capability currently owns any kind 
 every capability so far projects from the shared op log. That is a real design
 question, not a paragraph, so it gets its own proposal. See `design.md` §11–§12.
 
+## And: two axes, because one conflates quality with agreement
+
+The owner also identified that upvote/downvote merges two unrelated judgements —
+*is this spam or good content?* and *do I agree?* — so a forum named for
+dialectic would ship the mechanism by which web2 forums punish disagreement.
+
+**PLAN §7.4** splits them: an **assessment** axis (`constructive`/`noise`) and a
+**response** axis (`agree`/`disagree`, both optional). **Only assessment ranks**;
+response never sums, and is shown as a distribution rather than a net. That
+asymmetry is the design — two vote buttons added together would rank consensus
+and be worthless. A negative assessment is an **evaluation, not a report**: it
+acts in the assessor's own ranking immediately rather than petitioning an
+authority that §6.1 says does not exist, and it never accumulates into hiding.
+
+Both axes fit the existing one-byte discriminant with **no wire-format version
+bump**, and unknown discriminants are already refused rather than defaulted, so
+older peers fail closed.
+
 ## Impact
 
 - `docs/PLAN.md` §7.2 — rules 2, 3, 4 rewritten; rule 6 added; the reserved
   shape corrected.
-- `docs/PLAN.md` §7.3 — new, design-only: vouching's vocabulary and why it is
-  never published.
+- `docs/PLAN.md` §7.3 — new, design-only: vouching's vocabulary, why it is never
+  published, and how weight accrues from assessments the reader already makes.
+- `docs/PLAN.md` §7.4 — new: the assessment/response split, and why only
+  assessment orders.
 - New capability `relevance-ordering` (delta only; not merged here). **No spec
   delta for vouching** — deliberately, so this change carries one argument.
 - **The projection schema must reserve three columns before it is written.**

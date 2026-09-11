@@ -1318,12 +1318,15 @@ cannot be gamed by minting identities, plus one that can:
 - **`active`** — threads by the Lamport timestamp of their most recent
   non-hidden reply. Gameable only by *posting*, which moderation and rate
   limiting already govern.
-- **`top`** — vote ops counted per distinct identity, weighted by **how much
-  this reader weighs that voter's opinion**. A moderator's **upvote** weighs
-  `K_mod`; a **vouched** voter's upvote weighs `K_vouch` (§7.3); every other
-  vote weighs 1 — *some* score rather than zero, which is the interim's whole
-  premise and what rule 3 removes later. A post's score is **floored at zero**,
-  so downvoting can order a post last but never remove it.
+- **`top`** — **assessment** ops (§7.4) counted per distinct identity, weighted
+  by **how much this reader weighs that assessor's opinion**. A moderator's
+  `constructive` weighs `K_mod`; a **vouched** assessor's weighs `K_vouch`
+  (§7.3); every other weighs 1 — *some* score rather than zero, which is the
+  interim's whole premise and what rule 3 removes later. A post's score is
+  **floored at zero**, so `noise` can order a post last but never remove it.
+  **The response axis (`agree`/`disagree`) contributes nothing to this or any
+  ordering** — §7.4 is where that asymmetry is argued, and it is load-bearing
+  rather than a refinement.
 
 **`top` is an engagement ordering, not a relevance signal, and the distinction
 is the whole of the claim.** It reports how many distinct identities voted,
@@ -1401,9 +1404,9 @@ post outranks a visible one. Keep hidden posts in the op log (§5.7 keeps
 history) and let the UI offer a "show hidden" view — but the default feed omits
 them.
 
-**A moderator's *downvote* is the same mistake arriving from the other
-direction**, and rule 2's weights therefore apply to an **upvote only** — for a
-moderator's vote and equally for a vouched one (§7.3). This rule originally stopped a `hide` from being *weakened* into a
+**A moderator's *`noise` assessment* is the same mistake arriving from the other
+direction**, and rule 2's weights therefore apply to `constructive` **only** —
+for a moderator's assessment and equally for a vouched or earned one (§7.3). This rule originally stopped a `hide` from being *weakened* into a
 ranking nudge; nothing stopped a ranking nudge being *strengthened* by moderator
 authority into a soft hide. An amplified downvote has none of a moderation op's
 properties — it does not bind (a well-upvoted post survives it), it names no
@@ -1459,9 +1462,9 @@ filtering and ranking again. It must never be encoded as a large negative score
 offset: that would be indexable too and would silently restore the haircut rule
 4 rejects, since a sufficiently upvoted hidden post would climb back.
 
-**This is why rule 4's restriction of `K` to upvotes is load-bearing for the
-schema and not only for the semantics.** Had a moderator's downvote been given
-exclusion-like force — a threshold at which a post disappears — hidden-ness
+**This is why rule 4's restriction of the weights to `constructive` is
+load-bearing for the schema and not only for the semantics.** Had a moderator's
+`noise` been given exclusion-like force — a threshold at which a post disappears — hidden-ness
 would depend on a continuously accumulating vote count over an unbounded set of
 rows with no enumerable invalidation points, and it would genuinely become rule
 5's problem.
@@ -1608,6 +1611,42 @@ imply otherwise — no vouch counts, no "N people vouch for this author" badge.
 Such a display would be a published vouch graph reconstructed by eye, with all
 three problems above.
 
+#### Vouching accrues from what a reader already does
+
+**An explicit vouch list nobody fills in is a feature that ships dead.** Asking
+a reader to maintain a curation list is asking for work they did not come to do,
+so the vouched set stays empty and §7.3 has no effect. The mechanism has to
+start from behaviour the reader is already exhibiting.
+
+**So a reader's own assessments accrue weight toward the identities they
+assess.** Repeatedly marking someone's posts `constructive` (§7.4) raises that
+identity's weight in this reader's ranking, without anyone declaring anything.
+Call it **earned** weight, against a **declared** vouch, and keep the two
+distinguishable in the UI: one is something the reader chose and can revoke in a
+click, the other is something they should be told has happened and be able to
+undo.
+
+**It is the assessment axis that accrues, never the response axis** — and that
+is §7.4's asymmetry doing real work here rather than restating it. Weight
+earned by agreement would build a machine that finds a reader more of what they
+already think, which is the failure mode this whole design is arranged against.
+Weight earned by *assessed quality* does the opposite: it can, and should, raise
+the weight of someone the reader consistently disagrees with and consistently
+finds worth reading. **That is the single most valuable thing this system can
+do, and it is only reachable because the axes are separate.**
+
+Two bounds, both structural:
+
+- **Earned weight is capped below `K_vouch`.** Accrual is evidence, not a
+  declaration, and it should never silently exceed what the reader explicitly
+  chose. Without a cap, heavy engagement with one identity converges on
+  delegating a reader's feed to them by accident.
+- **It decays with disuse** — a reader's judgement of a year ago is weaker
+  evidence about their present preferences than last week's. This wants the
+  same age input §7.2 rule 5 says does not exist yet, so it is **specified as a
+  property and deferred in mechanism**, alongside decay itself. Until then,
+  accrual is bounded by the cap alone, which is the conservative failure.
+
 #### Weights, and the one ordering constraint that matters
 
 `K_vouch < K_mod`, and both are chosen rather than derived (§7.2 rule 2 says
@@ -1617,12 +1656,12 @@ record, where a vouch is one reader's private judgement, so the more accountable
 credential should not weigh less. `K_vouch` around 2 against `K_mod` of 3 keeps
 both inside §7.2's bracket.
 
-**Vouching amplifies promotion only**, exactly as rule 4 requires of a
-moderator's vote, and for the same reason: an amplified downvote is suppression
-without moderation's properties. That it is *private* suppression makes it no
-better — a reader who silently buries what their vouched set dislikes has built
-a filter bubble with a ranking engine, which is at least a product failure and
-arguably the thing a dialectic forum exists not to be.
+**Vouching amplifies `constructive` only**, exactly as rule 4 requires of a
+moderator's assessment, and for the same reason: an amplified `noise` is
+suppression without moderation's properties. That it is *private* suppression
+makes it no better — a reader who silently buries what their vouched set
+dislikes has built a filter bubble with a ranking engine, which is at least a
+product failure and arguably the thing a dialectic forum exists not to be.
 
 #### What it does not become
 
@@ -1648,6 +1687,121 @@ the reader rather than the system.** That is the property that makes it worth
 building rather than a stopgap: it is the only weight class here that stays
 meaningful in the end state, and it is what stops that end state from counting
 nobody but token holders.
+
+### 7.4 Two axes: assessment and response
+
+**The single vote axis is wrong for this forum, and it is wrong in a way that
+attacks §1.** One control collects two unrelated judgements — *is this well
+made?* and *do I agree?* — and a downvote for either reason cancels an upvote
+for either reason. A forum named for **dialectic** cannot ship the mechanism by
+which every web2 forum punishes disagreement; the Δ would be arguing against
+itself.
+
+#### The two judgements are genuinely independent
+
+The test is whether all four corners are populated. They are:
+
+| | **I agree** | **I disagree** |
+|---|---|---|
+| **Well made** | ordinary agreement | **the most valuable content on this forum** |
+| **Badly made** | my own side arguing badly | spam, abuse, noise |
+
+Top-right is the cell a single axis **cannot express**, and it is exactly what a
+dialectic forum exists to surface: the best argument against your position. A
+one-axis model forces that reader to choose between endorsing a view they reject
+and burying an argument they respect. Bottom-left is the other cell that goes
+missing, and it is the one that keeps a community honest about its own side.
+
+So: **two axes, recorded separately, never summed.**
+
+- **Assessment** — *is this a genuine, constructive contribution?*
+  `constructive` / `noise`.
+- **Response** — *where do I stand on it?* `agree` / `disagree`, and **both are
+  optional**; declining to answer is the ordinary case, not a missing value.
+
+#### Only assessment ranks. Response never sums.
+
+This asymmetry is the design, and everything else follows from it. It is what
+separates this from "two vote buttons", which would be worthless.
+
+**`top` is computed from the assessment axis alone.** If agreement contributed
+to ranking, the forum would rank *consensus* — the majority view would rise and
+the dialectic would die exactly as it does elsewhere, with an extra button. **A
+disagree therefore costs a post nothing.**
+
+**Response is never aggregated into a score at all.** Its two jobs are:
+
+- **It calibrates the reader's own weighting** (§7.3). An identity a reader
+  repeatedly assesses as `constructive` earns weight in that reader's ranking
+  **whether the reader agrees with them or not** — which is the mechanism that
+  makes "I disagree with you but you argue well" a first-class signal instead of
+  a shrug.
+- **It is displayed as a distribution, never as a net.** "Constructive; 40%
+  agree" tells a reader something true and interesting. A single number
+  reading +3 tells them nothing about which of the four corners produced it.
+  **A net agreement count must never be shown**, because a net score is what
+  makes disagreement feel like damage, and the display is where that pressure
+  actually lands.
+
+#### Why this is an evaluation and not a report
+
+The owner's objection is exactly right and worth recording, because the obvious
+implementation is a "report spam" button and it would be wrong here.
+
+**A report is a petition to an authority**; it asks someone else to act, and it
+is answered or ignored. §6.1 already establishes there is no authority whose
+reach extends past rendering, so a report has nobody to petition. **An
+assessment is a datum**: the reader is not asking for anything, they are stating
+what they think, and it takes effect in their own ranking and their own trust
+graph immediately and without anyone's permission.
+
+That difference is not cosmetic. It means the control **always does something
+visible to the person who used it** — the post drops in their feed, the author's
+weight moves — rather than disappearing into a queue. A control that visibly
+works is used honestly; a report button that changes nothing observable trains
+people to use it as a super-downvote, which is how `noise` would otherwise
+become the disagree button we just removed.
+
+#### `noise` is not moderation, and must not become it
+
+`noise` is one reader's assessment. It is **not** a hide, it does not accumulate
+toward one (§7.2 rule 2's floor and the no-auto-hide rule bind here), and a Stoa
+with a hundred `noise` assessments on a post has still hidden nothing. Only a
+moderator's signed op hides (§6), and that remains the only thing that does.
+
+The relationship worth stating: `noise` assessments are a **signal a moderator
+may choose to read**, in the same way relevance is a signal a reader reads. They
+are never an input the system acts on by itself. §7.2 rule 4's principle holds —
+suppression is a binding judgement or it is nothing.
+
+#### Encoding, and what it costs
+
+The vote op already carries a one-byte direction with 254 unused values, so
+**both axes fit in the existing wire format with no version bump**: an
+assessment is a discriminant, a response is another. `VoteDirection::from_byte`
+**refuses** an unknown discriminant rather than defaulting it (§11), so a peer on
+an older build rejects an assessment it cannot interpret instead of miscounting
+it as a vote. That is the fail-closed direction, and it is why this extension is
+cheap rather than a migration.
+
+`up` and `down` remain as they are, meaning what §7.2 already says they mean, so
+nothing already published is reinterpreted.
+
+#### What it costs the interface, which is the real cost
+
+Two controls are harder than one, and **most readers will use neither if asked
+to think.** The mitigation is that the axes are not equally prominent:
+assessment is the primary control because it is the one that ranks; response is
+secondary and optional. A reader who only ever assesses gets a working forum,
+and a reader who only ever responds changes nothing but their own weights —
+both are acceptable degradations.
+
+**This is the part most likely to be wrong**, and unlike the sybil arithmetic it
+cannot be settled by reasoning. It wants observation: whether people use two
+controls at all, whether `noise` drifts into meaning "disagree" despite the
+separation, and whether the distribution display reads as informative or as
+noise itself. Ship it able to be measured, and treat the first finding that
+contradicts this section as the section's answer.
 
 ---
 

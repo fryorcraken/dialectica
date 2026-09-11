@@ -2,7 +2,9 @@
 
 Defines the orderings a reader may request over a Stoa's posts, what a vote contributes to one, and the bounds an ordering SHALL respect however the ops it reads were produced.
 
-This capability governs the **shape and bounds** of the engagement ordering, not its arithmetic. The weight a moderator's upvote carries is a constant in the scorer, deliberately outside this contract: a score is a local projection rather than an op, so retuning it is a code change and pinning a number here would make it a contract change instead.
+This capability governs the **shape and bounds** of the engagement ordering, not its arithmetic. The weight a moderator's positive vote carries is a constant in the scorer, deliberately outside this contract: a score is a local projection rather than an op, so retuning it is a code change and pinning a number here would make it a contract change instead.
+
+**Terminology.** A **vote** here is any recorded evaluation op, and it carries two independent axes. The **assessment** axis judges a contribution's quality and is the only one that orders — a vote described below as *raising* or *lowering* a position is an assessment. The **response** axis states the voter's own position on the contribution and never orders; the requirement "Only the assessment axis orders" governs it, and every other requirement's references to raising and lowering concern assessments alone. Requirements written in terms of "a vote" without naming an axis bind both, since authenticity, scope, per-identity counting and the prohibition on panicking apply to any evaluation op whatever it records.
 
 ## ADDED Requirements
 
@@ -91,7 +93,36 @@ Exclusion SHALL NOT be represented as an adjustment to a post's score. A suffici
 - **WHEN** an excluded post accumulates more votes in the raising direction than any present post has
 - **THEN** it remains absent from the ordering
 
-### Requirement: An engagement ordering counts distinct voting identities
+### Requirement: Only the assessment axis orders; the response axis never does
+
+Where a reader records both an assessment of a contribution's quality and a response stating their own position on it, an ordering SHALL be computed from the assessment axis alone. A response SHALL NOT raise or lower any target's position, and SHALL NOT be aggregated into any score.
+
+The two are independent judgements, and a control that conflated them would rank by consensus: the majority position would rise and a well-made argument against it would fall, for no reason connected to its quality. A forum organised around reasoned disagreement cannot make disagreeing with a post the mechanism that buries it.
+
+It follows that a target SHALL occupy the same position whether every reader agrees with it, every reader disagrees with it, or none has responded at all. Declining to respond SHALL be an ordinary outcome rather than a missing value to be defaulted, and SHALL be indistinguishable in its effect on ordering from any response.
+
+#### Scenario: Disagreement does not lower a position
+
+- **WHEN** a target assessed as constructive receives responses of disagreement from every identity that responded
+- **THEN** its position is the same as if none had responded
+
+#### Scenario: Agreement does not raise a position
+
+- **WHEN** two targets carry identical assessments and one additionally carries responses of agreement
+- **THEN** the two occupy positions determined by their assessments alone
+
+#### Scenario: An unanswered response axis is not a missing value
+
+- **WHEN** an identity assesses a target without stating a response
+- **THEN** the assessment counts toward the ordering in full
+- **AND** no default response is recorded or inferred
+
+#### Scenario: A response alone moves nothing
+
+- **WHEN** the only records naming a target are responses carrying no assessment
+- **THEN** the target's position is that of a target with no records naming it
+
+### Requirement: An engagement ordering counts distinct assessing identities
 
 Where an ordering counts votes, it SHALL count each voting identity at most once per target, taking that identity's current vote as decided by the system's ordering rule. It SHALL NOT accumulate repeated votes from one identity, and SHALL NOT define a recency rule of its own.
 
@@ -228,6 +259,31 @@ A threshold at which accumulated lowering votes withhold a post SHALL NOT exist.
 
 - **WHEN** a post at the lower bound is ordered alongside a hidden post
 - **THEN** the downvoted post appears and the hidden post does not
+
+### Requirement: An assessment never becomes a moderation
+
+A negative assessment SHALL NOT hide a target, SHALL NOT accumulate toward hiding one, and SHALL NOT be an input to whether a target is excluded. No quantity of negative assessments from any number of identities SHALL cause a target to be reported as hidden or withheld from a reader.
+
+An assessment is one reader's evaluation, made without authority and requiring none. Hiding is a binding judgement that only a signed moderation op produces, and a threshold at which assessments achieved the same effect would be moderation performed by whoever assembles the most identities — reachable by anyone, since assessing requires no permission.
+
+Negative assessments MAY be reported to a moderator as a signal to act on. Reporting them SHALL NOT itself change what any reader sees.
+
+#### Scenario: Unanimous negative assessment does not hide
+
+- **WHEN** every identity that has assessed a target assessed it negatively
+- **THEN** the target is not reported as hidden
+- **AND** it remains present in the ordering
+
+#### Scenario: Negative assessments do not compound into exclusion
+
+- **WHEN** a target accumulates negative assessments from more identities than any other target in its Stoa
+- **THEN** it is still present in the ordering
+- **AND** whether it is excluded depends only on moderation resolution
+
+#### Scenario: A moderator's negative assessment does not hide either
+
+- **WHEN** a Stoa's moderator assesses a target negatively without publishing a moderation op
+- **THEN** the target is not reported as hidden
 
 ### Requirement: An ordering is total, so pagination neither repeats nor skips
 

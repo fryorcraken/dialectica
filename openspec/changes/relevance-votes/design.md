@@ -629,7 +629,64 @@ all questions with more than one defensible answer.
 So PLAN §7.3 records the decision and the vocabulary; the mechanism gets its own
 proposal.
 
-## 13. What this document got wrong, corrected in review
+## 13. Two axes, and why only one of them ranks
+
+The owner raised a second extension: the upvote/downvote model conflates *quality*
+(spam versus good content) with *agreement* ("I don't agree with you but it's
+still engaging, genuine, constructive content"), and asked for an original design
+— noting that web2's "report spam" is the wrong frame, because the reader is
+**evaluating content, not filing a report**. PLAN §7.4 carries it.
+
+**The objection is correct and it attacks §1 rather than merely the UX.** One
+control collecting two unrelated judgements means a downvote for disagreement
+and a downvote for spam are the same byte. A forum named for dialectic that
+ships the mechanism by which web2 forums punish disagreement has lost its own
+argument before anyone posts.
+
+**The axes are genuinely independent**, which is the test worth applying before
+adding a second control to anything: all four corners are populated
+(agree/well-made, agree/badly-made, disagree/well-made, disagree/badly-made),
+and *disagree + well-made* is the cell a single axis cannot express at all. It
+is also the single most valuable thing a dialectic forum can surface — the best
+argument against your position — so its being unrepresentable is not a corner
+case, it is the product.
+
+**The design decision is the asymmetry, not the second axis.** Two vote buttons
+that get added together would be worthless: if agreement fed ranking, the forum
+would rank consensus, and the dialectic would die with an extra click. So:
+
+- **Assessment alone ranks.** A disagree costs a post nothing.
+- **Response never sums.** Its jobs are to calibrate the reader's own weights
+  (§11's vouching) and to be displayed **as a distribution, never as a net**.
+  "Constructive; 40% agree" is informative; "+3" hides which of the four corners
+  produced it, and a net figure is precisely what makes disagreement feel like
+  damage. The display is where the pressure actually lands, so the prohibition
+  belongs in the design and not only in the UI's taste.
+
+**Evaluation, not report — and the distinction has teeth.** A report is a
+petition to an authority, and §6.1 establishes there is no authority whose reach
+extends past rendering, so a report has nobody to petition. An assessment takes
+effect immediately in the assessor's own ranking and trust graph, without
+anyone's permission. That means the control **always does something visible to
+the person who used it**, which is what keeps it honest: a report button that
+changes nothing observable trains people to use it as a super-downvote, which
+would reintroduce the disagree button by the back door.
+
+**Encoding is free.** The vote op is `target + one direction byte` with 254
+unused discriminants, so both axes fit with **no wire-format version bump**. And
+because `VoteDirection::from_byte` *refuses* unknown discriminants rather than
+defaulting them, an older peer rejects an assessment it cannot interpret instead
+of miscounting it — fail-closed, which is the direction that makes this cheap
+rather than a migration.
+
+**What I am least sure of, stated plainly:** two controls are harder than one,
+and most readers will use neither if asked to think. The mitigation is
+prominence rather than persuasion — assessment primary because it ranks,
+response secondary and optional, with both degradations acceptable. Unlike the
+sybil arithmetic, this cannot be settled by reasoning; it wants observation, and
+the first finding that contradicts §7.4 should be treated as §7.4's answer.
+
+## 14. What this document got wrong, corrected in review
 
 Recorded rather than silently fixed, because the reasoning that produced the
 error is the useful part.
