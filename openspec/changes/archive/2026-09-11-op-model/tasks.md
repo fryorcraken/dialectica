@@ -95,18 +95,31 @@ Writing it the other way round would be inventing a history.
       probe — this change adds no behaviour, including test behaviour. Recorded
       as an open question instead.
 - [x] 7.4 Audit the existing tests for the defect class this project keeps
-      hitting: a test that cannot fail for the reason it names. Findings in the
-      PR description and the final report.
-- [x] 7.5 Evaluate extracting the shared encoding rules into a general
+      hitting: a test that cannot fail for the reason it names. Done by
+      replacing `verify` with `return true` and recording what survived: three
+      tests do, all asserting only that a boolean is `true`. The suite catches
+      the mutation through four other tests, so nothing is a shipped defect.
+      Written up in `design.md`.
+- [x] 7.5 Run the gates and check what they actually cover. Found that CI's
+      formatting step does not reach `dialectica-core` at all — see `design.md`.
+      Not fixed here, because reformatting that crate would conflict with three
+      live branches for no urgent gain.
+- [x] 7.6 Evaluate extracting the shared encoding rules into a general
       capability, now that a second encoding exists. Declined; reasoning in
       `design.md` so a third encoding's author knows the question was asked.
-- [x] 7.6 Write `proposal.md`, `specs/op-format/spec.md`, `design.md` and this
-      file. Decide whether to archive.
+- [x] 7.7 Write `proposal.md`, `specs/op-format/spec.md`, `design.md` and this
+      file. Archive, so that branches forked from this head have a merged
+      `op-format` capability to extend rather than one that does not exist.
 
 ## 8. Gates
 
-- [x] 8.1 `cargo test --manifest-path <worktree>/dialectica/rust-lib/dialectica-core/Cargo.toml`
-      — green. Note the workspace-root manifest builds only the outer crate,
-      which has no tests of its own; `dialectica-core` is where `op.rs` lives.
-- [x] 8.2 `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings`
-      — both clean.
+- [x] 8.1 Tests green, 120 of them, under both the inner manifest
+      (`dialectica-core/Cargo.toml`) and CI's own command
+      (`rust-lib/Cargo.toml -p dialectica -p dialectica-core`). The outer
+      manifest alone runs nothing useful — that crate has no tests of its own.
+- [x] 8.2 Clippy clean under both, including CI's exact invocation. The only
+      warnings are the staged SDK's, which CI's `-p` scoping already excludes.
+- [x] 8.3 `cargo fmt --check` clean under CI's command. Note what that does
+      **not** mean: the same check against `dialectica-core`'s own manifest
+      reports diffs, because `cargo fmt` does not follow path dependencies.
+      Pre-existing, unrelated to this change, and written up in `design.md`.

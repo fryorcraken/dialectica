@@ -346,6 +346,84 @@ re-encoded the 12,938 inputs that were accepted. All reproduced their input
 exactly. The probe was removed afterwards; see Open Questions for whether it
 should be kept.
 
+### Three tests are weaker than their names suggest
+
+A fourth mutation was run as an audit rather than to verify a spec claim:
+`SignedOp::verify` was replaced with `return true`. Four tests caught it —
+`an_op_signed_by_someone_else_is_rejected`, `a_tampered_op_does_not_verify`,
+`an_op_replayed_into_another_stoa_does_not_verify` and
+`a_signature_over_one_kind_does_not_verify_as_another` — so **the suite is
+safe**, and nothing here is a shipped defect.
+
+But three tests survived it:
+
+- `a_signed_op_verifies_against_its_own_author`
+- `verification_answers_authenticity_and_not_authority`
+- `a_revision_by_a_different_author_is_authentic_and_still_not_valid`
+
+Each asserts only that `verify()` returned `true`, so none of them can fail
+against a `verify` that has stopped checking anything. That is a near relative
+of the defect class this project has already paid for three times — a test that
+cannot fail for the reason it names — with the mitigation that here the reason
+is covered elsewhere.
+
+The latter two are the interesting case, because the property they exist to pin
+is *deliberately* one-sided: their whole point is that an unauthorised-but-
+authentic op still verifies, and the only way to state that is a positive
+assertion. The honest reading is that they document an intent rather than
+detect a regression, and that the detection is done by the negative tests.
+
+Left as they are, because changing them is a behaviour change to the suite and
+this change adds documents. The cheap improvement, for whoever next edits this
+file: have each of the three also assert that a *deliberately broken* version of
+the same op does **not** verify — tampering the body, or swapping the signature
+— so that each test contains both directions and stops depending on a different
+test to give its assertion meaning.
+
+## A gate that cannot see the crate it exists for
+
+Found while running the gates for this change, and worth recording because it is
+precisely the kind of thing a green build cannot tell you.
+
+**CI's formatting step does not cover `dialectica-core` at all.** It runs
+
+```
+cargo fmt --manifest-path dialectica/rust-lib/Cargo.toml --check
+```
+
+and `dialectica-core` is a *path dependency* of that crate, not a workspace
+member of it — the outer `Cargo.toml` carries an empty `[workspace]` table on
+purpose, to stop cargo adopting a parent workspace. `cargo fmt` formats the
+crate it is given and the modules reachable from its own source tree; it does
+not follow path dependencies. So the crate holding `op.rs`, `stoa.rs`,
+`cursor.rs`, `identity.rs` and `wire.rs` — every line of logic this project has
+written — is checked by no formatting gate.
+
+The evidence that this is a real hole rather than a theoretical one: running
+`cargo fmt --check` against `dialectica-core`'s own manifest reports diffs in
+`identity.rs`, `op.rs` and `stoa.rs` on a tree where the CI command exits 0.
+
+What makes it notable is the contrast with the steps either side of it. Both the
+clippy and test steps are scoped `-p dialectica -p dialectica-core`, and the
+clippy step carries a comment explaining exactly why the second `-p` is spelled
+out — *"clippy lints the package it is given, and a dependency is compiled but
+not linted. Without this second `-p`, the crate holding every decision this
+project makes would be the one crate no lint ever ran against."* The reasoning
+is correct and was applied to two of the three gates. Formatting has the same
+problem and did not get the same fix.
+
+**The fix is a one-line change** — a second `cargo fmt --manifest-path
+dialectica/rust-lib/dialectica-core/Cargo.toml --check`, or `--all` — plus
+whatever reformatting it then demands.
+
+**It was deliberately not made in this change.** Reformatting `dialectica-core`
+rewrites `op.rs`, `stoa.rs` and `identity.rs`, and three branches forked from
+this head are editing those files right now; landing a whitespace pass across
+all three would hand each of them a conflict in return for nothing urgent. The
+finding is recorded here, and in the pull request, so that it is fixed
+deliberately once those branches have landed rather than silently by whoever
+next runs the command and wonders why their diff is enormous.
+
 ## Open Questions
 
 - **Should the re-encoding canonicity probe become a permanent test?** It found
