@@ -306,6 +306,20 @@ cannot be prevented from *arriving*: SDS has no membership and `senderId` is
 self-asserted. Verification therefore happens on **read**, filtering unsigned or
 badly-signed ops out. The store may hold junk; the reader never trusts it.
 
+**A generic op decoder may be wanted eventually, and is not built.** Every op
+decodes attacker-controlled bytes with the same failure modes — truncation,
+trailing bytes, a length prefix lying in either direction, an unknown version —
+and the genesis record's decoder (see the `stoa-genesis` spec) already has all
+of them, with a bounds-checked cursor as the plausibly reusable half.
+
+There is one decoder, so there is nothing yet to generalise from: an abstraction
+derived from a single instance is a guess. Noted here only so the second decoder
+is written knowing the first exists — that is when the seam becomes visible, and
+whether there is one at all. One reason to expect the fit to be awkward: a
+genesis record is **self-identifying by hash**, its encoding being its address
+preimage, where a post or a moderation op is addressed by its own id and carries
+a signature.
+
 ---
 
 ## 4. Addressing and transport
@@ -998,6 +1012,17 @@ own answer:
 - **Stoa metadata** — title, description, policy (§7.1). Owned by the Stoa's
   moderators rather than by any author, so the same moderator-scoped
   last-write-wins rule applies.
+
+  **The genesis record now carries a founding title and policy** (see the
+  `stoa-genesis` spec), which makes the relationship concrete: genesis values
+  are what the *address commits to* and can never change; the metadata op
+  carries what the Stoa is called *today*. A reader prefers the latest valid
+  op and falls back to the genesis values.
+
+  The op itself is not built. What it needs, beyond the last-write-wins rule:
+  whether a metadata op may change `policy` as well as the display fields —
+  tightening a policy retroactively changes who may post, which is a different
+  kind of act from a rename and may warrant a different rule.
 - **The moderator set itself.** Deferred with mutable moderation (§6), and the
   one place where a real ordering decision is still open — a set edited
   concurrently by two moderators is the first genuine merge question this design
@@ -1010,10 +1035,16 @@ Moderation ops are valid only when signed by a current moderator, and every peer
 verifies independently — so a hide binds for everyone running honest code.
 
 ```
-genesis: {stoa_id, creator_pk, epoch}
+genesis: {version, creator_pk, policy, title}   ← built; see the stoa-genesis spec
 post:    {..., sig(author_sk)}
 hide:    {..., sig(mod_sk)}    ← rejected if signer ∉ moderators
 ```
+
+The record carries **no per-peer value** — no epoch, no session counter. Every
+peer hashes it to obtain the Stoa's address, so a value varying with one peer's
+history gives that peer a different address for the same Stoa: two Stoas that
+cannot see each other, with no error anyone observes. §4.3 states the same rule
+for the channel id derived from that address.
 
 **The creator is the sole moderator initially.** A mutable moderator set is
 later work — which also defers the founder-as-permanent-root question rather
@@ -1614,11 +1645,19 @@ thing (§2.3).
   concurrently?** The one genuine merge question in the design (§5.7), and it
   does not arise while the creator is the sole moderator — so it is answered
   alongside mutable moderation, not before.
-- **Not whether a Stoa declares a posting policy, but when the field lands.**
-  Open / invite / first-post-approval / token-threshold (§7.1) are all variants
-  of one mechanism, so the genesis record wants a `policy` field even while
-  `open` is the only implemented value. Adding it in Phase 1 costs an enum with
-  one variant; adding it later means migrating every Stoa already created.
+- ~~**When the `policy` field lands.**~~ **Answered: it is in the genesis
+  record now**, with `open` as its only accepted value — `dialectica-core`'s
+  `stoa::Policy`. The reasoning stands as written and is why it landed early: a
+  genesis record is immutable and address-determining, so adding the field later
+  would have changed the address of every Stoa already created.
+
+  Two decisions made while implementing it, both worth knowing before adding the
+  second variant. An unknown policy discriminant is **refused, never defaulted
+  to `open`** — defaulting is how a token-gated Stoa silently becomes
+  world-postable on an older client, and refusing to display a Stoa is the
+  recoverable direction. And the encoding carries a **version discriminant**, so
+  a record from a newer client fails as "unknown version" rather than as a
+  misparse.
 
 - **Is a threshold the right shape for proof-of-holding as a relevance signal,
   and what threshold?** §7.2 argues a threshold rather than a graded count,

@@ -150,11 +150,26 @@ impl PublicKey {
     ///
     /// A guard would have been enough. A type that cannot express the mistake
     /// is better, because it does not depend on the next person remembering.
+    /// **Low-order points are refused here**, not left to fail at verification.
+    /// There are eight of them (all-zeros among them); each decompresses to a
+    /// valid Edwards point, so `VerifyingKey::from_bytes` accepts all eight, and
+    /// `verify_strict` then refuses every signature under them.
+    ///
+    /// Leaving that to verification is safe for authenticity and unsafe for
+    /// everything built on top. A Stoa genesis record naming a low-order creator
+    /// decodes, hashes to a stable address, and self-authenticates — producing a
+    /// forum whose sole moderator (§6) can never authorise anything, which no
+    /// check distinguishes from a legitimate one. Refusing at the parse is the
+    /// boundary validation CLAUDE.md asks for, and it costs nothing: a key that
+    /// can never verify a signature is not a key worth holding.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, KeyError> {
         let bytes: &[u8; 32] = bytes.try_into().map_err(|_| KeyError::NotAValidPublicKey)?;
-        ed25519_dalek::VerifyingKey::from_bytes(bytes)
-            .map(PublicKey)
-            .map_err(|_| KeyError::NotAValidPublicKey)
+        let key =
+            ed25519_dalek::VerifyingKey::from_bytes(bytes).map_err(|_| KeyError::NotAValidPublicKey)?;
+        if key.is_weak() {
+            return Err(KeyError::WeakPublicKey);
+        }
+        Ok(PublicKey(key))
     }
 
     pub fn to_bytes(&self) -> [u8; 32] {
@@ -319,6 +334,10 @@ pub fn derive_stoa_key(root: &[u8; 32], stoa: &Address) -> SecretKey {
 #[derive(Debug, PartialEq, Eq)]
 pub enum KeyError {
     NotAValidPublicKey,
+    /// A low-order point. Well-formed, and able to verify nothing — kept
+    /// distinct from `NotAValidPublicKey` because "this is not a key" and "this
+    /// is a key that can never work" send a reader to different places.
+    WeakPublicKey,
     NotAValidSecretKey,
     NotAValidSignature,
 }
@@ -327,6 +346,9 @@ impl std::fmt::Display for KeyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             KeyError::NotAValidPublicKey => write!(f, "not a valid public key"),
+            KeyError::WeakPublicKey => {
+                write!(f, "low-order public key, which can never verify a signature")
+            }
             KeyError::NotAValidSecretKey => write!(f, "not a valid secret key"),
             KeyError::NotAValidSignature => write!(f, "not a valid signature"),
         }
@@ -777,40 +799,78 @@ mod tests {
     }
 
     #[test]
-    fn a_low_order_public_key_cannot_verify_anything() {
-        // 32 zero bytes DECODE fine — they are a valid low-order Edwards point,
-        // not garbage — so parsing accepts them, and a caller might reasonably
-        // expect an all-zero key to have been rejected earlier. It is not: the
-        // rejection happens at verification, which is why `verify_op_bytes` uses
-        // `verify_strict`.
+    fn verification_refuses_a_low_order_key_obtained_around_the_parse() {
+        // Defence in depth, and NOT redundant with the parse guard below: that
+        // one pins that a low-order key cannot be built through `from_bytes`,
+        // this one that verification refuses it even when one is held. A future
+        // third `PublicKey` construction site would reopen exactly this door,
+        // and only this test would notice.
         //
-        // **What this test does NOT do is pin `verify_strict` itself.** Both
-        // assertions below would also hold under plain `verify`, because neither
-        // signature was made under the zero key — so swapping the call would not
-        // turn this red. Pinning the strict check properly needs a crafted
-        // small-order forgery, which is fiddly enough that it is not here; the
-        // guard against that swap is the doc comment on `verify_op_bytes` and
-        // the deliberate absence of a `Verifier` import, not this test.
-        //
-        // What it does pin is the surprising decode behaviour above, so that
-        // anyone who later "fixes" `PublicKey::from_bytes` to reject all-zero
-        // finds out that something already depended on it parsing.
-        let attacker_key = PublicKey::from_bytes(&[0u8; 32])
-            .expect("all-zero decodes as a low-order point, which is the premise here");
-        let honest = SecretKey::generate();
-        let sig = sign_op_bytes(&honest, b"an op");
-        assert!(
-            !verify_op_bytes(&attacker_key, b"an op", &sig),
-            "a low-order key must never verify"
+        // **What this does NOT pin is `verify_strict` versus `verify`.** Both
+        // refuse every input reachable here, so swapping the call leaves this
+        // green — measured, not assumed. Separating them needs a crafted
+        // small-order forgery, which is fiddly enough to be absent; the guard
+        // against that swap is `verify_op_bytes`'s doc comment and the
+        // deliberately-absent `Verifier` import, not a test. Said plainly so
+        // nobody reads this as cover it does not provide.
+        let low_order = PublicKey(
+            ed25519_dalek::VerifyingKey::from_bytes(&[0u8; 32])
+                .expect("the all-zero point decompresses; that is what makes it dangerous"),
         );
 
-        // And it cannot verify a signature made under its own seed either.
         let zero_seed = SecretKey::from_bytes(&[0u8; 32]).unwrap();
         let self_sig = sign_op_bytes(&zero_seed, b"an op");
         assert!(
-            !verify_op_bytes(&attacker_key, b"an op", &self_sig),
-            "verify_strict must reject the low-order key regardless of who signed"
+            !verify_op_bytes(&low_order, b"an op", &self_sig),
+            "a low-order key must verify nothing, including a signature under its own seed"
         );
+
+        let honest = SecretKey::generate();
+        assert!(
+            !verify_op_bytes(&low_order, b"an op", &sign_op_bytes(&honest, b"an op")),
+            "a low-order key must verify nothing, including an honest signature"
+        );
+    }
+
+    #[test]
+    fn a_low_order_public_key_is_refused_at_the_parse() {
+        // All eight low-order points decompress to valid Edwards points, so
+        // `VerifyingKey::from_bytes` accepts every one of them and only
+        // `verify_strict` refuses the signatures. Our parse refuses them first.
+        //
+        // Why the parse and not only verification: a key that can never verify
+        // anything is not merely useless, it is dangerous one layer up. A Stoa
+        // genesis record naming a low-order creator decodes, hashes to a stable
+        // address and self-authenticates — a forum whose sole moderator (§6) can
+        // never authorise anything, indistinguishable from a real one.
+        //
+        // All-zeros is the one an attacker would reach for, and it is the case
+        // the genesis record makes dangerous.
+        assert_eq!(
+            PublicKey::from_bytes(&[0u8; 32]),
+            Err(KeyError::WeakPublicKey),
+            "the all-zero point must be refused"
+        );
+
+        // The identity element, y = 1, is the other trivially-writable one.
+        let mut one = [0u8; 32];
+        one[0] = 1;
+        assert_eq!(
+            PublicKey::from_bytes(&one),
+            Err(KeyError::WeakPublicKey),
+            "the identity element must be refused"
+        );
+
+        // An honest key is unaffected — the check must reject the low-order
+        // points, not anything that merely looks unusual. Without this the
+        // check could be `Err` unconditionally and the assertions above would
+        // still pass.
+        for _ in 0..16 {
+            assert!(
+                PublicKey::from_bytes(&SecretKey::generate().public_key().to_bytes()).is_ok(),
+                "a generated key must still parse"
+            );
+        }
     }
 
     #[test]

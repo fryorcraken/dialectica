@@ -12,6 +12,7 @@ from a table here, so that this file stays the thing worth reading in full:
 | Read | When |
 |---|---|
 | [`docs/PLAN.md`](docs/PLAN.md) | **Before any design decision.** It carries the architecture, what was rejected and why, and the traps found before a line was written. |
+| [`.claude/agents/README.md`](.claude/agents/README.md) | **Before starting a change.** The spec-driven flow: which document answers which question, and the role agents. Also the test defects that have shipped here and what prevents them. |
 
 ### Keeping this file true
 
