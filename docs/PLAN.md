@@ -1238,9 +1238,11 @@ and `rlnRelay` was `false` on `logos.dev`. **Re-check both before acting on this
 order** — the ordering is a claim about readiness at a moment, and readiness is
 exactly the sort of thing that changes.
 
-**It does not unblock §7.2's scoring**, and the plan should not pretend
-otherwise. Rule 2 ships no score precisely because sybil resistance is absent,
-and that is RLN's job rather than a holding proof's: §5.3's ordering argument
+**It does not unblock §7.2's credential-gated scoring**, and the plan should not
+pretend otherwise. §7.2 rule 2 does ship an interim engagement ordering, but
+explicitly *without* a sybil-resistance claim and with a named expiry (rule 6);
+the gate rule 3 describes is what a holding proof would have to deliver and does
+not. That is RLN's job rather than a holding proof's: §5.3's ordering argument
 wanted a credential that rotating cannot shed, and a holding proof is weaker —
 tokens move between accounts, and one holding can back several presentations
 unless it is nullifier-bound (rule 3). So the sequence is: policy gating first
@@ -1308,19 +1310,43 @@ are the normal case, not a fault). It follows from §4.4's eventual consistency
 among active participants. Do not reach for a consensus mechanism to make scores
 agree; there is nothing to agree on.
 
-**2. v1 ships `new` and `active`, and no score at all.** With no sybil
-resistance (§7), a vote-weighted score is not a relevance signal — it is a dial
-the cheapest attacker turns. Two orderings that cannot be gamed by minting
-identities:
+**2. v1 ships an engagement ordering, and calls it that.** Two orderings that
+cannot be gamed by minting identities, plus one that can:
 
 - **`new`** — Lamport order descending. §4.4 already defines a total order with
   a tie-break; reuse it exactly rather than inventing a second ordering.
 - **`active`** — threads by the Lamport timestamp of their most recent
   non-hidden reply. Gameable only by *posting*, which moderation and rate
   limiting already govern.
+- **`top`** — vote ops counted per distinct identity. A moderator's **upvote**
+  weighs `K` (a constant in the scorer, **chosen rather than derived**); every
+  other vote weighs 1; a post's score is **floored at zero**, so downvoting can
+  order a post last but never remove it.
 
-This is a smaller claim than "we have a relevance model" and it is the true one,
-in the same spirit as §7's refusal to claim sybil resistance.
+**`top` is an engagement ordering, not a relevance signal, and the distinction
+is the whole of the claim.** It reports how many distinct identities voted,
+weighted by the one credential that cannot be minted. It does *not* report how
+good or how relevant a post is, because identities are free to create and
+nothing establishes that two votes came from two people.
+
+**It is safe for exactly one reason, and that reason is not a property of the
+design: nobody is attacking a forum with no transport, no discovery and no
+users.** With `K = 3`, four minted identities outvote a moderator, and no finite
+`K` changes that — minting is free, so every `K` is defeated at the same price.
+A defence resting on the environment expires when the environment changes, which
+is what **rule 6** exists to catch.
+
+Never claimed for it: that it resists sybils; that two peers agree on it (rule 1
+says they will not, and that is correct); or that it measures quality. §7
+refuses to claim sybil resistance it does not have, and this ordering sits
+inside that refusal rather than being an exception to it.
+
+**Why ship it at all**, given rule 3's argument below is correct: §1 says a
+forum where nothing can be removed is a firehose, and the same is true of
+attention — a forum that cannot rank is a firehose with a timestamp. Rule 3's
+end state is blocked on RLN rather than on anyone's effort, so waiting for it
+means shipping nothing for an unbounded interval, and rule 1 makes being wrong
+cheap. That trade is defensible while rule 6 holds and indefensible after.
 
 **3. Weight by the credential, not by the vote count.** When proof-of-holding
 lands (§7's reordered step 1), count **only votes carrying a valid claim**.
@@ -1342,45 +1368,166 @@ currently be assumed from the primitive.
 
 Which is why the rule is stated as a *shape* and not shipped: **this gate waits
 on RLN**, whose per-epoch nullifiers are built for exactly this, rather than on
-the holding proof §7 brings forward for policy gating. Until then, rule 2
-stands — no score at all. Gating on a re-presentable credential would raise the
-unit cost of a sybil vote without stopping one, and would claim more than it
-delivers.
+the holding proof §7 brings forward for policy gating. Gating on a
+re-presentable credential would raise the unit cost of a sybil vote without
+stopping one, and would claim more than it delivers.
 
-**4. Moderation filters, it does not penalise.** A post hidden by a valid
-moderator op is **excluded** from the projection, not demoted. §6 says a hide
-binds; a percentage haircut does not bind, it merely means a sufficiently
-upvoted hidden post outranks a visible one. Keep hidden posts in the op log
-(§5.7 keeps history) and let the UI offer a "show hidden" view — but the default
-feed omits them.
+**What this rule governs is the end state, and rule 2's interim ordering does
+not contradict it.** The distinction the interim needs, which this rule did not
+draw because it was written before the moderation resolver existed:
 
-**5. Decay must be indexable.** §2.5's paginated API has to `ORDER BY … LIMIT`
-in SQLite, and a score recomputed from the current clock on every read cannot be
-indexed. Store a decay-free score plus a timestamp and apply decay in the
-`ORDER BY` expression, or bucket age coarsely and recompute on a timer. **Decide
-this when the projection schema is designed, in Phase 1** — retrofitting an
-index onto a time-varying score is the expensive version.
+- A credential that **cannot be minted** may weight a vote today. A Stoa's
+  moderator set is derived from its genesis record, and the creator's key is
+  inside the address preimage — minting an identity does not mint a moderator of
+  any existing Stoa. That is a real credential, verified on every read.
+- A credential that can be **re-presented** may not, and that is still exactly
+  what RLN is for.
+
+Weighting by an unmintable credential is nonetheless **not a defence**, and rule
+2 says so: it is better placed than the un-inverted approach this rule warns
+about — OpChan's credentialed premium was a *tenth* of the raw vote it rode on,
+where a moderator's is a multiple of it — and it is still defeated by minting
+one more identity. The interim is justified by the absence of an attacker, never
+by the weight. When rule 6 fires, this rule is what replaces it.
+
+**4. Moderation filters, it does not penalise — and a credential may amplify
+promotion but never suppression.** A post hidden by a valid moderator op is
+**excluded** from the projection, not demoted. §6 says a hide binds; a
+percentage haircut does not bind, it merely means a sufficiently upvoted hidden
+post outranks a visible one. Keep hidden posts in the op log (§5.7 keeps
+history) and let the UI offer a "show hidden" view — but the default feed omits
+them.
+
+**A moderator's *downvote* is the same mistake arriving from the other
+direction**, and rule 2's `K` therefore applies to a moderator's **upvote
+only**. This rule originally stopped a `hide` from being *weakened* into a
+ranking nudge; nothing stopped a ranking nudge being *strengthened* by moderator
+authority into a soft hide. An amplified downvote has none of a moderation op's
+properties — it does not bind (a well-upvoted post survives it), it names no
+deciding op, and it has no specified inverse the way `hide` has `unhide`.
+Offering a moderator a non-binding way to suppress something is worse than
+offering none, because it is the nearer tool and does not do what it appears to.
+**Suppression is a binding judgement or it is nothing.**
+
+**5. Decay must be indexable — and there is currently no age to decay.** §2.5's
+paginated API has to `ORDER BY … LIMIT` in SQLite, and a score recomputed from
+the current clock on every read cannot be indexed. Store a decay-free score plus
+a timestamp and apply decay in the `ORDER BY` expression.
+
+**The reason decay ships disabled is not that it was not got to.** No value in
+the system expresses a post's age: `op-format` forbids an op from carrying a
+wall-clock timestamp ("a wall clock is a field the adversary sets" — exactly the
+failure Appendix A measured, where a post claiming a future time got an unbounded
+multiplier), `op-ordering` forbids substituting a local clock for missing
+metadata, and a Lamport timestamp is **a counter, not a duration** — it orders
+two ops without saying whether an hour or a year separated them. The only clock
+available is the receiving peer's own, recorded per peer. So decay is blocked on
+the transport supplying an authorship time, which nothing currently plans to.
+
+The epoch stored against a decay-free score is therefore the op's **Lamport
+timestamp**, never a receive-clock reading: a per-peer `CLOCK_REALTIME` value
+would make two peers rank the same ops differently for a reason unrelated to
+which ops they hold, and that is not the divergence rule 1 blesses.
+
+What the projection must nonetheless reserve, because retrofitting it is the
+expensive version: the decay-free score and its epoch; an **op-id tiebreak** in
+the index (equal scores are the ordinary case — every unvoted post ties — and
+without a total order `LIMIT` pagination silently repeats and skips rows); and
+**vote counts partitioned by voter rather than pre-weighted or pre-summed**.
+That last is what makes rule 1's promise true: a schema storing
+`weighted_total = plain + K·moderator` has baked `K` into stored data, so
+changing it needs a full replay rather than an `ORDER BY` edit — and it is wrong
+anyway, since a voter's authority resolves on read and is not a property of the
+vote.
+
+**Rule 4's exclusion has to be indexable too, and it is not this same problem.**
+A filter over a property resolved on read looks like rule 5 in another hat, but
+the two differ in boundedness: a decayed score changes *every row's* sort key
+*continuously*, whereas the hidden set is small, enumerable, and changes only
+when a moderation op arrives. So it is a derived set with explicit invalidation
+points — an ordinary materialised column. Store `is_hidden` on the view row,
+written by calling the moderation resolver rather than by a second copy of the
+authority rule in SQL, recomputed on moderation-op arrival (the arriving op may
+not be the deciding one) and swept when a late genesis record lands. Index it
+**ahead of** the score, so the query seeks and walks instead of ranking,
+filtering and ranking again. It must never be encoded as a large negative score
+offset: that would be indexable too and would silently restore the haircut rule
+4 rejects, since a sufficiently upvoted hidden post would climb back.
+
+**This is why rule 4's restriction of `K` to upvotes is load-bearing for the
+schema and not only for the semantics.** Had a moderator's downvote been given
+exclusion-like force — a threshold at which a post disappears — hidden-ness
+would depend on a continuously accumulating vote count over an unbounded set of
+rows with no enumerable invalidation points, and it would genuinely become rule
+5's problem.
+
+**6. The interim ordering expires, and here is the condition.** "The forum will
+not get spammed just yet" is true and has an expiry date. A staged decision with
+no named trigger is a permanent decision nobody admitted making, because no
+moment ever arrives that obliges anyone to revisit it. Rule 2's `top` is
+withdrawn or re-gated before the next release on whichever of these fires first:
+
+- **A Stoa becomes discoverable without a human passing an address.** §4.8 Phase
+  2's broadcast topic is the sharp line — it is "unauthenticated and spammable"
+  by its own description, and it is the moment an attacker can *find* a Stoa to
+  attack. **This is a precondition, not a warning: `top` must not ship enabled
+  in the same release as broadcast discovery.**
+- **A Stoa exceeds a few hundred participating identities.** Below that a
+  moderator reading the Stoa notices a brigade; above it nobody reads everything
+  and the signal becomes load-bearing rather than decorative.
+- **The first sybil attempt is observed** — a burst of votes, in either
+  direction, from identities with no posting history. One is enough; the
+  question was never whether an attacker *could*, only whether one had bothered.
+  Rule 5's separate per-class vote counts are what make this a query rather than
+  an investigation.
+- **A nullifier-bound vote credential lands** (RLN, §7). Rule 3's end state is
+  then available and the interim has no remaining justification.
+
+The first three retire `top`; the fourth replaces it. **Whoever proposes §4.8
+Phase 2 broadcast discovery owns this check** — it is recorded here rather than
+only in the change that introduced `top`, because the first condition fires
+inside someone else's change and they will not read that one.
 
 #### The shape to reserve now
 
 ```
-score = f(engagement) · decay(age) · weight(author_claims)
+engagement = Σ_voters  w(voter) · dir(vote)
+score      = engagement · decay(age)
 ```
 
-with `weight(∅) = 0` for votes (rule 3) and moderation handled by exclusion
-rather than a term (rule 4). In v1 no claim exists, so nothing is ranked by this
-and `new`/`active` are what ship. Writing the shape down now is what lets the
-claims layer land without a schema migration.
+with `dir ∈ {+1, −1}`, the sum floored at zero (rule 2), moderation handled by
+exclusion rather than a term (rule 4), and `decay(age) = 1.0` until an age
+exists (rule 5). `w` is the interim weighting today and becomes rule 3's
+`w(∅) = 0` gate when RLN lands — a scorer change, not a schema one.
+
+**This corrects an earlier shape that read
+`f(engagement) · decay(age) · weight(author_claims)`, and the correction
+matters.** That form weighted a post by its *author's* credential, where what is
+wanted is weighting a *vote* by its *voter's*. Appendix A measured why the
+difference is not cosmetic: OpChan's author multiplier scales a quantity the
+attacker already controls, which is how a flat 25% author premium loses to three
+free votes. A voter weight changes what the quantity is made of. **There is no
+author term at all**, deliberately — nothing about who wrote a post should
+multiply how much other people liked it, and if author standing ever matters it
+belongs as its own additive term.
 
 #### Where the rules come from
 
-Every rule above is stated as an inversion because `logos-messaging/OpChan` —
-the nearest kin, a Logos-ecosystem forum with a real relevance implementation —
-shipped the un-inverted version. **Appendix A** has the arithmetic and the
-citations; the one number worth carrying inline is that in OpChan's scorer,
-**three free sybil upvotes outrank holding an ENS name**, and a credentialed
-voter's premium is one tenth of the raw vote it rides on. That is rule 3 as a
-measurement rather than an opinion.
+Rules 1, 3, 4 and 5 are each stated as an inversion because
+`logos-messaging/OpChan` — the nearest kin, a Logos-ecosystem forum with a real
+relevance implementation — shipped the un-inverted version. **Appendix A** has
+the arithmetic and the citations; the one number worth carrying inline is that
+in OpChan's scorer, **three free sybil upvotes outrank holding an ENS name**,
+and a credentialed voter's premium is one tenth of the raw vote it rides on.
+That is rule 3 as a measurement rather than an opinion.
+
+**Rule 2 is the exception, and reading it as an inversion is the mistake to
+avoid.** It ships something the measurement says is gameable, on the explicit
+ground that nobody is there to game it. Appendix A is what the *end state* must
+avoid and what rule 6's trigger protects against — not a refutation of the
+interim, which fails to the same arithmetic and is justified by the environment
+instead. The failure mode to watch for is someone later reading rule 2 as
+evidence that the measurement did not matter.
 
 Two design choices for proof-of-holding that OpChan never faced, because its
 signal was binary and free:
