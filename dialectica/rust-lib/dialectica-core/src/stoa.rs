@@ -520,6 +520,19 @@ mod tests {
             all
         }
         let errors = every_variant();
+        // Distinguishability is a spec requirement — "a decoder that says only
+        // 'invalid' sends the reader looking in the wrong place" — and the
+        // format assertions below do not check it: collapsing three arms to the
+        // same string passes them. Pairwise distinctness is what catches that.
+        let mut seen = std::collections::HashSet::new();
+        for e in &errors {
+            assert!(
+                seen.insert(e.to_string()),
+                "{e:?} renders identically to another variant: {}",
+                e
+            );
+        }
+
         for e in errors {
             let rendered = e.to_string();
             assert!(!rendered.is_empty(), "{e:?} rendered empty");
@@ -735,6 +748,14 @@ mod tests {
             "80329cf05603a0c9ce7a749a53e271253307ba89d4924856e4017459d03a025f",
             "Stoa address derivation changed"
         );
+
+        // The title bound is interop, not a local preference: a peer at 1024
+        // encodes a 900-byte title that a peer at 777 refuses, and the two
+        // silently disagree about what is a valid Stoa. Every other test
+        // recomputes from the constant and so survives a change to it; this
+        // absolute value is what makes changing it a decision rather than an
+        // edit.
+        assert_eq!(MAX_TITLE_BYTES, 1024, "the title bound is network-visible");
     }
 
     #[test]

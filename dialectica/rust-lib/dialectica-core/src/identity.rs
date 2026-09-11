@@ -799,12 +799,46 @@ mod tests {
     }
 
     #[test]
+    fn verification_refuses_a_low_order_key_obtained_around_the_parse() {
+        // Defence in depth, and NOT redundant with the parse guard below: that
+        // one pins that a low-order key cannot be built through `from_bytes`,
+        // this one that verification refuses it even when one is held. A future
+        // third `PublicKey` construction site would reopen exactly this door,
+        // and only this test would notice.
+        //
+        // **What this does NOT pin is `verify_strict` versus `verify`.** Both
+        // refuse every input reachable here, so swapping the call leaves this
+        // green — measured, not assumed. Separating them needs a crafted
+        // small-order forgery, which is fiddly enough to be absent; the guard
+        // against that swap is `verify_op_bytes`'s doc comment and the
+        // deliberately-absent `Verifier` import, not a test. Said plainly so
+        // nobody reads this as cover it does not provide.
+        let low_order = PublicKey(
+            ed25519_dalek::VerifyingKey::from_bytes(&[0u8; 32])
+                .expect("the all-zero point decompresses; that is what makes it dangerous"),
+        );
+
+        let zero_seed = SecretKey::from_bytes(&[0u8; 32]).unwrap();
+        let self_sig = sign_op_bytes(&zero_seed, b"an op");
+        assert!(
+            !verify_op_bytes(&low_order, b"an op", &self_sig),
+            "a low-order key must verify nothing, including a signature under its own seed"
+        );
+
+        let honest = SecretKey::generate();
+        assert!(
+            !verify_op_bytes(&low_order, b"an op", &sign_op_bytes(&honest, b"an op")),
+            "a low-order key must verify nothing, including an honest signature"
+        );
+    }
+
+    #[test]
     fn a_low_order_public_key_is_refused_at_the_parse() {
         // All eight low-order points decompress to valid Edwards points, so
         // `VerifyingKey::from_bytes` accepts every one of them and only
         // `verify_strict` refuses the signatures. Our parse refuses them first.
         //
-        // Why it moved from verification to parse: a key that can never verify
+        // Why the parse and not only verification: a key that can never verify
         // anything is not merely useless, it is dangerous one layer up. A Stoa
         // genesis record naming a low-order creator decodes, hashes to a stable
         // address and self-authenticates — a forum whose sole moderator (§6) can
