@@ -20,6 +20,7 @@ pub mod arrival;
 pub mod identity;
 pub mod keystore;
 pub mod log;
+pub mod moderation;
 pub mod op;
 pub mod revision;
 pub mod stoa;
