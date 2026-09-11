@@ -157,11 +157,10 @@ into the spec since it is clearly intended to be part of the contract.
 It is not in the spec, and the reason is the rule against scenarios that cannot
 be tested. **No method in the module is paginated**, and no code anywhere in the
 crate constructs or consumes that shape — verified by reading every handler in
-`wire.rs` and the contract trait in the module crate's `lib.rs`, whose five
-methods are `version`, `ping`, `panic_probe`, `delivery_channel_exists` and the
-defaulted `on_context_ready`. There is nothing to write a WHEN/THEN against,
-and a requirement whose every scenario is hypothetical is a requirement no gate
-can see.
+`wire.rs` and every method of the contract trait in the module crate's `lib.rs`.
+`grep -rn "hasMore\|perPage"` over the crate is the check, and it is empty.
+There is nothing to write a WHEN/THEN against, and a requirement whose every
+scenario is hypothetical is a requirement no gate can see.
 
 So it is **a convention awaiting a caller**, and it stays in PLAN.md §2.5 where
 conventions-not-yet-built belong. The change that adds the first paginated
