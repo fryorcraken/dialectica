@@ -167,12 +167,40 @@ impl Arrival {
 /// broken by ascending message id. [`Ordering::Less`] means "orders first", so
 /// sorting a slice with this puts the current version at the front.
 ///
+/// # PRECONDITION: the op ids compared must be distinct
+///
+/// **The caller must deduplicate by [`OpId`] before sorting.** This is a
+/// contract on callers, not an implementation detail, because violating it
+/// reintroduces precisely the failure this module exists to prevent.
+///
+/// The order is total over *distinct ops*. Two entries sharing one op id can
+/// compare [`Ordering::Equal`] while differing in their [`Arrival`] — the op id
+/// is the last resort in every branch, so once it ties there is nothing left to
+/// separate them. A slice containing both would then sort into an order decided
+/// by the sort's stability and the input sequence, and the input sequence is
+/// arrival order, which differs per peer.
+///
+/// §3.1 makes ops "idempotent by `opId`", so a store holding one entry per op
+/// id satisfies this by construction and no caller need think about it. It is
+/// stated because `cmp_ops` is public and a caller sorting a list built *before*
+/// dedup would be the exception.
+///
 /// # A pure function of its arguments, which is the whole safety property
 ///
 /// It reads no clock, no arrival counter and no ambient state, so two peers
 /// holding the same inputs cannot produce different outputs. That is what makes
 /// the divergence this module exists to prevent unreachable rather than merely
 /// unlikely — there is no local input that could differ.
+///
+/// # Why the result is transitive
+///
+/// [`Arrival::is_ordered_by_transport`] partitions any population into two
+/// blocks: every transport-ordered op precedes every unordered one, and each
+/// block is independently totally ordered. A partition into two totally-ordered
+/// blocks with a uniform rule between them is transitive by construction —
+/// there is no boundary for a mixed comparator to break on, because the boundary
+/// rule consults nothing but presence. [`cmp_tiebreak`]'s has-id/no-id split
+/// within one Lamport value is the same argument one level down.
 ///
 /// # The degraded case
 ///
@@ -278,7 +306,10 @@ mod tests {
         let op = an_op("x");
         let older = Arrival::ordered(1, a_message_id(1));
         let newer = Arrival::ordered(2, a_message_id(1));
-        assert_eq!(cmp_ops((&newer, &op.id()), (&older, &op.id())), Ordering::Less);
+        assert_eq!(
+            cmp_ops((&newer, &op.id()), (&older, &op.id())),
+            Ordering::Less
+        );
         assert_eq!(
             cmp_ops((&older, &op.id()), (&newer, &op.id())),
             Ordering::Greater
@@ -293,7 +324,10 @@ mod tests {
         let op = an_op("x");
         let older = Arrival::ordered(1, a_message_id(9));
         let newer = Arrival::ordered(2, a_message_id(1));
-        assert_eq!(cmp_ops((&newer, &op.id()), (&older, &op.id())), Ordering::Less);
+        assert_eq!(
+            cmp_ops((&newer, &op.id()), (&older, &op.id())),
+            Ordering::Less
+        );
     }
 
     #[test]
@@ -304,7 +338,39 @@ mod tests {
         let low = Arrival::ordered(7, a_message_id(1));
         let high = Arrival::ordered(7, a_message_id(2));
         assert_eq!(cmp_ops((&low, &op.id()), (&high, &op.id())), Ordering::Less);
-        assert_eq!(cmp_ops((&high, &op.id()), (&low, &op.id())), Ordering::Greater);
+        assert_eq!(
+            cmp_ops((&high, &op.id()), (&low, &op.id())),
+            Ordering::Greater
+        );
+    }
+
+    #[test]
+    fn the_message_id_tiebreak_outranks_the_op_id_last_resort() {
+        // §5.7 breaks a Lamport tie by "ascending message id"; the op id is a
+        // documented LAST resort, reached only when the message ids cannot
+        // decide. This test is what makes that a priority rather than a
+        // coincidence.
+        //
+        // The defect it exists to catch is this repo's own: every other test of
+        // the message-id tiebreak compares two arrivals against the SAME
+        // `op.id()`, so an op-id comparison returns Equal and falls through
+        // invisibly. The tiebreak was only ever exercised where the competing
+        // rule was silent — the same shape as the `"ab"` vs `"abc"` defect the
+        // agents README records, where a fixture cannot tell two explanations
+        // apart.
+        //
+        // So: make the two rules DISAGREE. The lower-op-id op carries the
+        // HIGHER message id, at equal Lamport. Ordering by message id puts
+        // `high_op` first; ordering by op id puts `low_op` first. Only the
+        // documented priority passes.
+        let (low_op, high_op) = two_ops_by_ascending_id();
+        let higher_msg = Arrival::ordered(7, a_message_id(9));
+        let lower_msg = Arrival::ordered(7, a_message_id(1));
+        assert_eq!(
+            cmp_ops((&higher_msg, &low_op.id()), (&lower_msg, &high_op.id())),
+            Ordering::Greater,
+            "the message id must decide before the op id is consulted"
+        );
     }
 
     #[test]
@@ -326,17 +392,45 @@ mod tests {
     fn the_order_is_the_same_whichever_way_the_pair_is_presented() {
         // Antisymmetry. A comparison that returned Less both ways would make a
         // sort's result depend on the input order, which differs per peer.
+        //
+        // The last two cases are load-bearing and were added after a review
+        // found them missing: `ordered(..)` ALWAYS sets a message id and
+        // `unordered()` short-circuits before `cmp_tiebreak` runs, so without a
+        // `from_parts` case carrying a Lamport value and NO message id, that
+        // function's `(None, None)` arm is never reached. An arm returning
+        // `Less` there makes `cmp_ops` non-reflexive and non-antisymmetric —
+        // a violation of `Ord`'s contract that newer std can panic on — and
+        // every test claiming those properties by name passed anyway.
         let op = an_op("x");
         let cases = [
-            (Arrival::ordered(1, a_message_id(1)), Arrival::ordered(2, a_message_id(1))),
-            (Arrival::ordered(1, a_message_id(1)), Arrival::ordered(1, a_message_id(2))),
+            (
+                Arrival::ordered(1, a_message_id(1)),
+                Arrival::ordered(2, a_message_id(1)),
+            ),
+            (
+                Arrival::ordered(1, a_message_id(1)),
+                Arrival::ordered(1, a_message_id(2)),
+            ),
             (Arrival::ordered(1, a_message_id(1)), Arrival::unordered()),
             (Arrival::unordered(), Arrival::unordered()),
+            // Reaches `cmp_tiebreak`'s (None, None) arm.
+            (
+                Arrival::from_parts(Some(5), None),
+                Arrival::from_parts(Some(5), None),
+            ),
+            (
+                Arrival::from_parts(Some(5), None),
+                Arrival::from_parts(None, Some(a_message_id(1))),
+            ),
         ];
         for (a, b) in cases {
             let forward = cmp_ops((&a, &op.id()), (&b, &op.id()));
             let backward = cmp_ops((&b, &op.id()), (&a, &op.id()));
-            assert_eq!(forward, backward.reverse(), "comparison is not antisymmetric");
+            assert_eq!(
+                forward,
+                backward.reverse(),
+                "comparison is not antisymmetric"
+            );
         }
     }
 
@@ -359,15 +453,182 @@ mod tests {
         );
     }
 
+    /// Every combination of the three axes `cmp_ops` reads, with DISTINCT op
+    /// ids so the precondition holds.
+    ///
+    /// 3 Lamport states (absent, 1, 2) × 3 message-id states (absent, low,
+    /// high) × 3 distinct ops = 27 elements, each a `(Arrival, OpId)` pair.
+    /// That covers both branches of every match arm and, crucially, every way
+    /// of CROSSING between them — which is where a mixed comparator breaks.
+    ///
+    /// The op ids are sorted so the element index is meaningful to a reader
+    /// debugging a failure, and because `two_ops_by_ascending_id`'s reasoning
+    /// applies here too: which of three hashes is lowest is not knowable by
+    /// inspection, so it is determined rather than assumed.
+    fn every_combination() -> Vec<(Arrival, OpId)> {
+        let mut ids = [an_op("alpha").id(), an_op("beta").id(), an_op("gamma").id()];
+        ids.sort();
+        assert_ne!(ids[0], ids[1], "the fixture needs three distinct ops");
+        assert_ne!(ids[1], ids[2], "the fixture needs three distinct ops");
+
+        let mut out = Vec::new();
+        for lamport in [None, Some(1u64), Some(2u64)] {
+            for message_id in [None, Some(a_message_id(1)), Some(a_message_id(2))] {
+                for id in ids {
+                    out.push((Arrival::from_parts(lamport, message_id.clone()), id));
+                }
+            }
+        }
+        assert_eq!(out.len(), 27);
+        out
+    }
+
+    #[test]
+    fn the_order_is_transitive_across_every_combination() {
+        // THE law a mixed comparator most typically breaks, and the one the
+        // other tests could not see: antisymmetry is checked on four
+        // hand-picked pairs, and totality on one, but neither catches a rule
+        // that is locally sensible and globally inconsistent.
+        //
+        // Exhaustive over all 27^3 = 19,683 triples rather than sampled,
+        // because a transitivity defect typically lives in ONE crossing of the
+        // ordered/unordered boundary, and a sampler that missed that triple
+        // would report green. Runs in well under a millisecond.
+        //
+        // Structurally it holds because `is_ordered_by_transport` partitions
+        // the population into two blocks, every ordered element precedes every
+        // unordered one, and each block is independently totally ordered. There
+        // is no boundary to break on: the rule between blocks consults nothing
+        // but presence. This test is what would catch that reasoning ceasing to
+        // be true.
+        let population = every_combination();
+        for a in &population {
+            for b in &population {
+                if cmp_ops((&a.0, &a.1), (&b.0, &b.1)) != Ordering::Less {
+                    continue;
+                }
+                for c in &population {
+                    if cmp_ops((&b.0, &b.1), (&c.0, &c.1)) != Ordering::Less {
+                        continue;
+                    }
+                    assert_eq!(
+                        cmp_ops((&a.0, &a.1), (&c.0, &c.1)),
+                        Ordering::Less,
+                        "a < b and b < c but not a < c: {:?} {:?} {:?}",
+                        a.0,
+                        b.0,
+                        c.0
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_order_is_antisymmetric_across_every_combination() {
+        // The exhaustive counterpart to the hand-picked pairs above: all 27^2 =
+        // 729 pairs. Together with transitivity and the totality test, this is
+        // what makes "strict total order" a checked claim rather than a
+        // comment.
+        let population = every_combination();
+        for a in &population {
+            for b in &population {
+                let forward = cmp_ops((&a.0, &a.1), (&b.0, &b.1));
+                let backward = cmp_ops((&b.0, &b.1), (&a.0, &a.1));
+                assert_eq!(
+                    forward,
+                    backward.reverse(),
+                    "not antisymmetric: {:?} vs {:?}",
+                    a.0,
+                    b.0
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn distinct_op_ids_never_compare_equal_across_every_combination() {
+        // Totality, exhaustively, scoped to exactly what the precondition
+        // promises: DISTINCT OP IDS never tie, whatever their metadata. That is
+        // the property a caller who dedups by op id relies on, and a tie there
+        // would leave a sort's result to stability and input order — which is
+        // arrival order, which differs per peer.
+        //
+        // Scoped to op ids rather than to distinct ELEMENTS deliberately: two
+        // elements sharing an op id DO tie, which is not a defect but the
+        // precondition itself, pinned separately by
+        // `two_entries_sharing_an_op_id_can_tie_which_is_why_callers_dedup`.
+        // Writing this test the other way first is what surfaced that the
+        // contract needed stating — the assertion failed on exactly the pair
+        // the reviewer's probe found.
+        let population = every_combination();
+        for a in &population {
+            for b in &population {
+                if a.1 == b.1 {
+                    continue;
+                }
+                assert_ne!(
+                    cmp_ops((&a.0, &a.1), (&b.0, &b.1)),
+                    Ordering::Equal,
+                    "distinct op ids tied: {:?} {:?}",
+                    a.0,
+                    b.0
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn two_entries_sharing_an_op_id_can_tie_which_is_why_callers_dedup() {
+        // The PRECONDITION, pinned as a live property rather than left in prose.
+        // Two entries with the same op id and different metadata compare Equal,
+        // because the op id is the last resort in every branch and once it ties
+        // there is nothing left to separate them.
+        //
+        // This is not a defect: §3.1 makes ops "idempotent by opId", so a store
+        // holds one entry per op id and the case does not arise. It is pinned so
+        // that a caller sorting a list built BEFORE dedup finds the contract
+        // stated and tested, rather than discovering it as a per-peer
+        // rendering difference with no failing assertion anywhere.
+        let op = an_op("x");
+        let unordered = Arrival::unordered();
+        let id_only = Arrival::from_parts(None, Some(a_message_id(1)));
+        assert_ne!(unordered, id_only, "the two arrivals must genuinely differ");
+        assert_eq!(
+            cmp_ops((&unordered, &op.id()), (&id_only, &op.id())),
+            Ordering::Equal,
+            "sharing an op id ties, which is what the precondition is about"
+        );
+    }
+
     #[test]
     fn one_op_compared_against_itself_is_equal() {
-        // Reflexivity, the other half of a well-formed ordering.
+        // Reflexivity, the other half of a well-formed ordering. `Ord`'s
+        // contract requires it, and newer std can panic in a debug build with
+        // "user-provided comparison function does not correctly implement a
+        // total order" when a sort observes it failing.
+        //
+        // EVERY arrival shape, because the shapes reach different code. The
+        // lamport-only one is the one that matters and the one this test
+        // originally lacked: it is the only shape that reaches `cmp_tiebreak`'s
+        // (None, None) arm, since `ordered(..)` always sets a message id and
+        // `unordered()` short-circuits before the tiebreak runs. An arm
+        // returning `Less` there is a genuine `Ord` violation, and this test
+        // passed regardless until the lamport-only case was added.
         let op = an_op("x");
-        let arrival = Arrival::ordered(3, a_message_id(4));
-        assert_eq!(
-            cmp_ops((&arrival, &op.id()), (&arrival, &op.id())),
-            Ordering::Equal
-        );
+        let shapes = [
+            Arrival::ordered(3, a_message_id(4)),
+            Arrival::unordered(),
+            Arrival::from_parts(Some(3), None),
+            Arrival::from_parts(None, Some(a_message_id(4))),
+        ];
+        for arrival in shapes {
+            assert_eq!(
+                cmp_ops((&arrival, &op.id()), (&arrival, &op.id())),
+                Ordering::Equal,
+                "not reflexive for {arrival:?}"
+            );
+        }
     }
 
     #[test]
@@ -443,6 +704,15 @@ mod tests {
         // constructor produced. A constructor that quietly defaulted the
         // Lamport value to 0 would be indistinguishable from a real 0 forever
         // after, and every later peer disagreement would trace back here.
+        //
+        // This is also the only assertion available for "nothing here can
+        // produce a Lamport timestamp" — the property that keeps a second clock
+        // from existing. That property is enforced by the type's API surface
+        // (no constructor derives a value; see `Arrival`'s docs), not by any
+        // runtime check, so a test can only witness the one constructor that
+        // takes no value and confirm it invents none. A separate test named for
+        // the broader property overstated what it checked, so it was folded in
+        // here.
         let arrival = Arrival::unordered();
         assert_eq!(arrival.lamport(), None);
         assert_eq!(arrival.message_id(), None);
@@ -490,30 +760,36 @@ mod tests {
 
     #[test]
     fn two_ops_with_message_ids_but_no_lamport_fall_back_to_op_id() {
-        // NO SPEC: the spec says such ops are "unordered by the transport" and
-        // that unordered ops order by op id; it does not say whether their
-        // message ids may break that tie. Chosen: they may not — the fallback
-        // is op id alone, so the degraded order is derived entirely from the
-        // ops themselves and never partly from transport metadata that was
-        // explicitly declared insufficient to order.
+        // Derivable rather than unspecified, so no NO SPEC marker: R5 makes an
+        // op with a message id and no Lamport value "unordered by the
+        // transport", and R4 orders unordered ops by op id. The composition is
+        // the only reading. Tested anyway because the composition is what a
+        // reader would have to do in their head.
         let (low, high) = two_ops_by_ascending_id();
         // The LOW op carries the HIGH message id, so a comparison that used the
         // message id would order them the other way round.
         let low_op_high_msg = Arrival::from_parts(None, Some(a_message_id(9)));
         let high_op_low_msg = Arrival::from_parts(None, Some(a_message_id(1)));
         assert_eq!(
-            cmp_ops((&low_op_high_msg, &low.id()), (&high_op_low_msg, &high.id())),
+            cmp_ops(
+                (&low_op_high_msg, &low.id()),
+                (&high_op_low_msg, &high.id())
+            ),
             Ordering::Less
         );
     }
 
     #[test]
     fn a_lamport_timestamp_without_a_message_id_still_orders() {
-        // NO SPEC: the spec requires the Lamport timestamp to decide
-        // orderedness and does not say what a missing tiebreak does. Chosen:
-        // the op is ordered, and the op id breaks the tie. Dropping to
-        // unordered instead would discard a real Lamport value the transport
-        // supplied, which is the one thing this module must never do.
+        // Specified: "The Lamport timestamp alone decides whether an op is
+        // ordered". Promoted out of a NO SPEC marker on review, because partial
+        // metadata is the shape the upstream fix would ACTUALLY produce — SDS
+        // sends ephemeral messages with the Lamport value unset, so the event
+        // must express its absence independently of the message id. Which half
+        // decides orderedness was too consequential to leave in a comment.
+        //
+        // Dropping to unordered instead would discard a real Lamport value the
+        // transport supplied, which is the one thing this module must never do.
         let op = an_op("x");
         let lamport_only = Arrival::from_parts(Some(5), None);
         assert!(lamport_only.is_ordered_by_transport());
@@ -525,29 +801,24 @@ mod tests {
         );
 
         // And within one Lamport value, an op WITH a message id is more
-        // completely described than one without, so it leads.
-        // NO SPEC: the spec is silent on this pairing.
+        // completely described than one without, so it leads. Specified in the
+        // same requirement — a genuine arbitrary choice, derivable from no
+        // other rule, and the exact arm whose boundary a review found untested.
         let with_id = Arrival::ordered(5, a_message_id(1));
         assert_eq!(
             cmp_ops((&with_id, &op.id()), (&lamport_only, &op.id())),
             Ordering::Less
         );
-    }
 
-    // ─── What this module structurally cannot do ──────────────────────────
-
-    #[test]
-    fn nothing_here_can_produce_a_lamport_timestamp() {
-        // THE property that keeps a second clock from existing. Every route to
-        // a Lamport value requires a caller to supply one, so a value can only
-        // originate at the transport boundary. If a future change adds a
-        // constructor that derives one — a counter, a clock read, a "next()" —
-        // the two-orders-that-disagree failure becomes reachable, and it fails
-        // silently by rendering threads differently on different peers.
-        //
-        // This is asserted by the only means available to a test: the
-        // no-argument constructor yields no order at all.
-        assert_eq!(Arrival::unordered().lamport(), None);
-        assert!(!Arrival::unordered().is_ordered_by_transport());
+        // And two ops sharing a Lamport value with NO message id on either side
+        // are still separated, by op id. This is the arm whose boundary a
+        // review found untested: it is the only route to `cmp_tiebreak`'s
+        // (None, None) case, and an arm returning anything but `Equal` there
+        // breaks `Ord`'s contract outright.
+        let (low, high) = two_ops_by_ascending_id();
+        assert_eq!(
+            cmp_ops((&lamport_only, &low.id()), (&lamport_only, &high.id())),
+            Ordering::Less
+        );
     }
 }

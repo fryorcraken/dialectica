@@ -203,6 +203,45 @@ Note this case is unreachable through the contract we have, which supplies neith
 field. It is specified because the type permits it and an unspecified corner of a
 type is where the next reader's assumption goes.
 
+### Decision: the order is total over op ids, and callers must dedup
+
+`cmp_ops` falls back to the op id in every branch, so once two records share an
+op id there is nothing left to separate them and they compare `Equal` — even
+when their `Arrival`s differ. Reachable two ways: `(None, None)` with the same
+op id, and the ordered branch with equal Lamport and equal message id.
+
+This is **not** fixed by adding another tiebreak, because there is nothing left
+to tie-break on that is not per-peer. Comparing the `Arrival`s themselves would
+mean ordering by transport metadata that was explicitly declared insufficient to
+order (or, in the `(None, None)` case, by nothing at all). The honest resolution
+is a precondition: ops are idempotent by op id (§3.1), so a store holds one
+record per op id and the case does not arise.
+
+It is stated in the spec rather than left in a doc comment because it is a
+contract on **callers**, and `cmp_ops` is public. The store is being built now,
+by another agent, and is exactly the caller that could assemble a list before
+deduplicating. The failure would be silent in the usual way: a stability-
+dependent order, differing per peer, with no assertion anywhere.
+
+### Why the order is transitive
+
+Worth recording because it is the law a mixed comparator most typically breaks,
+and because the argument explains why this one does not.
+
+`is_ordered_by_transport` partitions any population into two blocks. Every
+transport-ordered op precedes every unordered one; each block is independently
+totally ordered. **A partition into two totally-ordered blocks with a uniform
+rule between them is transitive by construction** — there is no boundary for a
+mixed comparator to break on, because the boundary rule consults nothing but
+presence. `cmp_tiebreak`'s has-id/no-id split within one Lamport value is the
+same argument one level down.
+
+The load-bearing word is *uniform*. A boundary rule that consulted a value —
+"an op with Lamport 2 loses to an unordered op" — breaks transitivity
+immediately, and that is the mutation the exhaustive test was verified against
+(mutation 8 in `tasks.md`). The reasoning is in the code, but reasoning is not a
+gate, which is why the test exists.
+
 ## How the two-clocks trap is avoided
 
 The brief asks this be stated explicitly, and it is the load-bearing paragraph.

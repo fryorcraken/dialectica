@@ -20,13 +20,8 @@ A value inside the signed bytes is chosen by the op's author, and the author is 
 
 - **WHEN** the same op is received twice with different ordering metadata
 - **THEN** both yield the same op id
-- **AND** the op's content and signature are unaffected by the metadata
 
-#### Scenario: Ordering metadata is not signed
-
-- **WHEN** an op's signature is verified
-- **THEN** verification does not consult the ordering metadata
-- **AND** changing the ordering metadata does not invalidate the signature
+Structural rather than behavioural: the ordering metadata is a separate value from the op, so no code path exists by which it could reach the op id or the signed bytes. It is recorded as a requirement because it is the property that makes ordering metadata safe to accept from an untrusted transport, and a future change that folded the metadata into the op would violate it without any test failing.
 
 ### Requirement: Ops are ordered by the transport's order, not an order of our own
 
@@ -49,9 +44,30 @@ Two orders over the same messages can disagree, and the disagreement produces no
 
 #### Scenario: The order is total
 
-- **WHEN** any two distinct ops with recorded metadata are compared
+- **WHEN** any two ops with distinct op ids are compared
 - **THEN** exactly one of the two orders first
 - **AND** the comparison is consistent however the two are presented
+
+#### Scenario: The order is transitive
+
+- **WHEN** one op orders before a second, and that second orders before a third
+- **THEN** the first orders before the third
+
+### Requirement: Ops are deduplicated by op id before they are ordered
+
+A caller SHALL deduplicate ops by op id before ordering them. The order is total over distinct op ids; two records of the same op id MAY compare as equal regardless of the transport metadata recorded against each.
+
+This is a contract on callers rather than an implementation detail, which is why it is stated here. Ops are idempotent by op id, so a store holding one record per op id satisfies it by construction — but a caller ordering a list assembled before deduplication would not, and the consequence is the failure this capability exists to prevent: a tie leaves the relative order of two records to the sort's stability and the order they were assembled in, which is arrival order, which differs from peer to peer.
+
+#### Scenario: Two records of the same op may tie
+
+- **WHEN** two records carrying the same op id but different transport metadata are compared
+- **THEN** the comparison may report neither as ordering first
+
+#### Scenario: Distinct op ids never tie
+
+- **WHEN** two ops with distinct op ids are compared, with any combination of recorded metadata
+- **THEN** exactly one of the two orders first
 
 #### Scenario: Every peer computes the same order
 
@@ -111,6 +127,38 @@ Ordering by op id is chosen because the op id is a function of the op's own byte
 - **WHEN** recorded metadata is inspected
 - **THEN** whether the transport ordered the op is reported
 - **AND** a caller can act on that without inferring it from the ordering result
+
+### Requirement: The Lamport timestamp alone decides whether an op is ordered
+
+Where the transport supplies only part of its ordering metadata, the Lamport timestamp SHALL decide whether the op is ordered, and the message id SHALL NOT.
+
+An op carrying a Lamport timestamp but no message id SHALL be treated as ordered by the transport and SHALL take its place by that timestamp. Where such an op ties with another on the timestamp, an op carrying a message id SHALL order before an op that carries none, and two ops carrying neither SHALL be separated by their op ids.
+
+Partial metadata is not a hypothetical: it is the shape the transport is expected to produce. The synchronisation layer sends ephemeral messages with the Lamport timestamp unset, so an event that carries the value must also be able to express its absence, independently of the message id.
+
+Discarding a Lamport timestamp because the message id is missing would throw away the only value that orders, which is the one thing a recording peer must never do. Ordering an op the transport placed *after* ops it did not place would do the same by another route.
+
+#### Scenario: An op with a Lamport timestamp and no message id is ordered
+
+- **WHEN** an op carries a Lamport timestamp but no message id
+- **THEN** it is reported as ordered by the transport
+- **AND** it orders before every op carrying no Lamport timestamp
+
+#### Scenario: Such an op is ordered by its timestamp against other ordered ops
+
+- **WHEN** an op carrying a Lamport timestamp but no message id is compared with an op carrying a lower Lamport timestamp
+- **THEN** the op with the higher timestamp orders first
+
+#### Scenario: Within one Lamport value, a message id present leads one absent
+
+- **WHEN** two ops share a Lamport timestamp and only one carries a message id
+- **THEN** the op carrying a message id orders first
+
+#### Scenario: Within one Lamport value, two ops with no message id are separated
+
+- **WHEN** two ops share a Lamport timestamp and neither carries a message id
+- **THEN** the op with the lower op id orders first
+- **AND** the two do not compare as equal
 
 ### Requirement: A message id present without a Lamport timestamp does not order
 
