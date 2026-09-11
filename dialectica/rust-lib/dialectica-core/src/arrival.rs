@@ -38,6 +38,27 @@
 //! bug with no failing assertion anywhere. So there is no constructor here that
 //! derives a Lamport value, no counter, and no peer state: the only way a value
 //! enters is for the transport to have supplied it.
+//!
+//! # Seeing one op twice: do NOT keep the "richer" arrival
+//!
+//! The same op can arrive more than once, with a different [`Arrival`] each
+//! time. A store must pick one, and **the choice must not depend on which
+//! arrival carries more metadata.**
+//!
+//! [`Arrival::is_ordered_by_transport`] makes "which of these is richer?" an
+//! easy question to ask, which makes preferring the richer one tempting. It is
+//! wrong for the reason everything else in this module is shaped the way it is:
+//! **whether a peer receives the richer copy is a per-peer accident.** A peer
+//! that happened to see the ordered copy would keep a different arrival from one
+//! that saw the unordered copy, the two sort differently, and the two peers
+//! render the thread differently — the same silent divergence as a second
+//! Lamport clock, reached by a new route.
+//!
+//! **First-wins is the convergent rule**, and the op log specifies it. Not
+//! because the first arrival is better — it is not — but because "which did I
+//! see first" combined with idempotence by op id gives every peer the same
+//! answer for the same set of received messages, where "which is richer" does
+//! not.
 
 use crate::op::OpId;
 use std::cmp::Ordering;
@@ -56,6 +77,12 @@ use std::cmp::Ordering;
 /// width is the transport's to choose and is not settled at a contract we can
 /// read. Nothing here parses it; it is compared, and comparison is all §5.7 asks
 /// of it.
+///
+/// **What settling the width would unlock:** a `[u8; N]` here makes both this
+/// and [`Arrival`] `Copy`, since `Arrival`'s other field is already an
+/// `Option<u64>`. Today every op-log append clones an `Arrival`, which is
+/// nobody's bottleneck and not a reason to guess at a width — but whoever
+/// settles it should know that is what it buys.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct MessageId(Vec<u8>);
 
@@ -184,6 +211,11 @@ impl Arrival {
 /// id satisfies this by construction and no caller need think about it. It is
 /// stated because `cmp_ops` is public and a caller sorting a list built *before*
 /// dedup would be the exception.
+///
+/// The op log — the first consumer — is structurally immune: its entries live in
+/// a map keyed by [`OpId`], so a read iterates values distinct by construction
+/// with no intermediate list that could be sorted pre-dedup. That was checked
+/// rather than assumed, and it is the shape a second consumer should copy.
 ///
 /// # A pure function of its arguments, which is the whole safety property
 ///
