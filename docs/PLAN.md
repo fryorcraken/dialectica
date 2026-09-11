@@ -1295,7 +1295,12 @@ publishing (§6.1), so what a Stoa *surfaces* is its main lever over what readin
 it is like. Moderation decides what a Stoa refuses; relevance decides the
 ordering of everything it does not, which is the larger part.
 
-#### The five rules
+#### The six rules
+
+Five are standing design rules. **Rule 6 is different in kind**: it is an expiry
+condition on rule 2, and its whole purpose is that somebody trips over it later
+— so it is listed here rather than left to be discovered inside the section it
+governs.
 
 **1. Relevance is a local projection, never an op.** No score is ever published.
 A score is a column in the SQLite view (§3.3), derived from ops and rebuilt by
@@ -1679,8 +1684,17 @@ Two bounds, both structural:
 the same of `K_mod`, and the honesty applies to both). The inequality is not
 arbitrary: a moderator's standing is checkable by every peer from the genesis
 record, where a vouch is one reader's private judgement, so the more accountable
-credential should not weigh less. `K_vouch` around 2 against `K_mod` of 3 keeps
-both inside §7.2's bracket.
+credential should not weigh less.
+
+`K_vouch` around 2 against `K_mod` of 3 sits inside §7.2's bracket — **but that
+bracket was derived for an unmintable, peer-checkable credential, and a vouch is
+neither.** It is per-reader, unverifiable by anyone else, and the only weight
+class surviving rule 6. Whether the derivation transfers is **assumed here, not
+argued.** Two reasons it might — the bracket's argument was about not drowning
+organic engagement, which is indifferent to who issued the credential, and
+earned weight is capped below `K_vouch` regardless — but neither is a
+derivation. Treat the value as a starting point that inherits an argument made
+about something else, and settle it when vouching is specified.
 
 **Vouching amplifies upvotes only**, exactly as rule 4 requires of a moderator's
 vote, and for the same reason: an amplified downvote is suppression without
@@ -1772,10 +1786,14 @@ v1.
   much this reader weighs that voter (moderator, vouched, earned, plain). One
   axis, familiar, and no new op.
 - **Vouch — §7.3.** The reader's own answer to "whose judgement do I weigh",
-  accruing from votes they already cast. This is what makes the single axis
-  tolerable: a reader who finds someone consistently worth reading weights them
-  up **regardless of whether they agree with them**, which is where "I disagree
-  with you but you argue well" now lives.
+  accruing from votes they already cast. It is where "I disagree with you but
+  you argue well" *can* live — a reader who finds someone consistently worth
+  reading is free to weight them up whether or not they agree with them.
+  **Nothing makes them do so, and §7.3 is explicit that nothing prevents the
+  opposite**: with one axis an upvote blends "worth reading" with "I agree", so
+  a reader who upvotes only what they agree with builds a vouched set that
+  agrees with them. Vouching makes a reader's weighting explicit and revocable,
+  **not viewpoint-neutral** — bridging is what would deliver that.
 - **Report — to the Stoa's moderator.** Spam and abuse leave the ranking system
   entirely and go to someone with binding authority (§6). This is the axis split
   that actually has a track record: separating "rank this" from "this breaks the
@@ -2299,14 +2317,23 @@ thing (§2.3).
   channel inside one node's lifetime — assumes persisted SDS state does not
   corrupt a fresh `createNode`. Two runs against a real node, with peer traffic
   received in the first, settles it.
-- ~~**Are votes an op in v1 at all?**~~ **Answered: yes, collected and read by
-  nothing.** The kind is in the op format (`op.rs`), carrying a target and a
-  direction, so the history accumulates from v1 and scoring arrives later
-  without a wire-format version bump. §7.2 rule 2 still ships no score, so
-  nothing reads them yet. Both directions are recorded even though Appendix A
-  found the signal is upvote-only — what to *count* is the scorer's decision,
-  where §7.2 can change it, rather than the format's, where changing it costs a
-  version.
+- ~~**Are votes an op in v1 at all?**~~ **Answered: yes, and they are read —
+  §7.2 rule 2's `top` counts them.** The kind is in the op format (`op.rs`),
+  carrying a target and a direction, so the history accumulated from v1 and the
+  scorer arrived over it without a wire-format version bump, which is what
+  collecting them early bought. Both directions are recorded even though
+  Appendix A found the signal is upvote-only — what to *count* is the scorer's
+  decision, where §7.2 can change it, rather than the format's, where changing
+  it costs a version.
+
+  **This entry previously ended "rule 2 still ships no score, so nothing reads
+  them yet", and that outlived rule 2 by one revision.** Noted because of where
+  it sat rather than because one sentence went stale: a struck-through
+  *Answered* block is the shape a reader trusts most, since it presents itself
+  as settled, and this is the first place outside §7 that someone arrives at
+  asking what votes do today. **An answered question is not a finished
+  question** — when the section it summarises changes, the summary is part of
+  that change.
 - ~~**Is a hide reversible?**~~ **Answered: yes — the inverse is named. But it
   cannot currently win, and that half is not settled.**
   `op.rs` carries one `Moderate` kind with an `action` of `Hide` or `Unhide`,

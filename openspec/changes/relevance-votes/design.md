@@ -244,6 +244,13 @@ Hidden posts are **excluded before scoring**, not scored and demoted (rule 4).
 
 ## 3. What a moderator's upvote is worth: K = 3, and why a number at all
 
+**Naming note:** `K` throughout this document is the **moderator** weight, which
+PLAN calls **`K_mod`** now that §7.3 has introduced a second constant,
+`K_vouch`. The bare form is kept here because every use predates the split and
+refers to the same thing; read `K` as `K_mod` wherever it appears. Anything
+written after this change should use the qualified names, since "K" alone stops
+being unambiguous the moment there are two.
+
 The brief asks for a justified number, on the grounds that "a multiplier nobody
 can justify is a number someone will change arbitrarily." The honest answer has
 two halves.
@@ -637,6 +644,53 @@ the reader rather than the system. That is the argument for building it rather
 than treating it as a stopgap: it is the only weight class that stays meaningful
 in the end state, and it is what stops that end state from counting nobody but
 token holders.
+
+### Four vouching decisions taken here, with the arguments that produced them
+
+These were decided in this change rather than deferred — `tasks.md` §5 marks
+three of them done — so the reasoning belongs in a `design.md` rather than only
+in PLAN. The vouch proposal (§12) inherits the conclusions; without this it
+would inherit them bare.
+
+**1. Weight must accrue from votes already cast, because an explicit-only list
+ships dead.** Asking a reader to maintain a curation list is asking for work
+they did not come to do, so the vouched set stays empty and the whole mechanism
+has no effect. Anything that only works if users do unprompted admin does not
+work. So repeatedly upvoting someone raises that identity's weight in the
+upvoter's ranking with nobody declaring anything — **earned** weight, against a
+**declared** vouch. The two stay distinguishable in the UI because they differ
+in consent: one the reader chose and can revoke in a click, the other happened
+to them and they must be told about and able to undo.
+
+**2. Only upvotes accrue; a downvote moves nothing.** Same asymmetry as rule 4
+and the same reason, one step further in: accruing *negative* weight would let a
+reader's disagreements quietly assemble a filter that hides a viewpoint from
+them. That is the failure this design is arranged against, and it is worse here
+than in rule 4's case because it is invisible — a reader cannot notice the
+absence of something they were never shown. Earned weight only ever raises.
+
+**3. Earned weight is capped below `K_vouch`, because accrual is evidence and a
+vouch is a declaration.** An inferred signal should never silently outrun what
+the reader explicitly chose. Without the cap, heavy engagement with one identity
+converges on delegating a reader's feed to that identity **by accident**, which
+is a thing a reader would refuse if asked and never gets asked.
+
+**4. `K_vouch < K_mod`, because the more accountable credential should not weigh
+less.** A moderator's standing is checkable by every peer from the genesis
+record; a vouch is one reader's private judgement that no peer can audit. Both
+numbers are chosen rather than derived, and §3's honesty about `K_mod` applies
+to `K_vouch` in full.
+
+**One thing assumed rather than argued, and flagged as such.** §3 bracketed
+`K_mod` to roughly 2–5 by reasoning about typical engaged-thread vote counts —
+**that derivation was for an unmintable, peer-checkable credential.** A vouch is
+neither: it is per-reader, unverifiable by anyone else, and the only weight class
+that survives rule 6. Whether the same bracket transfers is **not established
+here.** Two reasons to think it might — the bracket's argument was about not
+drowning organic engagement, which is indifferent to who issued the credential;
+and earned weight is separately capped below `K_vouch` anyway — but neither is a
+derivation. Treat `K_vouch ≈ 2` as a starting value inheriting an argument made
+for a different credential, and settle it in the vouch proposal.
 
 ## 12. Why vouching is not specified in this change
 

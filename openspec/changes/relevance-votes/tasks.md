@@ -72,6 +72,13 @@ Not done here and deliberately not started.
       what they agree with builds a vouched set that agrees with them. Nothing in
       v1 prevents this; the honest claim is that vouching is explicit and
       revocable, not viewpoint-neutral.
+- [x] **Record the four decisions taken here in `design.md` §11**, not only in
+      PLAN — accrual-from-votes, upvotes-only, the cap below `K_vouch`, and
+      `K_vouch < K_mod`. Each was decided in this change, so the proposal below
+      would otherwise inherit four conclusions with none of the arguments.
+- [x] Flag that `K_vouch ≈ 2` **assumes** §7.2's bracket transfers, when that
+      bracket was derived for an unmintable peer-checkable credential and a
+      vouch is neither. Assumed, not argued, and said so in both documents.
 - [ ] **Its own proposal**, covering the question this change does not answer:
       where per-reader local state lives, how it persists across replay, whether
       it is exported between devices, and what a vouch naming an identity the
