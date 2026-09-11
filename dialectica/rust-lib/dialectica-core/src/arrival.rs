@@ -188,6 +188,29 @@ impl Arrival {
     }
 }
 
+/// One op as the order sees it: what the transport said, and which op it said it
+/// about.
+///
+/// Borrows rather than owns, so a store can compare entries it already holds
+/// without cloning an [`Arrival`] per comparison.
+///
+/// **A named pair rather than a tuple**, because a tuple makes every call site
+/// read `cmp_ops((&a.0, &a.1), (&b.0, &b.1))` — and a reader who cannot recall
+/// which slot is which has to scroll to the signature to find out. The two
+/// fields are a 2-tuple of references either way; naming them is what lets the
+/// comparison and its loops say what they mean.
+#[derive(Clone, Copy, Debug)]
+pub struct OpEntry<'a> {
+    pub arrival: &'a Arrival,
+    pub id: &'a OpId,
+}
+
+impl<'a> OpEntry<'a> {
+    pub fn new(arrival: &'a Arrival, id: &'a OpId) -> Self {
+        OpEntry { arrival, id }
+    }
+}
+
 /// Order two ops: most recent first where the transport said so, ascending op id
 /// where it did not.
 ///
@@ -262,29 +285,26 @@ impl Arrival {
 /// two peers disagreeing cannot be reasoned about at all. A reader who expects
 /// recency here will look for it and not find it; a reader who expects the
 /// lowest id first is reading the code.
-pub fn cmp_ops(a: (&Arrival, &OpId), b: (&Arrival, &OpId)) -> Ordering {
-    let (a_arrival, a_id) = a;
-    let (b_arrival, b_id) = b;
-
-    match (a_arrival.lamport, b_arrival.lamport) {
+pub fn cmp_ops(a: OpEntry<'_>, b: OpEntry<'_>) -> Ordering {
+    match (a.arrival.lamport, b.arrival.lamport) {
         // Both ordered: §5.7's rule verbatim.
         (Some(a_lamport), Some(b_lamport)) => b_lamport
             .cmp(&a_lamport)
             // Descending Lamport, so `b` leads the comparison.
-            .then_with(|| cmp_tiebreak(a_arrival, b_arrival))
+            .then_with(|| cmp_tiebreak(a.arrival, b.arrival))
             // A last resort on op id, so the order stays TOTAL even when two
             // ops share a Lamport value and neither carries a message id.
             // Without it, two distinct ops could compare Equal, and a sort
             // would leave their relative order to chance — which differs per
             // peer, reintroducing exactly the divergence this module prevents.
-            .then_with(|| a_id.cmp(b_id)),
+            .then_with(|| a.id.cmp(b.id)),
 
         // One ordered, one not: the ordered one leads, whatever its value.
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
 
         // Neither ordered: the defined degraded order.
-        (None, None) => a_id.cmp(b_id),
+        (None, None) => a.id.cmp(b.id),
     }
 }
 
@@ -322,6 +342,12 @@ mod tests {
         }
     }
 
+    /// `entry(&arrival, &id)` — shorter than spelling the struct at each of the
+    /// thirty-odd comparisons below, and it keeps an assertion on one line.
+    fn entry<'a>(arrival: &'a Arrival, id: &'a OpId) -> OpEntry<'a> {
+        OpEntry::new(arrival, id)
+    }
+
     fn a_message_id(seed: u8) -> MessageId {
         MessageId::new(vec![seed; 32])
     }
@@ -352,11 +378,11 @@ mod tests {
         let older = Arrival::ordered(1, a_message_id(1));
         let newer = Arrival::ordered(2, a_message_id(1));
         assert_eq!(
-            cmp_ops((&newer, &op.id()), (&older, &op.id())),
+            cmp_ops(entry(&newer, &op.id()), entry(&older, &op.id())),
             Ordering::Less
         );
         assert_eq!(
-            cmp_ops((&older, &op.id()), (&newer, &op.id())),
+            cmp_ops(entry(&older, &op.id()), entry(&newer, &op.id())),
             Ordering::Greater
         );
     }
@@ -370,7 +396,7 @@ mod tests {
         let older = Arrival::ordered(1, a_message_id(9));
         let newer = Arrival::ordered(2, a_message_id(1));
         assert_eq!(
-            cmp_ops((&newer, &op.id()), (&older, &op.id())),
+            cmp_ops(entry(&newer, &op.id()), entry(&older, &op.id())),
             Ordering::Less
         );
     }
@@ -382,9 +408,12 @@ mod tests {
         let op = an_op("x");
         let low = Arrival::ordered(7, a_message_id(1));
         let high = Arrival::ordered(7, a_message_id(2));
-        assert_eq!(cmp_ops((&low, &op.id()), (&high, &op.id())), Ordering::Less);
         assert_eq!(
-            cmp_ops((&high, &op.id()), (&low, &op.id())),
+            cmp_ops(entry(&low, &op.id()), entry(&high, &op.id())),
+            Ordering::Less
+        );
+        assert_eq!(
+            cmp_ops(entry(&high, &op.id()), entry(&low, &op.id())),
             Ordering::Greater
         );
     }
@@ -412,7 +441,10 @@ mod tests {
         let higher_msg = Arrival::ordered(7, a_message_id(9));
         let lower_msg = Arrival::ordered(7, a_message_id(1));
         assert_eq!(
-            cmp_ops((&higher_msg, &low_op.id()), (&lower_msg, &high_op.id())),
+            cmp_ops(
+                entry(&higher_msg, &low_op.id()),
+                entry(&lower_msg, &high_op.id())
+            ),
             Ordering::Greater,
             "the message id must decide before the op id is consulted"
         );
@@ -427,7 +459,7 @@ mod tests {
         let short_high = Arrival::ordered(1, MessageId::new(vec![0x02]));
         let long_low = Arrival::ordered(1, MessageId::new(vec![0x01, 0xFF, 0xFF]));
         assert_eq!(
-            cmp_ops((&long_low, &op.id()), (&short_high, &op.id())),
+            cmp_ops(entry(&long_low, &op.id()), entry(&short_high, &op.id())),
             Ordering::Less,
             "0x01FFFF must precede 0x02"
         );
@@ -469,8 +501,8 @@ mod tests {
             ),
         ];
         for (a, b) in cases {
-            let forward = cmp_ops((&a, &op.id()), (&b, &op.id()));
-            let backward = cmp_ops((&b, &op.id()), (&a, &op.id()));
+            let forward = cmp_ops(entry(&a, &op.id()), entry(&b, &op.id()));
+            let backward = cmp_ops(entry(&b, &op.id()), entry(&a, &op.id()));
             assert_eq!(
                 forward,
                 backward.reverse(),
@@ -488,12 +520,15 @@ mod tests {
         let (low, high) = two_ops_by_ascending_id();
         let same = Arrival::ordered(1, a_message_id(1));
         assert_eq!(
-            cmp_ops((&same, &low.id()), (&same, &high.id())),
+            cmp_ops(entry(&same, &low.id()), entry(&same, &high.id())),
             Ordering::Less
         );
         let both_unordered = Arrival::unordered();
         assert_eq!(
-            cmp_ops((&both_unordered, &low.id()), (&both_unordered, &high.id())),
+            cmp_ops(
+                entry(&both_unordered, &low.id()),
+                entry(&both_unordered, &high.id())
+            ),
             Ordering::Less
         );
     }
@@ -547,22 +582,24 @@ mod tests {
         // but presence. This test is what would catch that reasoning ceasing to
         // be true.
         let population = every_combination();
-        for a in &population {
-            for b in &population {
-                if cmp_ops((&a.0, &a.1), (&b.0, &b.1)) != Ordering::Less {
+        for (a_arrival, a_id) in &population {
+            let a = entry(a_arrival, a_id);
+            for (b_arrival, b_id) in &population {
+                let b = entry(b_arrival, b_id);
+                let a_precedes_b = cmp_ops(a, b) == Ordering::Less;
+                if !a_precedes_b {
                     continue;
                 }
-                for c in &population {
-                    if cmp_ops((&b.0, &b.1), (&c.0, &c.1)) != Ordering::Less {
+                for (c_arrival, c_id) in &population {
+                    let c = entry(c_arrival, c_id);
+                    let b_precedes_c = cmp_ops(b, c) == Ordering::Less;
+                    if !b_precedes_c {
                         continue;
                     }
                     assert_eq!(
-                        cmp_ops((&a.0, &a.1), (&c.0, &c.1)),
+                        cmp_ops(a, c),
                         Ordering::Less,
-                        "a < b and b < c but not a < c: {:?} {:?} {:?}",
-                        a.0,
-                        b.0,
-                        c.0
+                        "a < b and b < c but not a < c: {a_arrival:?} {b_arrival:?} {c_arrival:?}"
                     );
                 }
             }
@@ -576,16 +613,16 @@ mod tests {
         // what makes "strict total order" a checked claim rather than a
         // comment.
         let population = every_combination();
-        for a in &population {
-            for b in &population {
-                let forward = cmp_ops((&a.0, &a.1), (&b.0, &b.1));
-                let backward = cmp_ops((&b.0, &b.1), (&a.0, &a.1));
+        for (a_arrival, a_id) in &population {
+            let a = entry(a_arrival, a_id);
+            for (b_arrival, b_id) in &population {
+                let b = entry(b_arrival, b_id);
+                let forward = cmp_ops(a, b);
+                let backward = cmp_ops(b, a);
                 assert_eq!(
                     forward,
                     backward.reverse(),
-                    "not antisymmetric: {:?} vs {:?}",
-                    a.0,
-                    b.0
+                    "not antisymmetric: {a_arrival:?} vs {b_arrival:?}"
                 );
             }
         }
@@ -607,17 +644,15 @@ mod tests {
         // contract needed stating — the assertion failed on exactly the pair
         // the reviewer's probe found.
         let population = every_combination();
-        for a in &population {
-            for b in &population {
-                if a.1 == b.1 {
+        for (a_arrival, a_id) in &population {
+            for (b_arrival, b_id) in &population {
+                if a_id == b_id {
                     continue;
                 }
                 assert_ne!(
-                    cmp_ops((&a.0, &a.1), (&b.0, &b.1)),
+                    cmp_ops(entry(a_arrival, a_id), entry(b_arrival, b_id)),
                     Ordering::Equal,
-                    "distinct op ids tied: {:?} {:?}",
-                    a.0,
-                    b.0
+                    "distinct op ids tied: {a_arrival:?} {b_arrival:?}"
                 );
             }
         }
@@ -640,7 +675,7 @@ mod tests {
         let id_only = Arrival::from_parts(None, Some(a_message_id(1)));
         assert_ne!(unordered, id_only, "the two arrivals must genuinely differ");
         assert_eq!(
-            cmp_ops((&unordered, &op.id()), (&id_only, &op.id())),
+            cmp_ops(entry(&unordered, &op.id()), entry(&id_only, &op.id())),
             Ordering::Equal,
             "sharing an op id ties, which is what the precondition is about"
         );
@@ -669,7 +704,7 @@ mod tests {
         ];
         for arrival in shapes {
             assert_eq!(
-                cmp_ops((&arrival, &op.id()), (&arrival, &op.id())),
+                cmp_ops(entry(&arrival, &op.id()), entry(&arrival, &op.id())),
                 Ordering::Equal,
                 "not reflexive for {arrival:?}"
             );
@@ -687,7 +722,9 @@ mod tests {
             (Arrival::ordered(3, a_message_id(1)), id),
             (Arrival::ordered(2, a_message_id(1)), id),
         ];
-        versions.sort_by(|a, b| cmp_ops((&a.0, &a.1), (&b.0, &b.1)));
+        versions.sort_by(|(a_arrival, a_id), (b_arrival, b_id)| {
+            cmp_ops(entry(a_arrival, a_id), entry(b_arrival, b_id))
+        });
         assert_eq!(
             versions.iter().map(|v| v.0.lamport()).collect::<Vec<_>>(),
             vec![Some(3), Some(2), Some(1)]
@@ -706,7 +743,7 @@ mod tests {
         for lamport in [0u64, 1, u64::MAX] {
             let ordered = Arrival::ordered(lamport, a_message_id(1));
             assert_eq!(
-                cmp_ops((&ordered, &op.id()), (&unordered, &op.id())),
+                cmp_ops(entry(&ordered, &op.id()), entry(&unordered, &op.id())),
                 Ordering::Less,
                 "lamport {lamport} must still beat an unordered op"
             );
@@ -722,7 +759,7 @@ mod tests {
         let (low, high) = two_ops_by_ascending_id();
         let unordered = Arrival::unordered();
         assert_eq!(
-            cmp_ops((&unordered, &low.id()), (&unordered, &high.id())),
+            cmp_ops(entry(&unordered, &low.id()), entry(&unordered, &high.id())),
             Ordering::Less
         );
     }
@@ -736,7 +773,7 @@ mod tests {
         let (low, high) = two_ops_by_ascending_id();
         let unordered = Arrival::unordered();
         assert_eq!(
-            cmp_ops((&unordered, &low.id()), (&unordered, &high.id())),
+            cmp_ops(entry(&unordered, &low.id()), entry(&unordered, &high.id())),
             low.id().cmp(&high.id())
         );
     }
@@ -804,7 +841,7 @@ mod tests {
 
         let ordered = Arrival::ordered(0, a_message_id(9));
         assert_eq!(
-            cmp_ops((&ordered, &op.id()), (&id_only, &op.id())),
+            cmp_ops(entry(&ordered, &op.id()), entry(&id_only, &op.id())),
             Ordering::Less,
             "a message id alone must not confer an order"
         );
@@ -824,8 +861,8 @@ mod tests {
         let high_op_low_msg = Arrival::from_parts(None, Some(a_message_id(1)));
         assert_eq!(
             cmp_ops(
-                (&low_op_high_msg, &low.id()),
-                (&high_op_low_msg, &high.id())
+                entry(&low_op_high_msg, &low.id()),
+                entry(&high_op_low_msg, &high.id())
             ),
             Ordering::Less
         );
@@ -855,7 +892,7 @@ mod tests {
 
         let lower = Arrival::from_parts(Some(4), None);
         assert_eq!(
-            cmp_ops((&lamport_only, &op.id()), (&lower, &op.id())),
+            cmp_ops(entry(&lamport_only, &op.id()), entry(&lower, &op.id())),
             Ordering::Less
         );
 
@@ -865,7 +902,7 @@ mod tests {
         // other rule, and the exact arm whose boundary a review found untested.
         let with_id = Arrival::ordered(5, a_message_id(1));
         assert_eq!(
-            cmp_ops((&with_id, &op.id()), (&lamport_only, &op.id())),
+            cmp_ops(entry(&with_id, &op.id()), entry(&lamport_only, &op.id())),
             Ordering::Less
         );
 
@@ -876,7 +913,10 @@ mod tests {
         // breaks `Ord`'s contract outright.
         let (low, high) = two_ops_by_ascending_id();
         assert_eq!(
-            cmp_ops((&lamport_only, &low.id()), (&lamport_only, &high.id())),
+            cmp_ops(
+                entry(&lamport_only, &low.id()),
+                entry(&lamport_only, &high.id())
+            ),
             Ordering::Less
         );
     }
