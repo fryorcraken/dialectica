@@ -193,6 +193,56 @@ Keeping the three inside one method also means the mutation table below has one
 place to break each of them, which is the practical test that they are all
 load-bearing.
 
+### Decision: Exhaustiveness sits on the action, not on the op kind
+
+Found when `StoaMetadata` landed as a fifth op kind and the question "what would
+a new kind do here?" was asked of each place this module inspects one. The build
+passed; the answer was still a defect.
+
+The filter is `matches!(entry.op.op.kind, OpKind::Moderate { .. })`, which is
+right and deliberately non-exhaustive: it asks "is this a moderation?", a new
+kind should simply not match, and forcing the compiler to ask about every future
+kind at a *filter* would be noise.
+
+The final conversion was not. It read:
+
+```rust
+match deciding.op.op.kind {
+    OpKind::Moderate { action: Hide, .. } => Hidden(deciding),
+    _ => Unhidden(deciding),
+}
+```
+
+That `_` covered two unrelated things: a `Moderate{Unhide}`, which is correct,
+and **any other op kind**, which is unreachable — but unreachable only because
+the filter thirty lines earlier established it, not because anything at the match
+said so. So a fifth kind reaching that line would have been reported as
+`Unhidden`: a fail-open default, thirty lines from the only thing preventing it.
+
+**Why nothing caught it.** The compiler had nothing to object to, because the
+wildcard is exhaustive by construction. And **no test could notice, because every
+test reaches that line through the filter** — the invariant that makes the arm
+unreachable is the same invariant that stops any fixture exercising it. It
+survived security, blind spec-test, design and architecture review; none of the
+four is looking for an arm that cannot be reached.
+
+This is the fourth instance of the defect family in
+`.claude/agents/README.md`, and the only one the compiler *could* have caught.
+The other three were fixtures where two rules agreed, or a check retiring a test
+in front of it; this one the compiler was willing to check and was told not to.
+
+**The fix moves the exhaustiveness rather than adding a guard.** Destructure the
+kind, then match on the `ModerationAction`, so the compiler checks exhaustiveness
+over the action — which is the enum whose variants actually determine the answer.
+Verified by deleting the `Unhide` arm and watching the build fail with
+`non-exhaustive patterns: &ModerationAction::Unhide not covered`, which makes it
+the compiler's property rather than one this document asserts.
+
+The kind mismatch becomes a stated impossibility with a chosen outcome:
+`Unmoderated`, not `Unhidden`. A non-moderation op deciding a moderation question
+is a bug in the filter, and the safe reading of a bug is that nothing was
+moderated — the same asymmetry as the `Hide` tie-break, applied one layer down.
+
 ### Decision: The answer names the op, and is not a bool
 
 `resolve` returns:
