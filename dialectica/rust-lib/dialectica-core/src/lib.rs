@@ -21,6 +21,7 @@ pub mod identity;
 pub mod keystore;
 pub mod log;
 pub mod op;
+pub mod revision;
 pub mod stoa;
 pub mod wire;
 

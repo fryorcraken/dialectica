@@ -1003,6 +1003,13 @@ merge strategy. Two versions of a post do not *conflict* — they are ordered:
   that a post was edited, and a moderator acting on a post is acting on a
   version they can name.
 
+**The resolver that applies this rule is built** (see the `post-revision` spec):
+`dialectica-core`'s `revision::current_version` answers "which version of this
+post is current?" over the op log. Every version names the original post —
+revisions do not chain — and the reasoning for that, for the order in which a
+version is verified and its authorship checked, and for what the current
+ordering regime does and does not guarantee, is in the change's `design.md`.
+
 The reason this matters beyond edits: it means dialectica has **almost no
 shared mutable state**. Posts and replies are append-only; an edit appends too.
 SDS gives an order, and an order plus "only the author may revise" is a complete
