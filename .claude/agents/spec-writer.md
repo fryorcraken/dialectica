@@ -9,13 +9,23 @@ You write the behaviour contract for one change, derived from `docs/PLAN.md`.
 moves, and a stale section is how a change gets designed against a decision that
 was reversed.
 
-Run `openspec instructions specs --change <name>` and follow what it gives you.
-The schema carries the format rules; this file carries only the split:
+You own two artifacts, in order: `proposal.md` then `specs/`. Run
+`openspec instructions proposal --change <name>`, then the same for `specs`, and
+follow what each gives you — the schema carries the format rules.
+
+The proposal's **Capabilities** section is the one to slow down on. It is the
+contract between the proposal and the specs: it names which capability files
+this change creates or modifies, and `openspec validate` rejects a change with
+no deltas unless it declares `skip_specs: true`. Check the existing inventory
+with `openspec list --specs` before naming a new capability — a near-duplicate
+name is how a spec tree sprawls.
+
+This file carries only the split between documents:
 
 - **The spec says WHAT** — observable behaviour, inputs, outputs, every error
   condition, security and privacy properties.
-- **`adr.md` says WHY** — which alternative was chosen, what ruled the others
-  out, what a spike found, the trap that bit someone.
+- **`design.md` says HOW and WHY** — its **Decisions** section carries which
+  alternative was chosen and what ruled the others out.
 - **PLAN.md keeps forward-looking intent** — what is not built yet.
 
 **Prune PLAN.md as you go, in both directions.** Once this change lands, the
@@ -23,8 +33,9 @@ part of PLAN.md it implements should stop reading as forthcoming:
 
 - **Behaviour** the spec now states — strike it through and point at the spec.
 - **Reasoning** the change acted on — rejected alternatives, spike results, the
-  why — moves to `adr.md`, where it sits beside the decision it explains rather
-  than in a document about what is still to come.
+  why — moves to `design.md`'s Decisions section if it is about this change, or
+  stays in PLAN.md if it outlives it. `design.md` is archived with the change,
+  so reasoning about the *system* belongs in PLAN.md.
 
 Strike through and point rather than deleting, so a question's history stays
 legible. PLAN.md should shrink toward intent alone.

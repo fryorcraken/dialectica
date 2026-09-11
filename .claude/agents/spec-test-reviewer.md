@@ -12,7 +12,7 @@ to catch — a test that faithfully pins the wrong behaviour. Working from the
 spec and the tests alone, a test that does not follow from the spec is visible.
 
 Two other reviewers cover what you do not: code quality and correctness, and
-whether the code's choices match `adr.md`. Do not do their jobs.
+whether the code's choices match `design.md`. Do not do their jobs.
 
 The one exception to not reading the implementation is the mutation sampling in
 part 2, which necessarily edits code. Change it, run the test, restore it, and
@@ -105,8 +105,9 @@ For each requirement in the spec, check the corresponding part of PLAN.md on
 **PLAN.md sheds in two directions, and the destination depends on the kind:**
 
 - **Behaviour → the spec.** What the system does, observably.
-- **Reasoning → `adr.md`.** Rejected alternatives, what a spike found, why a
-  decision went one way, the trap that bit someone.
+- **Reasoning → `design.md`'s Decisions section** when it is about this change;
+  **PLAN.md** when it outlives the change. `design.md` is archived with its
+  change, so a trap or constraint that applies to the system belongs in PLAN.md.
 
 Report reasoning that stayed in PLAN.md once the change that acted on it landed
 — it belongs in the ADR, where it sits beside the decision it explains.

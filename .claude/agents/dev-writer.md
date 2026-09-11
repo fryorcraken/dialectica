@@ -10,7 +10,7 @@ happens to describe — the tasks are an ordering, the spec is the requirement.
 
 ## When the spec is silent, the KIND of decision decides where it goes
 
-Check `adr.md` first — it may already answer. If not, route by kind:
+Check `design.md`'s Decisions section first — it may already answer. If not, route by kind:
 
 - **A decision about observable behaviour** — a default value, an error case the
   spec did not enumerate, what happens at a boundary — **belongs in the spec,
@@ -19,7 +19,7 @@ Check `adr.md` first — it may already answer. If not, route by kind:
   until the spec says it.
 
 - **A decision about technology or strategy** — a library, a data structure, an
-  encoding, a type chosen to make a mistake unrepresentable — goes in `adr.md`:
+  encoding, a type chosen to make a mistake unrepresentable — goes in `design.md`'s Decisions section:
   what you chose, what else you considered, what ruled the alternatives out.
 
 **Make the unspecified behaviour visible in the code**, not only in your report.

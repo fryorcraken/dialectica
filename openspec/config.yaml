@@ -1,32 +1,16 @@
+# OpenSpec's built-in workflow: proposal → specs → design → tasks.
+#
+# A custom schema with a separate `adr.md` was built and dropped: `design.md`
+# already carries a **Decisions** section asking for "key technical choices with
+# rationale (why X over Y?)... alternatives considered for each decision", which
+# is the substance of an ADR. A second artifact was duplication.
+#
+# What canonical ADRs add over this is lifecycle, not content — sequential
+# numbering, immutability, and a superseded-by chain. `docs/PLAN.md` already
+# serves that role here, and better: it carries what was rejected and why as
+# prose, updated in place when the reasoning changes.
+#
+# So: per-change reasoning goes in `design.md`; reasoning that outlives a change
+# goes in PLAN.md. Neither belongs in a spec — OpenSpec silently drops a REMOVED
+# requirement when the capability is new, with validation still passing.
 schema: spec-driven
-
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
-
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
-
-# Per-operation guidance (optional)
-# Add advisory guidance for how apply and archive work should be conducted.
-# This is separate from artifact rules above.
-# Example:
-#   operations:
-#     apply:
-#       guidance:
-#         - Keep test summaries concise
-#     archive:
-#       guidance:
-#         - Summarize the archive outcome before finishing
