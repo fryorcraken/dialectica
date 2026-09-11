@@ -65,21 +65,45 @@
 //! `design.md` argues why closed is the right direction, and what would reverse
 //! it.
 //!
-//! # Correct under both orders, with no branch
+//! # Exactly one `Arrival` is read, and which one is the whole design
 //!
-//! Nothing here reads an [`Arrival`](crate::arrival::Arrival). The fold walks
-//! [`OpLog::iter_target`], which is already in [`cmp_ops`](crate::arrival::cmp_ops)
-//! order, and takes the first entry that binds — because that is the position
-//! the ordering rule defines as current.
+//! This section said "nothing here reads an `Arrival`" and "no branch" until
+//! architecture review caught it. Both became false with the `Hide`-wins
+//! tie-break, and a stale paragraph here is worse than in most places: it is
+//! what the author of a fourth resolver reads to learn the house discipline.
 //!
-//! **Not because the first entry is the most recent.** `cmp_ops` leads with the
-//! highest Lamport timestamp only where the transport supplied one; otherwise —
-//! which is every op today — it falls back to *ascending op id*, an order
+//! What [`resolve`] actually does: filter [`OpLog::iter_target`] down to the
+//! candidates that bind, then read **the leading candidate's**
+//! [`Arrival`](crate::arrival::Arrival) — one `Arrival`, exactly once — and
+//! branch on it. Where the transport ordered that op, its position is a real
+//! last-write-wins answer and stands. Where it did not, the degraded order
+//! carries no recency, and a `Hide` among the candidates decides instead. The
+//! full statement is on [`resolve`]; the reasoning is in the change's
+//! `design.md`.
+//!
+//! **Why the leader's, and not the read's.** The tempting alternative is to ask
+//! whether the *sequence* was ordered — a property of what `iter_target`
+//! returned. That is a different set of ops from the one whose leader decides,
+//! because filtering happens in between: a read can contain unordered ops that
+//! all fail authority, and the binding candidates left behind can be entirely
+//! transport-ordered. Asking about the read would demote that case to the
+//! degraded branch for no reason. The question this module needs is about the op
+//! that is *about to decide*, so that is the op whose arrival it reads.
+//!
+//! **What survived from the old paragraph, because it is still true.** The
+//! leading entry is taken because that is the position the ordering rule defines
+//! as current — **not because it is the most recent**. `cmp_ops` leads with the
+//! highest Lamport timestamp only where the transport supplied one; otherwise,
+//! which is every op today, it falls back to *ascending op id*, an order
 //! carrying no recency whatever. `log.rs`'s [`OpLog::iter_target`] and
 //! [`cmp_ops`](crate::arrival::cmp_ops) both state this; it is not restated
-//! here. What matters to this fold is that the rule defines a first position and
-//! every peer computes the same one, which holds under both branches — so the
-//! same code is correct before and after the upstream fix.
+//! here.
+//!
+//! The old paragraph then concluded that the same code is therefore correct
+//! under both orders with no branch. That is the step that was wrong, and
+//! `design.md` records why: it established *convergence* and treated convergence
+//! as sufficient, never asking whether last-write-wins is meaningful at all when
+//! there is no "last". It is not, and the branch above is the consequence.
 
 use crate::identity::{Address, PublicKey};
 use crate::log::{Entry, OpLog};

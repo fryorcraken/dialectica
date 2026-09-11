@@ -37,6 +37,47 @@ system refuses to let a caller skip*.
 
 ## Decisions
 
+### Decision: The two resolvers' folds are not extracted into one
+
+Recorded because the surface resemblance is strong and the pressure to unify will
+recur. Both changes list the other under "deliberately does not build"; neither
+said why they stayed apart, which leaves the next reader to rediscover it.
+
+They look like one job: walk `iter_target`, keep the first entry passing a
+predicate, fall back when none does. An extracted
+`first_binding(log, target, P) -> Option<&Entry>` would serve both. Three things
+say otherwise.
+
+1. **This one is no longer a `find`.** It is filter → collect → read the leading
+   candidate's `Arrival` → conditionally re-search for a `Hide`. The revision
+   resolver is a genuine `find(..).unwrap_or(original)`. Only one of the two fits
+   the extracted shape.
+
+2. **The predicates differ in arity, which is the part a shared signature would
+   erase.** `is_valid_revision(candidate, original)` is a *relation between two
+   entries* — §5.7's authorship rule needs the target op to answer at all.
+   `Moderators::authorises(&entry)` is a *property of one entry* checked against
+   ambient state the caller supplied. A shared `Fn(&Entry) -> bool` can express
+   the second and not the first, so unifying would mean widening it to
+   `Fn(&Entry, &Entry)` and passing a dummy on this side — a signature admitting
+   it serves two callers.
+
+3. **The result types are not unifiable.** The revision resolver's `None` means
+   "not a post, or not held". [`Moderation::Unmoderated`] means "held, and
+   nothing bound". Different lattices: one is absence of a subject, the other is
+   presence of a subject with no verdict.
+
+**The strongest evidence is historical.** `first_binding` would have fitted this
+resolver *before* the hide-bias commit, and would have had to be un-extracted
+*after* it. An abstraction that a single security finding forces back apart was a
+resemblance rather than a seam — and the resemblance was strongest exactly when
+there was least reason to trust it, because both folds were young.
+
+What would change this: a third resolver arriving with the one-entry predicate
+shape and the same fallback semantics. Two instances are a coincidence; three are
+a pattern, and CLAUDE.md's "do not refactor speculatively" stops applying once the
+generality is demonstrated rather than predicted.
+
 ### Decision: The moderator set is a type, and "unknown" is unrepresentable
 
 The question the task posed was fail-closed versus fail-open when the genesis
@@ -187,6 +228,15 @@ The cost is that the return type borrows from the log. That is the same trade
 return type as the thing Phase 2's SQLite implementation may want to revisit; this
 resolver will follow whatever it becomes.
 
+**When it is revisited, measure against this resolver rather than the revision
+one.** `resolve` collects a second `Vec` on top of `iter_target`'s — the filter
+to binding candidates — because the degraded branch has to re-search the
+candidates after inspecting the leader, which a single pass cannot do. The
+revision resolver allocates once. So the two are not interchangeable as cost
+estimates, and the worse of them is the one to size a streaming read against.
+Not worth restructuring now: §3.3 puts read traffic on the materialised view, so
+a resolver over a peer's whole history is a rebuild rather than a render.
+
 ### Decision: Hold the line on the moderator set being a set of one
 
 §13 names concurrent moderator-set edits as "the one genuine merge question in the
@@ -286,6 +336,16 @@ wrong by a later edit. Where the transport supplied Lamport values, §5.7's rule
 is real and last-write-wins stands untouched — biasing there would make every
 hide permanent, a worse bug than the one being closed.
 `a_transport_ordered_unhide_still_reverses_a_hide` pins it.
+
+**The condition asks about the leading candidate, not about all of them**, and
+that distinction is now load-bearing outside this module — do not "simplify" it
+without reading what depends on it. Architecture review used it to correct a
+queued `Ordered { regime, entries }` design for the log's read result: a regime
+stamped on the read describes the *pre-filter* sequence, which is a different set
+of ops from the binding candidates whose leader decides here. Under a `Mixed`
+regime a resolver would still have to inspect its own leader's `Arrival`, leaving
+two ways to ask one question. The argument is in this module because that is
+where the requirement arose; it is cited elsewhere because it generalises.
 
 **Why not in `cmp_ops`.** Two reasons. It is moderation semantics, and a general
 comparator has no business knowing that one op kind's payload is safer to
