@@ -594,7 +594,13 @@ impl Keystore {
     /// `identity.rs`'s doc comment names exactly this copy as deferred to the
     /// keystore. The obvious way to discharge that is:
     ///
-    /// ```ignore
+    /// `text`, not `ignore`: this block is illustrative prose showing code
+    /// that NO LONGER EXISTS, so it is not a doc-test anyone should compile or
+    /// count. `ignore` still registers a doc-test (reported as ignored), which
+    /// made cargo run 193 tests where the source declared 192 — and CI's
+    /// count-the-tests gate caught exactly that, which is its job.
+    ///
+    /// ```text
     /// let mut bytes = sk.to_bytes();
     /// let root = Zeroizing::new(bytes);
     /// bytes.zeroize();          // easy to delete, and nothing notices
