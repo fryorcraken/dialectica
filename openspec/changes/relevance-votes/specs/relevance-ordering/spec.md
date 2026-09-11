@@ -93,34 +93,41 @@ Exclusion SHALL NOT be represented as an adjustment to a post's score. A suffici
 - **WHEN** an excluded post accumulates more votes in the raising direction than any present post has
 - **THEN** it remains absent from the ordering
 
-### Requirement: Only the assessment axis orders; the response axis never does
+### Requirement: A response never raises or lowers a target
 
-Where a reader records both an assessment of a contribution's quality and a response stating their own position on it, an ordering SHALL be computed from the assessment axis alone. A response SHALL NOT raise or lower any target's position, and SHALL NOT be aggregated into any score.
+Where a reader records both an assessment of a contribution's quality and a response stating their own position on it, a **score** SHALL be computed from the assessment axis alone. A response SHALL NOT raise or lower any target's position in any score-ordered result, and SHALL NOT be aggregated into any score.
 
 The two are independent judgements, and a control that conflated them would rank by consensus: the majority position would rise and a well-made argument against it would fall, for no reason connected to its quality. A forum organised around reasoned disagreement cannot make disagreeing with a post the mechanism that buries it.
 
-It follows that a target SHALL occupy the same position whether every reader agrees with it, every reader disagrees with it, or none has responded at all. Declining to respond SHALL be an ordinary outcome rather than a missing value to be defaulted, and SHALL be indistinguishable in its effect on ordering from any response.
+It follows that a target SHALL occupy the same position in a score-ordered result whether every reader agrees with it, every reader disagrees with it, or none has responded at all. Declining to respond SHALL be an ordinary outcome rather than a missing value to be defaulted.
+
+**A response MAY determine whether a target is selected into a result, provided it does not order within one.** Selecting for divided response is not ranking by agreement: it neither advantages the majority position nor disadvantages the minority, because the criterion is the division itself and is satisfied identically whichever side is larger. The prohibition is on agreement conferring advantage, not on the response axis being read.
 
 #### Scenario: Disagreement does not lower a position
 
 - **WHEN** a target assessed as constructive receives responses of disagreement from every identity that responded
-- **THEN** its position is the same as if none had responded
+- **THEN** its position in a score-ordered result is the same as if none had responded
 
 #### Scenario: Agreement does not raise a position
 
 - **WHEN** two targets carry identical assessments and one additionally carries responses of agreement
 - **THEN** the two occupy positions determined by their assessments alone
 
+#### Scenario: Which side is in the majority confers no advantage
+
+- **WHEN** two targets carry identical assessments and identically divided responses, and the majority side differs between them
+- **THEN** neither is placed ahead of the other on that account, in any result
+
 #### Scenario: An unanswered response axis is not a missing value
 
 - **WHEN** an identity assesses a target without stating a response
-- **THEN** the assessment counts toward the ordering in full
+- **THEN** the assessment counts toward the score in full
 - **AND** no default response is recorded or inferred
 
 #### Scenario: A response alone moves nothing
 
 - **WHEN** the only records naming a target are responses carrying no assessment
-- **THEN** the target's position is that of a target with no records naming it
+- **THEN** the target's position in a score-ordered result is that of a target with no records naming it
 
 ### Requirement: An engagement ordering counts distinct assessing identities
 
@@ -259,6 +266,36 @@ A threshold at which accumulated lowering votes withhold a post SHALL NOT exist.
 
 - **WHEN** a post at the lower bound is ordered alongside a hidden post
 - **THEN** the downvoted post appears and the hidden post does not
+
+### Requirement: A contested ordering distinguishes disputed from ignored
+
+An ordering MAY be offered that surfaces targets a Stoa assessed as worth reading and responded to divergently. Such an ordering SHALL require both a quantity of assessment and a division of response, and SHALL NOT place a target on the strength of divided response alone.
+
+A target that few assessed is not disputed but ignored, and the two are different things a reader wants told apart. An ordering that read only the division would rank a target with one response each way alongside one the whole Stoa split over, because both divide evenly — so the quantity of assessment is what separates a dispute from an absence of interest.
+
+This ordering SHALL NOT raise or lower any target in any other ordering. It is a selection, not a score, so a target's position elsewhere SHALL be unchanged by how divided its responses are.
+
+Because it requires both axes to move, it SHALL NOT be reachable by acting on either alone: no quantity of assessment without divided response SHALL place a target here, and no division of response without assessment SHALL do so.
+
+#### Scenario: A widely assessed and evenly divided target is surfaced
+
+- **WHEN** a target carries assessments from many identities and responses divided near evenly
+- **THEN** it may appear in the contested ordering
+
+#### Scenario: A barely assessed target is not contested
+
+- **WHEN** a target carries responses divided evenly but assessments from very few identities
+- **THEN** it does not appear in the contested ordering ahead of a target with the same division and far more assessments
+
+#### Scenario: Undivided response is not contested however widely assessed
+
+- **WHEN** every identity that responded to a widely assessed target responded the same way
+- **THEN** it does not appear in the contested ordering
+
+#### Scenario: Contested placement does not alter other orderings
+
+- **WHEN** a target's responses become more divided while its assessments are unchanged
+- **THEN** its position in the engagement ordering is unchanged
 
 ### Requirement: An assessment never becomes a moderation
 

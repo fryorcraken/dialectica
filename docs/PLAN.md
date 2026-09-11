@@ -1325,8 +1325,13 @@ cannot be gamed by minting identities, plus one that can:
   interim's whole premise and what rule 3 removes later. A post's score is
   **floored at zero**, so `noise` can order a post last but never remove it.
   **The response axis (`agree`/`disagree`) contributes nothing to this or any
-  ordering** — §7.4 is where that asymmetry is argued, and it is load-bearing
+  *score*** — §7.4 is where that asymmetry is argued, and it is load-bearing
   rather than a refinement.
+- **`contested`** — high assessed quality, split response (§7.4). Not a score
+  and not a variant of `top`: it is a *conjunction* of the two axes, so it ranks
+  nothing up or down and cannot be gamed by pushing either axis alone. On a
+  forum named for dialectic this is plausibly the most valuable ordering in the
+  product, and it is the concrete payoff for asking readers for a second signal.
 
 **`top` is an engagement ordering, not a relevance signal, and the distinction
 is the whole of the claim.** It reports how many distinct identities voted,
@@ -1742,6 +1747,33 @@ disagree therefore costs a post nothing.**
   **A net agreement count must never be shown**, because a net score is what
   makes disagreement feel like damage, and the display is where that pressure
   actually lands.
+
+#### `contested` is a shipped ordering, and it is the payoff
+
+Separating the axes buys an ordering that a single axis can only approximate:
+**`contested` — high assessed quality, split response.** Posts a Stoa agrees are
+worth reading and disagrees about. On a forum named for dialectic that is
+arguably the most valuable ordering in the product, and it should ship alongside
+`new`, `active` and `top` rather than being left implicit in a distribution
+display.
+
+**Reddit's `controversial` is the prior art and it is better than a first pass
+credits.** It uses disagreement as a *discovery* signal rather than a penalty,
+which is the right instinct and the one thing a conflated axis can still express.
+
+**What makes this version different is that Reddit has to infer the split from a
+net near zero**, because up and down are one number by then. That inference
+cannot distinguish *contested* from *ignored*: a post at +1/−1 and a post at
++400/−398 both read as "near zero", and a post nobody cared about scores the same
+as one the Stoa split over. That is why `controversial` also surfaces mediocre
+posts, and why it ends up a tab nobody opens rather than a primary ordering.
+
+With the axes genuinely separate, the quantity is read directly rather than
+inferred: **assessment supplies "is this worth reading", response supplies "do we
+agree", and `contested` is the conjunction.** A post nobody assessed is not
+contested, it is ignored, and the two are distinguishable without a volume
+heuristic. **That distinction is the argument for the second axis in one
+sentence.**
 
 #### Why this is an evaluation and not a report
 

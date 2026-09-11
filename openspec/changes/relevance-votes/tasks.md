@@ -83,6 +83,11 @@ Not done here and deliberately not started.
 - [x] Confirm both fit the existing one-byte discriminant, and that unknown
       discriminants already fail closed.
 - [x] Spec the axis separation and the never-becomes-moderation property.
+- [x] Ship `contested` as an ordering rather than leaving it implicit in a
+      display, and state what makes it better than Reddit's inferred version.
+      **Not contingent on the A/B/C decision** — it holds under all three.
+- [x] Record the three candidate shapes with C recommended (`design.md` §14),
+      including the risk at equal billing to the recommendation.
 - [ ] Implementation, when accepted, needs these tests specifically:
   - [ ] A target's position is **identical** under unanimous agreement,
         unanimous disagreement, and no responses. This is the requirement that
@@ -93,6 +98,13 @@ Not done here and deliberately not started.
   - [ ] An older peer refuses an unknown discriminant rather than counting it —
         pin the discriminant values with hardcoded `assert_eq!`, since
         `cargo mutants` cannot see a wrong `const`.
+  - [ ] **`contested` separates disputed from ignored**: a target with one
+        response each way does not outrank one the whole Stoa split over. This
+        is the fixture that must make the two rules disagree — build it so a
+        division-only implementation and a division-plus-volume one give
+        *opposite* answers, or it passes either way.
+  - [ ] Which side holds the majority confers no advantage — construct two
+        targets with mirrored divisions and assert neither leads.
 - [ ] **Measurement, not reasoning**: ship able to observe whether `noise`
       drifts into meaning "disagree". §7.4 says the first finding that
       contradicts it is its answer, and that is only true if it can be observed.

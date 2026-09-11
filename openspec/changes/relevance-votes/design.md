@@ -686,7 +686,112 @@ response secondary and optional, with both degradations acceptable. Unlike the
 sybil arithmetic, this cannot be settled by reasoning; it wants observation, and
 the first finding that contradicts §7.4 should be treated as §7.4's answer.
 
-## 14. What this document got wrong, corrected in review
+## 14. Decision: three shapes for the two axes, and why C is recommended
+
+**Status: open. The owner is reviewing §7.4 as written (shape B) and has not
+chosen.** Recorded now because the comparison survives whichever way it goes, and
+because a design examined and rejected is worth more written down than
+rediscovered.
+
+### Reddit's `controversial` deserved more credit than §13's first pass gave it
+
+The prompt for this comparison was the observation that **Reddit did a good job,
+and has a `controversial` ordering**. That is correct and §13 under-credited it.
+`controversial` uses disagreement as a **discovery** signal rather than a
+penalty, which is the one thing a conflated axis can still do well, and it is the
+same instinct §7.4 is built on.
+
+**The reason it still fails is the instructive part, and it is the argument for
+separating the axes, arrived at by taking the counter-example seriously:**
+
+> `controversial` only works because it reads the two axes **back out** of one
+> conflated number — inferring "contested" from a net near zero.
+
+That inference cannot separate *contested* from *ignored*. A post at +1/−1 and a
+post at +400/−398 both read as "near zero". Hence the volume correction every
+implementation carries, hence its surfacing of mediocre-and-ignored posts, and
+hence its status as a tab nobody opens rather than a primary ordering. A
+separated design reads the quantity directly instead of inferring it.
+
+### The three shapes
+
+**A — Reddit-faithful: one axis, derived orderings.** Keep `up`/`down` as
+merged. Derive `top` (`up − down`), `contested` (volume × evenness), and a noise
+filter (low ratio at low volume).
+
+- *Wins:* zero new ops, zero UI change, ships immediately. `contested` comes free.
+- *Loses:* the conflation is never resolved, only inferred around. A disagreeing
+  downvote still lowers `top`, so §7.4's top-right cell gets a side door rather
+  than a seat. Spam and disagreement stay indistinguishable, which forecloses any
+  later quality signal that is not brigadeable.
+
+**B — two explicit axes.** What §7.4 currently specifies.
+
+- *Wins:* the axes are genuinely separate, so `noise` means spam and nothing
+  else, and `contested` is precise rather than inferred.
+- *Loses:* two controls, and most readers will use neither if asked to think.
+  This is the risk flagged throughout and it is behavioural, not reasoned.
+
+**C — one control, two gestures.** One primary control with four outcomes:
+upvote = agree + worth reading; **downvote = disagree, still worth reading**;
+a secondary gesture (long-press) = `noise`; nothing = nothing. Then
+`top = up + down` — both directions signal worth-reading — `noise` is excluded
+from `top` entirely and never sums, and `contested` is the near-even split at
+high volume.
+
+- *Wins:* one primary control, so most of B's cost evaporates. Ordinary users
+  learn nothing new — they up/down as always, and the meaning shift is invisible
+  at the point of clicking. Spam reporting is rare, so a less convenient gesture
+  matches its real frequency.
+- *Loses:* see the risk below, stated at full strength.
+
+### The property that makes C worth the risk
+
+**On this forum, disagreeing with something makes it more visible, not less.**
+
+If that holds it is a **design principle rather than a feature**, and it belongs
+near §1's Stoa tension rather than inside a ranking subsection — it is §1's
+argument about removal, restated about attention, and it is a claim that could go
+on the front page and be true.
+
+### The risk, at equal billing
+
+**A downvote that raises a post violates a decade of learned behaviour.** Users
+arrive with a model built by every forum they have used, and C silently inverts
+its consequence. Some will feel misled when they discover it — not confused,
+*misled*, which is worse and is a trust problem rather than a usability one.
+
+**And "discoverable and fixable through copy" is a claim about users that nobody
+here has tested.** It is the kind of assertion that sounds reasonable in a design
+document and is contradicted by the first real cohort. It should be read as the
+weakest sentence in the case for C, not as its mitigation.
+
+C is also the hardest of the three to explain in one sentence, and a ranking rule
+that cannot be explained is one users construct folklore about.
+
+### Recommendation, and what would change it
+
+**C, with B as the fallback.** C gets most of B's separation at a fraction of the
+interaction cost, and its risk is *discoverable* — it shows up in confused
+feedback and can be answered with copy, placement, or reverting to B. B's risk is
+that nobody uses the second control, which is silent, and a signal nobody
+supplies is indistinguishable from a signal that does not work.
+
+**A is the honest fallback if the whole two-axis line is over-engineering.** It
+is not wrong. It is permanently stuck with spam and disagreement being the same
+byte, which is a real cost paid later rather than now.
+
+**What would move the recommendation to B:** evidence that users do supply a
+second signal when asked, or a decision that the surprise in C is unacceptable
+regardless of frequency. **What would move it to A:** deciding `contested` alone
+justifies neither the second axis nor the gesture, since A gets an approximate
+version of it for free.
+
+**`contested` ships under all three**, which is why §7.4 now names it as an
+ordering rather than leaving it implicit in a display. That part is not
+contingent on this decision.
+
+## 15. What this document got wrong, corrected in review
 
 Recorded rather than silently fixed, because the reasoning that produced the
 error is the useful part.
