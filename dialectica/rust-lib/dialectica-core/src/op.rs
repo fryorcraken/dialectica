@@ -740,6 +740,7 @@ mod tests {
             title: "Agora".to_string(),
         }
         .address()
+        .expect("a short title is well under MAX_TITLE_BYTES")
     }
 
     fn a_post() -> Op {
@@ -940,7 +941,8 @@ mod tests {
                     policy: Policy::Open,
                     title: "Another".to_string(),
                 }
-                .address(),
+                .address()
+                .expect("a short title is well under MAX_TITLE_BYTES"),
                 ..base.clone()
             },
             Op {

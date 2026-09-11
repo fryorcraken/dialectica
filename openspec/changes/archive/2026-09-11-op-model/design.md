@@ -438,25 +438,44 @@ value accepted, exactly one past it refused with the specific variant — and
 verified failing under both an off-by-one and a permissive clamp. The `op.rs`
 instances are the metadata-op branch's to fix.
 
-**`stoa.rs` has no cap constant at all.** No `MAX_FIELD_LEN`, no `FieldTooLong`.
-The only bound is structural: `cursor.take(len)` fails because the input slice
-is short. That absence is now pinned by
-`the_genesis_decoder_has_no_field_length_cap`, so a future variant adding a list
-has to decide about a cap rather than inherit its absence by accident.
+That commit was written before PR 8 merged, and the rebase onto it changed what
+`stoa.rs` needed; the next two sections were rewritten to match rather than left
+describing a tree that no longer exists.
 
-The absence is safe against **memory exhaustion**, for a reason worth stating
-because it is not obvious: this decoder never allocates on the strength of the
-claim. `Cursor::take` returns a bounds-checked subslice of a buffer that already
-exists, and the `to_vec` after it copies only what `take` returned. `op.rs` needs
-its cap because it additionally decodes a *list*, whose element count is a second
-claim with elements allocating as they are read.
+**`stoa.rs` had no cap constant at all when this was first written** — no
+`MAX_FIELD_LEN`, no `FieldTooLong`, with the only bound being structural:
+`cursor.take(len)` failing because the input slice was short. That was reported
+as a finding, and the absence was pinned by a test so a future variant adding a
+list would have to decide about a cap rather than inherit its absence.
 
-**It is not safe against composition, and the same is true of `op.rs`.** A
-genesis record with a 400 KiB title decodes without complaint — measured at
-409,638 bytes, 2.7× the 150 KiB SDS limit — because the only bound is the buffer
-handed in. This is the same finding the security reviewer made about `op.rs`
-(two fields each under the cap summing past the message limit), reached from the
-other direction: there, the cap composes badly; here, there is no cap to compose.
+**PR 8's merge closed it independently, and better.** `origin/main` now carries
+`MAX_TITLE_BYTES` (1 KiB), a `TitleTooLong` variant, a **fallible encoder** so
+the bound holds symmetrically, boundary tests at the cap and one past it, and a
+hardcoded pin on the constant. It also fixed `a_lying_length_prefix_is_refused`
+to claim a length *under* the cap — the precise defect reported here, since with
+a cap checked first a `u32::MAX` claim is refused as `TitleTooLong` and the
+lying-prefix path stops being exercised at all.
+
+So on rebase the pinned-absence test asserted something no longer true and was
+**deleted** rather than repaired. Two things replaced it, covering what main's
+pair does not:
+
+- `the_available_input_boundary_accepts_the_largest_fit_and_refuses_one_more`.
+  There are now **two** bounds on one length prefix — the cap (`TitleTooLong`)
+  and the available input (`LengthMismatch`) — and they drift independently.
+  Main's pair varies lengths around 1024 with the record self-consistent, so a
+  decoder that stopped comparing the claim against the remaining input keeps
+  passing it. Verified: a clamp-instead-of-refuse mutation fails this test while
+  leaving both of main's cap tests green.
+- `the_two_length_bounds_are_reported_distinguishably`, so the two do not
+  collapse into one error. A caller matching `TitleTooLong` to say "that title
+  is too long" and `LengthMismatch` to say "this record is corrupt" gets both
+  wrong if the decoder reports either for both.
+
+**Neither module's cap makes a record fit a message.** That half of the finding
+stands. `op.rs` has several capped fields that can sum past the 150 KiB SDS
+limit; `stoa.rs` now caps its one field at 1 KiB, which happens to keep a record
+under the limit today but is not a check and should not be read as one.
 
 **The right home for that check is the transport boundary, not either decoder.**
 A decoder is handed a `&[u8]` and cannot tell whether it arrived in one SDS
@@ -469,6 +488,13 @@ The consequence for this spec: `op-format`'s cap requirement is stated as a
 per-field refusal threshold that prevents allocating on a hostile claim, which
 is what the code does and all it does. It deliberately does **not** claim that a
 decoded op fits in an SDS message, because no code establishes that.
+
+**Worth noting as process evidence rather than as a technical point:** two
+agents working independently reached the same conclusion about `stoa.rs`'s
+missing bound, from opposite directions — one adding the cap, one pinning its
+absence — within the same cycle. That is the mechanism working, and it is also
+why the pinned-absence test had to go rather than be forced to coexist: a test
+asserting "there is no cap" and a cap are not both right.
 
 ## Open Questions
 

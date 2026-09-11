@@ -27,38 +27,34 @@
 //! lying length prefix, an unknown policy and an unknown version are each
 //! refused rather than absorbed.
 //!
-//! **There is no field-length cap here, unlike `op.rs`**, and it is worth being
-//! exact about what that does and does not mean.
+//! **Two different bounds govern the title length prefix**, and confusing them
+//! is how one of them silently stops being checked.
 //!
-//! What it does NOT expose is the memory-exhaustion lever `op.rs`'s cap exists
-//! to close. That module refuses a length prefix over `MAX_FIELD_LEN` *before*
-//! allocating, because a 4-byte prefix can claim 4 GiB. This decoder never
-//! allocates on the strength of the claim at all: `Cursor::take` returns a
-//! bounds-checked subslice of a buffer that already exists, and the `to_vec`
-//! after it copies only what `take` returned. An absurd claim is refused by the
-//! slice bound before any memory is reserved. `op.rs` additionally decodes a
-//! *list*, whose element count is a second claim with elements allocating as
-//! they are read; a genesis record has one variable-length field and no
-//! counted collection.
+//! 1. **The cap.** A claim over [`MAX_TITLE_BYTES`] is refused as
+//!    `TitleTooLong`, checked *before* the read so it costs nothing, and
+//!    enforced on the encode side too — so the decoder refuses exactly what the
+//!    encoder declines to produce.
+//! 2. **The available input.** A claim under the cap but past what the buffer
+//!    holds is refused as `LengthMismatch`.
 //!
-//! What the absence DOES mean is that **nothing here bounds a record against
-//! the 150 KiB SDS message limit.** A genesis record whose title is 400 KiB
-//! decodes without complaint, because the only bound is the length of the
-//! buffer handed in. That is a real gap, and it is the same shape as the
-//! "cap does not compose" finding in `op.rs` — arrived at from the other
-//! direction, since here there is no cap to compose.
+//! The cap is checked first, which is worth knowing before writing a test
+//! against either: a claim above the cap never reaches the input comparison, so
+//! a test that reaches for `u32::MAX` to exercise the lying-prefix path
+//! silently stops exercising it. Each bound has its own boundary pair, and
+//! `the_two_length_bounds_are_reported_distinguishably` pins that they do not
+//! collapse into one error.
+//!
+//! **Neither bound makes a record fit an SDS message, and nothing here does.**
+//! The cap bounds one field; a record is that field plus a fixed header. Today
+//! that cannot exceed the 150 KiB message limit, but this module does not check
+//! it and should not be read as promising it — the same "a cap is not a message
+//! bound" gap `op.rs` has, where several capped fields can sum past the limit.
 //!
 //! **The right home for that check is the transport boundary**, where the SDS
-//! frame is actually visible, and not here: this decoder is handed a `&[u8]`
-//! and has no way to know whether it arrived in one message, was read from
-//! local storage, or was assembled by a caller. A cap in this module would be
-//! guessing at a constraint it cannot observe, and would also make the decoder
-//! unable to re-read a record it had itself accepted earlier under a different
-//! limit. Recorded rather than fixed, deliberately.
-//!
-//! `the_genesis_decoder_has_no_field_length_cap` pins the absence, so that a
-//! future variant adding a list (an invite list, a token identifier) fails that
-//! test and has to decide about a cap on purpose.
+//! frame is actually visible. This decoder is handed a `&[u8]` and has no way
+//! to know whether it arrived in one message, was read from local storage, or
+//! was assembled by a caller, so a message-size limit here would be guessing at
+//! a constraint it cannot observe.
 //!
 //! # What is deliberately not here
 //!
@@ -565,28 +561,42 @@ mod tests {
     }
 
     #[test]
-    fn the_title_length_boundary_accepts_the_largest_fit_and_refuses_one_more() {
-        // A BOUNDARY PAIR, not a value far past the boundary.
+    fn the_available_input_boundary_accepts_the_largest_fit_and_refuses_one_more() {
+        // A BOUNDARY PAIR for the SECOND bound, which is easy to miss because
+        // the first one now has its own pair.
         //
-        // `a_lying_length_prefix_is_refused` above claims u32::MAX — roughly
-        // 4 GiB against a record of a few dozen bytes. It proves *a* bound
-        // exists and says nothing about WHERE it is: the same test passes if
-        // the bound drifts by any amount short of 4 GiB, which is every amount
-        // anyone would plausibly get wrong. A one-sided test is how a limit
-        // moves with no gate noticing.
+        // Two different limits govern a title length prefix, and they fail
+        // with different errors:
         //
-        // Genesis has no cap CONSTANT (see the module note below), so the
-        // boundary being pinned here is the structural one: the largest claim
-        // the input can satisfy is the title length itself. Accept that;
-        // refuse exactly one more.
+        //   1. the CAP    — `len > MAX_TITLE_BYTES` => TitleTooLong.
+        //                   Pinned by `a_title_at_the_maximum_is_accepted` and
+        //                   `a_title_over_the_maximum_is_refused_on_both_sides`.
+        //   2. the INPUT  — a claim under the cap but past what the buffer
+        //                   holds => LengthMismatch. That is this test.
+        //
+        // Both are boundaries and both can drift independently. The cap pair
+        // says nothing about (2): it varies lengths around 1024 while the
+        // record stays self-consistent, so a decoder that stopped comparing the
+        // claim against the remaining input would keep passing it.
+        //
+        // Stays well under MAX_TITLE_BYTES on purpose, for the reason
+        // `a_lying_length_prefix_is_refused` now documents: the cap is checked
+        // first, so a claim above it is refused as TitleTooLong and never
+        // reaches the input comparison this test exists to pin.
         let g = Genesis {
             title: "abcdef".to_string(),
             ..a_record()
         };
         let fits = g.title.len() as u32;
+        assert!(
+            (fits as usize) < MAX_TITLE_BYTES,
+            "the fixture must sit below the cap, or this tests the wrong bound"
+        );
 
-        // Exactly the title's length: accepted, and yields the real record.
-        let mut ok = g.canonical_bytes();
+        // Exactly what the input holds: accepted, and yields the real record.
+        // Asserting the VALUE rather than `is_ok()` is what rules out a decoder
+        // that accepted the length and then returned something else.
+        let mut ok = g.canonical_bytes().unwrap();
         with_title_length_claim(&mut ok, fits);
         assert_eq!(
             Genesis::decode(&ok).unwrap(),
@@ -595,9 +605,10 @@ mod tests {
         );
 
         // One byte more than the input holds: refused, with the specific
-        // variant. Asserting the variant rather than `is_err()` is what keeps
-        // this from passing on some unrelated rejection.
-        let mut over = g.canonical_bytes();
+        // variant. Asserting the variant rather than `is_err()` keeps this from
+        // passing on some unrelated rejection — and specifically distinguishes
+        // it from TitleTooLong, which is the other way a length prefix dies.
+        let mut over = g.canonical_bytes().unwrap();
         with_title_length_claim(&mut over, fits + 1);
         assert_eq!(
             Genesis::decode(&over),
@@ -607,42 +618,27 @@ mod tests {
     }
 
     #[test]
-    fn the_genesis_decoder_has_no_field_length_cap() {
-        // NO SPEC: chosen behaviour, pinned so it is a decision rather than an
-        // oversight — and so that adding a cap has to come here and say so.
+    fn the_two_length_bounds_are_reported_distinguishably() {
+        // The cap and the input bound must not collapse into one error.
         //
-        // `op.rs` refuses a length prefix over MAX_FIELD_LEN (150 KiB) BEFORE
-        // allocating, because a 4-byte prefix can claim 4 GiB and reserving on
-        // that claim is a remote memory-exhaustion lever. `stoa.rs` has no such
-        // constant and no FieldTooLong variant.
-        //
-        // No memory-exhaustion lever follows from that, because this decoder
-        // never allocates on the strength of the claim: `Cursor::take` is a
-        // bounds-checked subslice of an existing buffer, and the `.to_vec()`
-        // after it copies only the bytes `take` actually returned. `op.rs`
-        // needs its cap because it also decodes a LIST, whose element count is
-        // a separate claim with elements allocating as they are read.
-        //
-        // It does NOT follow that a record is bounded against the 150 KiB SDS
-        // limit — a 400 KiB title decodes fine, since the only bound is the
-        // buffer handed in. See the module docs: that check belongs at the
-        // transport boundary, where the frame is visible, and this module
-        // cannot see it.
-        //
-        // If a future variant adds a list (an invite list, a token identifier),
-        // this test should fail and be replaced by a cap plus its own boundary
-        // pair — which is the point of pinning the absence.
-        let g = a_record();
-        let mut bytes = g.canonical_bytes();
-        with_title_length_claim(&mut bytes, u32::MAX);
+        // A caller matching on TitleTooLong to say "that title is too long for
+        // a Stoa" and on LengthMismatch to say "this record is corrupt" gets
+        // both wrong if the decoder reports either for both. The two tests
+        // above each pin one side; this pins that they stay different, which
+        // neither does on its own.
+        let mut over_cap = a_record().canonical_bytes().unwrap();
+        with_title_length_claim(&mut over_cap, (MAX_TITLE_BYTES + 1) as u32);
 
-        // A 4 GiB claim is refused for running past the input, NOT by a cap.
-        // If a cap is ever added, this becomes the wrong error and the test
-        // fails, which is the signal to come here and update it deliberately.
+        let mut past_input = a_record().canonical_bytes().unwrap();
+        with_title_length_claim(&mut past_input, (MAX_TITLE_BYTES - 1) as u32);
+
         assert_eq!(
-            Genesis::decode(&bytes),
-            Err(GenesisError::LengthMismatch),
-            "absent a cap, an absurd claim must be refused by the input bound"
+            Genesis::decode(&over_cap),
+            Err(GenesisError::TitleTooLong(MAX_TITLE_BYTES + 1))
+        );
+        assert_eq!(
+            Genesis::decode(&past_input),
+            Err(GenesisError::LengthMismatch)
         );
     }
 
