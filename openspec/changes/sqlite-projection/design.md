@@ -293,6 +293,12 @@ implicit:
   and this store is the authority for forum state. `bundled` makes the SQLite
   version a property of `Cargo.lock`, which is the same guarantee every other
   dependency here gives.
+
+  **A review made that concrete and it is sharper than stated above:** the schema
+  uses `STRICT`, which SQLite gained in **3.37 (2021)**. Against a host library
+  older than that, schema creation fails outright — so without `bundled` this
+  module would not merely behave differently on an old host, it would not open a
+  store at all.
 - The cost is honest: it compiles the SQLite amalgamation from C, which pulls
   `cc` and adds build time. **Verified to build here**, producing
   `libsqlite3.a`; `cc` is present in the toolchain the `rust` CI job uses.
@@ -627,17 +633,66 @@ restored.
 
 | Mutation | Result | Killed by |
 |---|---|---|
-| `PRIMARY KEY` on `op_bytes` instead of `op_id` | **SURVIVED** | nothing — see below |
-| Accept any layout version below this build's (`!=` → `>`) | **SURVIVED** | nothing — see below |
-| `op_id ASC` → `op_id DESC` in the `ORDER BY` | killed | 3 tests, incl. both agreement tests |
+| `iter_stoa` matches a **2**-byte prefix | **SURVIVED** (review) | now 1 test |
+| `iter_target` matches an **8**-byte prefix | **SURVIVED** (review) | now 1 test |
+| `score_epoch` sentinel `-1` instead of `NULL` | **SURVIVED** (review) | now 1 test |
+| Drop `sort_msg` from the `ORDER BY` | **partially survived** (review) | now 3 tests incl. the headline one |
+| `PRIMARY KEY` on `op_bytes` instead of `op_id` | **SURVIVED** | now 1 test |
+| Accept any layout version below this build's (`!=` → `>`) | **SURVIVED** | now 1 test |
+| `sort_ordered` removed (unordered filler `1` → `0`) | not run initially | now 5 tests |
+| Index `sort_msg_present DESC` → ascending | **SURVIVED** (review) | now 1 test (query plan) |
+| `iter_stoa` matches a **1**-byte prefix | killed | 1 test |
+| `op_id ASC` → `op_id DESC` in the `ORDER BY` | killed | 3 tests |
 | `INSERT OR IGNORE` → `INSERT OR REPLACE` | killed | 9 tests |
-| Keep the message id in an unordered op's sort key | killed | 3 tests, incl. the structural one |
-| `iter_stoa` matches a one-byte prefix, not the whole address | killed | `two_stoas_sharing_an_address_prefix_are_not_confused_in_sqlite` |
+| Keep the message id in an unordered op's sort key | killed | 3 tests |
 | Store the sort key's message id as the recorded arrival | killed | 2 tests |
 
-**Both survivors were the "one step weaker" mutation**, which is the discipline
-that found them. The maximally-wrong version of each dies instantly and proves
-nothing:
+**Six survivors in total, five of which a review found after this table first
+claimed two.** That is the honest number, and the pattern in it is the lesson:
+every single one was the *one step weaker* form of a mutation already recorded
+as a kill. A one-byte prefix died; two bytes lived. Removing the primary key
+died; moving it lived. Refusing nothing died; refusing only the future lived.
+
+**The four the review found, and why each hid:**
+
+- **Prefix matching at 2 and 8 bytes.** The fixtures picked two titles whose
+  hashes happened to agree in byte 0 and *guarded that coincidence* — the guard
+  documented the luck it had as though it were the property the test needed.
+  Fixed by **constructing** the addresses and ids from raw bytes rather than
+  hunting hash collisions, with the shared length a named constant
+  (`SHARED_PREFIX_BYTES`) and guards pinning both that the prefix agrees *and*
+  that the next byte differs. A 9-byte hash agreement is not findable by trying
+  titles, which is why the old approach could not have been strengthened in
+  place.
+- **`score_epoch = -1`.** `u64::MAX as i64` **is** `-1`, so an unordered op and
+  one ordered at the maximum stored the same value. This is the exact in-band
+  sentinel collision `lamport_sort_key`'s own documentation rejects for its own
+  column — solved correctly there with `sort_ordered`, and reintroduced one
+  column over. It hid because the column is reserved: *"nothing writes this and
+  no read consults it"* is a comment that excuses a column from every
+  behavioural test while the rows go to every peer's disk. Inert today; a §7.2
+  ranking defect the moment rule 5 lands, in rows already written.
+- **Dropping `sort_msg`.** Killed two tests but **not the headline agreement
+  test**, whose entire purpose is catching divergence. `every_ordering_shape`
+  used only `vec![seed; 32]` and `vec![]`, so every pair was equal-length or
+  empty and length-vs-lexicographic could never disagree. Fixed by adding
+  prefix-related, differing-length ids (`[0x01]`, `[0x01,0x00]`, `[0x01,0xFF]`,
+  `[0x02]`) at one Lamport value.
+- **The index's `DESC`.** Results identical, `EXPLAIN QUERY PLAN` shows
+  `SCAN USING COVERING INDEX` becoming `... USE TEMP B-TREE FOR LAST 3 TERMS` —
+  precisely the degradation the sort key exists to prevent, invisible to every
+  gate because only the *cost* changes. Now asserted directly.
+
+**And one this change had not thought to run:** removing `sort_ordered`. The
+review noted that no test used `i64::MAX as u64`, the one Lamport value whose
+key collides with the unordered filler — so the leading column's necessity
+rested on a comment. Now asserted as a collision, so a future edit removing the
+column fails with a name that points at the cause.
+
+**Every replacement test was watched failing under its mutation before being
+kept.**
+
+**The two this change found for itself**, both also the one-step-weaker form:
 
 - **"Remove the `PRIMARY KEY`"** dies on every dedup test. **"Put it on
   `op_bytes`"** survived the entire suite, because the two columns agree on
@@ -659,15 +714,20 @@ nothing:
   boundary — `0` is the absence of a version, not an unknown one, and must not
   be refused.
 
-Both new tests were **watched failing under their mutation before being kept**,
-which is the only thing that makes them evidence.
+**The index gap, which this change first declared open and has now closed.** An
+earlier draft said nothing mutation-tests the `CREATE INDEX` statements, because
+an index is a performance object and a wrong column order changes no result — so
+a silent scan is invisible to every gate. That was the right diagnosis and the
+wrong conclusion: it *is* checkable, with one `EXPLAIN QUERY PLAN` assertion per
+read, and `every_ordered_read_is_served_by_an_index_rather_than_a_sort` now makes
+it. The assertion is on the **absence of a temp B-tree** rather than on the plan
+text, because the wording is SQLite's to change between versions while the
+property is not.
 
-**One further gap, stated rather than closed:** nothing mutation-tests the
-`CREATE INDEX` statements, because an index is a performance object and dropping
-one changes no result. A wrong index column order therefore costs a silent table
-scan that no test can see — the same class of invisible-to-a-green-gate problem
-that §7.2 rule 5 is about. Checking it needs `EXPLAIN QUERY PLAN` assertions,
-which is a real gap and is not built here.
+**What remains genuinely unchecked**, so the claim is bounded: the plan test
+runs against an *empty* table, so it establishes that the index *can* serve the
+order, not that SQLite's planner will still choose it once statistics exist. A
+store large enough to change that decision is not something a unit test builds.
 
 ## What the clone costs, measured rather than assumed
 
@@ -788,10 +848,19 @@ became a bug in the other direction: the peer really did receive that id, and
 `whether_an_arrival_was_ordered_survives_storage` is a spec requirement.
 
 So the row carries both — `arrival_lamport`/`arrival_msg` for what was
-**recorded**, and the sort columns for what is **compared** — and they differ in
-exactly one case. That is two columns of apparent redundancy which is not
-redundancy at all, and the schema says so at the point a reader would otherwise
-try to remove it.
+**recorded**, and the sort columns for what is **compared**. That is two columns
+of apparent redundancy which is not redundancy at all, and the schema says so at
+the point a reader would otherwise try to remove it.
+
+**They differ in two ways, not one.** An earlier draft here claimed one, and a
+review corrected it — which matters, because an exactness claim is exactly what
+invites a future editor to collapse the columns:
+
+1. An op the transport did not order but for which it supplied a message id.
+   The record keeps the id; the sort key must not carry it.
+2. **Every** unordered op: `arrival_lamport` is `NULL` while `sort_lamport` is
+   the filler `0` — and `0` is a real Lamport value's image, so the sort column
+   cannot represent absence at all. Harmless only because `sort_ordered` leads.
 
 **The general shape, which is not about SQLite**: a materialised ordering is a
 *projection* of the recorded facts, not a re-encoding of them. Anywhere the two

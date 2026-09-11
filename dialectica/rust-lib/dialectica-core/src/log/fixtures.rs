@@ -116,6 +116,74 @@ pub fn two_posts_by_ascending_id() -> (SignedOp, SignedOp) {
     }
 }
 
+/// How many leading bytes a prefix-confusion fixture must share.
+///
+/// **The number is the test's strength**, so it is a named constant rather
+/// than a literal buried in an assertion, and it is asserted rather than
+/// assumed.
+///
+/// A review found a **2-byte** prefix match on `iter_stoa` and an **8-byte**
+/// match on `iter_target` passing the entire suite, because the fixtures they
+/// faced pinned only byte 0 — a hash coincidence that two short titles happened
+/// to produce. Any query comparing fewer than this many bytes now fails.
+///
+/// 16 rather than 31: it is comfortably past any plausible accidental
+/// truncation (a `substr(.., 8)`, a `u64` read of the first 8 bytes, a
+/// hex-prefix comparison) while leaving 16 bytes for the divergence to be
+/// unmistakable. A fixture agreeing on 31 of 32 bytes would test the same
+/// property and read as a puzzle.
+pub const SHARED_PREFIX_BYTES: usize = 16;
+
+/// Two distinct 32-byte keys agreeing on the first [`SHARED_PREFIX_BYTES`].
+///
+/// **Constructed, not hunted.** A hash collision this long is not findable by
+/// trying titles, and the earlier fixtures' "pick two names and assert byte 0
+/// matches" pinned the luck they had rather than the property the test needs.
+///
+/// Nothing in the log requires a Stoa address or an op id to be hash-derived:
+/// §4.5 makes the address an opaque key to the store, and §3.3 makes a target
+/// naming an op this peer never received entirely ordinary. So a synthetic key
+/// is a valid fixture, and it is the only way to state the prefix length as a
+/// requirement rather than as an observation.
+fn two_keys_sharing_a_long_prefix() -> ([u8; 32], [u8; 32]) {
+    let mut one = [0xA5u8; 32];
+    let mut two = [0xA5u8; 32];
+    // Diverge at exactly the first byte past the shared prefix, so the
+    // fixture's guarantee is "agrees on N, differs at N" rather than "agrees
+    // on at least N somewhere".
+    one[SHARED_PREFIX_BYTES] = 0x01;
+    two[SHARED_PREFIX_BYTES] = 0x02;
+
+    // FIXTURE GUARDS, and unlike the ones they replace these pin a property
+    // rather than a coincidence: the two keys agree on every byte of the
+    // prefix, AND differ at the byte immediately after it.
+    assert_eq!(
+        one[..SHARED_PREFIX_BYTES],
+        two[..SHARED_PREFIX_BYTES],
+        "the fixture must share its whole declared prefix"
+    );
+    assert_ne!(
+        one[SHARED_PREFIX_BYTES], two[SHARED_PREFIX_BYTES],
+        "the fixture must diverge immediately after the prefix"
+    );
+    (one, two)
+}
+
+/// Two Stoa addresses agreeing on their first [`SHARED_PREFIX_BYTES`] bytes.
+pub fn two_addresses_sharing_a_long_prefix() -> (Address, Address) {
+    let (one, two) = two_keys_sharing_a_long_prefix();
+    (Address::from_bytes(one), Address::from_bytes(two))
+}
+
+/// Two op ids agreeing on their first [`SHARED_PREFIX_BYTES`] bytes.
+pub fn two_op_ids_sharing_a_long_prefix() -> (OpId, OpId) {
+    let (one, two) = two_keys_sharing_a_long_prefix();
+    let hex = |bytes: [u8; 32]| {
+        OpId::from_hex(&hex::encode(bytes)).expect("32 bytes of hex is always a valid op id")
+    };
+    (hex(one), hex(two))
+}
+
 /// A population crossing every branch of `cmp_ops`, over distinct ops.
 ///
 /// **This is the fixture the two-implementation agreement test turns on**, so
@@ -133,14 +201,43 @@ pub fn two_posts_by_ascending_id() -> (SignedOp, SignedOp) {
 ///   resort, which is the branch a sort key that stopped at the message id
 ///   would silently leave undefined;
 /// - an EMPTY message id, which is a legal value and must not read as absence;
-/// - Lamport `0`, `u64::MAX` and `u64::MAX - 1` — the boundaries, where a sort
-///   key that overflows or clamps wrongly shows up and nowhere else.
+/// - **message ids of DIFFERING LENGTHS, in prefix relationships** — see below;
+/// - Lamport `0`, `u64::MAX`, `u64::MAX - 1`, and `i64::MAX as u64` — the
+///   boundaries, where a sort key that overflows, clamps or mis-signs shows up
+///   and nowhere else.
+///
+/// # Why the message ids are not all the same length
+///
+/// They were — every one was `vec![seed; 32]` or empty — and **a review found
+/// that this test could not catch a missing `sort_msg` in the `ORDER BY`.**
+/// With equal-length ids, comparing by length and comparing lexicographically
+/// give the same answer on every pair, so the branch the column exists for was
+/// never exercised.
+///
+/// `[0x01]`, `[0x01, 0x00]`, `[0x01, 0xFF]`, `[0x02]` are prefix-related and of
+/// differing lengths, which is where Rust's derived `Ord` on `Vec<u8>` and
+/// SQLite's BLOB `memcmp` could in principle disagree — a shorter id that is a
+/// prefix of a longer one sorts first under both, and nothing in this suite
+/// established that until these were added. `arrival.rs`'s
+/// `a_message_id_is_compared_by_bytes_not_by_length` pins the Rust half; this
+/// is what pins that SQLite agrees.
+///
+/// It is also the first thing a message-id width change would break, and
+/// `arrival.rs` records that the width is the transport's to choose and is not
+/// settled.
 ///
 /// One op per arrival, all distinct, because two entries sharing an op id tie
 /// under `cmp_ops` by design. A fixture that built such a pair would be
 /// exercising the precondition rather than the order, and any disagreement it
 /// produced would be an artefact rather than a finding.
 pub fn every_ordering_shape() -> Vec<(SignedOp, Arrival)> {
+    // Prefix-related and of differing lengths. Grouped at one Lamport value so
+    // the tiebreak is what separates them and nothing else can.
+    let short = MessageId::new(vec![0x01]);
+    let longer_zero = MessageId::new(vec![0x01, 0x00]);
+    let longer_high = MessageId::new(vec![0x01, 0xFF]);
+    let next = MessageId::new(vec![0x02]);
+
     let arrivals = vec![
         Arrival::unordered(),
         Arrival::from_parts(None, Some(a_message_id(1))),
@@ -154,6 +251,18 @@ pub fn every_ordering_shape() -> Vec<(SignedOp, Arrival)> {
         Arrival::ordered(0, MessageId::new(vec![])),
         Arrival::ordered(u64::MAX, a_message_id(1)),
         Arrival::ordered(u64::MAX - 1, a_message_id(1)),
+        // The sign boundary of the `i64` the sort key casts into, and the one
+        // Lamport value whose key collides with the unordered filler.
+        Arrival::ordered(i64::MAX as u64, a_message_id(1)),
+        // THE LENGTH-VERSUS-LEXICOGRAPHIC GROUP. All at Lamport 4, so the
+        // message id is the only thing that can order them:
+        //   [0x01] < [0x01, 0x00] < [0x01, 0xFF] < [0x02]
+        // A comparison by length would put [0x01] and [0x02] together ahead of
+        // the two-byte pair, which is a different sequence.
+        Arrival::ordered(4, short),
+        Arrival::ordered(4, longer_zero),
+        Arrival::ordered(4, longer_high),
+        Arrival::ordered(4, next),
         // A PAIR sharing a Lamport value AND a message id, so only the op-id
         // last resort separates them. Two entries on purpose: one alone
         // exercises nothing.

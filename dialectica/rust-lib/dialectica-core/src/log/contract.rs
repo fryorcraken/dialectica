@@ -803,28 +803,30 @@ fn two_stoas_sharing_an_address_prefix_are_not_confused<L: OpLog>(log: &mut L) {
     //
     // `a_stoa_restricted_read_excludes_other_stoas` uses two Stoas whose
     // addresses differ in the first byte, so a read comparing only a PREFIX
-    // passes it. This one cannot be passed that way: the two addresses are
-    // chosen to COLLIDE in byte 0 and differ only later.
+    // passes it. This one cannot be passed that way.
     //
-    // Why it matters here specifically: a prefix-matching `iter_stoa` is a
-    // cross-Stoa leak in a censorship-resistant forum — another Stoa's ops
-    // bleeding into this Stoa's read. With 32-byte addresses a collision is
-    // rare enough never to surface in casual testing and certain enough to
-    // surface eventually, which is the worst combination.
-    let (one, two) = ("S0", "S178");
-    let (addr_one, addr_two) = (a_stoa(one), a_stoa(two));
-
-    // FIXTURE GUARD. These addresses are hash-derived, so the collision is a
-    // property of the current genesis encoding rather than of the titles. If
-    // an encoding change breaks it, this test must fail loudly here rather
-    // than silently stop exercising prefix confusion — the "a new check can
-    // retire an old test" hazard, applied to our own fixture.
-    assert_eq!(
-        addr_one.as_bytes()[0],
-        addr_two.as_bytes()[0],
-        "fixture must share a first byte, or it tests nothing"
-    );
-    assert_ne!(addr_one, addr_two, "fixture must be two distinct Stoas");
+    // Why it matters: a prefix-matching `iter_stoa` is a cross-Stoa leak in a
+    // censorship-resistant forum — one Stoa's content rendering inside
+    // another, and one Stoa's moderator set consulted against another's ops.
+    // With 32-byte addresses a collision is rare enough never to surface in
+    // casual testing and certain enough to surface eventually, which is the
+    // worst combination.
+    //
+    // # The addresses are CONSTRUCTED, not hunted, and that is the fix
+    //
+    // An earlier version picked two titles whose hashes happened to agree in
+    // byte 0 and guarded that with `as_bytes()[0] == as_bytes()[0]`. **A
+    // review found a 2-byte prefix match passing all 443 tests**, and an
+    // 8-byte prefix match on `iter_target` too: the guard pinned the luck it
+    // had, and documented it as though it were the property the test needed.
+    //
+    // Searching for a longer hash collision is not the answer either — a
+    // 9-byte agreement is not findable by trying titles. So the addresses are
+    // built from raw bytes: `Address::from_bytes` takes a `[u8; 32]`, and
+    // nothing about `iter_stoa` requires an address to be hash-derived. The
+    // Stoa address is an opaque 32-byte key to the log (§4.5), which is
+    // exactly what makes a synthetic one a valid fixture.
+    let (addr_one, addr_two) = two_addresses_sharing_a_long_prefix();
 
     let here = signed(Op {
         stoa: addr_one,
@@ -864,17 +866,14 @@ fn two_targets_sharing_an_op_id_prefix_are_not_confused<L: OpLog>(log: &mut L) {
     // moderation resolver handed ops aimed at a DIFFERENT post would apply
     // one post's `Hide` to an unrelated post. Silent, and invisible until
     // two op ids happen to collide.
-    let (one, two) = ("p0", "p37");
-    let (post_one, post_two) = (signed(a_post(one)), signed(a_post(two)));
-    let (target_one, target_two) = (post_one.op.id(), post_two.op.id());
-
-    // FIXTURE GUARD, for the same reason as above: op ids are hashes.
-    assert_eq!(
-        target_one.as_bytes()[0],
-        target_two.as_bytes()[0],
-        "fixture must share a first byte, or it tests nothing"
-    );
-    assert_ne!(target_one, target_two, "fixture must be two distinct ops");
+    //
+    // The targets are CONSTRUCTED for the reason the Stoa test above gives at
+    // length — a review found an EIGHT-byte prefix match on this read passing
+    // the whole suite, because the old fixture pinned a one-byte hash
+    // coincidence. A target is an op id a `Moderate` op NAMES, and §3.3 makes
+    // a dangling target ordinary (`a_revision_whose_target_is_absent_...`), so
+    // a synthetic id is a valid fixture and needs no post behind it.
+    let (target_one, target_two) = two_op_ids_sharing_a_long_prefix();
 
     let author = a_key(2);
     let moderate_one = Op {
@@ -896,12 +895,7 @@ fn two_targets_sharing_an_op_id_prefix_are_not_confused<L: OpLog>(log: &mut L) {
     }
     .sign(&author);
 
-    for op in [
-        post_one,
-        post_two,
-        moderate_one.clone(),
-        moderate_two.clone(),
-    ] {
+    for op in [moderate_one.clone(), moderate_two.clone()] {
         log.append(op, Arrival::unordered()).unwrap();
     }
 

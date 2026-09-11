@@ -102,9 +102,28 @@ middle so a reviewer can see it without a database in the diff.
       boundary where `0` must be accepted rather than refused.
 - [x] Boundary pair for the sort key at `0`, `1`, `u64::MAX - 1`, `u64::MAX`,
       asserted order-reversing **and injective**, not sampled in the middle.
-- [x] Mutation-verified. **Seven mutations, two survivors**, both of them the
-      "one step weaker" form; both now killed by tests watched failing first.
-      The table is in `design.md`, survivors included.
+- [x] **Prefix-confusion fixtures are CONSTRUCTED, not hunted.** The first
+      version picked titles whose hashes agreed in byte 0 and guarded that
+      coincidence — a review found 2-byte (`stoa`) and 8-byte (`target`) prefix
+      matches passing all 443 tests. `SHARED_PREFIX_BYTES` is now a named
+      constant, the keys are built from raw bytes, and the guards pin that the
+      prefix agrees **and** that the next byte differs.
+- [x] `every_ordering_shape` carries **differing-length, prefix-related**
+      message ids. With all ids 32 bytes, length-vs-lexicographic could never
+      disagree, and the headline agreement test could not catch a dropped
+      `sort_msg`. It now can.
+- [x] `score_epoch` is `NULL` for an unordered arrival, **never `-1`** —
+      `u64::MAX as i64` is `-1`, so the sentinel collided. Caught by a review in
+      a column no read consults, which is where an untested defect is cheapest
+      to leave and most expensive to ship.
+- [x] The `i64` sign boundary and the Lamport value whose sort key collides with
+      the unordered filler are both asserted, so removing `sort_ordered` fails
+      with a name pointing at the cause.
+- [x] `EXPLAIN QUERY PLAN` asserted to contain no temp B-tree, closing a gap an
+      earlier draft declared open rather than closed.
+- [x] Mutation-verified. **Thirteen mutations, six survivors**, every one of
+      them the "one step weaker" form; all now killed by tests watched failing
+      first. The table is in `design.md`, survivors included.
 
 ## 4. Documents
 
