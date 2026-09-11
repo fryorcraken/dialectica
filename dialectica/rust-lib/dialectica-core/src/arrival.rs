@@ -778,6 +778,13 @@ mod tests {
         // id is a hash, and the spec makes it a tiebreak WITHIN one Lamport
         // value. An arbitrary order that announces itself is better than one
         // that looks real.
+        //
+        // THIS is the partial shape the transport actually produces, so this
+        // test covers a live case rather than a corner. LIP-109 makes
+        // `message_id` non-optional and MUST-set, while ephemeral messages send
+        // `lamport_timestamp` unset — so an ephemeral message carries exactly
+        // this combination, and a peer reading the message id as an order would
+        // interleave ephemeral traffic among ordered ops by hash value.
         let op = an_op("x");
         let id_only = Arrival::from_parts(None, Some(a_message_id(1)));
         assert!(!id_only.is_ordered_by_transport());
@@ -814,11 +821,18 @@ mod tests {
     #[test]
     fn a_lamport_timestamp_without_a_message_id_still_orders() {
         // Specified: "The Lamport timestamp alone decides whether an op is
-        // ordered". Promoted out of a NO SPEC marker on review, because partial
-        // metadata is the shape the upstream fix would ACTUALLY produce — SDS
-        // sends ephemeral messages with the Lamport value unset, so the event
-        // must express its absence independently of the message id. Which half
-        // decides orderedness was too consequential to leave in a comment.
+        // ordered". Promoted out of a NO SPEC marker on review, because which
+        // half of the metadata decides orderedness was too consequential to
+        // leave in a test comment.
+        //
+        // This exact combination is NOT reachable through any transport
+        // contract known today — LIP-109 requires a message id on every
+        // message, so a Lamport value arriving without one describes no message
+        // SDS sends. (An earlier version of this comment claimed ephemeral
+        // messages produced it; they produce the OPPOSITE shape, and that fact
+        // now sits on the requirement it actually supports.) It is specified
+        // because the type permits it, and an unspecified corner of a type is
+        // where the next reader's assumption goes.
         //
         // Dropping to unordered instead would discard a real Lamport value the
         // transport supplied, which is the one thing this module must never do.

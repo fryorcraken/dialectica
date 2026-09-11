@@ -59,7 +59,19 @@ of the sentence that test's comment already contains.
 
 **Modified Capabilities**
 
-None. `stoa-genesis` is untouched.
+None — and that is a deliberate narrowing rather than an absence.
+
+`op-format` already carries "An op carries no ordering field and no per-peer
+state", with the same justification this change would have given and a scenario
+pinned by the same test. An earlier draft of this change restated that rule as its
+own first requirement; it is deleted rather than modified, because the rule was
+already in the right capability and two live specs asserting one requirement is
+how two copies drift and the wrong one gets read. `op-ordering` governs what a
+peer records *alongside* an op; `op-format` governs what an op may contain. The
+spec's preamble names that boundary so a reader is not left wondering where the
+other half went.
+
+`stoa-genesis` is untouched.
 
 ## Impact
 
@@ -71,3 +83,6 @@ None. `stoa-genesis` is untouched.
   would each have to add; filing it is the project owner's.
 - Does not build the store. The store is a later change, and this type is what it
   will key on.
+- Builds on `phase1/op-model`, which archived that change and created
+  `openspec/specs/op-format/spec.md`. This change adds no requirement to that
+  spec and removes none.

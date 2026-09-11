@@ -543,6 +543,13 @@ Does not promise:
   own posts.
 - **No membership.** Anyone can join a channel.
 - **No delivery to absent peers.** ACK means "some participants received it".
+- **No ordering metadata reaching the application.** The Lamport total order and
+  the message-id tie-break above are real and are what SDS orders its own log
+  by — but they stop below us. The Reliable Channel API's received-message event
+  carries the payload alone, so neither value reaches a consumer, and
+  `channelMessageReceived` cannot forward what it never got. **Read the promises
+  above as internal to SDS, not as an interface.** §13 has the finding and what
+  each upstream layer would have to add.
 - **150 KiB max message size**, hard cap — a network-wide gossipsub validation
   limit, not unilaterally raisable. See §4.6.
 

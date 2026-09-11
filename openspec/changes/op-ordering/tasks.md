@@ -45,8 +45,10 @@
       implementation.
 - [x] The two-ops fixture *determines* which op id is lower rather than assuming
       it, so a test cannot pass for the wrong reason.
-- [x] Unspecified choices carry `// NO SPEC:` markers (three of them, all on the
-      partial-metadata cases the contract cannot currently produce).
+- [x] Unspecified choices carried `// NO SPEC:` markers — three of them, all on
+      partial-metadata cases. **None remain**: §8 records two promoted into the
+      spec and one deleted as derivable. A grep for `NO SPEC` in this change now
+      finds nothing but prose explaining their removal.
 - [x] Mutation-verify every asserted property. Six mutations, each caught:
 
 | # | Mutation | Tests that failed |
@@ -55,7 +57,7 @@
 | 2 | Message-id tiebreak reversed to descending | `equal_lamport_timestamps_are_broken_by_ascending_message_id`, `a_message_id_is_compared_by_bytes_not_by_length` |
 | 3 | Unordered ops sort above ordered ones | `an_op_the_transport_ordered_beats_one_it_did_not`, `a_message_id_without_a_lamport_timestamp_does_not_order` |
 | 4 | Op-id last resort removed from the ordered branch | `the_order_is_total_over_distinct_ops` |
-| 5 | `unordered()` fabricates `lamport: Some(0)` | `an_unordered_arrival_records_no_values_at_all`, `absence_is_not_equal_to_a_zero_lamport_timestamp`, `nothing_here_can_produce_a_lamport_timestamp` |
+| 5 | `unordered()` fabricates `lamport: Some(0)` | `an_unordered_arrival_records_no_values_at_all`, `absence_is_not_equal_to_a_zero_lamport_timestamp`, `two_entries_sharing_an_op_id_can_tie_which_is_why_callers_dedup` |
 | 6 | `is_ordered_by_transport` accepts a message id alone | `a_message_id_without_a_lamport_timestamp_does_not_order` |
 | 7 | Boundary rule non-uniform outside the population's range (`lamport == 0` loses to unordered) | `an_op_the_transport_ordered_beats_one_it_did_not`, `a_message_id_without_a_lamport_timestamp_does_not_order` |
 | 8 | Boundary rule non-uniform **within** the population (`lamport == 2` loses to unordered) | `the_order_is_transitive_across_every_combination`, `the_order_is_antisymmetric_across_every_combination` — **and nothing else** |
@@ -161,9 +163,13 @@ Recorded because a passing suite here proves less than it appears to.
   them. The first test that could exist is an integration test against a delivery
   module that forwards the fields — which is the upstream change `design.md`
   specifies.
-- **That the degraded order is ever exercised in anger.** Every op today arrives
-  `unordered()`, so today the degraded path is the ONLY path. The suite covers
-  both, but production currently exercises one.
-- **Whether `Arrival` is constructed correctly at the boundary.** There is no
-  boundary wiring yet, deliberately — nothing to decode. The first consumer will
-  be the store.
+- **That either order is exercised in anger.** No op arrives with an `Arrival` at
+  all: nothing outside `arrival.rs` constructs one from a received message,
+  because no boundary wiring exists yet. So the suite covers both the transport
+  order and the degraded order, and production exercises neither. When wiring
+  lands it will construct `unordered()` until the upstream fields arrive, making
+  the degraded path the only live one — but that is a prediction about a change
+  not yet written, not a statement about today.
+- **Whether `Arrival` is constructed correctly at the boundary.** Deliberately
+  unwritten — there is nothing to decode until the transport forwards the fields.
+  The op log consumes `Arrival` but does not build one from a message either.

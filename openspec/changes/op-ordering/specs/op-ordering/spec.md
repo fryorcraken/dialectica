@@ -2,26 +2,9 @@
 
 Defines what orders two ops in a Stoa, what a receiving peer records alongside an op in order to answer that, and what order it produces when the transport supplies no ordering metadata.
 
+The complementary half of this contract lives in the `op-format` capability, whose requirement "An op carries no ordering field and no per-peer state" states that an op SHALL NOT carry a Lamport timestamp or a transport message id, and that the omission is enforced by the encoding's length. That requirement is not restated here: this capability governs what a peer records *alongside* an op, and `op-format` governs what an op may contain. Two specs asserting one rule is how two copies drift and the wrong one gets read.
+
 ## ADDED Requirements
-
-### Requirement: Ordering metadata is recorded alongside an op, never inside it
-
-An op SHALL NOT carry any ordering field. The values that order ops SHALL be recorded by the receiving peer as metadata attached to the op on arrival.
-
-A value inside the signed bytes is chosen by the op's author, and the author is the party the ordering exists to constrain. An author who could assert their own Lamport timestamp could place a revision after any other version of their post, which is the whole of what the revision rule prevents.
-
-#### Scenario: The ordering metadata is not part of the op
-
-- **WHEN** an op's canonical encoding is produced
-- **THEN** it contains no Lamport timestamp, no message id, and no sequence number
-- **AND** the encoding's length is fully accounted for by the op's own fields
-
-#### Scenario: Two arrivals of the same op are the same op
-
-- **WHEN** the same op is received twice with different ordering metadata
-- **THEN** both yield the same op id
-
-Structural rather than behavioural: the ordering metadata is a separate value from the op, so no code path exists by which it could reach the op id or the signed bytes. It is recorded as a requirement because it is the property that makes ordering metadata safe to accept from an untrusted transport, and a future change that folded the metadata into the op would violate it without any test failing.
 
 ### Requirement: Ops are ordered by the transport's order, not an order of our own
 
@@ -53,6 +36,12 @@ Two orders over the same messages can disagree, and the disagreement produces no
 - **WHEN** one op orders before a second, and that second orders before a third
 - **THEN** the first orders before the third
 
+#### Scenario: Every peer computes the same order
+
+- **WHEN** two peers hold the same ops with the same recorded transport metadata
+- **THEN** both produce the same order
+- **AND** neither consults its own clock, its arrival sequence, or any local state
+
 ### Requirement: Ops are deduplicated by op id before they are ordered
 
 A caller SHALL deduplicate ops by op id before ordering them. The order is total over distinct op ids; two records of the same op id MAY compare as equal regardless of the transport metadata recorded against each.
@@ -69,17 +58,18 @@ This is a contract on callers rather than an implementation detail, which is why
 - **WHEN** two ops with distinct op ids are compared, with any combination of recorded metadata
 - **THEN** exactly one of the two orders first
 
-#### Scenario: Every peer computes the same order
-
-- **WHEN** two peers hold the same ops with the same recorded transport metadata
-- **THEN** both produce the same order
-- **AND** neither consults its own clock, its arrival sequence, or any local state
-
 ### Requirement: Absent transport metadata is represented, never fabricated
 
 A peer SHALL be able to record that the transport supplied no Lamport timestamp or no message id for an op. It SHALL NOT substitute a local clock reading, an arrival counter, or a default value for a metadata value it did not receive.
 
 A substituted value is indistinguishable from a received one once recorded, so a peer that substitutes cannot later tell which of its ops are genuinely ordered. Two peers substituting different local values also order the same pair of ops differently, with nothing to detect it.
+
+Recorded metadata SHALL NOT affect the op it is recorded against: the same op received twice with differing metadata SHALL yield the same op id both times. This is what makes metadata safe to accept from an untrusted transport, and it is the boundary between this capability and `op-format`, which owns the op's own contents.
+
+#### Scenario: Two arrivals of the same op are the same op
+
+- **WHEN** the same op is received twice with different ordering metadata
+- **THEN** both yield the same op id
 
 #### Scenario: A missing Lamport timestamp is recorded as missing
 
@@ -134,7 +124,7 @@ Where the transport supplies only part of its ordering metadata, the Lamport tim
 
 An op carrying a Lamport timestamp but no message id SHALL be treated as ordered by the transport and SHALL take its place by that timestamp. Where such an op ties with another on the timestamp, an op carrying a message id SHALL order before an op that carries none, and two ops carrying neither SHALL be separated by their op ids.
 
-Partial metadata is not a hypothetical: it is the shape the transport is expected to produce. The synchronisation layer sends ephemeral messages with the Lamport timestamp unset, so an event that carries the value must also be able to express its absence, independently of the message id.
+The two fields are independent at the contract level, so all four combinations are representable and each must have a defined answer. This particular combination is not reachable through any transport contract known today: the synchronisation layer requires a message id on every message, so a Lamport timestamp arriving without one describes no message it sends. It is specified because the type permits it, and an unspecified corner of a type is where the next reader's assumption goes.
 
 Discarding a Lamport timestamp because the message id is missing would throw away the only value that orders, which is the one thing a recording peer must never do. Ordering an op the transport placed *after* ops it did not place would do the same by another route.
 
@@ -165,6 +155,8 @@ Discarding a Lamport timestamp because the message id is missing would throw awa
 An op whose metadata carries a message id but no Lamport timestamp SHALL be treated as unordered by the transport.
 
 The message id is a tiebreak within one Lamport value, not an order in itself: message ids are assigned by hashing and carry no temporal meaning. Ordering by message id alone would produce a stable, total, and entirely arbitrary order that looks like a real one.
+
+**This is the partial shape the transport actually produces**, and the reason this requirement is not a hypothetical corner. The synchronisation layer requires a message id on every message but sends ephemeral messages with the Lamport timestamp unset, so an ephemeral message carries exactly this combination. A peer that read the message id as an order would place such messages among ordered ops by hash value.
 
 #### Scenario: A message id alone does not confer an order
 

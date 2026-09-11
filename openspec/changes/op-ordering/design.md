@@ -161,6 +161,57 @@ requirement structural rather than documented. `Arrival::is_ordered_by_transport
 exists so that a caller can *state* the question, but the type already guarantees
 they cannot skip it.
 
+### Decision: three constructors, and `from_parts` is the one that matters
+
+`Arrival::ordered(lamport, id)` and `Arrival::unordered()` name the two shapes the
+contract can produce today. `from_parts(Option, Option)` is the third, and it
+exists because the two fields are independent at the contract level: a recorder
+must be able to write down what it actually received, including half of it. The
+alternative — forcing every construction through the two named shapes — would mean
+inventing the missing half, which is the one thing this module refuses to do.
+
+It earns its place in this document for a reason found only in review: **the two
+named constructors hide the arms where a field is absent.** `ordered` always sets
+a message id, `unordered` short-circuits before the tiebreak runs, so a test suite
+built from those two alone never reaches `cmp_tiebreak`'s `(None, None)` case. Two
+mutations survived the first suite for exactly that reason, one of them a genuine
+`Ord` violation. `from_parts` is how the tests now reach the type's full shape, and
+the general lesson in `tasks.md` §7 is about it.
+
+### Decision: `MessageId` wraps a `Vec<u8>`, not a fixed-width array
+
+`reliable-channel-api.md:121` specifies the id as keccak-256 hex, which is
+fixed-width — so `[u8; 32]` looks available, and a reader checking the citation
+will wonder why it was declined.
+
+It was declined because that width is the *Reliable Channel API's* choice, not
+SDS's. `sds.md:114` types `message_id` as a `string` and `sds.md:127-128` requires
+only that it be "globally unique... likely based on a message hash" — "likely"
+being the operative word. A fixed-width array would encode one layer's current
+choice into a type that outlives it, and the failure would arrive as a decode
+error against a transport that changed nothing it promised.
+
+Nothing here parses the id; it is compared, and comparison is all §5.7 asks of it,
+so the width buys nothing today. What it *would* buy is recorded on the type:
+`MessageId` and `Arrival` both become `Copy` once the width is fixed, since
+`Arrival`'s other field is already an `Option<u64>`. Today every op-log append
+clones. That is nobody's bottleneck, and not a reason to guess.
+
+### Decision: `cmp_ops` is a free function over tuples, not an `impl Ord`
+
+Conspicuous given how much of this document discusses `Ord`'s contract, so: the
+alternative was a record type pairing an `Arrival` with an `OpId` and carrying
+`impl Ord`.
+
+Declined because `Ord` on such a type would be a lie about the part that matters.
+The order is total over **distinct op ids** only — two records sharing an op id
+compare `Equal` while differing — and `Ord` implies a total order over the type's
+own values. A caller reaching for `.sort()` on a `Vec` of that type gets the
+precondition silently, with no signature to warn them; `cmp_ops` as a named
+function with a documented precondition puts the requirement where a caller reads
+it. The pairing is also genuinely two values the store holds separately, and a
+record type existing only to host a trait impl would be the tail wagging the dog.
+
 ### Decision: The degraded order is by op id, and it is named a degraded order
 
 Three candidates for ordering ops the transport did not order:
@@ -288,9 +339,28 @@ MessageReceivedEvent:
 ```
 
 Both are already computed and already the documented basis of ordering
-(`reliable-channel-api.md:123`). `lamportTimestamp` should be optional in the same
-sense SDS makes it optional — ephemeral messages send it unset (`sds.md:321-322`) —
-so the event must be able to express "not set" rather than defaulting to 0.
+(`reliable-channel-api.md:123`).
+
+**The two fields have different optionality, and the asymmetry is the part to get
+right.** `messageId` is present on every message: `sds.md:114` declares
+`string message_id = 2` without `optional`, and `sds.md:127-128` makes setting it
+a MUST. `lamportTimestamp` is `optional uint64` (`sds.md:116`), and the
+MAY-be-unset carve-out at `sds.md:136` covers it along with `causal_history` and
+`bloom_filter` — ephemeral messages send all three unset (`sds.md:321-322`).
+
+So the event MUST be able to express "no Lamport timestamp" rather than defaulting
+to 0, and **`(messageId present, lamportTimestamp absent)` is the combination a
+consumer will see most often** — every ephemeral message has that shape. The
+filing party should expect to be asked what a consumer does with it. The answer
+this design takes, and the one worth stating in the ask: **such a message is
+unordered.** The message id is a tiebreak within a Lamport value, not an order —
+it is a hash and carries no temporal meaning — so a consumer that ordered by it
+alone would interleave ephemeral traffic among ordered messages by hash value,
+producing an arbitrary order indistinguishable in shape from a real one.
+
+The reverse combination, a Lamport timestamp with no message id, describes no
+message SDS sends and needs no answer from the contract; this design defines one
+only because its own types permit the shape.
 
 **2. `logos-delivery-module` — `delivery_module.lidl:28` and `src/delivery_module_plugin.cpp:207-215`.**
 
