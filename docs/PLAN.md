@@ -457,23 +457,26 @@ cannot see each other, silently and permanently. §4.5 states the same rule from
 the other direction — derive `channelId` as a pure function of the addressed
 object.
 
-**Live bug, read it before touching channel lifecycle:
-`logos-messaging/logos-delivery#4116`.** Closing a channel that has received a
-peer message and then re-creating it with the same id kills the whole node
-process — and the v0.2.1 docstring claims the opposite (the issue reproduces on
-0.2.0; whether it was re-confirmed at 0.2.1 is not recorded), so following the
-documentation is what walks you into it. The issue has the conditions and the
-repro; do not restate them here, they will be wrong once it is fixed.
+**Set aside, 2026-09-12: `logos-messaging/logos-delivery#4116`.** The issue
+reports that closing a channel which has received a peer message and then
+re-creating it with the same id kills the node process. **We are no longer
+designing around it.** It was never deterministically reproduced, the spike
+that was meant to settle it never created a node, and an undetermined bug was
+shaping a real user-facing restriction. Treat the documented behaviour as
+correct until something here actually fails.
 
-What it costs *us* is the shape below, which stands on its own.
+**What this does not change:** the reason dialectica closes channels at all.
+That argument is below and rests on the shared node, not on any bug.
+
+**What it does change** is recorded at the end of this section.
 
 **Dialectica closes a channel in two places: when a user leaves a Stoa, and on
 shutdown.** Both, and the second is the one that looks optional and is not.
 
 **The delivery node is not ours to stop, and it outlives us.**
 `delivery_module` is a separate, shared process — `createNode` is called once
-per context (§11), and issue #4116 notes in passing that when the node dies "any
-other module sharing that node loses it too". So dialectica exiting does not
+per context (§11), and when the node dies, any other module sharing that node
+loses it too. So dialectica exiting does not
 stop the node, and the node's own `stop()` is not the alternative: calling it
 would tear delivery down for every other module using it, which is not
 dialectica's call to make.
@@ -502,43 +505,29 @@ only "stops its SDS loops" and does not mention the unsubscribe at all.
 That is why both cases close: leaving a Stoa and shutting down are the same
 situation — a channel that must not outlive the app that opened it.
 
-So dialectica closes channels, and #4116 makes a close followed by a re-create
-dangerous. Three ways out; the first is ruled out by this section's own rule.
+**Re-creating a channel is allowed.** Close and reopen the same id within one
+node's lifetime — to recover from an error, or because a user left a Stoa and
+rejoined. There is no epoch in the channel id and no restriction on reopening.
 
-**Ruled out — a per-peer epoch in the channel id, bumped on each open.** That is
-what a per-peer value in a rendezvous field costs: peer A reopens at
+An earlier version of this section forbade all of that to avoid #4116, at the
+cost of one real limitation: **rejoining a Stoa required a restart.** That
+limitation is withdrawn along with the premise.
+
+**The channel id stays a pure function of the addressed object.** No epoch in
+it — not a per-peer one, and not a deterministic one either.
+
+The per-peer form is ruled out by this section's own rule: peer A reopens at
 `stoa-abc/e8` while peer B is still on `stoa-abc/e7`, and they stop seeing each
-other with no error anywhere, which is worse than the crash because it is
-silent.
+other with **no error anywhere** — a silent permanent partition, which §4.5
+rules out independently of any bug.
 
-**Legitimate but unbuilt — a *deterministic* epoch every peer computes
-identically**, from a genesis-record field or a coarse clock bucket. The issue
-confirms that create → close → create with a *different* id does not reproduce,
-so this genuinely avoids both the crash and the partition. It is not designed
-here, and the hard part is that a value which changes must change for everyone
-at once — a rendezvous problem at each boundary. **This is the option to revisit
-if the assumption below fails.**
-
-**Chosen for v1 — leave the id alone and never re-create a channel inside one
-node's lifetime.** The bug needs a close and a re-create in the same node;
-dialectica controls whether that ever happens. Concretely:
-
-- **Open each Stoa's channel once per node lifetime.** Do not close and reopen
-  as a way of recovering from an error, refreshing state, or reacting to
-  connectivity changes. Reopen only after the node itself has gone away.
-- **On leaving a Stoa, close and do not reopen in that session.** Rejoining
-  before restart is the one user-visible path into the bug; make it re-create
-  the node, or defer the rejoin, or accept it as a known limitation until #4116
-  is fixed.
-
-That leaves the ordinary restart safe, since the node is new.
-
-**Untested, and the approach above rests on it:** #4116 reproduces within one
-running node. Whether persisted SDS state surviving a full process restart
-corrupts a fresh `createNode` the same way is unknown. Two runs against a real
-node, with peer traffic received in the first, settles it — worth doing before
-relying on any of this, because the failure surfaces at startup while the code
-responsible ran in the previous session.
+**A deterministic epoch is ruled out for a different reason, and it is a
+judgement about whose problem this is.** Making every peer recompute a matching
+epoch is a rendezvous problem at each boundary — a value that changes must
+change for everyone at once — and dialectica would carry that complexity
+forever in order to route around a defect in `logos-delivery`. **If re-creating
+a channel kills the node, that is an upstream bug and it gets fixed upstream.**
+Do not reintroduce an epoch here as the remedy.
 
 ### 4.4 What SDS does and does not promise
 
@@ -2819,10 +2808,6 @@ thing (§2.3).
   points the other way. RLN's per-epoch nullifiers are the better candidate and
   are also unverified here. This is the load-bearing unknown in the claims
   design: settle it before any credential carries weight in ranking or gating.
-- **Does #4116 survive a process restart?** §4.3's approach — never re-create a
-  channel inside one node's lifetime — assumes persisted SDS state does not
-  corrupt a fresh `createNode`. Two runs against a real node, with peer traffic
-  received in the first, settles it.
 - ~~**Are votes an op in v1 at all?**~~ **Answered: yes, and they are read —
   §7.2 rule 2's `top` counts them.** The kind is in the op format (`op.rs`),
   carrying a target and a direction, so the history accumulated from v1 and the
