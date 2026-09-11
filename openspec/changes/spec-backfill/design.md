@@ -37,8 +37,9 @@ untraceable ones listed as gaps rather than quietly dropped. That table is in
 
 **Non-Goals**
 
-- **No code and no tests.** Every gap found is recorded, not fixed. A documents
-  change that also edits the suite cannot be reviewed as either.
+- **No behaviour change.** One test was added under an explicit scope exception
+  (argued in `tasks.md`); every other gap found is recorded, not fixed. The test
+  is in its own commit so the documents can be reviewed without it.
 - **No keystore.** The specs cover key *types*; persistence, unlock and
   at-rest encryption are a separate capability that does not exist yet.
 - **No forum-shaped wire surface.** `module-wire-contract` describes what is
@@ -283,13 +284,25 @@ This is also a textbook instance of the fixture trap this project keeps paying
 for — the test exercises the creator-key path where *one* of the two rules is
 silent, so it cannot tell the two refusals apart.
 
-**The fix is one test** in `stoa.rs`: build a record with an all-zero creator
-key and assert `Err(GenesisError::InvalidCreator(KeyError::WeakPublicKey))`,
-which fails if the weak-key guard is removed and is distinguishable from the
-existing `NotAValidPublicKey` case. Note that `stoa.rs` already has the
-machinery — its `every_error_renders_without_leaking_rust_syntax` test
-constructs `InvalidCreator(KeyError::WeakPublicKey)` explicitly, so the variant
-is *rendered* by a test while being *reached* by none.
+Note how close the machinery already was:
+`every_error_renders_without_leaking_rust_syntax` constructs
+`InvalidCreator(KeyError::WeakPublicKey)` explicitly, so the variant was
+*rendered* by a test while being *reached* by none. A variant that only ever
+appears in a Display test is a variant no decode path is known to produce.
+
+**FIXED in this change**, under a deliberate scope exception granted because no
+other open branch touches `stoa.rs` — see `tasks.md`. The test is
+`a_creator_key_that_can_never_verify_is_refused_distinguishably`, in its own
+commit, watched failing before it passed. Its failure output with the guard
+disabled is the defect stated plainly:
+
+```
+left:  Ok(Genesis { creator: PublicKey(0000…0000), policy: Open, title: "Agora" })
+right: Err(InvalidCreator(WeakPublicKey))
+```
+
+That is a genesis record decoding cleanly, self-authenticating, and naming a
+sole moderator who can never authorise anything.
 
 ### Two security properties each rest on exactly one test
 
@@ -368,11 +381,13 @@ Recorded rather than invented, per the rule against untestable scenarios.
 
 ## Open Questions
 
-- **Should the genesis weak-creator-key test land before or with the next
-  `stoa.rs` change?** It is a one-test fix for a real gap under a merged
-  requirement, but this change adds no tests by construction. Whoever next
-  touches `stoa.rs` should take it; if nothing touches `stoa.rs` soon, it is
-  worth its own small change rather than waiting indefinitely.
+- **Should the three one-sided `verify()` tests be given their negative half?**
+  The `op-model` change identified them and left them, reasonably, because
+  changing them is a behaviour change to the suite. The property they pin —
+  authenticity is not authority — is now load-bearing for `moderation.rs`, which
+  decides authority on read, so the case for fixing them is stronger than when
+  it was first raised. Recorded in `tasks.md` where a reader of the `identity`
+  spec will meet it.
 - **Does `module-wire-contract` survive the removal of `panic_probe`?** The
   method is marked for deletion once the panic question stops being live, and
   the guard requirement's "exercised rather than merely asserted" scenario is

@@ -33,8 +33,8 @@ that is the main product of writing a spec after the fact.
 
 ## What Changes
 
-Documents only. No code, no tests, no behaviour. The suite was green before this
-change and is green after it, over identical code.
+Documents, plus **one test** under a deliberate scope exception. No behaviour
+changes.
 
 - An `identity` capability spec: what a key, an address and a signature
   guarantee; what is refused at the parse and why; and — stated as a
@@ -46,6 +46,11 @@ change and is green after it, over identical code.
   `cursor.rs` decision, and the defects the exercise turned up.
 - A `tasks.md` whose centre is a requirement-to-test table naming every
   requirement no test pins.
+- **One test**, in its own commit, closing a gap under an already-merged
+  `stoa-genesis` requirement that writing this spec revealed. The exception to
+  "documents only" is argued in `tasks.md`; the short version is that no other
+  open branch touches `stoa.rs`, so this is the only place it lands without a
+  conflict.
 
 The code being specified, for reference:
 
@@ -79,7 +84,7 @@ for why they were left where they are rather than moved in this change.
 
 ## Impact
 
-- No source file changes. `openspec/changes/spec-backfill/` is the whole diff.
+- One test added to `dialectica-core/src/stoa.rs`; no non-test source changes.
 - No wire-contract change: `module-wire-contract` describes the surface that
   exists today, which is Phase 0's probe surface plus the delivery bridge.
   Nothing forum-shaped is exposed yet.
