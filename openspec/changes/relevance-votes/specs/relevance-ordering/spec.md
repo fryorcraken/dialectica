@@ -238,6 +238,8 @@ A negative vote SHALL NOT hide a target, SHALL NOT accumulate toward hiding one,
 
 A vote is one reader's evaluation and a report is one reader's request, and neither carries authority. Hiding is a binding judgement that only a signed moderation op produces, and a threshold at which votes or reports achieved the same effect would be moderation performed by whoever assembles the most identities — reachable by anyone, since neither voting nor reporting requires permission.
 
+**This is the ordering's obligation and is not the same claim as the moderation capability's "only moderation ops decide moderation".** That one binds a *resolver*, which must ignore non-moderation ops when deciding whether a target is hidden. This one binds an *ordering*, which must not manufacture exclusion by accumulation even though it legitimately reads votes. Neither implies the other: a resolver obeying its rule perfectly says nothing about what an ordering does with a thousand downvotes, and only this requirement reaches reports, which are not ops at all.
+
 A report MAY exclude the target from the **reporting reader's own** view, and MAY be surfaced to a moderator as a signal to act on. Neither effect SHALL change what any other reader sees.
 
 #### Scenario: Unanimous downvoting does not hide
