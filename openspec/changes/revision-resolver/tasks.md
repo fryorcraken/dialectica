@@ -300,7 +300,37 @@ instruction to a reviewer, and it was what made the requirements read as
 apologies for themselves. A requirement states what must hold; where to look is
 not its job.
 
-## 10. PLAN.md
+## 10. Rebasing onto main, and the op kind that arrived meanwhile
+
+- [x] **`StoaMetadata` (#11) did not break the build, and that was checked
+      rather than assumed.** A new `OpKind` variant is exactly where a resolver
+      silently acquires wrong behaviour, so the clean compile was investigated
+      instead of trusted. It holds because **no match in `revision.rs` is
+      exhaustive**: every one is either a positive `matches!` on `Post`/`Revise`,
+      or a two-arm projection with a `_` arm. A new kind therefore falls outside
+      both guards and is excluded *by the rule*, not by a wildcard that would
+      have defaulted it into "is a version".
+
+      Pinned by `a_stoa_metadata_op_is_neither_a_post_nor_a_version`, which
+      covers both directions and was mutation-verified against mutation 5
+      (removing the post-kind guard) before being kept. The op matters twice:
+      it carries **no target at all** — it names the Stoa, the case
+      `iter_target`'s doc says is not expressible there, so it never reaches the
+      fold — and it carries a `title`, which is content, so a resolver matching
+      loosely on "has text" rather than on the `Revise` kind would substitute a
+      Stoa's title into a post's body.
+
+- [x] **`cmp_ops`'s signature change (#10) reached nothing here.** It now takes
+      a named `OpEntry` instead of two anonymous tuples. `revision.rs` has **no
+      call sites** — every mention is documentation — because the resolver
+      delegates ordering entirely to `iter_target`. That is the
+      "defines no order of its own" requirement earning its place empirically:
+      the design review kept it in the spec over the argument that it was
+      unpinnable, on the grounds that a private copy of the rule "diverges from
+      every other reader on the first change to `arrival.rs`". That change then
+      happened one round later, and this resolver needed nothing.
+
+## 11. PLAN.md
 
 - [x] One line in §5.7 that the resolver exists, per the document model.
 - [x] Reasoning stays in `design.md`; not duplicated into PLAN.md.

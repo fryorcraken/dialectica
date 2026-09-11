@@ -1004,6 +1004,57 @@ mod tests {
     }
 
     #[test]
+    fn a_stoa_metadata_op_is_neither_a_post_nor_a_version() {
+        // The op kind added after this resolver was written, pinned in both
+        // directions because a new kind is exactly where a resolver silently
+        // acquires wrong behaviour.
+        //
+        // It matters twice over. `StoaMetadata` names the **Stoa** and carries
+        // no target at all — the case `iter_target`'s doc warns is not
+        // expressible there — so it cannot even reach the fold. And it carries
+        // a `title`, which is content: a resolver matching loosely on "has
+        // text" rather than on the `Revise` kind would substitute a Stoa's
+        // title into a post's body.
+        let key = author();
+        let metadata = Op {
+            stoa: a_stoa(),
+            author: key.public_key(),
+            kind: OpKind::StoaMetadata {
+                title: "Renamed Agora".to_string(),
+                description: "not a post body".to_string(),
+            },
+        }
+        .sign(&key);
+        let metadata_id = metadata.op.id();
+
+        let post = a_post("the real body");
+        let id = post.op.id();
+
+        let mut log = MemoryOpLog::new();
+        log.append(post, Arrival::unordered());
+        // Top of the order, so only the kind check can exclude it.
+        log.append(metadata.clone(), Arrival::ordered(u64::MAX, a_message_id(0)));
+
+        // It names no op, so it never reaches a target-restricted read.
+        assert_eq!(
+            log.iter_target(&id).len(),
+            0,
+            "a metadata op names the Stoa, not an op"
+        );
+
+        // The post is unaffected: not revised, own body.
+        let resolved = current_version(&log, &id).unwrap();
+        assert!(!resolved.is_revised());
+        assert_eq!(resolved.body(), "the real body");
+
+        // And it is not itself a post with versions.
+        assert!(
+            current_version(&log, &metadata_id).is_none(),
+            "only a post has versions"
+        );
+    }
+
+    #[test]
     fn a_reply_is_a_post_and_has_versions() {
         // The other side of the kind check: a reply is a `Post` with its parent
         // set (§4.1, and `op.rs`'s "there is no `Reply` kind"), so it must
