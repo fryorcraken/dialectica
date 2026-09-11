@@ -9,24 +9,55 @@ per-role models and tool limits.
 
 ## The documents, and what each is for
 
-| Document | Question | Lifetime |
+| Document | Question | Where it ends up |
 |---|---|---|
-| `docs/PLAN.md` | Why the system is built this way; what is not built yet | Permanent |
-| `proposal.md` | Why this change, and which capabilities it touches | Archived with the change |
-| `openspec/specs/` | **What** the system does — the behaviour contract | Permanent |
-| `design.md` | **How**, and **why this approach** (Decisions) | Archived with the change |
-| `tasks.md` | The ordered checklist | Archived with the change |
+| `docs/PLAN.md` | A short summary of what exists, and **what is not built yet** | Lives at `docs/`, edited forever |
+| `proposal.md` | Why this change, which capabilities it touches | `changes/archive/<date>-<name>/` |
+| `openspec/specs/` | **What** the system does — the behaviour contract | `openspec/specs/`, current |
+| `design.md` | **How**, and **why this approach** (Decisions) | `changes/archive/<date>-<name>/` |
+| `tasks.md` | The ordered checklist | `changes/archive/<date>-<name>/` |
 
-Two rules keep them from drifting:
+### What "archived" means concretely
 
+A directory move plus a merge — nothing is deleted or compressed.
+
+While a change is in flight it lives in `openspec/changes/<name>/`, and its
+`specs/` holds a **delta** (`## ADDED Requirements`). `openspec archive` then:
+
+1. **merges the delta into `openspec/specs/`** — the live, current contract;
+2. **moves the folder** to `openspec/changes/archive/<date>-<name>/`.
+
+Everything stays in git and stays greppable. What changes is the *index*: the
+archive is organised by change, so a cross-cutting question ("why is the title
+length-prefixed?") means knowing which change did it, or grepping every folder.
+That gets worse as the archive grows.
+
+### The two rules that keep them from drifting
+
+- **PLAN.md is not where "why" lives.** Decisions go in `design.md` under
+  Decisions, and stay there. PLAN.md carries what is **not built yet**, plus a
+  one-line summary of what is — that a thing exists, never why it works that
+  way. Someone investigating a past decision goes and reads the archive; that is
+  what it is for.
 - **PLAN.md sheds as specs are written.** Behaviour it described as forthcoming
-  is struck through and pointed at the spec. It shrinks toward intent alone.
-- **Reasoning that outlives a change must reach PLAN.md.** `design.md` is
-  archived, so a trap or constraint left only there is lost. Per-change
-  reasoning stays in `design.md`; system-level reasoning goes to PLAN.md.
+  gets struck through and pointed at the spec.
 
-Reasoning never goes in a spec. OpenSpec silently drops a REMOVED requirement
-when the capability is new, with validation still passing.
+The failure mode is two copies, not a missing one. Reasoning duplicated between
+PLAN.md and a `design.md` drifts, and the wrong copy gets read.
+
+Reasoning never goes in a spec at all. OpenSpec silently drops a REMOVED
+requirement when the capability is new, with validation still passing.
+
+### PLAN.md is not being migrated wholesale
+
+It currently holds a lot of reasoning that, under the rule above, would live in
+a `design.md` — §2.3's SDK gaps, §11's traps, why BIP-340 was rejected. **Leave
+it.** Two reasons: most of it has no change to attach to (§11's traps were
+learned across Phase 0, with no OpenSpec change behind them), and a bulk move
+would be a large one-way edit to this project's most valuable document.
+
+The rule applies **going forward**. New reasoning lands in a `design.md`, and
+PLAN.md sheds an area as a change touches it. It shrinks by attrition.
 
 ## The roles
 

@@ -102,23 +102,24 @@ For each requirement in the spec, check the corresponding part of PLAN.md on
 - states as future intent something the spec now specifies
 - duplicates behaviour the spec states, rather than pointing at it
 
-**PLAN.md sheds in two directions, and the destination depends on the kind:**
+**PLAN.md sheds in two directions:**
 
 - **Behaviour → the spec.** What the system does, observably.
-- **Reasoning → `design.md`'s Decisions section** when it is about this change;
-  **PLAN.md** when it outlives the change. `design.md` is archived with its
-  change, so a trap or constraint that applies to the system belongs in PLAN.md.
+- **Reasoning → `design.md`'s Decisions section**, where it stays. The archive
+  is in git and greppable, so someone investigating a past decision reads it
+  there; PLAN.md does not keep a second copy.
 
-Report reasoning that stayed in PLAN.md once the change that acted on it landed
-— it belongs in the ADR, where it sits beside the decision it explains.
+Report reasoning that stayed in PLAN.md once the change that acted on it landed.
+A one-line summary that a thing exists is correct; a paragraph explaining why it
+works that way belongs in `design.md`.
 
 **The one destination that is always wrong is the spec.** A spec has no place
 for reasoning, and OpenSpec silently drops it: a REMOVED requirement is
 discarded when the capability is new, with validation still passing. Reasoning
 routed into a spec is reasoning lost.
 
-The right end state is PLAN.md shrinking toward forward-looking intent only,
-with pointers to where the built parts now live. Prefer a strikethrough plus
+The right end state is PLAN.md shrinking toward what is not built yet, with a
+one-line summary of what is. Prefer a strikethrough plus
 "answered: see `<spec>`" over deletion, so the question's history stays legible.
 
 ## Output

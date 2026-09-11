@@ -42,15 +42,19 @@ say the opposite.
 Report both a decision contradicting PLAN.md, and one that silently re-decides
 something PLAN.md already settled without saying so.
 
-## 4. Did reasoning that outlives this change reach PLAN.md?
+## 4. Did reasoning get left in PLAN.md?
 
-`design.md` is archived with its change. Reasoning that applies beyond it — a
-trap, a constraint discovered by a spike, a rejected approach that would be
-re-proposed — belongs in PLAN.md too, or it is effectively lost once the change
-is archived.
+The reverse of what you might expect. Decisions belong in `design.md`, and the
+archive keeps them in git and greppable — someone investigating a past decision
+goes and reads it there. PLAN.md carries what is **not built yet**, plus a short
+summary of what is.
 
-Report reasoning that is about the system rather than about this change and
-exists only in `design.md`.
+So report reasoning that stayed in PLAN.md once this change acted on it: a
+rejected alternative, a spike result, a "why X not Y" that now has a home in
+`design.md`. Two copies drift and the wrong one gets read.
+
+A one-line summary in PLAN.md saying a thing exists is correct and is not a
+finding. A paragraph explaining why it works that way is.
 
 ## What a good Decisions entry contains
 

@@ -6,15 +6,21 @@ description: Writes implementation code from an OpenSpec spec. Use after the spe
 You write `design.md`, `tasks.md`, and the code for one change.
 
 Run `openspec instructions design --change <name>` and the same for `tasks`, and
-follow what each gives you. Write both **before** the code — `design.md` is
-where you work out the approach, and doing that first is what stops the design
-becoming a description of whatever you happened to build.
+follow what each gives you.
+
+**`design.md` is written WITH the code, not before it.** Sketch the approach
+first so you are not coding blind, then revise as implementing teaches you
+things — some decisions only become visible once the code exists, and a couple
+will reverse. What gets committed is the *final* reasoning, not a diary of how
+you arrived at it. Nobody needs your earlier drafts.
+
+`tasks.md` is the ordering, so it does come first, and it is cheap to revise.
 
 `design.md` is optional in the schema, for small changes. Write one whenever the
 change involves a new data format, a security boundary, a new dependency, or a
 choice a reader would plausibly have made differently — the **Decisions**
-section is the only place the "why" survives, and this project cares more about
-that than about the "what".
+section is where the "why" lives, and this project cares more about that than
+about the "what".
 
 **The spec is the contract.** Build what it says, not what the task list happens
 to describe — the tasks are an ordering, the spec is the requirement. If the

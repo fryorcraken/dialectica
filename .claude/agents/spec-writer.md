@@ -25,20 +25,23 @@ This file carries only the split between documents:
 - **The spec says WHAT** — observable behaviour, inputs, outputs, every error
   condition, security and privacy properties.
 - **`design.md` says HOW and WHY** — its **Decisions** section carries which
-  alternative was chosen and what ruled the others out.
-- **PLAN.md keeps forward-looking intent** — what is not built yet.
+  alternative was chosen and what ruled the others out. **This is where "why the
+  system is built this way" lives**, not PLAN.md.
+- **PLAN.md carries what is NOT BUILT YET**, plus a short summary of what is —
+  a paragraph and a pointer per built area, never the reasoning.
 
-**Prune PLAN.md as you go, in both directions.** Once this change lands, the
-part of PLAN.md it implements should stop reading as forthcoming:
+**Prune PLAN.md as you go.** Once this change lands, the part of PLAN.md it
+implements should stop reading as forthcoming:
 
-- **Behaviour** the spec now states — strike it through and point at the spec.
+- **Behaviour** the spec now states — strike it through, point at the spec, and
+  leave at most a one-line summary that it exists.
 - **Reasoning** the change acted on — rejected alternatives, spike results, the
-  why — moves to `design.md`'s Decisions section if it is about this change, or
-  stays in PLAN.md if it outlives it. `design.md` is archived with the change,
-  so reasoning about the *system* belongs in PLAN.md.
+  why — moves to `design.md`'s Decisions section and stays there. Do not leave a
+  second copy in PLAN.md. The archive is in git and greppable; someone
+  investigating a past decision reads it there.
 
 Strike through and point rather than deleting, so a question's history stays
-legible. PLAN.md should shrink toward intent alone.
+legible. PLAN.md should shrink toward what is still ahead.
 
 **Never route reasoning into the spec.** A spec has no place for it, and
 OpenSpec silently drops it — a REMOVED requirement is discarded when the
