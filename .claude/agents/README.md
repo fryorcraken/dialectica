@@ -77,6 +77,16 @@ The three reviewers split deliberately, and run in parallel:
 - `design-reviewer` asks **did the code take the decisions that were recorded,
   and were the decisions worth recording recorded?**
 
+**`code-reviewer` is launched once per dimension** — correctness, security,
+readability, architecture — with the prompt naming which. One agent holding all
+four does each worse: scanning for a reachable panic is a different reading of
+the same file from scanning for a function doing two jobs, and a single pass
+becomes whichever the reviewer started with. A small change can take one
+instance covering all four.
+
+So a full review is typically six agents: four `code-reviewer`, plus
+`spec-test-reviewer` and `design-reviewer`.
+
 `spec-test-reviewer` is deliberately blind to the implementation. Someone who
 has read the code judges tests by what the code does, which is exactly the
 failure a spec exists to catch: a test that faithfully pins the wrong behaviour.
