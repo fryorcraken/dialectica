@@ -188,11 +188,17 @@ impl Arrival {
     }
 }
 
-/// Order two ops: most recent first.
+/// Order two ops: most recent first where the transport said so, ascending op id
+/// where it did not.
 ///
 /// §5.7's rule, over the transport's values: descending Lamport timestamp, ties
 /// broken by ascending message id. [`Ordering::Less`] means "orders first", so
 /// sorting a slice with this puts the current version at the front.
+///
+/// **"Most recent first" describes the transport-ordered branch only.** The
+/// degraded branch is **ascending op id**, so the LOWEST op id reads first, and
+/// that is what "most recent" degrades to — see below for why it cannot be
+/// recency. Today that branch is the only one production reaches.
 ///
 /// # PRECONDITION: the op ids compared must be distinct
 ///
@@ -241,14 +247,21 @@ impl Arrival {
 /// it did not, and a post's current version should not be displaced by an op
 /// about which nothing is known.
 ///
-/// Two unordered ops fall back to ascending [`OpId`] — chosen because an op id
-/// is a function of the op's own bytes, so every peer computes the same one from
-/// the op alone. Arrival sequence and the delivery module's `timestamp` were
-/// both rejected: they are per-peer, and the second is per-peer while looking
-/// shared. The fallback is arbitrary with respect to time, and that is accepted,
-/// because the property bought is *convergence* rather than accuracy. Two peers
-/// agreeing on an arbitrary order render consistently; two peers disagreeing
-/// cannot be reasoned about at all.
+/// Two unordered ops fall back to **ascending** [`OpId`] — lowest first — chosen
+/// because an op id is a function of the op's own bytes, so every peer computes
+/// the same one from the op alone. Arrival sequence and the delivery module's
+/// `timestamp` were both rejected: they are per-peer, and the second is per-peer
+/// while looking shared.
+///
+/// **The direction is stated because "arbitrary" does not imply one, and the
+/// surrounding prose is about recency.** The degraded order is not most-recent
+/// first, and it could not be: an op id is a hash, so there is nothing in it to
+/// be recent *by*. "Ascending op id" is a deterministic arbitrary order — it
+/// carries no recency information at all, and the only property it buys is
+/// convergence. Two peers agreeing on an arbitrary order render consistently;
+/// two peers disagreeing cannot be reasoned about at all. A reader who expects
+/// recency here will look for it and not find it; a reader who expects the
+/// lowest id first is reading the code.
 pub fn cmp_ops(a: (&Arrival, &OpId), b: (&Arrival, &OpId)) -> Ordering {
     let (a_arrival, a_id) = a;
     let (b_arrival, b_id) = b;
