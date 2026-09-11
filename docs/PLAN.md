@@ -1318,10 +1318,12 @@ cannot be gamed by minting identities, plus one that can:
 - **`active`** — threads by the Lamport timestamp of their most recent
   non-hidden reply. Gameable only by *posting*, which moderation and rate
   limiting already govern.
-- **`top`** — vote ops counted per distinct identity. A moderator's **upvote**
-  weighs `K` (a constant in the scorer, **chosen rather than derived**); every
-  other vote weighs 1; a post's score is **floored at zero**, so downvoting can
-  order a post last but never remove it.
+- **`top`** — vote ops counted per distinct identity, weighted by **how much
+  this reader weighs that voter's opinion**. A moderator's **upvote** weighs
+  `K_mod`; a **vouched** voter's upvote weighs `K_vouch` (§7.3); every other
+  vote weighs 1 — *some* score rather than zero, which is the interim's whole
+  premise and what rule 3 removes later. A post's score is **floored at zero**,
+  so downvoting can order a post last but never remove it.
 
 **`top` is an engagement ordering, not a relevance signal, and the distinction
 is the whole of the claim.** It reports how many distinct identities voted,
@@ -1331,8 +1333,9 @@ nothing establishes that two votes came from two people.
 
 **It is safe for exactly one reason, and that reason is not a property of the
 design: nobody is attacking a forum with no transport, no discovery and no
-users.** With `K = 3`, four minted identities outvote a moderator, and no finite
-`K` changes that — minting is free, so every `K` is defeated at the same price.
+users.** With `K_mod = 3`, four minted identities outvote a moderator, and no
+finite weight changes that — minting is free, so every weight is defeated at the
+same price.
 A defence resting on the environment expires when the environment changes, which
 is what **rule 6** exists to catch.
 
@@ -1399,8 +1402,8 @@ history) and let the UI offer a "show hidden" view — but the default feed omit
 them.
 
 **A moderator's *downvote* is the same mistake arriving from the other
-direction**, and rule 2's `K` therefore applies to a moderator's **upvote
-only**. This rule originally stopped a `hide` from being *weakened* into a
+direction**, and rule 2's weights therefore apply to an **upvote only** — for a
+moderator's vote and equally for a vouched one (§7.3). This rule originally stopped a `hide` from being *weakened* into a
 ranking nudge; nothing stopped a ranking nudge being *strengthened* by moderator
 authority into a soft hide. An amplified downvote has none of a moderation op's
 properties — it does not bind (a well-upvoted post survives it), it names no
@@ -1435,10 +1438,12 @@ the index (equal scores are the ordinary case — every unvoted post ties — an
 without a total order `LIMIT` pagination silently repeats and skips rows); and
 **vote counts partitioned by voter rather than pre-weighted or pre-summed**.
 That last is what makes rule 1's promise true: a schema storing
-`weighted_total = plain + K·moderator` has baked `K` into stored data, so
-changing it needs a full replay rather than an `ORDER BY` edit — and it is wrong
-anyway, since a voter's authority resolves on read and is not a property of the
-vote.
+`weighted_total = plain + K_mod·moderator` has baked the weight into stored
+data, so changing it needs a full replay rather than an `ORDER BY` edit — and it
+is wrong anyway, since a voter's authority resolves on read and is not a property
+of the vote. §7.3 makes this sharper still: a vouched voter's weight is not even
+a property of the *Stoa*, since it differs per reader, so weights must be joined
+at query time rather than stored against a vote under any scheme.
 
 **Rule 4's exclusion has to be indexable too, and it is not this same problem.**
 A filter over a property resolved on read looks like rule 5 in another hat, but
@@ -1483,8 +1488,11 @@ withdrawn or re-gated before the next release on whichever of these fires first:
 - **A nullifier-bound vote credential lands** (RLN, §7). Rule 3's end state is
   then available and the interim has no remaining justification.
 
-The first three retire `top`; the fourth replaces it. **Whoever proposes §4.8
-Phase 2 broadcast discovery owns this check** — it is recorded here rather than
+The first three retire `top`; the fourth replaces it. **What expires is the
+*plain* vote's non-zero weight, not the ordering itself** — §7.3's vouched class
+survives every trigger, because a vouch was never a sybil defence and an
+attacker's arrival does not invalidate it. **Whoever proposes §4.8 Phase 2
+broadcast discovery owns this check** — it is recorded here rather than
 only in the change that introduced `top`, because the first condition fires
 inside someone else's change and they will not read that one.
 
@@ -1542,6 +1550,104 @@ signal was binary and free:
   privacy, **not** presentation unlinkability, and its `3010` account-binding
   may preclude it (§5.5, §13). Settle this before a holding proof carries any
   weight in ranking.
+
+### 7.3 Vouching: a reader's own trust, and why it is not published
+
+Moderator weight (§7.2 rule 2) is one Stoa-wide opinion, and a Stoa has exactly
+one moderator today. That makes the interim ordering a fair description of what
+*the creator* likes, which is not the same as relevance and does not scale past
+a Stoa small enough for one person to read.
+
+**A reader may therefore vouch for an identity**: "this pseudonym produces good
+judgement, weigh their votes more heavily **in my ranking**." It is the answer
+for someone who has earned standing with actual readers but holds no system
+credential — no moderator key, no token, no RLN membership — which is the
+majority of anyone worth reading.
+
+#### The vocabulary, and what each rejected word would have implied
+
+**"Vouch"**, because the alternatives each smuggle in a different mechanism:
+
+- **"follow"** already means *show me their posts* in every forum anyone has
+  used. Reusing it welds feed subscription to vote weighting, and users want
+  those separately — plenty of people are worth reading and unreliable at
+  judging others, and the reverse is commoner still.
+- **"friend"** implies reciprocity and a social graph. This is one-directional
+  and needs no agreement from the other party, who is never told.
+- **"trust"** collides with the word §7 uses for cryptographic guarantees. A
+  "trusted user" reads as a system property; a *vouched* one is plainly
+  somebody's opinion, which is exactly what it is.
+
+So: a reader **vouches for** an identity, holds a **vouched set**, and the
+scorer's weight classes are **moderator / vouched / plain**.
+
+#### It is a local projection, not an op — and that is not a detail
+
+**A vouch is never published.** It is local state, like the score it feeds
+(§7.2 rule 1), and three independent arguments all land on that:
+
+- **§5.2 makes a published vouch a privacy leak.** Identities are unlinkable
+  across Stoas by construction. A vouch list that travelled — or that named
+  identities in more than one Stoa — would re-link the pseudonyms §5.2 keeps
+  apart, and would do it using the reader's own social graph, which is worse
+  than the linkage §5.2 prevents. **A vouch therefore names a Stoa-scoped
+  identity and is scoped to that Stoa**, with no cross-Stoa list anywhere.
+- **A published vouch graph is a sybil amplifier.** If vouches were ops,
+  minting identities that vouch for each other would manufacture standing, and
+  the graph would be exactly the unmetered signal §7.2 rule 3 warns about with
+  more steps. Keeping it local means an attacker can only affect *their own*
+  ranking, which is not an attack.
+- **It converges without any protocol.** Nothing has to agree. §7.2 rule 1
+  already says two peers rank differently and that is correct; a vouch makes
+  that divergence *intentional* rather than merely tolerated.
+
+The consequence worth stating plainly: **vouching does not make anyone more
+visible to anyone else.** It changes one reader's feed. Anybody expecting it to
+confer status on the person vouched for has misread it, and the UI must not
+imply otherwise — no vouch counts, no "N people vouch for this author" badge.
+Such a display would be a published vouch graph reconstructed by eye, with all
+three problems above.
+
+#### Weights, and the one ordering constraint that matters
+
+`K_vouch < K_mod`, and both are chosen rather than derived (§7.2 rule 2 says
+the same of `K_mod`, and the honesty applies to both). The inequality is not
+arbitrary: a moderator's standing is checkable by every peer from the genesis
+record, where a vouch is one reader's private judgement, so the more accountable
+credential should not weigh less. `K_vouch` around 2 against `K_mod` of 3 keeps
+both inside §7.2's bracket.
+
+**Vouching amplifies promotion only**, exactly as rule 4 requires of a
+moderator's vote, and for the same reason: an amplified downvote is suppression
+without moderation's properties. That it is *private* suppression makes it no
+better — a reader who silently buries what their vouched set dislikes has built
+a filter bubble with a ranking engine, which is at least a product failure and
+arguably the thing a dialectic forum exists not to be.
+
+#### What it does not become
+
+**A vouch is not transitive, and this is a decision rather than an omission.**
+Weighing the opinions of people my vouched set vouches for is a web of trust,
+and a web of trust needs loop detection, depth limits, decay per hop, and a
+defined answer when two paths disagree — and it recreates the sybil amplifier
+locally, since one bad vouch imports a stranger's entire graph. If transitivity
+is ever wanted, it is its own design with its own evidence, not a parameter.
+
+**A vouch does not moderate.** It cannot hide, and it is not an input to
+moderation. §6.1 keeps moderation a binding judgement, and a reader's private
+weighting is the opposite of binding by construction.
+
+#### Where it sits in the staging
+
+Vouching is **an extension, scheduled after** §7.2's interim ordering ships, and
+it is the one piece of §7 that **does not expire under rule 6**: it is not a
+sybil defence and never claimed to be, so an attacker's arrival does not
+invalidate it. When rule 3's credential gate lands and plain votes drop to zero,
+vouched votes survive — **a vouch is a credential too, just one whose issuer is
+the reader rather than the system.** That is the property that makes it worth
+building rather than a stopgap: it is the only weight class here that stays
+meaningful in the end state, and it is what stops that end state from counting
+nobody but token holders.
 
 ---
 

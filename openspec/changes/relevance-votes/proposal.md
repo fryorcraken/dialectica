@@ -65,10 +65,30 @@ directions.
 It does not schedule the credential-gated end state. It schedules the **check**
 that says the interim has expired.
 
+## Also: the vocabulary for reader-declared trust
+
+The owner extended the scope mid-change — a reader should be able to weigh the
+opinion of someone producing good content who holds no system credential. The
+term is **vouch** (a reader *vouches for* an identity; holds a **vouched set**;
+weight classes are **moderator / vouched / plain**), and the rejected candidates
+each smuggled in a different mechanism: "follow" already means feed subscription,
+"friend" implies reciprocity, "trust" collides with §7's cryptographic sense.
+
+**PLAN §7.3 records the decision; this change does not specify or build it.** A
+vouched set is per-reader local state and no capability currently owns any kind —
+every capability so far projects from the shared op log. That is a real design
+question, not a paragraph, so it gets its own proposal. See `design.md` §11–§12.
+
 ## Impact
 
 - `docs/PLAN.md` §7.2 — rules 2, 3, 4 rewritten; rule 6 added; the reserved
   shape corrected.
-- New capability `relevance-ordering` (delta only; not merged here).
+- `docs/PLAN.md` §7.3 — new, design-only: vouching's vocabulary and why it is
+  never published.
+- New capability `relevance-ordering` (delta only; not merged here). **No spec
+  delta for vouching** — deliberately, so this change carries one argument.
 - **The projection schema must reserve three columns before it is written.**
   See `design.md` §1. This is the only part of this change with a deadline.
+  Vouching adds **no** schema requirement: it makes the already-chosen
+  partition-by-voter-and-join-at-query-time decision *required* rather than
+  merely convenient, and takes the class count from two to three.

@@ -138,13 +138,15 @@ Scope is checked separately from authenticity because an authentic vote naming a
 - **WHEN** a target's only downvotes fail verification
 - **THEN** the target's position is the same as if those ops were absent
 
-### Requirement: Only an unmintable credential may weight a vote
+### Requirement: A weight above the ordinary comes from the system or from the reader, never from the voter
 
-An ordering MAY weight a vote above the weight of an uncredentialed vote only where the credential distinguishing it cannot be obtained by creating a new identity. A credential that a new identity can obtain SHALL NOT increase a vote's weight.
+An ordering MAY weight a vote above the ordinary weight only where the distinction is conferred either by state the whole Stoa derives identically, or by a declaration the reader computing the ordering made themselves. A distinction a voter can confer on themselves SHALL NOT increase a vote's weight, and no property an op asserts about its own author SHALL do so.
 
-Weighting by a mintable credential moves no cost onto an attacker: an attacker who can create identities can create credentialed ones, so the weight decorates a quantity they already control. The moderator set derived from a Stoa's genesis record satisfies this because the creator's key is inside the address preimage, and an address is what a Stoa is — a minted identity is not a moderator of any existing Stoa.
+The prohibited case is the one that matters: an attacker who can create identities can create identities carrying any self-asserted property, so weighting by one decorates a quantity the attacker already controls rather than costing them anything.
 
-This requirement bounds what may be weighted; it does not require that anything is, and it fixes no weight.
+The two permitted sources are safe for different reasons, and neither reason transfers to the other. A Stoa-derived credential — the moderator set obtained from the genesis record — is safe because the creator's key sits inside the address preimage and an address is what a Stoa is, so a minted identity is not a moderator of any existing Stoa. A reader-declared weight is safe because it is not a claim about the world at all: it changes only the ranking of the reader who declared it, so an attacker who obtains one has persuaded exactly one person and gained nothing they did not already have.
+
+This requirement bounds what may be weighted. It does not require that anything is, and it fixes no weight.
 
 #### Scenario: A vote by a moderator may weigh more than one by a non-moderator
 
@@ -154,21 +156,39 @@ This requirement bounds what may be weighted; it does not require that anything 
 #### Scenario: A newly created identity's vote carries no elevated weight
 
 - **WHEN** an identity with no history votes
-- **THEN** its vote carries the uncredentialed weight
+- **THEN** its vote carries the ordinary weight
 - **AND** no property the identity can assert about itself raises that weight
 
 #### Scenario: A moderator of another Stoa is not credentialed here
 
 - **WHEN** the moderator of one Stoa votes in a Stoa they do not moderate
-- **THEN** their vote carries the uncredentialed weight
+- **THEN** their vote carries the ordinary weight
 
-### Requirement: A credential may amplify promotion but never suppression
+#### Scenario: A reader's own declaration may weight a vote
 
-Where an ordering weights a credentialed vote above an uncredentialed one, that weighting SHALL apply only to a vote that raises a target's position. A credentialed vote that lowers a target's position SHALL carry the same weight as an uncredentialed one.
+- **WHEN** a reader has declared that it weighs a given identity's opinion above the ordinary, and that identity votes
+- **THEN** that vote may weigh more than the ordinary in that reader's ordering
+
+#### Scenario: One reader's declaration does not change another reader's ordering
+
+- **WHEN** one reader has declared such a weighting and another has not, and both order the same ops
+- **THEN** the second reader's ordering is unchanged by the first's declaration
+- **AND** neither reader is in error
+
+#### Scenario: A declaration is not derived from any op
+
+- **WHEN** an ordering is computed over a log containing ops that assert standing, endorsement or reputation for their authors
+- **THEN** no such op raises any vote's weight
+
+### Requirement: A weight may amplify promotion but never suppression
+
+Where an ordering weights a vote above the ordinary weight, that weighting SHALL apply only to a vote that raises a target's position. A weighted vote that lowers a target's position SHALL carry the ordinary weight. This SHALL hold for every source of weight.
 
 Amplified suppression is a moderation action without moderation's properties. A moderation op binds, names a deciding op, and has a specified inverse; an amplified downvote does none of these — it reduces a post's visibility by a proportion that a sufficiently voted post survives, and nothing identifies it as a moderator's decision or reverses it as one.
 
 Offering a moderator an amplified but non-binding way to suppress something is worse than offering none, because it is the nearer tool and it does not do what it appears to do. Suppression is a binding judgement or it is nothing.
+
+A reader-declared weight is no exception, and its own reason is separate: amplifying the suppressions of those a reader has chosen to weigh would remove from that reader's view whatever their chosen voters disliked, which builds a self-reinforcing filter rather than a ranking. The asymmetry keeps such a declaration a statement about whose recommendations to surface, never about whose objections to act on.
 
 #### Scenario: A moderator's downvote weighs the same as anyone's
 
@@ -179,6 +199,11 @@ Offering a moderator an amplified but non-binding way to suppress something is w
 
 - **WHEN** a moderator upvotes one target and downvotes another, both otherwise unvoted
 - **THEN** the magnitude of the change to the upvoted target's score is not equal to the magnitude of the change to the downvoted one's
+
+#### Scenario: A reader-declared weight does not amplify a downvote
+
+- **WHEN** an identity a reader has declared a weighting for downvotes a target
+- **THEN** the target's position falls by the same amount as it would for an undeclared identity's downvote
 
 ### Requirement: Negative engagement orders a post last and never removes it
 

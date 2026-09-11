@@ -562,7 +562,74 @@ decision, it is a permanent one taken quietly — and the reason to insist is th
 the interim's entire safety argument is "no attacker is present", which nobody
 will re-examine unless something makes them.
 
-## 11. What this document got wrong, corrected in review
+## 11. Vouching: recorded here, specified elsewhere
+
+The owner extended the scope mid-change: alongside the moderator class, a reader
+should be able to **decide for themselves** whose judgement to weigh, for someone
+producing good content who holds no system credential. PLAN §7.3 carries the
+decision; this section records only what a reader of *this change* needs, and the
+mechanism is deliberately **not specified or tasked here** — see §12.
+
+**The vocabulary is the part that was actually asked for**, and the rejected
+options each encode a different mechanism, which is why the choice is not
+cosmetic. "Follow" already means *show me their posts*; reusing it welds feed
+subscription to vote weighting, and those are separable wants (plenty of people
+are worth reading and unreliable at judging others, and the reverse is commoner).
+"Friend" implies reciprocity and a social graph, where this is one-directional
+and the other party is never told. "Trust" collides with §7's cryptographic
+sense — a "trusted user" reads as a system property rather than one reader's
+opinion. **Vouch** carries none of those. Weight classes become
+**moderator / vouched / plain**.
+
+**The one finding that changes an interface**: a vouch is per-reader, so a
+vouched voter's weight is not a property of the vote *or of the Stoa*. The
+schema's decision to partition aggregation by voter and join weights at query
+time already accommodates this with no change — but it upgrades that decision
+from convenient to required, since no per-Stoa stored weight could ever express
+it. The class count in that join goes from two to three.
+
+**Why it is not an op**, which is the substantive design decision: §5.2 makes
+identities unlinkable across Stoas, so a published or travelling vouch list
+would re-link the pseudonyms §5.2 protects — using the reader's own social graph,
+which is worse than the linkage being prevented. A vouch therefore names a
+Stoa-scoped identity and stays in that Stoa. Independently, a published vouch
+graph is a sybil amplifier (identities vouching for each other manufacture
+standing, which is rule 3's unmetered signal with extra steps), and keeping it
+local means an attacker can only affect their own ranking, which is not an
+attack.
+
+**It amplifies promotion only**, for rule 4's reason plus one of its own: private
+suppression is not better than public suppression, it is a filter bubble with a
+ranking engine behind it.
+
+**It does not expire under rule 6.** When the credential gate lands and plain
+votes drop to zero, vouched votes survive — a vouch *is* a credential, issued by
+the reader rather than the system. That is the argument for building it rather
+than treating it as a stopgap: it is the only weight class that stays meaningful
+in the end state, and it is what stops that end state from counting nobody but
+token holders.
+
+## 12. Why vouching is not specified in this change
+
+This change carries one argument — that an interim engagement ordering is worth
+shipping and must carry a named expiry. Vouching is a second argument, and
+putting both in one delta would make each harder to review and impossible to
+revert independently, which is the repository's own rule about reshaping and
+altering behaviour in one diff.
+
+It also raises a real design question this change has no answer for: **a vouched
+set is per-reader local state, and no capability currently owns any.** Every
+capability so far projects from the op log, which is shared, replayable and
+attacker-supplied. A vouched set is none of those — it is authored by the user,
+never published, and must survive replay rather than be derived by it. Where it
+lives, how it is persisted, whether it is exported when a user moves devices, and
+what happens to a vouch naming an identity the reader no longer holds ops for are
+all questions with more than one defensible answer.
+
+So PLAN §7.3 records the decision and the vocabulary; the mechanism gets its own
+proposal.
+
+## 13. What this document got wrong, corrected in review
 
 Recorded rather than silently fixed, because the reasoning that produced the
 error is the useful part.

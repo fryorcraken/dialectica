@@ -55,8 +55,26 @@ Not done here and deliberately not started.
 - [ ] Mutation-verify each of the above: break the property, record which tests
       fail, restore, report the table.
 
-## 5. Not in scope
+## 5. Vouching — decided here, built elsewhere
+
+- [x] Choose the vocabulary and record why each alternative was rejected
+      (PLAN §7.3). This is what the owner asked for.
+- [x] Establish that a vouch is never published, and the three independent
+      reasons — §5.2 re-linking, sybil amplification, no convergence needed.
+- [x] Confirm it adds no schema requirement, and relay the class-count change.
+- [ ] **Its own proposal**, covering the question this change does not answer:
+      where per-reader local state lives, how it persists across replay, whether
+      it is exported between devices, and what a vouch naming an identity the
+      reader holds no ops for resolves to.
+
+## 6. Not in scope
 
 - Decay. There is no age to decay; the column pair is reserved and unused.
-- Any credential other than the moderator set. Rule 3 owns that.
+- Any system credential other than the moderator set. Rule 3 owns that.
 - Auto-hiding at a vote threshold. Refused, structurally, by the floor.
+- Transitive vouching. A web of trust needs loop detection, depth limits,
+  per-hop decay and a rule for contradictory paths, and it recreates the sybil
+  amplifier locally — one bad vouch imports a stranger's whole graph. Its own
+  design with its own evidence, never a parameter added to this one.
+- Any UI surfacing vouch counts. That is a published vouch graph reconstructed
+  by eye, with all three of §7.3's problems.
