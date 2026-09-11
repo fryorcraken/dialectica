@@ -38,17 +38,21 @@ The encoding of the op that carries this is the `op-format` capability's.
 A reader SHALL prefer the most recent valid metadata op for a Stoa, and SHALL
 fall back to the genesis record's founding values when it holds none.
 
-The ordering is the transport's to establish. This capability SHALL NOT define
-it, and a metadata op SHALL NOT assert its own position in it: a self-asserted
-ordering value is forgeable by exactly the author it is meant to order, which
-for a moderator-owned field is the difference between "the latest rename wins"
-and "whoever claims the highest number wins".
+"Most recent" SHALL be decided by the order the transport establishes, as the
+`op-ordering` capability defines it. This capability SHALL NOT define its own
+ordering, and a metadata op SHALL NOT assert its own position in one: a
+self-asserted ordering value is forgeable by exactly the author it is meant to
+order, which for a moderator-owned field is the difference between "the latest
+rename wins" and "whoever claims the highest number wins".
 
-**Resolution is not implemented**, because the ordering metadata it requires is
-not exposed by the delivery contract as it stands. Metadata ops accumulate and
-nothing reads them yet. This requirement fixes the rule so that whoever
-implements resolution does not have to re-derive it; it does not claim the
-behaviour exists.
+Where the transport supplied no ordering metadata, resolution SHALL use the
+degraded order `op-ordering` defines rather than inventing one. Two metadata ops
+that cannot be ordered by the transport still resolve identically on every peer.
+
+**Resolution is not implemented here.** Metadata ops accumulate and nothing
+reads them yet. This requirement fixes the rule so that whoever implements
+resolution does not have to re-derive it; it does not claim the behaviour
+exists.
 
 #### Scenario: A Stoa with no metadata op shows its founding values
 

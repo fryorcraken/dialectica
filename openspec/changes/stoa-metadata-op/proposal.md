@@ -91,9 +91,10 @@ above. See design.md — Decisions.
 - No change to `stoa.rs`, `identity.rs` or `cursor.rs`.
 - No wire-contract change at the module boundary. Nothing crosses it yet.
 - **Out of scope, and must stay out:** resolution. Preferring the latest op over
-  the genesis values needs an ordering, and PLAN.md §13 records that the
-  delivery contract exposes neither a Lamport clock nor an SDS message id. This
-  change defines the op; it does not order ops.
+  the genesis values needs an ordering and somewhere to keep the result. The
+  ordering is the `op-ordering` capability's and now exists; the store does not.
+  This change defines the op and states the resolution rule, and implements
+  neither ordering nor resolution.
 - **Out of scope:** the moderator-set check. `op.rs` verifies authenticity, not
   authority (§3.3), and two existing tests pin that split. A metadata op signed
   by a non-moderator is authentic and must still verify here.

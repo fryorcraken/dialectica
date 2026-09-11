@@ -22,10 +22,15 @@ to the genesis values — and leaves one question open, which this change answer
 **Non-Goals**
 
 - **No resolution.** "Prefer the latest valid op, fall back to genesis" needs an
-  ordering. §13's last entry records that `contracts/delivery_module.lidl`
-  exposes `channelMessageReceived(channelId, senderId, payload, timestamp)` —
-  no Lamport clock and no SDS message id — so §5.7's rule has no input at the
-  contract that exists. Implementing an ordering here would mean inventing one.
+  ordering, and ordering is the `op-ordering` capability's — `arrival::cmp_ops`
+  applies §5.7's rule, with a defined degraded order for ops the transport did
+  not order. Resolution is a store concern and there is no store; this change
+  defines the op and states the rule, and implements neither.
+
+  Written when that ordering was still an open question, this non-goal was
+  originally justified by the gap. The gap is now characterised rather than
+  open, and the non-goal survives it for a simpler reason: nothing here has
+  anywhere to put a resolved title.
 - **No moderator-set check.** Authority needs the moderator set at the op's
   position in the order; the type does not have it and §3.3 puts the check on
   read.
@@ -113,8 +118,10 @@ kind's layout, and it would invalidate every metadata op already signed.
 
 1. `Policy` has a second accepted variant, so a change is expressible and a test
    can vary it.
-2. The ordering question in §13 is settled, so "the latest policy op" is a
-   determinable thing rather than a phrase.
+2. Metadata resolution is actually built on `arrival::cmp_ops`, so "the latest
+   policy op" is a determinable thing rather than a phrase. The ordering itself
+   is settled — that was open when this was written and is not any more — but a
+   rule nothing implements still cannot be relied on to gate posting.
 3. The fallback rule for policy is specified *separately* from the display
    fallback, and specified as fail-closed: a peer that cannot establish the
    current policy treats the Stoa as more restrictive than genesis, not less —
@@ -226,6 +233,11 @@ anywhere in the used range would re-mean every op already signed.
 
 ## Open Questions
 
-None that belong to this change. The one it touches and does not close —
-ordering, and therefore resolution — is §13's, is being settled separately, and
-is recorded there rather than duplicated here.
+None that belong to this change.
+
+The one it touches and does not close — ordering — was open while this was
+written and has since been settled by the `op-ordering` capability:
+`arrival::cmp_ops` applies §5.7's rule, and ops the transport did not order fall
+back to a defined degraded order identical on every peer. That does not make
+resolution this change's to build; it means the thing resolution was waiting on
+now exists, and a store is what is still missing.

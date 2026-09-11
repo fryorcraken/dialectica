@@ -251,3 +251,26 @@
       **The check worth repeating before any `MODIFIED` delta: grep the merged
       spec for the requirement heading, verbatim.** A wrong name does not fail
       loudly — it silently modifies nothing.
+
+- [x] 7.7 After PR #10 merged, correct every claim that ordering is an open
+      question. It is not any more: `arrival::cmp_ops` applies §5.7's rule, with
+      a defined degraded order for ops the transport did not order.
+
+      Five places said or implied otherwise — PLAN.md §5.7 and §13, the
+      `stoa-metadata` resolution requirement, design.md's non-goal, its
+      "what would have to be true" list, and its Open Questions, plus the
+      proposal's Impact. All rewritten.
+
+      The non-goal SURVIVES the correction but for a different reason, and
+      saying which matters: resolution was out of scope because the ordering did
+      not exist; it is now out of scope because there is no store to put a
+      resolved title in. A non-goal whose stated justification has evaporated is
+      a claim that has quietly become false, even when the conclusion still
+      holds.
+
+      Found by `git diff origin/main..HEAD --stat` showing 1,777 deletions
+      across `arrival.rs` and `openspec/changes/op-ordering/` — which was NOT a
+      real deletion but the artefact of comparing against a main that had moved
+      past my merge-base. `git merge-base` confirmed it before anything was
+      touched. Worth knowing: the stale-base artefact and a genuine
+      cross-change deletion look identical in `--stat`.

@@ -1031,8 +1031,10 @@ own answer:
   reasoning, and what would have to be true to add one, is in the
   `stoa-metadata-op` change's `design.md`.
 
-  **Resolution is not built**, and cannot be until the ordering gap at the end
-  of §13 closes. The op accumulates; nothing reads it yet.
+  **Resolution is not built**, but is no longer blocked: `arrival::cmp_ops`
+  applies §5.7's rule, with a defined degraded order while the transport
+  supplies no ordering metadata (§13). The op accumulates; nothing reads it
+  yet.
 - **The moderator set itself.** Deferred with mutable moderation (§6), and the
   one place where a real ordering decision is still open — a set edited
   concurrently by two moderators is the first genuine merge question this design
@@ -1676,10 +1678,12 @@ thing (§2.3).
   restate them here.
 
   What reopens it, in one line each, because these are the conditions and not
-  the reasoning: `Policy` gains a second accepted variant; §13's ordering gap
-  below closes; and a policy fallback rule is specified separately from the
-  display one, as fail-closed. Adding it then costs an unused op-kind
-  discriminant, not a wire-format version and not any Stoa's address.
+  the reasoning: `Policy` gains a second accepted variant; metadata resolution
+  is actually built on `arrival::cmp_ops`, so "the current policy" is a
+  determinable thing rather than a phrase; and a policy fallback rule is
+  specified separately from the display one, as fail-closed. Adding it then
+  costs an unused op-kind discriminant, not a wire-format version and not any
+  Stoa's address.
 
 - **Is a threshold the right shape for proof-of-holding as a relevance signal,
   and what threshold?** §7.2 argues a threshold rather than a graded count,
