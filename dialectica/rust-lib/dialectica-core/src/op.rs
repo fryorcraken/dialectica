@@ -98,15 +98,36 @@ const VERSION_1: u8 = 1;
 
 /// The maximum length of any single variable-length field, in bytes.
 ///
-/// §4.4 caps an SDS message at **150 KiB**, "a network-wide gossipsub
-/// validation limit, not unilaterally raisable". A field longer than that
-/// cannot reach a peer whatever this code does, so accepting one only means
-/// allocating for a record that could never have arrived legitimately.
+/// Derived from §4.4's **150 KiB** SDS message cap, "a network-wide gossipsub
+/// validation limit, not unilaterally raisable" — so no single field larger
+/// than this could have arrived inside one message.
 ///
-/// The cap is checked *before* allocating, which is the point: a 4-byte length
-/// prefix can claim 4 GiB, and a decoder that reserved that much on the promise
-/// of a hostile peer would be a remote memory-exhaustion lever. `Cursor::take`
-/// would refuse the read afterwards — but only after the allocation.
+/// # What this cap does, and what it deliberately does not
+///
+/// Its job is bounding **allocation before data**: a 4-byte length prefix can
+/// claim 4 GiB, and a decoder that reserved that much on a hostile peer's
+/// promise would be a remote memory-exhaustion lever. `Cursor::take` would
+/// refuse the read afterwards — but only after the allocation. Checking the
+/// claim first is the whole point, which is why `take_checked_length` compares
+/// before it reads.
+///
+/// **It does NOT bound the total size of a decoded op, and must not be read as
+/// doing so.** The bound is per field and does not compose: the `Post`
+/// attachment path reaches 768,076 bytes — five times the SDS cap — because
+/// `take_string_list` bounds the element count and each element separately.
+/// Measured, not estimated.
+///
+/// That is not a hole to close here, for two reasons. Amplification is roughly
+/// 1:1 — reaching that size costs the sender the same bytes — so it is not a
+/// lever in the sense the per-field cap closes. And **the total-size check
+/// belongs at the transport boundary, where the SDS frame is known.** This
+/// module is handed a byte slice and cannot see the frame it arrived in, so a
+/// combined bound here would be a guess at a number the caller already has.
+/// Put it where the frame is; do not add it here.
+///
+/// The value is pinned by `the_field_cap_is_pinned_to_a_known_answer` — a cap
+/// that silently drifted upward would still refuse an absurd prefix and still
+/// pass every test that only probes absurd values.
 const MAX_FIELD_LEN: usize = 150 * 1024;
 
 /// A 32-byte op id: the hash of an op's canonical bytes.
@@ -1545,6 +1566,74 @@ mod tests {
         assert_eq!(
             Op::decode(&bytes),
             Err(OpError::FieldTooLong(u32::MAX as usize))
+        );
+    }
+
+    #[test]
+    fn the_field_cap_is_pinned_to_a_known_answer() {
+        // The cap's VALUE, which nothing else checks.
+        //
+        // Every other cap test probes `u32::MAX` — about 28,000x the cap — so
+        // it proves that *a* cap exists and nothing at all about *where*. A cap
+        // silently raised to 150 MB still refuses 4 GiB and still passes all of
+        // them, while leaving open the very memory-exhaustion lever the cap
+        // exists to close. That is this repo's own defect class — asserting
+        // against a value so far outside the boundary that the boundary is
+        // unconstrained — in a new dress.
+        //
+        // The boundary pair below cannot catch it either: both are expressed in
+        // terms of `MAX_FIELD_LEN`, so they MOVE with a drifted cap. Only a
+        // hardcoded pin is left, and `cargo mutants` structurally cannot cover
+        // it — it mutates functions, not `const` values.
+        //
+        // 150 KiB is §4.4's SDS message cap. If this fails, do NOT update the
+        // expected value: work out why the cap moved and whether the network
+        // can survive it.
+        assert_eq!(MAX_FIELD_LEN, 150 * 1024);
+    }
+
+    /// A post whose body is exactly `len` bytes.
+    ///
+    /// Returns real bytes rather than a doctored prefix, because the accept
+    /// side has to actually contain the data it claims — a prefix claiming
+    /// 150 KiB over a short input is a `LengthMismatch` and would prove nothing
+    /// about the cap.
+    fn a_post_with_body_of(len: usize) -> Vec<u8> {
+        Op {
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: "a".repeat(len),
+                attachments: vec![],
+            },
+            ..a_post()
+        }
+        .canonical_bytes()
+    }
+
+    #[test]
+    fn a_field_exactly_at_the_cap_is_accepted() {
+        // The accept half of the boundary. Without it the cap is bounded from
+        // one side only, and `len > MAX_FIELD_LEN` tightened to `len >= …`
+        // would pass every other test in this module.
+        let bytes = a_post_with_body_of(MAX_FIELD_LEN);
+        let op = Op::decode(&bytes).expect("a field exactly at the cap must decode");
+        match op.kind {
+            OpKind::Post { body, .. } => assert_eq!(body.len(), MAX_FIELD_LEN),
+            other => panic!("expected a post, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_field_one_byte_over_the_cap_is_refused() {
+        // The refuse half, one byte the other side. This is what catches an
+        // off-by-one — `len > MAX_FIELD_LEN + 1` — which every `u32::MAX` test
+        // in this module survives, and it asserts the exact claimed length so
+        // the refusal is demonstrably the cap's and not the input's.
+        let bytes = a_post_with_body_of(MAX_FIELD_LEN + 1);
+        assert_eq!(
+            Op::decode(&bytes),
+            Err(OpError::FieldTooLong(MAX_FIELD_LEN + 1))
         );
     }
 
