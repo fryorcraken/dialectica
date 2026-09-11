@@ -40,9 +40,16 @@
 //! `contracts/delivery_module.lidl` exposes
 //! `channelMessageReceived(channelId, senderId, payload, timestamp)` — no
 //! Lamport clock and no SDS message id — so §5.7's ordering rule has no input
-//! at the contract we actually have. That gap is real, it is Phase 2's to
-//! close, and it is recorded in §13 rather than papered over here with a field
-//! that would be wrong.
+//! at the contract we actually have.
+//!
+//! The gap turns out to sit a layer BELOW that contract, and it is not
+//! dialectica's to close: the Reliable Channel API's `MessageReceivedEvent`,
+//! which `delivery_module` consumes, carries exactly one field — the reassembled
+//! payload — so `channelMessageReceived` cannot forward what it was never given.
+//! `channelMessageReceived`'s `timestamp` is the receiving peer's own
+//! `CLOCK_REALTIME` read and orders nothing. [`crate::arrival`] holds what a
+//! peer records instead, and the `op-ordering` change's `design.md` carries the
+//! citations and what each upstream layer would have to add.
 //!
 //! **No `senderId`.** §4.1: "`senderId` is not an author identity, and the plan
 //! should not treat it as one." It binds at channel creation as a transport

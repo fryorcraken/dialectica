@@ -16,6 +16,7 @@
 // implementation detail every decoder happens to share.
 mod cursor;
 
+pub mod arrival;
 pub mod identity;
 pub mod op;
 pub mod stoa;
