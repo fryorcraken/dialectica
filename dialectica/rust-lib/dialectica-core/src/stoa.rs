@@ -55,6 +55,23 @@ use crate::identity::{stoa_address, Address, KeyError, PublicKey};
 /// instead of misparsing it, and what lets two generations coexist.
 const VERSION_1: u8 = 1;
 
+/// The longest a title may be, in bytes.
+///
+/// **Address-determining, so it cannot be added later** — raising or lowering it
+/// changes which records are valid, and any Stoa created above a later cap
+/// becomes undecodable. Same argument that puts `policy` in the record now
+/// (PLAN.md §13).
+///
+/// 1 KiB is far above any plausible forum title and far below anything that
+/// makes hashing or an allocation interesting. Bytes rather than characters
+/// because the encoding is bytes; a title of multi-byte characters gets fewer
+/// of them, which is the right trade for a bound that has to be exact.
+///
+/// It also makes the `as u32` cast below unrepresentable rather than merely
+/// unlikely: without a bound, a 2^32-byte title encodes a length prefix of `0`
+/// and the record stops round-tripping.
+const MAX_TITLE_BYTES: usize = 1024;
+
 /// How a Stoa decides who may post.
 ///
 /// One variant today. The field exists now because PLAN.md §13 costs it out:
@@ -143,6 +160,34 @@ pub enum GenesisError {
     InvalidTitle,
     /// The creator key is not a valid public key.
     InvalidCreator(KeyError),
+    /// The title exceeds [`MAX_TITLE_BYTES`]. Carries the length found, since
+    /// "too long" without a number leaves the caller guessing by how much.
+    TitleTooLong(usize),
+}
+
+impl std::fmt::Display for GenesisError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GenesisError::UnknownVersion(v) => {
+                write!(f, "unknown genesis record version {v}")
+            }
+            GenesisError::UnknownPolicy(p) => {
+                write!(f, "unknown posting policy {p}")
+            }
+            GenesisError::Truncated => write!(f, "genesis record ended mid-field"),
+            GenesisError::TrailingBytes => {
+                write!(f, "trailing bytes after a complete genesis record")
+            }
+            GenesisError::LengthMismatch => {
+                write!(f, "a length prefix disagrees with the bytes present")
+            }
+            GenesisError::InvalidTitle => write!(f, "title is not valid UTF-8"),
+            GenesisError::InvalidCreator(e) => write!(f, "creator key: {e}"),
+            GenesisError::TitleTooLong(n) => {
+                write!(f, "title is {n} bytes, the maximum is {MAX_TITLE_BYTES}")
+            }
+        }
+    }
 }
 
 impl Genesis {
@@ -161,18 +206,24 @@ impl Genesis {
     /// length-prefixed rather than trailing-to-end-of-input, so that a second
     /// variable-length field (an invite list, a token identifier) can be added
     /// in a later version without the boundary between them becoming ambiguous.
-    pub fn canonical_bytes(&self) -> Vec<u8> {
+    ///
+    /// Fails for a title over [`MAX_TITLE_BYTES`]. Encoding is fallible so the
+    /// bound holds on both sides: a record the decoder would reject must not be
+    /// one the encoder will produce, or the two disagree about what is valid.
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, GenesisError> {
         let title = self.title.as_bytes();
+        if title.len() > MAX_TITLE_BYTES {
+            return Err(GenesisError::TitleTooLong(title.len()));
+        }
         let mut out = Vec::with_capacity(1 + 32 + 1 + 4 + title.len());
         out.push(VERSION_1);
         out.extend_from_slice(&self.creator.to_bytes());
         out.push(self.policy.to_byte());
-        // `as u32` cannot truncate meaningfully here: a title long enough to
-        // overflow u32 is far past any size this record is ever encoded at, and
-        // the length is checked against the input on the way back in.
+        // The bound above is what makes this cast total: a title that could
+        // truncate is refused before reaching it.
         out.extend_from_slice(&(title.len() as u32).to_be_bytes());
         out.extend_from_slice(title);
-        out
+        Ok(out)
     }
 
     /// Decode a canonical encoding, refusing anything else.
@@ -195,6 +246,12 @@ impl Genesis {
         let mut len = [0u8; 4];
         len.copy_from_slice(cursor.take(4)?);
         let len = u32::from_be_bytes(len) as usize;
+        // Checked BEFORE the read, so an over-long title costs nothing to
+        // refuse — and so the decoder rejects exactly what the encoder refuses
+        // to produce.
+        if len > MAX_TITLE_BYTES {
+            return Err(GenesisError::TitleTooLong(len));
+        }
         // A prefix claiming more than the input holds is a LengthMismatch
         // rather than a Truncated: the input is not short, the claim is wrong,
         // and saying so points at the right half of the problem.
@@ -219,8 +276,8 @@ impl Genesis {
     /// Prefer this over calling [`stoa_address`] with hand-assembled bytes —
     /// going through the record is what makes it impossible to hash a
     /// non-canonical encoding by accident.
-    pub fn address(&self) -> Address {
-        stoa_address(&self.canonical_bytes())
+    pub fn address(&self) -> Result<Address, GenesisError> {
+        Ok(stoa_address(&self.canonical_bytes()?))
     }
 
     /// Whether this record is the one `address` names.
@@ -229,8 +286,10 @@ impl Genesis {
     /// consults nothing: no registry, no peer, no third party. That is the
     /// whole point — a wrong or tampered record fails to match, and the failure
     /// needs no one's cooperation to detect.
+    /// A record too long to encode matches nothing: it has no address, so it
+    /// cannot be the one any address names.
     pub fn matches(&self, address: &Address) -> bool {
-        &self.address() == address
+        self.address().is_ok_and(|a| &a == address)
     }
 }
 
@@ -303,7 +362,7 @@ mod tests {
     #[test]
     fn encodes_identically_every_time() {
         let g = a_record();
-        assert_eq!(g.canonical_bytes(), g.canonical_bytes());
+        assert_eq!(g.canonical_bytes().unwrap(), g.canonical_bytes().unwrap());
     }
 
     #[test]
@@ -325,13 +384,13 @@ mod tests {
 
         for other in [different_creator, different_title] {
             assert_ne!(
-                base.canonical_bytes(),
-                other.canonical_bytes(),
+                base.canonical_bytes().unwrap(),
+                other.canonical_bytes().unwrap(),
                 "a field is missing from the encoding"
             );
             assert_ne!(
-                base.address(),
-                other.address(),
+                base.address().unwrap(),
+                other.address().unwrap(),
                 "a field is missing from the address"
             );
         }
@@ -353,7 +412,7 @@ mod tests {
             title: "ab".to_string(),
             ..a_record()
         };
-        let mut extended = g.canonical_bytes();
+        let mut extended = g.canonical_bytes().unwrap();
         extended.push(b'c');
 
         assert_eq!(
@@ -364,9 +423,13 @@ mod tests {
 
         // And the length prefix is really present in the encoding: the four
         // bytes before the title spell its length.
-        let len_at = TITLE_LEN_AT;
+        let bytes = g.canonical_bytes().unwrap();
         assert_eq!(
-            u32::from_be_bytes(g.canonical_bytes()[len_at..len_at + 4].try_into().unwrap()),
+            u32::from_be_bytes(
+                bytes[TITLE_LEN_AT..TITLE_LEN_AT + 4]
+                    .try_into()
+                    .unwrap()
+            ),
             2,
             "the title's length must be encoded ahead of it"
         );
@@ -379,7 +442,7 @@ mod tests {
                 title: title.to_string(),
                 ..a_record()
             };
-            assert_eq!(Genesis::decode(&g.canonical_bytes()).unwrap(), g);
+            assert_eq!(Genesis::decode(&g.canonical_bytes().unwrap()).unwrap(), g);
         }
     }
 
@@ -388,7 +451,7 @@ mod tests {
         // Every prefix of a valid record, not just a couple of hand-picked
         // lengths: a decoder that reads one field without a bounds check fails
         // only at the boundary that field happens to straddle.
-        let bytes = a_record().canonical_bytes();
+        let bytes = a_record().canonical_bytes().unwrap();
         for n in 0..bytes.len() {
             let err = Genesis::decode(&bytes[..n]).unwrap_err();
             assert!(
@@ -406,18 +469,96 @@ mod tests {
         // Accepting them would let two byte strings decode to the same record
         // while hashing to different addresses — the exact ambiguity canonical
         // encoding exists to remove.
-        let mut bytes = a_record().canonical_bytes();
+        let mut bytes = a_record().canonical_bytes().unwrap();
         bytes.push(0);
         assert_eq!(Genesis::decode(&bytes), Err(GenesisError::TrailingBytes));
     }
 
     #[test]
+    fn every_error_renders_without_leaking_rust_syntax() {
+        // This is the decoder for peer bytes, so it is the first error type to
+        // reach the `{"error":"..."}` wire contract. `format!("{:?}")` would put
+        // `UnknownPolicy(99)` — a Rust type name — in a user-facing field.
+        //
+        // Asserting the absence of `(` and `::` is what makes this fail if
+        // someone derives Display or falls back to Debug, rather than only
+        // checking that some string came out.
+        let errors = [
+            GenesisError::UnknownVersion(9),
+            GenesisError::UnknownPolicy(99),
+            GenesisError::Truncated,
+            GenesisError::TrailingBytes,
+            GenesisError::LengthMismatch,
+            GenesisError::InvalidTitle,
+            GenesisError::InvalidCreator(KeyError::NotAValidPublicKey),
+        ];
+        for e in errors {
+            let rendered = e.to_string();
+            assert!(!rendered.is_empty(), "{e:?} rendered empty");
+            assert!(
+                !rendered.contains('(') && !rendered.contains("::"),
+                "{e:?} rendered as Rust syntax: {rendered}"
+            );
+        }
+    }
+
+    #[test]
     fn a_lying_length_prefix_is_refused() {
-        let mut bytes = a_record().canonical_bytes();
-        let len_at = TITLE_LEN_AT;
-        // Claim the title is far longer than the input holds.
-        bytes[len_at..len_at + 4].copy_from_slice(&u32::MAX.to_be_bytes());
+        let mut bytes = a_record().canonical_bytes().unwrap();
+        // Claim more than the input holds, but stay UNDER MAX_TITLE_BYTES — the
+        // bound is checked first, so a `u32::MAX` claim would be refused as
+        // TitleTooLong and this test would stop exercising the lying-prefix
+        // path it is named for.
+        let claim = (MAX_TITLE_BYTES - 1) as u32;
+        bytes[TITLE_LEN_AT..TITLE_LEN_AT + 4].copy_from_slice(&claim.to_be_bytes());
         assert_eq!(Genesis::decode(&bytes), Err(GenesisError::LengthMismatch));
+    }
+
+    #[test]
+    fn a_title_over_the_maximum_is_refused_on_both_sides() {
+        // The bound must hold symmetrically: a record the decoder refuses must
+        // not be one the encoder will produce, or the two disagree about what
+        // is valid and a peer can hold a record it cannot re-derive an address
+        // for.
+        let too_long = Genesis {
+            title: "x".repeat(MAX_TITLE_BYTES + 1),
+            ..a_record()
+        };
+        assert_eq!(
+            too_long.canonical_bytes(),
+            Err(GenesisError::TitleTooLong(MAX_TITLE_BYTES + 1)),
+            "the encoder must refuse an over-long title"
+        );
+        assert!(
+            !too_long.matches(&a_record().address().unwrap()),
+            "a record with no encoding matches no address"
+        );
+
+        // And the decode side, reached with a hand-built prefix claiming a
+        // length over the bound. Refused BEFORE the read, so it costs nothing.
+        let mut bytes = a_record().canonical_bytes().unwrap();
+        let claim = (MAX_TITLE_BYTES + 1) as u32;
+        bytes[TITLE_LEN_AT..TITLE_LEN_AT + 4].copy_from_slice(&claim.to_be_bytes());
+        assert_eq!(
+            Genesis::decode(&bytes),
+            Err(GenesisError::TitleTooLong(MAX_TITLE_BYTES + 1)),
+            "the decoder must refuse an over-long title"
+        );
+    }
+
+    #[test]
+    fn a_title_at_the_maximum_is_accepted() {
+        // The boundary itself is inclusive. Without this, a fencepost error in
+        // either check is invisible — both directions still "refuse something
+        // long" and every other test passes.
+        let at_limit = Genesis {
+            title: "x".repeat(MAX_TITLE_BYTES),
+            ..a_record()
+        };
+        let bytes = at_limit
+            .canonical_bytes()
+            .expect("a title of exactly MAX_TITLE_BYTES must encode");
+        assert_eq!(Genesis::decode(&bytes).unwrap(), at_limit);
     }
 
     #[test]
@@ -431,7 +572,7 @@ mod tests {
             title: "abcdef".to_string(),
             ..a_record()
         };
-        let mut bytes = g.canonical_bytes();
+        let mut bytes = g.canonical_bytes().unwrap();
         bytes[TITLE_LEN_AT..TITLE_LEN_AT + 4].copy_from_slice(&2u32.to_be_bytes());
         assert_eq!(Genesis::decode(&bytes), Err(GenesisError::TrailingBytes));
     }
@@ -440,7 +581,7 @@ mod tests {
     fn an_unknown_policy_is_refused_rather_than_defaulted() {
         // The security-relevant one. Defaulting an unrecognised policy to Open
         // is how a token-gated Stoa becomes world-postable on an old client.
-        let mut bytes = a_record().canonical_bytes();
+        let mut bytes = a_record().canonical_bytes().unwrap();
         bytes[POLICY_AT] = 99;
         assert_eq!(Genesis::decode(&bytes), Err(GenesisError::UnknownPolicy(99)));
     }
@@ -450,7 +591,7 @@ mod tests {
         // Distinguishable from `Truncated` on purpose: this one means "a newer
         // client wrote this", which is a different thing to tell a user than
         // "this data is corrupt".
-        let mut bytes = a_record().canonical_bytes();
+        let mut bytes = a_record().canonical_bytes().unwrap();
         bytes[0] = 99;
         assert_eq!(Genesis::decode(&bytes), Err(GenesisError::UnknownVersion(99)));
     }
@@ -463,7 +604,7 @@ mod tests {
         // module's own claim that "a record without a valid [creator] does not
         // describe a Stoa at all", which was asserted by nothing until review
         // pointed out every other error variant had a test and this one did not.
-        let mut bytes = a_record().canonical_bytes();
+        let mut bytes = a_record().canonical_bytes().unwrap();
         // `[0x02; 32]` is not a valid compressed Edwards point. Picked by
         // probing rather than assumed: all-ones IS valid, so the obvious
         // "obviously bogus" constant would have made this test pass for the
@@ -480,7 +621,7 @@ mod tests {
     #[test]
     fn an_invalid_title_encoding_is_refused() {
         let g = a_record();
-        let mut bytes = g.canonical_bytes();
+        let mut bytes = g.canonical_bytes().unwrap();
         // Replace the title's first byte with a lone continuation byte.
         let title_at = TITLE_LEN_AT + 4;
         bytes[title_at] = 0x80;
@@ -490,7 +631,7 @@ mod tests {
     #[test]
     fn a_record_verifies_against_its_own_address() {
         let g = a_record();
-        assert!(g.matches(&g.address()));
+        assert!(g.matches(&g.address().unwrap()));
     }
 
     #[test]
@@ -503,7 +644,7 @@ mod tests {
             creator: a_key(2),
             ..real.clone()
         };
-        assert!(!impostor.matches(&real.address()));
+        assert!(!impostor.matches(&real.address().unwrap()));
     }
 
     #[test]
@@ -517,7 +658,7 @@ mod tests {
             ..a_record()
         };
         assert_eq!(one.title, two.title);
-        assert_ne!(one.address(), two.address());
+        assert_ne!(one.address().unwrap(), two.address().unwrap());
     }
 
     #[test]
@@ -533,7 +674,7 @@ mod tests {
             ..a_record()
         };
         assert_eq!(one.creator, two.creator);
-        assert_ne!(one.address(), two.address());
+        assert_ne!(one.address().unwrap(), two.address().unwrap());
     }
 
     #[test]
@@ -556,13 +697,13 @@ mod tests {
         let g = a_record();
 
         assert_eq!(
-            hex::encode(g.canonical_bytes()),
+            hex::encode(g.canonical_bytes().unwrap()),
             "018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c\
              000000000541676f7261",
             "the genesis wire format changed"
         );
         assert_eq!(
-            g.address().to_hex(),
+            g.address().unwrap().to_hex(),
             "80329cf05603a0c9ce7a749a53e271253307ba89d4924856e4017459d03a025f",
             "Stoa address derivation changed"
         );
@@ -601,7 +742,7 @@ mod tests {
         // but the spec states it and a reimplementation would work from the
         // spec. It becomes a real check the moment `Address` gains a second
         // constructor.
-        assert_eq!(a_record().address().as_bytes().len(), 32);
+        assert_eq!(a_record().address().unwrap().as_bytes().len(), 32);
     }
 
     #[test]
@@ -615,11 +756,11 @@ mod tests {
                 ..a_record()
             };
             assert_eq!(
-                g.canonical_bytes().len(),
+                g.canonical_bytes().unwrap().len(),
                 TITLE_LEN_AT + 4 + title.len(),
                 "unexpected encoding length for title {title:?}"
             );
         }
     }
-
 }
+

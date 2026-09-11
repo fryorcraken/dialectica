@@ -30,7 +30,9 @@ The record's values are **founding** values, not current ones. The record fixes 
 
 ### Requirement: The encoding is canonical
 
-A genesis record SHALL have exactly one valid byte encoding. Every variable-length field SHALL be length-prefixed, so that no two distinct records encode to the same bytes.
+A genesis record that is valid MUST have exactly one byte encoding. Every variable-length field MUST be length-prefixed, so that no two distinct records encode to the same bytes.
+
+Validity is the precondition, not an afterthought: a record whose title exceeds the maximum has no encoding at all, so the length bound is what makes this requirement true rather than approximately true.
 
 This is what makes an address reproducible: two peers holding the same record compute the same address, and a peer cannot be shown a record that hashes to an address it does not describe.
 
@@ -52,11 +54,11 @@ This is what makes an address reproducible: two peers holding the same record co
 
 ### Requirement: A tampered or truncated record is rejected
 
-Decoding SHALL reject any input that is not the canonical encoding of a valid record: truncated input, trailing bytes, a length prefix disagreeing with the data present in either direction, an unrecognised version, an unrecognised policy discriminant, a title that is not valid UTF-8, and a creator key that is not a valid public key.
+Decoding MUST reject any input that is not the canonical encoding of a valid record: truncated input, trailing bytes, a length prefix disagreeing with the data present in either direction, an unrecognised version, an unrecognised policy discriminant, a title that is not valid UTF-8, a title longer than the maximum, and a creator key that is not a valid public key or that can never verify a signature.
 
-Each SHALL be reported distinguishably. A decoder that says only "invalid" sends the reader looking in the wrong place.
+Each MUST be reported distinguishably. A decoder that says only "invalid" sends the reader looking in the wrong place.
 
-A record arriving from a peer is attacker-controlled. Rejection SHALL happen at the decoding boundary, before the record reaches any state machine, and SHALL NOT be reported as a valid record carrying default values.
+A record arriving from a peer is attacker-controlled. Rejection MUST happen at the decoding boundary, before the record reaches any state machine, and MUST NOT be reported as a valid record carrying default values.
 
 #### Scenario: Truncated input is refused
 
@@ -92,6 +94,19 @@ A record arriving from a peer is attacker-controlled. Rejection SHALL happen at 
 - **THEN** decoding fails
 - **AND** the failure is distinguishable from a malformed encoding
 
+#### Scenario: A creator key that can never verify a signature is refused
+
+- **WHEN** a record carries a well-formed creator key under which no signature can ever verify
+- **THEN** decoding fails
+- **AND** the failure is distinguishable from a malformed key
+
+#### Scenario: A title longer than the maximum is refused on both sides
+
+- **WHEN** a record's title exceeds the maximum length
+- **THEN** encoding it fails
+- **AND** decoding an input declaring that length fails
+- **AND** the input is refused before its title is read
+
 #### Scenario: An unknown policy is refused rather than defaulted
 
 - **WHEN** a record carries a policy discriminant this version does not recognise
@@ -100,7 +115,7 @@ A record arriving from a peer is attacker-controlled. Rejection SHALL happen at 
 
 ### Requirement: An address verifies the record it names
 
-A peer given a Stoa address and a candidate genesis record SHALL be able to determine, without consulting any registry or third party, whether the record is the one that address names.
+A peer given a Stoa address and a candidate genesis record MUST be able to determine, without consulting any registry or third party, whether the record is the one that address names.
 
 This is what makes a pasted address self-authenticating, and it is a security boundary: §4.8 has Stoa addresses appearing inside posts, which is attacker-supplied content.
 
@@ -121,7 +136,7 @@ This is what makes a pasted address self-authenticating, and it is a security bo
 
 ### Requirement: A posting policy is declared at creation
 
-A genesis record SHALL carry a posting policy. `open` SHALL be the only policy this version accepts, and the field SHALL be present in the encoding rather than implied by its absence.
+A genesis record MUST carry a posting policy. `open` MUST be the only policy this version accepts, and the field MUST be present in the encoding rather than implied by its absence.
 
 The field is present now because the record is immutable and address-determining: adding it later would change the address of every Stoa already created, and there is no in-place upgrade path. Open, invite, first-post-approval and token-threshold are variants of one mechanism, so the space is reserved even while one variant is implemented.
 
@@ -138,7 +153,7 @@ The field is present now because the record is immutable and address-determining
 
 ### Requirement: The encoding declares its version
 
-The encoding SHALL begin with a version discriminant, and decoding SHALL reject a version it does not recognise.
+The encoding MUST begin with a version discriminant, and decoding MUST reject a version it does not recognise.
 
 A genesis record is immutable and address-determining, so a future field cannot be added in place — it changes the address of every Stoa already created. The version discriminant is what makes that a legible refusal on an old client rather than a misparse, and what lets two encoding generations coexist on the network.
 
@@ -155,7 +170,7 @@ A genesis record is immutable and address-determining, so a future field cannot 
 
 ### Requirement: The record carries no per-peer state
 
-A genesis record SHALL contain only values every peer agrees on. It SHALL NOT carry a session counter, a local sequence number, or any other value that varies with an individual peer's history.
+A genesis record MUST contain only values every peer agrees on. It MUST NOT carry a session counter, a local sequence number, or any other value that varies with an individual peer's history.
 
 Every peer hashes the record to obtain the Stoa's address, so a per-peer value gives each peer a different address for the same Stoa. That failure is silent: it produces two Stoas that cannot see each other rather than an error anyone observes. The channel id derived from this address inherits the same constraint.
 
