@@ -397,12 +397,23 @@ cycle on the pin.
 ### The consequence for the #4116 experiment
 
 The UI is not installable from a clean cache, so `lgs basecamp launch` has no
-plugin to click. Note what this does *not* block, and it is the more useful
-half: **the core and delivery modules both installed.** A probe driven through
-the module's IPC surface rather than the QML view — the way PHASE0-FINDINGS §3
-drove `panic_probe` with `logoscore call` — does not need the UI at all. That is
-the cheaper path to the restart experiment, and it sidesteps this defect
-entirely rather than waiting on it.
+plugin to click. Note what this does *not* block: **the core and delivery
+modules both installed** into the `alice` profile.
+
+The obvious way round is to drive the module over IPC rather than through the
+view, as PHASE0-FINDINGS §3 did with `logoscore call dialectica panic_probe`.
+**Check before relying on it: there is no `logoscore` on this machine** — not on
+`PATH`, and not in the basecamp bundle, whose `bin/` holds only
+`LogosBasecamp`, `ui-host` and `logos_host`. So §3's apparatus is not simply
+sitting there waiting; where that `logoscore` came from is itself an open
+question, and answering it is a prerequisite for the IPC route rather than a
+detail of it.
+
+That leaves two candidate paths for a re-run, neither free: fix or bypass the
+lgpm defect so the UI installs and buttons can be clicked, or find/build the
+CLI that talks to a running core. **The second is still the better bet** — it
+avoids depending on a QML view for an experiment about transport state, and it
+is the one that can be scripted across the two launches a restart test needs.
 
 ---
 

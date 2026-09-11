@@ -1675,8 +1675,8 @@ at build or run time, not review time.
   different commit from the pin. So the UI install fails from a clean cache on
   `Forbidden root entry: assets` — the very error the pin was added to avoid.
   `lgpm --version` against that cached path is the one-command check
-  (PHASE2-FINDINGS §5b). The core and delivery modules install fine, so an
-  experiment driven through module IPC is unaffected.
+  (PHASE2-FINDINGS §5b). The core and delivery modules install fine, so only
+  the view is blocked.
 - **`lgs basecamp` verbs act on the current directory and take no
   `--directory` flag.** So a git worktree cannot be built without a `cd`, which
   this repo's permission setup refuses — meaning **the main checkout is what
@@ -1796,8 +1796,10 @@ thing (§2.3).
   **Still open. A spike got the core and delivery modules installed and was
   blocked one step short of a launch** by an unrelated packaging defect —
   `[repos.lgpm]` selects nothing, so the UI cannot install from a clean cache
-  (`docs/PHASE2-FINDINGS.md` §5b). The experiment does not need the UI: drive it
-  through the module IPC surface, as PHASE0-FINDINGS §3 did.
+  (`docs/PHASE2-FINDINGS.md` §5b). The experiment does not need the UI — driving
+  the module over IPC is the better route anyway — but note that the
+  `logoscore` CLI PHASE0-FINDINGS §3 used is not on this machine nor in the
+  basecamp bundle, so locating it is part of the cost rather than a given.
 
   **What answering it costs** (`docs/PHASE2-FINDINGS.md` §5). Two things were learned that change the
   estimate rather than the answer. **The precondition holds**: SDS state is
