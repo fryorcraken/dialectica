@@ -67,6 +67,10 @@
 //! nothing. Both are answers, neither is an error, and completeness is not a
 //! property any peer can establish about itself.
 
+pub mod sqlite;
+
+pub use sqlite::SqliteOpLog;
+
 use crate::arrival::{cmp_ops, Arrival, OpEntry};
 use crate::identity::Address;
 use crate::op::{OpId, OpKind, SignedOp};
@@ -474,6 +478,9 @@ impl OpLog for MemoryOpLog {
 
 #[cfg(test)]
 pub(crate) mod fixtures;
+
+#[cfg(test)]
+mod contract;
 
 #[cfg(test)]
 mod tests {

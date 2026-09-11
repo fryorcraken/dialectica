@@ -1,4 +1,5 @@
-//! Fixtures for the log's tests.
+//! Fixtures shared by the log's tests and by the two-implementation contract
+//! suite.
 //!
 //! Extracted from `mod.rs`'s test module so a second test module can share them
 //! rather than copy them. A second copy would drift from the first, and these
@@ -6,7 +7,7 @@
 //! determines an order rather than asserting one, so a divergent copy would
 //! silently stop testing what its callers believe it tests.
 
-use crate::arrival::MessageId;
+use crate::arrival::{Arrival, MessageId};
 use crate::identity::{Address, SecretKey};
 use crate::op::{ModerationAction, Op, OpId, OpKind, SignedOp, VoteDirection};
 use crate::stoa::{Genesis, Policy};
@@ -113,4 +114,68 @@ pub fn two_posts_by_ascending_id() -> (SignedOp, SignedOp) {
     } else {
         (two, one)
     }
+}
+
+/// A population crossing every branch of `cmp_ops`, over distinct ops.
+///
+/// **This is the fixture the two-implementation agreement test turns on**, so
+/// its coverage IS the coverage of the claim "the SQL `ORDER BY` is `cmp_ops`".
+/// Every arrival shape the comparator distinguishes is present:
+///
+/// - no metadata at all — the degraded branch, and the only branch production
+///   reaches today;
+/// - a message id with no Lamport value, which `cmp_ops` treats as unordered
+///   and which is the shape an SDS ephemeral message actually produces;
+/// - a Lamport value with no message id, which reaches `cmp_tiebreak`'s
+///   `(None, None)` arm — a shape neither named constructor can build;
+/// - equal Lamport values with differing message ids (the §5.7 tiebreak);
+/// - equal Lamport values with EQUAL message ids, forcing the op-id last
+///   resort, which is the branch a sort key that stopped at the message id
+///   would silently leave undefined;
+/// - an EMPTY message id, which is a legal value and must not read as absence;
+/// - Lamport `0`, `u64::MAX` and `u64::MAX - 1` — the boundaries, where a sort
+///   key that overflows or clamps wrongly shows up and nowhere else.
+///
+/// One op per arrival, all distinct, because two entries sharing an op id tie
+/// under `cmp_ops` by design. A fixture that built such a pair would be
+/// exercising the precondition rather than the order, and any disagreement it
+/// produced would be an artefact rather than a finding.
+pub fn every_ordering_shape() -> Vec<(SignedOp, Arrival)> {
+    let arrivals = vec![
+        Arrival::unordered(),
+        Arrival::from_parts(None, Some(a_message_id(1))),
+        Arrival::from_parts(None, Some(a_message_id(9))),
+        Arrival::from_parts(None, Some(MessageId::new(vec![]))),
+        Arrival::from_parts(Some(5), None),
+        Arrival::ordered(5, a_message_id(1)),
+        Arrival::ordered(5, a_message_id(9)),
+        Arrival::ordered(6, a_message_id(1)),
+        Arrival::ordered(0, a_message_id(1)),
+        Arrival::ordered(0, MessageId::new(vec![])),
+        Arrival::ordered(u64::MAX, a_message_id(1)),
+        Arrival::ordered(u64::MAX - 1, a_message_id(1)),
+        // A PAIR sharing a Lamport value AND a message id, so only the op-id
+        // last resort separates them. Two entries on purpose: one alone
+        // exercises nothing.
+        Arrival::ordered(7, a_message_id(3)),
+        Arrival::ordered(7, a_message_id(3)),
+    ];
+
+    let out: Vec<(SignedOp, Arrival)> = arrivals
+        .into_iter()
+        .enumerate()
+        .map(|(i, arrival)| (signed(a_post(&format!("shape {i}"))), arrival))
+        .collect();
+
+    // FIXTURE GUARD. The ops must be distinct, or `cmp_ops`'s precondition is
+    // violated and the comparison is UNDEFINED rather than merely different —
+    // which would make a disagreement between the two implementations an
+    // artefact of this fixture rather than a finding about either.
+    let mut ids: Vec<OpId> = out.iter().map(|(op, _)| op.op.id()).collect();
+    let before = ids.len();
+    ids.sort();
+    ids.dedup();
+    assert_eq!(before, ids.len(), "the ordering fixture must be distinct ops");
+
+    out
 }

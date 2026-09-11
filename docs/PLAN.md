@@ -291,10 +291,17 @@ Each peer is to keep a **local SQLite store** holding every op it has seen, plus
 a materialised view of the forum derived from it. Ops are the authority; the view
 is a cache that can be rebuilt by replay.
 
-**The op log exists behind a `Store` trait** (see the `op-log` spec), with an
-in-memory implementation only. The SQLite implementation, the materialised view
-and its query indexes are all still to build — so nothing persists across a
-restart yet.
+**The op log exists behind a `Store` trait** (see the `op-log` spec), with two
+implementations: in memory, and on disk in SQLite. **The materialised view and
+its query indexes are still to build** — the log is the authority and it
+persists; the cache derived from it does not exist.
+
+The log stores **inputs and never conclusions**: one row per op, carrying who
+signed it, what it acts on, and where the transport placed it. No score, no vote
+tally, no hidden flag. That line is where §7.2's cheap-retuning promise comes
+from, and §6's read-time authority check is what forces it — a weight is not
+knowable when an op is stored. The `sqlite-projection` change's `design.md` has
+the argument and the shape the view will need.
 
 Two peers routinely hold **different sets of ops** — one was offline, one joined
 late, a message has not propagated yet — so they can legitimately disagree about
@@ -700,16 +707,18 @@ late, or never arrive, without blocking anything.
 
 ### 4.7 Durability — and what v1 deliberately does not have
 
-Three tiers, only two of which are in v1's scope. The `v1` column is what v1 is
-*for*, not what is built — the op log currently has an in-memory implementation
-only (see the `op-log` spec), so the middle tier buys nothing across a restart
-yet:
+Three tiers, only two of which are in v1's scope:
 
 | Tier | Covers | in v1's scope |
 |---|---|---|
 | SDS window | recent ops, retransmission, causal-history and SDS-Repair backfill | ✅ |
-| Local SQLite | everything this peer has ever seen | ✅ — trait shipped, SQLite not yet |
+| Local SQLite | everything this peer has ever seen | ✅ — built; ops survive a restart |
 | Logos Storage snapshots | deep history, beyond what live peers hold | ❌ later |
+
+The middle tier holds the **ops**. The materialised view derived from them is
+not built, so a restart keeps everything a peer has seen and rebuilds what it
+renders by replay — which is §3.3's arrangement working as intended rather than
+a gap.
 
 **SDS gives real but bounded backfill.** A peer receiving a message whose
 `causal_history` names ops it lacks buffers and fetches them, and **SDS-Repair**
@@ -2018,6 +2027,13 @@ inference, since it sets how defensive the guard must be.
 Stoa/thread/post model, moderator-set verification, the op log and its SQLite
 projection, query indexing — pure Rust behind `Transport` and `Store` traits,
 tested against fakes with no node running.
+
+> **The store half is done.** The op log has two implementations behind one
+> trait — in memory and in SQLite — and the same behavioural suite runs against
+> both, which is what a second implementor was for. What remains under "query
+> indexing" is the **materialised view** §3.3 distinguishes from the log: the
+> log carries the indexes its own reads need, and the view that a feed is
+> rendered from does not exist.
 
 **Zero SDK types in this crate.** That is not a preference: anything touching
 `modules()` or `context()` calls `lp_*` symbols undefined in an rlib and will

@@ -1,0 +1,1286 @@
+//! The op log on disk: §3.3's "local SQLite store", and the trait's second
+//! implementor.
+//!
+//! # Why this file exists
+//!
+//! PLAN.md §3.3: "Each peer is to keep a **local SQLite store** holding every op
+//! it has seen". §9 lists "the op log and its SQLite projection, query indexing"
+//! as one Phase 1 item, of which [`super::MemoryOpLog`] was half. This is the
+//! other half, and it is what makes §4.7's middle durability tier — "everything
+//! this peer has ever seen" — buy anything across a restart.
+//!
+//! It is also the answer to a condition the `op-log` change wrote for itself:
+//! *"`MemoryOpLog` is the only implementor of `OpLog`; when `grep 'impl OpLog'`
+//! still returns one line at the end of Phase 1, the trait did not earn itself."*
+//!
+//! # This is the log, not the view
+//!
+//! §3.3 distinguishes the op log (the authority) from the materialised view (a
+//! cache that can be rebuilt by replay). Nothing here derives forum state:
+//! there is no thread table, no feed, no reply count. There is one table of ops
+//! and the indexes that make the defined read order servable.
+//!
+//! # What decides nothing, still decides nothing
+//!
+//! §3.3 puts verification on read, and persistence is not an occasion to change
+//! that. [`SqliteOpLog::append`] writes an op whose signature does not verify
+//! exactly as it writes one that does, for the three reasons [`super`]'s module
+//! documentation gives. A store that refused to write what it could not verify
+//! would make a forgery indistinguishable from an op that never arrived — the
+//! same defect on disk as in memory.
+//!
+//! # The order lives in two places now, and a test is what holds them together
+//!
+//! [`crate::arrival::cmp_ops`] is the definition of the read order. This module
+//! re-expresses it as an `ORDER BY` over columns computed at append time, so
+//! that the order is **indexable** — which the alternative, loading every
+//! matching row and sorting in Rust, structurally is not.
+//!
+//! That is two definitions of one order with no compiler checking them against
+//! each other, and it is the genuine cost of this design. What makes it
+//! survivable is
+//! `both_implementations_agree_across_every_ordering_branch`: it builds a
+//! population crossing every branch of `cmp_ops`, appends it to both logs, and
+//! asserts the sequences are identical. A divergence is a failing test naming
+//! the pair that disagreed, not a rendering difference in production.
+//!
+//! **`cmp_ops` remains the definition.** The SQL is an implementation of it.
+//!
+//! # Nothing here panics
+//!
+//! PHASE0-FINDINGS §3 measured that an unguarded panic **aborts the module
+//! process**, and everything stored arrived from a peer. So there is no
+//! `unwrap`, no `expect` and no indexing that could be out of bounds outside
+//! `#[cfg(test)]`; every `rusqlite` failure becomes an
+//! [`OpLogError`](super::OpLogError).
+
+use super::{Appended, Entry, OpLog, OpLogError};
+use crate::arrival::{Arrival, MessageId};
+use crate::identity::Address;
+use crate::op::{OpId, SignedOp};
+use rusqlite::{Connection, OptionalExtension};
+use std::path::Path;
+
+/// The storage layout this build writes and understands.
+///
+/// Held in SQLite's own `PRAGMA user_version`, which is one `INTEGER` the file
+/// format already reserves — so a version needs no table of its own and cannot
+/// be lost by a schema change that forgot about it.
+///
+/// **Pinned by a hardcoded assertion**, following `identity.rs`'s wire
+/// constants. `cargo mutants` mutates functions and not `const`s, so a wrong
+/// version here is invisible to it; this project has already shipped a
+/// `VERSION_1` defect that left the whole suite green.
+pub const LAYOUT_VERSION: i32 = 1;
+
+/// Map a Lamport timestamp onto an ascending sort key that reverses it.
+///
+/// # Why a mapping rather than `ORDER BY arrival_lamport DESC`
+///
+/// `cmp_ops` wants descending Lamport among the ops the transport ordered.
+/// Reversing at **write** time makes one ascending index serve it, where a
+/// `DESC` on the stored value would need its own index to be scanned rather than
+/// sorted — and the whole point of materialising a sort key is that §2.5's
+/// paginated reads become an index walk.
+///
+/// # Why not simply negate
+///
+/// `-(u64::MAX as i64)` does not fit. SQLite's `INTEGER` is an `i64` and a
+/// Lamport value is a `u64`, so the map has to be a bijection between the two
+/// ranges rather than an arithmetic negation. This one is: `u64::MAX - lamport`
+/// reverses within `u64`, and adding `i64::MIN` reinterprets the result across
+/// the signed range. `0` maps to `i64::MAX`, `u64::MAX` maps to `i64::MIN`.
+///
+/// # The sentinel is NOT in this column
+///
+/// An earlier draft reserved `i64::MAX` here for "the transport did not order
+/// this", and it was wrong: `lamport == 0` maps to exactly that value, so a
+/// Lamport-0 op would have shared a sort key with every unordered op and
+/// interleaved with them by op id. `cmp_ops` requires every ordered op to
+/// precede every unordered one **whatever the Lamport value**, and
+/// `an_op_the_transport_ordered_beats_one_it_did_not` uses Lamport 0 precisely
+/// because that is where a sentinel-based design breaks.
+///
+/// Every repair inside one `i64` column fails for the same reason — `u64` and
+/// `i64` have the same cardinality, so a bijection leaves no spare value. The
+/// fix is [`SortKey::ordered`], a separate leading column, which costs one
+/// integer per row and makes the partition structural instead of arithmetic.
+///
+/// Order-reversing across the whole domain is asserted by
+/// `the_lamport_sort_key_reverses_the_order_across_the_whole_u64_range`, at the
+/// boundaries rather than at convenient middle values.
+fn lamport_sort_key(lamport: u64) -> i64 {
+    (u64::MAX - lamport).wrapping_add(i64::MIN as u64) as i64
+}
+
+/// [`cmp_ops`](crate::arrival::cmp_ops), materialised as three stored columns.
+///
+/// # Why this is one type rather than three expressions at the insert
+///
+/// It was three expressions, and **the two-implementation agreement test caught
+/// them disagreeing with the comparator.** The bug is worth recording because it
+/// is not obvious from either side alone:
+///
+/// `cmp_ops` short-circuits. Its `(None, None)` Lamport arm goes **straight to
+/// the op id** — `a.id.cmp(b.id)` — and never reaches `cmp_tiebreak`, so for two
+/// ops the transport did not order, **the message id is not consulted at all.**
+/// An `ORDER BY sort_lamport, sort_msg_present DESC, sort_msg, op_id` does
+/// consult it, because SQL has no short-circuit: the columns are compared in
+/// sequence regardless of what the first one held.
+///
+/// So an unordered op carrying a message id — which is a real shape, the one an
+/// SDS ephemeral message produces — sorted ahead of an unordered op without one,
+/// where `cmp_ops` would have ordered the pair by op id. Two honest peers, one
+/// storing in memory and one on disk, rendered one thread differently.
+///
+/// **The fix is to make the message id unreachable for an unordered op rather
+/// than to remember not to consult it.** [`SortKey::of`] discards it when there
+/// is no Lamport value, so the row that reaches the `ORDER BY` cannot express
+/// the distinction SQL would otherwise sort on. That is CLAUDE.md's "put the
+/// complexity in the data structure, not the logic": the alternative is a
+/// `CASE WHEN` in the `ORDER BY` — a guard that must be spelled identically in
+/// four places, three indexes and one query, and that silently degrades an index
+/// scan into a sort when it is not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SortKey {
+    /// `0` when the transport ordered this op, `1` when it did not.
+    ///
+    /// **The leading column, and ascending over it is `cmp_ops`'s partition.**
+    /// A column of its own rather than a sentinel inside [`SortKey::lamport`],
+    /// because `u64` and `i64` have the same cardinality: a bijection between
+    /// them leaves no value spare to mean "absent", and every candidate
+    /// sentinel is some real Lamport value's image. `0` before `1` so that
+    /// ascending is the right direction for every column in the key, which is
+    /// what lets one index serve the whole `ORDER BY`.
+    ordered: i64,
+    /// Descending Lamport, reversed at write time — see [`lamport_sort_key`].
+    /// Meaningless when `ordered` is `1`, and never reached, because the
+    /// leading column has already decided.
+    lamport: i64,
+    /// Whether a message id participates in the order. **Not** whether the
+    /// arrival recorded one: an unordered arrival's message id is recorded in
+    /// the `arrival_msg` column and deliberately absent from its sort key.
+    msg_present: i64,
+    msg: Option<Vec<u8>>,
+}
+
+impl SortKey {
+    /// Derive the four columns from what the transport supplied.
+    ///
+    /// **The match is on the Lamport value, and the message id is only reachable
+    /// inside the `Some` arm.** That shape is the invariant: there is no path
+    /// through this function that puts a message id into the sort key of an op
+    /// the transport did not order.
+    fn of(arrival: &Arrival) -> Self {
+        match arrival.lamport() {
+            Some(lamport) => {
+                let msg = arrival.message_id();
+                SortKey {
+                    ordered: 0,
+                    lamport: lamport_sort_key(lamport),
+                    // `cmp_tiebreak` puts an op WITH a message id before one
+                    // without, within one Lamport value. Its own column because
+                    // the EMPTY message id is a legal value, so no byte string
+                    // is "below every byte string and not equal to the empty
+                    // one" — collapsing the two would be
+                    // `absence_is_not_equal_to_a_zero_lamport_timestamp`'s
+                    // defect in another costume.
+                    msg_present: i64::from(msg.is_some()),
+                    msg: msg.map(|m| m.as_bytes().to_vec()),
+                }
+            }
+            // The degraded branch: `cmp_ops` compares op ids and NOTHING else.
+            // Both the Lamport key and the message id are zeroed here rather
+            // than stored and then not consulted, because a stored value that
+            // must not be read is one an `ORDER BY` will eventually read —
+            // which is the defect the agreement test caught.
+            None => SortKey {
+                ordered: 1,
+                lamport: 0,
+                msg_present: 0,
+                msg: None,
+            },
+        }
+    }
+}
+
+/// The op log in a SQLite database.
+///
+/// # One connection, owned, no pool
+///
+/// A peer has one store. A connection pool solves a concurrency problem this
+/// type does not have, and would be a dependency taken for a shape nothing here
+/// exhibits.
+///
+/// # The file is handed in, never discovered
+///
+/// [`SqliteOpLog::open`] takes a path, exactly as `Keystore` is handed a file
+/// and for the same reason: a fixed path baked into a pure crate is untestable
+/// and would mean this crate reading the environment at a moment its caller does
+/// not control. The module crate has the host-stamped
+/// `instance_persistence_path`.
+#[derive(Debug)]
+pub struct SqliteOpLog {
+    conn: Connection,
+}
+
+impl SqliteOpLog {
+    /// Open or create a log at `path`, refusing a layout this build cannot read.
+    ///
+    /// A store whose `PRAGMA user_version` names a layout this build does not
+    /// understand is refused with
+    /// [`OpLogError::UnknownLayoutVersion`](super::OpLogError::UnknownLayoutVersion),
+    /// naming both numbers, and **no op is read from it**. See that variant for
+    /// why refusing beats a best-effort read.
+    pub fn open(path: &Path) -> Result<Self, OpLogError> {
+        let conn = Connection::open(path).map_err(storage)?;
+        Self::from_connection(conn)
+    }
+
+    /// An ephemeral log with no file behind it.
+    ///
+    /// **Not a test double, and not a second implementation of
+    /// [`super::MemoryOpLog`].** It is this exact code — the same schema, the
+    /// same `ORDER BY`, the same decode path — with SQLite's `:memory:` backing
+    /// store. It exists so that every behavioural test that is not *about*
+    /// persistence can exercise the real SQL without a temporary directory, a
+    /// file permission, or a teardown, which is what the `op-log` change gave as
+    /// its third reason for deferring SQLite at all.
+    ///
+    /// Tests that ARE about persistence use [`SqliteOpLog::open`] against a real
+    /// file, because this one by construction cannot survive being dropped.
+    pub fn in_memory() -> Result<Self, OpLogError> {
+        let conn = Connection::open_in_memory().map_err(storage)?;
+        Self::from_connection(conn)
+    }
+
+    fn from_connection(conn: Connection) -> Result<Self, OpLogError> {
+        // A fresh database reports 0, which is not a version anything wrote —
+        // it is the absence of one, and the only case where creating the schema
+        // is correct. Any other unexpected value is a store somebody else's
+        // build wrote.
+        let found: i32 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .map_err(storage)?;
+
+        if found == 0 {
+            Self::create_schema(&conn)?;
+        } else if found != LAYOUT_VERSION {
+            return Err(OpLogError::UnknownLayoutVersion {
+                found,
+                expected: LAYOUT_VERSION,
+            });
+        }
+
+        Ok(SqliteOpLog { conn })
+    }
+
+    /// The whole schema, in one place, with every column's reason beside it.
+    ///
+    /// # Dedup is the `PRIMARY KEY`, and it was chosen for the precondition
+    ///
+    /// The `op-log` design was careful to record that its `HashMap` acquired the
+    /// anti-duplicate property by accident, and warned the next author against
+    /// assuming a new storage shape inherits it. **Here the causality runs the
+    /// other way, and saying so is the point**: `op_id BLOB PRIMARY KEY` was
+    /// written to satisfy two already-stated requirements at once —
+    ///
+    /// 1. §3.1's "idempotent by `opId`" — one op id, one row;
+    /// 2. `cmp_ops`'s precondition, that no two entries sharing an op id may
+    ///    reach the comparator.
+    ///
+    /// The design named the shape that would give only the first: "a
+    /// `SELECT ... ORDER BY` over a table with a **non-unique** index". The
+    /// ordering index below ends in `op_id`, which is the primary key, so it is
+    /// unique by construction and no ordered read can emit one op id twice.
+    ///
+    /// # The op is stored as its canonical bytes, not as fields
+    ///
+    /// `op_bytes` is `SignedOp::to_bytes()` verbatim. The canonical encoding is
+    /// the signature preimage (`op.rs`), so storing the op as decomposed columns
+    /// and re-encoding on read would make the signature depend on this module's
+    /// re-encoding agreeing with `op.rs`'s forever. `a_stored_op_reads_back_byte_identical`
+    /// holds it to the byte.
+    ///
+    /// The columns beside it — `stoa`, `target`, and the three sort columns —
+    /// are **derived from those bytes at append time and are indexes, not
+    /// authority**. If one ever disagreed with the blob, the blob is right.
+    fn create_schema(conn: &Connection) -> Result<(), OpLogError> {
+        conn.execute_batch(&format!(
+            "BEGIN;
+             CREATE TABLE ops (
+                 -- §3.1's idempotence AND `cmp_ops`'s precondition, in one
+                 -- constraint. See this function's documentation.
+                 op_id             BLOB PRIMARY KEY NOT NULL,
+
+                 -- The signed canonical encoding, verbatim. The authority.
+                 op_bytes          BLOB NOT NULL,
+
+                 -- The Stoa ADDRESS, never a channel id (§4.5: 'never let
+                 -- channel identity leak into payloads or storage keys', so
+                 -- that per-thread channels later become a routing change
+                 -- rather than a migration).
+                 stoa              BLOB NOT NULL,
+
+                 -- The op this one acts upon, or NULL for a kind that names
+                 -- none. A `Post`'s parent is NOT a target: a reply names its
+                 -- parent as a reply relationship, not as a subject acted upon.
+                 target            BLOB,
+
+                 -- ── The recorded arrival, verbatim ────────────────────────
+                 -- What the transport said, exactly as `Arrival` holds it.
+                 -- NULL means the transport supplied nothing for that field.
+                 --
+                 -- SEPARATE FROM THE SORT COLUMNS BELOW, and that separation is
+                 -- load-bearing rather than redundant. The two are different
+                 -- facts: this is what the peer RECORDED, the sort columns are
+                 -- what the ORDER BY compares. They differ in exactly one case
+                 -- — an op the transport did not order but for which it
+                 -- supplied a message id — where the arrival keeps the id and
+                 -- the sort key must not carry it, because `cmp_ops` does not
+                 -- consult it. See `SortKey`.
+                 --
+                 -- Deriving the arrival back OUT of the sort columns was the
+                 -- first design and it was wrong: it made the recorded fact and
+                 -- the ordering fact one column set, so making the ordering
+                 -- correct would have silently discarded a message id the peer
+                 -- genuinely received.
+                 arrival_lamport   INTEGER,
+                 arrival_msg       BLOB,
+
+                 -- ── The read order, materialised ──────────────────────────
+                 -- `cmp_ops` expressed over stored values so it can be
+                 -- indexed. Written once at append; first-wins makes that
+                 -- sound, since the arrival is fixed at first append and no
+                 -- code path here rewrites it.
+
+                 -- 0 = the transport ordered this op, 1 = it did not.
+                 -- THE LEADING COLUMN, and `cmp_ops`'s partition made
+                 -- structural: every ordered op precedes every unordered one
+                 -- whatever the Lamport value. A column rather than a sentinel
+                 -- inside `sort_lamport`, because u64 and i64 have the same
+                 -- cardinality and a bijection leaves no value spare. See
+                 -- `lamport_sort_key`, which records the draft that got this
+                 -- wrong and how Lamport 0 exposed it.
+                 sort_ordered      INTEGER NOT NULL,
+
+                 -- Descending Lamport, reversed at write time. Meaningless when
+                 -- `sort_ordered` is 1, and never reached in that case.
+                 sort_lamport      INTEGER NOT NULL,
+
+                 -- `cmp_tiebreak` puts an op WITH a message id before one
+                 -- without. This is its own column rather than a sentinel
+                 -- inside `sort_msg` because the EMPTY message id is a legal
+                 -- value, so no byte string is 'below every byte string and
+                 -- not equal to the empty one'. Collapsing the two would be
+                 -- `absence_is_not_equal_to_a_zero_lamport_timestamp`'s defect
+                 -- in another costume.
+                 sort_msg_present  INTEGER NOT NULL,
+                 sort_msg          BLOB,
+
+                 -- The op's AUTHOR, lifted out of `op_bytes` so it can be
+                 -- joined and indexed.
+                 --
+                 -- Reserved for §7.2's ranking, and the shape is the point.
+                 -- Votes are to affect relevance, with a MODERATOR's vote
+                 -- weighted more heavily than an ordinary one — and
+                 -- `moderation.rs` decides moderator-ness **on read, every
+                 -- time, from the genesis record**, caching nothing and
+                 -- deciding nothing at append.
+                 --
+                 -- So a vote's weight is NOT a property of the vote. It
+                 -- depends on the moderator set at the moment of reading, and
+                 -- a schema that multiplied a weight in at insert would
+                 -- contradict the module that decides authority, and would go
+                 -- silently stale the moment a moderator set changed.
+                 --
+                 -- What IS stable at write time is who signed the op. Storing
+                 -- the author makes 'count this target's votes, partitioned by
+                 -- voter' an indexed query, with the weighting applied at
+                 -- READ time against the (small) moderator set — which is the
+                 -- only shape consistent with authority being a read-time
+                 -- decision.
+                 author            BLOB NOT NULL,
+
+                 -- ── Reserved for a relevance score (§7.2 rule 5) ──────────
+                 -- NOTHING WRITES THIS AND NO READ CONSULTS IT.
+                 --
+                 -- The time a score decays FROM: the op's Lamport timestamp,
+                 -- or -1 where the transport supplied none.
+                 --
+                 -- This is the durable half of the rule 5 decision. A score
+                 -- multiplied by decay BEFORE storage is a function of the
+                 -- READ's clock, so no index over it can be correct and
+                 -- §2.5's `ORDER BY … LIMIT` degrades to a full scan on every
+                 -- page. Storing the epoch instead lets decay be applied in
+                 -- the ORDER BY expression over stored values, which an index
+                 -- can serve.
+                 --
+                 -- NOT a wall-clock reading, and that is the whole point.
+                 -- `arrival.rs` refuses `channelMessageReceived`'s `timestamp`
+                 -- because it is a per-peer CLOCK_REALTIME read — 'recording
+                 -- it here would be recording arrival sequence while believing
+                 -- we recorded a shared order'. A decay epoch taken from the
+                 -- local clock reintroduces that one layer up: two peers would
+                 -- rank the same ops differently because they received them at
+                 -- different instants, which is divergence from a source §7.2
+                 -- rule 1 does not sanction.
+                 --
+                 -- NO `score` COLUMN, deliberately. An earlier draft reserved
+                 -- one and it was wrong: a stored score is a stored WEIGHTING,
+                 -- and the weighting is not knowable at append. See the
+                 -- `author` column above.
+                 score_epoch       INTEGER NOT NULL
+             ) STRICT;
+
+             -- THE ORDERING INDEX. Its columns are exactly the ORDER BY's, in
+             -- order, so an unrestricted read is an index scan rather than a
+             -- materialise-and-sort. It ends in `op_id` — the primary key — so
+             -- it is unique, which is what keeps a `SELECT ... ORDER BY` over
+             -- it from ever emitting one op id twice.
+             CREATE INDEX ops_order
+                 ON ops (sort_ordered, sort_lamport,
+                         sort_msg_present DESC, sort_msg, op_id);
+
+             -- The two restricted reads, each prefixed by what it restricts on
+             -- so that the same ordering is served without a sort.
+             CREATE INDEX ops_by_stoa
+                 ON ops (stoa, sort_ordered, sort_lamport,
+                         sort_msg_present DESC, sort_msg, op_id);
+             CREATE INDEX ops_by_target
+                 ON ops (target, sort_ordered, sort_lamport,
+                         sort_msg_present DESC, sort_msg, op_id);
+
+             -- RESERVED, and nothing queries it yet. `(target, author)` is the
+             -- shape a vote tally needs: 'the ops about this subject, grouped
+             -- by who signed them', which a later ranking change weights
+             -- against the moderator set it resolves at read time. It is
+             -- created now rather than later because adding an index to a
+             -- peer's existing store is cheap only while the store is small,
+             -- and because an index nothing uses costs writes and nothing else
+             -- — which is the right side of rule 5's trade.
+             CREATE INDEX ops_by_target_author ON ops (target, author);
+
+             PRAGMA user_version = {LAYOUT_VERSION};
+             COMMIT;"
+        ))
+        .map_err(storage)
+    }
+
+    /// The one `SELECT`, shared by all three ordered reads.
+    ///
+    /// Written once for the reason `MemoryOpLog::sorted` gives: a second call
+    /// site spelling its own `ORDER BY` is how one of them eventually spells it
+    /// differently. The `WHERE` clause is the only thing that varies, and it is
+    /// passed in rather than being chosen from an enum here, so a fourth read
+    /// does not mean editing this function.
+    ///
+    /// The `ORDER BY` is `cmp_ops`: ascending `sort_lamport` (ordered ops first,
+    /// then descending Lamport), then message-id presence, then message-id
+    /// bytes, then op id as the last resort — matching
+    /// `cmp_ops` → `cmp_tiebreak` → `a.id.cmp(b.id)` branch for branch.
+    fn ordered_read(
+        &self,
+        where_clause: &str,
+        params: &[&dyn rusqlite::ToSql],
+    ) -> Result<Vec<Entry>, OpLogError> {
+        let sql = format!(
+            "SELECT {SELECT_COLUMNS}
+             FROM ops
+             {where_clause}
+             ORDER BY sort_ordered ASC, sort_lamport ASC,
+                      sort_msg_present DESC, sort_msg ASC, op_id ASC"
+        );
+        let mut stmt = self.conn.prepare(&sql).map_err(storage)?;
+        let rows = stmt
+            .query_map(params, |row| {
+                Ok(Row {
+                    op_bytes: row.get(0)?,
+                    arrival_lamport: row.get(1)?,
+                    arrival_msg: row.get(2)?,
+                })
+            })
+            .map_err(storage)?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(decode_entry(row.map_err(storage)?)?);
+        }
+        Ok(out)
+    }
+}
+
+/// One row, as the two reads select it.
+///
+/// A named struct rather than a tuple because the two `Option`s are easy to
+/// transpose and the compiler would not notice — both are `Option`s of
+/// different types only by luck.
+struct Row {
+    op_bytes: Vec<u8>,
+    arrival_lamport: Option<i64>,
+    arrival_msg: Option<Vec<u8>>,
+}
+
+/// The columns both reads select, in the order [`decode_entry`] expects.
+///
+/// A `const` rather than two string literals, because the `SELECT` list and the
+/// index arithmetic in the row mapper have to agree and nothing else checks
+/// that they do.
+const SELECT_COLUMNS: &str = "op_bytes, arrival_lamport, arrival_msg";
+
+/// Rebuild an [`Entry`] from what a row holds.
+///
+/// The op comes from its canonical bytes, so the signature is over exactly what
+/// was signed.
+///
+/// **The arrival comes from the `arrival_*` columns and NOT from the sort key.**
+/// An earlier draft derived it from the sort columns, on the reasoning that
+/// there was nothing in an `Arrival` they did not already carry. That was wrong
+/// in exactly one case and the case is real: an op the transport did not order,
+/// for which it nonetheless supplied a message id — the shape an SDS ephemeral
+/// message produces. The sort key must drop that id (see [`SortKey`]) and the
+/// record must keep it, so one column set cannot be both.
+fn decode_entry(row: Row) -> Result<Entry, OpLogError> {
+    let op = SignedOp::from_bytes(&row.op_bytes)
+        .map_err(|e| OpLogError::CorruptEntry(format!("the stored op did not decode: {e}")))?;
+
+    // Stored from a `u64` by a cast that is reversed here. The round trip is
+    // exact across the whole domain — including `u64::MAX`, which is stored as
+    // `-1` and read back as `u64::MAX` — which
+    // `a_maximal_lamport_timestamp_survives_storage` pins at the boundary
+    // rather than at a convenient middle value.
+    let lamport = row.arrival_lamport.map(|l| l as u64);
+
+    // `NULL` versus a value, not empty versus non-empty: an EMPTY message id is
+    // a legal recorded value and must read back as present-and-empty. That is
+    // `absence_is_not_equal_to_a_zero_lamport_timestamp`'s distinction, and
+    // `an_empty_message_id_is_recorded_and_is_not_absence` pins it here.
+    let message_id = row.arrival_msg.map(MessageId::new);
+
+    Ok(Entry {
+        op,
+        arrival: Arrival::from_parts(lamport, message_id),
+    })
+}
+
+/// Every `rusqlite` failure becomes one variant, carrying its own description.
+///
+/// A free function rather than a `From` impl, deliberately: a `From` would make
+/// `?` convert silently at every call site, including ones where a different
+/// variant is the right answer — `CorruptEntry` is not a storage failure, and
+/// the two are distinguishable only because this conversion is written out.
+fn storage(e: rusqlite::Error) -> OpLogError {
+    OpLogError::Storage(e.to_string())
+}
+
+impl OpLog for SqliteOpLog {
+    /// Writes whatever it is given, once, keeping the first arrival's metadata.
+    ///
+    /// **`INSERT OR IGNORE`, never `INSERT OR REPLACE`.** Replace would
+    /// overwrite the stored arrival with the later one — richer-wins by the back
+    /// door, which is the rule `arrival.rs` spends a section of module
+    /// documentation warning consumers off, because whether a peer receives the
+    /// richer copy is a per-peer accident and two peers would then sort the same
+    /// ops differently with no error anywhere.
+    ///
+    /// `changes()` reports which happened, so the caller is told rather than
+    /// having to count the log before and after.
+    fn append(&mut self, op: SignedOp, arrival: Arrival) -> Result<Appended, OpLogError> {
+        let entry = Entry { op, arrival };
+        let id = entry.id();
+        let key = SortKey::of(&entry.arrival);
+        let score_epoch = entry.arrival.lamport().map_or(-1, |l| l as i64);
+
+        let changed = self
+            .conn
+            .execute(
+                "INSERT OR IGNORE INTO ops
+                     (op_id, op_bytes, stoa, target, author,
+                      arrival_lamport, arrival_msg,
+                      sort_ordered, sort_lamport, sort_msg_present, sort_msg,
+                      score_epoch)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                rusqlite::params![
+                    id.as_bytes().as_slice(),
+                    entry.op.to_bytes(),
+                    entry.op.op.stoa.as_bytes().as_slice(),
+                    entry.target().map(|t| t.as_bytes().to_vec()),
+                    entry.op.op.author.to_bytes().as_slice(),
+                    // The arrival as RECORDED — both fields, whatever the sort
+                    // key does with them.
+                    entry.arrival.lamport().map(|l| l as i64),
+                    entry.arrival.message_id().map(|m| m.as_bytes().to_vec()),
+                    key.ordered,
+                    key.lamport,
+                    key.msg_present,
+                    key.msg,
+                    score_epoch,
+                ],
+            )
+            .map_err(storage)?;
+
+        Ok(if changed == 0 {
+            Appended::AlreadyPresent
+        } else {
+            Appended::Stored
+        })
+    }
+
+    fn get(&self, id: &OpId) -> Result<Option<Entry>, OpLogError> {
+        let row = self
+            .conn
+            .query_row(
+                &format!("SELECT {SELECT_COLUMNS} FROM ops WHERE op_id = ?1"),
+                rusqlite::params![id.as_bytes().as_slice()],
+                |row| {
+                    Ok(Row {
+                        op_bytes: row.get(0)?,
+                        arrival_lamport: row.get(1)?,
+                        arrival_msg: row.get(2)?,
+                    })
+                },
+            )
+            // `optional` turns SQLite's "no rows" into `None` rather than an
+            // error, which is the whole point of the nesting: absence is a
+            // defined answer and a failure is a different one.
+            .optional()
+            .map_err(storage)?;
+
+        row.map(decode_entry).transpose()
+    }
+
+    fn iter(&self) -> Result<Vec<Entry>, OpLogError> {
+        self.ordered_read("", &[])
+    }
+
+    fn iter_stoa(&self, stoa: &Address) -> Result<Vec<Entry>, OpLogError> {
+        // `= ?1` on the whole 32-byte blob, never a prefix or a LIKE. A
+        // prefix-matching restricted read is a cross-Stoa leak in a
+        // censorship-resistant forum, and with 32-byte addresses a collision is
+        // rare enough never to surface in casual testing and certain enough to
+        // surface eventually.
+        self.ordered_read(
+            "WHERE stoa = ?1",
+            &[&stoa.as_bytes().as_slice() as &dyn rusqlite::ToSql],
+        )
+    }
+
+    fn iter_target(&self, target: &OpId) -> Result<Vec<Entry>, OpLogError> {
+        // `target IS NOT NULL` is implied by the equality — SQL's `=` never
+        // matches NULL — so an op naming no target can never be returned by a
+        // target read, without a second clause that has to be remembered.
+        self.ordered_read(
+            "WHERE target = ?1",
+            &[&target.as_bytes().as_slice() as &dyn rusqlite::ToSql],
+        )
+    }
+
+    fn len(&self) -> Result<usize, OpLogError> {
+        let n: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM ops", [], |row| row.get(0))
+            .map_err(storage)?;
+        // A negative count is not representable by COUNT(*), and a count past
+        // `usize` needs more ops than addressable memory. `try_into` rather than
+        // `as` so that a platform where it could fail says so instead of
+        // wrapping.
+        usize::try_from(n).map_err(|_| {
+            OpLogError::CorruptEntry(format!("the store reported {n} ops, which is not a count"))
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::fixtures::*;
+    use super::*;
+    use crate::log::Appended;
+    use std::cmp::Ordering;
+
+    /// A path in a fresh temporary directory, and the directory's guard.
+    ///
+    /// The guard must be held for the test's lifetime: dropping it removes the
+    /// directory. Returned as a pair rather than hidden behind a helper that
+    /// drops it, because a test that let it drop early would fail confusingly.
+    ///
+    /// Built with `std::fs` rather than a `tempfile` dependency, for the same
+    /// reason the keystore change hand-rolled its nine-line predicate: one need,
+    /// in tests, is not worth a crate.
+    struct TempDir(std::path::PathBuf);
+
+    impl TempDir {
+        fn new(name: &str) -> Self {
+            let mut path = std::env::temp_dir();
+            // The process id and the test's own name keep two tests in one run
+            // from colliding, and two runs from inheriting each other's files.
+            path.push(format!("dialectica-oplog-{}-{name}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir_all(&path).expect("a temporary directory is creatable");
+            TempDir(path)
+        }
+
+        fn file(&self, name: &str) -> std::path::PathBuf {
+            self.0.join(name)
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    // ─── The layout version ───────────────────────────────────────────────
+
+    #[test]
+    fn the_layout_version_is_pinned_to_a_known_answer() {
+        // Hardcoded, following `identity.rs`'s wire constants. `cargo mutants`
+        // mutates functions and not `const`s, so a wrong version here is
+        // invisible to it — and this project has already shipped a `VERSION_1`
+        // defect that left the whole suite green.
+        //
+        // Changing this number is changing the on-disk format every peer holds.
+        // If this assertion fails, that is the question being asked.
+        assert_eq!(LAYOUT_VERSION, 1);
+    }
+
+    #[test]
+    fn a_store_from_an_unknown_layout_version_is_refused_and_names_both_numbers() {
+        // Ops are the authority for all forum state (§3.3), so a layout misread
+        // yields a forum that is wrong with no error anywhere. Refusing is
+        // visible; reading best-effort is not.
+        let dir = TempDir::new("unknown-version");
+        let path = dir.file("log.sqlite");
+
+        // A store this build wrote, then stamped with a version it does not
+        // know. Stamped rather than hand-built, so the test exercises the
+        // version check and not a malformed file.
+        let log = SqliteOpLog::open(&path).unwrap();
+        drop(log);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch("PRAGMA user_version = 9999").unwrap();
+        drop(conn);
+
+        match SqliteOpLog::open(&path) {
+            Err(OpLogError::UnknownLayoutVersion { found, expected }) => {
+                // Hardcoded on both sides: a test asserting `found == 9999`
+                // only would pass for an implementation that reported the same
+                // number twice.
+                assert_eq!(found, 9999);
+                assert_eq!(expected, 1);
+            }
+            other => panic!("an unknown layout version must be refused, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_store_from_an_older_layout_version_is_refused_too() {
+        // **A SURVIVOR THAT MUTATION TESTING FOUND.** Relaxing the check from
+        // `found != LAYOUT_VERSION` to `found > LAYOUT_VERSION` — accepting any
+        // layout older than this build's — passed the entire suite, because
+        // every other version test uses a HIGHER version (9999).
+        //
+        // "Refuse nothing" dies instantly. "Refuse only the future" is the
+        // mutation one step weaker, and it is both plausible and wrong:
+        // accepting an older layout is exactly the shape a well-meaning
+        // "backwards compatible" edit takes, and it would have this build read
+        // a version-0-shaped file through version-1 column positions. Ops are
+        // the authority for all forum state, so that is a forum that is wrong
+        // with no error anywhere.
+        //
+        // There is no migration path here by design (see `design.md`): a
+        // layout this build does not understand is refused in BOTH directions,
+        // and an older store is upgraded by a change that says so, not by
+        // being read hopefully.
+        let dir = TempDir::new("older-version");
+        let path = dir.file("log.sqlite");
+
+        let log = SqliteOpLog::open(&path).unwrap();
+        drop(log);
+        let conn = Connection::open(&path).unwrap();
+        // A NEGATIVE version, not `LAYOUT_VERSION - 1`. With `LAYOUT_VERSION`
+        // at 1 those are the same thing, and `0` is SQLite's "never stamped"
+        // value which legitimately means a fresh file — so a test using it
+        // would assert the opposite of what it names, and would start failing
+        // for the wrong reason the moment the version is bumped.
+        //
+        // `-1` is below this build's version, is not the fresh sentinel, and
+        // stays below whatever `LAYOUT_VERSION` becomes. That is the property
+        // the test needs, stated so a later reader does not "simplify" it back.
+        conn.execute_batch("PRAGMA user_version = -1").unwrap();
+        drop(conn);
+
+        match SqliteOpLog::open(&path) {
+            Err(OpLogError::UnknownLayoutVersion { found, expected }) => {
+                assert_eq!(found, -1);
+                assert_eq!(expected, LAYOUT_VERSION);
+            }
+            other => panic!("an older layout version must be refused too, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_fresh_store_is_created_rather_than_refused() {
+        // The boundary on the other side of the version check: `0` is what
+        // SQLite reports for a file nobody has stamped, and it is the ONE value
+        // that must not be refused — it is the absence of a version rather than
+        // an unknown one. A check that refused it would make the log
+        // unopenable on first run.
+        let dir = TempDir::new("fresh");
+        let path = dir.file("log.sqlite");
+        assert!(!path.exists(), "the fixture must start with no file");
+
+        let log = SqliteOpLog::open(&path).expect("a fresh store must be creatable");
+        assert_eq!(log.len().unwrap(), 0);
+
+        // And it stamped the version, so the next open takes the other branch.
+        let stamped: i32 = log
+            .conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(stamped, LAYOUT_VERSION);
+    }
+
+    #[test]
+    fn the_refusal_names_the_version_in_its_message() {
+        // The variant is one thing; what a human reads is another. A refusal
+        // that did not name the numbers would leave the reader unable to tell
+        // which build wrote the file they are holding.
+        let rendered = OpLogError::UnknownLayoutVersion {
+            found: 7,
+            expected: 1,
+        }
+        .to_string();
+        assert!(rendered.contains('7'), "the found version is not named");
+        assert!(rendered.contains('1'), "the expected version is not named");
+    }
+
+    // ─── Dedup is keyed on the identity column ────────────────────────────
+
+    #[test]
+    fn the_primary_key_is_the_op_id_and_not_any_other_column() {
+        // **A SURVIVOR THAT MUTATION TESTING FOUND, and the test that kills
+        // it.** Moving the `PRIMARY KEY` from `op_id` to `op_bytes` passed the
+        // ENTIRE suite — every dedup test, every contract test, both
+        // implementations.
+        //
+        // It survives because the two columns agree on every input the public
+        // API can construct: identical ops have identical bytes, so `op_bytes`
+        // deduplicates exactly where `op_id` does. "Remove the primary key"
+        // dies instantly and proves nothing; this is the mutation one step
+        // weaker, and it is the one that was live.
+        //
+        // Why it would matter. §3.1 makes the op id the identity, and it is a
+        // DOMAIN-SEPARATED HASH of the canonical bytes rather than the bytes
+        // themselves (`an_op_id_is_not_a_bare_hash_of_the_canonical_bytes`).
+        // Keying on the encoding rather than on the identity means the store's
+        // notion of "the same op" is the encoding's, so any future encoding
+        // change that is not identity-preserving — a version bump, a canonical
+        // form that admits two spellings — silently splits one op into two
+        // rows, and `cmp_ops`'s precondition is violated with no error.
+        //
+        // Asserted against the schema rather than through the API, because the
+        // API cannot construct the distinguishing case: that is precisely why
+        // the mutation survived every behavioural test.
+        let log = SqliteOpLog::in_memory().unwrap();
+        let mut stmt = log
+            .conn
+            .prepare("SELECT name, pk FROM pragma_table_info('ops')")
+            .unwrap();
+        let columns: Vec<(String, i64)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+
+        assert!(!columns.is_empty(), "the table must have columns");
+        let key: Vec<&str> = columns
+            .iter()
+            .filter(|(_, pk)| *pk > 0)
+            .map(|(name, _)| name.as_str())
+            .collect();
+        // Hardcoded, and exactly one column: a composite key including `op_id`
+        // would also satisfy a `contains` check while deduplicating on
+        // something coarser.
+        assert_eq!(
+            key,
+            vec!["op_id"],
+            "the primary key must be the op id alone"
+        );
+    }
+
+    #[test]
+    fn a_store_this_version_wrote_opens_and_keeps_its_ops() {
+        let dir = TempDir::new("same-version");
+        let path = dir.file("log.sqlite");
+
+        let op = signed(a_post("persisted"));
+        let id = op.op.id();
+        let mut log = SqliteOpLog::open(&path).unwrap();
+        log.append(op, Arrival::unordered()).unwrap();
+        drop(log);
+
+        let reopened = SqliteOpLog::open(&path).unwrap();
+        assert!(reopened.get(&id).unwrap().is_some());
+    }
+
+    // ─── Persistence ──────────────────────────────────────────────────────
+
+    #[test]
+    fn ops_outlive_the_log_object_that_stored_them() {
+        // §4.7's middle durability tier, which bought nothing before this
+        // existed: "everything this peer has ever seen".
+        let dir = TempDir::new("outlive");
+        let path = dir.file("log.sqlite");
+
+        let population = every_ordering_shape();
+        let mut log = SqliteOpLog::open(&path).unwrap();
+        for (op, arrival) in &population {
+            log.append(op.clone(), arrival.clone()).unwrap();
+        }
+        let before: Vec<OpId> = log.iter().unwrap().iter().map(|e| e.id()).collect();
+        drop(log);
+
+        let reopened = SqliteOpLog::open(&path).unwrap();
+        let after: Vec<OpId> = reopened.iter().unwrap().iter().map(|e| e.id()).collect();
+
+        assert_eq!(
+            before.len(),
+            population.len(),
+            "the fixture must reach the comparison"
+        );
+        // The SEQUENCE, not the set: a store that persisted every op but
+        // rebuilt its sort key differently on reopen would pass a set
+        // comparison and render a thread in a new order after a restart.
+        assert_eq!(before, after, "the read order changed across a restart");
+    }
+
+    #[test]
+    fn a_persisted_op_is_byte_identical_after_a_restart() {
+        // The op is signed, so anything the store did to it on the way to disk
+        // or back would break the signature. Asserted rather than trusted.
+        let dir = TempDir::new("byte-identical");
+        let path = dir.file("log.sqlite");
+
+        let op = signed(a_post("exact across a restart"));
+        let id = op.op.id();
+        let arrival = Arrival::ordered(5, a_message_id(3));
+
+        let mut log = SqliteOpLog::open(&path).unwrap();
+        log.append(op.clone(), arrival.clone()).unwrap();
+        drop(log);
+
+        let reopened = SqliteOpLog::open(&path).unwrap();
+        let entry = reopened.get(&id).unwrap().unwrap();
+        assert_eq!(entry.op.to_bytes(), op.to_bytes());
+        assert_eq!(entry.op, op);
+        assert!(entry.op.verify(), "storage must not disturb the signature");
+        assert_eq!(entry.arrival, arrival, "the recorded arrival must survive");
+    }
+
+    #[test]
+    fn deduplication_survives_a_restart() {
+        // §3.1's idempotence is a property of the STORE, not of one process's
+        // memory. A peer that re-received an op after a restart and stored it
+        // twice would put a duplicate into `cmp_ops`, whose precondition
+        // forbids exactly that.
+        let dir = TempDir::new("dedup-restart");
+        let path = dir.file("log.sqlite");
+
+        let op = signed(a_post("arrives, restarts, arrives again"));
+        let mut log = SqliteOpLog::open(&path).unwrap();
+        assert_eq!(
+            log.append(op.clone(), Arrival::ordered(1, a_message_id(1)))
+                .unwrap(),
+            Appended::Stored
+        );
+        drop(log);
+
+        let mut reopened = SqliteOpLog::open(&path).unwrap();
+        assert_eq!(
+            reopened
+                .append(op.clone(), Arrival::ordered(9, a_message_id(2)))
+                .unwrap(),
+            Appended::AlreadyPresent,
+            "a restart must not make a known op look new"
+        );
+        assert_eq!(reopened.len().unwrap(), 1);
+        // And first-wins held across the restart too: the metadata recorded
+        // before the drop is the one that survived.
+        let entry = reopened.get(&op.op.id()).unwrap().unwrap();
+        assert_eq!(entry.arrival.lamport(), Some(1));
+    }
+
+    #[test]
+    fn whether_an_arrival_was_ordered_survives_a_restart() {
+        // The seam for the upstream transport fix: a peer must still be able to
+        // say "this thread is ordered by the network" or "by op id" after it
+        // restarts. A store that rebuilt the distinction from a sort key alone
+        // would lose the message id of an unordered arrival, which is the
+        // defect `SortKey` exists to prevent.
+        let dir = TempDir::new("ordered-survives");
+        let path = dir.file("log.sqlite");
+
+        let ordered = signed(a_post("ordered"));
+        let unordered = signed(a_post("unordered"));
+        // The sharp one: unordered by the transport, but carrying a message id.
+        let id_only = signed(a_post("a message id and no lamport"));
+
+        let mut log = SqliteOpLog::open(&path).unwrap();
+        log.append(ordered.clone(), Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
+        log.append(unordered.clone(), Arrival::unordered()).unwrap();
+        log.append(
+            id_only.clone(),
+            Arrival::from_parts(None, Some(a_message_id(7))),
+        )
+        .unwrap();
+        drop(log);
+
+        let reopened = SqliteOpLog::open(&path).unwrap();
+        let back = |op: &crate::op::SignedOp| reopened.get(&op.op.id()).unwrap().unwrap().arrival;
+
+        assert!(back(&ordered).is_ordered_by_transport());
+        assert!(!back(&unordered).is_ordered_by_transport());
+
+        // THE case the sort key cannot carry: unordered, and yet a message id
+        // was genuinely received. The record must keep it even though the
+        // ordering must not consult it.
+        let recovered = back(&id_only);
+        assert!(!recovered.is_ordered_by_transport());
+        assert_eq!(
+            recovered.message_id(),
+            Some(&a_message_id(7)),
+            "an unordered arrival's message id must survive storage"
+        );
+    }
+
+    #[test]
+    fn a_maximal_lamport_timestamp_survives_storage() {
+        // `u64::MAX` does not fit in SQLite's `INTEGER`, which is an `i64`, so
+        // it is stored through a cast and read back through its inverse. The
+        // boundary is where that round trip breaks if it is going to.
+        let dir = TempDir::new("maximal-lamport");
+        let path = dir.file("log.sqlite");
+
+        let mut log = SqliteOpLog::open(&path).unwrap();
+        // A PAIR at the boundary: the largest value, and one below it. One
+        // alone would pass for an implementation that saturated.
+        let at_max = signed(a_post("at the maximum"));
+        let below = signed(a_post("one below the maximum"));
+        log.append(at_max.clone(), Arrival::ordered(u64::MAX, a_message_id(1)))
+            .unwrap();
+        log.append(
+            below.clone(),
+            Arrival::ordered(u64::MAX - 1, a_message_id(1)),
+        )
+        .unwrap();
+        drop(log);
+
+        let reopened = SqliteOpLog::open(&path).unwrap();
+        assert_eq!(
+            reopened
+                .get(&at_max.op.id())
+                .unwrap()
+                .unwrap()
+                .arrival
+                .lamport(),
+            Some(u64::MAX)
+        );
+        assert_eq!(
+            reopened
+                .get(&below.op.id())
+                .unwrap()
+                .unwrap()
+                .arrival
+                .lamport(),
+            Some(u64::MAX - 1),
+            "a saturating round trip would collapse these two"
+        );
+        // And the order between them is still descending Lamport.
+        let ids: Vec<OpId> = reopened.iter().unwrap().iter().map(|e| e.id()).collect();
+        assert_eq!(ids, vec![at_max.op.id(), below.op.id()]);
+    }
+
+    // ─── The sort key ─────────────────────────────────────────────────────
+
+    #[test]
+    fn the_lamport_sort_key_reverses_the_order_across_the_whole_u64_range() {
+        // Boundaries, not convenient middle values. An implementation that
+        // overflows or saturates does so at the ends and nowhere else, so a
+        // test sampling the middle would report green for a key that collapses
+        // `u64::MAX` onto its neighbour.
+        //
+        // Asserted as a PROPERTY — a < b implies key(a) > key(b) — over every
+        // adjacent pair in a boundary-heavy sample, rather than against
+        // hardcoded key values, because the values are an encoding detail and
+        // the reversal is the contract.
+        let values = [
+            0u64,
+            1,
+            2,
+            u64::MAX / 2 - 1,
+            u64::MAX / 2,
+            u64::MAX / 2 + 1,
+            u64::MAX - 2,
+            u64::MAX - 1,
+            u64::MAX,
+        ];
+        for window in values.windows(2) {
+            let (lower, higher) = (window[0], window[1]);
+            assert!(lower < higher, "the sample must be ascending");
+            assert_eq!(
+                lamport_sort_key(lower).cmp(&lamport_sort_key(higher)),
+                Ordering::Greater,
+                "the sort key must reverse: {lower} vs {higher}"
+            );
+        }
+        // Injective at the boundary, which the reversal alone does not imply:
+        // a saturating map is still weakly decreasing.
+        assert_ne!(lamport_sort_key(u64::MAX), lamport_sort_key(u64::MAX - 1));
+        assert_ne!(lamport_sort_key(0), lamport_sort_key(1));
+    }
+
+    #[test]
+    fn an_ordered_op_sorts_ahead_of_an_unordered_one_at_every_lamport_value() {
+        // `cmp_ops` places every ordered op before every unordered one WHATEVER
+        // the Lamport value, and the sort key has to express that.
+        //
+        // THIS IS THE TEST THAT CAUGHT THE SENTINEL BUG. An earlier draft
+        // reserved `i64::MAX` in the Lamport column for "unordered" — and
+        // `lamport_sort_key(0)` is exactly `i64::MAX`, so a Lamport-0 op
+        // interleaved with the unordered ones instead of preceding them.
+        // Lamport 0 is in this list for that reason and must stay.
+        let unordered = SortKey::of(&Arrival::unordered());
+        for lamport in [0u64, 1, u64::MAX / 2, u64::MAX - 1, u64::MAX] {
+            let ordered = SortKey::of(&Arrival::ordered(lamport, a_message_id(1)));
+            assert!(
+                ordered.ordered < unordered.ordered,
+                "lamport {lamport} must still sort ahead of an unordered op"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unordered_arrivals_message_id_is_absent_from_its_sort_key() {
+        // `cmp_ops`'s `(None, None)` Lamport arm goes STRAIGHT to the op id and
+        // never consults the message id. SQL has no short-circuit, so a sort
+        // key that carried the id would order two unordered ops by it — which
+        // is the divergence the two-implementation agreement test caught.
+        //
+        // Pinned here as well as there because this is the structural half: the
+        // agreement test says the two implementations match, and this says WHY,
+        // so a future edit that reintroduced the id would fail with a name that
+        // points at the cause.
+        let with_id = SortKey::of(&Arrival::from_parts(None, Some(a_message_id(7))));
+        let without = SortKey::of(&Arrival::unordered());
+        assert_eq!(with_id.msg_present, 0);
+        assert_eq!(with_id.msg, None);
+        assert_eq!(
+            with_id, without,
+            "two unordered arrivals must have identical sort keys, \
+             so only the op id can separate them"
+        );
+    }
+
+    #[test]
+    fn an_ordered_arrivals_message_id_is_present_in_its_sort_key() {
+        // The other direction, so the test above cannot be satisfied by a key
+        // that simply never carries a message id.
+        let with_id = SortKey::of(&Arrival::ordered(5, a_message_id(7)));
+        let without = SortKey::of(&Arrival::from_parts(Some(5), None));
+        assert_eq!(with_id.msg_present, 1);
+        assert_eq!(with_id.msg, Some(a_message_id(7).as_bytes().to_vec()));
+        assert_eq!(without.msg_present, 0);
+        // And presence sorts first, which is `cmp_tiebreak`'s rule: the column
+        // is ordered DESC, so 1 precedes 0.
+        assert!(with_id.msg_present > without.msg_present);
+    }
+
+    #[test]
+    fn an_empty_message_id_is_present_rather_than_absent_in_the_sort_key() {
+        // The empty message id is a legal value, so presence cannot be encoded
+        // as "the blob is non-empty". Collapsing them would reorder an op
+        // carrying an empty id as though the transport had supplied none.
+        let empty = SortKey::of(&Arrival::ordered(5, MessageId::new(vec![])));
+        assert_eq!(empty.msg_present, 1, "an empty message id is still present");
+        assert_eq!(empty.msg, Some(vec![]));
+    }
+
+    // ─── Nothing here panics ──────────────────────────────────────────────
+
+    #[test]
+    fn opening_a_path_that_cannot_be_a_database_is_an_error_and_not_a_panic() {
+        // PHASE0-FINDINGS §3: a panic aborts the module process. The store's
+        // path comes from the host, so a bad one must be an answer.
+        let dir = TempDir::new("bad-path");
+        // A directory where a file is expected: SQLite cannot open it, and the
+        // failure must arrive as a `Result`.
+        let as_dir = dir.file("a-directory");
+        std::fs::create_dir_all(&as_dir).unwrap();
+
+        match SqliteOpLog::open(&as_dir) {
+            Err(OpLogError::Storage(_)) => {}
+            other => panic!("opening a directory must be a storage error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_corrupt_stored_op_is_reported_rather_than_decoded() {
+        // The store worked and what it returned did not — a different fact from
+        // a disk failure, and one that points at a hand-edited file rather than
+        // at the hardware.
+        let dir = TempDir::new("corrupt");
+        let path = dir.file("log.sqlite");
+
+        let op = signed(a_post("about to be corrupted"));
+        let id = op.op.id();
+        let mut log = SqliteOpLog::open(&path).unwrap();
+        log.append(op, Arrival::unordered()).unwrap();
+        drop(log);
+
+        // Replace the stored bytes with something that is not an op. The row is
+        // otherwise intact, so this exercises the decode and not the schema.
+        let conn = Connection::open(&path).unwrap();
+        conn.execute(
+            "UPDATE ops SET op_bytes = ?1",
+            rusqlite::params![vec![0xFFu8; 8]],
+        )
+        .unwrap();
+        drop(conn);
+
+        let reopened = SqliteOpLog::open(&path).unwrap();
+        match reopened.get(&id) {
+            Err(OpLogError::CorruptEntry(_)) => {}
+            other => panic!("a corrupt op must be reported as corrupt, got {other:?}"),
+        }
+        // And the ordered read reports it too, rather than silently skipping
+        // the row — a read that dropped undecodable entries would quietly
+        // shrink a peer's history.
+        match reopened.iter() {
+            Err(OpLogError::CorruptEntry(_)) => {}
+            other => panic!("a corrupt op must not be skipped by a read, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn every_error_variant_renders_differently() {
+        // Two errors that read the same are one error with two names, and a
+        // reader cannot act on the difference. `keystore.rs` pins the same
+        // property for the same reason.
+        let rendered = [
+            OpLogError::Storage("disk".to_string()).to_string(),
+            OpLogError::UnknownLayoutVersion {
+                found: 2,
+                expected: 1,
+            }
+            .to_string(),
+            OpLogError::CorruptEntry("bytes".to_string()).to_string(),
+        ];
+        for (i, a) in rendered.iter().enumerate() {
+            for b in rendered.iter().skip(i + 1) {
+                assert_ne!(a, b, "two error variants render identically");
+            }
+        }
+    }
+}
