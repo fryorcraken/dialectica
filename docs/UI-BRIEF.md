@@ -11,13 +11,16 @@ argument between positions.
 > **Provenance.** This brief is derived from `docs/PLAN.md` and is kept in step
 > with it as changes land — it is a live document, not a snapshot. If something
 > here disagrees with PLAN.md, PLAN.md wins and this file has a bug. Last
-> reconciled against **PLAN.md §7.2-§7.3** (votes and vouching) and **§9.1**
-> (the Phase 3 API).
+> reconciled against **PLAN.md §7.2-§7.3** (votes and vouching), **§9.1**
+> (the Phase 3 API) and **§5.2.1** (what an identity is called).
 >
-> **The generated name's vocabulary is the one part still moving** — treat the
-> *shape* (adjectives plus a noun, derived from the key, never typed) as
-> settled and the specific wordlist as provisional. `git log docs/PLAN.md`
-> answers what has landed; this block does not try to.
+> **The generated name's vocabulary is settled as of §5.2.1**: four words — two
+> adjectives and two nouns — drawn from Greek philosophy and letters, derived
+> from the key and never typed. An earlier version of this block called the
+> wordlist provisional and the shape "adjectives plus a noun"; both are
+> superseded. The *word counts* remain curation work, but the shape, the sizes
+> and the source are decided. `git log docs/PLAN.md` answers what has landed;
+> this block does not try to.
 
 ---
 
@@ -64,10 +67,33 @@ registry. No rotation: an identity is permanent within its Stoa.
 no unified inbox that would correlate identities.
 
 **Identities have generated names, and this is new.** An identity renders as
-**two adjectives and a noun drawn from science-fiction literature** — something
-like *vermilion patient sandworm* — computed from the key itself. Nobody types a
-name; there is no registry to hold one and a typed name carried between Stoas
-would undo the unlinkability above with a text field.
+**two adjectives and two nouns drawn from Greek philosophy and letters** —
+something like *measured attic thales praxis* or *sober ionic stoic kairos* —
+computed from the key itself. Nobody types a name; there is no registry to hold
+one and a typed name carried between Stoas would undo the unlinkability above
+with a text field.
+
+**The register is deliberate and it is the point: sober, plain, adult.** The
+adjectives are geographic and temperamental (`attic`, `ionic`, `doric`,
+`measured`, `sober`, `patient`, `laconic`); the nouns pool the vocabulary of
+Greek thought (`logos`, `praxis`, `techne`, `aporia`, `kairos`) with thinkers
+and writers (`thales`, `hypatia`, `solon`, `sappho`). **If a name reads like a
+fantasy handle, something has gone wrong** — an earlier draft drew on science
+fiction and produced *vermilion patient sandworm*, which is why this note
+exists.
+
+**It is four words, and they all matter.** This is longer than a typical
+username and the length is not decorative: it is what makes accidental
+collisions rare (see below). **Do not truncate or elide it** — dropping the tail
+removes one of the two nouns, which is most of what distinguishes one name from
+another.
+
+**An identicon is intended alongside the name, and designing it is part of your
+work.** A small visual glyph derived from the same key, giving recognition a
+second channel. What is fixed is where it comes from — the key — so it is stable
+forever, identical on every peer, and not something anyone can choose or
+register. What it looks like is open. **What it cannot do is in obligation 6,
+and that half is not negotiable.**
 
 **At onboarding the user picks from a slate of five, and can refresh the slate
 as often as they like.** So the name is chosen and carries intent — someone who
@@ -83,9 +109,12 @@ Two consequences for you:
 
 - **An onboarding screen exists that did not before**: five identities, pick
   one, refresh for more. It is the first thing a new user sees in a Stoa.
-- **A name is not unique and not an identifier** — see obligation 6 below. In a
-  Stoa of a thousand there is a ~3% chance two people share a name; at five
-  thousand it is better than even.
+- **A name is not unique and not an identifier** — see obligation 6 below.
+  Accidental collisions are now rare: in a Stoa of a thousand the chance two
+  people share a name is **about 0.003%**, and at five thousand **about 0.07%**.
+  (An earlier three-word scheme gave 3% and better-than-even; the fourth word is
+  what bought this.) **Rare is not never**, and none of it touches deliberate
+  impersonation — which is the whole of obligation 6.
 
 ### 3. Posts are never edited in place
 
@@ -295,12 +324,14 @@ This is obligation 2b again, now applying to the thing **every post is
 attributed to**, which is a far larger surface than Stoa titles: a feed renders
 an attribution on every row.
 
-*(One thing to know about where the name comes from: the core returns the
-author as an **address**, not a name. PLAN §9.1 lists the feed's author field
-as "the author, as the per-Stoa address (§5.2) — never a name, because there
-are no names". The name is computed from that address for display, so the
-address is not something the interface must go and fetch in order to show it:
-it is the thing it was given, and the name is the derived half.)*
+*(One thing to know about where the name comes from, and an earlier version of
+this paragraph had it wrong. The core returns the author as an **address**, not
+a name — PLAN §9.1 lists the feed's author field as "the author, as the per-Stoa
+address (§5.2) — never a name, because there are no names". But the name is
+**not** derived from that address: §5.2.1 derives it from the **public key**, on
+purpose, so that a name tracks the key that signs. So a view holding only an
+address **cannot** compute the name itself, and core must return the rendered
+name alongside the address. Treat both as things you are given.)*
 
 **Uniqueness is not merely unbuilt — it is unavailable.** A uniqueness check
 needs agreement about who holds which name, and there is no authority to hold
@@ -313,10 +344,11 @@ interface must be correct when two identities present the same name.
 never cross Stoas, so the privacy property in constraint 2 is not what rules
 this out — do not reach for it here.)*
 
-And a bigger wordlist is not the lever it appears to be: it lengthens the odds
-of an *accidental* collision while costing a deliberate impersonator only a
-constant factor, because refresh is unlimited. Treat "two identities can
-present the same name" as permanent.
+And a bigger name space is not the lever it appears to be: **the space was
+enlarged roughly a thousandfold and this paragraph did not change.** It lengthens
+the odds of an *accidental* collision, which is worth doing and is all it does;
+it costs a deliberate impersonator only a constant factor, because refresh is
+unlimited. Treat "two identities can present the same name" as permanent.
 
 Two people in one Stoa can hold the same name by chance, and a name resembling
 anyone else's can be obtained **by pressing refresh** — there is no cost to
@@ -335,9 +367,46 @@ name requires agreeing which arrived second, and arrival order differs per peer:
 two people would number the same pair oppositely, each certain the other was
 looking at the impostor.
 
-*(A visual identicon derived from the same key is an interesting second
-recognition channel and is entirely undesigned — but it is not a substitute for
-the address. A second forgeable channel is still forgeable.)*
+**Four things help a reader tell two people apart, and only one of them settles
+anything.** They are listed in this order on purpose. Read flatly as a list of
+four mitigations they would suggest the problem is handled; it is not, because
+**three of them are recognition aids and the fourth is the only guarantee.**
+
+**1. The name space.** Makes an accidental collision rare — see constraint 2 for
+the numbers. Does nothing else, and nothing at all about impersonation.
+
+**2. The identicon** — intended, and yours to design. A glyph derived from the
+same key, shown with the name. It earns its place on *accidental* collisions:
+two people who happen to share a name still look different at a glance. **It is
+forgeable in exactly the way the name is.** An attacker grinds for a key whose
+name *and* glyph both read close — a two-channel search instead of a one-channel
+search, which raises their cost by a factor and changes nothing about the kind
+of protection on offer. **A second forgeable channel is still forgeable**, and
+the identicon must never be rendered as a verification mark, a badge, or
+anything that reads as "checked".
+
+**3. Vouching** (see the vote control section). The one layer an attacker cannot
+mint, because **a vouch points at a key** — not at a name, not at a picture. A
+lookalike gets the name, gets a near-matching glyph, and does *not* get the
+vouch. That is a real distinction. Two limits, and both must stay visible in
+whatever you build:
+
+- It is **private and never published**, so it only protects a reader against an
+  impersonation of someone **that reader has already vouched for**. It does
+  nothing when a reader is meeting either party for the first time — which is
+  most impersonation.
+- Weight **accrues from upvotes the reader has already cast**, so a new user's
+  vouched set is **empty**. New users have no vouches and are the least able to
+  spot an impostor: the layer is thinnest exactly where exposure is highest.
+
+**4. The address.** The only unforgeable one, and the only thing that settles
+who published something. Its single weakness is not cryptographic — **it works
+only if someone looks.** That is the entire reason this obligation demands it be
+present rather than one click away.
+
+**The sentence to design against: layers 1–3 make an honest mistake less likely;
+only layer 4 makes a dishonest claim false.** A row showing a name and a glyph
+and no address has given the reader three recognition aids and zero guarantees.
 
 ---
 

@@ -826,9 +826,11 @@ Stoa's posts to that one pseudonym and no further.
 
 ### 5.2.1 What an identity is called
 
-**A display name is generated from the identity's public key, never typed.** Two
-adjectives and a noun, drawn from science-fiction literature — *vermilion
-patient sandworm*, not `user_8f3a` and not a handle someone registered.
+**A display name is generated from the identity's public key, never typed.**
+Words drawn from Greek philosophy and letters — *measured attic stoic*, *sober
+ionic thales* — not `user_8f3a` and not a handle someone registered. The shape
+is settled below and is **four words**, for reasons that are arithmetic rather
+than aesthetic.
 
 **But a user is not handed one.** At onboarding they are shown a slate of five
 generated identities and pick one, and they may refresh the slate as many times
@@ -919,79 +921,180 @@ Four properties this has to have, each of which decides something:
   already keeps author and Stoa addresses in separate domains so no byte string
   is both. The name domain joins that set for the same reason.
 - **Index extraction is from distinct hash bytes per slot**, so that the two
-  adjectives and the noun are independent draws rather than three views of the
-  same bits.
+  adjectives and the two nouns are independent draws rather than four views of
+  the same bits.
 
-#### The ten universes, and why these
+#### One source: Greek philosophy and letters
 
-The owner named Dune, Asimov and Altered Carbon and asked for roughly the top
-ten SF book universes. The selection is a taste call, but it has three real
-constraints, and the constraints do most of the work:
+**An earlier draft of this section drew on ten science-fiction book universes.**
+That is withdrawn entirely — no SF vocabulary survives, and neither do the
+mythological creatures a middle draft added. The register was the reason: the
+owner asked for something more serious, and *vermilion patient sandworm* is a
+fantasy handle where *measured attic stoic* is a name an adult will accept
+being called in an argument. **If a generated name sounds like a gamertag, it
+is wrong.**
 
-- **Literary, not screen.** A book universe has a vocabulary someone wrote down;
-  a screen franchise has a vocabulary someone trademarked and merchandised.
-  This matters practically (below) and tonally — the forum is named in Greek
-  after a method of argument.
+Two constraints survive the change intact, and one is retired by it:
+
 - **The words must survive being torn out of context.** A wordlist entry is read
-  by people who have not read the book. `sandworm`, `ansible` and `sprawl` are
-  evocative alone; a character's surname is noise, and a proper noun invites the
-  trademark question with no compensating benefit.
-- **No single universe may dominate.** A name drawn from one universe reads as
-  an allegiance the user did not declare. Spreading the draw across ten makes
-  the source invisible, which is the intent — the flavour should be *science
-  fiction*, not *Dune*.
+  by people who have not read Diogenes Laertius. `attic`, `stoic`, `praxis` and
+  `thales` work alone; a minor scholiast's name is noise. This constraint did
+  most of the work in the SF selection and does more here, because the Greek
+  corpus has a far longer tail of obscurity available to be wrong about.
+- **A name may describe a texture, never a verdict.** Derived in the earlier
+  draft as the rule behind the tone exclusions, and now the load-bearing test
+  for the whole list. `attic` is a texture; `plato` is a verdict.
+- **~~No single source may dominate.~~ Retired.** It existed because a name
+  drawn from one universe reads as an allegiance the user did not declare. With
+  one source there is nothing to balance, and the flavour is *Greek thought*
+  on purpose rather than by accident.
 
-| Universe | Author | What it supplies |
+**Public domain by two and a half thousand years**, which retires the trademark
+paragraph the SF list needed: there is no estate, no mark, and no proprietor.
+The material is also, unlike a novel's coinages, already half-naturalised into
+English — `stoic`, `attic`, `praxis`, `ethos` are English words with Greek
+parents, which is exactly why they survive decontextualisation.
+
+**The nouns pool two kinds of word**, which is the owner's decision taken for
+the size of the resulting list:
+
+| Kind | What it supplies | Examples |
 |---|---|---|
-| Dune | Herbert | ecology, desert, feudal-ritual vocabulary |
-| the Foundation and Robot novels | Asimov | psychohistory, positronics, imperial scale |
-| Altered Carbon | Morgan | embodiment, sleeves, noir-industrial texture |
-| the Culture | Banks | ships, Minds, post-scarcity irony |
-| Hyperion | Simmons | pilgrimage, time-debt, baroque strangeness |
-| Neuromancer and the Sprawl | Gibson | ice, decks, the original cyberspace lexicon |
-| the Xenogenesis / Patternist books | Butler | symbiosis, ooloi, biology as politics |
-| the Hainish cycle | Le Guin | ansible, ambiguity, anthropological register |
-| Blindsight and Rifters | Watts | vampires-as-predators, deep-sea, hard bleakness |
-| Revelation Space | Reynolds | lighthuggers, plague, deep-time engineering |
+| the vocabulary of Greek thought | abstractions that have naturalised into English | `logos`, `ethos`, `kairos`, `praxis`, `techne`, `aporia`, `kanon`, `stasis`, `arete`, `episteme` |
+| thinkers, writers and makers | proper names with register | `thales`, `hypatia`, `solon`, `sappho`, `theophrastos`, `eratosthenes`, `kleanthes`, `pyrrhon` |
 
-**What was considered and left out, because the exclusions are the argument.**
-Star Wars, Star Trek, Warhammer 40,000 and the Marvel/DC properties are screen-
-or game-first and aggressively trademarked; a generated name is a *product
-surface*, and `imperial stormtrooper` in a shipped app is a conversation nobody
-wants. Tolkien is fantasy rather than SF and is the single most litigated estate
-in the genre. Lovecraft is public domain and tempting for exactly that reason,
-and is excluded on the author's politics being a live and legitimate objection
-for a forum that will have to defend its word list to its own users.
+**A small number of names are excluded because they read as an argument rather
+than a name** — Plato, Aristotle and Socrates above all, whose mere invocation
+is a move in a debate, so a user rendered *sober ionic plato* is handed standing
+they did not earn. The exclusion is deliberately short: a handful of the most
+invoked figures, and everything arguable is kept, because the pooled list was
+chosen for its size and a cautious sweep would undo that.
 
-**The trademark position, stated honestly rather than confidently.** Individual
-common words — `sandworm`, `ansible`, `lighthugger` — are not what trademark
-protects; marks attach to names used in commerce, and `Dune` is a mark while
-`sandworm` is a noun. Coined proper nouns are the risk (`Bene Gesserit`,
-`Shrike`, `Ubik`), and the wordlist must contain none of them. **This is a
-design constraint and not a legal opinion**, and if the project ever wants one,
-this paragraph is the thing to hand a lawyer rather than a defence to rely on.
+**The adjectives carry the register, and this is where the effort went.** A
+proper name and an abstract noun read very differently attached to a person —
+*sober ionic thales* against *sober ionic praxis* — and the list that reconciles
+them is the adjective list. It is therefore uniformly in **one voice, at once
+geographic and temperamental**:
 
-#### The arithmetic, and what it does not buy
-
-With N adjectives and M nouns and an ordered adjective pair drawn with
-replacement, the space is `N²M`. For N = M = 256 that is exactly 2²⁴, about
-16.8 million. Birthday collision probability for k identities in one Stoa is
-approximately `1 − exp(−k(k−1)/2S)`:
-
-| Identities in one Stoa | P(some pair collides), S = 2²⁴ |
+| Kind | Examples |
 |---|---|
-| 100 | 0.03% |
-| 1,000 | 2.9% |
-| 2,000 | 11% |
-| 5,000 | 53% |
+| geographic | `attic`, `ionic`, `doric`, `aeolic`, `delian`, `samian`, `arcadian`, `laconic`, `rhodian`, `theban` |
+| temperamental | `measured`, `sober`, `plain`, `patient`, `quiet`, `steady`, `temperate`, `candid`, `spare`, `lucid` |
+| dispositional (the schools) | `stoic`, `skeptic`, `eclectic`, `peripatetic`, `aporetic`, `zetetic`, `gnomic`, `ascetic` |
 
-Doubling both lists to 512 gives 2²⁷ and moves 5,000 participants from 53% to
-about 9%. That is a real improvement and it is **not the reason to choose a
-size**, because of the next subsection.
+A geographic adjective attached to a person reads as origin, which is a texture
+and never a claim; a temperamental one reads as manner, likewise. Both land the
+same way in front of either kind of noun, which is what makes the pooled noun
+list work at all.
 
-**So: collisions are expected, not exceptional.** A Stoa of a few thousand will
-have one. The interface consequence is therefore not "handle the rare case" but
-a standing rule:
+#### Transliteration: one convention, applied throughout
+
+A list assembled from three sources reads as assembled from three sources, so
+the convention is fixed and uniform:
+
+- **kappa → `k`, never `c`** — `kanon`, `kosmos`, `techne`, `kleanthes`, not
+  `canon`, `cosmos`, `Cleanthes`.
+- **`-os` retained, never Latinised to `-us`** — `theophrastos`, `pyrrhon`,
+  `chrysippos`, not `Theophrastus`, `Pyrrho`, `Chrysippus`.
+- **upsilon → `y`** — `physis`, `mythos`, `hyle`.
+- **chi → `ch`** — `techne`, `psyche`, `arche`. (`kh` is more faithful and reads
+  as alien; the constraint that a word survive decontextualisation wins.)
+- **No diacritics, no Greek script** — see the ASCII rule below, which is a bidi
+  decision rather than a typographic preference.
+
+**The one exception, stated so it does not look like drift:** where English has
+fully settled a form, the settled form wins — `thales`, `solon`, `sappho`,
+`hypatia`, not a stricter transliteration nobody would recognise. The convention
+serves recognisability; it does not outrank it.
+
+#### The arithmetic, and why the name is four words
+
+**The list sizes were derived from what the sources honestly yield, and the word
+count then followed from the arithmetic.** That order matters: the alternative —
+picking a target space and padding the lists to reach it — produces names that
+read as filler, which costs the register this whole revision exists to buy.
+
+**What the sources honestly yield:**
+
+- **Adjectives: 256.** The single-voice constraint is a real limit. Geographic
+  adjectives of the Greek world give roughly 70 usable; the schools and
+  dispositions give roughly 55 after the tone exclusions; plain English
+  temperament words in the sober register give roughly 90. That is about 215,
+  and reaching 256 is honest work. **512 is not reachable in one voice** — the
+  last two hundred would be either obscure demes or four near-synonyms for
+  *calm*, and a list padded with `placid`/`serene`/`tranquil`/`unruffled` is
+  exactly the filler that loses the register.
+- **Nouns: 512.** The pooled list is deep: roughly 250 terms from the vocabulary
+  of Greek thought, and roughly 250 thinkers, writers and makers once the
+  handful of argument-move names come out. **1,024 is not reachable** without
+  scraping every minor figure in Diogenes Laertius and every technical entry in
+  Liddell–Scott, which reintroduces the "an obscure surname is noise" failure
+  the second constraint forbids.
+
+**So the honest sizes are 256 and 512, and at three words that is not enough.**
+With two adjectives and one noun the space is `256 × 256 × 512` = 2²⁵ =
+**33,554,432**, and birthday collision probability for k identities in one Stoa,
+`1 − exp(−k(k−1)/2S)`, gives:
+
+| Identities in one Stoa | three words, S = 2²⁵ |
+|---|---|
+| 100 | 0.015% |
+| 1,000 | 1.5% |
+| 5,000 | **31%** |
+| 10,000 | **77%** |
+
+By hand at k = 5,000: `k(k−1)/2 = 12,497,500`, and `12,497,500 / 33,554,432 =
+0.37245`, so `1 − e^-0.37245 = 1 − 0.68902 = 0.311`.
+
+**31% fails the bar**, and it is worth being blunt that this is *worse* than the
+16.8-million space it replaces on every count except register — because the
+Greek-only sources are smaller than ten SF universes pooled, and honest sizes
+are smaller still than the ones a previous draft assumed.
+
+**Therefore the name is four words: two adjectives and two nouns.**
+
+```
+S = 256 × 256 × 512 × 512 = 2³⁴ = 17,179,869,184
+```
+
+| Identities in one Stoa | **four words, S = 2³⁴** |
+|---|---|
+| 100 | 0.00003% |
+| 1,000 | 0.003% |
+| 5,000 | **0.073%** |
+| 10,000 | **0.29%** |
+
+By hand at k = 5,000: `12,497,500 / 17,179,869,184 = 0.00072745`, and for x this
+small `1 − e^-x ≈ x`, so **0.073%**. At k = 10,000: `49,995,000 /
+17,179,869,184 = 0.0029101`, giving `1 − e^-0.0029101 = 0.002906`, so **0.29%**.
+
+**This reverses the recommendation an earlier draft of this section made**, and
+the reversal should be visible rather than quietly corrected. That draft argued
+for three words against a fourth, on the grounds that a name renders on every
+feed row and recognition degrades with length before information content does.
+**That argument is still true and it now loses**, because its premise changed:
+it was made against lists of 512 and 1,024 that a blended SF-and-Greek corpus
+could sustain, and the Greek-only sources do not sustain them. Given a choice
+between a fourth word and a padded list, **the fourth word is the lesser cost**
+— length is a fixed, honest price, where padding degrades every name drawn from
+the padded region and cannot be undone without a scheme version bump.
+
+Two things make the fourth word cheaper here than it would have been:
+
+- **The second noun is a noun, not a third adjective.** *measured attic thales
+  praxis* has two content words a reader can latch onto rather than a longer
+  run of modifiers, and the pooled noun list is the one with the range to
+  support two draws.
+- **The register absorbs length better than the old one did.** Four Greek words
+  read as a name in the classical manner; four SF words read as a string of
+  adjectives. This is a genuine difference and not a rationalisation, but it is
+  a taste claim and is marked as one.
+
+**So: collisions are now rare rather than expected — and the interface rule does
+not change.** A Stoa of five thousand has under a one-in-a-thousand chance of
+containing a pair. That is a different world from 53%, and it changes nothing
+about what the interface must do, because the rule was never a response to the
+rate:
 
 > **A name is never presented as unique, and never used as an identifier.** The
 > address is the identity. This is the same rule §4.8 and §5.7 already state for
@@ -1001,15 +1104,17 @@ a standing rule:
 What the interface does on collision is therefore nothing special: it
 disambiguates the same way it always should, by showing the address alongside
 the name where it matters. **What it must not do is renumber.** Appending `#2`
-to the second `vermilion patient sandworm` requires agreeing which one was
+to the second `measured attic thales praxis` requires agreeing which one was
 second, which is arrival order — a per-peer fact (§3.3), so two peers would
 number them oppositely and each would be sure the other was the impostor.
 
 **A second collision question the slate introduces: two identical names in one
-picker.** Five draws from 2²⁴ collide with probability about `5·4/2S` — roughly
-one slate in 1.7 million. A user will never see it; a shipped product across
-enough onboardings eventually will, and it reads as broken rather than as
-unlikely.
+picker.** Five draws from 2³⁴ collide with probability about `5·4/2S` = `10/S` —
+roughly one slate in 1.7 billion, against one in 1.7 million at 2²⁴. A user will
+never see it, and at this size arguably no deployment ever will. **The picker
+still discards and redraws a duplicate**, because the handling is three lines
+and the alternative is a display that reads as broken in the one case it
+appears.
 
 This one *is* worth handling, and it is cheap precisely because it is local:
 the slate is generated on one peer, at one moment, with nothing published. So
@@ -1038,10 +1143,16 @@ resembling a moderator's. **Refreshable onboarding is that attack, shipped as a
 feature.**
 
 This is worth stating as plainly as possible because it inverts the usual
-framing. An earlier draft of this section argued that grinding was cheap —
-about S derivations to hit one specific name, 16.8 million at 2²⁴, seconds on
-one core — and concluded that enlarging the wordlist could not fix it. Both
-halves are still true and both are now *beside the point*: **with unlimited
+framing. An earlier draft of this section argued that grinding was cheap — about
+S derivations to hit one specific name, seconds on one core — and concluded that
+enlarging the wordlist could not fix it. **The move to 2³⁴ is the interesting
+test of that claim, and it does not overturn it**: 17 billion derivations is
+minutes rather than seconds on one core, and trivially parallel, so the cost
+went from negligible to slightly less negligible. An attacker hunting one
+specific name now waits; an attacker hunting *any* name close enough to mislead
+a reader — which is the actual attack — searches a far smaller target set and
+waits no longer than before. Both halves stand, and both are *beside the point*:
+**with unlimited
 regeneration the attacker does not need a script.** They press refresh. The
 difference between a user refreshing for a name they like and an attacker
 refreshing for a name that impersonates a moderator is **intent, not mechanism**,
@@ -1076,12 +1187,77 @@ confirmation, and belongs on §11.1's list:**
 > into apparent authority — the address must be present and not one click away.
 > A name is never unique and never an identifier.
 
-Enlarging the wordlist remains the wrong instinct, and the reason survives the
-reframing: a list big enough to resist search — say 2⁶⁴ — is a list nobody
-curated, which forfeits every property in "what was left out" above. It would be
-scraped and it would ship slurs. **Curation and search-resistance are in direct
+**Enlarging the space is the wrong instinct *for this problem*, and the move to
+2³⁴ is not a counter-example.** The space grew because the honest lists were too
+small for three words to hold an acceptable *accidental* collision rate, and for
+no other reason. Against grinding it bought minutes. A space big enough to
+resist search — say 2⁶⁴ — is a space nobody curated, which forfeits every
+property the source constraints above exist to protect: it would be scraped, and
+it would ship slurs and verdicts. **Curation and search-resistance are in direct
 opposition, and curation wins**, because search-resistance was never achievable
-by this route and is now not even the relevant axis.
+by this route and is not the relevant axis. The two motives are easy to conflate
+and must not be: **the space grew to help honest users tell each other apart,
+not to make anyone harder to imitate.**
+
+#### Four layers, and only one of them settles anything
+
+Three further recognition aids exist or are intended, and listing them flatly
+would invite exactly the wrong conclusion — that between them the problem is
+handled. It is not. **Three of the four are recognition aids and the fourth is
+the only guarantee**, and they are set out in that order so the asymmetry is
+visible rather than averaged away.
+
+**1. The name space, at 2³⁴.** Reduces *accidental* collisions, and nothing
+else. Covered in full above.
+
+**2. An identicon derived from the same key — intended, and undesigned here.**
+A visual glyph computed from the public key alongside the name, so that two
+identities sharing a name still look different at a glance. The property it must
+have is the one the name already has: **derived from the key, hence
+deterministic, unregistrable and identical on every peer.** It earns its place
+on *accidental* collisions — a reader comparing two rows sees two different
+pictures without reading a word.
+
+**It is forgeable in exactly the way the name is, and this must not be softened
+into a security property.** An attacker grinds for a key whose name *and* glyph
+both read close; that is a two-channel search rather than a one-channel search,
+which raises the cost by a factor and changes the kind of protection not at all.
+**A second forgeable channel is still forgeable.** The visual design is
+deliberately not attempted here — what is settled is that it is wanted and what
+it must be derived from.
+
+**3. Vouching (§7.3) — the only layer an attacker cannot mint, and the most
+limited.** A vouch, declared or earned, points at **a key**, not at a name and
+not at a picture. So a lookalike gets the name, gets a near-matching glyph, and
+does **not** get the vouch — the reader's own prior judgement does not transfer
+to the impostor, because it was never attached to anything the impostor could
+copy. That is the only distinction on this list that does not reduce to "look
+more carefully".
+
+Two limits, both structural in §7.3 as it stands, and both must be stated or
+this reads as a solution:
+
+- **It is private and never published**, which is §7.3's core privacy property.
+  So it protects a reader from being fooled by an impersonation of *someone that
+  reader has already vouched for*. It does nothing for a reader meeting either
+  party for the first time — which is most impersonation, and in a
+  permissionless forum the common case.
+- **Earned weight accrues from upvotes the reader has already cast** (§7.3), so
+  a reader's vouched set is **empty at onboarding** and stays thin until they
+  have read for a while. New users have no vouches and are simultaneously the
+  least equipped to spot an impostor. The layer is weakest exactly where the
+  exposure is highest.
+
+**4. The address — the only thing that settles identity.** Unforgeable,
+unmintable, and what every signature actually binds to. Its one weakness is not
+cryptographic: **it settles the question only if someone looks.** That is
+precisely why §11.1 requires it to be *present* rather than one click away
+wherever recognition carries weight, and above all wherever a moderator is
+named.
+
+The shape to carry away: **layers 1–3 make an honest mistake less likely; only
+layer 4 makes a dishonest claim false.** An interface that shows a name and a
+glyph and no address has shipped three recognition aids and zero guarantees.
 
 Two mitigations available and deliberately not taken, recorded so nobody
 re-proposes them as fixes. **Deriving the name from the key and the Stoa address
@@ -1096,17 +1272,36 @@ touches the control being limited.
 
 - **Combinations, not just words.** Two individually innocuous adjectives can
   compose into a slur or an insult aimed at a real group. Vetting single words
-  is insufficient; the generated *pair* is what ships. With 256² ordered
-  adjective pairs this is not exhaustively reviewable by hand, so the practical
+  is insufficient; the generated *combination* is what ships. **The fourth word
+  makes this materially harder**, and that is the one real cost of the shape
+  chosen above: 256² ordered adjective pairs was already past hand review, and
+  the noun pair adds 512² more, with the adjective–noun and noun–noun junctions
+  on top. A pooled noun list of thinkers and abstractions is also more exposed
+  than a list of one kind, because a proper name beside an abstract noun can
+  compose into a reading neither word carries alone. So the practical
   requirement is a denylist applied at generation — a derived name landing on a
   refused combination is re-derived from the next hash bytes, deterministically,
-  so every peer skips identically.
-- **The list is versioned and effectively frozen.** Removing a word after
-  release changes the name of every identity that had it, on peers that update
-  and not on peers that do not. That is the two-peers-disagree failure this
-  whole scheme exists to avoid. So a word removal is a **scheme version bump**,
-  handled like any other versioned change, and the denylist above is why the
-  first version should be conservative.
+  so every peer skips identically — and the denylist matters more at four words
+  than it did at three.
+- **The lists are versioned and effectively frozen, and a word removal is a
+  scheme version bump.** This is the most operationally important line in the
+  section, so it is worth spelling out the mechanism rather than asserting the
+  rule. `name = words(H(NAME_PREFIX || public_key))` maps hash bytes to list
+  indices, so removing one word **reindexes the list** and every identity whose
+  name drew on an index at or after the removed one now renders differently.
+  That happens **on peers that have updated and not on peers that have not** —
+  so the same key renders as two different people depending on who is looking,
+  which is the two-peers-disagree failure this whole scheme exists to avoid, and
+  which users report as impersonation.
+
+  So `NAME_PREFIX` is versioned, and **any change to the lists — a removal, an
+  addition, a reordering, a size change, or a change to the number of words —
+  mints a new version rather than editing the current one.** The version bump is
+  what stops the disagreement: it makes the old and new schemes distinct
+  derivations rather than two peers' answers to one question. It is also why the
+  *first* version must be conservative: shipping a word that has to come out
+  later is not a patch, it is a migration in which everybody's name changes at
+  once.
 - **ASCII-only, and this is a bidi decision rather than a parochial one.** These
   are display strings composed by us from a fixed list, so unlike post bodies
   they are the one piece of rendered text the project fully controls. Keeping
@@ -1137,6 +1332,15 @@ says, which is that section's general shape:
 - **Never present a name as changeable.** It is a function of a permanent key
   (§5.3). Copy that says "pick your username" promises a settings screen that
   cannot exist.
+- **Never present the recognition layers as adding up to a defence.** An
+  identicon and a vouch are recognition aids; the address is the only thing that
+  settles who published something. A screen that shows name and glyph and calls
+  the pair "verified" has said something false.
+- **A four-word name needs room, and must not be truncated to fit.** It is
+  longer than the three-word form earlier drafts assumed, and a layout that
+  elides the tail has removed one of the two nouns — which is most of the
+  distinguishing content, since the adjectives are drawn from the smaller list.
+  If a row cannot hold the name, the row is wrong.
 
 #### What is not decided here
 
@@ -1146,17 +1350,19 @@ says, which is that section's general shape:
   content is the correlation §5.2 protects, and building it makes that
   correlation one screenshot away. Not decided; it is a real convenience against
   a real hazard, and it wants the owner's judgement rather than a default.
-- **Exact list sizes and the lists themselves.** 256/256 is the working
-  assumption because it makes the arithmetic above legible and the curation
-  achievable; nothing above depends on it, and the grinding argument is
-  indifferent to it.
-- **Whether a name is accompanied by a visual identicon derived from the same
-  key.** It would give recognition a second channel, and the grinding
-  reframing above makes it *more* interesting rather than less: a near-match in
-  an image is harder to reach by refreshing than a near-match in three words,
-  because a reader compares images whole rather than reading them token by
-  token. Genuinely promising, entirely undesigned, and **not a substitute for
-  showing the address** — a second forgeable channel is still forgeable.
+- **The list contents.** The *sizes* are decided — 256 adjectives and 512 nouns,
+  and the four-word shape follows from them — and so are the source, the
+  transliteration convention and the exclusion rules. What is not written is the
+  768 words themselves, which is curation work rather than design work. **The
+  sizes are load-bearing in a way the earlier draft's were not**: they were
+  derived from what the sources honestly yield, and the word count was chosen to
+  fit them, so a later decision to "just add more adjectives" changes the
+  arithmetic that justified four words and needs a version bump either way.
+- **The identicon's visual design** — but not whether there is one. It is
+  **intended** (see "Four layers" above), and what is settled is the property it
+  must have: derived from the same public key, hence deterministic, stable and
+  unregistrable. What it looks like is the owner's half of the work. Recorded
+  here as design not yet done, rather than as a decision not yet taken.
 - **How many refreshes is too many to be honest about.** If a user refreshes
   two hundred times, the interface has watched someone hunt for a specific name
   and has no idea whether they are picking a favourite or building an
