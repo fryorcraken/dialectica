@@ -17,6 +17,7 @@
 mod cursor;
 
 pub mod identity;
+pub mod op;
 pub mod stoa;
 pub mod wire;
 
