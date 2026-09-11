@@ -747,6 +747,41 @@ mod tests {
     }
 
     #[test]
+    fn a_creator_key_that_can_never_verify_is_refused_distinguishably() {
+        // The spec's scenario "A creator key that can never verify a signature
+        // is refused" was asserted by NOTHING at this boundary until now, and
+        // the gap was found by writing the identity spec rather than by any
+        // gate. Measured: with the `is_weak()` check disabled in
+        // `PublicKey::from_bytes`, every test in this file stayed green —
+        // including `an_invalid_creator_key_is_refused`, which uses `[0x02; 32]`
+        // and therefore only ever exercises the OTHER refusal.
+        //
+        // That is the fixture trap this project keeps paying for: the existing
+        // test exercises the creator-key path where one of the two rules is
+        // silent, so it cannot tell the two apart. This one makes them disagree
+        // — the key here is well-formed (it decompresses; that is precisely
+        // what makes it dangerous) and is refused for the other reason.
+        //
+        // Why it matters one layer up, from `identity.rs`'s own argument: a
+        // record naming a low-order creator decodes, hashes to a stable address
+        // and self-authenticates, producing a forum whose sole moderator (§6)
+        // can never authorise anything — indistinguishable from a legitimate
+        // one by any later check.
+        let mut bytes = a_record().canonical_bytes().unwrap();
+        // All-zeros: the low-order point an attacker would reach for, and the
+        // case the genesis record makes dangerous.
+        for b in bytes.iter_mut().skip(1).take(32) {
+            *b = 0x00;
+        }
+        assert_eq!(
+            Genesis::decode(&bytes),
+            Err(GenesisError::InvalidCreator(KeyError::WeakPublicKey)),
+            "a creator key that can never verify must be refused, and \
+             distinguishably from a malformed one"
+        );
+    }
+
+    #[test]
     fn an_invalid_title_encoding_is_refused() {
         let g = a_record();
         let mut bytes = g.canonical_bytes().unwrap();
