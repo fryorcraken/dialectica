@@ -129,20 +129,32 @@ use crate::op::{OpId, OpKind};
 ///
 /// The two are the same entry when a post has no valid revision, which is the
 /// ordinary case for most posts and is not a special outcome.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CurrentVersion<'a> {
+///
+/// # Owned, because a log that persists cannot lend
+///
+/// This carried `&'a Entry` borrowed from the log until [`OpLog`]'s reads became
+/// owned. The borrow could not survive that and the reason is structural rather
+/// than stylistic: a database cannot lend a reference to a row it has not
+/// materialised, so `iter_target` returns `Vec<Entry>` and there is no longer a
+/// log-owned entry to point at. See [`OpLog`]'s documentation.
+///
+/// The cost is two `Entry` clones per resolution, and they are the same two
+/// values the borrowed form named. `Copy` is gone with the references, so this
+/// is `Clone` only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CurrentVersion {
     /// The post as first published. Always an [`OpKind::Post`].
-    pub original: &'a Entry,
+    pub original: Entry,
     /// The version to render: the valid revision the ordering rule places
     /// first, or `original` itself when there is none.
     ///
     /// "First" is not "newest" — see this module's documentation. Under the
     /// order production actually runs today it is a convergent arbitrary choice
     /// rather than a temporal one.
-    pub current: &'a Entry,
+    pub current: Entry,
 }
 
-impl CurrentVersion<'_> {
+impl CurrentVersion {
     /// The body a reader should render.
     ///
     /// Written once here rather than at each call site, because pulling the body
@@ -223,7 +235,7 @@ impl CurrentVersion<'_> {
 /// supplies the second; the two checks here supply the rest, in that order —
 /// see this module's documentation for why verifying first is load-bearing
 /// rather than tidy.
-pub fn current_version<'a, L: OpLog>(log: &'a L, post: &OpId) -> Option<CurrentVersion<'a>> {
+pub fn current_version<L: OpLog>(log: &L, post: &OpId) -> Option<CurrentVersion> {
     let original = log.get(post)?;
 
     // Only a post has versions. A `Revise`, a `Vote` or a `Moderate` reaching
@@ -245,8 +257,12 @@ pub fn current_version<'a, L: OpLog>(log: &'a L, post: &OpId) -> Option<CurrentV
         // timestamp only on the transport-ordered branch, which production never
         // reaches today; the degraded branch is ascending op id and carries no
         // recency. See this module's documentation.
-        .find(|entry| is_valid_revision(entry, original))
-        .unwrap_or(original);
+        .find(|entry| is_valid_revision(entry, &original))
+        // `clone` rather than a move: `original` is still needed for the struct
+        // below, and the branch that takes it is the ordinary case (most posts
+        // have no revision). The borrowed form got this for free; the owned one
+        // pays one clone on the no-revision path.
+        .unwrap_or_else(|| original.clone());
 
     Some(CurrentVersion { original, current })
 }

@@ -141,9 +141,11 @@ pub enum Appended {
     AlreadyPresent,
 }
 
+/// What went wrong reaching the store — never what the store held.
+///
 /// What a peer stores, and what a reader may ask of it.
 ///
-/// # Why this is a trait with one implementation today
+/// # Why this is a trait, and what is about to implement it
 ///
 /// PLAN.md §9 Phase 1 names it: "pure Rust behind `Transport` and `Store`
 /// traits, tested against fakes with no node running". §3.3 names SQLite as the
@@ -152,11 +154,29 @@ pub enum Appended {
 /// specified in the plan, and the revision and moderation resolvers are both
 /// written against this contract.
 ///
-/// Note §9 lists "the op log and its SQLite projection" as Phase 1 work, so the
-/// in-memory-only implementation is half of a Phase 1 item deliberately
-/// deferred, not something the plan scheduled later.
+/// # Reads return OWNED entries, and the reason is structural
 ///
-/// The argument and what would reverse it are in the change's `design.md`.
+/// These returned `Vec<&Entry>` and `Option<&Entry>` until the SQLite
+/// implementation was written, and the change is not a preference.
+///
+/// **A database cannot lend a reference to a row it has not materialised.**
+/// [`MemoryOpLog`] owns its entries and so can lend them; a store holding rows
+/// in a file would have to point the borrow into a cache built for the call —
+/// which means the cache outlives the call, which means it lives in the struct,
+/// which means a read needs `&mut self`, and the next read invalidates the last
+/// one's references. Every route ends somewhere worse than owning.
+///
+/// `Cow<'_, [Entry]>` and `impl Iterator<Item = Entry>` were both evaluated and
+/// both lose — a `Cow` would be `Owned` in every implementation, since
+/// [`MemoryOpLog`] sorts on read and so constructs a `Vec` either way, and an
+/// iterator is not object-safe and holds a borrow across the caller's fold. The
+/// `sqlite-projection` change's `design.md` has the table.
+///
+/// The cost is a clone per entry per read in [`MemoryOpLog`]. §3.3 puts the
+/// query traffic on the materialised view — the log is read to *rebuild* that
+/// view, not to render a frame — and the read already allocated a `Vec` and
+/// sorted it, so this is a constant factor on an operation that was O(n)
+/// allocating already.
 ///
 /// # Every method is defined over a partial set
 ///
@@ -187,7 +207,7 @@ pub trait OpLog {
     ///
     /// Absence is a defined answer, not an error: the op may simply not have
     /// reached this peer yet.
-    fn get(&self, id: &OpId) -> Option<&Entry>;
+    fn get(&self, id: &OpId) -> Option<Entry>;
 
     /// Every op, in [`cmp_ops`] order.
     ///
@@ -195,14 +215,14 @@ pub trait OpLog {
     /// fold over exactly this sequence, so there is no separate `replay()` verb
     /// — it would be a second name for one job, and CLAUDE.md asks for one
     /// function, one job.
-    fn iter(&self) -> Vec<&Entry>;
+    fn iter(&self) -> Vec<Entry>;
 
     /// Every op in one Stoa, in [`cmp_ops`] order.
     ///
     /// The Stoa address, never a channel id (§4.5): "never let channel identity
     /// leak into payloads or storage keys", so that per-thread channels later
     /// become a routing change rather than a migration.
-    fn iter_stoa(&self, stoa: &Address) -> Vec<&Entry>;
+    fn iter_stoa(&self, stoa: &Address) -> Vec<Entry>;
 
     /// Every op naming `target` — **an op** — in [`cmp_ops`] order.
     ///
@@ -237,7 +257,7 @@ pub trait OpLog {
     ///
     /// An op is never its own target: this returns the ops acting *on* `target`,
     /// not `target` itself.
-    fn iter_target(&self, target: &OpId) -> Vec<&Entry>;
+    fn iter_target(&self, target: &OpId) -> Vec<Entry>;
 
     /// How many distinct ops the log holds.
     fn len(&self) -> usize;
@@ -297,8 +317,8 @@ impl MemoryOpLog {
     /// Written once so the three public reads cannot disagree about what "in
     /// order" means. A second call site spelling its own `sort_by` is how one of
     /// them eventually spells it differently.
-    fn sorted(&self, keep: impl Fn(&Entry) -> bool) -> Vec<&Entry> {
-        let mut out: Vec<&Entry> = self.entries.values().filter(|e| keep(e)).collect();
+    fn sorted(&self, keep: impl Fn(&Entry) -> bool) -> Vec<Entry> {
+        let mut out: Vec<Entry> = self.entries.values().filter(|e| keep(e)).cloned().collect();
         // `sort_by` and not `sort_unstable_by`: both are correct here only
         // because `cmp_ops` is total over distinct ops, and `sort_by`'s
         // stability makes that a property this code does not depend on. Ops in
@@ -331,19 +351,19 @@ impl OpLog for MemoryOpLog {
         }
     }
 
-    fn get(&self, id: &OpId) -> Option<&Entry> {
-        self.entries.get(id)
+    fn get(&self, id: &OpId) -> Option<Entry> {
+        self.entries.get(id).cloned()
     }
 
-    fn iter(&self) -> Vec<&Entry> {
+    fn iter(&self) -> Vec<Entry> {
         self.sorted(|_| true)
     }
 
-    fn iter_stoa(&self, stoa: &Address) -> Vec<&Entry> {
+    fn iter_stoa(&self, stoa: &Address) -> Vec<Entry> {
         self.sorted(|e| &e.op.op.stoa == stoa)
     }
 
-    fn iter_target(&self, target: &OpId) -> Vec<&Entry> {
+    fn iter_target(&self, target: &OpId) -> Vec<Entry> {
         self.sorted(|e| e.target().as_ref() == Some(target))
     }
 
@@ -353,116 +373,15 @@ impl OpLog for MemoryOpLog {
 }
 
 #[cfg(test)]
+pub(crate) mod fixtures;
+
+#[cfg(test)]
 mod tests {
+    use super::fixtures::*;
     use super::*;
     use crate::arrival::MessageId;
-    use crate::identity::{sign_op_bytes, SecretKey};
+    use crate::identity::sign_op_bytes;
     use crate::op::{ModerationAction, Op, VoteDirection};
-    use crate::stoa::{Genesis, Policy};
-
-    fn a_key(seed: u8) -> SecretKey {
-        SecretKey::from_bytes(&[seed; 32]).unwrap()
-    }
-
-    fn a_stoa(title: &str) -> Address {
-        Genesis {
-            creator: a_key(1).public_key(),
-            policy: Policy::Open,
-            title: title.to_string(),
-        }
-        .address()
-        // Infallible for this fixture: `address` fails only on a title over
-        // MAX_TITLE_BYTES (1 KiB), and every caller here passes a short literal.
-        // An `expect` rather than a silent fallback so that a future fixture
-        // with a long title fails loudly here instead of producing an address
-        // derived from something other than what it named.
-        .expect("a short fixture title is always under the genesis title cap")
-    }
-
-    fn a_post(body: &str) -> Op {
-        Op {
-            stoa: a_stoa("Agora"),
-            author: a_key(2).public_key(),
-            kind: OpKind::Post {
-                thread: None,
-                parent: None,
-                body: body.to_string(),
-                attachments: vec![],
-            },
-        }
-    }
-
-    fn signed(op: Op) -> SignedOp {
-        op.sign(&a_key(2))
-    }
-
-    fn a_message_id(seed: u8) -> MessageId {
-        MessageId::new(vec![seed; 32])
-    }
-
-    /// One op kind of each variant, with adversarial field values.
-    ///
-    /// Shared by the panic test and the no-filtering test because both need
-    /// "every kind, awkwardly shaped" and a second copy would drift from the
-    /// first.
-    ///
-    /// **Must list every `OpKind` variant.** `nothing_is_filtered_on_the_way_in`
-    /// counts what this returns, so a kind missing here is a kind neither test
-    /// covers — and nothing fails. `Entry::target`'s exhaustive match is what
-    /// makes a new variant visible; this list is the part that must then be
-    /// updated by hand.
-    fn every_op_kind() -> Vec<OpKind> {
-        vec![
-            OpKind::Post {
-                thread: None,
-                parent: None,
-                body: String::new(),
-                attachments: vec![],
-            },
-            OpKind::Post {
-                thread: Some(OpId::from_hex(&"00".repeat(32)).unwrap()),
-                parent: Some(OpId::from_hex(&"ff".repeat(32)).unwrap()),
-                body: "x".repeat(64 * 1024),
-                attachments: vec![String::new(); 64],
-            },
-            OpKind::Revise {
-                target: OpId::from_hex(&"00".repeat(32)).unwrap(),
-                body: "\u{0}\u{feff}🏛".to_string(),
-                attachments: vec![],
-            },
-            OpKind::Moderate {
-                target: OpId::from_hex(&"ff".repeat(32)).unwrap(),
-                action: ModerationAction::Unhide,
-            },
-            OpKind::Vote {
-                target: OpId::from_hex(&"ab".repeat(32)).unwrap(),
-                direction: VoteDirection::Down,
-            },
-            OpKind::StoaMetadata {
-                title: String::new(),
-                description: "\u{0}🏛".to_string(),
-            },
-        ]
-    }
-
-    /// Two posts whose ids are known to differ, lower id first.
-    ///
-    /// Determined rather than assumed, for the reason `arrival.rs`'s equivalent
-    /// fixture gives: the ids are hashes, and hardcoding the wrong guess would
-    /// make a degraded-order test pass for the wrong reason.
-    fn two_posts_by_ascending_id() -> (SignedOp, SignedOp) {
-        let (one, two) = (signed(a_post("alpha")), signed(a_post("beta")));
-        assert_ne!(
-            one.op.id(),
-            two.op.id(),
-            "the fixture needs two distinct ops"
-        );
-        if one.op.id() < two.op.id() {
-            (one, two)
-        } else {
-            (two, one)
-        }
-    }
 
     // ─── The store decides nothing ────────────────────────────────────────
 
@@ -491,7 +410,7 @@ mod tests {
             log.append(forged.clone(), Arrival::unordered()),
             Appended::Stored
         );
-        assert_eq!(log.get(&id).map(|e| &e.op), Some(&forged));
+        assert_eq!(log.get(&id).map(|e| e.op), Some(forged));
         assert_eq!(log.iter().len(), 1);
     }
 
@@ -594,8 +513,8 @@ mod tests {
         log.append(one.clone(), Arrival::unordered());
         log.append(two.clone(), Arrival::unordered());
         assert_eq!(log.len(), 2);
-        assert_eq!(log.get(&one_id).map(|e| &e.op), Some(&one));
-        assert_eq!(log.get(&two_id).map(|e| &e.op), Some(&two));
+        assert_eq!(log.get(&one_id).map(|e| e.op), Some(one));
+        assert_eq!(log.get(&two_id).map(|e| e.op), Some(two));
     }
 
     #[test]

@@ -236,8 +236,20 @@ impl Moderators {
 ///
 /// Third, a bool invites a caller to store it, and §6.2's whole finding is about a
 /// check that stopped being run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Moderation<'a> {
+/// # Owned, because a log that persists cannot lend
+///
+/// The two op-carrying variants held `&'a Entry` borrowed from the log until
+/// [`OpLog`]'s reads became owned. A database cannot lend a reference to a row
+/// it has not materialised, so there is no longer a log-owned entry to point at.
+/// See [`OpLog`]'s documentation for why that is structural rather than a
+/// preference.
+///
+/// **Nothing about the resolution changed.** The fold, the three checks and the
+/// fail-closed posture are untouched; what changed is that the deciding op is
+/// carried rather than referenced. `Copy` goes with the references — this is
+/// `Clone` only, which is what an owned `Entry` permits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Moderation {
     /// No binding moderation of this target reached this peer.
     ///
     /// Not distinguishable from "nobody moderated it", and that is correct rather
@@ -246,13 +258,13 @@ pub enum Moderation<'a> {
     /// the same from here. Convergence closes the gap.
     Unmoderated,
     /// A moderator hid it, and this is the op that did.
-    Hidden(&'a Entry),
+    Hidden(Entry),
     /// A moderator hid it and a moderator lifted that, or a moderator published a
     /// bare unhide. This is the op that decided it.
-    Unhidden(&'a Entry),
+    Unhidden(Entry),
 }
 
-impl<'a> Moderation<'a> {
+impl Moderation {
     /// Whether a conforming peer stops rendering the target.
     ///
     /// §6.1 is careful about the ceiling and so is this name: moderation "can only
@@ -262,7 +274,11 @@ impl<'a> Moderation<'a> {
     }
 
     /// The op that decided this, if one did.
-    pub fn deciding_op(&self) -> Option<&'a Entry> {
+    ///
+    /// Borrows from `self` rather than from the log, which is the only change
+    /// the ownership move made here: the entry now lives in this value, so its
+    /// lifetime is this value's.
+    pub fn deciding_op(&self) -> Option<&Entry> {
         match self {
             Moderation::Unmoderated => None,
             Moderation::Hidden(e) | Moderation::Unhidden(e) => Some(e),
@@ -358,8 +374,11 @@ impl<'a> Moderation<'a> {
 /// answer. It lives here rather than in [`cmp_ops`](crate::arrival::cmp_ops)
 /// because it is moderation semantics: a general comparator has no business
 /// knowing that one op kind's payload is safer to prefer.
-pub fn resolve<'a, L: OpLog>(log: &'a L, moderators: &Moderators, target: &OpId) -> Moderation<'a> {
-    let binding: Vec<&Entry> = log
+pub fn resolve<L: OpLog>(log: &L, moderators: &Moderators, target: &OpId) -> Moderation {
+    // `Vec<Entry>` rather than `Vec<&Entry>`: the log's reads are owned now, so
+    // there is nothing to borrow from. The filter and its order are untouched —
+    // see this function's documentation, every word of which still applies.
+    let binding: Vec<Entry> = log
         .iter_target(target)
         .into_iter()
         // The kind filter is the resolver's job, not the log's: `iter_target`
@@ -369,22 +388,26 @@ pub fn resolve<'a, L: OpLog>(log: &'a L, moderators: &Moderators, target: &OpId)
         .filter(|e| matches!(e.op.op.kind, OpKind::Moderate { .. }) && moderators.authorises(e))
         .collect();
 
-    let Some(first) = binding.first().copied() else {
+    let Some(first) = binding.first() else {
         return Moderation::Unmoderated;
     };
 
     // Where the transport ordered the leading op, its position is a real
     // last-write-wins answer and nothing here second-guesses it.
-    let deciding = if first.arrival.is_ordered_by_transport() {
-        first
+    //
+    // An INDEX rather than a reference, so that the chosen entry can be moved
+    // out of `binding` at the end. Selecting by index changes nothing about
+    // WHICH entry is selected — the two branches are the same two branches —
+    // and it keeps the fail-closed `Hide` preference below identical in shape.
+    let deciding_index = if first.arrival.is_ordered_by_transport() {
+        0
     } else {
         // Otherwise every candidate is in the degraded order, where position
         // carries no recency at all. Prefer a `Hide` if any binding one exists,
         // and fall back to the rule's first entry when none does.
         binding
             .iter()
-            .copied()
-            .find(|e| {
+            .position(|e| {
                 matches!(
                     e.op.op.kind,
                     OpKind::Moderate {
@@ -393,7 +416,20 @@ pub fn resolve<'a, L: OpLog>(log: &'a L, moderators: &Moderators, target: &OpId)
                     }
                 )
             })
-            .unwrap_or(first)
+            .unwrap_or(0)
+    };
+    // `nth`, not `binding[deciding_index]`. The index is sound by construction —
+    // it is either 0 over a vector the `let ... else` above proved non-empty, or
+    // a value `position` returned from this same vector — but indexing PANICS if
+    // that reasoning is ever broken by an edit, and PHASE0-FINDINGS §3 measured
+    // that a panic aborts the module process. The fallible form costs nothing
+    // and turns a future bug into a rendering rather than a denial of service.
+    let Some(deciding) = binding.into_iter().nth(deciding_index) else {
+        // Unreachable by the reasoning above. Reported as unmoderated for the
+        // same reason the unreachable-kind arm below is: a bug in this
+        // function's own index arithmetic is not evidence that anything was
+        // moderated, and this module runs on attacker-supplied content.
+        return Moderation::Unmoderated;
     };
 
     // Matched on the ACTION rather than on the kind, so that a fifth op kind
@@ -1479,7 +1515,7 @@ mod tests {
         // what.
         let moderators = moderators_of(&agora());
         let entry = log.get(&hide.op.id()).unwrap();
-        assert!(moderators.authorises(entry));
+        assert!(moderators.authorises(&entry));
         assert!(moderators.contains(&creator().public_key()));
     }
 
@@ -1551,7 +1587,7 @@ mod tests {
         // directly, so the test cannot pass because the fixture was accidentally
         // unauthorised for some other reason.
         assert!(
-            moderators.authorises(log.get(&revision_id).unwrap()),
+            moderators.authorises(&log.get(&revision_id).unwrap()),
             "the fixture must clear authenticity, authority and scope"
         );
         assert_eq!(resolve(&log, &moderators, &target), Moderation::Unmoderated);
@@ -1680,7 +1716,10 @@ mod tests {
         let hide_id = hide.op.id();
         log.append(hide, Arrival::ordered(2, a_message_id(1)));
 
-        let entry = resolve(&log, &moderators_of(&agora()), &target)
+        // The resolution is bound rather than chained, because `deciding_op`
+        // now borrows from the `Moderation` value instead of from the log.
+        let moderation = resolve(&log, &moderators_of(&agora()), &target);
+        let entry = moderation
             .deciding_op()
             .expect("a hidden target names its op");
         assert_eq!(entry.id(), hide_id);
