@@ -241,22 +241,11 @@ impl Genesis {
 /// panic here is reached from inbound peer data, where PHASE0-FINDINGS §3
 /// measured what an unguarded panic costs: the module process aborts.
 ///
-/// **Probably the generic half of op decoding, but not extracted yet.** Every
-/// op will decode attacker-controlled bytes with the same five failure modes
-/// (truncation, trailing bytes, a length prefix lying in either direction, an
-/// unknown version), so this and the length-prefix discipline are the obvious
-/// candidates to share.
-///
-/// It stays private because there is exactly ONE decoder today, and an
-/// abstraction derived from one instance is a guess. The specific reason to
-/// wait: a genesis record is the only op that is self-identifying by hash — its
-/// encoding IS its address preimage — where a post or a moderation op is
-/// addressed by its own id and carries a signature this does not. A generic
-/// framing is therefore likely `(version, type, payload, signature)`, which the
-/// genesis record fits awkwardly.
-///
-/// The second decoder is what will show which parts are genuinely shared. When
-/// it arrives, making this `pub(crate)` and moving it is the cheap half.
+/// Private because there is exactly one decoder. If a second op wants the same
+/// bounds-checked reads, `pub(crate)` and a move is cheap — but generalising
+/// from one instance would be a guess, and a genesis record is an odd template:
+/// it is self-identifying by hash, its encoding being its address preimage,
+/// where other ops carry their own id and a signature.
 struct Cursor<'a> {
     bytes: &'a [u8],
     at: usize,

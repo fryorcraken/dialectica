@@ -54,7 +54,19 @@ A `NO SPEC:` marker is how the spec/test reviewer finds behaviour that was
 chosen rather than specified. Without it, a reasonable default becomes permanent
 by accident, and nobody ever decides whether it was right.
 
-Follow `CLAUDE.md`. The parts that bite here:
+## Follow the engineering principles in CLAUDE.md
+
+- **Make the change easy, then make the easy change.** If a change is awkward,
+  that is information about the code: refactor first, in its own commit that
+  changes no behaviour, then make the now-small change. Do not refactor
+  speculatively — make room for the change in front of you.
+- **Complexity in the data structure, not the logic.** Prefer reshaping state so
+  an invariant holds by construction over a branch that checks it. The fourth
+  slightly-different guard is the signal to reshape.
+- **One function, one job.** The tell is the name: an `And`, or a vague verb
+  like `handle`/`process`.
+
+And the rules that bite hardest here:
 
 - **Absolute paths, and `Read`/`Edit`/`Write` over shell file manipulation.**
 - **Never trust inbound data.** Anything from a peer is attacker-controlled:

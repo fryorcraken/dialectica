@@ -306,20 +306,19 @@ cannot be prevented from *arriving*: SDS has no membership and `senderId` is
 self-asserted. Verification therefore happens on **read**, filtering unsigned or
 badly-signed ops out. The store may hold junk; the reader never trusts it.
 
-**A generic op decoder is coming, and is deliberately not built yet.** Every op
+**A generic op decoder may be wanted eventually, and is not built.** Every op
 decodes attacker-controlled bytes with the same failure modes — truncation,
 trailing bytes, a length prefix lying in either direction, an unknown version —
 and the genesis record's decoder (see the `stoa-genesis` spec) already has all
-of them, with a bounds-checked cursor as the reusable half.
+of them, with a bounds-checked cursor as the plausibly reusable half.
 
-It stays specific to one op because there is exactly one decoder, and an
-abstraction derived from a single instance is a guess. The concrete reason to
-wait: a genesis record is the only op **self-identifying by hash** — its
-encoding IS its address preimage — where a post or a moderation op is addressed
-by its own id and carries a signature the genesis record does not. So a generic
-framing probably looks like `(version, type, payload, signature)`, which the
-genesis record fits badly. The second decoder is what shows where the seam
-really is.
+There is one decoder, so there is nothing yet to generalise from: an abstraction
+derived from a single instance is a guess. Noted here only so the second decoder
+is written knowing the first exists — that is when the seam becomes visible, and
+whether there is one at all. One reason to expect the fit to be awkward: a
+genesis record is **self-identifying by hash**, its encoding being its address
+preimage, where a post or a moderation op is addressed by its own id and carries
+a signature.
 
 ---
 

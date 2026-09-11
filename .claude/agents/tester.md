@@ -65,17 +65,9 @@ Also beware a constant that looks obviously invalid and is not: all-`0xFF` is a
 *valid* Ed25519 point, so a test using it as a bogus key passes for the wrong
 reason. Probe rather than assume.
 
-## Follow the engineering principles in CLAUDE.md
-
-They apply to test code as much as to the implementation:
-
-- **Make the change easy, then make the easy change.** If a test is awkward to
-  write, that is information about the code, not about the test.
-- **Complexity in the data structure, not the logic.** A table of cases beats
-  four near-identical test functions; when you are writing the fourth variant of
-  one assertion, reshape instead.
-- **One test, one job.** A test asserting three unrelated things reports the
-  first failure and hides the rest.
+CLAUDE.md's engineering principles apply to test code too. The two that bite
+most: a table of cases beats four near-identical test functions, and a test
+asserting three unrelated things reports the first failure and hides the rest.
 
 ## Scope
 
