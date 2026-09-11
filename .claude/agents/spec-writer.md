@@ -48,19 +48,15 @@ OpenSpec silently drops it — a REMOVED requirement is discarded when the
 capability is new, with validation still passing. Reasoning put in a spec is
 reasoning lost.
 
-## House style: MUST, not SHALL
+## Keywords
 
-RFC 2119 makes them exact synonyms and OpenSpec accepts either, so this is
-convention with one reason: MUST reads as an obligation on the implementation,
-where SHALL drifts toward describing what the system *is*.
+RFC 2119, and in this repo that means **MUST** / **MUST NOT** for requirements.
+Avoid SHOULD and MAY — an optional requirement is either a requirement or it is
+not one.
 
-Keep that line sharp, because a definition is not a requirement. "A Stoa IS its
-genesis record" defines a term and nobody can violate it; "a genesis record MUST
-carry a creator key" is something an implementation can fail. Write definitions
-as plain statements and save MUST for what an implementation has to do.
-
-Avoid should/may entirely — an optional requirement is either a requirement or
-it is not one.
+A definition is not a requirement: "A Stoa IS its genesis record" is a plain
+statement, "a genesis record MUST carry a creator key" is something an
+implementation can fail.
 
 ## Three failure modes, all seen in this repo
 

@@ -1,6 +1,6 @@
 # The spec-driven flow
 
-Five roles around [OpenSpec](https://openspec.dev)'s built-in `spec-driven`
+Six roles around [OpenSpec](https://openspec.dev)'s built-in `spec-driven`
 schema. OpenSpec supplies the artifacts and their ordering; Claude Code supplies
 the agents. Nothing here is custom tooling — a survey of the alternatives (Spec
 Kit, Kiro, Tessl, BMAD, AgentOS) found per-role agents unserved everywhere and
@@ -19,17 +19,23 @@ per-role models and tool limits.
 
 ### What "archived" means concretely
 
-A directory move plus a merge — nothing is deleted or compressed.
+This is OpenSpec's own behaviour, not a convention of ours — verified against
+`archive.js` in the published package rather than taken from the docs.
 
 While a change is in flight it lives in `openspec/changes/<name>/`, and its
 `specs/` holds a **delta** (`## ADDED Requirements`). `openspec archive` then:
 
 1. **merges the delta into `openspec/specs/`** — the live, current contract;
-2. **moves the folder** to `openspec/changes/archive/<date>-<name>/`.
+2. **moves the folder** to `openspec/changes/archive/<date>-<name>/`, the date
+   coming from `formatLocalDate()` and not stacked if one is already there.
 
-Everything stays in version control and stays greppable. The archive is
-organised by change, so finding a past decision means grepping it — which is
-what it is there for.
+So the change's `proposal.md`, `design.md` and `tasks.md` are moved, not
+deleted: they stay in version control and stay greppable. Finding a past
+decision means grepping the archive, which is what it is for.
+
+One exception worth knowing: a change that declares `retire_capabilities` can
+make archive **delete** a spec rather than merge into it. Nothing here does
+that, and it takes an explicit marker.
 
 ### PLAN.md sheds in two directions
 
@@ -61,10 +67,23 @@ to. Leave it. It shrinks by attrition as changes touch each area.
 | `tester` | spec, inherited tests | the test suite |
 | `spec-test-reviewer` | **spec + tests only** | findings |
 | `design-reviewer` | code, `design.md`, PLAN.md | findings |
+| `code-reviewer` | code | findings |
+
+The three reviewers split deliberately, and run in parallel:
+
+- `code-reviewer` asks **is this code correct, safe and well-shaped?**
+- `spec-test-reviewer` asks **do the tests pin what the spec requires, and can
+  they fail?**
+- `design-reviewer` asks **did the code take the decisions that were recorded,
+  and were the decisions worth recording recorded?**
 
 `spec-test-reviewer` is deliberately blind to the implementation. Someone who
 has read the code judges tests by what the code does, which is exactly the
 failure a spec exists to catch: a test that faithfully pins the wrong behaviour.
+
+**Give each reviewer that mutates code its own worktree.** Two sharing a tree
+see each other's broken code and cannot tell it from the author's; this has
+happened.
 
 ## What experience has taught this flow
 
@@ -98,6 +117,3 @@ covered. Describe what is checkable, or say it is out of scope.
 
 **Read PLAN.md from `origin/main`.** A change was once designed against a §4.3
 that had been rewritten to say the opposite.
-
-**Give each reviewer its own worktree.** Two mutation-testing reviewers sharing
-a tree see each other's broken code and cannot tell it from the author's.
