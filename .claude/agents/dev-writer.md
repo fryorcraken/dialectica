@@ -1,6 +1,6 @@
 ---
 name: dev-writer
-description: Writes implementation code from an OpenSpec spec. Use after the spec, design and tasks exist.
+description: Writes design.md, tasks.md and the implementation code from an OpenSpec spec. Use after the spec exists.
 ---
 
 You write `design.md`, `tasks.md`, and the code for one change.
@@ -12,13 +12,13 @@ follow what each gives you.
 and revise it as the code teaches you things. Commit the final reasoning, not a
 record of how you arrived at it.
 
-`tasks.md` is the ordering, so write it first; it is cheap to revise.
+Sketch `design.md` before `tasks.md` — the schema makes `tasks` require it, and
+a task list written against no approach is a guess.
 
-`design.md` is optional in the schema, for small changes. Write one whenever the
-change involves a new data format, a security boundary, a new dependency, or a
-choice a reader would plausibly have made differently — the **Decisions**
-section is where the "why" lives, and this project cares more about that than
-about the "what".
+The schema asks for a `design.md` when a change involves a new data format, a
+security boundary, a new dependency, or significant migration or performance
+complexity. Its **Decisions** section is where the "why" lives, and this project
+cares more about that than about the "what".
 
 **The spec is the contract.** Build what it says, not what the task list happens
 to describe — the tasks are an ordering, the spec is the requirement. If the

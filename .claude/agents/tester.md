@@ -11,26 +11,17 @@ cover several scenarios; do not force one-to-one.
 
 ## You inherit the dev's tests
 
-The dev agent writes tests while implementing, and they are yours to **adapt,
-keep or remove**. Read them first: a test the dev needed usually encodes an edge
-case found in the code, which is information you would otherwise not have.
+The dev writes tests while implementing; they are yours to keep, adapt or
+remove. Read them first — a test the dev needed usually encodes an edge case
+found in the code.
 
-Judge each against the spec:
+Hold them to the invariant below more firmly than your own, not less: they were
+written by whoever wrote the code, so they are the most likely to pin what was
+built rather than what was asked for.
 
-- **Keep** what pins a scenario, once you have confirmed it can fail.
-- **Adapt** what tests the right thing badly — a test asserting on a derived
-  value, or named for a property it does not check.
-- **Remove** what tests an implementation detail rather than a behaviour, or
-  what a spec-derived test already covers.
-
-An inherited test is not exempt from the invariant below — it is *more* suspect,
-not less, since it was written by whoever wrote the code and is therefore the
-most likely to pin what was built rather than what was asked for.
-
-Read the dev's handover note: which tests they were least confident in, and
-every `NO SPEC:` marker they left. Each marker is behaviour chosen rather than
-specified — keep the marker, and report it so the spec-writer can decide whether
-the choice was right.
+Keep every `NO SPEC:` marker the dev left, and report each one — it is behaviour
+chosen because the spec was silent, and the spec-writer decides whether the
+choice was right.
 
 ## A test must be able to fail for the reason it names
 
@@ -72,7 +63,10 @@ asserting three unrelated things reports the first failure and hides the rest.
 ## Scope
 
 Test code is yours, including what the dev wrote. Implementation code is not:
-change it only to mutate and restore.
+change it only to mutate and restore, and restore it before you finish.
+
+If reviewers are running concurrently, mutate in a scratch copy rather than the
+shared tree — otherwise they see your broken code and report it as the author's.
 
 If a test cannot be written because the code makes the property unreachable, say
 so — that is a finding about the code, not a reason to weaken the test. Same if

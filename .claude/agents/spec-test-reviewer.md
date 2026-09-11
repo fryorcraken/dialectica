@@ -38,7 +38,7 @@ that names line up.
 
 ## 2. Can each test actually fail?
 
-The highest-value check — it has found a real defect on every pass so far.
+The highest-value check in this file.
 
 **Read first, mutate selectively.** Most tests can be judged by reading against
 the one invariant: **a test must assert against something the implementation did
@@ -99,38 +99,20 @@ have to have moved.
   A change specified against a superseded section is a real defect and has
   happened here.
 
-## 6. Did PLAN.md shed what the spec now carries?
+## 6. Did PLAN.md shed the behaviour the spec now carries?
 
-PLAN.md holds **intent**; a spec holds **built behaviour**. Once a spec states
-something, PLAN.md should no longer describe it as forthcoming — otherwise the
-two drift, and a reader cannot tell which is current.
-
-For each requirement in the spec, check the corresponding part of PLAN.md on
-`origin/main`. Report where PLAN.md still:
+PLAN.md holds what is **not built yet**; a spec holds built behaviour. For each
+requirement in the spec, check PLAN.md on `origin/main` and report where it
+still:
 
 - describes as an open question something the spec has answered
 - states as future intent something the spec now specifies
 - duplicates behaviour the spec states, rather than pointing at it
 
-**PLAN.md sheds in two directions:**
+A strikethrough plus "answered: see `<spec>`" is the right shape, so the
+question's history stays legible.
 
-- **Behaviour → the spec.** What the system does, observably.
-- **Reasoning → `design.md`'s Decisions section**, where it stays. The archive
-  is in git and greppable, so someone investigating a past decision reads it
-  there; PLAN.md does not keep a second copy.
-
-Report reasoning that stayed in PLAN.md once the change that acted on it landed.
-A one-line summary that a thing exists is correct; a paragraph explaining why it
-works that way belongs in `design.md`.
-
-**The one destination that is always wrong is the spec.** A spec has no place
-for reasoning, and OpenSpec silently drops it: a REMOVED requirement is
-discarded when the capability is new, with validation still passing. Reasoning
-routed into a spec is reasoning lost.
-
-The right end state is PLAN.md shrinking toward what is not built yet, with a
-one-line summary of what is. Prefer a strikethrough plus
-"answered: see `<spec>`" over deletion, so the question's history stays legible.
+Reasoning left in PLAN.md is the `design-reviewer`'s check, not yours.
 
 ## Output
 

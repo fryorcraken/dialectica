@@ -1,6 +1,6 @@
 # The spec-driven flow
 
-Six roles around [OpenSpec](https://openspec.dev)'s built-in `spec-driven`
+Role agents around [OpenSpec](https://openspec.dev)'s built-in `spec-driven`
 schema. OpenSpec supplies the artifacts and their ordering; Claude Code supplies
 the agents. Nothing here is custom tooling — a survey of the alternatives (Spec
 Kit, Kiro, Tessl, BMAD, AgentOS) found per-role agents unserved everywhere and
@@ -19,8 +19,7 @@ per-role models and tool limits.
 
 ### What "archived" means concretely
 
-This is OpenSpec's own behaviour, not a convention of ours — verified against
-`archive.js` in the published package rather than taken from the docs.
+This is OpenSpec's own behaviour, not a convention of ours.
 
 While a change is in flight it lives in `openspec/changes/<name>/`, and its
 `specs/` holds a **delta** (`## ADDED Requirements`). `openspec archive` then:
@@ -50,13 +49,13 @@ PLAN.md is left with what is **not built yet**, plus one line per built area
 saying it exists — never why it works that way. Keeping a second copy of the
 reasoning is the failure mode: two copies drift and the wrong one gets read.
 
-Reasoning never goes in a spec at all. OpenSpec silently drops a REMOVED
-requirement when the capability is new, with validation still passing.
+Reasoning never goes in a spec at all — a spec is a behaviour contract, and
+prose rationale in one is prose nobody will maintain.
 
-**This applies to changes as they land, not as a migration.** PLAN.md's existing
-~1800 lines hold plenty that would now live in a `design.md` — §2.3's SDK gaps,
-§11's traps, why BIP-340 was rejected — and most of it has no change to attach
-to. Leave it. It shrinks by attrition as changes touch each area.
+**This applies to changes as they land, not as a migration.** PLAN.md today
+holds plenty that would now live in a `design.md` — §2.3's SDK gaps, §11's
+traps, why BIP-340 was rejected — and most of it has no change to attach to.
+Leave it. It shrinks by attrition as changes touch each area.
 
 ## The roles
 
@@ -68,6 +67,16 @@ to. Leave it. It shrinks by attrition as changes touch each area.
 | `spec-test-reviewer` | **spec + tests only** | findings |
 | `design-reviewer` | code, `design.md`, PLAN.md | findings |
 | `code-reviewer` | code | findings |
+
+**Two steps belong to whoever is running the change, not to any agent:**
+
+- **Acting on findings.** Every reviewer ends "findings only, do not fix". A
+  finding about behaviour goes back to `spec-writer`; about the code, to
+  `dev-writer`; about a test, to `tester`. Re-run only the reviewers whose
+  findings led to changes.
+- **`openspec validate` and `openspec archive`.** Archive is what merges the
+  delta into `openspec/specs/` — skip it and the change ships with its spec
+  never promoted. Do it once the change is otherwise done.
 
 The three reviewers split deliberately, and run in parallel:
 

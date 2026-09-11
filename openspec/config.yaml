@@ -7,8 +7,8 @@
 # (numbering, immutability, superseded-by chains), which this project does not
 # need.
 #
-# Reasoning never goes in a spec: OpenSpec silently drops a REMOVED requirement
-# when the capability is new, with validation still passing.
+# Reasoning never goes in a spec: a spec is a behaviour contract, and prose
+# rationale in one is prose nobody maintains.
 #
-# See `.claude/agents/README.md` for the document model and the five roles.
+# See `.claude/agents/README.md` for the document model and the role agents.
 schema: spec-driven

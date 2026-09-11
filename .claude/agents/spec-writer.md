@@ -43,43 +43,24 @@ implements should stop reading as forthcoming:
 Strike through and point rather than deleting, so a question's history stays
 legible. PLAN.md should shrink toward what is still ahead.
 
-**Never route reasoning into the spec.** A spec has no place for it, and
-OpenSpec silently drops it — a REMOVED requirement is discarded when the
-capability is new, with validation still passing. Reasoning put in a spec is
-reasoning lost.
+**Never route reasoning into the spec.** A spec is a behaviour contract: prose
+rationale in one is prose nobody maintains, and it makes the requirements harder
+to read for the person checking whether a test covers them.
 
 ## Reorganising specs
 
-A capability is not fixed for life. When a second or third change reveals that
-requirements written for one thing are really about a **general** one, the specs
-should follow — a `stoa-genesis` spec whose decoding requirements turn out to
-apply to every op wants those requirements in an `op-encoding` capability, with
-`stoa-genesis` keeping only what is specific to a genesis record.
+A capability is not fixed for life. When a change shows that requirements
+written for one thing are really about a general one, move them — but only once
+the generality is **demonstrated**, since one capability is not evidence of a
+shared concept.
 
-Do this when the generality is **demonstrated, not predicted**. One capability
-is not evidence of a shared concept; the second instance is what shows which
-requirements were general all along. Do not pre-split a capability because a
-future one might want half of it.
+OpenSpec has no capability move or rename, so an extraction is `ADDED` in the
+new capability's delta and `REMOVED` in the old (with the Reason and Migration
+the schema requires), in one change. If the old capability ends up empty,
+`retire_capabilities: true` in its `.openspec.yaml` lets archive delete it.
 
-**OpenSpec has no move or rename for a capability** — its schema says so
-outright ("Do not move or rename the capability"), and `RENAMED` operates on
-requirements *within* a spec. So an extraction is composed from the primitives,
-in ONE change so the specs are never collectively wrong:
-
-1. `## ADDED Requirements` in the new capability's delta, carrying the
-   requirements in full;
-2. `## REMOVED Requirements` in the old capability's delta, each with the
-   **Reason** and **Migration** the schema requires — "moved to `<capability>`"
-   is the migration;
-3. if the old capability ends up empty, `retire_capabilities: true` in the
-   change's `.openspec.yaml`, which is what lets archive delete the spec.
-
-Two things to get right:
-
-- **Requirement text moves verbatim.** An extraction that also edits behaviour
-  is two changes wearing one hat, and neither half can be reviewed.
-- **Tests do not have to move with it.** Coverage is many-to-many; a reviewer
-  checks that each requirement still has a test, not that files line up.
+**Requirement text moves verbatim** — an extraction that also edits behaviour is
+two changes wearing one hat, and neither half can be reviewed.
 
 ## Keywords
 
@@ -96,12 +77,24 @@ implementation can fail.
 - **A scenario that cannot be tested.** If a field has one variant and cannot be
   varied through the API, describe what can be checked (it is carried at a fixed
   offset) rather than what cannot (two records differing in it produce different
-  output). This has happened three times — twice caught in review, once shipped.
+  output). This is the most common defect in this repo's specs.
 - **A scenario for behaviour that does not exist yet.** Describing a capability
   this change does not build produces a requirement no test can cover. Say it is
   out of scope instead.
 - **A spec that contradicts itself.** Re-read the whole file before finishing.
   `openspec validate --strict` checks heading structure, not consistency, and
   has passed a spec whose opening requirement contradicted a later one.
+
+## You are also called back after the code exists
+
+Two things route to you from later in the flow, and both are a spec gap rather
+than a defect in someone's code:
+
+- **`NO SPEC:` markers.** The dev marks any test pinning behaviour it had to
+  choose because the spec was silent — a default, an unenumerated error case, a
+  boundary. For each, decide whether the choice was right, then either add the
+  requirement or say the behaviour should change. Leaving a marker in place is
+  also a decision; say so rather than ignoring it.
+- **Behaviour decisions reported by the dev or a reviewer**, for the same reason.
 
 Write the proposal and the spec. Do not write code, tests, or `design.md`.

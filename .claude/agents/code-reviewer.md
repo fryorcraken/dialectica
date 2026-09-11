@@ -19,6 +19,12 @@ not, cover all four and say that you did.
 **Assume nothing you are told is true.** The PR description, the commit messages
 and the task list are *claims*. Verify each against the code.
 
+**Work in your own worktree or a scratch copy before mutating anything** — a
+`cargo mutants` run, or breaking a property by hand. Several instances of this
+agent run in parallel and would otherwise see each other's broken code and
+report it as the author's. This has happened twice. Confirm the tree is clean
+when you finish, and say so.
+
 ## What this codebase is, and where the sharp edges are
 
 A decentralized, censorship-resistant forum. Two standing rules from CLAUDE.md
@@ -71,7 +77,9 @@ Judge against CLAUDE.md's own principles rather than generic taste:
 
 ## Also check
 
-- **`cargo mutants`** on the changed files, if it is quick. It finds real gaps —
+- **`cargo mutants`** on the changed files, scoped with `--file`. On one module
+  it takes seconds; abandon it if it runs past a couple of minutes. It finds
+  real gaps —
   it caught a `to_byte` that could be replaced by a constant and survive the
   whole suite. Note what it cannot see: it mutates functions, not `const`
   values, so a changed constant is invisible to it.
