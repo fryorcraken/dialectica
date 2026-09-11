@@ -303,10 +303,30 @@ impl<'a> Moderation<'a> {
 /// content with no recourse, where a `Hide` wrongly winning leaves something
 /// hidden that a moderator can lift the moment real ordering arrives.
 ///
-/// **Confined to the degraded branch.** Where the transport supplied Lamport
-/// values, §5.7's rule is real and last-write-wins stands untouched — biasing
-/// there would make every hide permanent, which is a worse bug than the one this
-/// closes. `a_transport_ordered_unhide_still_reverses_a_hide` pins that.
+/// **Only candidates that already bind are eligible**, which is the point at
+/// which this preference could silently undo the authority check above it. A
+/// search over every op naming the target — rather than over the filtered
+/// candidates — would let any peer publish a forged `Hide` and have every reader
+/// report it, restoring §6.2's defect on the only path in use.
+/// `the_hide_bias_searches_only_ops_that_already_bind` pins it, and is the one
+/// fixture in this module combining unordered arrivals, a binding op and a
+/// non-binding `Hide`.
+///
+/// **Confined to the degraded branch, keyed on the LEADING candidate.** Where
+/// the transport ordered the leading op, §5.7's rule is real and last-write-wins
+/// stands untouched — biasing there would make every hide permanent, which is a
+/// worse bug than the one this closes.
+/// `a_transport_ordered_unhide_still_reverses_a_hide` pins that.
+///
+/// The condition asks about `first` rather than about every candidate, and the
+/// two differ on mixed arrivals — the normal state during a transport upgrade.
+/// `first` being ordered means the leading position was won by a genuine
+/// last-write-wins comparison, which is the entire reason not to second-guess
+/// it; and since [`cmp_ops`](crate::arrival::cmp_ops) places every ordered op
+/// ahead of every unordered one, an ordered leader means the ordered ops decided
+/// among themselves. `the_ordered_branch_is_chosen_by_the_leading_op_not_by_all_of_them`
+/// pins the distinction, which was previously a place the spec and the code
+/// disagreed with no test able to tell.
 ///
 /// **Convergence is preserved**, which is the property that would have made this
 /// unacceptable. The bias is a pure function of the two ops' actions and their
@@ -436,6 +456,12 @@ mod tests {
     /// address is inside both op ids — so a handful of titles is all it takes to
     /// choose which action wins the degraded order. Security review found one in
     /// four attempts; this loop is that, made repeatable.
+    ///
+    /// **The budget of 256 is chosen, not typed.** Each title is an independent
+    /// ~50/50 trial, so exhausting it has probability ~2⁻²⁵⁶ — far below any
+    /// rate at which a flaky test would be noticed, and below the collision
+    /// probability of the hash itself. Exhaustion panics rather than skipping,
+    /// so the impossible case is loud.
     fn a_stoa_where_the_hide_hashes_lower() -> (Genesis, SignedOp, SignedOp, OpId) {
         for n in 0..256u32 {
             let genesis = a_genesis(&creator(), &format!("Ground {n}"));
@@ -457,6 +483,7 @@ mod tests {
     /// reason as [`a_stoa_where_the_hide_hashes_lower`]: `agora()` happens to
     /// fall the other way, and asserting otherwise made the test that uses this
     /// fail on its first run rather than quietly stop exercising its own name.
+    /// Same 256 budget, same ~2⁻²⁵⁶ exhaustion probability, same loud panic.
     fn a_stoa_where_a_forged_unhide_sorts_first() -> (Genesis, SignedOp, SignedOp, OpId) {
         for n in 0..256u32 {
             let genesis = a_genesis(&creator(), &format!("Contested {n}"));
@@ -961,31 +988,28 @@ mod tests {
     }
 
     #[test]
-    fn the_degraded_order_decides_when_the_transport_ordered_nothing() {
-        // The order production ACTUALLY RUNS today: no Lamport value reaches us,
-        // so `cmp_ops` falls back to ascending op id. A resolver correct only
-        // under Lamport values would be untested for every op a peer currently
-        // holds.
+    fn a_non_binding_op_leading_the_degraded_read_is_skipped() {
+        // Named for what it proves, after blind spec-test review showed the
+        // previous name was a false coverage claim — §6's "worse than a missing
+        // test".
         //
-        // `cmp_ops` sorts unordered ops by `a_id.cmp(b_id)` — ASCENDING — and
-        // `Ordering::Less` means "orders first", so the LOWEST op id reads first
-        // and is therefore what "most recent" degrades to. That is arbitrary with
-        // respect to time and `arrival.rs` says so: the property bought is
-        // convergence, not accuracy.
+        // It was `the_degraded_order_decides_when_the_transport_ordered_nothing`,
+        // and it did not test that. Two `Unhide`s of one target need two distinct
+        // authors, and in a one-moderator Stoa the second necessarily does not
+        // bind — so after the authority filter the candidate vector holds exactly
+        // ONE entry, `first` and `last` are the same, and the op-id fallback
+        // decides nothing. Inverting the fallback left the whole suite green.
         //
-        // **Exercised through two UNHIDES**, so that the `Hide`-wins tie-break
-        // has no opinion and what is measured is purely the op-id fallback.
+        // What the fixture genuinely does exercise is still worth keeping: a
+        // non-binding op sitting anywhere in the degraded read is skipped, and
+        // the binding one is chosen and named.
         //
-        // This test originally used a hide/unhide pair. That pair is now governed
-        // by the tie-break, so the same fixture would measure a different
-        // property — and would have kept passing while testing nothing it names.
-        // Two unhides of one target need two distinct authors, so the second is
-        // an outsider's: it does not bind, and the binding one must still be the
-        // one chosen out of the ordered read.
-        //
-        // The outsider's op is given the LOWER id where the hashes allow, so a
-        // resolver that took the leading entry without checking authority would
-        // pick it and fail.
+        // **NOT VERIFIABLE IN THIS CHANGE: the op-id fallback choosing between
+        // two BINDING candidates in the degraded order.** That needs two ops that
+        // both bind and differ, which needs two distinct moderators of one Stoa,
+        // which needs the mutable moderator set §13 defers. The same blocker as
+        // the two-moderator scenario in `spec.md`. When that set lands, this is
+        // the fixture to add — do not assume the fallback is covered until then.
         let (mut log, target) = a_log_with_a_post();
         let binding = a_moderation(
             address_of(&agora()),
@@ -1129,6 +1153,203 @@ mod tests {
         let resolved = resolve(&log, &moderators_of(&stoa), &target);
         assert!(resolved.is_hidden());
         assert_eq!(resolved.deciding_op().map(|e| e.id()), Some(hide_id));
+    }
+
+    #[test]
+    fn the_hide_bias_searches_only_ops_that_already_bind() {
+        // THE test that was missing, found by blind spec-test review, and the
+        // most dangerous gap in this module's suite.
+        //
+        // The `Hide`-wins tie-break searches for a `Hide` among the candidates.
+        // If it searched `iter_target` — everything naming the target, validated
+        // or not — instead of the already-filtered `binding` vector, then ANY
+        // peer could publish a forged or unauthorised `Hide` of any target and
+        // every conforming peer would report `Hidden`, naming the forgery as the
+        // deciding op. That is §6.2's "any peer can forge a moderation"
+        // reinstated verbatim, on the degraded path, which is the ONLY path
+        // production runs today.
+        //
+        // The whole suite stayed green under that mutation, because the two
+        // hostile-input tests are blind in different ways:
+        //
+        //   - `a_log_full_of_forgeries_...` holds NO binding op, so the fold
+        //     returns `Unmoderated` before the bias is reached at all;
+        //   - `one_genuine_hide_among_the_forgeries_still_binds` uses ordered
+        //     arrivals throughout, so it takes the transport-ordered branch and
+        //     never reaches the bias either.
+        //
+        // So this fixture is the combination neither had, and it is exactly the
+        // degraded security surface: UNORDERED arrivals, at least one BINDING
+        // op, and at least one NON-BINDING `Hide`. Each of the three is load
+        // bearing; drop any one and the mutation survives again.
+        let (mut log, target) = a_log_with_a_post();
+
+        // Binds: the creator's unhide, in the right Stoa, correctly signed.
+        let binding_unhide = a_moderation(
+            address_of(&agora()),
+            &creator(),
+            target,
+            ModerationAction::Unhide,
+        );
+        let binding_id = binding_unhide.op.id();
+
+        // Does NOT bind, and each fails a different one of the three checks, so
+        // no single check carries this test on its own.
+        let unauthorised_hide = a_moderation(
+            address_of(&agora()),
+            &outsider(),
+            target,
+            ModerationAction::Hide,
+        );
+        assert!(
+            unauthorised_hide.verify(),
+            "the fixture must be AUTHENTIC and merely unauthorised"
+        );
+        let forged_hide = a_forged_moderation(
+            address_of(&agora()),
+            &creator().public_key(),
+            &outsider(),
+            target,
+            ModerationAction::Hide,
+        );
+        let lyceum = a_genesis(&creator(), "Lyceum");
+        let cross_stoa_hide = a_moderation(
+            address_of(&lyceum),
+            &creator(),
+            target,
+            ModerationAction::Hide,
+        );
+
+        for op in [
+            binding_unhide,
+            unauthorised_hide,
+            forged_hide,
+            cross_stoa_hide,
+        ] {
+            log.append(op, Arrival::unordered());
+        }
+
+        let resolved = resolve(&log, &moderators_of(&agora()), &target);
+        assert!(
+            !resolved.is_hidden(),
+            "a Hide that does not bind won the tie-break — any peer can now \
+             forge a moderation on the degraded path"
+        );
+        assert_eq!(
+            resolved.deciding_op().map(|e| e.id()),
+            Some(binding_id),
+            "the binding op must decide, and must be the one named"
+        );
+    }
+
+    #[test]
+    fn a_hide_that_binds_still_wins_over_hides_that_do_not() {
+        // The complement, so the test above cannot be satisfied by a resolver
+        // that simply never reports `Hidden` on the degraded path. Same shape,
+        // plus one genuine `Hide` — which must win, and must be the op named
+        // rather than any of the three impostors.
+        let (mut log, target) = a_log_with_a_post();
+        let lyceum = a_genesis(&creator(), "Lyceum");
+
+        let binding_hide = a_moderation(
+            address_of(&agora()),
+            &creator(),
+            target,
+            ModerationAction::Hide,
+        );
+        let binding_id = binding_hide.op.id();
+
+        for op in [
+            binding_hide,
+            a_moderation(
+                address_of(&agora()),
+                &outsider(),
+                target,
+                ModerationAction::Hide,
+            ),
+            a_forged_moderation(
+                address_of(&agora()),
+                &creator().public_key(),
+                &outsider(),
+                target,
+                ModerationAction::Hide,
+            ),
+            a_moderation(
+                address_of(&lyceum),
+                &creator(),
+                target,
+                ModerationAction::Hide,
+            ),
+        ] {
+            log.append(op, Arrival::unordered());
+        }
+
+        let resolved = resolve(&log, &moderators_of(&agora()), &target);
+        assert!(resolved.is_hidden());
+        assert_eq!(
+            resolved.deciding_op().map(|e| e.id()),
+            Some(binding_id),
+            "an impostor Hide was named as the deciding op"
+        );
+    }
+
+    #[test]
+    fn the_ordered_branch_is_chosen_by_the_leading_op_not_by_all_of_them() {
+        // NO SPEC — now specified; this pins the reading.
+        //
+        // The spec said "where no competing moderation was ordered by the
+        // transport", a predicate over ALL candidates; the code asks only
+        // whether the LEADING one was ordered. Blind review found the two
+        // disagree on mixed arrivals — reachable today through
+        // `Arrival::from_parts` and the normal state during a transport upgrade
+        // — and that swapping the code to the spec's `any(...)` form broke no
+        // test.
+        //
+        // The code is right: `first` being transport-ordered means the leading
+        // position IS a genuine last-write-wins answer, which is the entire
+        // rationale for not second-guessing it. A candidate further down being
+        // unordered says nothing about the leading one, and `cmp_ops` already
+        // places every ordered op ahead of every unordered one — so an ordered
+        // leader means the ordered ops won on their own terms. The spec has
+        // been tightened to say this.
+        //
+        // The fixture: an ordered `Unhide` leading, an unordered `Hide` behind
+        // it. Under the code the ordered leader decides and the target is NOT
+        // hidden; under the spec's old `any(...)` reading the mixed set would
+        // take the degraded branch and the `Hide` would win.
+        let (mut log, target) = a_log_with_a_post();
+        let ordered_unhide = a_moderation(
+            address_of(&agora()),
+            &creator(),
+            target,
+            ModerationAction::Unhide,
+        );
+        let unhide_id = ordered_unhide.op.id();
+        let unordered_hide = a_moderation(
+            address_of(&agora()),
+            &creator(),
+            target,
+            ModerationAction::Hide,
+        );
+
+        log.append(ordered_unhide, Arrival::ordered(5, a_message_id(1)));
+        log.append(unordered_hide, Arrival::unordered());
+
+        // The fixture must really be mixed, or it exercises neither reading.
+        let entries = log.iter_target(&target);
+        assert!(
+            entries.iter().any(|e| e.arrival.is_ordered_by_transport())
+                && entries.iter().any(|e| !e.arrival.is_ordered_by_transport()),
+            "the fixture must carry BOTH arrival kinds"
+        );
+
+        let resolved = resolve(&log, &moderators_of(&agora()), &target);
+        assert!(
+            !resolved.is_hidden(),
+            "an ordered leading op must decide on its own terms, rather than \
+             being demoted to the degraded branch by an unordered straggler"
+        );
+        assert_eq!(resolved.deciding_op().map(|e| e.id()), Some(unhide_id));
     }
 
     #[test]
@@ -1454,18 +1675,18 @@ mod tests {
         // never have received existed — §3.3's partial set makes that
         // undecidable, and a rule no peer can evaluate is not a rule.
         //
-        // **What a bare `Unhide` DOES, which this marker originally failed to
-        // ask.** Security review found that the representational question
-        // (`Unhidden` versus `Unmoderated`) was the easy half. The hard half is
-        // that a bare `Unhide` is a live op competing in the order — and under
-        // the degraded order, where only two ops can ever exist for a
-        // {Stoa, moderator, target}, a lower-hashing bare `Unhide` published
-        // pre-emptively would have vetoed every future `Hide` of that target
-        // permanently. That is closed by `resolve`'s `Hide`-wins tie-break, and
-        // `a_hide_is_not_defeated_by_the_unhide_hashing_lower` is the regression
-        // test. The marker is kept because the *representational* choice is
-        // still unspecified, and because the two questions travel together: a
-        // bare `Unhide` being binding is exactly what made the veto reachable.
+        // The marker above covers the REPRESENTATIONAL choice only, and stops
+        // there deliberately.
+        //
+        // What a bare `Unhide` *does* was once under this marker too, and blind
+        // review was right that it no longer belongs: it is **specified and
+        // tested**, so leaving it here would tell a future reader "nobody
+        // decided this" about something decided. A bare `Unhide` is a live op
+        // competing in the order, and under the degraded order it would have
+        // vetoed every future `Hide` of its target — closed by `resolve`'s
+        // `Hide`-wins tie-break, required by the spec, and pinned by
+        // `a_hide_is_not_defeated_by_the_unhide_hashing_lower`. Not a `NO SPEC:`
+        // item; a cross-reference.
         let (mut log, target) = a_log_with_a_post();
         let unhide = a_moderation(
             address_of(&agora()),

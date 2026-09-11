@@ -112,6 +112,10 @@ report.
 - [x] Tie-break applied unconditionally, not just in the degraded branch → 3
       fail. Both directions matter: the first proves the fix does something, the
       second proves it does not break reversibility once real ordering arrives.
+- [x] **Mutation I** — bias searches `iter_target` instead of the validated
+      candidates → **2 fail** (was 0, and this one reinstates §6.2's defect)
+- [x] **Mutation C** — ordered-branch condition becomes `all(...)` over every
+      candidate rather than the leading one → **1 fails** (was 0)
 
 **One defect found this way.** `each_stoas_moderator_binds_only_in_their_own_stoa`
 originally gave the two Stoas different creators, so the authority check alone
@@ -198,9 +202,69 @@ have kept passing while measuring a different property. It now uses two
 `Unhide`s (one binding, one not), where the tie-break has no opinion and the
 op-id fallback is what is actually under test.
 
-## 9. Gates
+## 9. Blind spec-test review findings, addressed
 
-- [x] `cargo test -p dialectica-core` — 210 pass (178 inherited, 32 ours)
+The blind role found two surviving mutations the implementation-aware security
+review had missed — which is the split working as `.claude/agents/README.md`
+intends.
+
+- [x] **[HIGH] Mutation I: the bias searching unvalidated ops survived the whole
+      suite.** Had `resolve` looked for a `Hide` in `iter_target` rather than in
+      the already-filtered candidates, any peer could forge a `Hide` of any
+      target and every reader would report it — §6.2's defect restored on the
+      degraded path, the only path in use. The shipped code was always correct;
+      the test pinning it did not exist.
+
+      Nothing caught it because the two hostile-input tests are blind in
+      *different* ways: `a_log_full_of_forgeries_...` holds no binding op, so the
+      fold returns before the bias runs; `one_genuine_hide_among_the_forgeries_...`
+      uses ordered arrivals, so it takes the other branch. **No fixture combined
+      unordered arrivals + a binding op + a non-binding `Hide`**, which is the
+      whole degraded security surface. Added
+      `the_hide_bias_searches_only_ops_that_already_bind` (each non-binding
+      `Hide` fails a *different* one of the three checks) and its complement
+      `a_hide_that_binds_still_wins_over_hides_that_do_not`. Mutation I now kills
+      both.
+- [x] **[MEDIUM] Mutation C: spec and code disagreed with no test able to tell.**
+      Spec said "no competing moderation was ordered" (all candidates); code asks
+      about the leading one. They differ on mixed arrivals — reachable via
+      `Arrival::from_parts`, and the normal state during a transport upgrade.
+      **The code is right**: an ordered leader won its position by a genuine
+      comparison, and `cmp_ops` puts every ordered op ahead of every unordered
+      one. Spec tightened to say so; added
+      `the_ordered_branch_is_chosen_by_the_leading_op_not_by_all_of_them`.
+- [x] **[MEDIUM] The previous rewrite did not land.**
+      `the_degraded_order_decides_when_the_transport_ordered_nothing` used two
+      `Unhide`s, but two unhides of one target need two authors and in a
+      one-moderator Stoa the second cannot bind — so the candidate vector held
+      one element and the op-id fallback decided nothing. Renamed to
+      `a_non_binding_op_leading_the_degraded_read_is_skipped`, with a
+      "not verifiable in this change" note naming the mutable moderator set as
+      the blocker. **The fallback between two binding candidates is not covered
+      and is now marked as such** rather than claimed.
+- [x] **Marker 2 split.** The representational choice stays a `NO SPEC:`; the
+      veto consequence is specified and tested, so it is now a cross-reference.
+      Keeping it under a marker told readers "nobody decided this" about
+      something decided.
+- [x] **Spec names the fallback order.** It said "a defined order that carries no
+      recency" without saying *ascending op id*, so a spec-only reader could not
+      write a test for it.
+- [x] **The 256 budget is justified.** ~2⁻²⁵⁶ exhaustion probability, stated on
+      both helpers, with exhaustion panicking rather than skipping.
+
+### The structural fix, not just the test
+
+The reviewer could not construct either mutation from the spec alone — it had to
+read the fold, which is exactly what a blind reviewer should not need. Both gaps
+were spec gaps. So the spec now carries **"Only moderations that already bind are
+eligible to decide, including under this preference"** as prose plus two
+scenarios, rather than leaving it as an implementation detail. A future
+implementer working from the spec is now forced into the fixture that was
+missing.
+
+## 10. Gates
+
+- [x] `cargo test -p dialectica-core` — 213 pass (178 inherited, 35 ours)
 - [x] `cargo clippy -p dialectica-core --all-targets -- -D warnings` — clean
 - [x] `cargo fmt -p dialectica-core --check` — **14 pre-existing hunks**,
       measured by stashing this change and re-running, 0 introduced. Three were

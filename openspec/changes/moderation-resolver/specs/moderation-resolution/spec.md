@@ -83,9 +83,11 @@ The same comparison is what keeps a reader from applying one Stoa's moderator se
 
 Where a target has more than one binding moderation, the outcome SHALL be the one stated by whichever of them the ordering rule places first. A moderation op SHALL carry the action it performs, and the action `unhide` SHALL reverse a previous `hide`.
 
-"First" is the ordering rule's position and nothing else. That rule leads with the highest Lamport timestamp where the transport supplied one, and otherwise falls back to a defined order that carries no recency — so a reader SHALL NOT treat the leading op as the most recently published one, and SHALL NOT substitute any other notion of recency for the rule's position.
+"First" is the ordering rule's position and nothing else. That rule leads with the highest Lamport timestamp where the transport supplied one; where it supplied none, it falls back to **ascending op id**, which carries no recency at all — an op id is a hash of the op's own content, so the fallback is arbitrary with respect to time and identical on every peer. A reader SHALL NOT treat the leading op as the most recently published one, and SHALL NOT substitute any other notion of recency for the rule's position.
 
-**Where no competing moderation was ordered by the transport, `hide` SHALL decide.** This SHALL NOT apply where the leading moderation was ordered by the transport: there the ordering rule's position stands unmodified.
+**Where the leading binding moderation was not ordered by the transport, `hide` SHALL decide.** Where the leading binding moderation *was* ordered by the transport, the ordering rule's position SHALL stand unmodified, **even if other candidates were not ordered**.
+
+The condition is deliberately about the leading candidate rather than about all of them, and the two differ whenever one target's binding moderations carry mixed arrival kinds — the normal state while a transport upgrade propagates. A leading op that the transport ordered occupies its position by a genuine last-write-wins comparison, which is the whole reason not to second-guess it; a candidate further down being unordered says nothing about that. The ordering rule already places every transport-ordered op ahead of every unordered one, so an ordered leader means the ordered ops won on their own terms.
 
 The asymmetry exists because a moderation op is fully determined by its Stoa, author, target and action, with no nonce and no timestamp. For one Stoa, one moderator and one target there are therefore exactly two possible ops with two fixed identifiers, and an unordered comparison between them resolves the same way forever — so the rule would hand permanent victory to whichever identifier happened to sort first. That is not last-write-wins degrading; it lets a single pre-emptive `unhide`, published before any moderation exists and then abandoned, veto every future `hide` of that target on every conforming peer. It is also cheap to arrange, because the Stoa's creator chooses the title that determines the address that both identifiers are derived from.
 
@@ -114,11 +116,33 @@ Ops that are not binding SHALL NOT participate in this ordering at all: a more r
 - **THEN** the target is still reported as hidden
 - **AND** the moderator's hide is named as the deciding moderation
 
+**Only moderations that already bind are eligible to decide, including under this preference.** A `hide` that fails authenticity, authority or scope SHALL NOT be preferred, SHALL NOT decide the outcome, and SHALL NOT be named as the deciding moderation.
+
+This is stated separately because it is the point at which the preference could silently undo the requirement it sits beneath. A preference that searched every op naming the target, rather than only those already established as binding, would let any peer publish a forged or unauthorised `hide` of any target and have every conforming reader report it as hidden — restoring, on the degraded path that is the only path in use, exactly the forgeable moderation this capability exists to prevent.
+
 #### Scenario: A pre-emptive unhide does not veto a later hide
 
 - **WHEN** a moderator's `unhide` of a target precedes their `hide` of it under the ordering rule, and neither was ordered by the transport
 - **THEN** the target is reported as hidden
 - **AND** the outcome does not depend on which op's identifier sorts first
+
+#### Scenario: A forged hide does not win the degraded preference
+
+- **WHEN** a target's moderations include a binding `unhide` and one or more `hide` ops that fail authenticity, authority or scope, and none was ordered by the transport
+- **THEN** the target is not reported as hidden
+- **AND** the binding `unhide` is named as the deciding moderation
+
+#### Scenario: A binding hide still wins over hides that do not bind
+
+- **WHEN** a target's moderations include a binding `hide` alongside `hide` ops that do not bind, and none was ordered by the transport
+- **THEN** the target is reported as hidden
+- **AND** the binding `hide` is named as the deciding moderation
+
+#### Scenario: A transport-ordered leading op decides despite unordered candidates
+
+- **WHEN** a target's leading binding moderation was ordered by the transport and another binding moderation of it was not
+- **THEN** the leading op decides
+- **AND** the preference for `hide` does not apply
 
 #### Scenario: A transport-ordered unhide still reverses a hide
 
