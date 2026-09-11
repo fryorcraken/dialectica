@@ -174,6 +174,32 @@
       tests fail, restore. Fourteen mutations; two survived and were fixed by
       tests that now exist (4.6 and 6.4). Table in the report.
 
+- [x] 10.2 **The table above was incomplete, and that is the finding.** It
+      claimed fourteen verifications and did not include the one on this
+      change's central property: deleting `bytes.zeroize()` from
+      `Keystore::generate` left all 184 tests green. Found by review, not here.
+
+      **A mutation table listing only kills hides its own misses**, which is
+      worse than a missing test because it stops anyone looking. The survivors
+      are now rows, not footnotes:
+
+      | # | Mutation | Result |
+      |---|---|---|
+      | 15 | Delete the wipe in `generate` | **SURVIVED** → fixed structurally, §12.1 |
+      | 16 | `root` field loses `Zeroizing` | compile error, names `must_be_zeroizing` |
+      | 17 | Skip `Zeroizing`'s destructor | 1 fails |
+      | 18 | The demonstrated "names a fix" bypass | 1 fails |
+      | 19 | Probe ignores its lookup | 9 fail |
+      | 20 | Two error messages collide | 1 fails |
+      | 21 | Add a stored passphrase verifier | 9 fail |
+      | 22 | `stoa_address` reports the wrong identity | 2 fail |
+      | 23 | `Fn` reverted to `FnOnce` | **SURVIVES** — see below |
+
+      23 is recorded as a survivor rather than quietly dropped. `FnOnce` is a
+      supertrait of `Fn`, so `&F` satisfies it and the signature change is not
+      observable; it is justified on honesty rather than enforceability, and
+      claiming otherwise would be the same defect as the original table.
+
 ## 11. Security review findings
 
 Everything below was found by review after the first three commits, each with a
@@ -227,16 +253,63 @@ worth keeping.
       design.md, so nothing stopped a later contributor relaxing one as a
       convenience.
 
-## 12. Gates
+## 12. Spec-test review findings
 
-- [x] 12.1 `cargo test -p dialectica-core` — green.
-- [x] 12.2 `cargo fmt --check` — clean.
-- [x] 12.3 `cargo clippy -p dialectica-core --all-targets -- -D warnings` —
+A second review, blind to the implementation. Two surviving mutations and four
+untested or untestable scenarios.
+
+- [x] 12.1 **[HIGH] Zeroization had no test at all.** Every `Zeroizing` in the
+      file could have been removed with nothing failing beyond compile errors,
+      and the explicit wipe in `generate` could be deleted with nothing failing
+      at all.
+
+      Fixed **structurally rather than with a test**, because the wipe was not
+      testable: a stack local after its function returns is not observable.
+      `generate` no longer makes the copy — `to_bytes()` moves straight into
+      the `Zeroizing`. `Zeroize` is no longer imported by the library, so a
+      reappearing `use` is the signal someone has reintroduced a hand-rolled
+      wipe.
+
+      Plus the two tests the reviewer named: behavioural (raw pointer post-drop,
+      with a control proving the technique can see the difference) and
+      structural (a compile-time bound on every secret-bearing field).
+- [x] 12.2 **[MEDIUM] `every_error_message_names_a_fix` passed for the wrong
+      reason**, demonstrated: a pure fault statement with "restore" as a noun
+      stayed green. Now requires the verb at a word boundary in the guidance
+      clause after `;` or an em dash. Its own regression test pins the exact
+      bypass.
+- [x] 12.3 Restate the two **unobservable** requirements as outcomes —
+      read-once → "content that passed no permission check is never used";
+      tag-decides → "nothing stored can verify a passphrase on its own". Both
+      now have tests; the second kills a stored verifier with 9 failures.
+- [x] 12.4 Change `lookup` to `Fn` so "the probe is callable repeatedly" is
+      satisfiable, and test it. Recorded as a **surviving mutation**: `FnOnce`
+      is a supertrait, so the change is not observable.
+- [x] 12.5 Test that an occupied staging path is refused directly, rather than
+      only through the symlink test — which passes with `create_new` reverted,
+      because the randomness catches it there.
+- [x] 12.6 Sweep **all 17** error variants pairwise for distinguishability,
+      not the 7 the spec happens to name. `UnknownVersion`/`UnknownProtection`
+      and the three "restore it from a backup" variants were the near misses.
+- [x] 12.7 Test the reported identity **end to end** — derive, sign, and verify
+      the op is attributed to the address the probe named, plus a negative so
+      the assertion is not vacuous. Every other probe test used the literal
+      `"abcd"`.
+- [x] 12.8 Decide whether reason text is a stable interface. **It is not** —
+      recorded as a spec requirement, because reasons must stay free to improve
+      and one has already been rewritten for naming a fault without a fix.
+- [x] 12.9 Add the three missing `NO SPEC:` markers.
+
+## 13. Gates
+
+- [x] 13.1 `cargo test -p dialectica-core` — green.
+- [x] 13.2 `cargo fmt --check` — clean.
+- [x] 13.3 `cargo clippy -p dialectica-core --all-targets -- -D warnings` —
       clean.
 
-## 13. Documentation
+## 14. Documentation
 
-- [x] 13.1 Replace PLAN.md §5.6's specification with a one-line summary that the
+- [x] 14.1 Replace PLAN.md §5.6's specification with a one-line summary that the
       keystore exists, per the document model — the reasoning now lives in
       `design.md` and keeping a second copy is the failure mode that model
       exists to prevent.

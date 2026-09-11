@@ -20,6 +20,7 @@ A view cannot discover this any other way: it has no filesystem access and no ne
 
 - **WHEN** the probe is called more than once with no intervening change
 - **THEN** each call returns the same answer
+- **AND** each call re-determines that answer rather than reusing an earlier one
 
 ### Requirement: The answer carries an identity or a reason, never both and never neither
 
@@ -75,6 +76,20 @@ The reasons SHALL be distinguishable from one another, at minimum: no keystore e
 - **WHEN** the keystore cannot be parsed
 - **THEN** the reason says so
 - **AND** is distinguishable from a wrong passphrase
+
+### Requirement: Reason text is for a reader, not for a caller to match on
+
+A reason's exact wording SHALL NOT be part of the contract. Callers SHALL treat it as prose to display, and SHALL NOT branch on its content.
+
+This is a deliberate limit on the surface, decided rather than left to accident. Reasons must be free to improve as their guidance is found wanting — one was already rewritten for naming a fault without a fix — and a caller matching on text would turn each of those improvements into a silent breaking change that no type and no test would catch.
+
+A caller that needs to branch needs a machine-readable discriminant, which this version does not provide. Adding one later is a widening of the reply shape and therefore a deliberate act; it is not a reason to freeze the prose now.
+
+#### Scenario: Reasons remain distinguishable without being fixed
+
+- **WHEN** a reason's wording changes
+- **THEN** it remains distinguishable from every other reason
+- **AND** no caller contract is broken by the change itself
 
 ### Requirement: The identity reported is the one that would sign
 

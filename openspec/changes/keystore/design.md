@@ -411,6 +411,20 @@ cipher key and the decrypted plaintext likewise, the `Passphrase` wraps
 `Zeroizing<Vec<u8>>`, and `chacha20poly1305`'s `zeroize` feature wipes the
 cipher's own expanded key state.
 
+**The wipe is structural, because a wipe is not testable.** `generate` used to
+copy `sk.to_bytes()` into a local, wrap it, then `bytes.zeroize()` the local —
+and review found that **deleting that line left all 184 tests green**. It could
+never have been pinned: a stack local after its function returns is not
+observable. So the copy is not made at all; `to_bytes()` moves straight into the
+`Zeroizing`, and there is no second binding to forget. `Zeroize` is no longer
+imported by the library, so a `use zeroize::Zeroize` reappearing is itself the
+signal that someone has reintroduced a hand-rolled wipe.
+
+What *is* tested: that `Zeroizing` clears on drop (observed through a raw
+pointer post-drop, with a control proving the technique can see the difference),
+and that every secret-bearing field is wrapped in it (a compile-time bound, so
+removing a wrapper stops the build rather than failing at runtime).
+
 **The absence of `Debug` on `Keystore`, `Passphrase` and `Unlock` is enforced by
 a test**, not by a doc comment. It was previously enforced by absence, which is
 not enforcement: the natural way to acquire one is a moment's convenience while
@@ -489,6 +503,55 @@ guessing between them would be telling the user something unverified.
   implementation; dialectica targets Linux (PLAN.md's Basecamp traps are
   Linux-specific), and the arm exists to keep the crate portable rather than to
   serve a supported platform.
+
+### Two requirements were restated because they could not be observed
+
+A spec requirement nothing can check is worse than no requirement: it reads as
+coverage and drifts silently. Review found two of mine, both added in good faith
+during the security fixes.
+
+- **"A keystore is read at most once per operation."** Not observable from
+  outside — a caller cannot count the implementation's reads. Restated as what
+  the single read is *for*: **content that passed no permission check is never
+  used**, and **a symlink's target does not inherit the check**. Both are about
+  outcomes rather than mechanism. The read-once implementation is an obligation
+  on the code, recorded above and in `read_checked`'s doc comment.
+- **"Correctness is decided by the authentication tag."** Nothing would notice a
+  stored verifier being *added* alongside the AEAD. Restated as a property of
+  the file: **nothing is stored that can verify a passphrase independently of
+  decrypting**. That is checkable three ways — the layout has no room, no byte
+  past the header repeats across two writes of the same secret, and a wrong
+  passphrase is indistinguishable from a tampered file. Adding a four-byte
+  verifier now kills nine tests.
+
+A third, in `posting-capability`, was **unsatisfiable through the API it
+described**: "the probe is callable repeatedly", against a `lookup: impl
+FnOnce`. The signature is now `Fn`.
+
+Worth recording because the obvious explanation is wrong: `FnOnce` is a
+supertrait of `Fn`, so `&F` satisfies it and the scenario *was* testable by
+passing a reference — verified by reverting the signature and watching the test
+still pass. `Fn` stays because it is the honest constraint, not because it is
+enforceable: nothing consumes the lookup, and a signature that overstates what
+it takes is one callers work around. **Reverting it is not mutation-detectable,
+and the table says so.**
+
+### The "names a fix" check was passing for the wrong reason
+
+`every_error_message_names_a_fix` matched `msg.contains(verb)`. Review replaced
+`Truncated`'s message with *"truncated: the restore operation that wrote this
+file did not finish"* — a pure fault statement, no action, "restore" as a **noun**
+— and the test stayed green. Substring matching has no word boundary and no
+part-of-speech sense: "check" matches "checksum", "create" matches "created".
+
+Now the verb must appear **at a word boundary** in the **guidance clause** —
+everything after the first `;` or em dash — and a message with no such clause
+fails with a message saying so. Every existing message already satisfied both,
+so the fix cost nothing. The demonstrated bypass now dies.
+
+The `NO SPEC:` marker stays and is narrowed to what the check actually pins.
+What it still cannot see: a grammatically imperative sentence telling the user
+to do something useless. That needs a reader.
 
 ## Open Questions
 

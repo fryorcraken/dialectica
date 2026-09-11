@@ -61,7 +61,13 @@ use std::path::{Path, PathBuf};
 use argon2::Argon2;
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
-use zeroize::{Zeroize, Zeroizing};
+// `Zeroize` itself is not imported here, and its absence is the point: after
+// `generate` stopped making a plain copy there is no explicit wipe anywhere in
+// this file. Every secret is inside a `Zeroizing` and cleared by its drop, so a
+// `use zeroize::Zeroize` reappearing means someone has reintroduced a hand-rolled
+// wipe — which is the shape review found could be deleted without any test
+// noticing.
+use zeroize::Zeroizing;
 
 use crate::cursor::{Cursor, OutOfBounds};
 use crate::identity::{Address, PublicKey, SecretKey};
@@ -581,16 +587,42 @@ pub struct Keystore {
 
 impl Keystore {
     /// Mint a fresh root secret. Nothing is written until [`Keystore::write_to`].
+    ///
+    /// # There is deliberately no plain local here
+    ///
+    /// `SecretKey::to_bytes` returns a `[u8; 32]` this type does not own —
+    /// `identity.rs`'s doc comment names exactly this copy as deferred to the
+    /// keystore. The obvious way to discharge that is:
+    ///
+    /// ```ignore
+    /// let mut bytes = sk.to_bytes();
+    /// let root = Zeroizing::new(bytes);
+    /// bytes.zeroize();          // easy to delete, and nothing notices
+    /// ```
+    ///
+    /// which is what this function used to do, and **review found that
+    /// deleting the wipe left the entire suite green.** A stack local after
+    /// its function returns is not observable from a test, so that line could
+    /// never have been pinned by one — it was a promise enforced by nobody,
+    /// in a `tasks.md` that claimed fourteen mutation verifications and had
+    /// not tried this one.
+    ///
+    /// So the copy is not made. `to_bytes()` is moved straight into the
+    /// `Zeroizing`, and there is no second binding to forget about: the
+    /// temporary is consumed by the wrapper, and what the wrapper holds is
+    /// wiped on drop by a mechanism
+    /// `generate_wipes_the_plain_array_it_was_handed` does pin.
+    ///
+    /// CLAUDE.md's rule applied to a security property: prefer reshaping state
+    /// so the invariant holds by construction over adding a line that
+    /// maintains it. A line must be remembered; a shape cannot be forgotten.
     pub fn generate() -> Self {
         // Through `SecretKey` rather than `getrandom` directly, so there is one
         // place in this crate that decides where key entropy comes from.
         let sk = SecretKey::generate();
-        let mut bytes = sk.to_bytes();
-        let root = Zeroizing::new(bytes);
-        // `to_bytes` handed out a plain array this type does not own — exactly
-        // the copy `identity.rs` flags as deferred to here. Wipe it.
-        bytes.zeroize();
-        Keystore { root }
+        Keystore {
+            root: Zeroizing::new(sk.to_bytes()),
+        }
     }
 
     /// The per-Stoa signing key for this identity (§5.2).
@@ -1375,6 +1407,13 @@ mod tests {
     fn an_unencrypted_file_does_contain_the_secret_which_is_why_it_is_a_choice() {
         // The other direction, pinned so that "unencrypted" is honest about
         // what it is rather than something a reader has to assume.
+        //
+        // NO SPEC: the spec says an unencrypted keystore is a recorded state
+        // and says nothing about the secret being stored VERBATIM — an
+        // implementation that obfuscated it would satisfy every requirement.
+        // Pinned anyway because obfuscation here would be the worse outcome:
+        // it reads as protection and is none, which is exactly the LEZ failure
+        // this change is measured against.
         let bytes = a_keystore(0xAB).to_file_bytes(&Unlock::Unencrypted).unwrap();
         assert!(bytes.windows(32).any(|w| w == [0xABu8; 32]));
     }
@@ -1923,11 +1962,31 @@ mod tests {
         // variant at once, including ones added later. "Unlocked: false"
         // states a fault; a reason has to say what to do about it.
         //
-        // NO SPEC: "names a fix" is checked as "contains an imperative verb
-        // from this list". The spec requires actionable guidance and cannot
-        // define it mechanically; this is the closest checkable proxy, and it
-        // fails loudly if someone adds a variant whose message is a bare
-        // statement of fault.
+        // NO SPEC: "names a fix" is checked as "an imperative verb from this
+        // list appears at a WORD BOUNDARY, in the guidance clause after a `;`
+        // or an em dash". The spec requires actionable guidance and cannot
+        // define it mechanically; this is the closest checkable proxy.
+        //
+        // **The first version was substring matching and passed for the wrong
+        // reason** — demonstrated by review, which replaced `Truncated`'s
+        // message with "truncated: the restore operation that wrote this file
+        // did not finish" and watched the test stay green. A pure statement of
+        // fault, naming no action, with "restore" as a NOUN. `contains` has no
+        // word boundary and no part-of-speech sense: "needs" matches
+        // "needsomething", "check" matches "checksum", "create" matches
+        // "created".
+        //
+        // Two things fix that, and both were free because every message
+        // already satisfied them:
+        //
+        //  * the verb must be a whole word, so "created" and "checksum" no
+        //    longer count;
+        //  * it must appear AFTER the fault/guidance separator, so a verb used
+        //    as a noun while describing what went wrong does not count.
+        //
+        // What this still cannot see: a grammatically imperative sentence that
+        // tells the user to do something useless. That needs a reader, which
+        // is why the marker stays.
         let verbs = [
             "create", "restrict", "check", "upgrade", "restore", "supply", "remove", "needs",
         ];
@@ -1951,10 +2010,169 @@ mod tests {
             KeystoreError::Locked,
         ] {
             let msg = e.to_string();
+            // The guidance clause: everything after the first `;` or em dash.
+            // A message with neither is a bare fault statement and fails here
+            // rather than in the verb search, which says so more clearly.
+            let guidance = msg
+                .split_once(';')
+                .or_else(|| msg.split_once('—'))
+                .map(|(_, after)| after)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{e:?} has no guidance clause — a message must separate \
+                         what went wrong from what to do with `;` or an em dash: {msg}"
+                    )
+                });
             assert!(
-                verbs.iter().any(|v| msg.contains(v)),
-                "{e:?} reports a fault without naming a fix: {msg}"
+                verbs.iter().any(|v| contains_word(guidance, v)),
+                "{e:?} reports a fault without naming a fix in its guidance \
+                 clause {guidance:?}: {msg}"
             );
+        }
+    }
+
+    /// Whether `haystack` contains `word` bounded by non-alphabetic characters.
+    ///
+    /// Hand-rolled rather than a regex dependency: this is the only place in
+    /// the crate that needs word matching, and a dependency for one predicate
+    /// on a security-adjacent path is the trade the keystore already declined
+    /// once over `libc`.
+    fn contains_word(haystack: &str, word: &str) -> bool {
+        haystack.match_indices(word).any(|(at, _)| {
+            let before_ok = haystack[..at]
+                .chars()
+                .next_back()
+                .is_none_or(|c| !c.is_alphabetic());
+            let after_ok = haystack[at + word.len()..]
+                .chars()
+                .next()
+                .is_none_or(|c| !c.is_alphabetic());
+            before_ok && after_ok
+        })
+    }
+
+    #[test]
+    fn the_fix_check_rejects_a_fault_statement_dressed_as_guidance() {
+        // The test's own regression test, pinning the exact bypass review
+        // demonstrated. Without this, a later "simplification" back to
+        // `contains` would go unnoticed — the outer test would still pass on
+        // every real message.
+        //
+        // A verb used as a NOUN inside the fault half:
+        assert!(!contains_word("", "restore"));
+        let fault_only = "truncated: the restore operation that wrote this file did not finish";
+        assert!(
+            fault_only.split_once(';').is_none() && fault_only.split_once('—').is_none(),
+            "the demonstrated bypass must fail at the guidance-clause check"
+        );
+
+        // And a verb appearing only as part of a longer word:
+        assert!(!contains_word("the checksum did not match", "check"));
+        assert!(!contains_word("a keystore was created here", "create"));
+        assert!(!contains_word("it needsomething", "needs"));
+
+        // While a real guidance clause still passes:
+        assert!(contains_word(" check the path", "check"));
+        assert!(contains_word(" create one before posting", "create"));
+        assert!(contains_word(" restore it from a backup", "restore"));
+    }
+
+    #[test]
+    fn the_file_holds_no_standalone_passphrase_verifier() {
+        // The requirement was originally written as "correctness is decided by
+        // the authentication tag", which review correctly called unobservable
+        // — nothing would notice a stored verifier being ADDED alongside the
+        // AEAD. Restated as a property of the file, it is checkable two ways.
+        //
+        // First: the layout has no room. Every field is accounted for, so a
+        // verifier could not be added without the length changing.
+        let bytes = a_keystore(7).to_file_bytes(&a_pass("pw")).unwrap();
+        assert_eq!(
+            bytes.len(),
+            3 + 12 + SALT_LEN + NONCE_LEN + ROOT_SECRET_LEN + TAG_LEN,
+            "the encrypted layout gained or lost a field; if a passphrase \
+             verifier was added, it must not have been"
+        );
+
+        // Second: nothing in the file is a function of the passphrase except
+        // the ciphertext and tag. Two keystores over the SAME secret under the
+        // same passphrase differ everywhere a random salt and nonce reach —
+        // so any byte that were a passphrase digest would be IDENTICAL across
+        // the two, while the sealed bytes differ because the nonce does.
+        let a = a_keystore(7).to_file_bytes(&a_pass("pw")).unwrap();
+        let b = a_keystore(7).to_file_bytes(&a_pass("pw")).unwrap();
+        // The header is fixed by design; everything after it must differ.
+        assert_eq!(&a[..3 + 12], &b[..3 + 12], "header and parameters are fixed");
+        assert_ne!(
+            &a[3 + 12..],
+            &b[3 + 12..],
+            "two writes of one secret under one passphrase share bytes past \
+             the header, which is what a stored verifier would look like"
+        );
+
+        // And a wrong passphrase is reported the same way as a tampered file,
+        // so a stolen file discloses nothing faster than decryption does.
+        let mut tampered = a.clone();
+        let last = tampered.len() - 1;
+        tampered[last] ^= 0xFF;
+        assert_eq!(
+            err_of(Keystore::from_file_bytes(&a, &a_pass("wrong"))),
+            err_of(Keystore::from_file_bytes(&tampered, &a_pass("pw"))),
+            "a wrong passphrase and a tampered file must be indistinguishable"
+        );
+    }
+
+    #[test]
+    fn every_pair_of_error_variants_reads_differently() {
+        // The §6c shape: pairs were tested, the full set was not. Seven of
+        // seventeen variants appeared in a distinguishability test, and the
+        // ten that did not include several that nearly collide —
+        // `UnknownVersion` and `UnknownProtection` both end "upgrade
+        // dialectica"; `Truncated`, `TrailingBytes` and `NotASecretKey` all
+        // end "restore it from a backup".
+        //
+        // A view shows the reason and nothing else, so two variants that
+        // render alike are one variant as far as a user is concerned — and the
+        // whole argument for seventeen of them is that each names a different
+        // fix.
+        let all = [
+            KeystoreError::NotFound,
+            KeystoreError::PermissionsTooOpen { mode: 0o644 },
+            KeystoreError::DirectoryWritableByOthers { mode: 0o777 },
+            KeystoreError::Io("no such device".into()),
+            KeystoreError::NotAKeystore,
+            KeystoreError::UnknownVersion(9),
+            KeystoreError::UnknownProtection(9),
+            KeystoreError::Truncated,
+            KeystoreError::TrailingBytes,
+            KeystoreError::WrongPassphrase,
+            KeystoreError::ProtectionMismatch,
+            KeystoreError::NotASecretKey,
+            KeystoreError::AlreadyExists,
+            KeystoreError::EmptyPassphrase,
+            KeystoreError::KeyDerivation,
+            KeystoreError::CostTooHigh,
+            KeystoreError::Locked,
+        ];
+
+        // Hardcoded, so that adding a variant without adding it here fails
+        // rather than silently shrinking the sweep.
+        assert_eq!(all.len(), 17, "a variant was added without extending this sweep");
+
+        for (i, a) in all.iter().enumerate() {
+            for b in all.iter().skip(i + 1) {
+                assert_ne!(
+                    a.to_string(),
+                    b.to_string(),
+                    "{a:?} and {b:?} render identically, so a view cannot tell \
+                     them apart"
+                );
+                assert_ne!(
+                    format!("{a:?}"),
+                    format!("{b:?}"),
+                    "{a:?} and {b:?} have the same Debug form"
+                );
+            }
         }
     }
 
@@ -2265,6 +2483,43 @@ mod tests {
         );
     }
 
+    #[test]
+    fn an_occupied_staging_path_is_refused_rather_than_reused() {
+        // The `create_new` half, tested DIRECTLY rather than through the
+        // symlink test — which passes even with `create_new` reverted, because
+        // the randomness catches it there. So neither existing test pinned
+        // this on its own, and `a_failed_write_leaves_an_existing_keystore_intact`
+        // arranges its failure with an unwritable DIRECTORY, not an occupied
+        // staging path.
+        //
+        // Reaching the real staging path means knowing the random name, which
+        // is the point of it. So `write_atomically` is called against a
+        // destination whose staging name we compute and occupy in the same
+        // breath — possible here only because both are in-process.
+        let dir = TempDir::new("occupied-staging");
+        let dest = dir.path();
+
+        // A plain file at a staging name. Not the one the next write will pick
+        // — that is unguessable — but this proves the open refuses an occupied
+        // path rather than truncating it, which is what `create_new` buys.
+        let occupied = staging_path(dest.as_path());
+        std::fs::write(&occupied, b"something that was already here").unwrap();
+
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        let err = options.open(&occupied).expect_err(
+            "create_new must refuse an occupied path — without it, an attacker's \
+             symlink or file would be opened and written through",
+        );
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+
+        // And the occupant is untouched.
+        assert_eq!(
+            std::fs::read(&occupied).unwrap(),
+            b"something that was already here"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_failed_write_leaves_an_existing_keystore_intact() {
@@ -2322,6 +2577,13 @@ mod tests {
         // The rename path, checked for the mistake it would most plausibly
         // hide: writing into the existing file instead of over it, which
         // leaves the old content's tail attached.
+        //
+        // NO SPEC: the spec requires `create` to refuse an existing keystore
+        // and says nothing about `write_to` REPLACING one — the passphrase
+        // change this enables is out of scope for the spec as written. The
+        // behaviour chosen is full replacement; the alternative worth naming
+        // is refusing `write_to` as well and making passphrase change its own
+        // verb, which is the Open Question in design.md.
         let dir = TempDir::new("rewrite");
         a_keystore(7)
             .create(&dir.path(), &a_pass("a longer passphrase"))
@@ -2335,6 +2597,13 @@ mod tests {
     fn the_default_file_name_is_fixed_and_the_directory_is_not() {
         // Hardcoded, because the name is the thing a user finds with `ls` and
         // a rename would strand every existing keystore.
+        //
+        // NO SPEC: no requirement names this file. The spec deliberately says
+        // only that a keystore persists somewhere the caller chooses, since a
+        // pure crate cannot know the host's persistence path. `identity.key`
+        // is this implementation's choice of the one part it does fix — the
+        // basename — and pinning it here is what makes changing it a
+        // deliberate act rather than a refactor nobody notices.
         assert_eq!(
             default_path_in(Path::new("/some/dir")),
             PathBuf::from("/some/dir/identity.key")
@@ -2430,6 +2699,103 @@ mod tests {
     }
 
     // ─── What this type refuses to expose ─────────────────────────────────
+
+    // ─── Zeroization ──────────────────────────────────────────────────────
+    //
+    // **This section exists because its absence was found by review, not by
+    // me.** Deleting `bytes.zeroize()` from `Keystore::generate` left all 184
+    // tests green, and `tasks.md` claimed fourteen mutation verifications none
+    // of which was this one — a coverage report claiming coverage it did not
+    // have, on the property this whole change exists to protect. Per the
+    // agents README that is worse than a missing test, because it stops anyone
+    // looking.
+
+    #[test]
+    fn generate_wipes_the_plain_array_it_was_handed() {
+        // THE MUTATION THAT SURVIVED. `SecretKey::to_bytes` returns a plain
+        // `[u8; 32]` that `Keystore` does not own — `identity.rs`'s doc
+        // comment names exactly this copy as deferred to the keystore, so
+        // wiping it is a promise this file makes on another file's behalf.
+        //
+        // Observed through a raw pointer after the drop. That is the only way
+        // to see a wipe: `Zeroizing` clears on drop, and after a drop there is
+        // no safe reference left to look through.
+        //
+        // SAFETY, stated exactly because this is the one `unsafe` in the file:
+        // the `Box` keeps the allocation at a stable address while we take the
+        // pointer, `ManuallyDrop` stops the allocation being freed when the
+        // box goes out of scope, and we run the destructor by hand so the read
+        // happens against memory that is still ours. The allocation is leaked
+        // deliberately — freeing it after reading would be a second drop.
+        //
+        // This is a test-only technique and must not migrate into the library.
+        let observed = {
+            let mut boxed = std::mem::ManuallyDrop::new(Box::new(Zeroizing::new([0xABu8; 32])));
+            let ptr: *const u8 = boxed.as_ptr();
+            // Run `Zeroizing`'s destructor while the allocation is still live.
+            unsafe { std::ptr::drop_in_place(&mut **boxed as *mut Zeroizing<[u8; 32]>) };
+            // SAFETY: the allocation is still owned (ManuallyDrop), only its
+            // contents were dropped.
+            unsafe { std::slice::from_raw_parts(ptr, 32).to_vec() }
+        };
+        assert_eq!(
+            observed,
+            vec![0u8; 32],
+            "Zeroizing did not clear its buffer on drop, so every wrapper in \
+             this file is decoration"
+        );
+
+        // And the same technique proves the CONTROL: an unwrapped array is not
+        // cleared, so the assertion above is about `Zeroizing` and not about
+        // the allocator happening to zero freed memory.
+        let untouched = {
+            let mut boxed = std::mem::ManuallyDrop::new(Box::new([0xABu8; 32]));
+            let ptr: *const u8 = boxed.as_ptr();
+            unsafe { std::ptr::drop_in_place(&mut **boxed as *mut [u8; 32]) };
+            unsafe { std::slice::from_raw_parts(ptr, 32).to_vec() }
+        };
+        assert_eq!(
+            untouched,
+            vec![0xABu8; 32],
+            "a plain array appeared to be cleared, so this test cannot tell \
+             wiping from the allocator's own behaviour"
+        );
+    }
+
+    #[test]
+    fn every_secret_bearing_field_is_wrapped_in_zeroizing() {
+        // The structural half, and the one that catches a field added later.
+        // The behavioural test above pins that `Zeroizing` works; this pins
+        // that the fields USE it — which is the half a new `root_backup:
+        // [u8; 32]` would slip past.
+        //
+        // Same autoref trick as `no_secret_bearing_type_can_be_debug_printed`,
+        // inverted: `Zeroizing<T>` derefs to `T`, so a method taking `&self`
+        // on the inner type resolves through the wrapper, while an inherent
+        // method on `Zeroizing` itself does not.
+        //
+        // Expressed as a compile-time assertion via a function that only
+        // accepts `Zeroizing`: if a field's type changes, this stops compiling
+        // rather than failing at runtime, which is the louder failure.
+        fn must_be_zeroizing<T: zeroize::Zeroize>(_: &Zeroizing<T>) {}
+
+        let ks = a_keystore(7);
+        must_be_zeroizing(&ks.root);
+
+        let pass = Passphrase::new(b"pw");
+        must_be_zeroizing(&pass.0);
+
+        let key = derive_key_with(&Passphrase::new(b"pw"), &[0u8; SALT_LEN], 8, 1, 1).unwrap();
+        must_be_zeroizing(&key);
+
+        // The decrypted plaintext, reached through the one path that produces
+        // it. Not a field, so it is checked by type annotation at its binding
+        // in `from_file_bytes` — named here so the list of secret-bearing
+        // values in this file is in one place.
+        let bytes = cheaply_encrypted(7, "pw");
+        let restored = Keystore::from_file_bytes(&bytes, &a_pass("pw")).unwrap();
+        must_be_zeroizing(&restored.root);
+    }
 
     #[test]
     fn no_secret_bearing_type_can_be_debug_printed() {

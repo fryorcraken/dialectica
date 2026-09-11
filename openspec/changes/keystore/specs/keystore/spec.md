@@ -264,16 +264,21 @@ Setting restrictive permissions at creation time does not prevent this: those pe
 - **WHEN** anything already exists at the intermediate path
 - **THEN** the write fails rather than opening or truncating it
 
-### Requirement: The permissions checked are the permissions of the bytes read
+### Requirement: A keystore substituted mid-operation is not used
 
-The permission check and the read SHALL be performed against the same opened file, not against the same path name resolved twice.
+An operation SHALL NOT check one file and then act on another. Where a check and a use both concern the keystore, they SHALL concern the same file, so that replacing what is at the path between them cannot produce a use of content that was never checked.
 
-Two resolutions of one name are two different files as far as an attacker is concerned: what is checked can be replaced before what is read. A check performed on a path also follows symlinks, so it can describe a file other than the one whose contents are used.
+Two resolutions of one name are two different files as far as an attacker is concerned. A check performed on a path also follows symlinks, so it can describe a file other than the one whose contents are used.
 
-#### Scenario: A keystore is read at most once per operation
+#### Scenario: Content that passed no permission check is never used
 
-- **WHEN** an operation needs both the keystore's protection state and its contents
-- **THEN** the file is read once and both answers come from those bytes
+- **WHEN** the file at the keystore path is replaced after its permissions are checked and before its contents are used
+- **THEN** the contents of the replacement are not used
+
+#### Scenario: A symlink's target does not inherit the check
+
+- **WHEN** the keystore path is a symlink to a file with different permissions
+- **THEN** the permissions that decide the outcome are those of the file whose bytes are read
 
 #### Scenario: Oversized input is refused without being read into memory
 
@@ -297,16 +302,25 @@ Error strings cross the module boundary to a view, which may log or display them
 - **WHEN** loading fails because the file is malformed
 - **THEN** the message describes the structural problem without reproducing the file's bytes
 
-### Requirement: The passphrase check is not a byte comparison
+### Requirement: The keystore stores nothing that can verify a passphrase on its own
 
-Verification that a passphrase is correct SHALL be the authenticated cipher's own tag check, which is constant-time, and SHALL NOT be an ordinary equality comparison against a stored digest.
+The keystore file SHALL NOT contain any value that can be checked against a passphrase independently of decrypting the secret — no digest of the passphrase, no magic value inside the plaintext, no checksum a caller could compare.
 
-A short-circuiting comparison against a stored value leaks how much of a guess was right, which turns an offline attack on the file into a faster one.
+Such a value is what an ordinary equality comparison gets used on, and an equality comparison on a secret-derived value short-circuits: it leaks how much of a guess was right, turning an offline attack on the file into a faster one. Having no verifier at all removes the temptation rather than relying on every future comparison being written carefully.
 
-#### Scenario: Correctness is decided by the authentication tag
+It also bounds what a stolen file discloses: without a verifier, an attacker cannot tell a wrong passphrase from a corrupt file any faster than the authenticated decryption can.
 
-- **WHEN** a passphrase is checked
-- **THEN** the decision comes from the cipher's authentication, and no separate stored verifier is compared
+#### Scenario: A wrong passphrase and a tampered file are indistinguishable
+
+- **WHEN** unlocking fails because the passphrase is wrong
+- **AND** unlocking fails because the ciphertext was altered
+- **THEN** the two failures are reported identically
+
+#### Scenario: The file is exactly its declared layout, with no room for a verifier
+
+- **WHEN** a keystore is written
+- **THEN** its length is exactly that of its declared fields
+- **AND** no field holds a value derived from the passphrase other than the ciphertext and its authentication tag
 
 ### Requirement: Secret material is cleared when dropped
 
