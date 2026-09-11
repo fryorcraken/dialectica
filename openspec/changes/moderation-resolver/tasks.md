@@ -108,6 +108,10 @@ report.
 - [x] `Unhide` no longer reverses → 5 fail
 - [x] Kind filter widened → 8 fail
 - [x] Validate-after-select instead of skip-and-continue → 4 fail
+- [x] `Hide`-wins tie-break removed → 1 fails (the veto regression test)
+- [x] Tie-break applied unconditionally, not just in the degraded branch → 3
+      fail. Both directions matter: the first proves the fix does something, the
+      second proves it does not break reversibility once real ordering arrives.
 
 **One defect found this way.** `each_stoas_moderator_binds_only_in_their_own_stoa`
 originally gave the two Stoas different creators, so the authority check alone
@@ -158,9 +162,45 @@ our own restatements of it false:
   places first" and adds an explicit SHALL NOT against reading the leading op as
   the most recently published one.
 
-## 8. Gates
+## 8. Security review findings, addressed
 
-- [x] `cargo test -p dialectica-core` — 206 pass (178 inherited, 28 ours)
+- [x] **[HIGH] A `Hide` could be permanently defeated by hash luck.** A
+      `Moderate` op carries no nonce, so exactly two ops can exist per
+      {Stoa, moderator, target}, and under the degraded order the lower-hashing
+      one won forever. A bare pre-emptive `Unhide` was therefore a permanent
+      veto, and grindable through the Stoa title. **Verified independently
+      before fixing**: in the shipped `agora()` fixture the unhide does hash
+      lower. Closed by preferring `Hide` when neither candidate was
+      transport-ordered — argued in `design.md`, and confined to the degraded
+      branch so real ordering still reverses.
+- [x] **[MEDIUM] A test could not fail for the reason its name gave.**
+      `a_moderator_may_reverse_a_moderation_they_did_not_place` had one
+      moderator, so the any-moderator and only-the-placer rules agreed on its
+      fixture. Renamed to
+      `the_authority_predicate_consults_the_set_and_not_the_earlier_ops_author`,
+      which is what the body supports; the two-moderator claim moved into the
+      marker as explicitly untestable, and `spec.md`'s scenario now says so too.
+- [x] **[LOW] Blast radius recorded.** One compromised moderator key can
+      `Unhide` every moderation in the Stoa, unrecoverably except by forking,
+      until §6.2's thresholds land. Now in both the marker and `design.md`.
+- [x] **Test gap closed.** `an_unauthorised_op_does_not_displace_an_authorised_one`
+      pinned skip-and-continue only on the transport-ordered branch, which
+      production never reaches. Added
+      `..._in_the_degraded_order`, whose Stoa is **searched** for one where the
+      forgery sorts first — `agora()` is not such a Stoa, and asserting blindly
+      made the test fail on its first run.
+
+### One test had to be reworked rather than kept
+
+`the_degraded_order_decides_when_the_transport_ordered_nothing` used a
+hide/unhide pair, which the tie-break now governs — so the old fixture would
+have kept passing while measuring a different property. It now uses two
+`Unhide`s (one binding, one not), where the tie-break has no opinion and the
+op-id fallback is what is actually under test.
+
+## 9. Gates
+
+- [x] `cargo test -p dialectica-core` — 210 pass (178 inherited, 32 ours)
 - [x] `cargo clippy -p dialectica-core --all-targets -- -D warnings` — clean
 - [x] `cargo fmt -p dialectica-core --check` — **14 pre-existing hunks**,
       measured by stashing this change and re-running, 0 introduced. Three were

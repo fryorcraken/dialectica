@@ -1076,6 +1076,24 @@ the op that decided. `Moderate` carries `Hide` or `Unhide`, ordered by §5.7's
 rule. Not built: applying it in a materialised view, and everything below that
 depends on a mutable moderator set.
 
+**"A hide binds" is conditional on an ordering the transport does not yet
+supply, and that is the sharpest limitation in this section.** §5.7 orders
+competing moderations by Lamport timestamp; no Lamport value reaches us
+(§13), so every op is unordered and the fallback is ascending op id. A
+`Moderate` op carries no nonce and no timestamp, so for one Stoa, one moderator
+and one target there are **exactly two possible ops** — and an unordered
+comparison between them resolves the same way forever. Last-write-wins has no
+"last" to consult.
+
+The resolver closes the dangerous half by preferring `Hide` when neither
+candidate was transport-ordered, so a pre-emptive `Unhide` cannot veto future
+moderation. What that does **not** restore is the ability to *reverse* a hide:
+until Lamport values arrive, an `Unhide` competing with a `Hide` of the same
+target loses regardless of when it was published. A moderator who hides
+something by mistake cannot currently un-hide it by publishing an `Unhide`
+alone. That is deliberate — the alternative was the veto — and it resolves
+itself when §13's upstream gap closes, with no change to this code.
+
 The record carries **no per-peer value** — no epoch, no session counter. Every
 peer hashes it to obtain the Stoa's address, so a value varying with one peer's
 history gives that peer a different address for the same Stoa: two Stoas that

@@ -85,6 +85,14 @@ Where a target has more than one binding moderation, the outcome SHALL be the on
 
 "First" is the ordering rule's position and nothing else. That rule leads with the highest Lamport timestamp where the transport supplied one, and otherwise falls back to a defined order that carries no recency — so a reader SHALL NOT treat the leading op as the most recently published one, and SHALL NOT substitute any other notion of recency for the rule's position.
 
+**Where no competing moderation was ordered by the transport, `hide` SHALL decide.** This SHALL NOT apply where the leading moderation was ordered by the transport: there the ordering rule's position stands unmodified.
+
+The asymmetry exists because a moderation op is fully determined by its Stoa, author, target and action, with no nonce and no timestamp. For one Stoa, one moderator and one target there are therefore exactly two possible ops with two fixed identifiers, and an unordered comparison between them resolves the same way forever — so the rule would hand permanent victory to whichever identifier happened to sort first. That is not last-write-wins degrading; it lets a single pre-emptive `unhide`, published before any moderation exists and then abandoned, veto every future `hide` of that target on every conforming peer. It is also cheap to arrange, because the Stoa's creator chooses the title that determines the address that both identifiers are derived from.
+
+Preferring `hide` is the recoverable direction. An `unhide` winning wrongly un-moderates content with no remedy available to any moderator; a `hide` winning wrongly leaves content hidden that a moderator can lift as soon as the transport supplies an order. Biasing the transport-ordered branch would be the opposite trade — it would make every hide permanent — which is why the rule is confined to the degraded one.
+
+This preference is computed from the candidate ops alone, so every peer holding the same ops still reaches the same answer.
+
 Last-write-wins over a set of one is not an ordering, and a moderation system with no correction path makes every mistake permanent. The ordering rule is the same one that orders an author's revisions: no second rule is invented for moderation.
 
 Ops that are not binding SHALL NOT participate in this ordering at all: a more recent op that fails authenticity, authority or scope SHALL NOT displace an older binding one, and SHALL NOT be reported as the deciding moderation.
@@ -106,10 +114,24 @@ Ops that are not binding SHALL NOT participate in this ordering at all: a more r
 - **THEN** the target is still reported as hidden
 - **AND** the moderator's hide is named as the deciding moderation
 
+#### Scenario: A pre-emptive unhide does not veto a later hide
+
+- **WHEN** a moderator's `unhide` of a target precedes their `hide` of it under the ordering rule, and neither was ordered by the transport
+- **THEN** the target is reported as hidden
+- **AND** the outcome does not depend on which op's identifier sorts first
+
+#### Scenario: A transport-ordered unhide still reverses a hide
+
+- **WHEN** a moderator's hide and a later unhide of one target were both ordered by the transport
+- **THEN** the target is not reported as hidden
+- **AND** the preference for `hide` does not apply
+
 #### Scenario: A moderator may reverse a moderation they did not place
 
 - **WHEN** one moderator's hide is followed by an unhide from a different moderator of the same Stoa
 - **THEN** the unhide takes effect
+
+**Not verifiable in this change.** It needs two distinct moderators of one Stoa, and the moderator set is the creator alone until a mutable set exists. What is verified is the structural precondition — that authority is decided by membership in the moderator set and not by comparison with an earlier op's author. Anything relying on this scenario should treat it as specified intent, not as covered behaviour.
 
 #### Scenario: Ordering does not depend on the sequence ops were received in
 

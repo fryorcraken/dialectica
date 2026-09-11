@@ -216,6 +216,16 @@ next author does not have to rediscover it:
 - **Two moderators editing the set concurrently is the open question**, and
   nothing here answers it. It is unreachable today: the only way into the set is
   the genesis record, which is immutable.
+- **The blast radius of one compromised key.** Because any moderator may reverse
+  any moderation (the marker on
+  `the_authority_predicate_consults_the_set_and_not_the_earlier_ops_author`),
+  a single compromised moderator key can `Unhide` **every** moderation in the
+  Stoa — and with the creator as sole moderator there is no recovery short of
+  forking the Stoa. That is the cost of the reversibility §13 asked for, and
+  §6.2's threshold certificates are the intended answer: an action takes N of M
+  signatures, so one key stops being enough. Recorded here because the choice is
+  right and the exposure is real, and a reader weighing the marker should see
+  both.
 - **`log.rs`'s reason for not filtering on append becomes live.** Its second
   argument — "an op that is unauthorised under today's set may be authorised under
   the set that a not-yet-received op establishes" — is currently true but not
@@ -234,8 +244,68 @@ say so, and this design cites them rather than restating the argument.
 
 What the fold actually needs is weaker than recency and holds under both
 branches: the rule defines *a* first position, and every peer computes the same
-one from the ops alone. So the same code is correct before and after the upstream
-fix, and no branch here has to be revisited.
+one from the ops alone.
+
+**That argument is correct about the fold and was wrong about the decision, and
+the gap between those two is worth naming.** It establishes *convergence* —
+every peer agrees — and then quietly treats convergence as sufficient. It never
+asks whether last-write-wins is meaningful at all when there is no "last". It is
+not, and the next decision is the consequence.
+
+### Decision: `Hide` wins the tie where nothing was transport-ordered
+
+Found by security review, after the reasoning above had been written and
+believed.
+
+A `Moderate` op is fully determined by `{stoa, author, target, action}`. No
+nonce, no timestamp, no free byte. So for one Stoa, one moderator and one target
+**exactly two ops can ever exist**, with two fixed op ids — and since every
+arrival today is unordered, the comparison between them is a constant. Whichever
+id is lower would win permanently: not "until something newer arrives", but
+forever, because nothing newer can be constructed.
+
+That turns a bare `Unhide` into a **pre-emptive veto**. Publish one naming a
+target nobody has moderated, discard the key, and if the pair hashes the wrong
+way that target can never be hidden by anyone on any conforming peer. It is
+grindable, too: the creator picks the Stoa title, the title fixes the address,
+and the address is inside both op ids — review found a favourable title in four
+attempts, and `a_stoa_where_the_hide_hashes_lower` makes that search repeatable.
+
+So when **neither** candidate was transport-ordered, a `Hide` beats an `Unhide`
+regardless of op id.
+
+**Why this direction.** The two errors are not symmetric. An `Unhide` winning
+wrongly un-moderates content with no remedy any moderator can reach; a `Hide`
+winning wrongly leaves something hidden that a moderator can lift the moment
+real ordering arrives. Fail-safe is the recoverable side, and it is the same
+asymmetry `stoa.rs` used to refuse an unknown policy rather than default to
+`open`.
+
+**Confined to the degraded branch**, which is the part most likely to be got
+wrong by a later edit. Where the transport supplied Lamport values, §5.7's rule
+is real and last-write-wins stands untouched — biasing there would make every
+hide permanent, a worse bug than the one being closed.
+`a_transport_ordered_unhide_still_reverses_a_hide` pins it.
+
+**Why not in `cmp_ops`.** Two reasons. It is moderation semantics, and a general
+comparator has no business knowing that one op kind's payload is safer to
+prefer; and `cmp_ops` orders *all* ops, so a bias there would silently reach the
+revision resolver too.
+
+**What it costs, stated plainly.** Until Lamport values arrive, an `Unhide`
+cannot reverse a `Hide` of the same target — reversibility, which §13 asked for
+and `op.rs` named `Unhide` to provide, is suspended in the degraded order. That
+is a real loss and it is the smaller one. It resolves itself when the upstream
+gap closes, with no change to this code.
+
+**What would reverse this.** Real Lamport values reaching the resolver: the
+tie-break then never fires, because the ordered branch takes every comparison.
+It becomes dead code that should be deleted rather than left as a trap, and
+`a_transport_ordered_unhide_still_reverses_a_hide` is the test that will still
+pass when it is.
+
+So the same code is correct before and after the upstream fix, and the one
+branch that has to be revisited is named here.
 
 The tests exercise both: fixtures with `Arrival::ordered(..)` for the rule as
 §5.7 states it, and fixtures with `Arrival::unordered()` for the order production

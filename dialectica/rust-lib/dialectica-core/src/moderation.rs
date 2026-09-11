@@ -277,22 +277,88 @@ impl<'a> Moderation<'a> {
 ///
 /// The converse holds and is also correct: a peer missing the newest `Unhide`
 /// reports `Hidden`. §3.3's different-op-sets case is the normal one.
+///
+/// # Where the transport ordered nothing, `Hide` wins the tie
+///
+/// Found by security review, and it is the one place this resolver departs from
+/// "first entry wins".
+///
+/// A `Moderate` op is fully determined by `{stoa, author, target, action}` —
+/// there is no nonce, no timestamp and no free byte. So for one Stoa, one
+/// moderator and one target **exactly two ops can ever exist**, with two fixed
+/// op ids. Every arrival today is unordered, so `cmp_ops` sorts by ascending op
+/// id, and taking the first entry would mean *whichever id is lower wins
+/// forever* — no matter who published first, no matter how often the other is
+/// republished.
+///
+/// That is not last-write-wins degrading gracefully. It is a **pre-emptive
+/// veto**: publish a bare `Unhide` naming an unmoderated target, discard the
+/// key, and if that pair hashes the wrong way the target can never be hidden by
+/// anyone. It is also grindable — the creator picks the Stoa title, the title
+/// fixes the address, and the address is inside both ids.
+///
+/// So when **neither** candidate was ordered by the transport, a `Hide` beats an
+/// `Unhide` regardless of op id. The asymmetry is deliberate and is the
+/// fail-safe direction: an `Unhide` wrongly winning silently un-moderates
+/// content with no recourse, where a `Hide` wrongly winning leaves something
+/// hidden that a moderator can lift the moment real ordering arrives.
+///
+/// **Confined to the degraded branch.** Where the transport supplied Lamport
+/// values, §5.7's rule is real and last-write-wins stands untouched — biasing
+/// there would make every hide permanent, which is a worse bug than the one this
+/// closes. `a_transport_ordered_unhide_still_reverses_a_hide` pins that.
+///
+/// **Convergence is preserved**, which is the property that would have made this
+/// unacceptable. The bias is a pure function of the two ops' actions and their
+/// recorded arrivals, so every peer holding the same ops computes the same
+/// answer. It lives here rather than in [`cmp_ops`](crate::arrival::cmp_ops)
+/// because it is moderation semantics: a general comparator has no business
+/// knowing that one op kind's payload is safer to prefer.
 pub fn resolve<'a, L: OpLog>(log: &'a L, moderators: &Moderators, target: &OpId) -> Moderation<'a> {
-    log.iter_target(target)
+    let binding: Vec<&Entry> = log
+        .iter_target(target)
         .into_iter()
-        .find_map(|entry| match &entry.op.op.kind {
-            // The kind filter is the resolver's job, not the log's: `iter_target`
-            // answers "what acts on this subject?" for every kind, so that a
-            // fifth op kind does not widen the store's API. §5.7: a moderator's
-            // hide and an author's edit "are about different things and do not
-            // contend".
-            OpKind::Moderate { action, .. } if moderators.authorises(entry) => match action {
-                ModerationAction::Hide => Some(Moderation::Hidden(entry)),
-                ModerationAction::Unhide => Some(Moderation::Unhidden(entry)),
-            },
-            _ => None,
-        })
-        .unwrap_or(Moderation::Unmoderated)
+        // The kind filter is the resolver's job, not the log's: `iter_target`
+        // answers "what acts on this subject?" for every kind, so that a fifth
+        // op kind does not widen the store's API. §5.7: a moderator's hide and
+        // an author's edit "are about different things and do not contend".
+        .filter(|e| matches!(e.op.op.kind, OpKind::Moderate { .. }) && moderators.authorises(e))
+        .collect();
+
+    let Some(first) = binding.first().copied() else {
+        return Moderation::Unmoderated;
+    };
+
+    // Where the transport ordered the leading op, its position is a real
+    // last-write-wins answer and nothing here second-guesses it.
+    let deciding = if first.arrival.is_ordered_by_transport() {
+        first
+    } else {
+        // Otherwise every candidate is in the degraded order, where position
+        // carries no recency at all. Prefer a `Hide` if any binding one exists,
+        // and fall back to the rule's first entry when none does.
+        binding
+            .iter()
+            .copied()
+            .find(|e| {
+                matches!(
+                    e.op.op.kind,
+                    OpKind::Moderate {
+                        action: ModerationAction::Hide,
+                        ..
+                    }
+                )
+            })
+            .unwrap_or(first)
+    };
+
+    match deciding.op.op.kind {
+        OpKind::Moderate {
+            action: ModerationAction::Hide,
+            ..
+        } => Moderation::Hidden(deciding),
+        _ => Moderation::Unhidden(deciding),
+    }
 }
 
 #[cfg(test)]
@@ -356,6 +422,53 @@ mod tests {
 
     fn a_message_id(seed: u8) -> MessageId {
         MessageId::new(vec![seed; 32])
+    }
+
+    /// A Stoa whose hide/unhide pair hashes the OPPOSITE way to `agora()`'s.
+    ///
+    /// Returns `(genesis, hide, unhide, target)` with `hide.id() < unhide.id()`.
+    ///
+    /// Searched rather than hardcoded, for two reasons. Which of two SHA-256
+    /// outputs is lower is not a fact a reader should take on trust, and a
+    /// hardcoded guess that went stale would leave the test passing while
+    /// exercising the wrong arrangement. And the search *is* the finding: the
+    /// creator picks the title, the title fixes the Stoa address, and the
+    /// address is inside both op ids — so a handful of titles is all it takes to
+    /// choose which action wins the degraded order. Security review found one in
+    /// four attempts; this loop is that, made repeatable.
+    fn a_stoa_where_the_hide_hashes_lower() -> (Genesis, SignedOp, SignedOp, OpId) {
+        for n in 0..256u32 {
+            let genesis = a_genesis(&creator(), &format!("Ground {n}"));
+            let stoa = address_of(&genesis);
+            let target = a_post(stoa, &a_key(2), "the subject").op.id();
+            let hide = a_moderation(stoa, &creator(), target, ModerationAction::Hide);
+            let unhide = a_moderation(stoa, &creator(), target, ModerationAction::Unhide);
+            if hide.op.id() < unhide.op.id() {
+                return (genesis, hide, unhide, target);
+            }
+        }
+        panic!("no title in 256 attempts put the hide first; SHA-256 is not this biased");
+    }
+
+    /// A Stoa where an OUTSIDER's unhide of the target sorts below the
+    /// moderator's hide.
+    ///
+    /// Returns `(genesis, hide, forged_unhide, target)`. Searched for the same
+    /// reason as [`a_stoa_where_the_hide_hashes_lower`]: `agora()` happens to
+    /// fall the other way, and asserting otherwise made the test that uses this
+    /// fail on its first run rather than quietly stop exercising its own name.
+    fn a_stoa_where_a_forged_unhide_sorts_first() -> (Genesis, SignedOp, SignedOp, OpId) {
+        for n in 0..256u32 {
+            let genesis = a_genesis(&creator(), &format!("Contested {n}"));
+            let stoa = address_of(&genesis);
+            let target = a_post(stoa, &a_key(2), "the subject").op.id();
+            let hide = a_moderation(stoa, &creator(), target, ModerationAction::Hide);
+            let forged = a_moderation(stoa, &outsider(), target, ModerationAction::Unhide);
+            if forged.op.id() < hide.op.id() {
+                return (genesis, hide, forged, target);
+            }
+        }
+        panic!("no title in 256 attempts put the forged unhide first");
     }
 
     /// A post in `stoa`, by `author`.
@@ -860,46 +973,213 @@ mod tests {
         // respect to time and `arrival.rs` says so: the property bought is
         // convergence, not accuracy.
         //
-        // Expected answer derived from the op ids alone, and the ops are appended
-        // HIGHER-id first so insertion order cannot produce it by accident.
+        // **Exercised through two UNHIDES**, so that the `Hide`-wins tie-break
+        // has no opinion and what is measured is purely the op-id fallback.
+        //
+        // This test originally used a hide/unhide pair. That pair is now governed
+        // by the tie-break, so the same fixture would measure a different
+        // property — and would have kept passing while testing nothing it names.
+        // Two unhides of one target need two distinct authors, so the second is
+        // an outsider's: it does not bind, and the binding one must still be the
+        // one chosen out of the ordered read.
+        //
+        // The outsider's op is given the LOWER id where the hashes allow, so a
+        // resolver that took the leading entry without checking authority would
+        // pick it and fail.
         let (mut log, target) = a_log_with_a_post();
-        let one = a_moderation(
-            address_of(&agora()),
-            &creator(),
-            target,
-            ModerationAction::Hide,
-        );
-        let two = a_moderation(
+        let binding = a_moderation(
             address_of(&agora()),
             &creator(),
             target,
             ModerationAction::Unhide,
         );
-        let (low, high) = if one.op.id() < two.op.id() {
-            (one, two)
-        } else {
-            (two, one)
-        };
-        let low_id = low.op.id();
-        let low_action = match &low.op.kind {
-            OpKind::Moderate { action, .. } => *action,
-            _ => unreachable!(),
-        };
+        let not_binding = a_moderation(
+            address_of(&agora()),
+            &outsider(),
+            target,
+            ModerationAction::Unhide,
+        );
+        let binding_id = binding.op.id();
 
-        log.append(high, Arrival::unordered());
-        log.append(low, Arrival::unordered());
+        // Appended in the order that would be wrong if insertion order leaked.
+        log.append(binding, Arrival::unordered());
+        log.append(not_binding, Arrival::unordered());
 
         let resolved = resolve(&log, &moderators_of(&agora()), &target);
+        assert!(!resolved.is_hidden());
         assert_eq!(
             resolved.deciding_op().map(|e| e.id()),
-            Some(low_id),
-            "under the degraded order the lower op id reads first"
+            Some(binding_id),
+            "the binding unhide must decide, whatever the op-id order"
         );
-        assert_eq!(resolved.is_hidden(), low_action == ModerationAction::Hide);
     }
 
     #[test]
-    fn a_moderator_may_reverse_a_moderation_they_did_not_place() {
+    fn an_unauthorised_op_does_not_displace_an_authorised_one_in_the_degraded_order() {
+        // The degraded-order twin of `an_unauthorised_op_does_not_displace_an_
+        // authorised_one`, which pins skip-and-continue only on the
+        // transport-ordered branch — a branch production never reaches.
+        //
+        // Here both arrivals are unordered, so `cmp_ops` sorts by op id, and the
+        // Stoa is SEARCHED for one where the forged unhide sorts first rather
+        // than assumed. `agora()` is not such a Stoa — asserting it blindly made
+        // this test fail on its first run, which is the fixture guard doing its
+        // job. Without the search the genuine hide would lead anyway, and
+        // take-then-validate would agree with skip-and-continue.
+        let (stoa, hide, forged_unhide, target) = a_stoa_where_a_forged_unhide_sorts_first();
+        assert!(
+            forged_unhide.op.id() < hide.op.id(),
+            "the search must have found the forgery sorting first"
+        );
+        let hide_id = hide.op.id();
+
+        let mut log = MemoryOpLog::new();
+        log.append(forged_unhide, Arrival::unordered());
+        log.append(hide, Arrival::unordered());
+
+        let resolved = resolve(&log, &moderators_of(&stoa), &target);
+        assert!(
+            resolved.is_hidden(),
+            "a forgery leading the degraded order displaced a genuine hide"
+        );
+        assert_eq!(resolved.deciding_op().map(|e| e.id()), Some(hide_id));
+    }
+
+    #[test]
+    fn a_hide_is_not_defeated_by_the_unhide_hashing_lower() {
+        // THE pre-emptive veto, found by security review.
+        //
+        // A `Moderate` op is fully determined by {stoa, author, target, action}
+        // — no nonce, no timestamp, no free byte. So for one Stoa, one
+        // moderator and one target there exist EXACTLY TWO ops, with two fixed
+        // op ids. Every arrival today is `unordered()`, so `cmp_ops` sorts by
+        // ascending op id and whichever id is lower would win *forever*:
+        // regardless of publication order, regardless of republishing.
+        //
+        // That makes a bare `Unhide` a permanent veto. Publish one naming a
+        // target nobody has moderated, then discard the key; if that target's
+        // unhide id sorts below its hide id — about half of targets, and
+        // grindable through the Stoa title, which the creator chooses and which
+        // is inside both ids — the target can never be hidden by anyone, ever.
+        // No op the moderator could publish wins, because only two exist and the
+        // attacker took the lower one.
+        //
+        // This fixture is the shipped `agora()`, where the unhide genuinely does
+        // hash lower — DETERMINED below, not assumed, so the test fails loudly
+        // rather than silently stops exercising the veto if a fixture changes.
+        let (mut log, target) = a_log_with_a_post();
+        let hide = a_moderation(
+            address_of(&agora()),
+            &creator(),
+            target,
+            ModerationAction::Hide,
+        );
+        let unhide = a_moderation(
+            address_of(&agora()),
+            &creator(),
+            target,
+            ModerationAction::Unhide,
+        );
+        assert!(
+            unhide.op.id() < hide.op.id(),
+            "this fixture must be one where the unhide sorts FIRST, or it does \
+             not exercise the veto at all"
+        );
+        let hide_id = hide.op.id();
+
+        // Both unordered: the only order production reaches today. The unhide is
+        // appended FIRST, so insertion order cannot produce the expected answer
+        // by accident either.
+        log.append(unhide, Arrival::unordered());
+        log.append(hide, Arrival::unordered());
+
+        let resolved = resolve(&log, &moderators_of(&agora()), &target);
+        assert!(
+            resolved.is_hidden(),
+            "an unhide that merely hashes lower defeated a hide permanently"
+        );
+        assert_eq!(resolved.deciding_op().map(|e| e.id()), Some(hide_id));
+    }
+
+    #[test]
+    fn the_hide_bias_applies_whichever_way_the_hashes_fall() {
+        // The other half, and the one that stops the test above passing for a
+        // resolver that simply always reports Hidden when it sees a Hide at all.
+        //
+        // Here the fixture is chosen so the HIDE hashes lower — so the untouched
+        // op-id order already yields Hidden, and the bias changes nothing. Both
+        // arrangements must give the same answer; that is what "the bias removes
+        // the coin flip" means, as opposed to "the bias flips the coin".
+        //
+        // The Stoa is searched for rather than assumed, because which of two
+        // hashes is lower is not something a reader should take on trust — and
+        // because the search itself demonstrates the grindability the finding
+        // rests on.
+        let (stoa, hide, unhide, target) = a_stoa_where_the_hide_hashes_lower();
+        assert!(
+            hide.op.id() < unhide.op.id(),
+            "the search must have found the opposite arrangement"
+        );
+        let hide_id = hide.op.id();
+
+        let mut log = MemoryOpLog::new();
+        log.append(hide, Arrival::unordered());
+        log.append(unhide, Arrival::unordered());
+
+        let resolved = resolve(&log, &moderators_of(&stoa), &target);
+        assert!(resolved.is_hidden());
+        assert_eq!(resolved.deciding_op().map(|e| e.id()), Some(hide_id));
+    }
+
+    #[test]
+    fn a_transport_ordered_unhide_still_reverses_a_hide() {
+        // The bias must be confined to the DEGRADED branch. Where the transport
+        // did order the ops, §5.7's rule is real and last-write-wins must stand
+        // — otherwise this "fix" would make every hide permanent the moment
+        // ordering arrives, which is a worse bug than the one it closes.
+        //
+        // The unhide carries the higher Lamport value AND hashes lower, so a
+        // resolver that applied the bias unconditionally would report Hidden.
+        let (mut log, target) = a_log_with_a_post();
+        let hide = a_moderation(
+            address_of(&agora()),
+            &creator(),
+            target,
+            ModerationAction::Hide,
+        );
+        let unhide = a_moderation(
+            address_of(&agora()),
+            &creator(),
+            target,
+            ModerationAction::Unhide,
+        );
+        assert!(
+            unhide.op.id() < hide.op.id(),
+            "the fixture must be one the bias WOULD have caught"
+        );
+        let unhide_id = unhide.op.id();
+
+        log.append(hide, Arrival::ordered(2, a_message_id(1)));
+        log.append(unhide, Arrival::ordered(3, a_message_id(1)));
+
+        let resolved = resolve(&log, &moderators_of(&agora()), &target);
+        assert!(
+            !resolved.is_hidden(),
+            "a real Lamport order must still let an unhide reverse a hide"
+        );
+        assert_eq!(resolved.deciding_op().map(|e| e.id()), Some(unhide_id));
+    }
+
+    #[test]
+    fn the_authority_predicate_consults_the_set_and_not_the_earlier_ops_author() {
+        // Named for what the body supports, which is narrower than the rule it
+        // motivates. It was called `a_moderator_may_reverse_a_moderation_they_
+        // did_not_place`, and security review was right that the name overstated
+        // it: with ONE moderator in the fixture, "any moderator may reverse any
+        // moderation" and "only the placing moderator may" give identical
+        // answers. §6's fixture trap, and a reader auditing whether the
+        // any-moderator rule is tested would have found this and stopped looking.
+        //
         // NO SPEC: any moderator may reverse any moderation, rather than only
         // the moderator who placed it. §6 makes an op valid when signed by "a
         // current moderator" and says nothing about ownership of an earlier op.
@@ -908,12 +1188,20 @@ mod tests {
         // permanent, which §6.2's whole direction (raising the cost of one rogue
         // key) argues against.
         //
-        // Two moderators need a mutable moderator set, which does not exist. So
-        // this is tested at the level that DOES exist: the check is membership,
-        // not identity with the earlier op's author, and that is asserted
-        // directly. Writing a two-moderator scenario would mean asserting against
-        // behaviour that cannot be built today, which `.claude/agents/README.md`
-        // rules out.
+        // **That choice is UNTESTABLE today and is not tested here.** It needs
+        // two distinct moderators, which needs a mutable moderator set, which
+        // does not exist (§13 defers it). What IS testable, and is what this
+        // asserts, is the structural precondition: `authorises` consults the
+        // moderator set and nothing about the ops already in the log, so it
+        // cannot be conditioning on who placed what. That is necessary for the
+        // rule and not sufficient for it.
+        //
+        // The blast radius of the choice, which belongs with it: **one
+        // compromised moderator key can `Unhide` every moderation in the Stoa**,
+        // and with a single creator-moderator there is no recovery short of
+        // forking. §6.2's threshold certificates are the intended answer — an
+        // action takes N of M signatures, so one key is not enough — and until
+        // they land this is the cost of the reversibility that §13 asked for.
         let (mut log, target) = a_log_with_a_post();
         let hide = a_moderation(
             address_of(&agora()),
@@ -1160,11 +1448,24 @@ mod tests {
         //
         // NO SPEC: an `Unhide` with no prior `Hide` is binding and reported as
         // `Unhidden`, rather than refused as meaningless or reported as
-        // `Unmoderated`. The spec makes the most recent binding moderation
-        // decide and says nothing about what it must follow. Chosen this way
-        // because the alternative needs the resolver to know whether a `Hide` it
-        // may never have received existed — §3.3's partial set makes that
+        // `Unmoderated`. The spec makes the leading binding moderation decide
+        // and says nothing about what it must follow. Chosen this way because
+        // the alternative needs the resolver to know whether a `Hide` it may
+        // never have received existed — §3.3's partial set makes that
         // undecidable, and a rule no peer can evaluate is not a rule.
+        //
+        // **What a bare `Unhide` DOES, which this marker originally failed to
+        // ask.** Security review found that the representational question
+        // (`Unhidden` versus `Unmoderated`) was the easy half. The hard half is
+        // that a bare `Unhide` is a live op competing in the order — and under
+        // the degraded order, where only two ops can ever exist for a
+        // {Stoa, moderator, target}, a lower-hashing bare `Unhide` published
+        // pre-emptively would have vetoed every future `Hide` of that target
+        // permanently. That is closed by `resolve`'s `Hide`-wins tie-break, and
+        // `a_hide_is_not_defeated_by_the_unhide_hashing_lower` is the regression
+        // test. The marker is kept because the *representational* choice is
+        // still unspecified, and because the two questions travel together: a
+        // bare `Unhide` being binding is exactly what made the veto reachable.
         let (mut log, target) = a_log_with_a_post();
         let unhide = a_moderation(
             address_of(&agora()),
