@@ -1095,8 +1095,8 @@ alone. That is deliberate — the alternative was the veto — and it resolves
 itself when §13's upstream gap closes, with no change to this code.
 
 **This becomes a UI requirement the moment a hide button exists**, and there is
-no user-facing surface yet to carry it, so it is recorded here for whoever
-builds one. A moderator pressing "hide" is currently taking an action that
+no user-facing surface yet to carry it, so it is **collected in §11.1** with the
+other obligations on a view nobody has built. A moderator pressing "hide" is currently taking an action that
 cannot be undone on the peers that matter, and nothing in the core will warn
 them — `moderation::resolve` answers what is hidden, not what a future reversal
 would do. The honest interface says so at the point of action rather than
@@ -1352,7 +1352,8 @@ moderator op is **excluded** from the projection, not demoted. §6 says a hide
 binds; a percentage haircut does not bind, it merely means a sufficiently
 upvoted hidden post outranks a visible one. Keep hidden posts in the op log
 (§5.7 keeps history) and let the UI offer a "show hidden" view — but the default
-feed omits them.
+feed omits them. That last clause is an obligation on a view rather than on the
+projection, and is collected with the others in §11.1.
 
 **5. Decay must be indexable.** §2.5's paginated API has to `ORDER BY … LIMIT`
 in SQLite, and a score recomputed from the current clock on every read cannot be
@@ -1655,6 +1656,68 @@ at build or run time, not review time.
   ISO-8601 (delivery bug #26).
 - **`messageReceived` fires for your own messages; `channelMessageReceived` does
   not** — own sends come back as `channelMessageSent`.
+
+---
+
+## 11.1 Rendering obligations, collected
+
+**These are requirements on a user-facing surface that does not exist yet.** Each
+was discovered while designing something in core, each is a real obligation on
+whoever builds the view, and none of them can be enforced by core or caught by
+any gate — a view that violates one compiles, passes CI, and ships.
+
+They are collected here because they were accruing one per section, in whichever
+section happened to discover them, and a requirement recorded only where it was
+found is a requirement the person who needs it never reads. §11 is the model: a
+list nobody has to know the origin of in order to use.
+
+**The general shape, which is why a home was needed rather than four
+footnotes**: core is careful to answer only what it can answer, and each of these
+is a place where the honest answer is *incomplete without something the view
+says*. A core that says "this is hidden" has not said "and you cannot undo that";
+a core that reports a weight has not said "and this confers nothing on the person
+it names". The gap is the view's to close, every time, and it is invisible from
+inside core.
+
+- **A hide cannot currently be reversed, so say so at the point of action.**
+  §6's tie-break prefers `Hide` when neither candidate was transport-ordered, so
+  until Lamport values arrive an `Unhide` competing with a `Hide` of the same
+  target loses regardless of publication order. A moderator pressing "hide" is
+  taking an action that does not currently un-take, and `moderation::resolve`
+  answers what is hidden rather than what a reversal would do — nothing in core
+  will warn them. The honest interface says so at the point of action rather than
+  offering an "unhide" that silently fails to bind. **Removed together with the
+  tie-break** when the transport supplies Lamport values; the two are one
+  decision and should not outlive each other separately.
+- **The default feed omits hidden posts; "show hidden" is a deliberate view.**
+  §7.2 rule 4: a hidden post is excluded from the projection rather than
+  demoted, and history is kept in the op log. A view that renders hidden posts by
+  default has converted an exclusion into a haircut, which is the thing rule 4
+  refuses.
+- **Vouching confers no status: no vouch counts, no "N people vouch for this
+  author" badge.** §7.3. Such a display is a published vouch graph reconstructed
+  by eye, with every problem the never-published rule exists to avoid. Core's
+  only structural lever is to refuse to make the aggregate cheap — the vouched-set
+  surface deliberately has no per-identity probe and no count, so a view cannot
+  assemble one from a method that never said no. **That is a mitigation and not
+  enforcement**, which is exactly why this belongs on a list rather than in a
+  test.
+- **Declared and earned weight must be presented differently.** §7.3: one is
+  something the reader chose and can revoke in a click; the other is something
+  they should be *told has happened* and be able to undo. Core carries the
+  provenance on every list entry precisely so a view can honour this; a view that
+  renders them identically presents an accrual as a declaration, which is the
+  misrepresentation the distinction exists to prevent.
+- **A net agreement count must never be shown.** §7.4: response is displayed as
+  a distribution ("constructive; 40% agree"), never as a net. A single number
+  reading +3 says nothing about which of the four corners produced it, and a net
+  score is what makes disagreement feel like damage. **The display is where that
+  pressure actually lands** — separating the axes in the data model buys nothing
+  if the view sums them back together.
+
+The last three arrive with §7.3 and §7.4, which are unmerged at the time this
+section was written; they are listed now so that the list is complete when that
+branch lands rather than gaining two entries nobody goes back for.
 
 ---
 
