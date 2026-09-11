@@ -203,6 +203,87 @@ pub enum Unlock {
     Passphrase(Passphrase),
 }
 
+/// The environment variable a passphrase arrives in.
+///
+/// Named after radicle's `RAD_PASSPHRASE`, which is the model §5.6 points at.
+///
+/// **This unlock path has a documented limitation, and it is documented rather
+/// than mitigated because it cannot be mitigated from here.** A process's
+/// environment is readable by the same user through `/proc/<pid>/environ`, and
+/// on some systems by `ps -e`; it is also inherited by every child process and
+/// is commonly captured whole by crash reporters and process supervisors. So a
+/// passphrase supplied this way is protected from an attacker who has the
+/// keystore FILE and not the running machine — an offline attack on a stolen
+/// disk, which is the threat the encryption is for — and not from one who is
+/// already running code as this user. radicle says the same thing more bluntly
+/// in its man page: *"this is not secure and is equivalent to having an
+/// unencrypted secret key."* That is slightly too strong — it still defeats the
+/// stolen-disk case — but it is the right direction to err in.
+///
+/// The agent path (§5.6's third) is what closes this, and is deferred; see the
+/// module doc.
+pub const PASSPHRASE_ENV: &str = "DIALECTICA_PASSPHRASE";
+
+/// How to open the keystore, decided from the file's own state and the
+/// environment.
+///
+/// **The file is asked first, and the environment second**, which is the only
+/// order that produces truthful errors. Deciding from the environment alone —
+/// "a passphrase is set, so assume encryption" — reports an unencrypted
+/// keystore as a protection mismatch, and reports a missing passphrase against
+/// an unencrypted keystore as a locked one. Neither is true, and both send the
+/// user to fix something that is not broken.
+///
+/// **An empty environment variable is treated as unset**, matching `ssh-keygen`
+/// and radicle. The alternative — treating it as the empty passphrase — would
+/// be an unlock attempt with a key anyone can derive, reported as a wrong
+/// passphrase when it failed. `Keystore::create` refuses the empty passphrase
+/// for the same reason.
+///
+/// Returns the error the caller should report when no unlock is possible. That
+/// is a `KeystoreError` rather than a bespoke type so the probe has one source
+/// of reason strings.
+pub fn unlock_from_env(path: &Path) -> Result<Unlock, KeystoreError> {
+    if !Keystore::is_encrypted(path)? {
+        return Ok(Unlock::Unencrypted);
+    }
+    match std::env::var_os(PASSPHRASE_ENV) {
+        Some(v) if !v.is_empty() => Ok(Unlock::Passphrase(Passphrase::new(
+            // Bytes, not a lossy `to_string_lossy`: a passphrase that is not
+            // valid UTF-8 is still a passphrase, and converting lossily would
+            // map two different ones onto the same key.
+            os_str_bytes(&v),
+        ))),
+        _ => Err(KeystoreError::Locked),
+    }
+}
+
+/// An `OsString`'s bytes.
+#[cfg(unix)]
+fn os_str_bytes(v: &std::ffi::OsString) -> &[u8] {
+    use std::os::unix::ffi::OsStrExt;
+    v.as_os_str().as_bytes()
+}
+
+/// On a non-Unix platform an `OsString` is not bytes, and there is no lossless
+/// view of one. Stated rather than silently lossy.
+#[cfg(not(unix))]
+fn os_str_bytes(v: &std::ffi::OsString) -> &[u8] {
+    // `to_str` is None for a non-UTF-16-representable value, which on Windows
+    // cannot be typed into an environment variable in the first place.
+    v.to_str().map(|s| s.as_bytes()).unwrap_or(&[])
+}
+
+/// Open the keystore at `path` using whatever the environment allows.
+///
+/// The one function the probe calls, and the one place the three questions —
+/// does it exist, is it encrypted, is a passphrase available — are asked in the
+/// order that makes each error true.
+pub fn open_from_env(path: &Path) -> Result<Keystore, KeystoreError> {
+    let unlock = unlock_from_env(path)?;
+    Keystore::open(path, &unlock)
+}
+
 /// Where the keystore lives inside a directory the caller chose.
 ///
 /// The *name* is fixed and the *directory* is not, which is the only split that
@@ -271,6 +352,14 @@ pub enum KeystoreError {
     AlreadyExists,
     /// The passphrase was empty. See [`Passphrase::is_empty`].
     EmptyPassphrase,
+    /// The keystore is encrypted and no passphrase is available.
+    ///
+    /// Distinct from [`KeystoreError::WrongPassphrase`] because the two are
+    /// completely different situations for the user: one means "set the
+    /// variable", the other means "you set it to the wrong thing". A probe that
+    /// reported both as "locked" would leave someone re-typing a passphrase
+    /// that was never being read.
+    Locked,
     /// Argon2 declined the parameters. Not reachable with the constants above,
     /// and present because the alternative is an `expect` — which on this path
     /// would be a panic in a module process, reachable from a file whose
@@ -353,6 +442,11 @@ impl std::fmt::Display for KeystoreError {
                 f,
                 "an empty passphrase protects nothing; either supply a real \
                  passphrase or create the keystore unencrypted on purpose"
+            ),
+            KeystoreError::Locked => write!(
+                f,
+                "keystore is encrypted and no passphrase is available; supply \
+                 one in {PASSPHRASE_ENV} before starting dialectica"
             ),
             KeystoreError::KeyDerivation => write!(
                 f,
@@ -736,6 +830,21 @@ fn check_permissions(_path: &Path) -> Result<(), KeystoreError> {
     Ok(())
 }
 
+/// Where a keystore's bytes are written before they are moved into place.
+///
+/// A named function rather than an inline `with_extension`, so that "the bytes
+/// never go straight to the destination" is a property a test can assert on
+/// instead of a line in the body of a function whose behaviour on a crash
+/// cannot be observed. A mutation that wrote directly to the destination left
+/// the whole suite green until this existed.
+///
+/// A **sibling** of the destination, not a path in the system temp directory:
+/// a rename across filesystems is not a rename, it is a copy, and loses the
+/// atomicity this whole arrangement is for.
+fn staging_path(path: &Path) -> PathBuf {
+    path.with_extension("tmp")
+}
+
 /// Write, then move into place.
 ///
 /// **An interrupted write must not destroy an existing key**, and a plain
@@ -758,7 +867,7 @@ fn check_permissions(_path: &Path) -> Result<(), KeystoreError> {
 fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), KeystoreError> {
     use std::io::Write;
 
-    let tmp = path.with_extension("tmp");
+    let tmp = staging_path(path);
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
     #[cfg(unix)]
@@ -1058,6 +1167,54 @@ mod tests {
         assert_eq!(
             err_of(Keystore::from_file_bytes(&bytes, &a_pass("pw"))),
             KeystoreError::ProtectionMismatch
+        );
+    }
+
+    #[test]
+    fn the_header_is_authenticated_and_not_merely_read() {
+        // MUTATION-DRIVEN. Deleting the AAD entirely left the whole suite
+        // green, and the reason is worth writing down rather than papering
+        // over: the salt and the nonce are ALREADY inputs to the key and the
+        // cipher, so editing either breaks the tag whether or not it is in the
+        // AAD, and the protection-byte downgrade is caught by a length check
+        // before the tag is reached. Every test aimed at the AAD was passing
+        // for a reason that was not the AAD.
+        //
+        // What the AAD alone covers is the VERSION byte, which enters neither
+        // the key nor the cipher. Nothing today can relabel a v1 file as v2 —
+        // there is no v2 — so the property is checked at the function rather
+        // than through a file, which is the honest place for it: this is what
+        // makes a second version safe to add, and the test has to exist BEFORE
+        // that version does or the guarantee arrives too late.
+        //
+        // Hardcoded bytes, not a comparison against a recomputation.
+        let salt = [0xAAu8; SALT_LEN];
+        let nonce = [0xBBu8; NONCE_LEN];
+        let aad = aad_bytes(VERSION_1, Protection::Argon2idXChaCha20Poly1305, &salt, &nonce);
+        assert_eq!(aad.len(), 2 + SALT_LEN + NONCE_LEN, "the AAD is not empty");
+        assert_eq!(aad[0], 1, "the version must be authenticated");
+        assert_eq!(aad[1], 1, "the protection scheme must be authenticated");
+        assert_eq!(&aad[2..2 + SALT_LEN], &salt);
+        assert_eq!(&aad[2 + SALT_LEN..], &nonce);
+
+        // And the version genuinely changes the tag's input, which is the
+        // property a future v2 decoder inherits: a v1 file's ciphertext, if
+        // relabelled, authenticates under different associated data and
+        // therefore does not open.
+        assert_ne!(
+            aad_bytes(1, Protection::Argon2idXChaCha20Poly1305, &salt, &nonce),
+            aad_bytes(2, Protection::Argon2idXChaCha20Poly1305, &salt, &nonce),
+            "two format versions must not share associated data"
+        );
+        assert_ne!(
+            aad_bytes(VERSION_1, Protection::None, &salt, &nonce),
+            aad_bytes(
+                VERSION_1,
+                Protection::Argon2idXChaCha20Poly1305,
+                &salt,
+                &nonce
+            ),
+            "two protection schemes must not share associated data"
         );
     }
 
@@ -1412,6 +1569,7 @@ mod tests {
             KeystoreError::EmptyPassphrase,
             KeystoreError::KeyDerivation,
             KeystoreError::CostTooHigh,
+            KeystoreError::Locked,
         ] {
             let msg = e.to_string();
             assert!(
@@ -1512,6 +1670,58 @@ mod tests {
     }
 
     #[test]
+    fn the_bytes_never_go_straight_to_the_destination() {
+        // MUTATION-DRIVEN. Replacing the staging path with the destination
+        // itself — i.e. writing in place, truncate and all, which is exactly
+        // what radicle's stack does — left every test green. Nothing observed
+        // the difference, because a crash halfway through a write is not
+        // something a test can arrange.
+        //
+        // So the property is checked where it IS observable: the destination
+        // and the staging path are different files, in the same directory so
+        // that the rename between them is a rename rather than a cross-device
+        // copy. That is the whole mechanism; if those two facts hold, an
+        // interrupted write cannot have truncated the destination, because the
+        // destination was never opened for writing.
+        //
+        // Hardcoded, not derived from `staging_path`.
+        let dest = Path::new("/keys/identity.key");
+        let staging = staging_path(dest);
+        assert_ne!(staging, dest, "staging must not be the destination");
+        assert_eq!(staging, PathBuf::from("/keys/identity.tmp"));
+        assert_eq!(
+            staging.parent(),
+            dest.parent(),
+            "staging must be a sibling, or the rename crosses a filesystem and \
+             stops being atomic"
+        );
+    }
+
+    #[test]
+    fn a_failed_write_leaves_an_existing_keystore_intact() {
+        // The consequence that matters. The root secret exists nowhere else,
+        // so a write that fails must not have taken the previous key with it.
+        //
+        // The failure is arranged by occupying the staging path with a
+        // DIRECTORY, which cannot be opened as a file and cannot be renamed
+        // over — a real errno rather than a mocked one.
+        let dir = TempDir::new("failed-write");
+        a_keystore(7)
+            .create(dir.path().as_path(), &Unlock::Unencrypted)
+            .unwrap();
+        std::fs::create_dir(staging_path(dir.path().as_path())).unwrap();
+
+        let err = a_keystore(9).write_to(dir.path().as_path(), &Unlock::Unencrypted);
+        assert!(err.is_err(), "the write should have failed");
+
+        // And the original key is still there and still opens.
+        let back = Keystore::open(dir.path().as_path(), &Unlock::Unencrypted).unwrap();
+        assert_eq!(*back.root, [7u8; 32], "a failed write destroyed the key");
+
+        std::fs::remove_dir(staging_path(dir.path().as_path())).unwrap();
+    }
+
+    #[test]
     fn a_write_leaves_no_temporary_file_behind() {
         // The temporary holds whatever was written of a secret. A leftover is
         // a second copy at a path nobody checks the permissions of.
@@ -1545,6 +1755,94 @@ mod tests {
             default_path_in(Path::new("/some/dir")),
             PathBuf::from("/some/dir/identity.key")
         );
+    }
+
+    // ─── The environment unlock path ──────────────────────────────────────
+    //
+    // These share one `#[test]` because `std::env::set_var` is process-global
+    // and cargo runs tests in threads. Split into several, they would race and
+    // fail intermittently — which is worse than a long test, because an
+    // intermittent failure teaches people to re-run rather than to look.
+
+    #[test]
+    fn the_environment_decides_the_unlock_only_after_the_file_has_spoken() {
+        let plain = TempDir::new("env-plain");
+        a_keystore(7)
+            .create(plain.path().as_path(), &Unlock::Unencrypted)
+            .unwrap();
+        let enc = TempDir::new("env-enc");
+        a_keystore(7)
+            .create(enc.path().as_path(), &a_pass("s3cret"))
+            .unwrap();
+
+        // SAFETY: single-threaded within this test by construction — no other
+        // test in this module touches this variable, and the module doc above
+        // says why that is not split further.
+        unsafe { std::env::remove_var(PASSPHRASE_ENV) };
+
+        // An UNENCRYPTED keystore opens with no passphrase set. The trap this
+        // pins: deciding from the environment first would report this as a
+        // protection mismatch, sending a user to set a variable that nothing
+        // will read.
+        assert!(matches!(
+            unlock_from_env(plain.path().as_path()).unwrap(),
+            Unlock::Unencrypted
+        ));
+        assert!(open_from_env(plain.path().as_path()).is_ok());
+
+        // An ENCRYPTED one with nothing set is Locked — not WrongPassphrase,
+        // which would be a claim about a value that was never supplied.
+        assert_eq!(
+            err_of(unlock_from_env(enc.path().as_path())),
+            KeystoreError::Locked
+        );
+
+        // An EMPTY variable counts as unset, matching ssh-keygen and radicle.
+        // Treating it as the empty passphrase would attempt an unlock with a
+        // key anyone can derive, and report WrongPassphrase when it failed.
+        unsafe { std::env::set_var(PASSPHRASE_ENV, "") };
+        assert_eq!(
+            err_of(unlock_from_env(enc.path().as_path())),
+            KeystoreError::Locked
+        );
+
+        // The RIGHT passphrase opens it.
+        unsafe { std::env::set_var(PASSPHRASE_ENV, "s3cret") };
+        assert!(open_from_env(enc.path().as_path()).is_ok());
+
+        // The WRONG one is WrongPassphrase, distinguishable from Locked.
+        unsafe { std::env::set_var(PASSPHRASE_ENV, "not-it") };
+        assert_eq!(
+            err_of(open_from_env(enc.path().as_path())),
+            KeystoreError::WrongPassphrase
+        );
+
+        // A passphrase set against an UNENCRYPTED keystore is ignored rather
+        // than being a mismatch — the file said it needs none, and that is the
+        // answer.
+        assert!(open_from_env(plain.path().as_path()).is_ok());
+
+        // A MISSING keystore is NotFound, whatever the environment says.
+        let gone = TempDir::new("env-gone");
+        assert_eq!(
+            err_of(unlock_from_env(gone.path().as_path())),
+            KeystoreError::NotFound
+        );
+
+        unsafe { std::env::remove_var(PASSPHRASE_ENV) };
+    }
+
+    #[test]
+    fn the_passphrase_variable_is_named_by_a_hardcoded_constant() {
+        // A view's documentation and an operator's shell both name this
+        // string, so renaming it is a breaking change nothing else would
+        // catch. Hardcoded rather than compared to itself.
+        assert_eq!(PASSPHRASE_ENV, "DIALECTICA_PASSPHRASE");
+        // And the locked reason names it, which is what makes that reason
+        // actionable — §5.6's requirement, checked where a view would read it.
+        assert!(KeystoreError::Locked
+            .to_string()
+            .contains("DIALECTICA_PASSPHRASE"));
     }
 
     // ─── What this type refuses to expose ─────────────────────────────────

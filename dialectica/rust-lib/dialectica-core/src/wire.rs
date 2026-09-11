@@ -102,6 +102,118 @@ pub fn panic_probe(request: &str) -> String {
     })
 }
 
+// ─── The capability probe (PLAN.md §5.6) ──────────────────────────────────
+
+/// What a caller may do right now, and why not if not.
+///
+/// **The two states are one enum rather than a struct with two `Option`s**, and
+/// that is the whole reason this type exists instead of the handler building
+/// JSON inline. §5.6 gives the shape as
+/// `{"canPost":bool, "identity":"…" | "reason":"…"}` — the `|` is exclusive —
+/// and §2.5 forbids a reply that is partly a success. A
+/// `{ can_post, identity: Option, reason: Option }` can express three states
+/// the contract does not have (both, neither, and a `canPost:true` with no
+/// identity), and each would then have to be prevented at every construction
+/// site.
+///
+/// CLAUDE.md's standing instruction is to put the complexity in the data
+/// structure: here that is an enum with one payload each, so the illegal
+/// states cannot be written down. Serialisation is total and the handler has
+/// no branch to get wrong.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Capability {
+    /// Posting is possible, under this author address (hex).
+    CanPost { identity: String },
+    /// Posting is not possible. The reason **names the fix** — §5.6's
+    /// requirement, and the difference between a view that can help a user and
+    /// one that can only display "unlocked: false".
+    CannotPost { reason: String },
+}
+
+impl Capability {
+    /// The wire form. Exactly one of `identity` and `reason` is present, by
+    /// construction rather than by a check here.
+    pub fn to_json(&self) -> String {
+        match self {
+            Capability::CanPost { identity } => {
+                serde_json::json!({ "canPost": true, "identity": identity }).to_string()
+            }
+            Capability::CannotPost { reason } => {
+                serde_json::json!({ "canPost": false, "reason": reason }).to_string()
+            }
+        }
+    }
+}
+
+/// The probe handler: `{}` in, `{"canPost":…}` out.
+///
+/// # This answers; it does not fail
+///
+/// **Every state comes back as a `Capability`, including the ones that are
+/// plainly errors** — an unreadable keystore, a malformed file, a wrong
+/// passphrase. That is a deliberate departure from the usual shape, and the
+/// reason is what the caller would otherwise have to do: a view handling both
+/// "you cannot post, because X" and "I could not determine whether you can
+/// post" has two negative branches, and the second has no sensible rendering.
+/// Collapsing them means a view checks exactly one thing.
+///
+/// §2.5's `{"error":"..."}` is still reachable, and only for the one failure
+/// that is not about capability: input this function could not interpret. A
+/// malformed *request* is a caller bug; a malformed *keystore* is a user state.
+///
+/// # What it is given, and why
+///
+/// Both the unlock state and the Stoa are the caller's to supply. This crate
+/// cannot read the environment or know the host's persistence path, and a probe
+/// that went looking would be doing discovery at a moment its caller does not
+/// control — the adapter has both and passes them in. The `stoa` is needed
+/// because there is no such thing as "the" identity: §5.2 gives a user one
+/// identity *per Stoa*, so "who would post" has no answer until a Stoa is
+/// named.
+pub fn get_capabilities(
+    request: &str,
+    lookup: impl FnOnce(&crate::identity::Address) -> Result<String, crate::keystore::KeystoreError>,
+) -> String {
+    guarded("get_capabilities", || {
+        let parsed: serde_json::Value = match serde_json::from_str(request) {
+            Ok(v) => v,
+            Err(e) => return error_json(&format!("invalid JSON: {e}")),
+        };
+        let stoa = match parsed.get("stoa") {
+            Some(serde_json::Value::String(s)) => match crate::identity::Address::from_hex(s) {
+                Ok(a) => a,
+                Err(e) => return error_json(&format!("stoa: {e}")),
+            },
+            Some(_) => return error_json("stoa must be a string"),
+            None => return error_json("missing field: stoa"),
+        };
+        capability_for(&stoa, lookup).to_json()
+    })
+}
+
+/// The probe's decision, separated from its JSON and its guard.
+///
+/// Split out because this is the part worth testing directly: the mapping from
+/// "what the keystore said" to "what a view is told" is where the §5.6
+/// requirement that a reason names a fix actually lives, and asserting on it
+/// through a JSON string would be asserting on serialisation at the same time.
+pub fn capability_for(
+    stoa: &crate::identity::Address,
+    lookup: impl FnOnce(&crate::identity::Address) -> Result<String, crate::keystore::KeystoreError>,
+) -> Capability {
+    match lookup(stoa) {
+        Ok(identity) => Capability::CanPost { identity },
+        // The reason IS the error's message, not a rewording of it.
+        // `KeystoreError::Display` already names the fix for each case — that
+        // is a documented obligation on it, with a test — so paraphrasing here
+        // would mean maintaining the same guidance in two places, and the two
+        // would drift.
+        Err(e) => Capability::CannotPost {
+            reason: e.to_string(),
+        },
+    }
+}
+
 // ─── The two halves of the delivery bridge that CAN be tested ─────────────
 //
 // `modules().delivery_module` cannot appear in this file: it calls `lp_*`
@@ -422,6 +534,215 @@ mod tests {
         }
     }
 
+    // ─── The capability probe ─────────────────────────────────────────────
+
+    use crate::identity::{stoa_address, Address};
+    use crate::keystore::KeystoreError;
+
+    fn a_stoa() -> Address {
+        stoa_address(b"a genesis record")
+    }
+
+    /// The probe with a lookup that succeeds.
+    fn probe_ok(request: &str, identity: &str) -> serde_json::Value {
+        let id = identity.to_string();
+        serde_json::from_str(&get_capabilities(request, |_| Ok(id))).unwrap()
+    }
+
+    /// The probe with a lookup that fails for this reason.
+    fn probe_err(request: &str, e: KeystoreError) -> serde_json::Value {
+        serde_json::from_str(&get_capabilities(request, |_| Err(e))).unwrap()
+    }
+
+    #[test]
+    fn the_probe_reports_an_identity_when_posting_is_possible() {
+        // The expected identity is a literal, not something read back from the
+        // lookup — otherwise the assertion is the test agreeing with itself.
+        let v = probe_ok(
+            &format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex()),
+            "ff00ff00",
+        );
+        assert_eq!(v["canPost"], true);
+        assert_eq!(v["identity"], "ff00ff00");
+    }
+
+    #[test]
+    fn a_successful_probe_carries_no_reason_and_a_failed_one_no_identity() {
+        // §5.6 gives the shape as `"identity":"…" | "reason":"…"` — the bar is
+        // exclusive. §2.5 forbids a reply that is partly a success, and a
+        // compose box gated on `canPost` while a stale `identity` field sits
+        // beside it is exactly how the wrong one gets rendered.
+        let stoa = format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex());
+
+        let yes = probe_ok(&stoa, "abcd");
+        assert!(yes.get("reason").is_none(), "got {yes}");
+
+        let no = probe_err(&stoa, KeystoreError::NotFound);
+        assert_eq!(no["canPost"], false);
+        assert!(no.get("identity").is_none(), "got {no}");
+    }
+
+    #[test]
+    fn each_failure_state_produces_a_distinguishable_reason() {
+        // The probe's whole value to a view is that the five states a user can
+        // actually be in are told apart. Collapsing any two means one of the
+        // two reasons is wrong, and a wrong reason sends someone to fix
+        // something that is not broken.
+        let stoa = format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex());
+        let mut seen = Vec::new();
+        for e in [
+            KeystoreError::NotFound,
+            KeystoreError::Locked,
+            KeystoreError::WrongPassphrase,
+            KeystoreError::PermissionsTooOpen { mode: 0o644 },
+            KeystoreError::NotAKeystore,
+            KeystoreError::Truncated,
+        ] {
+            let v = probe_err(&stoa, e);
+            let reason = v["reason"].as_str().unwrap().to_string();
+            assert!(
+                !seen.contains(&reason),
+                "two keystore states produced the same reason: {reason}"
+            );
+            seen.push(reason);
+        }
+    }
+
+    #[test]
+    fn no_passphrase_and_a_wrong_passphrase_are_different_reasons() {
+        // Named separately from the sweep above because this is the pair a
+        // reader is most likely to think is one state. "Set the variable" and
+        // "you set it to the wrong thing" send a user to completely different
+        // places, and merging them leaves someone re-typing a passphrase that
+        // was never being read.
+        let stoa = format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex());
+        let locked = probe_err(&stoa, KeystoreError::Locked);
+        let wrong = probe_err(&stoa, KeystoreError::WrongPassphrase);
+        assert_ne!(locked["reason"], wrong["reason"]);
+        // And each says enough to act on: one names the variable to set, the
+        // other says the supplied value was rejected.
+        assert!(
+            locked["reason"]
+                .as_str()
+                .unwrap()
+                .contains("DIALECTICA_PASSPHRASE"),
+            "got {locked}"
+        );
+        assert!(
+            wrong["reason"].as_str().unwrap().contains("rejected"),
+            "got {wrong}"
+        );
+    }
+
+    #[test]
+    fn a_keystore_failure_is_an_answer_and_not_an_error_reply() {
+        // The deliberate departure. A view handling both "you cannot post,
+        // because X" and "I could not determine whether you can post" has two
+        // negative branches, and the second has no sensible rendering.
+        let stoa = format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex());
+        for e in [
+            KeystoreError::NotFound,
+            KeystoreError::Io("disk on fire".into()),
+            KeystoreError::NotAKeystore,
+            KeystoreError::PermissionsTooOpen { mode: 0o777 },
+        ] {
+            let v = probe_err(&stoa, e);
+            assert!(
+                v.get("error").is_none(),
+                "a keystore state must not become the error shape, got {v}"
+            );
+            assert_eq!(v["canPost"], false);
+        }
+    }
+
+    #[test]
+    fn a_malformed_request_is_the_error_shape_rather_than_a_capability() {
+        // The other side of the same line: a malformed REQUEST is a caller bug
+        // and not a user state, so it is the one thing here that is still
+        // §2.5's error shape. Answering `canPost:false` to unparseable input
+        // would tell a view something about the keystore that was never
+        // checked.
+        for bad in [
+            "not json",
+            r#"{}"#,
+            r#"{"stoa":7}"#,
+            r#"{"stoa":"nothex"}"#,
+            r#"{"stoa":"00ff"}"#,
+        ] {
+            let out = get_capabilities(bad, |_| Ok("abcd".to_string()));
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(v.get("error").is_some(), "for {bad:?}, got {out}");
+            assert!(
+                v.get("canPost").is_none(),
+                "a failure must never also carry a result — §2.5"
+            );
+        }
+    }
+
+    #[test]
+    fn the_probe_reports_the_identity_for_the_stoa_it_was_asked_about() {
+        // §5.2 gives a user one identity PER STOA, so "who would post" has no
+        // answer until a Stoa is named. A probe that ignored the field would
+        // report one Stoa's pseudonym while the user posted under another's.
+        let seen = std::cell::RefCell::new(None);
+        let asked = stoa_address(b"stoa two");
+        let _ = get_capabilities(&format!(r#"{{"stoa":"{}"}}"#, asked.to_hex()), |s| {
+            *seen.borrow_mut() = Some(*s);
+            Ok("abcd".to_string())
+        });
+        assert_eq!(seen.into_inner(), Some(asked));
+    }
+
+    #[test]
+    fn the_probe_is_never_a_panic_even_when_the_lookup_panics() {
+        // The guard, on the one handler a view calls before rendering
+        // anything. A panic here does not make one button unavailable — it
+        // aborts the module process (PHASE0-FINDINGS §3) and the entire
+        // interface is unrenderable.
+        let out = get_capabilities(
+            &format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex()),
+            |_| panic!("the keystore layer exploded"),
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_some(), "got {out}");
+        assert!(v.get("canPost").is_none());
+    }
+
+    #[test]
+    fn the_capability_json_is_pinned_to_the_exact_shape_the_plan_specifies() {
+        // Hardcoded strings, both of them. §5.6 writes the contract as
+        // `{"canPost":bool, "identity":"…" | "reason":"…"}`, and a view is
+        // written against those exact key names — renaming one is a breaking
+        // change that no type checker would catch.
+        assert_eq!(
+            Capability::CanPost {
+                identity: "abcd".into()
+            }
+            .to_json(),
+            r#"{"canPost":true,"identity":"abcd"}"#
+        );
+        assert_eq!(
+            Capability::CannotPost {
+                reason: "no keystore".into()
+            }
+            .to_json(),
+            r#"{"canPost":false,"reason":"no keystore"}"#
+        );
+    }
+
+    #[test]
+    fn a_reason_containing_json_metacharacters_stays_valid_json() {
+        // A reason carries an OS error message, which can carry a path, which
+        // a user chose. Naive concatenation emits malformed JSON and the view
+        // sees a parse error instead of the reason.
+        let out = Capability::CannotPost {
+            reason: r#"at "C:\keys" — he said "no""#.into(),
+        }
+        .to_json();
+        let v: serde_json::Value = serde_json::from_str(&out).expect("must stay valid JSON");
+        assert_eq!(v["reason"], r#"at "C:\keys" — he said "no""#);
+    }
+
     #[test]
     fn every_handler_answers_with_an_object_carrying_exactly_one_top_level_shape() {
         // The wire contract is only useful if it holds for EVERY method, so
@@ -431,6 +752,10 @@ mod tests {
             ping(r#"{"payload":1}"#),
             ping("garbage"),
             panic_probe("{}"),
+            get_capabilities(&format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex()), |_| Ok(
+                "abcd".to_string()
+            )),
+            get_capabilities("garbage", |_| Ok("abcd".to_string())),
         ] {
             let v: serde_json::Value = serde_json::from_str(&out)
                 .unwrap_or_else(|e| panic!("handler emitted invalid JSON ({e}): {out}"));
