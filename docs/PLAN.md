@@ -2027,7 +2027,497 @@ untestable (§2.3).
 **Phase 2 — wire the real modules.** Swap the fakes for `delivery_module`
 channels and `storage_module`.
 
-**Phase 3 — the forum.** Feeds, threads, composition, moderation UI.
+**Phase 3 — the forum.** Feeds, threads, composition, moderation UI. Expanded in
+§9.1, which is where the API this phase needs is argued.
+
+### 9.1 Phase 3 — the forum
+
+**Why this is a section and not a line.** Every other part of this plan is
+argued at length while the view had one sentence, and the asymmetry was not a
+judgement that the view is simple — it is that nobody had written it down. The
+consequence is concrete rather than aesthetic: **the view is the only consumer
+of the core API, and the core API is the deliverable** (§2.5). `wire.rs` today
+exposes a version string, a ping, a panic probe, a capability probe and a
+delivery bridge — nothing that reaches an op, a log or a resolver. What is
+written below is therefore not a UI plan that happens to name some methods; the
+methods are the point, and the view is the argument for each one's existence.
+
+**What this section is not.** It does not design appearance — layout, colour and
+typography are not decisions this document should own. It designs what the view
+must **know**, what it must **ask for**, and what it must **never do**. The
+third category is §11.1's, and this section adds to that list rather than
+restating it.
+
+> **§11.1 "Rendering obligations, collected" arrives with the `vouching-state`
+> change and is not in this file until that lands.** The references to it below
+> are deliberate forward references rather than mistakes: this section
+> *surfaces* three new obligations — an `Unhide` affordance that must not be
+> offered as symmetric, a join confirmation that must show the address and not
+> only the title, and a bidi obligation wider than the one §11.1 records — and
+> their home is that list, not here. If
+> §11.1 is absent when you read this, that change has not merged yet — which is
+> a fact `git log` answers and this sentence should not.
+
+#### The constraint everything below follows from
+
+§2.1: Basecamp sandboxes the QML engine with a deny-all network access manager
+and no filesystem access outside the plugin directory. **Every byte the view
+renders arrives through a core method.** There is no fallback, no direct fetch,
+and no "the view can just read the file". So a gap in the API is not an
+inconvenience to route around — it is content that cannot be rendered at all.
+
+Two consequences that shape every method named here:
+
+- **A shape the API does not return is a shape no view can compute.** If the
+  core answers "hidden: true" without naming the op that decided it, no view
+  can offer a moderator the reversal affordance, because it has nothing to name.
+- **Every cross-module call is IPC (§2.4), and a feed is a loop.** A method that
+  answers one post per call turns a page of thirty into thirty IPC round trips.
+  The paginated shape is not politeness; it is the only shape that works.
+
+#### Staged, like §4.8, and for the same reason
+
+§4.8 stages Stoa discovery so that each phase is independently useful and none
+depends on a later one landing. Phase 3 wants the same treatment, and the test
+is the same: **a partial forum must still be a forum.**
+
+**Stage A — read a Stoa.** A feed and a thread view over one embedded Stoa
+(§4.8 Phase 0), rendering current versions, omitting hidden posts. No composing,
+no moderating, no joining. This is a usable forum for a reader, and it is the
+stage that proves the projection and both resolvers reach a screen.
+
+**Stage B — compose.** A compose affordance gated on `getCapabilities()`, a
+reply affordance in a thread, and an edit affordance on the reader's own posts.
+Requires a key; the probe already exists to say whether there is one.
+
+**Stage C — moderate.** A hide affordance for a moderator, and the
+irreversibility warning §11.1 requires. Only meaningful in a Stoa the reader
+moderates, which today means one they created.
+
+The "show hidden" view belongs to **Stage A**, not here, and the placement is a
+decision rather than an oversight: it is a reader's affordance over a filter the
+projection already applies, and it needs no key and no authority. Putting it in
+Stage C would make "see what was moderated" a moderator privilege, which §6.1's
+ceiling does not support — the ops are in every peer's log regardless.
+
+**Stage D — reach another Stoa.** §4.8 Phase 1's copyable address: paste to
+join, and in-post addresses rendered as an affordance rather than acted on.
+
+The ordering is not arbitrary and the dependencies run one way only. B needs A
+because a compose box needs somewhere to put the result; C needs A and B because
+a hide is an op and moderating needs the same publish path composing does; D
+needs A because joining a Stoa you cannot then read accomplishes nothing. **No
+stage needs a later one**, which is the §4.8 property worth preserving: if D
+never ships, dialectica is a single-Stoa forum, which is a smaller thing than
+intended and not a broken one.
+
+**What is deliberately not staged here:** votes. `op.rs` carries the `Vote`
+kind and §7.2 rule 2 ships no score, so a vote button would publish an op that
+changes nothing a reader can see. A control with no visible effect teaches users
+the app is broken. Votes arrive with scoring, not before.
+
+#### 1. What a feed is
+
+**A feed is a paginated list of thread heads, not of posts.** The alternative —
+a flat list of every post — was considered and is wrong for a reason that is
+about the orderings rather than about taste: §7.2's `active` ranks *threads* by
+their most recent non-hidden reply, which is not a property any single post has.
+A feed of posts cannot express `active` at all without the view regrouping,
+which is work the view has no data to do.
+
+So `listThreads` is the read, and each item is one thread, identified by the op
+id of the post that started it (§4.1: a thread is named by the id of its root).
+
+Each item carries what a feed row must render without a second call:
+
+- the thread's id, which is the root post's op id
+- the root post's **current version**: its body and its own op id, which are
+  different things the moment the post has been edited
+- whether the root post has been revised (§5.7's "the UI can show that a post
+  was edited")
+- the author, as the per-Stoa address (§5.2) — never a name, because there are
+  no names
+- a reply count, and the id of the thread's most recent non-hidden reply
+
+**Ordering is a parameter, and the accepted values are `new` and `active`**
+(§7.2 rule 2). No `top`: with no sybil resistance there is no score, and an
+ordering the core cannot compute is not one the API should accept and then
+quietly serve as something else. An unrecognised ordering is an error, never
+defaulted — the same discipline `stoa.rs` applies to an unknown policy
+discriminant, and for the same reason: a view asking for `top` and silently
+getting `new` has been told a falsehood no test will catch.
+
+**Both of those orderings are currently degraded, and that is unresolved** —
+§7.2 defines each in terms of a Lamport timestamp that §13 says does not reach
+us, so both fall back to ascending op id today. Section 8 below carries the
+question of what they may honestly be called until that changes; it is named
+here so that nobody reads this paragraph as saying the orderings work.
+
+**Hidden threads are omitted by default**, and the parameter that includes them
+is explicit (§7.2 rule 4, §11.1). Worth stating precisely because "hidden
+thread" is ambiguous: a thread whose *root post* is hidden is omitted from the
+feed; a thread with some hidden replies is not, and its reply count is of
+non-hidden replies. A hidden reply is a thread-view concern, not a feed one.
+
+**What is honestly uncertain here.** Whether `hasMore` can be answered without
+counting the whole result set is a projection question, not an API one — but it
+is the kind of thing that decides a schema, so §7.2 rule 5's instruction to
+settle indexing when the projection is designed covers it and this section
+should not pre-empt it.
+
+#### 2. What a thread view is
+
+A thread view renders **current versions** (§5.7), and the design tension is
+that "current" is not the whole truth a reader or a moderator needs.
+
+`getThread` returns the root post plus its replies, paginated, each item
+carrying:
+
+- the post's id **as a thread position** — the original's op id, which is what a
+  reply names as its parent and what never changes across edits
+- the **current version's** op id, which is what a moderator acts on and what
+  changes every time the post is edited. These are two fields because they are
+  two facts; `revision::CurrentVersion` carries both for exactly this reason,
+  and collapsing them would force every caller to re-derive one.
+- body and attachments, from the current version
+- `isRevised`
+- the author address
+- the parent post's id, so the view can render the reply structure
+- moderation state
+
+**The moderation state must name its deciding op, not be a boolean.**
+`moderation::Moderation` is a three-state enum — `Unmoderated`, `Hidden(op)`,
+`Unhidden(op)` — and the API should carry the same three states rather than
+flattening them. A boolean loses two things a view needs: the distinction
+between "nobody moderated this" and "a moderator deliberately restored it",
+which is the difference between an untouched post and a vindicated one; and the
+op id a reversal would have to name.
+
+**What a reader sees of a hidden post, stated exactly.** In the default view,
+nothing — the post is absent, not greyed out, because §7.2 rule 4 makes
+moderation a filter rather than a penalty and a visible placeholder is a
+penalty with extra steps. In the "show hidden" view, the post renders with its
+moderation state shown. The one thing the view must not do is render a hidden
+post indistinguishably from a visible one in the show-hidden view; a reader who
+asked to see what was hidden is owed the knowledge of which ones those were.
+
+**The bidi obligation is wider than §11.1 currently states it, and that is a
+third thing for that list.** §11.1 frames Unicode and bidi rendering around
+*metadata titles*, because that is where it was found: the metadata op
+deliberately does not sanitise, since normalising would break op-id agreement
+between peers. The same reasoning applies unchanged to **every** attacker-
+supplied string this section renders — post bodies above all, which are the
+largest and least constrained of them, and also author addresses if a view ever
+abbreviates one. `op.rs` preserves display text exactly and never normalises it,
+by design and with a test pinning that; so the obligation follows the text
+everywhere it goes, not only to the field where it was first noticed.
+
+**Edit history is deliberately not in this call.** §5.7 keeps superseded
+versions in the op log, and a thread view that returned every version of every
+post would return most of a thread twice for a facility most readers never open.
+`getPostHistory` is the separate call, taking a post id and returning its
+versions in the order the resolver defines. It is a Stage B or later concern;
+Stage A ships `isRevised` and nothing more, which is the honest amount — "this
+was edited" is a fact worth showing even when "here is what it said before" is
+not yet available.
+
+#### 3. What composition needs
+
+**Every posting affordance is gated on `getCapabilities()`, never on a build
+flag** (§5.6, and the `posting-capability` spec says it as a requirement). The
+failure this prevents is specific: a compose box the user typed into and cannot
+submit has lost their draft, and losing typed text is the single worst thing a
+forum client can do to someone.
+
+The probe already exists and answers `{"canPost":bool, "identity":"…" |
+"reason":"…"}`. What Stage B adds is the publish path:
+
+- `createPost` — a new thread in a Stoa
+- `createReply` — a post naming a parent, which is the same op kind with
+  `parent` set (`op.rs` has no `Reply` kind, deliberately)
+- `revisePost` — a new version of one of the caller's own posts
+
+Three properties these share, each of which is a decision:
+
+- **They return the op id of what was published**, so the view can scroll to it,
+  render it optimistically, or name it in an error. A publish that returns
+  `{"ok":true}` leaves the view unable to find what it just made.
+- **They are not "send to the network"; they are "append and publish".** The op
+  is signed, appended to the local log and handed to delivery. What the view is
+  told is that the op exists locally — delivery's own outcome arrives later
+  (§2.4: you cannot await a cross-module result inside a method), and a publish
+  call that blocked on it would be a call that can hang.
+- **The identity is not a parameter.** §5.2 gives a user one identity per Stoa,
+  derived from the root key and the Stoa address. The Stoa is a parameter; the
+  identity falls out of it. A method taking an author would be a method that can
+  be asked to sign as someone it is not.
+
+**What the view must never do:** show a compose affordance without having asked
+the probe in the current render. The probe is cheap and re-determines its
+answer on every call by design; caching it across a keystore change is how a
+button outlives the key that justified it.
+
+#### 4. What the moderation UI needs
+
+The ceiling first, because it bounds the whole design: §6.1 — **moderation
+changes what conforming peers render and nothing else.** It cannot unpublish,
+cannot remove a person, and cannot stop a peer running modified code from
+displaying anything it likes. A moderation UI that implies otherwise is
+promising something the transport does not deliver.
+
+Within that, Stage C needs three things — two methods and one thing core cannot
+provide at all:
+
+- **`getModerationCapability`**, answering whether the caller is a moderator of
+  this Stoa — the moderation analogue of `getCapabilities()`, and needed for the
+  same reason: a hide button that fails on submission is a hide button that
+  should not have been rendered. Today the answer is "are you the creator",
+  because the creator is the sole moderator (§6); the method is worth having
+  under its own name so that a mutable moderator set is a change to its
+  implementation rather than to every call site.
+- **`moderatePost`** — publishing a `Moderate` op with a `Hide` or `Unhide`
+  action, naming the target.
+- **The irreversibility warning**, which is §11.1's first entry and is not
+  optional. A moderator pressing hide today takes an action that cannot be
+  un-taken on the peers that matter, because the tie-break prefers `Hide` when
+  neither candidate was transport-ordered. Nothing in core will warn them:
+  `moderation::resolve` answers what is hidden, not what a reversal would do.
+  **The warning and the tie-break are removed together** when Lamport values
+  arrive.
+
+  **This produces a new obligation, recorded in §11.1**: an `Unhide` affordance
+  must not be offered as though it works. A UI that shows hide and unhide as a
+  symmetric pair is asserting a symmetry the resolver does not currently have.
+
+The "show hidden" view is **not** in this list — it is Stage A's, and the
+argument for that placement is above. Mechanically it is a parameter on the read
+calls rather than a separate mode, so that the default and the exception go
+through one code path.
+
+#### 5. How a user reaches a Stoa
+
+§4.8 stages this and Stage D implements its Phase 1: **a Stoa address is a
+copyable string.** Two calls:
+
+- `getStoa` — what a Stoa is called today, resolved from the latest valid
+  `StoaMetadata` op with a fallback to the genesis title (§5.7). Note this is
+  **the one thing in this section that core cannot currently do**: the metadata
+  op exists and accumulates, and nothing resolves it. See "What the resolvers do
+  not provide" below.
+- `joinStoa` — take an address, verify the genesis record hashes to it, and
+  record it as one this peer reads.
+
+**The security property is §4.8's and must not be weakened.** An address is
+self-authenticating: it is a hash of the genesis record, so a wrong or tampered
+record fails to match. `joinStoa` therefore verifies rather than trusts, and a
+mismatch is an error, never a join of something-close-enough.
+
+**In-post addresses are attacker-supplied content.** §4.8 is explicit and this
+section adds nothing to it except the mechanics: a Stoa address appearing in a
+post body renders as an affordance the reader chooses to act on; acting on it
+shows what is being joined — the Stoa's title and address — **before** joining;
+and nothing auto-joins, ever. The relevant threat is not a malicious Stoa, which
+a reader can leave; it is a reader who does not know they joined one.
+
+**The obligation this surfaces, also new to §11.1**: a Stoa's *displayed* title
+comes from a metadata op signed by its moderators and is not unique, not
+verified against anything, and freely chosen. Two Stoas may present the same
+title. The address is the identity and the title is decoration, so a join
+confirmation that shows only a title has shown the reader the forgeable half.
+
+#### 6. The core API this requires
+
+**Every method below is a claim on `wire.rs`'s future shape and a widening of
+the deliverable, which CLAUDE.md asks be done on purpose.** They follow §2.5
+without exception: JSON in, JSON out, `{"error":"..."}` as the only failure
+shape, never a partial success. Pagination is `(page, perPage)` in and
+`{"items":[...],"page":N,"hasMore":bool}` out — **and nothing implements that
+shape yet**, so whichever of these lands first is the first instance of it and
+sets the precedent.
+
+Field names are illustrative; the shapes and the arguments for them are not.
+
+**Stage A — read**
+
+```
+listStoas()                 -> {"items":[{stoa, title, description}], page, hasMore}
+getStoa({stoa})             -> {stoa, title, description, policy, isGenesisFallback}
+listThreads({stoa, order, page, perPage, includeHidden})
+                            -> {"items":[{thread, currentVersion, body, attachments,
+                                          author, isRevised, replyCount, lastReply}],
+                                page, hasMore}
+getThread({stoa, thread, page, perPage, includeHidden})
+                            -> {"items":[{post, currentVersion, parent, body,
+                                          attachments, author, isRevised,
+                                          moderation:{state, decidedBy}}],
+                                page, hasMore}
+```
+
+`isGenesisFallback` is the field worth defending: §5.7 says a reader prefers
+the latest valid metadata op and falls back to the genesis values, and those are
+different epistemic states. A peer that has not yet received a Stoa's metadata
+op is showing a founding title that may be years stale, and it should be able to
+say so rather than presenting it as current. This is the §11.1 general shape
+again — core's honest answer is incomplete without something the view says.
+
+`moderation.state` is one of `unmoderated`, `hidden`, `unhidden`, mirroring the
+resolver's enum; `decidedBy` is the op id, absent for `unmoderated`. Absent, not
+null-and-present: §2.5 forbids a shape that is partly a success, and a field
+that is sometimes meaningless is that shape in miniature.
+
+**Stage B — compose**
+
+```
+getCapabilities({stoa})     -> exists today
+createPost({stoa, body, attachments})          -> {op}
+createReply({stoa, thread, parent, body, attachments}) -> {op}
+revisePost({stoa, target, body, attachments})  -> {op}
+getPostHistory({stoa, post, page, perPage})
+                            -> {"items":[{version, body, attachments, isCurrent}],
+                                page, hasMore}
+```
+
+**Stage C — moderate**
+
+```
+getModerationCapability({stoa}) -> {canModerate:bool, identity | reason}
+moderatePost({stoa, target, action})           -> {op}
+```
+
+`getModerationCapability` deliberately mirrors `getCapabilities`'s exclusive
+either/or shape rather than inventing a second convention for the same job.
+
+**Stage D — reach**
+
+```
+joinStoa({address})         -> {stoa, title, description}
+```
+
+Returning the resolved title is what lets the view show what is being joined
+before it is joined, which §4.8 requires and which a bare `{"ok":true}` could
+not support.
+
+**Methods deliberately NOT proposed**, each with its reason, because a list of
+what was declined is the part that stops the API growing by accident:
+
+- **`vote`** — the op kind exists, nothing reads it (§7.2 rule 2). A method
+  publishing an op with no observable effect is a method that will be called and
+  then explained away.
+- **`getPost`**, a single-post read — every screen that shows a post shows it
+  inside a thread or a feed, and §2.4 makes per-item calls the expensive shape.
+  Add it when a screen exists that genuinely wants one post.
+- **`search`** — no index, no design, and a search that scans the op log per
+  keystroke is the hot-loop IPC §2.4 warns about. Not rejected, just not
+  designed.
+- **`getOp`**, a raw-op read — it would let a view render something no resolver
+  approved, which is exactly the discipline the resolvers exist to impose.
+- **a delete method** — there is none, structurally. §5.7 keeps history and §6.1
+  bounds moderation to rendering; an API method called `delete` would promise a
+  removal the protocol cannot perform.
+
+#### 7. What the resolvers do not provide, and this is a finding about core
+
+Writing the calls above found four gaps. Each is core work, not view work, and
+each is named here so that whoever builds the projection knows the shape it is
+being asked for rather than discovering it from a stalled view.
+
+- **Nothing resolves Stoa metadata.** §5.7 records this — the op accumulates and
+  nothing reads it — and `getStoa` is the call that needs it. `log.rs` already
+  states the shape: it is "the moderation resolver with a different subject",
+  reading by `Address` rather than by target, and reusing the authority check
+  unchanged. `iter_target` cannot serve it, because a metadata op's
+  `Entry::target()` is `None` by design.
+- **There is no thread read.** `iter_stoa` returns every op in a Stoa;
+  `iter_target` returns the ops acting on one op. Neither answers "the posts
+  whose `thread` is T", which is what a thread view is. That is a projection
+  index rather than a trait method — §3.3 puts read traffic on the materialised
+  view — but it is the first query the projection must serve and it does not
+  exist yet in any form.
+- **There is no reply count and no most-recent-reply.** §7.2's `active` ordering
+  needs the second, and both are folds over ops the resolvers do not perform.
+  Both must also be **of non-hidden replies**, which makes them folds over
+  moderation-resolved state rather than over raw ops — a detail easy to get
+  wrong once and hard to notice, because a count that includes hidden replies
+  looks entirely plausible.
+- **`current_version` is per-post and a feed is a list.** Calling it once per
+  row is correct and is what the in-memory log makes cheap; over a SQLite
+  projection it is a query per row. Nothing is broken today and nothing should
+  be optimised speculatively — recorded because it is the shape that decides
+  whether the projection stores resolved current versions or resolves on read,
+  and that is a schema decision, not a later tuning one.
+
+#### 8. What could not be decided here, and what would decide it
+
+- **Whether `listThreads` needs an `unread` concept.** Every forum has one and
+  it needs per-user local state that is not an op and never crosses the wire.
+  It is not hard; it is that nothing in this design has yet needed peer-local,
+  never-published state that is not a projection of ops, and inventing the
+  first instance of that as a feed field is how it gets designed badly. What
+  would decide it: a first user reading a Stoa with more than a screenful of
+  threads. Until then the question is theoretical.
+- **Whether a thread view paginates by reply order or by reply tree.** A flat
+  chronological list paginates cleanly and renders reply structure poorly; a
+  tree renders well and has no natural page boundary. This plan does not choose,
+  because the choice depends on how deep real threads get, and nobody has run
+  one. What would decide it: Stage A running against a Stoa with real traffic.
+- **What a feed ordering is allowed to be called while no Lamport value
+  arrives.** This is the sharpest unresolved thing in the section, and the first
+  draft of it was wrong in a way worth recording. §7.2 defines `new` as "Lamport
+  order descending" and `active` by the Lamport timestamp of the most recent
+  non-hidden reply — so **both** of v1's two orderings are defined in terms of a
+  value §13 says does not reach us. Today each would fall back to ascending op
+  id, which is a hash and carries no recency whatever.
+
+  The first draft of this bullet proposed "ship `new` only until Lamport values
+  arrive", on the assumption that only `active` was affected. It is not: `new`
+  is affected identically, and a feed labelled "new" ordered by hash is the same
+  lie in a shorter word. Recorded rather than silently fixed, because the
+  mistake is the one this whole degraded-ordering situation invites — reading
+  "convergent" as "roughly chronological".
+
+  The honest options are therefore: ship one ordering and name it for what it
+  actually is rather than for what §7.2 intends it to become; or ship §7.2's
+  two names and have the interface state that ordering is currently degraded.
+  **This plan does not choose**, and it is a genuine open question rather than a
+  deferred detail — a first-run forum whose ordering is arbitrary is a different
+  product from one whose ordering is chronological. What would decide it: §13's
+  upstream gap closing, which removes the question entirely and is why nobody
+  should build elaborate machinery around it in the meantime.
+
+- **Whether `listThreads`'s `replyCount` is worth its cost before then.** It is
+  a fold over moderation-resolved replies per row, and under the degraded order
+  the "most recent reply" it sits beside is not meaningfully recent. The count
+  itself is honest — a thread has a number of visible replies whatever the order
+  — so this is a question about the pair, not about the field. What would decide
+  it: the same gap closing, or a measurement showing the fold is cheap enough
+  that the question does not arise.
+
+#### 9. Why this section ships without a spec delta
+
+`.claude/agents/README.md` puts PLAN.md and the specs in different jobs: PLAN.md
+holds **what is not built yet** and the reasoning for it; a spec is a
+**behaviour contract** for something that exists, and reasoning never goes in
+one. This section is entirely the first kind. Nothing above is implemented,
+every method named is a proposal, and the two orderings are an open question
+rather than a requirement.
+
+A delta written now would have to invent scenarios for behaviour nobody has
+built, which is exactly the failure that README warns against — *"behaviour that
+does not exist yet cannot be covered"* — and it would freeze method shapes whose
+whole purpose here is to be argued with before anyone commits to them. The
+`posting-capability` spec is the model of when a delta *is* right: it was
+written alongside a probe that shipped.
+
+**So the specs come per stage, with the change that builds it.** Stage A is
+plausibly two capabilities rather than one — a feed contract and a thread
+contract — and which it is should be decided by whoever writes it, against the
+projection that actually exists, not here.
+
+One thing that will need saying in whichever spec lands first, recorded so it is
+not lost: **§2.5's paginated shape has no instance yet.** The first paginated
+method sets the precedent for every later one, so its spec is the one that
+should pin the envelope — `items`, `page`, `hasMore` — rather than each
+subsequent spec restating it and slowly disagreeing.
 
 ---
 
