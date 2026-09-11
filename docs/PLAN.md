@@ -533,6 +533,16 @@ node, with peer traffic received in the first, settles it — worth doing before
 relying on any of this, because the failure surfaces at startup while the code
 responsible ran in the previous session.
 
+A spike has since confirmed the **precondition** without settling the question
+(`docs/PHASE2-FINDINGS.md`). SDS state is genuinely durable — `sds.meta` and
+`sds.log` rows under the module's per-instance path, re-sorted by `loadChannel`
+on start — so a restart hands `createNode` real prior state rather than a blank
+slate, and this section's assumption is a substantive bet rather than a
+formality. Note also that the delivery contract's own `channelCreate` docstring
+advertises close-then-recreate as supported (*"re-creating a channel with the
+same id restores it"*), which is precisely the documentation §4.3 exists to
+override: following it is what walks you into the bug.
+
 ### 4.4 What SDS does and does not promise
 
 Promises: eventual consistency among *active participants* — Lamport total
@@ -549,12 +559,14 @@ Does not promise:
 - **No membership.** Anyone can join a channel.
 - **No delivery to absent peers.** ACK means "some participants received it".
 - **No ordering metadata reaching the application.** The Lamport total order and
-  the message-id tie-break above are real and are what SDS orders its own log
-  by — but they stop below us. The Reliable Channel API's received-message event
-  carries the payload alone, so neither value reaches a consumer, and
-  `channelMessageReceived` cannot forward what it never got. **Read the promises
-  above as internal to SDS, not as an interface.** §13 has the finding and what
-  each upstream layer would have to add.
+  the message-id tie-break above are real, are what SDS orders its own log by,
+  and are **durably persisted** — but they stop below us. They are dropped where
+  SDS hands the channel layer a deliverable carrying only the content and the
+  sender id; every layer above that, the Reliable Channel API event and
+  `channelMessageReceived` included, cannot forward what it never got. **Read
+  the promises above as internal to SDS, not as an interface.** §13 has the
+  finding and what each upstream layer would have to add; PHASE2-FINDINGS §1 has
+  the verbatim chain at the pinned revisions.
 - **150 KiB max message size**, hard cap — a network-wide gossipsub validation
   limit, not unilaterally raisable. See §4.6.
 
@@ -1652,7 +1664,17 @@ at build or run time, not review time.
 - **`createNode` exactly once per context.** The delivery node is a singleton
   per Logos Core instance; `stop()` kills traffic for every module using it.
 - **`messageReceived`'s timestamp is nanoseconds**; every other event is
-  ISO-8601 (delivery bug #26).
+  ISO-8601 (delivery bug #26). The underlying reason, which makes it
+  predictable rather than arbitrary: `messageReceived` is the **only** event
+  that reads a timestamp off the wire. Every other event gets one synthesised
+  local `CLOCK_REALTIME` read, taken once per callback before the event-type
+  dispatch (PHASE2-FINDINGS §2).
+- **`lgs basecamp` verbs act on the current directory and take no
+  `--directory` flag.** So a git worktree cannot be built without a `cd`, which
+  this repo's permission setup refuses — meaning **the main checkout is what
+  gets built**, at whatever revision it sits on. Confirm with
+  `git -C <main-checkout> status --branch` before believing a build exercised
+  your change (PHASE2-FINDINGS §6).
 - **`messageReceived` fires for your own messages; `channelMessageReceived` does
   not** — own sends come back as `channelMessageSent`.
 
@@ -1762,6 +1784,18 @@ thing (§2.3).
   channel inside one node's lifetime — assumes persisted SDS state does not
   corrupt a fresh `createNode`. Two runs against a real node, with peer traffic
   received in the first, settles it.
+
+  **Still open, and a spike has now established what answering it costs**
+  (`docs/PHASE2-FINDINGS.md` §5). Two things were learned that change the
+  estimate rather than the answer. **The precondition holds**: SDS state is
+  durably persisted, under the module's per-instance path, as `sds.meta` and
+  `sds.log` rows that `loadChannel` re-sorts on start — so there genuinely is
+  state that could corrupt a fresh `createNode`, and the question is not
+  vacuous (§4 of the findings). And **the contract cannot currently ask the
+  question**: dialectica exposes no `createNode`, `channelCreate`, `channelSend`
+  or `channelClose`, so this needs scaffolding contract methods before it needs
+  a test run, and the apparatus must survive a restart to measure anything —
+  which is two profiles launched twice, not one probe.
 - ~~**Are votes an op in v1 at all?**~~ **Answered: yes, collected and read by
   nothing.** The kind is in the op format (`op.rs`), carrying a target and a
   direction, so the history accumulates from v1 and scoring arrives later
@@ -1793,17 +1827,33 @@ thing (§2.3).
   already §5.7's.
 
   The investigation moved where the gap is. It is **not** that
-  `delivery_module.lidl` forgot to forward the fields: the Reliable Channel API's
-  `MessageReceivedEvent`, which the delivery module consumes, carries exactly one
-  field — the reassembled payload — so `channelMessageReceived` never receives
-  them either. Closing this needs a change at both layers, and neither is
-  dialectica's; `openspec/changes/op-ordering/design.md` records the field names
-  and types for filing.
+  `delivery_module.lidl` forgot to forward the fields. A spike then read the
+  exact pinned revisions and moved it again, one layer lower —
+  `docs/PHASE2-FINDINGS.md` §1 has the verbatim chain. **Three types must
+  change, not two**, and the lowest is the one that matters: SDS hands the
+  channel layer an `SdsDeliverable` carrying only `content` and `senderId`,
+  built on a line where the full message's `messageId` and Lamport timestamp are
+  in scope and simply not copied. The Reliable Channel API's event type then has
+  nothing left to forward (it carries three fields — `channelId`, `senderId`,
+  `payload` — not the single payload field once recorded here). So a fix to the
+  delivery module and the event type alone would forward a value that never
+  arrived. None of the three is dialectica's;
+  `openspec/changes/op-ordering/design.md` records the field names and types for
+  filing.
+
+  Worth knowing before filing: upstream **does** order correctly and then hides
+  it — the receive path parks causally-incomplete segments and releases them in
+  order, and its stash silently drops the oldest on overflow. A consumer sees a
+  message that never arrives, with no field that could reveal the hole.
 
   Two findings worth carrying forward. **`channelMessageReceived`'s `timestamp`
   is unusable for ordering** — it is the receiving peer's own `CLOCK_REALTIME`
-  read taken when its callback fires, so it differs per peer for one message,
+  read taken when its callback fires (a single read taken before the event-type
+  dispatch and reused for every event), so it differs per peer for one message,
   which is worse than §11's units problem and worth filing separately as a bug.
+  The channel event carries no wire timestamp for it to have preferred; exactly
+  one event, `messageReceived`, reads a real one off the wire, which is why only
+  that one has §11's units divergence.
   And **a dialectica-side Lamport clock is the one thing not to build**: SDS's
   clock advances on traffic no application sees and is initialised from epoch-ms,
   so a clock advanced on op arrivals could not be made to agree with it — and two
