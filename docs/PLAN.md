@@ -1238,9 +1238,11 @@ and `rlnRelay` was `false` on `logos.dev`. **Re-check both before acting on this
 order** — the ordering is a claim about readiness at a moment, and readiness is
 exactly the sort of thing that changes.
 
-**It does not unblock §7.2's scoring**, and the plan should not pretend
-otherwise. Rule 2 ships no score precisely because sybil resistance is absent,
-and that is RLN's job rather than a holding proof's: §5.3's ordering argument
+**It does not unblock §7.2's credential-gated scoring**, and the plan should not
+pretend otherwise. §7.2 rule 2 does ship an interim engagement ordering, but
+explicitly *without* a sybil-resistance claim and with a named expiry (rule 6);
+the gate rule 3 describes is what a holding proof would have to deliver and does
+not. That is RLN's job rather than a holding proof's: §5.3's ordering argument
 wanted a credential that rotating cannot shed, and a holding proof is weaker —
 tokens move between accounts, and one holding can back several presentations
 unless it is nullifier-bound (rule 3). So the sequence is: policy gating first
@@ -1293,7 +1295,12 @@ publishing (§6.1), so what a Stoa *surfaces* is its main lever over what readin
 it is like. Moderation decides what a Stoa refuses; relevance decides the
 ordering of everything it does not, which is the larger part.
 
-#### The five rules
+#### The six rules
+
+Five are standing design rules. **Rule 6 is different in kind**: it is an expiry
+condition on rule 2, and its whole purpose is that somebody trips over it later
+— so it is listed here rather than left to be discovered inside the section it
+governs.
 
 **1. Relevance is a local projection, never an op.** No score is ever published.
 A score is a column in the SQLite view (§3.3), derived from ops and rebuilt by
@@ -1308,19 +1315,53 @@ are the normal case, not a fault). It follows from §4.4's eventual consistency
 among active participants. Do not reach for a consensus mechanism to make scores
 agree; there is nothing to agree on.
 
-**2. v1 ships `new` and `active`, and no score at all.** With no sybil
-resistance (§7), a vote-weighted score is not a relevance signal — it is a dial
-the cheapest attacker turns. Two orderings that cannot be gamed by minting
-identities:
+**2. v1 ships an engagement ordering, and calls it that.** Two orderings that
+cannot be gamed by minting identities, plus one that can:
 
 - **`new`** — Lamport order descending. §4.4 already defines a total order with
   a tie-break; reuse it exactly rather than inventing a second ordering.
 - **`active`** — threads by the Lamport timestamp of their most recent
   non-hidden reply. Gameable only by *posting*, which moderation and rate
   limiting already govern.
+- **`top`** — vote ops counted per distinct identity, weighted by **how much
+  this reader weighs that voter's opinion**. A moderator's upvote weighs
+  `K_mod`; a **vouched** voter's weighs `K_vouch` (§7.3); every other weighs
+  1 — *some* score rather than zero, which is the interim's whole premise and
+  what rule 3 removes later. A post's score is **floored at zero**, so
+  downvoting can order a post last but never remove it.
 
-This is a smaller claim than "we have a relevance model" and it is the true one,
-in the same spirit as §7's refusal to claim sybil resistance.
+**One vote axis, not two.** §7.4 records why: a two-axis split separating
+quality from agreement has no published evaluation anywhere, and the measured
+constraint on distributed moderation is latency rather than expressiveness.
+Spam and abuse leave the ranking system entirely and go to the moderator as a
+**report** (§7.4), which is the separation that has a track record — and which
+binds, where a second vote axis would only have ranked.
+
+**`top` is an engagement ordering, not a relevance signal, and the distinction
+is the whole of the claim.** It reports how many distinct identities voted,
+weighted by the one credential that cannot be minted. It does *not* report how
+good or how relevant a post is, because identities are free to create and
+nothing establishes that two votes came from two people.
+
+**It is safe for exactly one reason, and that reason is not a property of the
+design: nobody is attacking a forum with no transport, no discovery and no
+users.** With `K_mod = 3`, four minted identities outvote a moderator, and no
+finite weight changes that — minting is free, so every weight is defeated at the
+same price.
+A defence resting on the environment expires when the environment changes, which
+is what **rule 6** exists to catch.
+
+Never claimed for it: that it resists sybils; that two peers agree on it (rule 1
+says they will not, and that is correct); or that it measures quality. §7
+refuses to claim sybil resistance it does not have, and this ordering sits
+inside that refusal rather than being an exception to it.
+
+**Why ship it at all**, given rule 3's argument below is correct: §1 says a
+forum where nothing can be removed is a firehose, and the same is true of
+attention — a forum that cannot rank is a firehose with a timestamp. Rule 3's
+end state is blocked on RLN rather than on anyone's effort, so waiting for it
+means shipping nothing for an unbounded interval, and rule 1 makes being wrong
+cheap. That trade is defensible while rule 6 holds and indefensible after.
 
 **3. Weight by the credential, not by the vote count.** When proof-of-holding
 lands (§7's reordered step 1), count **only votes carrying a valid claim**.
@@ -1342,45 +1383,188 @@ currently be assumed from the primitive.
 
 Which is why the rule is stated as a *shape* and not shipped: **this gate waits
 on RLN**, whose per-epoch nullifiers are built for exactly this, rather than on
-the holding proof §7 brings forward for policy gating. Until then, rule 2
-stands — no score at all. Gating on a re-presentable credential would raise the
-unit cost of a sybil vote without stopping one, and would claim more than it
-delivers.
+the holding proof §7 brings forward for policy gating. Gating on a
+re-presentable credential would raise the unit cost of a sybil vote without
+stopping one, and would claim more than it delivers.
 
-**4. Moderation filters, it does not penalise.** A post hidden by a valid
-moderator op is **excluded** from the projection, not demoted. §6 says a hide
-binds; a percentage haircut does not bind, it merely means a sufficiently
-upvoted hidden post outranks a visible one. Keep hidden posts in the op log
-(§5.7 keeps history) and let the UI offer a "show hidden" view — but the default
-feed omits them.
+**What this rule governs is the end state, and rule 2's interim ordering does
+not contradict it.** The distinction the interim needs, which this rule did not
+draw because it was written before the moderation resolver existed:
 
-**5. Decay must be indexable.** §2.5's paginated API has to `ORDER BY … LIMIT`
-in SQLite, and a score recomputed from the current clock on every read cannot be
-indexed. Store a decay-free score plus a timestamp and apply decay in the
-`ORDER BY` expression, or bucket age coarsely and recompute on a timer. **Decide
-this when the projection schema is designed, in Phase 1** — retrofitting an
-index onto a time-varying score is the expensive version.
+- A credential that **cannot be minted** may weight a vote today. A Stoa's
+  moderator set is derived from its genesis record, and the creator's key is
+  inside the address preimage — minting an identity does not mint a moderator of
+  any existing Stoa. That is a real credential, verified on every read.
+- A credential that can be **re-presented** may not, and that is still exactly
+  what RLN is for.
+
+Weighting by an unmintable credential is nonetheless **not a defence**, and rule
+2 says so: it is better placed than the un-inverted approach this rule warns
+about — OpChan's credentialed premium was a *tenth* of the raw vote it rode on,
+where a moderator's is a multiple of it — and it is still defeated by minting
+one more identity. The interim is justified by the absence of an attacker, never
+by the weight. When rule 6 fires, this rule is what replaces it.
+
+**4. Moderation filters, it does not penalise — and a credential may amplify
+promotion but never suppression.** A post hidden by a valid moderator op is
+**excluded** from the projection, not demoted. §6 says a hide binds; a
+percentage haircut does not bind, it merely means a sufficiently upvoted hidden
+post outranks a visible one. Keep hidden posts in the op log (§5.7 keeps
+history) and let the UI offer a "show hidden" view — but the default feed omits
+them.
+
+**A moderator's *downvote* is the same mistake arriving from the other
+direction**, and rule 2's weights therefore apply to an **upvote only** — for a
+moderator's vote and equally for a vouched or earned one (§7.3). This rule
+originally stopped a `hide` from being *weakened* into a
+ranking nudge; nothing stopped a ranking nudge being *strengthened* by moderator
+authority into a soft hide. An amplified downvote has none of a moderation op's
+properties — it does not bind (a well-upvoted post survives it), it names no
+deciding op, and it has no specified inverse the way `hide` has `unhide`.
+Offering a moderator a non-binding way to suppress something is worse than
+offering none, because it is the nearer tool and does not do what it appears to.
+**Suppression is a binding judgement or it is nothing.**
+
+**5. Decay must be indexable — and there is currently no age to decay.** §2.5's
+paginated API has to `ORDER BY … LIMIT` in SQLite, and a score recomputed from
+the current clock on every read cannot be indexed. Store a decay-free score plus
+a timestamp and apply decay in the `ORDER BY` expression.
+
+**The reason decay ships disabled is not that it was not got to.** No value in
+the system expresses a post's age: `op-format` forbids an op from carrying a
+wall-clock timestamp ("a wall clock is a field the adversary sets" — exactly the
+failure Appendix A measured, where a post claiming a future time got an unbounded
+multiplier), `op-ordering` forbids substituting a local clock for missing
+metadata, and a Lamport timestamp is **a counter, not a duration** — it orders
+two ops without saying whether an hour or a year separated them. The only clock
+available is the receiving peer's own, recorded per peer. So decay is blocked on
+the transport supplying an authorship time, which nothing currently plans to.
+
+The epoch stored against a decay-free score is therefore the op's **Lamport
+timestamp**, never a receive-clock reading: a per-peer `CLOCK_REALTIME` value
+would make two peers rank the same ops differently for a reason unrelated to
+which ops they hold, and that is not the divergence rule 1 blesses.
+
+What the projection must nonetheless reserve, because retrofitting it is the
+expensive version: the decay-free score and its epoch; an **op-id tiebreak** in
+the index (equal scores are the ordinary case — every unvoted post ties — and
+without a total order `LIMIT` pagination silently repeats and skips rows); and
+**vote counts partitioned by voter rather than pre-weighted or pre-summed**.
+That last is what makes rule 1's promise true: a schema storing
+`weighted_total = plain + K_mod·moderator` has baked the weight into stored
+data, so changing it needs a full replay rather than an `ORDER BY` edit — and it
+is wrong anyway, since a voter's authority resolves on read and is not a property
+of the vote. §7.3 makes this sharper still: a vouched voter's weight is not even
+a property of the *Stoa*, since it differs per reader, so weights must be joined
+at query time rather than stored against a vote under any scheme.
+
+**Rule 4's exclusion has to be indexable too, and it is not this same problem.**
+A filter over a property resolved on read looks like rule 5 in another hat, but
+the two differ in boundedness: a decayed score changes *every row's* sort key
+*continuously*, whereas the hidden set is small, enumerable, and changes only
+when a moderation op arrives. So it is a derived set with explicit invalidation
+points — an ordinary materialised column. Store `is_hidden` on the view row,
+written by calling the moderation resolver rather than by a second copy of the
+authority rule in SQL, recomputed on moderation-op arrival (the arriving op may
+not be the deciding one) and swept when a late genesis record lands. Index it
+**ahead of** the score, so the query seeks and walks instead of ranking,
+filtering and ranking again. It must never be encoded as a large negative score
+offset: that would be indexable too and would silently restore the haircut rule
+4 rejects, since a sufficiently upvoted hidden post would climb back.
+
+**This is why rule 4's restriction of the weights to upvotes is load-bearing for
+the schema and not only for the semantics.** Had a moderator's downvote been
+given exclusion-like force — a threshold at which a post disappears — hidden-ness
+would depend on a continuously accumulating vote count over an unbounded set of
+rows with no enumerable invalidation points, and it would genuinely become rule
+5's problem.
+
+**6. The interim ordering expires, and here is the condition.** "The forum will
+not get spammed just yet" is true and has an expiry date. A staged decision with
+no named trigger is a permanent decision nobody admitted making, because no
+moment ever arrives that obliges anyone to revisit it. Rule 2's `top` is
+withdrawn or re-gated before the next release on whichever of these fires first:
+
+- **A Stoa becomes discoverable without a human passing an address.** §4.8 Phase
+  2's broadcast topic is the sharp line — it is "unauthenticated and spammable"
+  by its own description, and it is the moment an attacker can *find* a Stoa to
+  attack. **This is a precondition, not a warning: `top` must not ship enabled
+  in the same release as broadcast discovery.**
+- **A moderator can no longer read every post in their own Stoa within a
+  session.** That is the moment the score stops being decorative and starts
+  deciding what gets seen, because nobody is checking the whole Stoa any more.
+  **The moderator is the observer and the owner of this check** — it is a
+  judgement they make from their own view, in their own client.
+
+  **An earlier draft said "a Stoa exceeds a few hundred participating
+  identities", and that was unanswerable rather than merely vague.** Rule 1
+  establishes that two peers hold different ops by design, so there is **no
+  vantage point from which a Stoa's identity count is a well-defined
+  quantity** — and a count of freely mintable identities is attacker-controlled
+  in both directions, so an attacker could trip the trigger or stay under it at
+  will. A trigger needing an auditor this architecture cannot have is a trigger
+  that never fires. The replacement is per-peer observable and has a named
+  person, which is what the other three already had.
+- **The first sybil attempt is observed** — a burst of votes, in either
+  direction, from identities with no posting history. One is enough; the
+  question was never whether an attacker *could*, only whether one had bothered.
+  Rule 5's separate per-class vote counts make this a query rather than an
+  investigation — **but a query nobody runs is not an observation.** The
+  moderator owns it, the client surfaces it **unprompted** rather than waiting
+  to be asked, and the cadence is *whenever the projection is rebuilt*, since
+  that is when the counts change and it costs nothing extra. An alert a person
+  must remember to go looking for is the same failure as no alert.
+- **A nullifier-bound vote credential lands** (RLN, §7). Rule 3's end state is
+  then available and the interim has no remaining justification.
+
+The first three retire `top`; the fourth replaces it. **What expires is the
+*plain* vote's non-zero weight, not the ordering itself** — §7.3's vouched class
+survives every trigger, because a vouch was never a sybil defence and an
+attacker's arrival does not invalidate it. **Whoever proposes §4.8 Phase 2
+broadcast discovery owns this check** — it is recorded here rather than
+only in the change that introduced `top`, because the first condition fires
+inside someone else's change and they will not read that one.
 
 #### The shape to reserve now
 
 ```
-score = f(engagement) · decay(age) · weight(author_claims)
+engagement = Σ_voters  w(voter) · dir(vote)
+score      = engagement · decay(age)
 ```
 
-with `weight(∅) = 0` for votes (rule 3) and moderation handled by exclusion
-rather than a term (rule 4). In v1 no claim exists, so nothing is ranked by this
-and `new`/`active` are what ship. Writing the shape down now is what lets the
-claims layer land without a schema migration.
+with `dir ∈ {+1, −1}`, the sum floored at zero (rule 2), moderation handled by
+exclusion rather than a term (rule 4), and `decay(age) = 1.0` until an age
+exists (rule 5). `w` is the interim weighting today and becomes rule 3's
+`w(∅) = 0` gate when RLN lands — a scorer change, not a schema one.
+
+**This corrects an earlier shape that read
+`f(engagement) · decay(age) · weight(author_claims)`, and the correction
+matters.** That form weighted a post by its *author's* credential, where what is
+wanted is weighting a *vote* by its *voter's*. Appendix A measured why the
+difference is not cosmetic: OpChan's author multiplier scales a quantity the
+attacker already controls, which is how a flat 25% author premium loses to three
+free votes. A voter weight changes what the quantity is made of. **There is no
+author term at all**, deliberately — nothing about who wrote a post should
+multiply how much other people liked it, and if author standing ever matters it
+belongs as its own additive term.
 
 #### Where the rules come from
 
-Every rule above is stated as an inversion because `logos-messaging/OpChan` —
-the nearest kin, a Logos-ecosystem forum with a real relevance implementation —
-shipped the un-inverted version. **Appendix A** has the arithmetic and the
-citations; the one number worth carrying inline is that in OpChan's scorer,
-**three free sybil upvotes outrank holding an ENS name**, and a credentialed
-voter's premium is one tenth of the raw vote it rides on. That is rule 3 as a
-measurement rather than an opinion.
+Rules 1, 3, 4 and 5 are each stated as an inversion because
+`logos-messaging/OpChan` — the nearest kin, a Logos-ecosystem forum with a real
+relevance implementation — shipped the un-inverted version. **Appendix A** has
+the arithmetic and the citations; the one number worth carrying inline is that
+in OpChan's scorer, **three free sybil upvotes outrank holding an ENS name**,
+and a credentialed voter's premium is one tenth of the raw vote it rides on.
+That is rule 3 as a measurement rather than an opinion.
+
+**Rule 2 is the exception, and reading it as an inversion is the mistake to
+avoid.** It ships something the measurement says is gameable, on the explicit
+ground that nobody is there to game it. Appendix A is what the *end state* must
+avoid and what rule 6's trigger protects against — not a refutation of the
+interim, which fails to the same arithmetic and is justified by the environment
+instead. The failure mode to watch for is someone later reading rule 2 as
+evidence that the measurement did not matter.
 
 Two design choices for proof-of-holding that OpChan never faced, because its
 signal was binary and free:
@@ -1395,6 +1579,363 @@ signal was binary and free:
   privacy, **not** presentation unlinkability, and its `3010` account-binding
   may preclude it (§5.5, §13). Settle this before a holding proof carries any
   weight in ranking.
+
+### 7.3 Vouching: a reader's own trust, and why it is not published
+
+Moderator weight (§7.2 rule 2) is one Stoa-wide opinion, and a Stoa has exactly
+one moderator today. That makes the interim ordering a fair description of what
+*the creator* likes, which is not the same as relevance and does not scale past
+a Stoa small enough for one person to read.
+
+**A reader may therefore vouch for an identity**: "this pseudonym produces good
+judgement, weigh their votes more heavily **in my ranking**." It is the answer
+for someone who has earned standing with actual readers but holds no system
+credential — no moderator key, no token, no RLN membership — which is the
+majority of anyone worth reading.
+
+#### The vocabulary, and what each rejected word would have implied
+
+**"Vouch"**, because the alternatives each smuggle in a different mechanism:
+
+- **"follow"** already means *show me their posts* in every forum anyone has
+  used. Reusing it welds feed subscription to vote weighting, and users want
+  those separately — plenty of people are worth reading and unreliable at
+  judging others, and the reverse is commoner still.
+- **"friend"** implies reciprocity and a social graph. This is one-directional
+  and needs no agreement from the other party, who is never told.
+- **"trust"** collides with the word §7 uses for cryptographic guarantees. A
+  "trusted user" reads as a system property; a *vouched* one is plainly
+  somebody's opinion, which is exactly what it is.
+
+So: a reader **vouches for** an identity, holds a **vouched set**, and the
+scorer's weight classes are **moderator / vouched / plain**.
+
+#### It is a local projection, not an op — and that is not a detail
+
+**A vouch is never published.** It is local state, like the score it feeds
+(§7.2 rule 1), and three independent arguments all land on that:
+
+- **§5.2 makes a published vouch a privacy leak.** Identities are unlinkable
+  across Stoas by construction. A vouch list that travelled — or that named
+  identities in more than one Stoa — would re-link the pseudonyms §5.2 keeps
+  apart, and would do it using the reader's own social graph, which is worse
+  than the linkage §5.2 prevents. **A vouch therefore names a Stoa-scoped
+  identity and is scoped to that Stoa**, with no cross-Stoa list anywhere.
+- **A published vouch graph is a sybil amplifier.** If vouches were ops,
+  minting identities that vouch for each other would manufacture standing, and
+  the graph would be exactly the unmetered signal §7.2 rule 3 warns about with
+  more steps. Keeping it local means an attacker can only affect *their own*
+  ranking, which is not an attack.
+- **It converges without any protocol.** Nothing has to agree. §7.2 rule 1
+  already says two peers rank differently and that is correct; a vouch makes
+  that divergence *intentional* rather than merely tolerated.
+
+The consequence worth stating plainly: **vouching does not make anyone more
+visible to anyone else.** It changes one reader's feed. Anybody expecting it to
+confer status on the person vouched for has misread it, and the UI must not
+imply otherwise — no vouch counts, no "N people vouch for this author" badge.
+Such a display would be a published vouch graph reconstructed by eye, with all
+three problems above.
+
+#### Vouching accrues from what a reader already does
+
+**An explicit vouch list nobody fills in is a feature that ships dead.** Asking
+a reader to maintain a curation list is asking for work they did not come to do,
+so the vouched set stays empty and §7.3 has no effect. The mechanism has to
+start from behaviour the reader is already exhibiting.
+
+**So a reader's own upvotes accrue weight toward the identities they upvote.**
+Repeatedly upvoting someone raises that identity's weight in this reader's
+ranking, without anyone declaring anything. Call it **earned** weight, against a
+**declared** vouch, and keep the two distinguishable in the UI: one is something
+the reader chose and can revoke in a click, the other is something they should be
+told has happened and be able to undo.
+
+**Only upvotes accrue. A downvote moves nothing.** The asymmetry matters for the
+same reason it does in rule 4: accruing *negative* weight from downvotes would
+let a reader's disagreements quietly build a filter that hides a viewpoint from
+them, which is the failure mode this design is arranged against and is worse for
+being invisible. Earned weight only ever raises.
+
+**This is where §7.4's abandoned second axis leaves a real gap, stated rather
+than papered over.** With one axis, an upvote means "worth reading" and "I
+agree" at once, so weight accrues from a blend of the two — and the literature
+§7.4 cites measures exactly that conflation. A reader who upvotes only what they
+agree with will build a vouched set that agrees with them. **Nothing in v1
+prevents that**, and the honest claim is that vouching makes a reader's
+weighting *explicit and revocable* rather than making it viewpoint-neutral.
+Bridging (§7.4) is the mechanism that would address it, and it is future work.
+
+Two bounds, both structural:
+
+- **Earned weight is capped below `K_vouch`.** Accrual is evidence, not a
+  declaration, and it should never silently exceed what the reader explicitly
+  chose. Without a cap, heavy engagement with one identity converges on
+  delegating a reader's feed to them by accident.
+- **It decays with disuse** — a reader's judgement of a year ago is weaker
+  evidence about their present preferences than last week's. This wants the
+  same age input §7.2 rule 5 says does not exist yet, so it is **specified as a
+  property and deferred in mechanism**, alongside decay itself. Until then,
+  accrual is bounded by the cap alone, which is the conservative failure.
+
+#### Weights, and the one ordering constraint that matters
+
+`K_vouch < K_mod`, and both are chosen rather than derived (§7.2 rule 2 says
+the same of `K_mod`, and the honesty applies to both). The inequality is not
+arbitrary: a moderator's standing is checkable by every peer from the genesis
+record, where a vouch is one reader's private judgement, so the more accountable
+credential should not weigh less.
+
+`K_vouch` around 2 against `K_mod` of 3 sits inside §7.2's bracket — **but that
+bracket was derived for an unmintable, peer-checkable credential, and a vouch is
+neither.** It is per-reader, unverifiable by anyone else, and the only weight
+class surviving rule 6. Whether the derivation transfers is **assumed here, not
+argued.** Two reasons it might — the bracket's argument was about not drowning
+organic engagement, which is indifferent to who issued the credential, and
+earned weight is capped below `K_vouch` regardless — but neither is a
+derivation. Treat the value as a starting point that inherits an argument made
+about something else, and settle it when vouching is specified.
+
+**Vouching amplifies upvotes only**, exactly as rule 4 requires of a moderator's
+vote, and for the same reason: an amplified downvote is suppression without
+moderation's properties. That it is *private* suppression makes it no better — a
+reader who silently buries what their vouched set dislikes has built a filter
+bubble with a ranking engine, which is at least a product failure and arguably
+the thing a dialectic forum exists not to be.
+
+#### What it does not become
+
+**A vouch is not transitive, and this is a decision rather than an omission.**
+Weighing the opinions of people my vouched set vouches for is a web of trust,
+and a web of trust needs loop detection, depth limits, decay per hop, and a
+defined answer when two paths disagree — and it recreates the sybil amplifier
+locally, since one bad vouch imports a stranger's entire graph. If transitivity
+is ever wanted, it is its own design with its own evidence, not a parameter.
+
+**A vouch does not moderate.** It cannot hide, and it is not an input to
+moderation. §6.1 keeps moderation a binding judgement, and a reader's private
+weighting is the opposite of binding by construction.
+
+#### Where it sits in the staging
+
+Vouching is **an extension, scheduled after** §7.2's interim ordering ships, and
+it is the one piece of §7 that **does not expire under rule 6**: it is not a
+sybil defence and never claimed to be, so an attacker's arrival does not
+invalidate it. When rule 3's credential gate lands and plain votes drop to zero,
+vouched votes survive — **a vouch is a credential too, just one whose issuer is
+the reader rather than the system.** That is the property that makes it worth
+building rather than a stopgap: it is the only weight class here that stays
+meaningful in the end state, and it is what stops that end state from counting
+nobody but token holders.
+
+### 7.4 One vote axis, a vouch, and a report
+
+**An earlier draft of this section specified two vote axes — quality separated
+from agreement — and a literature review contradicted it.** The design is now
+Reddit's single axis plus §7.3's vouch plus a report to the moderator. What
+follows is why, because the reasoning is the part worth keeping: the *problem*
+the two-axis design was solving is real and measured, and the two-axis design is
+simply not the intervention the evidence supports.
+
+#### What the evidence says, including against the obvious design
+
+**Against a second axis:**
+
+- The only large quasi-causal study of vote mechanisms finds **no fault with
+  up+down**. Difference-in-differences across 55 political subreddits that
+  *changed* their reaction mechanism, 155M comments: up-only and up+down both
+  associate with more deliberative, more civic discourse, and the **most
+  demagogic** case is subreddits with **no reaction mechanism at all**.
+- The one **randomised** removal of downvotes (a field experiment on a 3M-member
+  subreddit) improved the scoreboard and **not the behaviour**: negative scores
+  fell sharply, moderator removals did not move, and newcomers became *less*
+  likely to comment again. Removing the downvote is not a proven intervention.
+- **Two-axis voting has no published evaluation anywhere.** Two large forums
+  have run karma-plus-agreement for years with no measurement of any kind, and
+  their own design discussion reported the axes moving together the large
+  majority of the time. Specifying it here would have meant shipping a mechanism
+  whose only real deployments have never been assessed.
+- The one *evaluated* rich-moderation precedent (labelled categories plus
+  metamoderation) found the binding constraint was **latency, not
+  expressiveness** — much of a conversation passes before the best and worst
+  comments are identified, and only about half of unfair moderations were ever
+  corrected. **A peer-to-peer forum inherits a worse version of that**, so
+  spending the interaction budget on more expressive voting spends it in the
+  wrong place.
+
+**And yet the problem is real, which is why this section still exists:**
+
+- Users **do** downvote disagreement, at scale and in defiance of every
+  platform's stated norm. Half a million comments of users discussing their own
+  voting show downvoting used as a suppression tool against views that challenge
+  a community's norms.
+- The cost to dissenters is **quantified**: users who engage with opposing views
+  receive measurably fewer upvotes in their home communities. **Single-axis
+  voting taxes good-faith disagreement.**
+- Negative feedback **percolates**: downvoted authors post more, post worse, and
+  go on to downvote others.
+
+So the conflation is real and a second vote axis is not the answer to it. The
+answer the evidence points at is a different ranking *function* over the same
+single axis — see the bridging note below — and that is future work rather than
+v1.
+
+#### The three controls
+
+- **Vote — `up` / `down`.** Exactly as §7.2 rule 2 describes, weighted by how
+  much this reader weighs that voter (moderator, vouched, earned, plain). One
+  axis, familiar, and no new op.
+- **Vouch — §7.3.** The reader's own answer to "whose judgement do I weigh",
+  accruing from votes they already cast. It is where "I disagree with you but
+  you argue well" *can* live — a reader who finds someone consistently worth
+  reading is free to weight them up whether or not they agree with them.
+  **Nothing makes them do so, and §7.3 is explicit that nothing prevents the
+  opposite**: with one axis an upvote blends "worth reading" with "I agree", so
+  a reader who upvotes only what they agree with builds a vouched set that
+  agrees with them. Vouching makes a reader's weighting explicit and revocable,
+  **not viewpoint-neutral** — bridging is what would deliver that.
+- **Report — to the Stoa's moderator.** Spam and abuse leave the ranking system
+  entirely and go to someone with binding authority (§6). This is the axis split
+  that actually has a track record: separating "rank this" from "this breaks the
+  rules" is what the forums that work already do.
+
+**The report is what makes the single axis defensible.** The two-axis design
+existed to stop spam and disagreement being the same signal — and a report
+separates them *better*, because a moderator's hide **binds** (§6) where an
+assessment would only have ranked.
+
+#### A report petitions, and that is its limitation as well as its point
+
+An earlier draft argued a report is the wrong frame here because it petitions an
+authority rather than expressing a judgement. That objection was right and is
+kept, because it names the real cost rather than being dissolved by the
+decision:
+
+- **A report does nothing for the reader who filed it** until someone acts. A
+  vote changes their feed immediately; a report disappears into a queue with
+  exactly one reader.
+- **That queue does not scale.** One moderator per Stoa, no trust-and-safety
+  team, and the Slashdot finding above says latency is already the constraint.
+- **Reports are weaponisable and there is no backstop.** Mass reporting as a
+  harassment technique is well documented on centralised platforms, where
+  targets at least have an appeals path. A Stoa has none.
+- **Nobody has measured whether reports are precise enough to act on in a
+  decentralised system.** Studies of federated moderation find operators fall
+  back on instance-level blocklists rather than reports — which over-block and
+  fragment the network. If this design rests on "reports reach the right
+  moderator and are mostly valid", **that assumption is unmeasured anywhere**.
+
+The mitigation that keeps the reader's objection satisfied: **a report also acts
+locally and immediately** — it drops the post out of the reporter's own feed at
+once, rather than only entering a queue. The reader is then evaluating *and*
+petitioning, the control visibly does something, and a report that changes
+nothing observable does not get repurposed as a super-downvote.
+
+**A report is not a moderation.** It does not hide, and it never accumulates
+toward hiding however many arrive — §7.2 rule 4's principle holds unchanged:
+suppression is a binding judgement or it is nothing. A report is a *signal a
+moderator may read*, plus a local filter for the reader who sent it.
+
+#### Encoding
+
+**No new op and no version bump for the vote**, which keeps its existing shape.
+A report is a local action in v1 — it changes the reporter's own view and
+surfaces to the moderator — so the question of whether it ever becomes a
+published op is deferred rather than answered here. If it does, the vote op's
+one-byte discriminant has 254 unused values and refuses unknown ones rather than
+defaulting them (§11), so the extension stays fail-closed and cheap.
+
+#### Future: bridging-based ranking, and why it is not v1
+
+**This is the mechanism the evidence actually supports for surfacing good
+arguments a reader disagrees with**, and it is worth recording precisely so that
+nobody re-derives the two-axis design later.
+
+Bridging ranks by whether people who *usually disagree with each other* both
+rate something positively. Crucially **it is not a second vote axis** — it infers
+the disagreement dimension from the existing single-axis rating matrix by
+factorising it, so the interface stays exactly as above. The deployed instance
+(a large platform's crowd-sourced fact-check system) has real measured effects:
+substantial reductions in agreement with misleading claims and in resharing,
+independently replicated.
+
+**Why it is not v1, and what has to be true first:**
+
+- **It is fragile under permissionless identity.** Published analyses show fewer
+  than ten strategically placed ratings can push a meaningful fraction of
+  low-quality items over the display threshold. The deployed system resists this
+  only because the platform supplies sybil resistance out of band — phone
+  verification, rater enrolment, per-rater impact scores. **§7 is explicit that
+  dialectica has none of that.**
+- **§7.3's vouch is the candidate replacement for that missing layer**, which is
+  a stronger argument for vouching than §7.3 makes on its own. But it only works
+  once vouch data exists, so bridging is **downstream of vouch being populated**,
+  not parallel to it.
+- It needs a rating matrix with enough density to factorise, which a new Stoa
+  does not have.
+
+So the sequence is: single axis and vouch now; bridging when there is both a
+matrix to factorise and a sybil-resistance story to protect it. **Revisit it
+alongside rule 6's triggers**, since the condition that retires the interim
+score is close to the condition that makes bridging both possible and necessary.
+
+#### What was rejected, so it is not re-proposed
+
+- **A second vote axis** (quality separated from agreement). Unevaluated
+  anywhere, spends the interaction budget on expressiveness where the measured
+  constraint is latency, and its own precedents report the axes moving together.
+- **A `contested` ordering built on a split-response signal.** The single-axis
+  version of this — ranking by an even split — is **mechanically a "most
+  polarising content" sort**: the structural analysis behind the percolation
+  finding above shows a 50/50 split is exactly where a voter network is most
+  polarised, and separate work finds much controversial content is merely
+  off-topic. It has also **never been studied** for whether it surfaces anything
+  worth reading. Bridging is the thing this was reaching for, and it is a
+  different mechanism.
+- **Auto-hiding on accumulated negative signal**, in any form. Refused
+  structurally by §7.2 rule 2's floor.
+
+#### Open: a disagreeing reply is a quality signal the vote axis loses
+
+**Parked, not designed**, and it survives the move to one axis — arguably it
+matters *more* now, because the single axis is exactly what cannot express it.
+
+**Replying to say "I disagree" is implicitly "this is worth my time."** Nobody
+writes a rebuttal to spam; they scroll past. So a disagreeing reply carries the
+judgement the vote axis conflates away — and the reader who writes one may well
+*downvote* the same post, which is the measured behaviour §7.4 cites.
+
+Three reasons it is worth taking seriously rather than filing as a nicety:
+
+- **It is an organic signal, needing no new control.** A reader who would never
+  use an extra button has already expressed the judgement by writing.
+- **It is costly, which makes it hard to fake.** Unlike a click, a substantive
+  reply takes effort, so it resists the minting attack §7.2 rule 2 admits it
+  cannot stop. That makes it a *better* signal than any button, not a weaker
+  proxy for one.
+- **It needs no new op.** A reply is already a `Post` with a parent (§11), so
+  the data is present in the log today.
+
+**What must be settled before it is built**, and why it is not obvious:
+
+- **A reply is not necessarily a disagreement**, and inferring which from text
+  is sentiment analysis — an expensive, locale-specific, wrong-by-default
+  classifier that this project should not own. The alternative is counting *any*
+  substantive reply as a weak positive signal regardless of stance, which needs
+  no classifier but rewards pile-ons and flame wars — the failure mode of every
+  engagement metric ever shipped.
+- **It creates an incentive to reply rather than to vote**, and a forum that
+  rewards replying is a forum that rewards argument volume. That may be
+  acceptable here — argument is the point — but it is the kind of thing that
+  looks fine in design and is corrosive in practice.
+- **Self-replies and reply chains** would need excluding or bounding, or an
+  author raises their own post by arguing with their critics.
+
+**Weigh it against bridging** rather than in isolation: both address the same
+gap, bridging has measured results behind it and this does not, but this needs
+no rating-matrix density and no sybil-resistance layer. If bridging proves out
+of reach for a permissionless forum, this is the fallback that was always going
+to be the real signal.
 
 ---
 
@@ -1711,6 +2252,20 @@ thing (§2.3).
   concurrently?** The one genuine merge question in the design (§5.7), and it
   does not arise while the creator is the sole moderator — so it is answered
   alongside mutable moderation, not before.
+- **Should a disagreeing reply count as a quality signal?** Written up in §7.4 —
+  replying to disagree is implicitly "worth my time", it is costly enough to
+  resist minting, and it needs no new op. Blocked on avoiding sentiment
+  analysis, and on whether rewarding replies rewards argument volume. **Weigh it
+  against bridging**, which addresses the same gap with measured results but
+  needs a dense rating matrix and a sybil-resistance layer this forum lacks.
+- **Does bridging-based ranking work without platform-supplied sybil
+  resistance?** §7.4 records it as the evidenced answer to surfacing good
+  arguments a reader disagrees with, and records why it is not v1: published
+  analyses show fewer than ten placed ratings can push low-quality items over
+  threshold, and the deployed instance relies on out-of-band identity checks §7
+  says dialectica has none of. **§7.3's vouch is the candidate replacement** —
+  whether it is sufficient is the open question, and it cannot be answered until
+  vouch data exists.
 - ~~**When the `policy` field lands.**~~ **Answered: it is in the genesis
   record now**, with `open` as its only accepted value — `dialectica-core`'s
   `stoa::Policy`. The reasoning stands as written and is why it landed early: a
@@ -1762,14 +2317,23 @@ thing (§2.3).
   channel inside one node's lifetime — assumes persisted SDS state does not
   corrupt a fresh `createNode`. Two runs against a real node, with peer traffic
   received in the first, settles it.
-- ~~**Are votes an op in v1 at all?**~~ **Answered: yes, collected and read by
-  nothing.** The kind is in the op format (`op.rs`), carrying a target and a
-  direction, so the history accumulates from v1 and scoring arrives later
-  without a wire-format version bump. §7.2 rule 2 still ships no score, so
-  nothing reads them yet. Both directions are recorded even though Appendix A
-  found the signal is upvote-only — what to *count* is the scorer's decision,
-  where §7.2 can change it, rather than the format's, where changing it costs a
-  version.
+- ~~**Are votes an op in v1 at all?**~~ **Answered: yes, and they are read —
+  §7.2 rule 2's `top` counts them.** The kind is in the op format (`op.rs`),
+  carrying a target and a direction, so the history accumulated from v1 and the
+  scorer arrived over it without a wire-format version bump, which is what
+  collecting them early bought. Both directions are recorded even though
+  Appendix A found the signal is upvote-only — what to *count* is the scorer's
+  decision, where §7.2 can change it, rather than the format's, where changing
+  it costs a version.
+
+  **This entry previously ended "rule 2 still ships no score, so nothing reads
+  them yet", and that outlived rule 2 by one revision.** Noted because of where
+  it sat rather than because one sentence went stale: a struck-through
+  *Answered* block is the shape a reader trusts most, since it presents itself
+  as settled, and this is the first place outside §7 that someone arrives at
+  asking what votes do today. **An answered question is not a finished
+  question** — when the section it summarises changes, the summary is part of
+  that change.
 - ~~**Is a hide reversible?**~~ **Answered: yes — the inverse is named. But it
   cannot currently win, and that half is not settled.**
   `op.rs` carries one `Moderate` kind with an `action` of `Hide` or `Unhide`,
