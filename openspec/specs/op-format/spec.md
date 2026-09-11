@@ -268,15 +268,30 @@ A four-byte length prefix can claim four gibibytes. The transport caps a message
 
 The refusal SHALL be reported as an over-long field, distinguishably from running out of input, so that the cap is demonstrably what rejected it.
 
-#### Scenario: An over-long field length is refused by the cap
+The limit SHALL be pinned at its boundary rather than only at a value far beyond it. A test claiming a length thousands of times the limit demonstrates that some bound exists while leaving its position entirely unconstrained, so the limit could drift by any smaller amount undetected.
 
-- **WHEN** a body's length prefix claims far more than the message cap allows
+This requirement bounds a **single field**, and deliberately claims nothing about the size of a whole decoded op. Several fields each under the limit can sum past what one message carries. Establishing that an op fits in a message needs the transport frame, which a decoder handed a byte slice cannot observe — it cannot tell whether those bytes arrived in one message, came from local storage, or were assembled by a caller. That check belongs at the transport boundary.
+
+#### Scenario: The field-length limit is refused at its boundary
+
+- **WHEN** a field's length prefix claims exactly one byte more than the limit allows
+- **THEN** decoding fails reporting an over-long field
+
+#### Scenario: A field at exactly the limit is not refused by the cap
+
+- **WHEN** a field's length prefix claims exactly the limit
+- **THEN** the cap does not reject it
+- **AND** any failure that follows is about the input available, not the limit
+
+#### Scenario: An over-long field length is refused by the cap, not by running out
+
+- **WHEN** a body's length prefix claims more than the limit allows
 - **THEN** decoding fails reporting an over-long field
 - **AND** the failure is not merely "the input ended"
 
 #### Scenario: An over-long list count is refused by the cap
 
-- **WHEN** an attachment list's count claims far more than the message cap allows, with no elements behind it
+- **WHEN** an attachment list's count claims more than the limit allows, with no elements behind it
 - **THEN** decoding fails reporting an over-long field
 - **AND** no capacity is reserved on the strength of the count
 

@@ -424,6 +424,52 @@ finding is recorded here, and in the pull request, so that it is fixed
 deliberately once those branches have landed rather than silently by whoever
 next runs the command and wonders why their diff is enormous.
 
+## The cap does not bound a message, in either module
+
+Raised by a reviewer on a parallel branch and traced back here, since the idiom
+predates that branch.
+
+**The test idiom was one-sided.** Every length-prefix test in the crate claims
+`u32::MAX` — roughly 4 GiB, against records of a few dozen bytes. That proves *a*
+bound exists and nothing about where it sits: `MAX_FIELD_LEN` could rise from
+150 KiB to 150 MB, or acquire an off-by-one, with the whole suite green. Fixed
+for `stoa.rs` in its own commit by adding a boundary pair — largest accepted
+value accepted, exactly one past it refused with the specific variant — and
+verified failing under both an off-by-one and a permissive clamp. The `op.rs`
+instances are the metadata-op branch's to fix.
+
+**`stoa.rs` has no cap constant at all.** No `MAX_FIELD_LEN`, no `FieldTooLong`.
+The only bound is structural: `cursor.take(len)` fails because the input slice
+is short. That absence is now pinned by
+`the_genesis_decoder_has_no_field_length_cap`, so a future variant adding a list
+has to decide about a cap rather than inherit its absence by accident.
+
+The absence is safe against **memory exhaustion**, for a reason worth stating
+because it is not obvious: this decoder never allocates on the strength of the
+claim. `Cursor::take` returns a bounds-checked subslice of a buffer that already
+exists, and the `to_vec` after it copies only what `take` returned. `op.rs` needs
+its cap because it additionally decodes a *list*, whose element count is a second
+claim with elements allocating as they are read.
+
+**It is not safe against composition, and the same is true of `op.rs`.** A
+genesis record with a 400 KiB title decodes without complaint — measured at
+409,638 bytes, 2.7× the 150 KiB SDS limit — because the only bound is the buffer
+handed in. This is the same finding the security reviewer made about `op.rs`
+(two fields each under the cap summing past the message limit), reached from the
+other direction: there, the cap composes badly; here, there is no cap to compose.
+
+**The right home for that check is the transport boundary, not either decoder.**
+A decoder is handed a `&[u8]` and cannot tell whether it arrived in one SDS
+frame, was read from local storage, or was assembled by a caller — so a limit
+here would be guessing at a constraint it cannot observe, and would also make a
+decoder unable to re-read a record it had itself accepted under a different
+limit. Deliberately recorded rather than fixed.
+
+The consequence for this spec: `op-format`'s cap requirement is stated as a
+per-field refusal threshold that prevents allocating on a hostile claim, which
+is what the code does and all it does. It deliberately does **not** claim that a
+decoded op fits in an SDS message, because no code establishes that.
+
 ## Open Questions
 
 - **Should the re-encoding canonicity probe become a permanent test?** It found
