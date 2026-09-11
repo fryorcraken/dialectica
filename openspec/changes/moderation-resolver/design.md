@@ -339,13 +339,19 @@ hide permanent, a worse bug than the one being closed.
 
 **The condition asks about the leading candidate, not about all of them**, and
 that distinction is now load-bearing outside this module — do not "simplify" it
-without reading what depends on it. Architecture review used it to correct a
-queued `Ordered { regime, entries }` design for the log's read result: a regime
-stamped on the read describes the *pre-filter* sequence, which is a different set
-of ops from the binding candidates whose leader decides here. Under a `Mixed`
-regime a resolver would still have to inspect its own leader's `Arrival`, leaving
-two ways to ask one question. The argument is in this module because that is
-where the requirement arose; it is cited elsewhere because it generalises.
+without reading what depends on it.
+
+The consequence for the log's API is **op-log's** to state, and it does, under
+"The ordering regime: pressure this contract does not answer, and the shape to
+avoid". It names this resolver as the motivating case. Not restated here: one
+argument, one home, and that home is the contract the shape would have been
+added to.
+
+What belongs here is only why *this* resolver needs the leader's arrival rather
+than the read's. A read can hold unordered ops that all fail authority while
+every surviving candidate is transport-ordered; asking about the read would
+demote that case to the degraded branch for nothing. The question is about the
+op that is *about to decide*, so that is the op whose arrival is read.
 
 **Why not in `cmp_ops`.** Two reasons. It is moderation semantics, and a general
 comparator has no business knowing that one op kind's payload is safer to
