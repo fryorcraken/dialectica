@@ -259,10 +259,15 @@ resting on the untested assumption §13 named. Treat §13's entry as open.
 - `lgs basecamp build --variant all` — green, both `lgx` and `lgx-portable`.
 - `lgs basecamp modules` — captured `delivery_module` at the pinned rev.
 - `lgs basecamp install` — reported `installing 3 module(s) (deps first)`,
-  which is §11's trap correctly avoided, and was still building the delivery
-  module (a Nim/C++ build from source) when the session's budget ran out.
+  which is §11's trap correctly avoided, and then spent the rest of the session
+  building `liblogosdelivery` from source: the full Nim/Waku stack plus a Rust
+  zerokit/RLN toolchain, roughly 380 derivations on a cold cache, with
+  `liblogosdelivery-dev` itself the last and largest.
 
-Nothing failed. The work was not finished.
+**Nothing failed. The work was not finished**, and the reason is worth naming
+because it is a budgeting fact rather than a defect: on a cold nix cache,
+*getting to the starting line* of this experiment is a multi-hour build, and it
+is in front of the scaffolding work described below rather than behind it.
 
 ### The blocker a re-run must plan around, and it is not the build
 
@@ -325,6 +330,33 @@ than trusting a tile.
   immediately after the verb. The value of a third sighting is that it is now
   clearly *every* run, not an occasional one: budget the restore as a step, not
   a contingency.
+
+- **`liblogosdelivery` is built from source because nix distrusts the flake's
+  binary cache**, and the message says so only as a warning you will scroll
+  past:
+
+  ```
+  warning: ignoring untrusted flake configuration setting 'extra-substituters'.
+  Pass '--accept-flake-config' to trust it
+  ```
+
+  The delivery flake ships `extra-substituters` and `extra-trusted-public-keys`
+  pointing at a cache that would supply the whole Nim/Waku/zerokit stack
+  prebuilt. A non-trusted nix user cannot accept those settings silently, so
+  they are dropped and every derivation is rebuilt locally. **This converts a
+  download into a multi-hour compile**, and nothing about it presents as an
+  error. Anyone budgeting this experiment should decide deliberately whether to
+  pass `--accept-flake-config` (a trust decision about that cache's keys, not a
+  formality) or to plan for the from-source build.
+
+- **Run `lgs basecamp install` detached, not in a foreground call with a
+  timeout.** Its delivery build outlasts any reasonable command timeout, and
+  when the harness times the call out it kills the `nix build` child with it —
+  the partially-built derivation is discarded and the next run restarts that
+  derivation from the beginning. Nix's own caching protects the ~380
+  dependencies but not the one in flight, so a timeout near the end of
+  `liblogosdelivery` is the most expensive moment to hit. Start it in the
+  background and poll the log at the path the command prints.
 
 - **A stale line-number citation outlives the claim it supports.** §13 cited
   `plugin.cpp:158` for a fact that is now at line 212 (§2). The sentence stayed
