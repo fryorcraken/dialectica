@@ -11,7 +11,13 @@
 //! no SDK crate at all, so the constraint is enforced by the compiler rather
 //! than by review. The module crate is a thin adapter that forwards to it.
 
+// Private: a shared decoding primitive, not part of the module's contract.
+// §2.5 says widening the surface is a deliberate act, and a read head is an
+// implementation detail every decoder happens to share.
+mod cursor;
+
 pub mod identity;
+pub mod op;
 pub mod stoa;
 pub mod wire;
 

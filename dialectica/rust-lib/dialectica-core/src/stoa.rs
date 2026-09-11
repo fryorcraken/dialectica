@@ -27,6 +27,35 @@
 //! lying length prefix, an unknown policy and an unknown version are each
 //! refused rather than absorbed.
 //!
+//! **Two different bounds govern the title length prefix**, and confusing them
+//! is how one of them silently stops being checked.
+//!
+//! 1. **The cap.** A claim over [`MAX_TITLE_BYTES`] is refused as
+//!    `TitleTooLong`, checked *before* the read so it costs nothing, and
+//!    enforced on the encode side too — so the decoder refuses exactly what the
+//!    encoder declines to produce.
+//! 2. **The available input.** A claim under the cap but past what the buffer
+//!    holds is refused as `LengthMismatch`.
+//!
+//! The cap is checked first, which is worth knowing before writing a test
+//! against either: a claim above the cap never reaches the input comparison, so
+//! a test that reaches for `u32::MAX` to exercise the lying-prefix path
+//! silently stops exercising it. Each bound has its own boundary pair, and
+//! `the_two_length_bounds_are_reported_distinguishably` pins that they do not
+//! collapse into one error.
+//!
+//! **Neither bound makes a record fit an SDS message, and nothing here does.**
+//! The cap bounds one field; a record is that field plus a fixed header. Today
+//! that cannot exceed the 150 KiB message limit, but this module does not check
+//! it and should not be read as promising it — the same "a cap is not a message
+//! bound" gap `op.rs` has, where several capped fields can sum past the limit.
+//!
+//! **The right home for that check is the transport boundary**, where the SDS
+//! frame is actually visible. This decoder is handed a `&[u8]` and has no way
+//! to know whether it arrived in one message, was read from local storage, or
+//! was assembled by a caller, so a message-size limit here would be guessing at
+//! a constraint it cannot observe.
+//!
 //! # What is deliberately not here
 //!
 //! **No policy enforcement.** The record *declares* a policy; nothing checks a
@@ -44,6 +73,7 @@
 //! Stoas that cannot see each other. §4.3 states the same rule for the channel
 //! id, which is derived from this address: it "can carry no per-peer state".
 
+use crate::cursor::{Cursor, OutOfBounds};
 use crate::identity::{stoa_address, Address, KeyError, PublicKey};
 
 /// The encoding generation.
@@ -190,6 +220,22 @@ impl std::fmt::Display for GenesisError {
     }
 }
 
+impl From<OutOfBounds> for GenesisError {
+    /// The shared read head reports only *that* it ran out; this says what
+    /// running out means for a genesis record.
+    ///
+    /// Kept as a `From` rather than spelled at each call site so that every
+    /// bounds failure in `decode` maps the same way. The one site that means
+    /// something else — a length prefix claiming more than the input holds — is
+    /// mapped explicitly there, and reads as the deliberate exception it is.
+    fn from(e: OutOfBounds) -> Self {
+        match e {
+            OutOfBounds::Truncated => GenesisError::Truncated,
+            OutOfBounds::Trailing => GenesisError::TrailingBytes,
+        }
+    }
+}
+
 impl Genesis {
     /// The canonical encoding. Exactly one valid byte string per record.
     ///
@@ -243,9 +289,7 @@ impl Genesis {
 
         let policy = Policy::from_byte(cursor.take(1)?[0])?;
 
-        let mut len = [0u8; 4];
-        len.copy_from_slice(cursor.take(4)?);
-        let len = u32::from_be_bytes(len) as usize;
+        let len = cursor.take_length()?;
         // Checked BEFORE the read, so an over-long title costs nothing to
         // refuse — and so the decoder rejects exactly what the encoder refuses
         // to produce.
@@ -290,50 +334,6 @@ impl Genesis {
     /// cannot be the one any address names.
     pub fn matches(&self, address: &Address) -> bool {
         self.address().is_ok_and(|a| &a == address)
-    }
-}
-
-/// A bounds-checked read head.
-///
-/// Exists so that "did the input end?" is asked in ONE place. Hand-rolled
-/// slicing at each field is how a decoder acquires a panicking index — and a
-/// panic here is reached from inbound peer data, where PHASE0-FINDINGS §3
-/// measured what an unguarded panic costs: the module process aborts.
-///
-/// Private because there is exactly one decoder. If a second op wants the same
-/// bounds-checked reads, `pub(crate)` and a move is cheap — but generalising
-/// from one instance would be a guess, and a genesis record is an odd template:
-/// it is self-identifying by hash, its encoding being its address preimage,
-/// where other ops carry their own id and a signature.
-struct Cursor<'a> {
-    bytes: &'a [u8],
-    at: usize,
-}
-
-impl<'a> Cursor<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
-        Cursor { bytes, at: 0 }
-    }
-
-    /// The next `n` bytes, or `Truncated`. Never panics, never wraps:
-    /// `checked_add` because `at + n` on a hostile length could overflow and
-    /// wrap to a value that passes a naive bounds check.
-    fn take(&mut self, n: usize) -> Result<&'a [u8], GenesisError> {
-        let end = self.at.checked_add(n).ok_or(GenesisError::Truncated)?;
-        let slice = self
-            .bytes
-            .get(self.at..end)
-            .ok_or(GenesisError::Truncated)?;
-        self.at = end;
-        Ok(slice)
-    }
-
-    fn finish(self) -> Result<(), GenesisError> {
-        if self.at == self.bytes.len() {
-            Ok(())
-        } else {
-            Err(GenesisError::TrailingBytes)
-        }
     }
 }
 
@@ -555,6 +555,93 @@ mod tests {
         assert_eq!(Genesis::decode(&bytes), Err(GenesisError::LengthMismatch));
     }
 
+    /// Overwrite the title's length prefix with `claim`.
+    fn with_title_length_claim(bytes: &mut [u8], claim: u32) {
+        bytes[TITLE_LEN_AT..TITLE_LEN_AT + 4].copy_from_slice(&claim.to_be_bytes());
+    }
+
+    #[test]
+    fn the_available_input_boundary_accepts_the_largest_fit_and_refuses_one_more() {
+        // A BOUNDARY PAIR for the SECOND bound, which is easy to miss because
+        // the first one now has its own pair.
+        //
+        // Two different limits govern a title length prefix, and they fail
+        // with different errors:
+        //
+        //   1. the CAP    — `len > MAX_TITLE_BYTES` => TitleTooLong.
+        //                   Pinned by `a_title_at_the_maximum_is_accepted` and
+        //                   `a_title_over_the_maximum_is_refused_on_both_sides`.
+        //   2. the INPUT  — a claim under the cap but past what the buffer
+        //                   holds => LengthMismatch. That is this test.
+        //
+        // Both are boundaries and both can drift independently. The cap pair
+        // says nothing about (2): it varies lengths around 1024 while the
+        // record stays self-consistent, so a decoder that stopped comparing the
+        // claim against the remaining input would keep passing it.
+        //
+        // Stays well under MAX_TITLE_BYTES on purpose, for the reason
+        // `a_lying_length_prefix_is_refused` now documents: the cap is checked
+        // first, so a claim above it is refused as TitleTooLong and never
+        // reaches the input comparison this test exists to pin.
+        let g = Genesis {
+            title: "abcdef".to_string(),
+            ..a_record()
+        };
+        let fits = g.title.len() as u32;
+        assert!(
+            (fits as usize) < MAX_TITLE_BYTES,
+            "the fixture must sit below the cap, or this tests the wrong bound"
+        );
+
+        // Exactly what the input holds: accepted, and yields the real record.
+        // Asserting the VALUE rather than `is_ok()` is what rules out a decoder
+        // that accepted the length and then returned something else.
+        let mut ok = g.canonical_bytes().unwrap();
+        with_title_length_claim(&mut ok, fits);
+        assert_eq!(
+            Genesis::decode(&ok).unwrap(),
+            g,
+            "the largest claim the input satisfies must be accepted"
+        );
+
+        // One byte more than the input holds: refused, with the specific
+        // variant. Asserting the variant rather than `is_err()` keeps this from
+        // passing on some unrelated rejection — and specifically distinguishes
+        // it from TitleTooLong, which is the other way a length prefix dies.
+        let mut over = g.canonical_bytes().unwrap();
+        with_title_length_claim(&mut over, fits + 1);
+        assert_eq!(
+            Genesis::decode(&over),
+            Err(GenesisError::LengthMismatch),
+            "one byte past what the input holds must be a LengthMismatch"
+        );
+    }
+
+    #[test]
+    fn the_two_length_bounds_are_reported_distinguishably() {
+        // The cap and the input bound must not collapse into one error.
+        //
+        // A caller matching on TitleTooLong to say "that title is too long for
+        // a Stoa" and on LengthMismatch to say "this record is corrupt" gets
+        // both wrong if the decoder reports either for both. The two tests
+        // above each pin one side; this pins that they stay different, which
+        // neither does on its own.
+        let mut over_cap = a_record().canonical_bytes().unwrap();
+        with_title_length_claim(&mut over_cap, (MAX_TITLE_BYTES + 1) as u32);
+
+        let mut past_input = a_record().canonical_bytes().unwrap();
+        with_title_length_claim(&mut past_input, (MAX_TITLE_BYTES - 1) as u32);
+
+        assert_eq!(
+            Genesis::decode(&over_cap),
+            Err(GenesisError::TitleTooLong(MAX_TITLE_BYTES + 1))
+        );
+        assert_eq!(
+            Genesis::decode(&past_input),
+            Err(GenesisError::LengthMismatch)
+        );
+    }
+
     #[test]
     fn a_title_over_the_maximum_is_refused_on_both_sides() {
         // The bound must hold symmetrically: a record the decoder refuses must
@@ -735,6 +822,19 @@ mod tests {
         //
         // If this fails, do NOT update the expected values to match. Work out
         // what changed and whether the network can survive it.
+        // The constants themselves, asserted DIRECTLY and not only through the
+        // encoding below. `cargo mutants` structurally cannot see a wrong
+        // `const` — it mutates functions, not constants — so a constant is only
+        // ever pinned by an assertion someone wrote on purpose. This repo has
+        // already shipped a VERSION_1 defect that left the whole suite green
+        // for exactly that reason.
+        //
+        // The hex blob below does cover these bytes, but it covers them
+        // incidentally: a reader auditing "is the policy discriminant pinned?"
+        // has to decode the blob by hand to find out. These two lines answer it.
+        assert_eq!(VERSION_1, 1, "the genesis encoding version changed");
+        assert_eq!(Policy::OPEN, 0, "the open policy discriminant changed");
+
         let g = a_record();
 
         assert_eq!(

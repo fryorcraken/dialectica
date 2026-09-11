@@ -1682,13 +1682,33 @@ thing (§2.3).
   channel inside one node's lifetime — assumes persisted SDS state does not
   corrupt a fresh `createNode`. Two runs against a real node, with peer traffic
   received in the first, settles it.
-- **Are votes an op in v1 at all?** §3.3 lists voting among the op types and
-  §7.2 rule 2 ships no score, so v1 either collects vote ops nothing reads or
-  has no votes. Collecting them early is cheap and makes the history available
-  when scoring lands; deciding by accident is not.
-- **Is a hide reversible?** §5.7 orders "moderation ops on the same target" by
-  last-write-wins, which only means something if a hide can be undone. §6's op
-  sketch shows only `hide`. Name the inverse op or say hides are terminal.
+- ~~**Are votes an op in v1 at all?**~~ **Answered: yes, collected and read by
+  nothing.** The kind is in the op format (`op.rs`), carrying a target and a
+  direction, so the history accumulates from v1 and scoring arrives later
+  without a wire-format version bump. §7.2 rule 2 still ships no score, so
+  nothing reads them yet. Both directions are recorded even though Appendix A
+  found the signal is upvote-only — what to *count* is the scorer's decision,
+  where §7.2 can change it, rather than the format's, where changing it costs a
+  version.
+- ~~**Is a hide reversible?**~~ **Answered: yes — the inverse is named.**
+  `op.rs` carries one `Moderate` kind with an `action` of `Hide` or `Unhide`,
+  rather than two kinds, because §6.2's threshold certificate signs "the same
+  `(target, action, epoch)` tuple" and a tuple needs `action` to be a field.
+  Last-write-wins over a set of one was not an ordering, and a moderation
+  system with no correction path makes every mistake permanent.
+- **§5.7's ordering rule has no input at the contract we have.** It orders by
+  Lamport timestamp with a message-id tiebreak, and §4.4 has SDS supplying
+  both — but `contracts/delivery_module.lidl` exposes
+  `channelMessageReceived(channelId, senderId, payload, timestamp)`, with no
+  Lamport clock and no SDS message id. `timestamp` is the delivery module's
+  own, and §11 records that its units differ per event.
+
+  Ops deliberately carry neither (`op.rs`): a self-asserted Lamport value is
+  forgeable by the author it is meant to order, so inventing a field would be
+  worse than the gap. So either delivery exposes SDS's ordering metadata, or
+  §5.7 needs a rule that runs on what the transport actually provides. **This
+  blocks the op log and the revision/moderation resolvers, not the op format**
+  — which is why the format landed without it. Settle it before the store.
 
 ---
 

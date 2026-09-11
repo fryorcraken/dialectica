@@ -81,6 +81,25 @@ const STOA_KEY_SALT: &[u8] = b"/dialectica/1/Identity/Stoa";
 pub struct Address([u8; 32]);
 
 impl Address {
+    /// An address from its 32 raw bytes.
+    ///
+    /// **Infallible, and that is not a gap in validation.** An address is a
+    /// hash output, so every 32-byte string is a syntactically valid one —
+    /// there is nothing to check that would not be a lie about what this type
+    /// guarantees. What an address means is settled by re-deriving it from the
+    /// record or key it names ([`PublicKey::address`], [`stoa_address`]), and a
+    /// `Result` here would suggest that a successful construction had said
+    /// something about that.
+    ///
+    /// Takes a fixed-size array rather than a slice deliberately: the length is
+    /// a type constraint, so a caller holding wire bytes does its own checked
+    /// conversion and this cannot be handed the wrong thing. The same reasoning
+    /// as [`PublicKey::from_bytes`], one step further along — there is not even
+    /// an error case left to return.
+    pub fn from_bytes(bytes: [u8; 32]) -> Self {
+        Address(bytes)
+    }
+
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
@@ -408,9 +427,13 @@ impl std::fmt::Debug for Signature {
 /// separation between op *kinds*. A post and a moderation action both go
 /// through here, so a signature is not intrinsically bound to which sort of op
 /// it authorises — that separation has to come from the canonical bytes being
-/// unambiguously typed, which is the serialiser's job and the serialiser does
-/// not exist yet. When it lands, the op kind belongs in this digest, so the
-/// property is structural rather than a convention the encoder must maintain.
+/// unambiguously typed.
+///
+/// **That is now supplied.** [`crate::op::Op::canonical_bytes`] puts the op
+/// kind in the second byte of every preimage, so two ops of different kinds
+/// cannot encode alike and no signature over one is a signature over the
+/// other. The property is structural rather than a convention the encoder must
+/// maintain, which is what this comment previously said was owed.
 /// `pub(crate)`, deliberately. This is the raw value a signature is made over,
 /// and exporting it is an invitation to hand-roll a verification path — which
 /// is exactly the split [`verify_authored_op`] exists to prevent, since the
@@ -526,9 +549,12 @@ pub fn verify_authored_op(
 ///
 /// **The caller owns canonicalisation.** "The record's canonical bytes" is an
 /// obligation this function cannot discharge: it hashes whatever it is given, so
-/// two encodings of the same logical record yield two different addresses. The
-/// serialiser that fixes a canonical form does not exist yet (`serde_json` does
-/// not produce canonical JSON), and it arrives with the op model.
+/// two encodings of the same logical record yield two different addresses.
+///
+/// [`crate::stoa::Genesis::address`] is the entry point that discharges it, and
+/// it is the one to prefer — going through the record makes hashing a
+/// non-canonical encoding impossible by accident. This byte-oriented primitive
+/// stays for callers that already hold canonical bytes.
 pub fn stoa_address(genesis_bytes: &[u8]) -> Address {
     let mut hasher = Sha256::new();
     hasher.update(STOA_ADDRESS_PREFIX);
