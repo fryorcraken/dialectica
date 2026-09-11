@@ -80,29 +80,27 @@ The refusal SHALL be reported as an over-long field, distinguishably from runnin
 - **THEN** the first fails as an over-long field and the second as a length mismatch
 - **AND** the two do not collapse into one error, so a caller can tell "no peer could have sent this" from "this op is corrupt"
 
-### Requirement: Text fields are validated as UTF-8 and not otherwise transformed
+## ADDED Requirements
 
-Decoding SHALL reject text that is not valid UTF-8, and SHALL NOT normalise, case-fold, reorder, strip or otherwise transform text that is valid.
+### Requirement: Valid text is never normalised or otherwise transformed
 
-Refusing invalid UTF-8 is required because a lossy conversion maps distinct inputs onto one op, which would give two byte strings one op id.
+Decoding SHALL NOT normalise, case-fold, reorder, strip or otherwise transform text that is valid UTF-8. Rejecting text that is *not* valid UTF-8 is already required by "A malformed op is rejected at the decoding boundary"; this requirement governs what happens to text that passes that check.
 
-Declining to transform *valid* text is equally deliberate and is a canonicality requirement, not an oversight. Any normalisation applied at decode would mean an accepted byte string re-encoding to something other than itself, breaking op-id agreement between peers — the property the whole encoding exists to provide.
+Declining to transform valid text is a canonicality requirement, not an oversight. Any normalisation applied at decode would mean an accepted byte string re-encoding to something other than itself, which contradicts "An accepted encoding re-encodes to itself" and would break op-id agreement between peers — the property the whole encoding exists to provide. Two peers on builds with different Unicode tables would compute different ids for one op, silently.
 
 **The consequence is that display text is attacker-controlled and SHALL NOT be trusted for rendering or identification.** A title may contain bidirectional controls, zero-width characters, or homoglyphs of an established Stoa's name, and while no authority check exists any peer may sign such an op. Mitigation belongs to whoever renders: strip or visibly mark bidi and zero-width controls, show the Stoa address alongside any name, and never treat a title as an identifier. The address is the identity; a name never is.
 
-#### Scenario: Text that is not valid UTF-8 is refused
-
-- **WHEN** a text field's bytes are not valid UTF-8
-- **THEN** decoding fails
-- **AND** the bytes are not lossily converted
-
 #### Scenario: Valid text is returned exactly as it arrived
 
-- **WHEN** a text field carries valid UTF-8, including multi-byte sequences and embedded control characters
+- **WHEN** a text field carries valid UTF-8, including multi-byte sequences, bidirectional controls and zero-width characters
 - **THEN** decoding returns those characters unchanged
 - **AND** re-encoding reproduces the original bytes
 
-## ADDED Requirements
+#### Scenario: Canonically-equivalent text stays distinct
+
+- **WHEN** two ops carry titles that differ only by Unicode normalisation form, such as a combining sequence against its precomposed equivalent
+- **THEN** their encodings differ
+- **AND** their ids differ, rather than collapsing onto one op
 
 ### Requirement: A Stoa metadata op carries display fields and no policy
 

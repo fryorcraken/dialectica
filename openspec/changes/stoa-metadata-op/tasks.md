@@ -231,3 +231,23 @@
       checkable from the artefacts a spec reviewer is given rather than only
       from the source. A reviewer previously could not tell from spec and tests
       whether the cap was 150 KiB, 1 MiB or unbounded.
+
+- [x] 7.6 Fix a delta that would not have applied. The UTF-8 requirement was
+      filed under `## MODIFIED Requirements` as "Text fields are validated as
+      UTF-8 and not otherwise transformed" — but **no requirement of that name
+      exists in the merged `op-format` spec**. I wrote it against a mental model
+      of the spec rather than the merged requirement list, so `archive` would
+      have had nothing to modify.
+
+      Main covers invalid-UTF-8 *rejection* inside "A malformed op is rejected
+      at the decoding boundary"; it has no standalone text requirement. The
+      non-normalisation rule is genuinely NEW, so it moved to `## ADDED` as
+      "Valid text is never normalised or otherwise transformed", reworded to
+      complement main's rejection coverage rather than restate it, and to cite
+      "An accepted encoding re-encodes to itself" as the requirement
+      normalisation would contradict.
+
+      Verified the remaining two `MODIFIED` names match the merged spec exactly.
+      **The check worth repeating before any `MODIFIED` delta: grep the merged
+      spec for the requirement heading, verbatim.** A wrong name does not fail
+      loudly — it silently modifies nothing.
