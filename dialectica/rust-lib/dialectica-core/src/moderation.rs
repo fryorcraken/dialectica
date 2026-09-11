@@ -396,12 +396,30 @@ pub fn resolve<'a, L: OpLog>(log: &'a L, moderators: &Moderators, target: &OpId)
             .unwrap_or(first)
     };
 
-    match deciding.op.op.kind {
-        OpKind::Moderate {
-            action: ModerationAction::Hide,
-            ..
-        } => Moderation::Hidden(deciding),
-        _ => Moderation::Unhidden(deciding),
+    // Matched on the ACTION rather than on the kind, so that a fifth op kind
+    // cannot reach a `_` arm here and be reported as `Unhidden`.
+    //
+    // The previous form was `match deciding.op.op.kind { Moderate{Hide} => ..,
+    // _ => Unhidden }`, whose `_` covered two unrelated things: a
+    // `Moderate{Unhide}`, which is correct, and any other kind, which is
+    // unreachable — but unreachable only because the filter thirty lines above
+    // established it, not because anything here says so. `StoaMetadata` arriving
+    // in `op.rs` is the reminder that "unreachable by an invariant established
+    // elsewhere" is how a new variant defaults silently.
+    //
+    // Destructuring the action first makes the exhaustiveness the compiler's to
+    // check over `ModerationAction`, and turns the kind mismatch into a stated
+    // impossibility rather than a silent fallthrough.
+    match &deciding.op.op.kind {
+        OpKind::Moderate { action, .. } => match action {
+            ModerationAction::Hide => Moderation::Hidden(deciding),
+            ModerationAction::Unhide => Moderation::Unhidden(deciding),
+        },
+        // Unreachable: `binding` holds only `Moderate` ops, by the filter above.
+        // Reported as unmoderated rather than guessed at — a non-moderation op
+        // deciding a moderation question is a bug in the filter, and the safe
+        // reading of a bug is that nothing was moderated.
+        _ => Moderation::Unmoderated,
     }
 }
 
