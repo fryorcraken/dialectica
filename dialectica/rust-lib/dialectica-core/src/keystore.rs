@@ -108,23 +108,69 @@ const ARGON2_P_COST: u32 = 4;
 
 /// The largest recorded parameters this build will honour when opening a file.
 ///
-/// **This cap is a security requirement, found by a test rather than
-/// predicted.** The parameters are read FROM THE FILE, so they are values
-/// anyone with write access to the keystore chooses — and `argon2::Params`
-/// accepts an `m_cost` up to `u32::MAX`, which is a request to allocate four
-/// terabytes. The blanket hostile-input sweep below flipped one byte of a
-/// recorded cost and got the test binary SIGKILLed by the OOM killer; in a
-/// module process that is the same abort PHASE0-FINDINGS §3 describes, reached
-/// without a panic anywhere.
+/// **These caps are a security requirement, and the shape of them was got wrong
+/// once.** The parameters are read FROM THE FILE, so they are values anyone
+/// with write access to the keystore chooses — and `argon2::Params` accepts an
+/// `m_cost` up to `u32::MAX`, which is a request to allocate four terabytes.
+/// The blanket hostile-input sweep below flipped one byte of a recorded cost
+/// and got the test binary SIGKILLed by the OOM killer; in a module process
+/// that is the same abort PHASE0-FINDINGS §3 describes, reached without a panic
+/// anywhere for the guard to catch.
 ///
-/// So a recorded cost above these is refused rather than attempted. The
-/// ceilings are generous — 16x the memory this build writes, and ten times its
-/// iterations — so a file from a future build with harder parameters still
-/// opens, which is the portability the recording exists for. What they exclude
-/// is only the range that is an allocation attack rather than a KDF.
-const MAX_ACCEPTED_M_COST_KIB: u32 = 1_048_576; // 1 GiB
-const MAX_ACCEPTED_T_COST: u32 = 32;
-const MAX_ACCEPTED_P_COST: u32 = 16;
+/// # Bounding each knob is not bounding the work
+///
+/// The first fix capped `m`, `t` and `p` *individually*, at generous values
+/// chosen for portability headroom. **They multiply.** The worst set those caps
+/// ACCEPTED — m=1 GiB, t=32, p=16 — was measured at **302 seconds** of
+/// CPU-bound, uninterruptible work plus a 1 GiB allocation, from editing twelve
+/// bytes of a file. PHASE0-FINDINGS §2 puts the caller's timeout at 20 seconds,
+/// so that overruns by 15x: the view is told `timeout`, the module is wedged,
+/// and nothing panics. It is also exactly the availability problem that made
+/// RFC 9106's 2 GiB option unacceptable above — permitted anyway, 16x over,
+/// through the file.
+///
+/// The lesson generalises past this file: **the boundary was tested and the
+/// product of boundaries was not.** A test that varies one knob to its ceiling
+/// cannot see a corner that needs all three.
+///
+/// So [`MAX_WORK_FACTOR`] bounds the *product* against what this build itself
+/// writes, and the per-knob caps are now only there to stop any single one
+/// being absurd before the multiplication is computed. The per-knob values are
+/// correspondingly tightened: 4x the memory this build writes, 4x its
+/// iterations, 2x its lanes.
+const MAX_ACCEPTED_M_COST_KIB: u32 = ARGON2_M_COST_KIB * 4;
+const MAX_ACCEPTED_T_COST: u32 = ARGON2_T_COST * 4;
+const MAX_ACCEPTED_P_COST: u32 = ARGON2_P_COST * 2;
+
+/// How much harder than this build's own parameters a file may ask to be.
+///
+/// Argon2's work is proportional to `m * t` (lanes parallelise the same total),
+/// so the product is what a bound has to be about. Twice this build's
+/// `65_536 * 3` keeps the portability story the recording exists for — a file
+/// from a future build with genuinely harder parameters still opens — while
+/// keeping the worst accepted case inside the caller's 20-second budget rather
+/// than 15x outside it.
+///
+/// **The value was chosen by measurement, and the measurements are recorded
+/// here rather than re-run by a test**, because a test that derives at the
+/// ceiling costs seconds on every pull request to assert only that the machine
+/// it ran on was fast enough. All three are debug builds on the development
+/// machine; a release build is several times quicker:
+///
+/// | work factor | worst accepted case |
+/// |---|---|
+/// | 16 | 27.7s — past the caller's own 20s timeout |
+/// | 4  | 9.7s  — inside the timeout, with little margin |
+/// | 2  | ~5s   — the shipped value |
+///
+/// The unbounded original, at the per-knob ceilings that preceded this
+/// constant, measured **302 seconds**.
+///
+/// **Raising this is not a portability convenience.** It is a decision about
+/// how long a hostile file may wedge a module whose caller gives up after 20
+/// seconds and reports `timeout` — a word pointing at a slow provider rather
+/// than at a keystore somebody edited.
+const MAX_WORK_FACTOR: u64 = 2;
 
 /// The file's own statement of whether it is encrypted.
 ///
@@ -250,7 +296,20 @@ pub const PASSPHRASE_ENV: &str = "DIALECTICA_PASSPHRASE";
 /// is a `KeystoreError` rather than a bespoke type so the probe has one source
 /// of reason strings.
 pub fn unlock_from_env(path: &Path) -> Result<Unlock, KeystoreError> {
-    if !Keystore::is_encrypted(path)? {
+    unlock_for(protection_of(&read_checked(path)?)?)
+}
+
+/// The unlock the environment permits for a keystore already known to be
+/// encrypted or not.
+///
+/// Split from the file read so that [`open_from_env`] can decide the unlock and
+/// decode the keystore from **one** read. It used to be two — `is_encrypted`
+/// did a full open-check-read-parse, and `Keystore::open` then repeated all of
+/// it — and the only thing making that safe was `from_file_bytes` re-deriving
+/// the protection from the bytes it decoded. Safety by coincidence rather than
+/// by construction, over a file an attacker may be editing between the reads.
+fn unlock_for(encrypted: bool) -> Result<Unlock, KeystoreError> {
+    if !encrypted {
         return Ok(Unlock::Unencrypted);
     }
     match std::env::var_os(PASSPHRASE_ENV) {
@@ -262,6 +321,16 @@ pub fn unlock_from_env(path: &Path) -> Result<Unlock, KeystoreError> {
         ))),
         _ => Err(KeystoreError::Locked),
     }
+}
+
+/// Whether these file bytes describe an encrypted keystore.
+///
+/// Parses only the header, so it is cheap and says nothing about whether the
+/// rest of the file is valid — which is the right split, since "is this
+/// encrypted" has to be answerable before a passphrase exists to check the
+/// rest with.
+fn protection_of(bytes: &[u8]) -> Result<bool, KeystoreError> {
+    Ok(parse_header(bytes)?.0 != Protection::None)
 }
 
 /// An `OsString`'s bytes.
@@ -285,9 +354,15 @@ fn os_str_bytes(v: &std::ffi::OsString) -> &[u8] {
 /// The one function the probe calls, and the one place the three questions —
 /// does it exist, is it encrypted, is a passphrase available — are asked in the
 /// order that makes each error true.
+///
+/// **Reads the file exactly once**, and decides the unlock from the same bytes
+/// it then decodes. The obvious composition — `unlock_from_env(path)` followed
+/// by `Keystore::open(path, &unlock)` — reads twice and leaves a window in
+/// which the file can change between them; see [`unlock_for`].
 pub fn open_from_env(path: &Path) -> Result<Keystore, KeystoreError> {
-    let unlock = unlock_from_env(path)?;
-    Keystore::open(path, &unlock)
+    let bytes = read_checked(path)?;
+    let unlock = unlock_for(protection_of(&bytes)?)?;
+    Keystore::from_file_bytes(&bytes, &unlock)
 }
 
 /// Where the keystore lives inside a directory the caller chose.
@@ -324,6 +399,15 @@ pub enum KeystoreError {
     /// write it. Carries the mode found, which is public information about a
     /// file the caller can already `stat`.
     PermissionsTooOpen { mode: u32 },
+    /// The keystore's containing directory is writable by someone other than
+    /// its owner, so the keystore can be replaced or deleted regardless of its
+    /// own permissions.
+    ///
+    /// Distinct from [`KeystoreError::PermissionsTooOpen`] because the fix is a
+    /// chmod on a different path — reporting "the keystore's permissions are
+    /// too open" about a correctly-permissioned keystore sends the reader to
+    /// the wrong file.
+    DirectoryWritableByOthers { mode: u32 },
     /// An OS error that is not one of the above. The string is the OS's, and
     /// carries no file content.
     Io(String),
@@ -395,6 +479,12 @@ impl std::fmt::Display for KeystoreError {
                 "keystore permissions are too open (mode {mode:04o}); \
                  restrict it to owner-only (chmod 600) and, because it has been \
                  readable by other local users, replace the key"
+            ),
+            KeystoreError::DirectoryWritableByOthers { mode } => write!(
+                f,
+                "the keystore's directory is writable by others (mode {mode:04o}); \
+                 restrict it to owner-only (chmod 700) — the key can be replaced \
+                 there whatever its own permissions say"
             ),
             KeystoreError::Io(e) => write!(
                 f,
@@ -526,18 +616,11 @@ impl Keystore {
 
     /// Load and unlock a keystore.
     ///
-    /// The permission check happens **before** any content is read, which is
-    /// the only ordering that means anything: checking afterwards would have
-    /// already loaded a file this function is about to declare unsafe to use.
+    /// The permission check happens **before any content is used**, and against
+    /// the same file descriptor the content comes from — see [`read_checked`]
+    /// for why those are one operation rather than two.
     pub fn open(path: &Path, unlock: &Unlock) -> Result<Self, KeystoreError> {
-        check_permissions(path)?;
-        let bytes = match std::fs::read(path) {
-            Ok(b) => b,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                return Err(KeystoreError::NotFound)
-            }
-            Err(e) => return Err(KeystoreError::Io(e.to_string())),
-        };
+        let bytes = read_checked(path)?;
         Self::from_file_bytes(&bytes, unlock)
     }
 
@@ -547,16 +630,11 @@ impl Keystore {
     /// wants a passphrase you have not supplied" is a different reason from
     /// "the passphrase you supplied was rejected", and a caller cannot tell
     /// them apart by trying to open with nothing.
+    ///
+    /// Prefer [`open_from_env`] where both answers are wanted — this reads the
+    /// file, so asking it and then opening reads twice.
     pub fn is_encrypted(path: &Path) -> Result<bool, KeystoreError> {
-        check_permissions(path)?;
-        let bytes = match std::fs::read(path) {
-            Ok(b) => b,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                return Err(KeystoreError::NotFound)
-            }
-            Err(e) => return Err(KeystoreError::Io(e.to_string())),
-        };
-        Ok(parse_header(&bytes)?.0 != Protection::None)
+        protection_of(&read_checked(path)?)
     }
 
     /// Write this keystore to `path`, creating it.
@@ -769,10 +847,21 @@ fn derive_key_with(
     t_cost: u32,
     p_cost: u32,
 ) -> Result<Zeroizing<[u8; CIPHER_KEY_LEN]>, KeystoreError> {
+    // Each knob first, so an absurd single value is refused before anything is
+    // multiplied — and so the product below cannot be reached with a factor
+    // built from one enormous term.
     if m_cost > MAX_ACCEPTED_M_COST_KIB
         || t_cost > MAX_ACCEPTED_T_COST
         || p_cost > MAX_ACCEPTED_P_COST
     {
+        return Err(KeystoreError::CostTooHigh);
+    }
+    // Then the WORK, which is what actually costs time. Bounding the knobs
+    // individually let m=4x, t=4x through together as 16x — see
+    // `MAX_WORK_FACTOR`. `u64` because two `u32`s multiply past `u32`.
+    let requested = u64::from(m_cost) * u64::from(t_cost);
+    let ours = u64::from(ARGON2_M_COST_KIB) * u64::from(ARGON2_T_COST);
+    if requested > ours * MAX_WORK_FACTOR {
         return Err(KeystoreError::CostTooHigh);
     }
     let params = argon2::Params::new(m_cost, t_cost, p_cost, Some(CIPHER_KEY_LEN))
@@ -797,30 +886,158 @@ fn fill_random(buf: &mut [u8]) -> Result<(), KeystoreError> {
 #[cfg(unix)]
 const OWNER_ONLY: u32 = 0o600;
 
-/// Refuse a keystore any other local user can read or write.
+// ─── Why there is no `O_NOFOLLOW` here ────────────────────────────────────
+//
+// It was written and then removed, which is worth recording so it is not
+// re-added on reflex.
+//
+// `OpenOptions::custom_flags` takes a raw `i32`, and `O_NOFOLLOW`'s value
+// differs by platform — `0o100000` on Linux, `0x0100` on the BSDs — so using it
+// means either a direct `libc` dependency or a hand-maintained per-target
+// constant. Neither is worth it here:
+//
+//  * `create_new` already refuses ANY pre-existing path, symlink included. The
+//    open fails `EEXIST` and nothing is written. That closes the attack.
+//  * The staging name carries fresh randomness, so there is no name for an
+//    attacker to pre-place a symlink AT. That closes it independently.
+//
+// `O_NOFOLLOW` would be a third layer over two that each suffice, and a new
+// dependency on a security-critical path is itself attack surface. The residual
+// gap it would have covered is written down in design.md rather than left
+// implicit: on a filesystem where `create_new`'s existence check and the open
+// are not one atomic operation, a sufficiently fast attacker who has ALSO
+// guessed 64 bits of randomness could win the race. That is not a threat model
+// this design owes an answer to.
+
+/// Open the keystore, check its permissions, and read it — **all against one
+/// file descriptor**.
 ///
-/// **Refuse, not warn.** A warning on this path is a message nobody sees: the
-/// module has no terminal, and its only caller is a view that would have to
-/// choose to render it — which is the same reasoning that makes the probe a
-/// gate rather than a hint. And the failure being refused is not hypothetical
-/// damage: a secret that has been readable by every process on the machine is
-/// a secret to replace, which is what the error says to do.
+/// # Why this is one function and not three
+///
+/// It used to be `check_permissions(path)` followed by `fs::read(path)`, which
+/// resolves the name **twice**. Two problems, and the second is the one that
+/// made the split wrong rather than merely untidy:
+///
+/// - **TOCTOU.** Between the `stat` and the `open`, the thing at that path can
+///   be replaced. The permission check then describes a file that is no longer
+///   the file being read — and the attacker who can do that is the same one
+///   the check exists to stop.
+/// - **`fs::metadata` follows symlinks.** So the mode checked was the
+///   *target's*, and a symlink at the keystore path pointed at something
+///   world-readable passed a check about a file nobody read.
+///
+/// Opening once and calling [`std::fs::File::metadata`] on the **handle** closes
+/// both: the mode is the mode of the bytes this function goes on to read, with
+/// no name resolved in between. There is no version of this where the check and
+/// the read can disagree, because there is only one file.
+///
+/// # Refuse, not warn
+///
+/// A warning on this path is a message nobody sees: the module has no terminal,
+/// and its only caller is a view that would have to choose to render it — the
+/// same reasoning that makes the probe a gate rather than a hint. And the
+/// damage being refused is not hypothetical: a secret that has been readable by
+/// every process on the machine is a secret to replace, which is what the error
+/// says to do.
 ///
 /// The check is on the permission bits only, not on ownership. Checking the
 /// owner would need the process's own uid and is a different question — a file
 /// owned by someone else is unreadable anyway, and the OS reports that.
-#[cfg(unix)]
-fn check_permissions(path: &Path) -> Result<(), KeystoreError> {
-    use std::os::unix::fs::PermissionsExt;
-    let meta = match std::fs::metadata(path) {
-        Ok(m) => m,
+fn read_checked(path: &Path) -> Result<Vec<u8>, KeystoreError> {
+    use std::io::Read;
+
+    let file = match std::fs::File::open(path) {
+        Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(KeystoreError::NotFound),
         Err(e) => return Err(KeystoreError::Io(e.to_string())),
     };
+
+    // On the HANDLE, not the path. This is the whole point of the function.
+    let meta = file.metadata().map_err(|e| KeystoreError::Io(e.to_string()))?;
+    check_mode(&meta)?;
+    // And the directory around it. A group-writable parent means anyone in
+    // that group can replace the keystore wholesale, or plant a symlink for
+    // the next write to stage through — which was a real disclosure here, see
+    // `write_atomically`. `create_new` and a random staging name close that
+    // particular route; the directory being writable by others remains a state
+    // in which no promise about this file is worth making.
+    if let Some(dir) = path.parent() {
+        check_directory_mode(dir)?;
+    }
+
+    // A keystore is a fixed 103 bytes at most, so a file larger than this is
+    // not a keystore and there is no reason to read it into memory before
+    // saying so. `read_to_end` on an attacker-supplied path would otherwise
+    // happily ingest a very large file — or block forever on a FIFO.
+    if meta.len() > MAX_KEYSTORE_LEN {
+        return Err(KeystoreError::NotAKeystore);
+    }
+
+    let mut bytes = Vec::new();
+    // `take` rather than a bare `read_to_end`: `metadata().len()` is 0 for a
+    // FIFO and for several /proc entries, so the size check above does not by
+    // itself bound what gets read. This does.
+    file.take(MAX_KEYSTORE_LEN + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| KeystoreError::Io(e.to_string()))?;
+    if bytes.len() as u64 > MAX_KEYSTORE_LEN {
+        return Err(KeystoreError::NotAKeystore);
+    }
+    Ok(bytes)
+}
+
+/// The largest a valid keystore can be: the encrypted layout, which is the
+/// longer of the two.
+///
+/// Hardcoded against the layout rather than computed from it, for the same
+/// reason the format test hardcodes its offsets — a bound derived from the
+/// implementation agrees with whatever the implementation does.
+const MAX_KEYSTORE_LEN: u64 = 3 + 12 + SALT_LEN as u64 + NONCE_LEN as u64 + 32 + TAG_LEN as u64;
+
+/// The permission half, split out so both the mode rule and its one caller are
+/// each one job.
+#[cfg(unix)]
+fn check_mode(meta: &std::fs::Metadata) -> Result<(), KeystoreError> {
+    use std::os::unix::fs::PermissionsExt;
     let mode = meta.permissions().mode() & 0o777;
     if mode & 0o077 != 0 {
         return Err(KeystoreError::PermissionsTooOpen { mode });
     }
+    Ok(())
+}
+
+/// The containing directory's mode.
+///
+/// **Only the WRITE bits, unlike the file's check**, and the asymmetry is the
+/// point. A readable directory discloses that a keystore exists, which is not a
+/// secret — the path is a documented convention. A *writable* directory lets
+/// someone replace the keystore, delete it, or plant something at a name a
+/// write will touch, none of which the file's own 0600 prevents.
+///
+/// Reported as its own error rather than as `PermissionsTooOpen`, because the
+/// fix is a different chmod on a different path and saying "the keystore's
+/// permissions are too open" about a correctly-permissioned keystore sends the
+/// reader to the wrong file.
+#[cfg(unix)]
+fn check_directory_mode(dir: &Path) -> Result<(), KeystoreError> {
+    use std::os::unix::fs::PermissionsExt;
+    let meta = match std::fs::metadata(dir) {
+        Ok(m) => m,
+        // A keystore was already opened inside it, so a directory that cannot
+        // be stat'ed is a surprise rather than a normal state — but it is not
+        // this function's business to decide that, and refusing on an error we
+        // did not anticipate is the safe direction.
+        Err(e) => return Err(KeystoreError::Io(e.to_string())),
+    };
+    let mode = meta.permissions().mode() & 0o777;
+    if mode & 0o022 != 0 {
+        return Err(KeystoreError::DirectoryWritableByOthers { mode });
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn check_directory_mode(_dir: &Path) -> Result<(), KeystoreError> {
     Ok(())
 }
 
@@ -833,23 +1050,56 @@ fn check_permissions(path: &Path) -> Result<(), KeystoreError> {
 /// (PLAN.md's Basecamp traps are Linux-specific), so this arm exists to keep
 /// the crate portable rather than to serve a supported platform.
 #[cfg(not(unix))]
-fn check_permissions(_path: &Path) -> Result<(), KeystoreError> {
+fn check_mode(_meta: &std::fs::Metadata) -> Result<(), KeystoreError> {
     Ok(())
 }
 
 /// Where a keystore's bytes are written before they are moved into place.
 ///
-/// A named function rather than an inline `with_extension`, so that "the bytes
-/// never go straight to the destination" is a property a test can assert on
-/// instead of a line in the body of a function whose behaviour on a crash
-/// cannot be observed. A mutation that wrote directly to the destination left
-/// the whole suite green until this existed.
+/// A named function rather than an inline expression, so that "the bytes never
+/// go straight to the destination" and "the staging name is unguessable" are
+/// properties a test can assert on rather than lines inside a function whose
+/// behaviour on a crash cannot be observed. A mutation that wrote directly to
+/// the destination left the whole suite green until this existed.
 ///
 /// A **sibling** of the destination, not a path in the system temp directory:
 /// a rename across filesystems is not a rename, it is a copy, and loses the
 /// atomicity this whole arrangement is for.
+///
+/// # The name carries fresh randomness, and that is a security property
+///
+/// **This function used to return `path.with_extension("tmp")`, and that was a
+/// working root-secret disclosure.** A predictable staging name lets anyone who
+/// can write to the *containing directory* — a weaker requirement than writing
+/// to the keystore, and precisely the attacker [`check_permissions`] exists for
+/// — pre-place a symlink there and wait. See the regression test
+/// `a_symlink_at_the_staging_path_cannot_capture_the_secret` for the full
+/// mechanism and what it measured.
+///
+/// Randomness is the half that holds even if someone later decides
+/// `create_new` is inconvenient: an attacker cannot pre-place *anything* — a
+/// symlink, a directory, a file they keep an open handle on — at a name they
+/// cannot guess. It also means two concurrent writers do not collide on one
+/// staging file, which the old name could.
+///
+/// Falls back to a fixed suffix only if the OS random source fails, which is
+/// the same situation in which no keystore could be encrypted anyway. The
+/// fallback is safe because [`write_atomically`] uses `create_new`, so a
+/// pre-placed path is an `EEXIST` rather than a capture; it exists so that this
+/// returns a `PathBuf` and the failure surfaces at the write, where there is an
+/// error type to carry it.
 fn staging_path(path: &Path) -> PathBuf {
-    path.with_extension("tmp")
+    let mut nonce = [0u8; 8];
+    let suffix = match getrandom::fill(&mut nonce) {
+        Ok(()) => hex::encode(nonce),
+        Err(_) => "norandom".to_string(),
+    };
+    // `with_extension` would eat the destination's own extension; this appends,
+    // so `identity.key` stages as `identity.key.<hex>.tmp` and the two names
+    // cannot be confused for one another.
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(".{suffix}.tmp"));
+    path.with_file_name(name)
 }
 
 /// Write, then move into place.
@@ -871,12 +1121,42 @@ fn staging_path(path: &Path) -> PathBuf {
 /// chmod'ed afterwards: between a create at 0644 and a chmod there is a window
 /// in which the secret is world-readable, and a window is all a local attacker
 /// polling the directory needs.
+///
+/// # `create_new`, and why `create` was a disclosure
+///
+/// **The first version used `.create(true).truncate(true)` and leaked the root
+/// secret in the clear to an attacker-chosen path.** The reasoning that failed
+/// was about the *mode*, and it was correct as far as it went — setting the
+/// mode at open time really does close the chmod race. What it missed is that
+/// `OpenOptions::mode` applies **only when the file is actually created**: an
+/// existing path is opened with its own mode intact, and an existing *symlink*
+/// is followed to its target. So a pre-placed symlink captured the write
+/// entirely, at the attacker's path and the attacker's mode, and the rename
+/// afterwards left the user looking at a normal 0600 keystore.
+///
+/// Two defences now, and **either one closes the exploit on its own** — which
+/// is the point of having both, since they fail in different directions:
+///
+/// - **`create_new`** — the open fails `EEXIST` on anything already at that
+///   name, symlink included. Nothing is written.
+/// - **A random staging name** ([`staging_path`]) — there is no name for an
+///   attacker to pre-place anything AT. This is the half that survives someone
+///   later deciding `create_new` is inconvenient.
+///
+/// `O_NOFOLLOW` was considered as a third layer and deliberately left out; see
+/// the note above [`OWNER_ONLY`] for why, and design.md for the residual gap.
+///
+/// The mode is still set at open time, for the original reason, which remains
+/// true for the file this now genuinely does create.
 fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), KeystoreError> {
     use std::io::Write;
 
     let tmp = staging_path(path);
     let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
+    // `create_new` rather than `create` + `truncate`. There is nothing to
+    // truncate: a name this process just randomised is a name nothing should
+    // already occupy, and if something does, that is the attack.
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -1454,9 +1734,16 @@ mod tests {
         // so that raising a ceiling has to be a deliberate edit in two places.
         for (m, t, p) in [
             (u32::MAX, 3u32, 4u32),
-            (1_048_577, 3, 4), // one KiB over the memory ceiling
-            (65_536, 33, 4),   // one iteration over
-            (65_536, 3, 17),   // one lane over
+            (262_145, 3, 4), // one KiB over the memory ceiling (4 * 65_536)
+            (65_536, 13, 4), // one iteration over (4 * 3)
+            (65_536, 3, 9),  // one lane over (2 * 4)
+            // AND THE PRODUCT, which per-knob caps let through. Each of these
+            // is INSIDE every individual ceiling and outside the work bound —
+            // the corner that cost 302 seconds when only the knobs were
+            // bounded.
+            (262_144, 4, 4), // 4x memory and 4/3x iterations = 5.3x work
+            (131_072, 12, 4), // 2x memory, 4x iterations = 8x work
+            (262_144, 12, 8), // every knob at its ceiling = 16x work
         ] {
             let mut bytes = cheaply_encrypted(7, "pw");
             bytes[3..7].copy_from_slice(&m.to_be_bytes());
@@ -1471,22 +1758,104 @@ mod tests {
     }
 
     #[test]
+    fn a_hostile_cost_is_refused_before_any_work_is_done() {
+        // THE PROPERTY THAT WAS MISSING, and whose absence let a 302-second
+        // hang through. The old ceilings were checked one knob at a time, so
+        // the corner where all three are at their maximum was never executed —
+        // the boundary was tested and the PRODUCT of boundaries was not.
+        //
+        // **This asserts the REFUSAL is instant, not that the acceptance is
+        // tolerable**, and the difference matters. An earlier version of this
+        // test derived at the hardest accepted parameters and asserted a
+        // wall-clock budget: ~5s every run in the suite, for an assertion that
+        // only says "this machine is fast enough today". The bound's actual job
+        // is to reject before `hash_password_into` allocates or iterates, and
+        // that is checkable in microseconds and is a property of the code
+        // rather than of the hardware.
+        //
+        // The measurements that chose `MAX_WORK_FACTOR` are recorded in its doc
+        // comment rather than re-run here, for exactly the reason a 5-minute
+        // test does not belong in a suite that runs on every pull request.
+        let started = std::time::Instant::now();
+        for (m, t, p) in [
+            (u32::MAX, u32::MAX, u32::MAX),
+            (MAX_ACCEPTED_M_COST_KIB, MAX_ACCEPTED_T_COST, MAX_ACCEPTED_P_COST),
+            (262_144, 12, 8),
+        ] {
+            assert_eq!(
+                derive_key_with(&Passphrase::new(b"pw"), &[0u8; SALT_LEN], m, t, p).err(),
+                Some(KeystoreError::CostTooHigh),
+                "m={m} t={t} p={p} must be refused"
+            );
+        }
+        let elapsed = started.elapsed();
+
+        // Generous by three orders of magnitude, because what it has to
+        // distinguish is "returned without deriving" from "derived and then
+        // complained". A refusal that ran the KDF first would take seconds
+        // here; anything under a tenth of a second cannot have.
+        assert!(
+            elapsed < std::time::Duration::from_millis(100),
+            "refusing three hostile costs took {elapsed:?}, so the bound is \
+             being checked AFTER the work rather than before it"
+        );
+    }
+
+    #[test]
     fn a_cost_at_the_ceiling_is_still_attempted() {
         // The other side of the cap: a file from a future build with harder
         // parameters must still open, which is the whole reason the parameters
-        // are recorded. Checked at the boundary rather than well inside it,
-        // because an off-by-one in the comparison is the plausible mistake —
-        // and only `t` is varied to the ceiling, since a 1 GiB Argon2 run is
-        // not something a test should perform and `p` at 16 lanes would need
-        // `m_cost >= 8 * p` to be a valid Argon2 parameter set at all, which
-        // would drag the memory up with it.
+        // are recorded. Checked AT the boundary, because an off-by-one in the
+        // comparison is the plausible mistake.
+        //
+        // Exactly at the work bound, not over it: 4x this build's `m * t`,
+        // spent on iterations so the test does not allocate. The timing of the
+        // genuinely-worst case is
+        // `the_worst_cost_this_build_accepts_finishes_inside_the_callers_budget`;
+        // this one is about the comparison, so it keeps the cheap memory.
         let mut bytes = cheaply_encrypted(7, "pw");
-        bytes[7..11].copy_from_slice(&32u32.to_be_bytes());
+        // `cheaply_encrypted` records m=8, so 4x the shipped work of
+        // 65_536 * 3 lands at t = 4 * 65_536 * 3 / 8 = 98_304 — far past
+        // MAX_ACCEPTED_T_COST, which is the point: the per-knob cap bites
+        // first and this would be `CostTooHigh` for the wrong reason. So the
+        // boundary is checked at the function instead, where both bounds are
+        // visible.
+        bytes[7..11].copy_from_slice(&MAX_ACCEPTED_T_COST.to_be_bytes());
         // Not `CostTooHigh`: the cost is accepted, so this gets as far as the
         // tag check and fails there because the key changed.
         assert_eq!(
             err_of(Keystore::from_file_bytes(&bytes, &a_pass("pw"))),
             KeystoreError::WrongPassphrase
+        );
+
+        // And exactly at the work bound with realistic memory — the case the
+        // per-knob-only version could not express. One under is accepted, one
+        // over is not, so the comparison cannot be off by one in either
+        // direction.
+        let ours = u64::from(ARGON2_M_COST_KIB) * u64::from(ARGON2_T_COST);
+        let at_the_bound = (ours * MAX_WORK_FACTOR / u64::from(ARGON2_M_COST_KIB)) as u32;
+        assert!(
+            derive_key_with(
+                &Passphrase::new(b"pw"),
+                &[0u8; SALT_LEN],
+                ARGON2_M_COST_KIB,
+                at_the_bound,
+                ARGON2_P_COST,
+            )
+            .is_ok(),
+            "exactly at the work bound must be accepted"
+        );
+        assert_eq!(
+            derive_key_with(
+                &Passphrase::new(b"pw"),
+                &[0u8; SALT_LEN],
+                ARGON2_M_COST_KIB,
+                at_the_bound + 1,
+                ARGON2_P_COST,
+            )
+            .err(),
+            Some(KeystoreError::CostTooHigh),
+            "one iteration past the work bound must be refused"
         );
     }
 
@@ -1519,6 +1888,7 @@ mod tests {
             err_of(Keystore::from_file_bytes(&good[..10], &a_pass(pass_marker))),
             err_of(Keystore::from_file_bytes(b"junk", &Unlock::Unencrypted)),
             KeystoreError::PermissionsTooOpen { mode: 0o644 },
+            KeystoreError::DirectoryWritableByOthers { mode: 0o777 },
             KeystoreError::NotFound,
             KeystoreError::AlreadyExists,
         ];
@@ -1564,6 +1934,7 @@ mod tests {
         for e in [
             KeystoreError::NotFound,
             KeystoreError::PermissionsTooOpen { mode: 0o644 },
+            KeystoreError::DirectoryWritableByOthers { mode: 0o777 },
             KeystoreError::Io("no such device".into()),
             KeystoreError::NotAKeystore,
             KeystoreError::UnknownVersion(9),
@@ -1646,6 +2017,80 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[cfg(unix)]
+    #[test]
+    fn a_keystore_in_a_world_writable_directory_is_refused() {
+        // The directory is what makes the symlink attack possible, and a 0600
+        // keystore inside a 0777 directory is not protected by its own mode:
+        // anyone can delete it and put their own there.
+        //
+        // Only the WRITE bits, unlike the file's check — a readable directory
+        // discloses that a keystore exists, which is not a secret.
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new("open-dir");
+        a_keystore(7)
+            .create(dir.path().as_path(), &Unlock::Unencrypted)
+            .unwrap();
+
+        for mode in [0o777, 0o770, 0o707, 0o722, 0o702, 0o720] {
+            std::fs::set_permissions(&dir.0, std::fs::Permissions::from_mode(mode)).unwrap();
+            assert_eq!(
+                err_of(Keystore::open(dir.path().as_path(), &Unlock::Unencrypted)),
+                KeystoreError::DirectoryWritableByOthers { mode },
+                "directory mode {mode:04o} must be refused"
+            );
+        }
+
+        // Readable-but-not-writable is fine: it leaks only the file's
+        // existence, and the path is a documented convention anyway.
+        for mode in [0o700, 0o750, 0o755, 0o705] {
+            std::fs::set_permissions(&dir.0, std::fs::Permissions::from_mode(mode)).unwrap();
+            assert!(
+                Keystore::open(dir.path().as_path(), &Unlock::Unencrypted).is_ok(),
+                "directory mode {mode:04o} must be accepted"
+            );
+        }
+
+        std::fs::set_permissions(&dir.0, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+
+    #[test]
+    fn an_oversized_file_is_refused_without_being_read_into_memory() {
+        // `read_checked` opens an attacker-supplied path. A bare
+        // `read_to_end` there would ingest whatever is on the other end —
+        // which is a memory-exhaustion lever of the same kind the KDF cost
+        // ceiling closes, reached by a different route.
+        //
+        // A keystore is at most 103 bytes, so anything larger is not one and
+        // there is no reason to hold it in memory before saying so.
+        let dir = TempDir::new("oversized");
+        std::fs::write(dir.path(), vec![MAGIC; 64 * 1024]).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        assert_eq!(
+            err_of(Keystore::open(dir.path().as_path(), &Unlock::Unencrypted)),
+            KeystoreError::NotAKeystore
+        );
+    }
+
+    #[test]
+    fn the_largest_valid_keystore_is_not_itself_refused_as_oversized() {
+        // The other side of the size bound, and the off-by-one that would make
+        // the cap reject every encrypted keystore. Hardcoded against the
+        // layout, not read from the constant.
+        assert_eq!(MAX_KEYSTORE_LEN, 103);
+        let encrypted = a_keystore(7).to_file_bytes(&a_pass("pw")).unwrap();
+        assert_eq!(
+            encrypted.len() as u64,
+            MAX_KEYSTORE_LEN,
+            "the encrypted layout is exactly the size bound, so a bound one \
+             byte low would reject every encrypted keystore"
+        );
+    }
+
     #[test]
     fn the_permission_check_is_distinguishable_from_a_missing_file() {
         // The probe turns these into different reasons — "create one" versus
@@ -1692,52 +2137,183 @@ mod tests {
         // interrupted write cannot have truncated the destination, because the
         // destination was never opened for writing.
         //
-        // Hardcoded, not derived from `staging_path`.
+        // Hardcoded expectations about SHAPE, since the name now carries
+        // randomness and cannot be compared to a literal.
         let dest = Path::new("/keys/identity.key");
         let staging = staging_path(dest);
         assert_ne!(staging, dest, "staging must not be the destination");
-        assert_eq!(staging, PathBuf::from("/keys/identity.tmp"));
         assert_eq!(
             staging.parent(),
             dest.parent(),
             "staging must be a sibling, or the rename crosses a filesystem and \
              stops being atomic"
         );
+        let name = staging.file_name().unwrap().to_str().unwrap();
+        assert!(
+            name.starts_with("identity.key."),
+            "staging must not shadow the destination's own extension: {name}"
+        );
+        assert!(name.ends_with(".tmp"), "got {name}");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_at_the_staging_path_cannot_capture_the_secret() {
+        // REGRESSION. The first version of this file used a PREDICTABLE
+        // staging name (`identity.tmp`) opened with
+        // `.write(true).create(true).truncate(true).mode(0o600)`. Three facts
+        // combine into a working exploit:
+        //
+        //  * `OpenOptions::mode` applies ONLY when the file is created. An
+        //    existing path is opened with its own mode intact.
+        //  * `open` follows symlinks.
+        //  * The name was guessable, so an attacker could pre-place one.
+        //
+        // An attacker needing only write access to the CONTAINING DIRECTORY —
+        // a different and much weaker requirement than write access to the
+        // keystore, and exactly the "hostile local process on the same
+        // machine" that `check_permissions` exists for — plants a symlink and
+        // waits. The root secret is written through it, in the clear, at the
+        // attacker's chosen path and mode. The rename then completes, so the
+        // user sees a normal 0600 keystore and nothing indicates anything
+        // happened.
+        //
+        // Measured against the vulnerable code: `create` returned Ok, 35 bytes
+        // at mode 0666, the 32-byte seed verbatim at the attacker's path.
+        //
+        // The fix is `create_new(true)` plus a random staging name. EITHER one
+        // closes this test on its own; both are present because they fail in
+        // different directions — see `write_atomically`.
+        use std::os::unix::fs::symlink;
+
+        let dir = TempDir::new("symlink-attack");
+        let loot = dir.0.join("loot");
+        std::fs::write(&loot, b"attacker's original content").unwrap();
+
+        // The attacker plants a symlink at every name they might guess: the
+        // one the vulnerable code actually used, AND — because a test that
+        // only plants at a name the current code has stopped using proves
+        // nothing about the current code — the name `staging_path` would
+        // return right now. The second is a name the attacker could not really
+        // predict; planting it anyway is what makes this test exercise
+        // `create_new` rather than only the randomness.
+        let planted_old = dir.path().with_extension("tmp");
+        symlink(&loot, &planted_old).unwrap();
+        let planted_current = staging_path(dir.path().as_path());
+        let _ = symlink(&loot, &planted_current);
+
+        // The user creates their keystore, unaware.
+        let result = a_keystore(0xAB).create(dir.path().as_path(), &Unlock::Unencrypted);
+
+        // The secret must not be at the attacker's path, whatever else
+        // happened. This is the assertion that failed before the fix.
+        let harvested = std::fs::read(&loot).unwrap();
+        assert!(
+            !harvested.windows(32).any(|w| w == [0xABu8; 32]),
+            "the root secret was written through a planted symlink"
+        );
+        assert_eq!(
+            harvested, b"attacker's original content",
+            "a planted symlink's target was truncated or overwritten"
+        );
+
+        // And the write itself: either it failed, or it succeeded at a
+        // staging name the attacker could not guess. Both are acceptable —
+        // what is not acceptable is the secret leaving through the symlink,
+        // which is asserted above unconditionally.
+        if result.is_ok() {
+            assert!(
+                dir.path().exists(),
+                "a successful create must have produced the keystore"
+            );
+            let back = Keystore::open(dir.path().as_path(), &Unlock::Unencrypted).unwrap();
+            assert_eq!(*back.root, [0xABu8; 32]);
+        }
+
+        let _ = std::fs::remove_file(&planted_old);
+        let _ = std::fs::remove_file(&planted_current);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_staging_name_is_unpredictable() {
+        // The other half of the fix, and the half that survives someone later
+        // deciding `create_new` is inconvenient: an attacker cannot pre-place
+        // ANYTHING — symlink, directory, or a file they keep a handle on — at
+        // a name they cannot guess.
+        //
+        // Two calls for the same destination must differ, which a
+        // `with_extension("tmp")` cannot satisfy by construction.
+        let dest = Path::new("/keys/identity.key");
+        let a = staging_path(dest);
+        let b = staging_path(dest);
+        assert_ne!(a, b, "the staging name must not be predictable");
+
+        // Still a sibling, or the rename crosses a filesystem and stops being
+        // atomic — the property the randomness must not cost us.
+        assert_eq!(a.parent(), dest.parent());
+        assert_ne!(a, dest.to_path_buf());
+
+        // And enough randomness to be worth calling randomness. Hardcoded
+        // width, not derived from the implementation.
+        let name = a.file_name().unwrap().to_str().unwrap();
+        assert!(name.ends_with(".tmp"), "got {name}");
+        assert_eq!(
+            name.len(),
+            "identity.key".len() + 1 + 16 + ".tmp".len(),
+            "the staging name must carry 8 random bytes as 16 hex chars: {name}"
+        );
+    }
+
+    #[cfg(unix)]
     #[test]
     fn a_failed_write_leaves_an_existing_keystore_intact() {
         // The consequence that matters. The root secret exists nowhere else,
         // so a write that fails must not have taken the previous key with it.
         //
-        // The failure is arranged by occupying the staging path with a
-        // DIRECTORY, which cannot be opened as a file and cannot be renamed
-        // over — a real errno rather than a mocked one.
+        // The failure is arranged by making the CONTAINING DIRECTORY
+        // unwritable, so `create_new` cannot make the staging file — a real
+        // errno rather than a mocked one. It used to be arranged by occupying
+        // the staging path with a directory, which stopped being possible when
+        // that path became unguessable; the new arrangement is strictly better
+        // anyway, because it exercises the failure a user actually hits.
+        use std::os::unix::fs::PermissionsExt;
         let dir = TempDir::new("failed-write");
         a_keystore(7)
             .create(dir.path().as_path(), &Unlock::Unencrypted)
             .unwrap();
-        std::fs::create_dir(staging_path(dir.path().as_path())).unwrap();
+        std::fs::set_permissions(&dir.0, std::fs::Permissions::from_mode(0o500)).unwrap();
 
         let err = a_keystore(9).write_to(dir.path().as_path(), &Unlock::Unencrypted);
         assert!(err.is_err(), "the write should have failed");
 
+        // Restore before reading, since the read needs to traverse the dir.
+        std::fs::set_permissions(&dir.0, std::fs::Permissions::from_mode(0o700)).unwrap();
+
         // And the original key is still there and still opens.
         let back = Keystore::open(dir.path().as_path(), &Unlock::Unencrypted).unwrap();
         assert_eq!(*back.root, [7u8; 32], "a failed write destroyed the key");
-
-        std::fs::remove_dir(staging_path(dir.path().as_path())).unwrap();
     }
 
     #[test]
     fn a_write_leaves_no_temporary_file_behind() {
         // The temporary holds whatever was written of a secret. A leftover is
-        // a second copy at a path nobody checks the permissions of.
+        // a second copy at a path nobody checks the permissions of — and since
+        // the staging name is now random, a leak would accumulate one file per
+        // write rather than reusing one.
+        //
+        // The staging name cannot be predicted, so this checks the directory
+        // holds nothing but the keystore itself.
         let dir = TempDir::new("no-temp");
         a_keystore(7).create(&dir.path(), &a_pass("pw")).unwrap();
-        assert!(
-            !dir.path().with_extension("tmp").exists(),
-            "the temporary file survived a successful write"
+        let left: Vec<_> = std::fs::read_dir(&dir.0)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(
+            left,
+            vec![std::ffi::OsString::from("identity.key")],
+            "a successful write left something behind"
         );
     }
 
@@ -1854,6 +2430,72 @@ mod tests {
     }
 
     // ─── What this type refuses to expose ─────────────────────────────────
+
+    #[test]
+    fn no_secret_bearing_type_can_be_debug_printed() {
+        // **Adding `#[derive(Debug)]` to `Keystore`, `Passphrase` or `Unlock`
+        // is a security regression, and this test is what says so to the
+        // person about to do it.** Until now the property was enforced by
+        // absence and a doc comment, which is not enforcement — the natural
+        // way to acquire one is a moment's convenience while debugging, or an
+        // `unwrap_err()` that will not compile without it (which is exactly
+        // what `err_of` exists to avoid).
+        //
+        // A `Debug` here puts the root secret one `{:?}` away from a log line,
+        // a panic payload, or — through `guarded`'s message — the wire.
+        //
+        // The check is a compile-time one expressed as a runtime assertion:
+        // `impls_debug` resolves to the inherent method for any type, and to
+        // the trait method only for types that implement `Debug`. If someone
+        // derives it, the trait method wins and this fails.
+        struct No;
+        trait NotDebug {
+            fn impls_debug(&self) -> bool {
+                false
+            }
+        }
+        impl<T> NotDebug for &T {}
+        #[allow(dead_code)]
+        trait IsDebug {
+            fn impls_debug(&self) -> bool {
+                true
+            }
+        }
+        impl<T: std::fmt::Debug> IsDebug for T {}
+        let _ = No;
+
+        assert!(
+            !(&a_keystore(7)).impls_debug(),
+            "Keystore must not implement Debug: it holds the root secret"
+        );
+        assert!(
+            !(&Passphrase::new(b"pw")).impls_debug(),
+            "Passphrase must not implement Debug"
+        );
+        assert!(
+            !(&Unlock::Unencrypted).impls_debug(),
+            "Unlock must not implement Debug: it carries a Passphrase"
+        );
+
+        // And the control: a type that DOES implement Debug must be seen to,
+        // or the assertions above are vacuous — which is the exact defect
+        // this project has shipped three times.
+        //
+        // The `#[allow]` is scoped to this one statement and is itself part of
+        // the mechanism. Clippy is CORRECT that the `&` is redundant here —
+        // and that is the tell: it is redundant precisely because
+        // `KeystoreError` implements `Debug`, so the blanket `IsDebug` impl
+        // applies and the receiver needs no explicit reference. On the secret
+        // types above the `&` is what selects `NotDebug`, and clippy does not
+        // flag them. The lint firing on this line and not on those is the
+        // clearest statement that the detection works.
+        #[allow(clippy::needless_borrow)]
+        let control = (&KeystoreError::NotFound).impls_debug();
+        assert!(
+            control,
+            "the detection itself is broken, so the assertions above prove nothing"
+        );
+    }
 
     #[test]
     fn a_stoa_key_from_the_keystore_matches_direct_derivation() {

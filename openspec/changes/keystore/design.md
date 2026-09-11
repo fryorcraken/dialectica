@@ -120,19 +120,104 @@ binary with SIGKILL**.
 
 In a module process that is the same death PHASE0-FINDINGS §3 measured, and it
 is worse than a panic: reached with no unwinding anywhere, so `guarded` has
-nothing to catch. `MAX_ACCEPTED_M_COST_KIB` and its two siblings are the fix,
-checked *before* `Params::new` because the allocation happens in
-`hash_password_into` and a check after the fact runs too late for nothing.
+nothing to catch. The ceiling is checked *before* `Params::new`, because the
+allocation happens in `hash_password_into` and a check after the fact runs too
+late for nothing.
 
-The ceilings are 16x the memory this build writes and ten times its iterations,
-so a file from a future build with harder parameters still opens — which is the
-portability the recording exists for. What they exclude is only the range that
-is an allocation attack rather than a KDF.
+**This is the one finding here that was not predicted.** The general lesson:
+any field this crate reads from untrusted bytes and then *sizes an allocation
+on* needs a ceiling, and the op decoder already learned the same thing about its
+length prefixes.
 
-**This is the one finding here that was not predicted.** It is recorded because
-the general lesson generalises: any field this crate reads from untrusted bytes
-and then *sizes an allocation on* needs a ceiling, and the op decoder already
-learned the same thing about its length prefixes.
+### Bound the work, not each knob — the first fix was the wrong shape
+
+The first version of that ceiling capped `m_cost`, `t_cost` and `p_cost
+*individually*, at values chosen for portability headroom: 16x this build's
+memory, 10x its iterations, 4x its lanes.
+
+**They multiply.** The worst set those caps accepted — m=1 GiB, t=32, p=16 —
+measured at **302 seconds** of CPU-bound, uninterruptible work plus a 1 GiB
+allocation, from editing twelve bytes of a file. PHASE0-FINDINGS §2 puts the
+caller's timeout at 20 seconds, so that overruns by 15x: the view is told
+`timeout`, the module is wedged with no cancellation, and nothing panics. It is
+the same class of damage as the OOM finding and reached the same way — without
+anything for the guard to catch.
+
+It was also, exactly, the availability problem that ruled out RFC 9106's 2 GiB
+option two decisions above — permitted anyway, 16x over, through the file.
+
+So `MAX_WORK_FACTOR` bounds the *product* `m * t` against what this build itself
+writes, and the per-knob caps remain only to stop a single absurd value before
+the multiplication. The factor is 2, chosen by measurement rather than taste:
+
+| work factor | worst accepted case (debug build) |
+|---|---|
+| 16 | 27.7s — past the caller's own 20s timeout |
+| 4 | 9.7s — inside it, with little margin |
+| 2 | ~5s — shipped |
+
+**The methodological lesson is the part worth keeping**: the boundary was tested
+and the *product of boundaries* was not. `a_cost_at_the_ceiling_is_still_attempted`
+varied one knob and said so honestly in a comment — which is exactly why the
+multiplied corner was never executed. A test that moves one parameter to its
+limit cannot see a corner that needs three.
+
+**The test asserts the refusal is instant, not that the acceptance is
+tolerable.** An intermediate version derived at the hardest accepted parameters
+and asserted a wall-clock budget: ~5 seconds on every run, to assert only that
+the machine was fast enough that day. The bound's actual job is to reject before
+`hash_password_into` allocates or iterates, which is checkable in microseconds
+and is a property of the code rather than of the hardware. The measurements
+above live in `MAX_WORK_FACTOR`'s doc comment instead of in a test that re-runs
+them.
+
+### A predictable staging path was a root-secret disclosure
+
+**This was found by review, with a working proof of concept, after the first
+version shipped to the branch.** It is recorded at length because the reasoning
+that produced it was *locally correct* and still wrong, which is the kind of
+mistake worth being able to recognise again.
+
+The write staged through `identity.tmp` — a predictable sibling — opened with
+`.write(true).create(true).truncate(true)` and `.mode(0o600)`. The mode-at-open
+reasoning was sound: it really does close the chmod race, and that argument is
+still in the code. What it missed is that **`OpenOptions::mode` applies only
+when the file is actually created.** An existing path is opened with its own
+mode intact, and an existing *symlink* is followed to its target.
+
+So an attacker needing only write access to the **containing directory** — a
+strictly weaker capability than writing to the keystore, and precisely the
+"hostile local process on the same machine" the permission check exists for —
+pre-places a symlink and waits. Measured against the vulnerable code: `create`
+returned `Ok`, 35 bytes at mode 0666, the 32-byte root seed verbatim at the
+attacker's path. The rename then completed, so the user saw a normal 0600
+keystore and nothing indicated anything had happened. Against an encrypted
+keystore it leaks ciphertext, salt and nonce instead — everything an offline
+attack needs.
+
+Two fixes, **either of which closes it alone**, kept together because they fail
+in different directions:
+
+- **`create_new(true)`** — the open fails `EEXIST` on anything already at that
+  name. Verified by reverting the randomness and re-running the regression test.
+- **A random staging name** — there is no name to pre-place anything at.
+  Verified by reverting `create_new` and re-running.
+
+**`O_NOFOLLOW` was written and removed.** `custom_flags` takes a raw `i32` whose
+value differs by platform, so it means either a direct `libc` dependency or a
+hand-maintained per-target constant. It would have been a third layer over two
+that each suffice, and a dependency on a security-critical path is itself attack
+surface. The residual gap it would have covered, stated rather than left
+implicit: on a filesystem where `create_new`'s existence check and the open are
+not one atomic operation, an attacker who has *also* guessed 64 bits of
+randomness could win the race. That is not a threat model this design owes an
+answer to.
+
+**What let it through**: `a_written_keystore_is_owner_only_from_the_moment_it_exists`
+passes against the vulnerable code, because it checks the *destination* after a
+successful rename. The staging file was never examined by any test. The spec has
+gained a requirement about intermediate paths so that this is a stated
+obligation rather than an implementation detail nobody was looking at.
 
 ### Two unlock paths now; the agent deferred, and the shape grows one
 
@@ -205,10 +290,52 @@ The error names the *whole* fix, which is two things and not one: restrict the
 mode, **and replace the key**, because a secret that has been readable by every
 local process is a secret to replace rather than to keep using.
 
-The check runs **before any content is read**. Checking afterwards would have
+The check runs **before any content is used**. Checking afterwards would have
 already loaded a file the function is about to declare unsafe to use. It is on
 the permission bits only, not on ownership: a file owned by someone else is
 unreadable anyway, and the OS reports that.
+
+### One open, not two resolutions of one name
+
+The check and the read were originally `fs::metadata(path)` followed by
+`fs::read(path)`, which resolves the name **twice**. Two problems, and the
+second is what made the split wrong rather than merely untidy:
+
+- **TOCTOU.** Between the `stat` and the `open`, the thing at that path can be
+  replaced — by the same attacker the check exists to stop.
+- **`fs::metadata` follows symlinks.** The mode checked was the *target's*, so
+  a symlink pointing at something world-readable passed a check about a file
+  nobody read.
+
+`read_checked` opens once and calls `File::metadata()` on the **handle**. There
+is no version of this where the check and the read can disagree, because there
+is only one file. Plain std; nothing new was needed.
+
+`open_from_env` inherited the same shape at a larger scale: `is_encrypted` did a
+full check-read-parse and `Keystore::open` then repeated all of it. That was
+*safe*, but only because `from_file_bytes` re-derives the protection from the
+bytes it decodes — safety by coincidence, over a file an attacker may be editing
+between the two reads. It now reads once and decides both from the same bytes.
+
+The single open also bounds what is read. `MAX_KEYSTORE_LEN` is checked against
+the handle's size, and the read itself goes through `take`, because
+`metadata().len()` is 0 for a FIFO — so the size check alone does not bound a
+`read_to_end` on an attacker-supplied path.
+
+### Check the containing directory too, on write bits only
+
+The directory is what makes the symlink attack possible, and a 0600 keystore
+inside a 0777 directory is not protected by its own mode: anyone can delete it
+and put their own there. The permission check is the one place whose job is
+refusing an unsafe filesystem state, so it should be refusing this one.
+
+**Write bits only**, unlike the file's check, and the asymmetry is deliberate: a
+readable directory discloses that a keystore exists, which is not a secret — the
+path is a documented convention. A writable one is a different claim entirely.
+
+Reported as its own error, because the fix is a chmod on a different path.
+Saying "the keystore's permissions are too open" about a correctly-permissioned
+keystore sends the reader to the wrong file.
 
 ### Atomic writes, which radicle also does not do
 
@@ -284,6 +411,14 @@ cipher key and the decrypted plaintext likewise, the `Passphrase` wraps
 `Zeroizing<Vec<u8>>`, and `chacha20poly1305`'s `zeroize` feature wipes the
 cipher's own expanded key state.
 
+**The absence of `Debug` on `Keystore`, `Passphrase` and `Unlock` is enforced by
+a test**, not by a doc comment. It was previously enforced by absence, which is
+not enforcement: the natural way to acquire one is a moment's convenience while
+debugging, or an `unwrap_err()` that will not compile without it. A `Debug` here
+puts the root secret one `{:?}` away from a log line, a panic payload, or —
+through `guarded`'s message — the wire. The test uses autoref specialisation and
+carries a control case, so it cannot pass vacuously.
+
 **What that does not cover, said plainly so the omission is not mistaken for
 coverage:** Rust can move a value before it is dropped, and a `Vec` that
 reallocates leaves its old buffer unwiped. Argon2's internal memory blocks are
@@ -338,10 +473,17 @@ guessing between them would be telling the user something unverified.
   existing key cannot be recovered afterwards.
 - **A 64 MiB allocation on every unlock.** → The tradeoff Argon2id is for. It
   is once per process, not per operation.
-- **The cost ceiling could reject a genuinely-harder future file.** → Only above
-  1 GiB / t=32 / p=16, which is well past anything RFC 9106 recommends. Raising
-  it is a two-line change, and the test hardcodes the ceilings so raising one
-  has to be deliberate in two places.
+- **The cost ceiling could reject a genuinely-harder future file.** → Only past
+  twice this build's `m * t`, which still admits every parameter set RFC 9106
+  recommends at or below 128 MiB-equivalent work. Raising `MAX_WORK_FACTOR` is a
+  one-line change, and the refusal test hardcodes the ceilings so that raising
+  one has to be deliberate in two places. The measurements that chose the value
+  are in its doc comment, so the next person changing it is changing it against
+  numbers rather than against a guess.
+- **`O_NOFOLLOW` is absent.** → Two independently-sufficient defences are
+  present instead, and the residual race is documented above. Adding a `libc`
+  dependency for a third layer would have widened the attack surface of a
+  security-critical path to narrow it.
 - **Windows has no permission check.** → Stated in the code rather than silently
   skipped. Windows ACLs are a different mechanism needing their own
   implementation; dialectica targets Linux (PLAN.md's Basecamp traps are

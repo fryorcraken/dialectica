@@ -174,16 +174,69 @@
       tests fail, restore. Fourteen mutations; two survived and were fixed by
       tests that now exist (4.6 and 6.4). Table in the report.
 
-## 11. Gates
+## 11. Security review findings
 
-- [x] 11.1 `cargo test -p dialectica-core` — green.
-- [x] 11.2 `cargo fmt --check` — clean.
-- [x] 11.3 `cargo clippy -p dialectica-core --all-targets -- -D warnings` —
+Everything below was found by review after the first three commits, each with a
+working proof of concept. Recorded as its own section rather than folded into
+the sections above, because *what the original tests could not see* is the part
+worth keeping.
+
+- [x] 11.1 **[CRITICAL] Symlink capture of the root secret via a predictable
+      staging path.** `.mode()` applies only on creation, so an existing
+      symlink at `identity.tmp` was followed and the seed written through it in
+      the clear, at the attacker's mode, after which the rename completed
+      normally and nothing looked wrong.
+
+      Regression test written FIRST and watched fail —
+      `the root secret was written through a planted symlink`. Fixed with
+      `create_new(true)` and a randomised staging name; **each verified
+      sufficient alone** by reverting the other and re-running.
+
+      What let it through: the write test checked the *destination* after the
+      rename. The staging file was never examined by any test.
+- [x] 11.2 **[HIGH] The per-knob cost ceilings multiplied.** m=1 GiB, t=32,
+      p=16 were each inside their own cap and together measured 302 seconds —
+      15x the caller's 20-second timeout, uninterruptible, with nothing for
+      `guarded` to catch. Replaced with `MAX_WORK_FACTOR` bounding the product.
+
+      The lesson, which generalises: **the boundary was tested and the product
+      of boundaries was not.** `a_cost_at_the_ceiling_is_still_attempted` varied
+      one knob and said so honestly, which is exactly why the corner was never
+      executed.
+
+      The new test asserts the REFUSAL is instant rather than that the
+      acceptance is tolerable — the bound's job is to reject before any work,
+      which is a property of the code; a wall-clock budget at the ceiling only
+      asserts the machine was fast enough that day, and cost ~5s every run.
+- [x] 11.3 **[MEDIUM] check-then-read resolved one name twice**, and
+      `fs::metadata` follows symlinks. Replaced with a single open and
+      `File::metadata()` on the handle. `open_from_env` likewise now reads once
+      instead of twice — it was safe only incidentally, because
+      `from_file_bytes` re-derives protection from the bytes it decodes.
+- [x] 11.4 Bound how much is read from an attacker-supplied path, via `take`
+      as well as the size check — `metadata().len()` is 0 for a FIFO.
+- [x] 11.5 Check the **containing directory's** write bits. It is what made
+      11.1 possible, and a 0600 keystore in a 0777 directory is not protected
+      by its own mode. Write bits only: a readable directory discloses only
+      that a keystore exists.
+- [x] 11.6 Make "adding `#[derive(Debug)]` here is a security regression"
+      visible to the person about to do it, rather than enforced by absence.
+      Verified by adding the derive and watching the test fail.
+- [x] 11.7 Add spec requirements for the cost bound, the intermediate path, the
+      single-open read and the directory check. Each existed only in code and
+      design.md, so nothing stopped a later contributor relaxing one as a
+      convenience.
+
+## 12. Gates
+
+- [x] 12.1 `cargo test -p dialectica-core` — green.
+- [x] 12.2 `cargo fmt --check` — clean.
+- [x] 12.3 `cargo clippy -p dialectica-core --all-targets -- -D warnings` —
       clean.
 
-## 12. Documentation
+## 13. Documentation
 
-- [x] 12.1 Replace PLAN.md §5.6's specification with a one-line summary that the
+- [x] 13.1 Replace PLAN.md §5.6's specification with a one-line summary that the
       keystore exists, per the document model — the reasoning now lives in
       `design.md` and keeping a second copy is the failure mode that model
       exists to prevent.

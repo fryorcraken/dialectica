@@ -47,7 +47,7 @@ When posting is not possible, the reason SHALL state what the user or operator m
 
 "No key at this path; create one" is actionable. "Unlocked: false" is not, and a view can do nothing with it but show it.
 
-The reasons SHALL be distinguishable from one another, at minimum: no keystore exists, the keystore exists but is locked and no passphrase was supplied, the supplied passphrase was wrong, the keystore's permissions are too open, and the keystore is unreadable or malformed.
+The reasons SHALL be distinguishable from one another, at minimum: no keystore exists, the keystore exists but is locked and no passphrase was supplied, the supplied passphrase was wrong, the keystore's permissions are too open, the keystore's directory is writable by others, and the keystore is unreadable or malformed.
 
 #### Scenario: No keystore
 

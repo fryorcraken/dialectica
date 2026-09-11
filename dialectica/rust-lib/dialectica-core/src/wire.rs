@@ -600,6 +600,7 @@ mod tests {
             KeystoreError::Locked,
             KeystoreError::WrongPassphrase,
             KeystoreError::PermissionsTooOpen { mode: 0o644 },
+            KeystoreError::DirectoryWritableByOthers { mode: 0o777 },
             KeystoreError::NotAKeystore,
             KeystoreError::Truncated,
         ] {
