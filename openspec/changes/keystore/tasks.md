@@ -171,8 +171,29 @@
 ## 10. Mutation verification
 
 - [x] 10.1 Break each security property in turn, run the suite, record which
-      tests fail, restore. Fourteen mutations; two survived and were fixed by
-      tests that now exist (4.6 and 6.4). Table in the report.
+      tests fail, restore.
+
+      **Inline, not "see the report".** A reader of this file has to be able to
+      check whether these recorded their survivors — which is the exact defect
+      §10.2 is about, and leaving the first fourteen out of band would have
+      left it unverifiable in the document whose credibility it damaged.
+
+      | # | Mutation | Result |
+      |---|---|---|
+      | 1 | Permission check disabled | 1 fails |
+      | 2 | Wrong passphrase accepted (AEAD error → unauthenticated fallback) | 7 fail |
+      | 3 | Never-prompt replaced by `stdin().read_line()` | 1 fails |
+      | 4 | AAD deleted entirely | **SURVIVED** → fixed, §4.6 |
+      | 5 | KDF cost ceiling removed | 1 fails |
+      | 6 | Write goes straight to destination | **SURVIVED** → fixed, §6.4 |
+      | 7 | `CanPost` also carries `reason` | 2 fail |
+      | 8 | `Locked` and `WrongPassphrase` collapsed | 2 fail |
+      | 9 | Environment consulted before the file | 1 fails |
+      | 10 | `create` overwrites | 1 fails |
+      | 11 | Write mode 0600 → 0644 (LEZ's) | 9 fail |
+      | 12 | Unknown protection defaults to `None` | 1 fails |
+      | 13 | Empty-passphrase refusal removed | 1 fails |
+      | 14 | Salt and nonce fixed at zero | 1 fails |
 
 - [x] 10.2 **The table above was incomplete, and that is the finding.** It
       claimed fourteen verifications and did not include the one on this

@@ -117,57 +117,35 @@ hex = "0.4"
 # small dependency instead of the `rand` stack.
 getrandom = "0.4"
 
-# ─── The keystore (§5.6) ──────────────────────────────────────────────────
+# ─── The keystore ─────────────────────────────────────────────────────────
 #
-# Two dependencies, and both are decisions rather than reflexes. The full
-# comparison is in `openspec/changes/.../keystore/design.md`; the short version
-# of why NOT the obvious alternative is here, because it is what a reader of
-# this file will wonder.
+# THREE DEPENDENCIES, and this is the first change to widen §2.3's wall.
 #
-# The obvious alternative was to copy radicle literally — an OpenSSH-format
-# encrypted private key via `ssh-key`. Rejected because it imports a whole
-# key-file format, its PEM armouring and its legacy cipher suite to store 32
-# bytes, and because the interoperability that format buys (ssh-agent, ssh-keygen
-# on the same file) is the part deferred out of this change. See design.md.
+# **The reasoning lives in `design.md`, under "Three dependencies, and what was
+# refused"** — the crypto comparisons, why each crate is smaller than the
+# alternative, and the two crates deliberately NOT taken. It is not repeated
+# here, and that is deliberate: it was in both places once and had already
+# diverged (this file omitted the AES-GCM comparison design.md makes), which is
+# exactly the failure the document model exists to prevent.
 #
-# XChaCha20-Poly1305, not ChaCha20-Poly1305 or AES-GCM.
+# What stays here is only what a reader editing THIS file needs: which feature
+# flags are load-bearing, and why.
 #
-#  * AUTHENTICATED, which is the load-bearing property and not a nicety. An
-#    unauthenticated cipher would let anyone with write access to the file
-#    substitute the identity the user posts under — a silent identity swap,
-#    which is the worst outcome available on this path. With an AEAD a tampered
-#    file is a REFUSAL.
-#  * The 192-bit XChaCha nonce is random-safe. A 96-bit nonce needs a counter
-#    the file format would have to carry and every writer would have to respect;
-#    at 192 bits a fresh random nonce per write has negligible collision
-#    probability, so nonce reuse stops being a thing a future writer can get
-#    wrong. A keystore is rewritten rarely, but "rarely" is not an argument a
-#    format should rest on.
-#  * Pure Rust with no timing dependence on the key, where AES without hardware
-#    support is a table lookup — and this crate ships pure Rust everywhere.
-#
-# `zeroize` on, deliberately: it wipes the cipher's own expanded key state on
-# drop, which is the copy this crate cannot otherwise reach.
+# `zeroize` on: it wipes the cipher's own expanded key state on drop, which is
+# the copy this crate cannot otherwise reach.
 chacha20poly1305 = { version = "0.11", features = ["zeroize"] }
 
-# Argon2id for passphrase stretching, over PBKDF2 and bcrypt_pbkdf.
-#
-# The threat is an offline attack on a stolen file, where the attacker's budget
-# is hardware. PBKDF2 and bcrypt_pbkdf are both cheap to parallelise on a GPU;
-# Argon2id is memory-hard, which is what makes that hardware advantage cost
-# money. It is also the only one of the three with a standards-body
-# recommendation behind it (RFC 9106) rather than incumbency.
-#
-# `default-features = false` plus `alloc`: the default pulls `password-hash` and
-# `getrandom` for PHC-string parsing and salt generation, and this crate does
-# neither — the salt comes from `getrandom` directly (already a dependency) and
-# the parameters are carried in our own binary format, not a PHC string. What is
-# needed is the raw `hash_password_into` KDF and nothing else.
+# `default-features = false` plus `alloc` is load-bearing, not tidying: the
+# default pulls `password-hash` and `getrandom` for PHC-string parsing and salt
+# generation, and this crate does neither — the salt comes from `getrandom`
+# directly and the parameters are carried in our own binary format, not a PHC
+# string. What is needed is the raw `hash_password_into` KDF and nothing else.
 argon2 = { version = "0.6", default-features = false, features = ["alloc", "zeroize"] }
 
-# Wiping secret material from memory. Already in the tree via `ed25519-dalek`;
-# direct here because the keystore holds the copies `identity.rs`'s doc comment
-# names as deferred — "the seed locals ... are ordinary stack arrays ... those
-# copies are where the keystore (§5.6) takes over, and zeroizing them is its
-# job".
-zeroize = { version = "1", features = ["zeroize_derive"] }
+# NO FEATURES. `zeroize_derive` was enabled here and nothing used it — there is
+# no `derive(Zeroize)` in this crate and there is not meant to be, since every
+# secret is held in a `Zeroizing` wrapper rather than in a type that derives the
+# trait. Removed rather than kept as future-proofing: an enabled feature nobody
+# calls is the unexamined widening §2.3 is about, and a proc-macro crate is the
+# kind of surface worth not carrying on a guess.
+zeroize = "1"

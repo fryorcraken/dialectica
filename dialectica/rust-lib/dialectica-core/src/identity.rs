@@ -249,8 +249,13 @@ impl Eq for PublicKey {}
 /// out a plain `[u8; 32]` this type no longer controls, and the seed locals in
 /// [`SecretKey::generate`] and [`derive_stoa_key`] are ordinary stack arrays.
 ///
-/// **Those copies are [`crate::keystore`]'s to own, and it does** — it holds
-/// the root in a `Zeroizing` buffer and wipes the array `to_bytes` hands it.
+/// **Those copies are [`crate::keystore`]'s to own, and it does** — it moves
+/// what [`SecretKey::to_bytes`] returns straight into a `Zeroizing` buffer
+/// rather than binding it to a plain local first, so there is no second copy
+/// for anyone to forget to wipe. (It once wiped one explicitly; review found
+/// that line could be deleted with no test noticing, because a stack local
+/// after its function returns is not observable.)
+///
 /// The denials above remain about a key reaching a *log or a wire*, which is
 /// the reachable threat at this layer; the lifetime of a secret in memory is
 /// owned one layer up, because that is the layer that knows when a secret stops

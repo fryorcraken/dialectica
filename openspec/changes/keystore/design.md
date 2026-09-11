@@ -33,6 +33,45 @@ this design closes both — see the Decisions on permissions and on atomic write
 
 ## Decisions
 
+### Three dependencies, and what was refused
+
+**This is the first change to widen §2.3's wall**, so the widening itself is a
+decision and not a consequence of the crypto decisions below. The wall exists
+because a narrow wire contract is what keeps dependency churn behind it; a
+reader asking "why did we take three crates" should find an answer here rather
+than inferring one from the cryptography.
+
+| Crate | Why it cannot be avoided | Surface taken |
+|---|---|---|
+| `chacha20poly1305` | An AEAD is the load-bearing property (see below). Hand-rolling one is not a candidate. | One cipher. `zeroize` on; no other features. |
+| `argon2` | Memory-hard KDF. The alternative is PBKDF2, which is not one. | `default-features = false` — the default pulls `password-hash` and PHC-string parsing this crate does not do. |
+| `zeroize` | Already transitive via `ed25519-dalek`; direct because this crate now owns secret lifetimes. | **No features.** |
+
+Three things were refused, and the refusals are the part worth recording:
+
+- **`ssh-key`**, the literal reading of "copy radicle's model". It imports a
+  whole key-file format, PEM armouring and a legacy cipher suite to store 32
+  bytes — and the interoperability that buys is the agent path this change
+  defers. Details under the cipher decision below.
+- **`libc`**, for `O_NOFOLLOW`. A third layer over two that each suffice, and a
+  dependency on a security-critical path is itself attack surface. The residual
+  gap is recorded rather than papered over.
+- **A regex crate**, for `contains_word` in the "names a fix" test. One
+  predicate, in one test, is not worth a crate; it is hand-rolled in nine lines.
+
+And one feature was dropped: `zeroize_derive` was enabled and nothing used it.
+There is no `derive(Zeroize)` in this crate and there is not meant to be, since
+every secret lives in a `Zeroizing` wrapper. An enabled feature nobody calls is
+the unexamined widening §2.3 is about, and a proc-macro crate is the kind of
+surface not worth carrying on a guess.
+
+**The posture, stated once so it is not re-derived each time**: on this path a
+dependency must be either unavoidable (a primitive we must not hand-roll) or
+strictly smaller than what it replaces. Convenience is not a reason, and
+"defence in depth" is not a reason when the depth is already there. That is the
+same test applied to `libc`, to the regex crate, and to `zeroize_derive`, and
+`Cargo.toml` points here rather than restating it.
+
 ### XChaCha20-Poly1305, not an OpenSSH-format key
 
 The literal reading of §5.6 — "copy radicle's proven model" — is to use
@@ -321,6 +360,17 @@ The single open also bounds what is read. `MAX_KEYSTORE_LEN` is checked against
 the handle's size, and the read itself goes through `take`, because
 `metadata().len()` is 0 for a FIFO — so the size check alone does not bound a
 `read_to_end` on an attacker-supplied path.
+
+**`is_encrypted` stays `pub`, and therefore keeps the two-read shape this
+Decision calls safety by coincidence.** That is deliberate rather than an
+oversight the fix missed. A caller that wants *only* the protection state — to
+decide whether to go looking for a passphrase at all — has no other way to ask,
+and the probe's "locked" and "wrong passphrase" reasons are distinguishable
+only because that question can be asked separately. What the fix removes is the
+*internal* double read: `open_from_env`, the path everything real goes through,
+now reads once. A caller composing `is_encrypted` with `open` still reads twice
+and still inherits the window; the doc comment on `is_encrypted` says to prefer
+`open_from_env`, and this is the reasoning behind that line.
 
 ### Check the containing directory too, on write bits only
 

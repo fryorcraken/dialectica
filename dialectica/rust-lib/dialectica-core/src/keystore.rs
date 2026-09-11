@@ -15,7 +15,7 @@
 //! Radicle's model was then read rather than assumed, and **two of its
 //! properties turn out to be gaps**: it never checks the key file's permissions
 //! on read, and its writer truncates in place. Both are closed here — see
-//! [`check_permissions`] and [`write_atomically`].
+//! [`read_checked`] and [`write_atomically`].
 //!
 //! # Three properties that shape everything here
 //!
@@ -926,16 +926,16 @@ const OWNER_ONLY: u32 = 0o600;
 // `OpenOptions::custom_flags` takes a raw `i32`, and `O_NOFOLLOW`'s value
 // differs by platform — `0o100000` on Linux, `0x0100` on the BSDs — so using it
 // means either a direct `libc` dependency or a hand-maintained per-target
-// constant. Neither is worth it here:
+// constant. It fails design.md's dependency test ("Three dependencies, and what
+// was refused"): it is neither unavoidable nor smaller than what it replaces,
+// because two defences are already here and each suffices alone —
 //
-//  * `create_new` already refuses ANY pre-existing path, symlink included. The
-//    open fails `EEXIST` and nothing is written. That closes the attack.
+//  * `create_new` refuses ANY pre-existing path, symlink included. The open
+//    fails `EEXIST` and nothing is written.
 //  * The staging name carries fresh randomness, so there is no name for an
-//    attacker to pre-place a symlink AT. That closes it independently.
+//    attacker to pre-place a symlink AT.
 //
-// `O_NOFOLLOW` would be a third layer over two that each suffice, and a new
-// dependency on a security-critical path is itself attack surface. The residual
-// gap it would have covered is written down in design.md rather than left
+// The residual gap it would have covered is written down rather than left
 // implicit: on a filesystem where `create_new`'s existence check and the open
 // are not one atomic operation, a sufficiently fast attacker who has ALSO
 // guessed 64 bits of randomness could win the race. That is not a threat model
@@ -1103,7 +1103,8 @@ fn check_mode(_meta: &std::fs::Metadata) -> Result<(), KeystoreError> {
 /// **This function used to return `path.with_extension("tmp")`, and that was a
 /// working root-secret disclosure.** A predictable staging name lets anyone who
 /// can write to the *containing directory* — a weaker requirement than writing
-/// to the keystore, and precisely the attacker [`check_permissions`] exists for
+/// to the keystore, and precisely the attacker [`read_checked`]'s permission
+/// check exists for
 /// — pre-place a symlink there and wait. See the regression test
 /// `a_symlink_at_the_staging_path_cannot_capture_the_secret` for the full
 /// mechanism and what it measured.
@@ -2033,10 +2034,9 @@ mod tests {
 
     /// Whether `haystack` contains `word` bounded by non-alphabetic characters.
     ///
-    /// Hand-rolled rather than a regex dependency: this is the only place in
-    /// the crate that needs word matching, and a dependency for one predicate
-    /// on a security-adjacent path is the trade the keystore already declined
-    /// once over `libc`.
+    /// Hand-rolled rather than a regex dependency — design.md's "Three
+    /// dependencies, and what was refused" is where that posture lives, and
+    /// this is one of the three refusals it lists.
     fn contains_word(haystack: &str, word: &str) -> bool {
         haystack.match_indices(word).any(|(at, _)| {
             let before_ok = haystack[..at]
@@ -2390,7 +2390,8 @@ mod tests {
         // An attacker needing only write access to the CONTAINING DIRECTORY —
         // a different and much weaker requirement than write access to the
         // keystore, and exactly the "hostile local process on the same
-        // machine" that `check_permissions` exists for — plants a symlink and
+        // machine" that `read_checked`'s permission check exists for — plants
+        // a symlink and
         // waits. The root secret is written through it, in the clear, at the
         // attacker's chosen path and mode. The rename then completes, so the
         // user sees a normal 0600 keystore and nothing indicates anything

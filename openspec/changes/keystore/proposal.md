@@ -30,9 +30,11 @@ user typed."* A view must be able to ask "can I post?" and get a truthful answer
 
 ## What Changes
 
-- A `keystore` capability: a root secret encrypted at rest at a fixed path,
-  derived from a passphrase, with an authenticated cipher so a tampered file is
-  refused rather than decrypted to garbage.
+- A `keystore` capability: a root secret encrypted at rest under a
+  passphrase-derived key, with an authenticated cipher so a tampered file is
+  refused rather than decrypted to garbage. The file's **name** is fixed; its
+  directory is the caller's, since a pure crate cannot know the host's
+  persistence path.
 - A **canonical keystore file format** with a version discriminant and strict
   decoding — same discipline as the genesis record, applied to a file that
   arrives from the filesystem rather than from a peer.
@@ -66,10 +68,16 @@ None. No existing spec describes key storage or the wire surface.
   `lib.rs`.
 - `wire.rs` gains `get_capabilities`, and `lib.rs` re-exports it — the first
   widening of the wire contract since Phase 0, and deliberate per §2.5.
-- `identity.rs` is not edited. The keystore consumes `SecretKey::to_bytes` and
-  `SecretKey::from_bytes`, which already exist for exactly this.
-- Two new dependencies (`chacha20poly1305`, `argon2`), justified in design.md.
-  `zeroize` and `subtle` are already in the tree transitively and become direct.
+- `identity.rs` gains **no new behaviour** — the keystore consumes
+  `SecretKey::to_bytes` and `SecretKey::from_bytes`, which already exist for
+  exactly this. Its **doc comments are edited**, because two of them became
+  false: "No keystore" and the memory-hygiene note calling zeroization
+  "deferred, not solved". This change discharges both, and a comment that has
+  quietly become false is worse than no comment.
+- Three new direct dependencies — `chacha20poly1305`, `argon2`, and `zeroize`
+  (already transitive via `ed25519-dalek`, now direct because this crate owns
+  secret lifetimes). The widening itself, and the three crates refused, are a
+  Decision in design.md.
 - No SDK types. The keystore takes its path as an argument; nothing reads the
   environment or the filesystem at module-init time.
 - No store, no op log, no new op kind, no UI change.
