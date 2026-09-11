@@ -197,11 +197,21 @@ so the width buys nothing today. What it *would* buy is recorded on the type:
 `Arrival`'s other field is already an `Option<u64>`. Today every op-log append
 clones. That is nobody's bottleneck, and not a reason to guess.
 
-### Decision: `cmp_ops` is a free function over tuples, not an `impl Ord`
+### Decision: `cmp_ops` is a free function over a named pair, not an `impl Ord`
 
 Conspicuous given how much of this document discusses `Ord`'s contract, so: the
 alternative was a record type pairing an `Arrival` with an `OpId` and carrying
 `impl Ord`.
+
+The pair itself **is** a named type — `OpEntry { arrival, id }`, borrowing rather
+than owning so a store compares entries it already holds without cloning. It was
+an anonymous 2-tuple first, and that was a mistake found by review: every call
+site read `cmp_ops((&a.0, &a.1), (&b.0, &b.1))`, which sends a reader to the
+signature to recall which slot is which. It also hid what the exhaustive
+transitivity loop was doing — with the fields named, its guards read
+`a_precedes_b` and `b_precedes_c` instead of two `continue`s over `.0`/`.1`.
+
+What is declined is the trait impl, not the type.
 
 Declined because `Ord` on such a type would be a lie about the part that matters.
 The order is total over **distinct op ids** only — two records sharing an op id
@@ -384,6 +394,31 @@ receive-time as though it were message-time.
 
 **Not blocking us today.** Until (1) and (2) land, `Arrival::unordered()` is what
 the boundary constructs, the degraded order applies, and a peer can say so.
+
+## `arrival.rs`'s module docs have spent their budget
+
+Recorded so the next person does not have to rediscover it.
+
+The header has been extended three times, once per consumer finding, and a
+readability review that read it cold judged it still narrative — "yes, just". Two
+things keep it from tipping into an archive nobody reads: it is about sixty lines,
+which is the limit, and every heading is written as a claim, so scanning the
+headings gives the argument.
+
+**A fifth section should not go here.** The weakest fit today is the
+duplicate-arrival section, and the reason is audience: it is guidance for *store
+implementors*, not for anyone editing `arrival.rs`, and it is where a cold reader
+first feels the urge to skip. If another consumer's finding wants a section, move
+that one to the op log's docs — where its readers are — rather than extending
+this header further.
+
+The underlying pressure is worth naming, because it will recur: two consumers have
+now needed something from this module beyond its type signature, and both times the
+answer was prose. `cmp_ops` returns an `Ordering` whose meaning depends on which
+branch produced it, and the type cannot say that. If a third consumer asks a third
+question of that shape, the fix is likely to stop being a sentence and become
+returning the regime alongside the order, so a caller cannot read a degraded result
+as an authoritative one.
 
 ## What this change deliberately does not build
 

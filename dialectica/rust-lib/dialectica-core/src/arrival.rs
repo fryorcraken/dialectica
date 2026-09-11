@@ -470,14 +470,14 @@ mod tests {
         // Antisymmetry. A comparison that returned Less both ways would make a
         // sort's result depend on the input order, which differs per peer.
         //
-        // The last two cases are load-bearing and were added after a review
-        // found them missing: `ordered(..)` ALWAYS sets a message id and
-        // `unordered()` short-circuits before `cmp_tiebreak` runs, so without a
-        // `from_parts` case carrying a Lamport value and NO message id, that
-        // function's `(None, None)` arm is never reached. An arm returning
-        // `Less` there makes `cmp_ops` non-reflexive and non-antisymmetric —
-        // a violation of `Ord`'s contract that newer std can panic on — and
-        // every test claiming those properties by name passed anyway.
+        // The last two cases are load-bearing: `ordered(..)` ALWAYS sets a
+        // message id and `unordered()` short-circuits before `cmp_tiebreak`
+        // runs, so without a `from_parts` case carrying a Lamport value and NO
+        // message id, that function's `(None, None)` arm is never reached. An
+        // arm returning `Less` there makes `cmp_ops` non-reflexive and
+        // non-antisymmetric — a violation of `Ord`'s contract that newer std
+        // can panic on — and a suite built only from the two named
+        // constructors cannot see it.
         let op = an_op("x");
         let cases = [
             (
@@ -640,9 +640,6 @@ mod tests {
         // elements sharing an op id DO tie, which is not a defect but the
         // precondition itself, pinned separately by
         // `two_entries_sharing_an_op_id_can_tie_which_is_why_callers_dedup`.
-        // Writing this test the other way first is what surfaced that the
-        // contract needed stating — the assertion failed on exactly the pair
-        // the reviewer's probe found.
         let population = every_combination();
         for (a_arrival, a_id) in &population {
             for (b_arrival, b_id) in &population {
@@ -689,12 +686,11 @@ mod tests {
         // total order" when a sort observes it failing.
         //
         // EVERY arrival shape, because the shapes reach different code. The
-        // lamport-only one is the one that matters and the one this test
-        // originally lacked: it is the only shape that reaches `cmp_tiebreak`'s
-        // (None, None) arm, since `ordered(..)` always sets a message id and
-        // `unordered()` short-circuits before the tiebreak runs. An arm
-        // returning `Less` there is a genuine `Ord` violation, and this test
-        // passed regardless until the lamport-only case was added.
+        // lamport-only one is the one that matters: it is the only shape that
+        // reaches `cmp_tiebreak`'s (None, None) arm, since `ordered(..)` always
+        // sets a message id and `unordered()` short-circuits before the
+        // tiebreak runs. An arm returning `Less` there is a genuine `Ord`
+        // violation that no other shape can expose.
         let op = an_op("x");
         let shapes = [
             Arrival::ordered(3, a_message_id(4)),
@@ -792,9 +788,7 @@ mod tests {
         // from existing. That property is enforced by the type's API surface
         // (no constructor derives a value; see `Arrival`'s docs), not by any
         // runtime check, so a test can only witness the one constructor that
-        // takes no value and confirm it invents none. A separate test named for
-        // the broader property overstated what it checked, so it was folded in
-        // here.
+        // takes no value and confirm it invents none.
         let arrival = Arrival::unordered();
         assert_eq!(arrival.lamport(), None);
         assert_eq!(arrival.message_id(), None);
@@ -871,18 +865,15 @@ mod tests {
     #[test]
     fn a_lamport_timestamp_without_a_message_id_still_orders() {
         // Specified: "The Lamport timestamp alone decides whether an op is
-        // ordered". Promoted out of a NO SPEC marker on review, because which
-        // half of the metadata decides orderedness was too consequential to
-        // leave in a test comment.
+        // ordered".
         //
         // This exact combination is NOT reachable through any transport
         // contract known today — LIP-109 requires a message id on every
         // message, so a Lamport value arriving without one describes no message
-        // SDS sends. (An earlier version of this comment claimed ephemeral
-        // messages produced it; they produce the OPPOSITE shape, and that fact
-        // now sits on the requirement it actually supports.) It is specified
-        // because the type permits it, and an unspecified corner of a type is
-        // where the next reader's assumption goes.
+        // SDS sends. (The OPPOSITE shape is the reachable one: see
+        // `a_message_id_without_a_lamport_timestamp_does_not_order`.) It is
+        // specified because the type permits it, and an unspecified corner of a
+        // type is where the next reader's assumption goes.
         //
         // Dropping to unordered instead would discard a real Lamport value the
         // transport supplied, which is the one thing this module must never do.
@@ -899,7 +890,7 @@ mod tests {
         // And within one Lamport value, an op WITH a message id is more
         // completely described than one without, so it leads. Specified in the
         // same requirement — a genuine arbitrary choice, derivable from no
-        // other rule, and the exact arm whose boundary a review found untested.
+        // other rule.
         let with_id = Arrival::ordered(5, a_message_id(1));
         assert_eq!(
             cmp_ops(entry(&with_id, &op.id()), entry(&lamport_only, &op.id())),
