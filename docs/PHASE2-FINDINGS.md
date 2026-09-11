@@ -58,10 +58,20 @@ line 223 — and then, on the very next line, only two of them are copied forwar
 ```
 
 **The adjacency is the evidence.** `msg.messageId` is used as a key and
-discarded as a value in one statement. The Lamport timestamp, the causal history
-and the bloom filter are equally available on `msg` and equally not carried. The
-same two-field construction is repeated for the immediate-delivery path on line
-232. This is the single point where ordering metadata is discarded.
+discarded as a value in one statement. The same two-field construction is
+repeated for the immediate-delivery path on line 232. This is the single point
+where ordering metadata is discarded.
+
+**One link in this chain was not read directly, and it should be before the bug
+is filed.** `msg`'s own type is nim-sds's `Message`, a nimble dependency pinned
+in `nimble.lock` rather than vendored, and no realised copy was available to
+read. That `msg` carries a `messageId` is proven by the line above; that it also
+carries `lamportTimestamp` is inferred from the SDS persistency layer sorting
+`SdsMessage` on `(lamportTimestamp, messageId)` (§4) and from the SDS spec, not
+from the declaration. The conclusion does not turn on it — what reaches
+dialectica is fixed by the three types below, whatever `Message` holds — but a
+filing that claims "these fields are available and dropped here" should quote
+the declaration.
 
 **Layer 2 — the Reliable Channel API event.** By the time the event type is
 built there is nothing left to drop:
