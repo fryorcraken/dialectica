@@ -189,7 +189,34 @@ the spec, because each previously read like a testable requirement.
   anyway because the cost is asymmetric: an empty answer is a rendering, an abort
   is a denial of service.
 
-## 7. PLAN.md
+## 7. What the paired architecture review asked for
+
+Both resolvers were reviewed together. This change drew no findings of its own;
+both items below record decisions that were implicit.
+
+- [x] **Record why the two folds stayed separate.** Both changes listed the
+      other resolver under "deliberately does not build"; neither said why they
+      are not one fold with a predicate parameter, which is what a future reader
+      most needs given how strong the resemblance is. Added to `design.md` as
+      "This fold and the moderation resolver's are two jobs, not one with a
+      parameter", with the decisive evidence: an extracted helper would have
+      fitted the moderation resolver **before** its hide-bias commit and would
+      have had to be un-extracted **after** it. A seam one ordinary change
+      destroys was a resemblance.
+- [x] **Record why there is no fail-closed authority type here**, and why the
+      missing Stoa-scope check is correct rather than absent — the authority is
+      reached from the argument the resolver already has, so there is nothing
+      for a type to refuse, and the target op *is* the scope.
+- [x] **Narrow `iter_target`'s doc comment** so it does not mislead the author of
+      Stoa metadata resolution (§5.7), who has not started. It now says the
+      subject is **an op**, that `Entry::target` is what makes that a limit
+      rather than a parameter choice, that a metadata op names an `Address` and
+      so needs its own read, and that relevance scoring (§7.2) does *not* need
+      one because it folds over `iter`/`iter_stoa` and consumes a resolver's
+      output. Done here rather than on the moderation branch because this change
+      sits below `op-log` in the stack.
+
+## 8. PLAN.md
 
 - [x] One line in §5.7 that the resolver exists, per the document model.
 - [x] Reasoning stays in `design.md`; not duplicated into PLAN.md.

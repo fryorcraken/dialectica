@@ -216,12 +216,77 @@ reached — `current` is either `original`, established as a `Post`, or an entry
 and PHASE0-FINDINGS §3 measured that a panic aborts the module process. An empty
 body is a rendering; a crash is a denial of service.
 
+### Decision: This fold and the moderation resolver's are two jobs, not one with a parameter
+
+Recorded because the **surface resemblance is strong** and the pressure to unify
+will recur. Both read `iter_target`, both narrow by op kind, both check an
+authority, both take a leader. An extracted
+`first_binding(log, target, predicate)` looks obvious.
+
+It was examined as a pair with the moderation resolver and rejected. Three
+divergences, in ascending order of how conclusive they are:
+
+1. **The shapes are no longer the same.** This resolver is a genuine
+   `find(..).unwrap_or(original)`. The moderation resolver is
+   `filter → collect → inspect the leader's arrival → conditionally re-search`,
+   because a hide and an unhide tied under a degraded order must resolve toward
+   the hide. A shared helper would have to carry that bias for a caller that has
+   no use for it.
+
+2. **The predicates differ in arity, and that is the substantive difference.**
+   `is_valid_revision(candidate, original)` is a **relation between two
+   entries** — it compares the candidate's author against the *target op's*.
+   The moderation resolver's `Moderators::authorises(&entry)` is a **property of
+   one entry** against ambient state. A shared `Fn(&Entry) -> bool` would erase
+   exactly that distinction, which is the same distinction that decides where
+   each resolver's authority comes from (see the next decision).
+
+3. **The result types are not unifiable.** `Option<CurrentVersion>`'s `None`
+   means "not a post, or not held". The moderation resolver's `Unmoderated`
+   means "held, and nothing binds". Those are different lattices, and a common
+   return type would have to be the union, which neither caller wants.
+
+The decisive evidence, though, is historical rather than structural: **an
+extracted helper would have fitted the moderation resolver before its hide-bias
+commit and would have had to be un-extracted after it.** A seam that a single
+ordinary change destroys was a resemblance, not a seam.
+
+What is genuinely shared is already shared: `iter_target` supplies the ordered
+subsequence, and `cmp_ops` supplies the order. That is the seam, and it is at
+the log rather than between the two readers of it.
+
+### Decision: No fail-closed authority type here, and that asymmetry is real
+
+The moderation resolver takes a `Moderators` value constructed from the Stoa's
+genesis record, so that a caller cannot resolve moderation without having
+supplied the authority — it fails closed *by type*. The obvious symmetry
+argument says this resolver should have an equivalent.
+
+It should not, and proposing one would be the speculative-abstraction error.
+**The authority here is obtained from the argument the resolver already has**:
+the original post's author, reached by `let original = log.get(post)?;` on the
+first line. There is no state a caller could fail to supply, so there is nothing
+for a type to refuse.
+
+The same fact explains why this resolver needs no Stoa-scope check where the
+moderation resolver does. The original post is fetched by op id from the same
+log, so **the target op is the scope** — and an op lifted from another Stoa's
+channel fails `verify()`, since the Stoa is inside the signed bytes
+(`a_revision_lifted_into_another_stoa_is_dropped`). Moderation needs a separate
+scope check precisely because its authority is *not* co-located with its
+subject: the moderator set comes from a genesis record, the target from the log,
+and nothing but an explicit check ties the two together.
+
+`revision ↛ stoa` is therefore a genuine difference in what the two questions
+require, not a missing abstraction on this side.
+
 ## What this change deliberately does not build
 
 - **The moderation resolver.** §5.7 is explicit that a moderator's hide and an
   author's edit "are about different things and do not contend: an edit does not
   clear a hide, and a hide does not invalidate an edit." Two questions, two
-  resolvers, built in parallel against the same log.
+  resolvers, built in parallel against the same log — and they stay two, for the
+  reasons in the "two jobs, not one" decision above.
   `a_moderation_or_a_vote_on_the_post_is_not_a_version_of_it` pins the
   non-interference from this side: a moderation given the top of the order is not
   a version and does not displace one.
