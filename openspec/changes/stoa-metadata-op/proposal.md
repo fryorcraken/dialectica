@@ -45,16 +45,42 @@ construction.
 
 ## Capabilities
 
-**New Capabilities**
-
-- `stoa-metadata` — what a Stoa's mutable, moderator-owned metadata op carries,
-  how it encodes, how it relates to the immutable genesis values, and what it
-  deliberately does not carry.
+The requirements **split across two capabilities**, which is neither of the two
+obvious placements and is worth saying why.
 
 **Modified Capabilities**
 
-None. `stoa-genesis` already anticipated this capability by name and declared
-superseding out of its own scope, so nothing there needs amending.
+- `op-format` — because this change makes one of its existing requirements
+  *false*. "An op is the unit that crosses the wire" enumerates the kinds
+  closedly, and there are now five. That amendment is not optional, whatever
+  else is decided.
+
+  The wire-format facts about the new kind belong here too, and the reason is
+  visible in requirement text rather than taste: a standalone capability would
+  have restated `op-format`'s canonical-encoding, kind-in-signature,
+  authenticity-not-authority, malformed-input and no-ordering-field
+  requirements, each narrowed to one kind. That is duplication, not
+  specification — and it rots in the worst way, because a later change to the
+  general rule leaves a per-kind copy quietly contradicting it.
+
+  Two of `op-format`'s requirements are also **strengthened** while the change
+  is in them, both prompted by review of this work: the field cap now names its
+  value (150 KiB) rather than leaving it to the implementation, and UTF-8
+  handling now states that valid text is deliberately *not* normalised.
+
+**New Capabilities**
+
+- `stoa-metadata` — what is genuinely a distinct concept: that a Stoa has
+  founding values and current ones and both stay answerable, how the current
+  ones resolve, why the policy is not among them, and why a displayed title is
+  never an identifier. None of these are facts about the wire envelope, and no
+  other op kind has them.
+
+`stoa-genesis` needs no amendment: it already anticipated this capability by
+name and declared superseding out of its own scope.
+
+**A capability extraction was considered and declined**, separately from the
+above. See design.md — Decisions.
 
 ## Impact
 

@@ -2,256 +2,123 @@
 
 ## ADDED Requirements
 
-### Requirement: A Stoa's current metadata is carried by a signed op
+### Requirement: A Stoa's current metadata is distinct from its founding values
 
-A Stoa's **display metadata** — what it is called and how it describes itself
-today — SHALL be carried by a signed op, separate from the genesis record.
+A Stoa SHALL have two separately answerable descriptions of itself: the
+**founding** values fixed in its genesis record, and the **current** display
+metadata carried by a moderator-signed op.
 
-The genesis record's title is a **founding** value: it is inside the address
-preimage, so it can never change without minting a different Stoa. The metadata
-op carries what the Stoa is called *today*. The two are different questions
-about the same Stoa and both SHALL remain answerable.
+The genesis title is inside the address preimage, so it can never change
+without minting a different Stoa — that is what makes an address
+self-authenticating. The metadata op carries what the Stoa is called *today*.
+Both SHALL remain readable; the current value SHALL NOT overwrite or obscure
+the founding one.
 
-A metadata op SHALL carry the Stoa address it applies to, its signer's public
-key, a display title, and a description.
+Current metadata SHALL comprise a display title and a description. The
+description has no genesis counterpart, which is part of why this is its own
+concept rather than a mechanism for overriding genesis values one-for-one: the
+genesis record carries the minimum needed to *identify* a Stoa, and this
+carries what a reader needs to *render* one.
 
-The description is a field the genesis record does not have at all, which is
-part of why this op exists rather than being a mechanism for overriding genesis
-values one-for-one.
-
-#### Scenario: A metadata op names the Stoa it applies to
-
-- **WHEN** a metadata op is encoded
-- **THEN** the encoding carries a Stoa address
-- **AND** the address is inside the bytes the signature covers
+The encoding of the op that carries this is the `op-format` capability's.
 
 #### Scenario: Renaming a Stoa does not change its address
 
-- **WHEN** a Stoa's metadata op declares a title different from its genesis title
+- **WHEN** a Stoa's metadata declares a title different from its genesis title
 - **THEN** the Stoa's address, computed from the genesis record, is unchanged
 
-#### Scenario: The genesis title remains readable after a rename
+#### Scenario: The founding title remains readable after a rename
 
 - **WHEN** a metadata op declares a new title
 - **THEN** the genesis record still decodes to its founding title
 - **AND** the two titles are separately available
 
-### Requirement: A metadata op carries no posting policy
+### Requirement: Current metadata resolves by last-write-wins, falling back to genesis
 
-A metadata op SHALL NOT carry a posting policy field.
+A reader SHALL prefer the most recent valid metadata op for a Stoa, and SHALL
+fall back to the genesis record's founding values when it holds none.
+
+The ordering is the transport's to establish. This capability SHALL NOT define
+it, and a metadata op SHALL NOT assert its own position in it: a self-asserted
+ordering value is forgeable by exactly the author it is meant to order, which
+for a moderator-owned field is the difference between "the latest rename wins"
+and "whoever claims the highest number wins".
+
+**Resolution is not implemented**, because the ordering metadata it requires is
+not exposed by the delivery contract as it stands. Metadata ops accumulate and
+nothing reads them yet. This requirement fixes the rule so that whoever
+implements resolution does not have to re-derive it; it does not claim the
+behaviour exists.
+
+#### Scenario: A Stoa with no metadata op shows its founding values
+
+- **WHEN** a reader holds a Stoa's genesis record and no metadata op for it
+- **THEN** the Stoa's displayed title is the founding title
+
+### Requirement: Current metadata does not include the posting policy
+
+The posting policy SHALL NOT be part of a Stoa's mutable current metadata. It is
+declared at creation, in the genesis record, and is immutable.
 
 A rename is cosmetic; a policy change is authorisation. Three things rule the
-field out of *this* op rather than merely deferring it by taste:
+field out rather than merely deferring it by taste:
 
-- The reader rule for display metadata is "prefer the latest valid op, fall back
-  to the genesis value". Applied to a policy, fallback means a peer that has not
-  yet received a tightening op treats the Stoa as carrying its *founding*
-  policy. For a title that is a stale name; for a policy it is admitting posters
-  the Stoa has since excluded — the same silent widening that `stoa-genesis`
-  refuses when it declines to default an unknown policy discriminant.
+- **The fallback rule inverts safely for a title and unsafely for a policy.**
+  The rule above falls back to the genesis value when no op has been seen.
+  Applied to a policy, a peer that missed a *tightening* would fall back to the
+  *looser* founding policy — admitting posters the Stoa has since excluded.
+  That is the same silent widening `stoa-genesis` refuses when it declines to
+  default an unrecognised policy discriminant, reached by a different route: a
+  design that refuses to default a policy on decode and then hands one back on
+  resolve has closed only the front door.
 - A policy change is retroactive in a way a rename is not: it alters who may
-  post, for everyone, including on content already published.
-- The policy enum has exactly one accepted value, so a metadata op carrying one
-  could not express a change. Behaviour that cannot be varied cannot be
-  specified as varying.
+  post, for everyone, including over content already published.
+- The policy has exactly one accepted value, so a metadata op carrying one could
+  not express a change. Behaviour that cannot be varied SHALL NOT be specified
+  as varying.
 
-Omitting the field SHALL NOT cost an encoding version to add later. A future
-policy-changing act SHALL be expressible as a new op kind taking an unused kind
-discriminant, so an older client refuses it as an unknown kind rather than
-misreading it, and no existing op's encoding or address changes.
+Excluding it SHALL NOT cost an encoding version to add later. A future
+policy-changing act SHALL be expressible as a new op kind taking an unused
+discriminant, which changes no existing op's id and no Stoa's address.
 
-#### Scenario: The metadata op's encoding accounts for exactly its declared fields
+Adding it SHALL require all three of: a second accepted policy value, so a
+change is expressible and testable; a settled ordering, so "the current policy"
+is determinable; and a policy fallback rule specified separately from the
+display one and **fail-closed** — a peer that cannot establish the current
+policy treats the Stoa as more restrictive than its founding value, or declines
+to post, rather than guessing.
 
-- **WHEN** a metadata op is encoded
-- **THEN** the encoding's length is fully accounted for by the version, kind,
-  Stoa address, signer key, title and description
-- **AND** a policy field cannot be present without that accounting failing
+#### Scenario: A policy change cannot be expressed as current metadata
 
-#### Scenario: An unknown op kind is refused rather than reinterpreted
+- **WHEN** a Stoa's current metadata is set
+- **THEN** no posting policy is among the values it can carry
+- **AND** the genesis record remains the only source of the Stoa's policy
 
-- **WHEN** an op declares a kind discriminant this build does not recognise
-- **THEN** decoding fails, naming the unrecognised kind
-- **AND** it is not read as any kind this build does know
+### Requirement: A displayed title is never an identifier
 
-### Requirement: The op kind is inside the signed bytes
+A Stoa's displayed title SHALL NOT be treated as identifying it. Two Stoas may
+carry identical titles, and a title is chosen freely by whoever signed the op.
 
-A metadata op's kind discriminant SHALL be inside the bytes its signature
-covers, at the same fixed position every op kind uses.
+Display text reaches a reader exactly as its author wrote it — the encoding
+validates UTF-8 and deliberately applies no normalisation, because normalising
+would break the canonicality every peer's agreement on op ids depends on. A
+title may therefore contain bidirectional controls, zero-width characters, or
+homoglyphs of an established Stoa's name, and while no authority check exists
+any peer may sign such an op for any Stoa.
 
-There is one signing prefix for all ops, so a signature commits to "some
-dialectica op" and not to which one. Only an unambiguously typed preimage
-separates the kinds. Without it, a signature authorising one act would authorise
-another — and a metadata op is a moderator-signed act, so the kind that a
-signature over it could be mistaken for is a moderation.
+Whoever renders a title SHALL therefore mitigate at the point of display:
+strip or visibly mark bidi and zero-width controls, show the Stoa address
+alongside any name, and never resolve or match a Stoa by title. The address is
+the identity.
 
-#### Scenario: A signature over a metadata op does not verify as another kind
+#### Scenario: Two Stoas may share a displayed title
 
-- **WHEN** a metadata op is signed, and its signature is attached to an op of a
-  different kind with the same Stoa, signer and otherwise-identical fields
-- **THEN** verification of the substituted op fails
-- **AND** the original metadata op still verifies
+- **WHEN** two distinct Stoas declare the same current title
+- **THEN** both remain distinct Stoas with distinct addresses
+- **AND** neither is treated as the other
 
-#### Scenario: A metadata op and another kind never share a preimage
+#### Scenario: Display text is preserved rather than sanitised in the data layer
 
-- **WHEN** a metadata op and an op of another kind are built to be as similar as
-  the two field sets allow
-- **THEN** their encodings differ
-- **AND** their op ids differ
-
-### Requirement: The metadata op's encoding is canonical
-
-A metadata op SHALL have exactly one valid byte encoding. Each variable-length
-field SHALL be length-prefixed, so that no two distinct ops encode to the same
-bytes.
-
-Two variable-length fields sit adjacent in this op. Without prefixes the
-boundary between them is ambiguous: title `"ab"` with description `"c"` and
-title `"a"` with description `"bc"` would produce identical bytes, and therefore
-identical op ids for two different acts.
-
-#### Scenario: The same op always encodes identically
-
-- **WHEN** the same metadata op is encoded twice
-- **THEN** the two byte strings are identical
-
-#### Scenario: Ops differing in any field encode differently
-
-- **WHEN** two metadata ops differ in the Stoa, the signer, the title or the
-  description
-- **THEN** their encodings differ
-- **AND** their op ids differ
-
-#### Scenario: Adjacent variable-length fields cannot be confused
-
-- **WHEN** one op's title and description are the same concatenated text as
-  another's, split at a different point
-- **THEN** their encodings differ
-
-#### Scenario: An empty title and an empty description round-trip
-
-- **WHEN** a metadata op with an empty title and an empty description is encoded
-  and decoded
-- **THEN** the decoded op carries an empty title and an empty description
-- **AND** empty is not confused with absent
-
-#### Scenario: Text survives multi-byte UTF-8
-
-- **WHEN** a metadata op's title or description contains multi-byte UTF-8
-- **THEN** encoding and decoding return the same text
-
-### Requirement: A malformed metadata op is refused at the decoding boundary
-
-Decoding SHALL reject any input that is not the canonical encoding of a valid
-metadata op: truncation at any point, trailing bytes, a length prefix
-disagreeing with the input in either direction, a length prefix over the maximum
-a delivered message could carry, text that is not valid UTF-8, and a signer key
-that is not a valid public key.
-
-Each SHALL be reported distinguishably, so a reader is not sent looking in the
-wrong place.
-
-A field's declared length SHALL be checked against the maximum **before** any
-allocation is made on the strength of it. A four-byte length prefix can claim
-far more than a delivered message could hold, and allocating on a peer's promise
-is a remote memory-exhaustion lever.
-
-Every byte here arrives from a peer and is attacker-controlled. No input shape
-SHALL cause a panic: a panic in this decoder aborts the module process.
-
-#### Scenario: Truncated input is refused
-
-- **WHEN** a metadata op's encoding is truncated at any point
-- **THEN** decoding fails
-- **AND** no partially-populated op is produced
-
-#### Scenario: Trailing bytes are refused
-
-- **WHEN** a valid encoding is followed by extra bytes
-- **THEN** decoding fails
-
-#### Scenario: A length prefix claiming more than the input holds is refused
-
-- **WHEN** a title or description length prefix claims more bytes than remain
-- **THEN** decoding fails
-- **AND** the failure is distinguishable from the input merely running out
-
-#### Scenario: A length prefix over the message cap is refused before allocating
-
-- **WHEN** a length prefix claims more bytes than a delivered message could carry
-- **THEN** decoding fails naming the over-long field
-- **AND** the refusal comes from the cap rather than from exhausting the input
-
-#### Scenario: Text that is not valid UTF-8 is refused
-
-- **WHEN** a metadata op's title or description bytes are not valid UTF-8
-- **THEN** decoding fails
-- **AND** the bytes are not lossily converted, which would map distinct inputs
-  onto one op
-
-#### Scenario: A signer key that is not a valid public key is refused
-
-- **WHEN** a metadata op carries a signer key that is not a valid public key
-- **THEN** decoding fails
-- **AND** the failure is distinguishable from a malformed encoding
-
-#### Scenario: No input shape causes a panic
-
-- **WHEN** arbitrary or mutated bytes are decoded as a metadata op
-- **THEN** every outcome is a success or a named failure
-
-### Requirement: Verification of a metadata op answers authenticity, not authority
-
-Verifying a metadata op SHALL establish only that it is authentically from the
-key it names. It SHALL NOT be read as establishing that the signer was a
-moderator of the Stoa.
-
-Authority needs the Stoa's moderator set as of the op's position in the order,
-which the op type does not have and cannot obtain. A metadata op signed by a
-peer who is not a moderator is genuinely from that peer, and SHALL verify as
-authentic; whether it binds is a separate question answered on read.
-
-Conflating the two is a measured failure mode: the nearest comparable project
-checks moderator authority only on the send path and never on the read path, so
-any peer can forge a moderation.
-
-#### Scenario: A metadata op signed by a non-moderator is authentic
-
-- **WHEN** a peer who is not the Stoa's creator signs a metadata op for that Stoa
-- **THEN** verification succeeds, because the op really is from that peer
-- **AND** this is not a statement that the rename takes effect
-
-#### Scenario: A metadata op signed by someone other than its named signer fails
-
-- **WHEN** a metadata op names one signer but is signed with another key
-- **THEN** verification fails
-
-#### Scenario: A tampered metadata op does not verify
-
-- **WHEN** a metadata op's title is changed after signing
-- **THEN** verification fails
-
-#### Scenario: A metadata op replayed into another Stoa does not verify
-
-- **WHEN** a metadata op's Stoa address is changed after signing
-- **THEN** verification fails
-- **AND** it does not arrive as a rename of a Stoa its signer never addressed
-
-### Requirement: A metadata op carries no ordering field
-
-A metadata op SHALL NOT carry a timestamp, a Lamport value, a sequence number,
-or any other field asserting its own position in an order.
-
-Resolution between two metadata ops for one Stoa is last-write-wins by the
-order the transport establishes. That order is the transport's to supply. A
-value the op asserted about itself would be forgeable by the very author it is
-meant to order — and for a moderator-owned field that is the difference between
-"the latest rename wins" and "whoever claims the highest number wins".
-
-This requirement constrains the op's contents. It does not define the ordering,
-which needs ordering metadata the delivery contract does not presently expose.
-
-#### Scenario: The encoding has no room for an ordering field
-
-- **WHEN** a metadata op is encoded
-- **THEN** the encoding's length is exactly accounted for by its declared fields
-- **AND** an ordering field cannot be added without that accounting failing
+- **WHEN** a metadata op carries a title containing control or zero-width characters
+- **THEN** decoding preserves them unchanged
+- **AND** the obligation to render them safely rests with the renderer

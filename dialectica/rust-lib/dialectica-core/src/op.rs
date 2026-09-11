@@ -112,14 +112,15 @@ const VERSION_1: u8 = 1;
 /// before it reads.
 ///
 /// **It does NOT bound the total size of a decoded op, and must not be read as
-/// doing so.** The bound is per field and does not compose: the `Post`
-/// attachment path reaches 768,076 bytes — five times the SDS cap — because
-/// `take_string_list` bounds the element count and each element separately.
-/// Measured, not estimated.
+/// doing so.** The bound is per field and does not compose: a metadata op with
+/// both fields at the cap decodes at 307,274 bytes, twice the SDS cap, and the
+/// `Post` attachment path reaches 768,076 bytes because `take_string_list`
+/// bounds the element count and each element separately. Both were measured,
+/// not estimated.
 ///
 /// That is not a hole to close here, for two reasons. Amplification is roughly
-/// 1:1 — reaching that size costs the sender the same bytes — so it is not a
-/// lever in the sense the per-field cap closes. And **the total-size check
+/// 1:1 — reaching 307 KB of decoded op costs the sender 307 KB — so it is not
+/// a lever in the sense the per-field cap closes. And **the total-size check
 /// belongs at the transport boundary, where the SDS frame is known.** This
 /// module is handed a byte slice and cannot see the frame it arrived in, so a
 /// combined bound here would be a guess at a number the caller already has.
@@ -2044,6 +2045,96 @@ mod tests {
         );
     }
 
+    /// A metadata op with a title of `title_len` and a description of
+    /// `description_len`, as real bytes.
+    fn a_metadata_op_with_lengths(title_len: usize, description_len: usize) -> Vec<u8> {
+        Op {
+            stoa: a_stoa(),
+            author: a_key(2).public_key(),
+            kind: OpKind::StoaMetadata {
+                title: "a".repeat(title_len),
+                description: "b".repeat(description_len),
+            },
+        }
+        .canonical_bytes()
+    }
+
+    #[test]
+    fn a_metadata_field_exactly_at_the_cap_is_accepted() {
+        // The accept half of the boundary, for both fields at once. The two
+        // together decode to over 300 KB — twice the SDS message cap — which is
+        // deliberate and is documented on `MAX_FIELD_LEN`: the cap bounds
+        // allocation-before-data per field, not the total size of an op. The
+        // total-size check belongs at the transport boundary, where the frame
+        // is known.
+        let bytes = a_metadata_op_with_lengths(MAX_FIELD_LEN, MAX_FIELD_LEN);
+        let op = Op::decode(&bytes).expect("fields exactly at the cap must decode");
+        match op.kind {
+            OpKind::StoaMetadata { title, description } => {
+                assert_eq!(title.len(), MAX_FIELD_LEN);
+                assert_eq!(description.len(), MAX_FIELD_LEN);
+            }
+            other => panic!("expected metadata, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_metadata_field_one_byte_over_the_cap_is_refused() {
+        // The refuse half, one byte over, for EACH field independently — a cap
+        // applied to the title only would leave the description open, and a
+        // `u32::MAX` probe cannot tell the difference.
+        for (title_len, description_len) in [(MAX_FIELD_LEN + 1, 2), (2, MAX_FIELD_LEN + 1)] {
+            let bytes = a_metadata_op_with_lengths(title_len, description_len);
+            assert_eq!(
+                Op::decode(&bytes),
+                Err(OpError::FieldTooLong(MAX_FIELD_LEN + 1)),
+                "title {title_len}, description {description_len}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_lying_metadata_length_prefix_is_refused_in_either_direction() {
+        // The spec requires each malformation be "reported distinguishably",
+        // and calls out a prefix disagreeing "in either direction". Both
+        // directions were previously covered for a Post only.
+        //
+        // OVER-claiming is a LengthMismatch: the input is not short, the claim
+        // is wrong. UNDER-claiming is TrailingBytes: the decoder reads the
+        // field it was promised, then finds bytes after it. Different errors,
+        // same refusal, and the distinction is worth pinning — a caller
+        // matching only on LengthMismatch would mishandle the second.
+        let title_len_at = 1 + 1 + 32 + 32;
+
+        // Over-claiming, on the title.
+        let mut over = a_metadata_op_with_lengths(4, 4);
+        over[title_len_at..title_len_at + 4].copy_from_slice(&1000u32.to_be_bytes());
+        assert_eq!(Op::decode(&over), Err(OpError::LengthMismatch));
+
+        // Under-claiming, on the DESCRIPTION rather than the title, because
+        // the description is the last field. Shrinking the title's prefix
+        // instead would make the decoder read the description's length from
+        // the middle of the title's text, and the resulting error would be
+        // whatever those four bytes happened to spell — a test passing for a
+        // reason unrelated to under-claiming.
+        let description_len_at = title_len_at + 4 + 4;
+        let mut under = a_metadata_op_with_lengths(4, 6);
+        under[description_len_at..description_len_at + 4].copy_from_slice(&2u32.to_be_bytes());
+        assert_eq!(Op::decode(&under), Err(OpError::TrailingBytes));
+    }
+
+    #[test]
+    fn trailing_bytes_after_a_metadata_op_are_refused() {
+        // Metadata-specific rather than relying on the generic loop: the
+        // decode arm consumes two variable-length fields and then must leave
+        // the cursor exhausted. An arm that stopped early would be caught only
+        // by `trailing_bytes_are_refused`, and a future kind is as likely to
+        // regress this as any other property.
+        let mut bytes = a_metadata_op().canonical_bytes();
+        bytes.push(0);
+        assert_eq!(Op::decode(&bytes), Err(OpError::TrailingBytes));
+    }
+
     #[test]
     fn invalid_utf8_in_metadata_is_refused() {
         // Both fields, and not lossily converted — `from_utf8_lossy` would map
@@ -2085,6 +2176,73 @@ mod tests {
             };
             assert_eq!(Op::decode(&op.canonical_bytes()).unwrap(), op);
         }
+    }
+
+    #[test]
+    fn display_text_is_preserved_exactly_and_never_normalised() {
+        // Strict UTF-8 with NO normalisation, and that is a canonicality
+        // requirement rather than an oversight. Normalising, case-folding or
+        // stripping at decode would mean an accepted byte string re-encodes to
+        // something other than itself — two peers, two op ids, for what each
+        // believes is one op. The encoding's whole job is that they agree.
+        //
+        // The consequence is that display text is attacker-controlled: these
+        // are exactly the shapes used to impersonate a Stoa by name — a
+        // right-to-left override, a zero-width joiner, a Cyrillic homoglyph of
+        // "Agora". They MUST survive intact here, and the obligation to render
+        // them safely sits with the renderer. §4.8 already says a name is never
+        // an identifier; this is the data-layer half of that.
+        for hostile in [
+            "Agora\u{202E}txet desrever", // right-to-left override
+            "Ag\u{200B}ora",              // zero-width space
+            "\u{0410}gora",               // Cyrillic А, a homoglyph of A
+            "agora",                      // differs from "Agora" only by case
+            "e\u{0301}",                  // combining acute, NOT folded to é
+        ] {
+            let op = Op {
+                kind: OpKind::StoaMetadata {
+                    title: hostile.to_string(),
+                    description: String::new(),
+                },
+                ..a_metadata_op()
+            };
+            let bytes = op.canonical_bytes();
+            let decoded = Op::decode(&bytes).unwrap();
+            match &decoded.kind {
+                OpKind::StoaMetadata { title, .. } => {
+                    // Compared against the ORIGINAL literal, not against
+                    // anything the decoder produced.
+                    assert_eq!(title, hostile, "display text was transformed");
+                }
+                other => panic!("expected metadata, got {other:?}"),
+            }
+            // And re-encoding reproduces the same bytes, which is the
+            // canonicality property the non-transformation exists to protect.
+            assert_eq!(decoded.canonical_bytes(), bytes);
+        }
+
+        // The pair that would collide under NFC normalisation must stay
+        // distinct: "e" + combining acute against the precomposed "é".
+        let combining = Op {
+            kind: OpKind::StoaMetadata {
+                title: "e\u{0301}".to_string(),
+                description: String::new(),
+            },
+            ..a_metadata_op()
+        };
+        let precomposed = Op {
+            kind: OpKind::StoaMetadata {
+                title: "\u{00E9}".to_string(),
+                description: String::new(),
+            },
+            ..a_metadata_op()
+        };
+        assert_ne!(
+            combining.canonical_bytes(),
+            precomposed.canonical_bytes(),
+            "normalisation would collapse two distinct ops onto one encoding"
+        );
+        assert_ne!(combining.id(), precomposed.id());
     }
 
     #[test]
@@ -2168,15 +2326,30 @@ mod tests {
     }
 
     #[test]
-    fn the_next_free_kind_discriminant_is_refused_as_unknown() {
-        // Metadata takes 4, so 5 is what an older client would meet if a future
-        // policy-changing act lands as its own kind. That it refuses with a
-        // NAMED error rather than misparsing is what makes the reservation
-        // free: adding a kind later costs an unused discriminant, not a version
-        // bump and not a re-addressing of any Stoa.
+    fn an_unallocated_kind_discriminant_is_refused_as_unknown() {
+        // What makes "a later kind costs an unused discriminant, not a version
+        // bump" true: an older client meeting a discriminant it does not know
+        // refuses with a NAMED error rather than misparsing.
+        //
+        // This pins the PROPERTY, not a particular number. Naming "5" in the
+        // prose would go stale the moment another kind lands there while this
+        // test still passed — so the value is found by scanning upward from
+        // the highest allocated discriminant instead. Add a kind and this
+        // keeps testing the first genuinely free value.
+        let highest = one_of_each_kind()
+            .iter()
+            .map(|op| op.canonical_bytes()[KIND_AT])
+            .max()
+            .expect("one_of_each_kind is never empty");
+        let unallocated = highest + 1;
+
         let mut bytes = a_metadata_op().canonical_bytes();
-        bytes[KIND_AT] = 5;
-        assert_eq!(Op::decode(&bytes), Err(OpError::UnknownKind(5)));
+        bytes[KIND_AT] = unallocated;
+        assert_eq!(
+            Op::decode(&bytes),
+            Err(OpError::UnknownKind(unallocated)),
+            "discriminant {unallocated} must be refused, not misparsed"
+        );
     }
 
     #[test]

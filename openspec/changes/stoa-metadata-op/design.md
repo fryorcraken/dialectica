@@ -93,10 +93,16 @@ reason is structural rather than lucky:
 - An op's id is the hash of that one op. Adding a new op kind changes the id of
   no existing op, the address of no Stoa, and the encoding of nothing already
   written.
-- `op.rs` allocates kind discriminants explicitly, and 0–3 are used. A future
-  policy-changing act takes discriminant 5 (this change takes 4). An older
-  client meeting it gets `OpError::UnknownKind(5)` — the legible refusal the
-  version byte exists to give — rather than a misparse.
+- `op.rs` allocates kind discriminants explicitly and appends rather than
+  inserts, so a future policy-changing act takes **the next free value**, which
+  is whatever `OpKind`'s constants say it is at the time. An older client
+  meeting an unallocated discriminant gets `OpError::UnknownKind` — the legible
+  refusal the version byte exists to give — rather than a misparse.
+
+  Deliberately not naming the number here: if another kind lands first, a
+  sentence saying "discriminant 5" goes stale while every test still passes.
+  The property that matters is "appended, never inserted", which stays true
+  however many kinds arrive.
 
 So the reservation is free and requires no marker in the format to keep it free.
 What would *not* be free is landing a `policy` field inside this op's encoding
@@ -115,6 +121,58 @@ kind's layout, and it would invalidate every metadata op already signed.
    or declines to post rather than guessing. Until that rule exists, the honest
    position is that policy is immutable, which is exactly what the genesis
    record already says.
+
+### Where the requirements live: split, not folded and not standalone
+
+Asked as a binary — fold into `op-format`, or keep `stoa-metadata` standalone —
+both answers are wrong, and the requirement text says so more clearly than any
+argument about concepts.
+
+Written standalone, five of seven requirements were **per-kind restatements of
+general `op-format` requirements**: canonical encoding, the kind inside the
+signature, authenticity-not-authority, the malformed-input surface, and the
+no-ordering-field rule. `op-format` states each of those for *all* kinds, some
+emphatically — "whatever the two have in common". A narrowed copy adds no
+constraint and rots in the worst direction: a later change to the general rule
+leaves the per-kind copy quietly contradicting it, with both validating.
+
+Written folded, the two requirements that are *not* wire facts would have been
+buried in a wire-format spec: that a Stoa has founding values and current ones
+and both stay answerable, and that the policy is excluded. Neither is a fact
+about the envelope, and no other kind has anything like them.
+
+So: wire facts to `op-format`, concept to `stoa-metadata`.
+
+**The amendment to `op-format` was not optional either way.** Its requirement
+"An op is the unit that crosses the wire" enumerates the kinds closedly, and
+there are now five. Leaving that sentence saying four would have made a merged
+spec false the moment this landed — which is the concrete answer to "does a new
+op kind touch `op-format`?": yes, always, at minimum there.
+
+**Rule for the next kind's author**, so this is not re-derived: a new op kind
+amends `op-format`'s kind enumeration and puts its encoding facts there. It
+earns its own capability only for propositions that are not about the envelope
+— a reader rule, a relationship to another record, a deliberate exclusion. If
+the draft requirements read as `op-format`'s with one kind's name substituted
+in, they belong in `op-format`.
+
+### The extraction that was declined, and why it stays declined
+
+A general "a record has a canonical encoding" capability, extracted from
+`stoa-genesis` and `op-format`, was evaluated when `op-format` landed and
+declined. Having now written a second set of encoding requirements, this change
+agrees, and adds one observation the first evaluation could not have:
+
+the overlap that *is* real turned out to be between `op-format` and **this
+change**, not between `op-format` and `stoa-genesis` — and the right response
+to it was to put the requirements in `op-format`, which needs no new capability
+at all. The generality that looked like it wanted extracting was an op-format
+generality all along, and `op-format` already expresses it.
+
+`stoa-genesis` remains genuinely different: self-identifying by hash, no field
+cap, no presence tags, no signature envelope, and versioned independently. Two
+formats that version together mean a change to one invalidates the other for no
+reason, which `op-format` now states as a requirement.
 
 ### The op carries a description, which the genesis record does not have
 
