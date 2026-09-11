@@ -287,9 +287,14 @@ hiding something as a moderator (§6), voting — each is one op, signed by its
 author and published to the Stoa's channel. Nothing else crosses the wire, and
 the forum's whole state is a function of the ops a peer has seen.
 
-Each peer keeps a **local SQLite store** holding every op it has seen, plus a
-materialised view of the forum derived from it. Ops are the authority; the view
+Each peer is to keep a **local SQLite store** holding every op it has seen, plus
+a materialised view of the forum derived from it. Ops are the authority; the view
 is a cache that can be rebuilt by replay.
+
+**The op log exists behind a `Store` trait** (see the `op-log` spec), with an
+in-memory implementation only. The SQLite implementation, the materialised view
+and its query indexes are all still to build — so nothing persists across a
+restart yet.
 
 Two peers routinely hold **different sets of ops** — one was offline, one joined
 late, a message has not propagated yet — so they can legitimately disagree about
@@ -695,12 +700,15 @@ late, or never arrive, without blocking anything.
 
 ### 4.7 Durability — and what v1 deliberately does not have
 
-Three tiers, only two of which exist in v1:
+Three tiers, only two of which are in v1's scope. The `v1` column is what v1 is
+*for*, not what is built — the op log currently has an in-memory implementation
+only (see the `op-log` spec), so the middle tier buys nothing across a restart
+yet:
 
-| Tier | Covers | v1 |
+| Tier | Covers | in v1's scope |
 |---|---|---|
 | SDS window | recent ops, retransmission, causal-history and SDS-Repair backfill | ✅ |
-| Local SQLite | everything this peer has ever seen | ✅ |
+| Local SQLite | everything this peer has ever seen | ✅ — trait shipped, SQLite not yet |
 | Logos Storage snapshots | deep history, beyond what live peers hold | ❌ later |
 
 **SDS gives real but bounded backfill.** A peer receiving a message whose

@@ -19,6 +19,7 @@ mod cursor;
 pub mod arrival;
 pub mod identity;
 pub mod keystore;
+pub mod log;
 pub mod op;
 pub mod stoa;
 pub mod wire;
