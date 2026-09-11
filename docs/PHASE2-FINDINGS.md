@@ -283,15 +283,15 @@ resting on the untested assumption §13 named. Treat §13's entry as open.
 - `lgs basecamp build --variant all` — green, both `lgx` and `lgx-portable`.
 - `lgs basecamp modules` — captured `delivery_module` at the pinned rev.
 - `lgs basecamp install` — reported `installing 3 module(s) (deps first)`,
-  which is §11's trap correctly avoided, and then spent the rest of the session
-  building `liblogosdelivery` from source: the full Nim/Waku stack plus a Rust
-  zerokit/RLN toolchain, roughly 380 derivations on a cold cache, with
-  `liblogosdelivery-dev` itself the last and largest.
+  which is §11's trap correctly avoided. All three built (delivery took 8m42s
+  once its ~380 dependencies were cached). **Delivery and the core both
+  installed into the `alice` profile. The UI install failed** on
+  `Forbidden root entry: assets` — §5b, which is a live defect in the pin
+  configuration rather than anything about this spike.
 
-**Nothing failed. The work was not finished**, and the reason is worth naming
-because it is a budgeting fact rather than a defect: on a cold nix cache,
-*getting to the starting line* of this experiment is a multi-hour build, and it
-is in front of the scaffolding work described below rather than behind it.
+So the experiment stopped **one step short of a launch**, with two of three
+modules installed and the third blocked by a packaging bug. Nothing about the
+transport was reached.
 
 ### The blocker a re-run must plan around, and it is not the build
 
@@ -332,6 +332,77 @@ than trusting a tile.
   carries — was not taken, and it remains the cheapest high-value measurement
   available the moment a node runs. If a Lamport value did somehow reach a
   consumer it would contradict §1, and §1 is what would be wrong.
+
+---
+
+## 5b. `[repos.lgpm]` is not the lgpm that runs — and it is what blocked this spike
+
+**This is where the spike actually stopped, and it is a live defect rather than
+a budget problem.** Everything built. Delivery and the core both *installed*.
+The UI did not:
+
+```
+error: lgpm install .../logos-dialectica_ui-module.lgx into alice failed:
+  Error: Package validation failed: Forbidden root entry: assets
+```
+
+That is verbatim the failure `scaffold.toml`'s `[repos.lgpm]` comment says the
+pin exists to avoid, and which PHASE0-FINDINGS §8 records as a deliberate,
+working split. **It is not working.**
+
+### The pin is ignored
+
+The lgpm the install invokes reports:
+
+```
+lgpm version pre-release-202af6f (dev build)
+commit: 202af6fa0f0f4493bc59c8a609dff9326f78a18d
+```
+
+`scaffold.toml` pins `[repos.lgpm]` to `d3af2972f51d9c542537d80d60ad8d20282ddcd1`.
+**Different commits.** The binary's path says why:
+
+```
+~/.cache/logos-scaffold/basecamp/<BASECAMP-COMMIT>/lgpm-result/bin/lgpm
+```
+
+The cache is keyed by the **basecamp** commit, and `lgpm-result` sits *inside*
+that directory beside `app-result`. There is no lgpm-pin-keyed directory
+anywhere in the cache. So the lgpm that runs is the one **basecamp's own flake
+supplies**, and `[repos.lgpm]` selects nothing.
+
+### Why this matters more than one failed install
+
+PHASE0-FINDINGS §8 frames the basecamp/lgpm split as a deliberate trade — *"a
+split pair that installs and runs, or a matched pair that cannot install the UI
+at all"* — and says it is tolerable because *"the split is on the read side and
+we have exercised it"*. The evidence for "exercised" was a Phase 0 run that
+installed all three modules.
+
+**That reasoning no longer holds, because the mechanism it assumed does not
+exist.** The pin was never what made Phase 0's install work. Whatever did (a
+cache populated when basecamp's embedded lgpm happened to be older or newer, or
+a hand-run install) is not reproducible from the checked-in configuration — a
+fresh cache gets basecamp's lgpm and fails. The `doctor` WARN about the split
+pins is therefore pointing at a real problem while describing the wrong
+mechanism: there is no split *to choose*, because only one of the two pins is
+consulted.
+
+**What this does not settle:** whether `lgs` ignores `[repos.lgpm]` by design
+(basecamp embeds lgpm, so overriding it separately may be meaningless) or
+whether the pin is meant to work and does not. That is one question for the
+scaffold maintainers, and it should be asked before anyone else spends a build
+cycle on the pin.
+
+### The consequence for the #4116 experiment
+
+The UI is not installable from a clean cache, so `lgs basecamp launch` has no
+plugin to click. Note what this does *not* block, and it is the more useful
+half: **the core and delivery modules both installed.** A probe driven through
+the module's IPC surface rather than the QML view — the way PHASE0-FINDINGS §3
+drove `panic_probe` with `logoscore call` — does not need the UI at all. That is
+the cheaper path to the restart experiment, and it sidesteps this defect
+entirely rather than waiting on it.
 
 ---
 

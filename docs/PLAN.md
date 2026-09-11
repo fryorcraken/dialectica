@@ -1669,6 +1669,14 @@ at build or run time, not review time.
   that reads a timestamp off the wire. Every other event gets one synthesised
   local `CLOCK_REALTIME` read, taken once per callback before the event-type
   dispatch (PHASE2-FINDINGS §2).
+- **`[repos.lgpm]` selects nothing.** The lgpm that `lgs basecamp install`
+  invokes is basecamp's own, cached under the **basecamp** commit
+  (`~/.cache/logos-scaffold/basecamp/<commit>/lgpm-result/`), and reports a
+  different commit from the pin. So the UI install fails from a clean cache on
+  `Forbidden root entry: assets` — the very error the pin was added to avoid.
+  `lgpm --version` against that cached path is the one-command check
+  (PHASE2-FINDINGS §5b). The core and delivery modules install fine, so an
+  experiment driven through module IPC is unaffected.
 - **`lgs basecamp` verbs act on the current directory and take no
   `--directory` flag.** So a git worktree cannot be built without a `cd`, which
   this repo's permission setup refuses — meaning **the main checkout is what
@@ -1785,8 +1793,13 @@ thing (§2.3).
   corrupt a fresh `createNode`. Two runs against a real node, with peer traffic
   received in the first, settles it.
 
-  **Still open, and a spike has now established what answering it costs**
-  (`docs/PHASE2-FINDINGS.md` §5). Two things were learned that change the
+  **Still open. A spike got the core and delivery modules installed and was
+  blocked one step short of a launch** by an unrelated packaging defect —
+  `[repos.lgpm]` selects nothing, so the UI cannot install from a clean cache
+  (`docs/PHASE2-FINDINGS.md` §5b). The experiment does not need the UI: drive it
+  through the module IPC surface, as PHASE0-FINDINGS §3 did.
+
+  **What answering it costs** (`docs/PHASE2-FINDINGS.md` §5). Two things were learned that change the
   estimate rather than the answer. **The precondition holds**: SDS state is
   durably persisted, under the module's per-instance path, as `sds.meta` and
   `sds.log` rows that `loadChannel` re-sorts on start — so there genuinely is

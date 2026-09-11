@@ -652,17 +652,26 @@ Recorded here so the next person does not "fix" them back into a broken build.
   real hazard: basecamp embeds the same package-manager library `lgpm` is built
   from, so a mismatched pair can install packages the app cannot then read.
 
-  It stands anyway because the matched pair does not work here. lgpm at the
-  scaffold default rejects our UI package outright — `Forbidden root entry:
-  assets` — since the builder emits manifest 0.6.0, which relocates a `ui_qml`
-  icon into a top-level `assets/`, and that lgpm predates `assets` in
-  `logos-package`'s allowlist. So the choice is a split pair that installs and
-  runs, or a matched pair that cannot install the UI at all.
+  The `[repos.lgpm]` pin was added to dodge that: lgpm at the scaffold default
+  rejects our UI package outright — `Forbidden root entry: assets` — since the
+  builder emits manifest 0.6.0, which relocates a `ui_qml` icon into a
+  top-level `assets/`, and that lgpm predates `assets` in `logos-package`'s
+  allowlist.
 
-  **What makes it tolerable is that the split is on the read side and we have
-  exercised it**: this same pair installed all three modules and ran them (§6).
-  Re-pair the pins the moment a basecamp release ships with an lgpm that
-  accepts `assets`, and drop this note with it.
+  **⚠️ The pin does not do that, and this section used to claim it did.** A
+  later spike found `[repos.lgpm]` selects nothing: the lgpm that `install`
+  invokes lives at
+  `~/.cache/logos-scaffold/basecamp/<BASECAMP-COMMIT>/lgpm-result/`, keyed by
+  the **basecamp** commit, and reports a different commit from the pin. The UI
+  install fails on `Forbidden root entry: assets` from a clean cache. So there
+  is no "split pair that installs and runs" to prefer — only one of the two
+  pins is consulted at all. PHASE2-FINDINGS §5b has the evidence and what to
+  ask the scaffold maintainers.
+
+  This section previously called the split tolerable "because we have exercised
+  it", citing §6's successful install. That inference was wrong: whatever made
+  Phase 0's install work, it was not this pin, and it is not reproducible from
+  the checked-in configuration.
 
 - **The `delivery_module` pin differs from the scaffold default.** Ours is the
   rev whose channel API §1 and §6 were proven against, end to end. The default
