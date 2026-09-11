@@ -90,10 +90,9 @@ It is in its own commit, so the documents can be reviewed without it.
       `Ok(Genesis { creator: PublicKey(0000…) })` — the defect made visible.
 - [x] 4b.3 Restore the guard; confirm the test passes and the whole suite is
       green. No other test changed behaviour in either direction.
-- [x] 4b.4 Confirm the new test introduces no formatting diff, by comparing
-      `cargo fmt --check -p dialectica-core` against a stashed baseline. The 13
-      hunks it reports are all pre-existing and none is in the added code — see
-      the note under Gates.
+- [x] 4b.4 Confirm the new test introduces no formatting diff. It does not; CI's
+      own `cargo fmt --check` is clean. See the note below on which invocation
+      to use, which cost this change a detour.
 
 ## 5. Gates
 
@@ -103,14 +102,36 @@ It is in its own commit, so the documents can be reviewed without it.
 - [x] 5.3 SDK symlinked into the worktree to make the gate runnable, mirroring
       what CI's nix step does. The path is gitignored and adds nothing to the
       diff.
-- [x] 5.4 `cargo fmt --check -p dialectica-core` reports **13 hunks, all
-      pre-existing and none in the added test** — verified by stashing this
-      change and re-running, which reports the identical set. This is the
-      documented trap: local rustfmt disagrees with CI's pinned stable about
-      `identity.rs`, `op.rs` and untouched parts of `stoa.rs`, so bare
-      `cargo fmt` would rewrite other people's code away from what CI wants.
-      **Not run.** Baseline recorded here so the next person knows the number
-      is not theirs.
+- [x] 5.4 `cargo fmt --manifest-path …/rust-lib/Cargo.toml --check` — **clean**,
+      which is CI's own invocation and the one that counts. See the note below
+      before reaching for a different one.
+
+### The two `cargo fmt` invocations disagree, and only one is authoritative
+
+Recorded because it cost this change a detour and has cost other changes more.
+
+- `cargo fmt --manifest-path …/rust-lib/Cargo.toml --check` — **clean**, on this
+  branch and on `main`. This is what CI runs.
+- The same with `-p dialectica-core` — **13 diffs on `main` itself**, reformatting
+  in both directions (splitting some lines, joining others), i.e. resolving a
+  different configuration.
+
+**A check that fails on a merged, CI-green tree is measuring the wrong thing.**
+That is the tell, and it is the cheapest way to tell the two apart: run the
+invocation against an untouched `main` before believing what it says about your
+branch.
+
+An earlier version of this file recorded the 13 as a "pre-existing baseline" so
+the next person would know the number was not theirs. **That was wrong and has
+been removed** — the number is an artefact of the invocation, not a property of
+the tree, and preserving it would have propagated the error into a change whose
+whole argument is that unchecked claims are expensive. Reporting a phantom
+baseline is the same failure as claiming coverage nobody verified, pointed the
+other way.
+
+What stands regardless: **do not run bare `cargo fmt` to fix a failing check.**
+If an invocation reports diffs in code you did not touch, establish first
+whether it reports them on `main` too.
 
 ## Requirement → test
 
@@ -132,7 +153,7 @@ are unqualified within their module's `tests` block.
 | The derivation constants are pinned | `the_wire_constants_are_pinned_to_known_answers` — all four scenarios, hardcoded hex |
 | An address's display form parses strictly | `an_address_survives_a_hex_round_trip`, `address_parsing_rejects_attacker_supplied_junk` (not-hex, empty, short, and one byte too long) |
 | Verification binds the key to the claimed author | `a_validly_signed_op_under_the_wrong_key_is_still_rejected`, `an_authored_op_verifies_when_the_key_matches_the_claimed_author`, `an_authored_op_is_rejected_when_the_bytes_were_tampered_with`. Mutation-verified: **one test** catches removal of the binding |
-| Authenticity is not authority | `op::tests::verification_answers_authenticity_and_not_authority`, `op::tests::a_revision_by_a_different_author_is_authentic_and_still_not_valid` — **in `op.rs`, not here**, and both are one-sided positive assertions the `op-model` change already flagged as weaker than their names suggest |
+| Authenticity is not authority | `op::tests::verification_answers_authenticity_and_not_authority`, `op::tests::a_revision_by_a_different_author_is_authentic_and_still_not_valid`, `op::tests::a_metadata_op_by_a_non_moderator_is_authentic` — **all in `op.rs`, none here**, and all one-sided positive assertions. See the finding below: the count grew by one in #11 |
 | Identity does not rotate | `a_derived_stoa_key_is_deterministic` pins the positive half. **The absence of a rotation operation is pinned by NONE** — see gap 2 |
 | A secret key cannot be copied, logged or serialised | `a_secret_key_survives_a_byte_round_trip`, `an_all_zero_secret_key_is_accepted_because_every_seed_is_valid` pin the round trip. **The trait denials are pinned by NONE** — see gap 3 |
 
@@ -195,13 +216,22 @@ would otherwise have to discover by measurement.
 ### "Authenticity is not authority" is pinned only from `op.rs`
 
 The `identity` spec's requirement *Authenticity is not authority* has **no test
-in `identity.rs`**. Both tests that pin it —
-`op::tests::verification_answers_authenticity_and_not_authority` and
-`op::tests::a_revision_by_a_different_author_is_authentic_and_still_not_valid` —
-live in `op.rs`, and both are **one-sided positive assertions** that the
-`op-model` change already flagged as weaker than their names suggest: each
-asserts only that `verify()` returned `true`, so neither can fail against a
-`verify` that has stopped checking anything.
+in `identity.rs`**. Every test that pins it lives in `op.rs`, and every one is a
+**one-sided positive assertion** that the `op-model` change already flagged as
+weaker than its name suggests: each asserts only that `verify()` returned
+`true`, so none can fail against a `verify` that has stopped checking anything.
+
+- `op::tests::verification_answers_authenticity_and_not_authority`
+- `op::tests::a_revision_by_a_different_author_is_authentic_and_still_not_valid`
+- `op::tests::a_metadata_op_by_a_non_moderator_is_authentic` — **added by #11**,
+  after the pattern was documented
+
+**The count is growing, which is the part worth acting on.** The `op-model`
+change identified three such tests and left them, reasonably, because fixing
+them is a behaviour change to the suite. #11 then added a fourth instance of
+the same shape while correctly implementing the requirement. That is what an
+unfixed pattern does: it gets copied, because the existing tests are the model a
+new one is written against.
 
 **This matters more now than when it was flagged**, because the property is
 load-bearing for `moderation.rs`, which decides authority on read. The

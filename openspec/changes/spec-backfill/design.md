@@ -381,13 +381,16 @@ Recorded rather than invented, per the rule against untestable scenarios.
 
 ## Open Questions
 
-- **Should the three one-sided `verify()` tests be given their negative half?**
-  The `op-model` change identified them and left them, reasonably, because
-  changing them is a behaviour change to the suite. The property they pin —
-  authenticity is not authority — is now load-bearing for `moderation.rs`, which
-  decides authority on read, so the case for fixing them is stronger than when
-  it was first raised. Recorded in `tasks.md` where a reader of the `identity`
-  spec will meet it.
+- **Should the one-sided `verify()` tests be given their negative half?** The
+  `op-model` change identified three and left them, reasonably, because changing
+  them is a behaviour change to the suite. **#11 has since added a fourth** —
+  `a_metadata_op_by_a_non_moderator_is_authentic` — which is what an unfixed
+  pattern does: it becomes the model the next test is written against. The
+  property they pin is also now load-bearing for `moderation.rs`, which decides
+  authority on read. Both facts argue the same way, and the fix is cheap: have
+  each also assert that a deliberately broken version of the same op does not
+  verify. Recorded in `tasks.md` where a reader of the `identity` spec will meet
+  it.
 - **Does `module-wire-contract` survive the removal of `panic_probe`?** The
   method is marked for deletion once the panic question stops being live, and
   the guard requirement's "exercised rather than merely asserted" scenario is
