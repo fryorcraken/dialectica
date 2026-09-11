@@ -117,3 +117,9 @@ covered. Describe what is checkable, or say it is out of scope.
 
 **Read PLAN.md from `origin/main`.** A change was once designed against a §4.3
 that had been rewritten to say the opposite.
+
+**Specs get reorganised as concepts generalise.** When a second instance shows
+that requirements written for one capability are really about a general one,
+they move — `REMOVED` from the old spec and `ADDED` to the new, verbatim, in one
+change. OpenSpec has no capability move or rename, so the extraction is composed
+from those primitives. Do it when the generality is demonstrated, not predicted.

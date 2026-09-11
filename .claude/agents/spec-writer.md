@@ -48,6 +48,39 @@ OpenSpec silently drops it — a REMOVED requirement is discarded when the
 capability is new, with validation still passing. Reasoning put in a spec is
 reasoning lost.
 
+## Reorganising specs
+
+A capability is not fixed for life. When a second or third change reveals that
+requirements written for one thing are really about a **general** one, the specs
+should follow — a `stoa-genesis` spec whose decoding requirements turn out to
+apply to every op wants those requirements in an `op-encoding` capability, with
+`stoa-genesis` keeping only what is specific to a genesis record.
+
+Do this when the generality is **demonstrated, not predicted**. One capability
+is not evidence of a shared concept; the second instance is what shows which
+requirements were general all along. Do not pre-split a capability because a
+future one might want half of it.
+
+**OpenSpec has no move or rename for a capability** — its schema says so
+outright ("Do not move or rename the capability"), and `RENAMED` operates on
+requirements *within* a spec. So an extraction is composed from the primitives,
+in ONE change so the specs are never collectively wrong:
+
+1. `## ADDED Requirements` in the new capability's delta, carrying the
+   requirements in full;
+2. `## REMOVED Requirements` in the old capability's delta, each with the
+   **Reason** and **Migration** the schema requires — "moved to `<capability>`"
+   is the migration;
+3. if the old capability ends up empty, `retire_capabilities: true` in the
+   change's `.openspec.yaml`, which is what lets archive delete the spec.
+
+Two things to get right:
+
+- **Requirement text moves verbatim.** An extraction that also edits behaviour
+  is two changes wearing one hat, and neither half can be reviewed.
+- **Tests do not have to move with it.** Coverage is many-to-many; a reviewer
+  checks that each requirement still has a test, not that files line up.
+
 ## Keywords
 
 RFC 2119, and in this repo that means **MUST** / **MUST NOT** for requirements.

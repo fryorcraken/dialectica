@@ -76,7 +76,19 @@ so the spec-writer can evaluate and capture it, or change it.
 Also look for unmarked ones: behaviour a test pins that no scenario describes is
 the same gap without the marker, and is worth more attention, not less.
 
-## 4. Is the spec sound?
+## 4. If requirements moved between capabilities, did they survive?
+
+A change may extract requirements into a more general capability — the
+`REMOVED`-here / `ADDED`-there pair. That is legitimate, and it is where
+requirements go missing, because the two halves are reviewed as separate files.
+
+Check: every requirement removed from the old capability appears in the new one,
+**verbatim**. A requirement whose text changed during a move is a behaviour
+change smuggled into a reorganisation — report it as one. And confirm each moved
+requirement still has a test; coverage may be many-to-many, so the test does not
+have to have moved.
+
+## 5. Is the spec sound?
 
 - **Self-consistency.** `openspec validate --strict` checks heading structure
   only and will pass a spec whose requirements contradict each other. Read the
@@ -87,7 +99,7 @@ the same gap without the marker, and is worth more attention, not less.
   A change specified against a superseded section is a real defect and has
   happened here.
 
-## 5. Did PLAN.md shed what the spec now carries?
+## 6. Did PLAN.md shed what the spec now carries?
 
 PLAN.md holds **intent**; a spec holds **built behaviour**. Once a spec states
 something, PLAN.md should no longer describe it as forthcoming — otherwise the
