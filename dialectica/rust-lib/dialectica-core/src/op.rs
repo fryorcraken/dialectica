@@ -1587,13 +1587,28 @@ mod tests {
         // The blanket property, because the specific cases above cannot cover
         // every shape an attacker may send. PHASE0-FINDINGS §3: a panic aborts
         // the module process, so every one of these must be a Result.
-        let valid = a_post().canonical_bytes();
-        for n in 0..valid.len().min(80) {
-            for b in [0u8, 1, 2, 99, 0x80, 0xFF] {
-                let mut bytes = valid.clone();
-                bytes[n] = b;
-                let _ = Op::decode(&bytes);
-                let _ = SignedOp::from_bytes(&bytes);
+        //
+        // **Seeded from EVERY kind, and every byte of each.** This test was
+        // previously seeded from `a_post()` alone and capped at the first 80
+        // bytes, which made it a guard that looked blanket and covered one
+        // case: a post's kind byte is 0, and the flip set below has never
+        // contained every kind discriminant, so no other kind's decode arm was
+        // ever the arm being fuzzed. The point of this test is to catch a
+        // FUTURE kind added without the bounds-checked cursor discipline, and
+        // narrowed that way it could not.
+        //
+        // `truncation_at_any_point_is_refused` and `trailing_bytes_are_refused`
+        // both iterate `one_of_each_kind()` already; this is the third of the
+        // blanket properties and it now does too.
+        for op in one_of_each_kind() {
+            let valid = op.canonical_bytes();
+            for n in 0..valid.len() {
+                for b in [0u8, 1, 2, 4, 99, 0x80, 0xFF] {
+                    let mut bytes = valid.clone();
+                    bytes[n] = b;
+                    let _ = Op::decode(&bytes);
+                    let _ = SignedOp::from_bytes(&bytes);
+                }
             }
         }
         // And entirely arbitrary inputs, including the empty one.
