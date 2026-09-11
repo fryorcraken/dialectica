@@ -116,6 +116,35 @@
       fix in `stoa.rs`, where a `u32::MAX` claim died on the cap and the
       lying-prefix path stopped being exercised at all.
 
+- [x] 4.7 Readability, from review. Two changes, no behaviour:
+
+      `take_checked_length` → `take_length_within_cap`. "Checked" said nothing
+      about WHAT was checked, over a real semantic double-duty: the return is a
+      BYTE count in `take_string` and an ELEMENT count in `take_string_list`. A
+      reviewer reading the latter concluded the cap bounded the list's total
+      bytes and was corrected only by the comment below it. The unit split now
+      lives in the function's own doc, which let that comment shrink from five
+      lines to three.
+
+      Byte offsets were hand-rederived in ten places, each spelled differently
+      (`1 + 1 + 32 + 32`, `… + 4 + 2`, `title_at + 2 + 4`). Extended the
+      existing `KIND_AT` precedent with `STOA_AT`, `AUTHOR_AT`,
+      `KIND_FIELDS_AT`, `LEN_PREFIX`, `OPTION_TAG`, `POST_BODY_LEN_AT`,
+      `POST_BODY_AT`, plus a `metadata_offsets(title_len)` helper returning
+      named fields.
+
+      The helper earns its place over more constants because the description's
+      position DEPENDS on the title's length — the one offset that is not
+      constant. Previously each test hardcoded its own fixture's title length
+      as a magic number and explained the coupling in a comment; now it is an
+      argument. `an_over_long_metadata_description_is_refused_before_allocating`
+      was the worst instance and lost both its ad-hoc fixture and the comment
+      propping up `1 + 1 + 32 + 32 + 4 + 2`.
+
+      Mutation-verified as load-bearing, not cosmetic: an off-by-one in
+      `metadata_offsets` fails a test. Suite count unchanged at 149, which is
+      what makes this a refactor rather than a change.
+
 ## 5. What the op does not carry
 
 - [x] 5.1 Write `a_metadata_op_carries_no_policy_and_no_ordering_field`: the

@@ -108,7 +108,7 @@ const VERSION_1: u8 = 1;
 /// claim 4 GiB, and a decoder that reserved that much on a hostile peer's
 /// promise would be a remote memory-exhaustion lever. `Cursor::take` would
 /// refuse the read afterwards — but only after the allocation. Checking the
-/// claim first is the whole point, which is why `take_checked_length` compares
+/// claim first is the whole point, which is why `take_length_within_cap` compares
 /// before it reads.
 ///
 /// **It does NOT bound the total size of a decoded op, and must not be read as
@@ -771,11 +771,19 @@ fn put_option_id(out: &mut Vec<u8>, id: &Option<OpId>) {
 
 // ─── Decoding helpers ─────────────────────────────────────────────────────
 
-/// A length prefix, refused if it exceeds what SDS could have delivered.
+/// A length prefix, refused if it claims more than [`MAX_FIELD_LEN`].
 ///
-/// The cap is checked here rather than after reading, because the whole point
+/// The cap is applied here rather than after reading, because the whole point
 /// is to refuse before allocating on a hostile peer's promise.
-fn take_checked_length(cursor: &mut Cursor<'_>) -> Result<usize, OpError> {
+///
+/// **The returned count means different things to its two callers**, and the
+/// cap applies to the number either way rather than to any total. In
+/// [`take_string`] it is a count of BYTES; in [`take_string_list`] it is a
+/// count of ELEMENTS, each of which is then separately capped as it is read.
+/// So a list is bounded at `MAX_FIELD_LEN` elements of `MAX_FIELD_LEN` bytes,
+/// not at `MAX_FIELD_LEN` bytes in total — see [`MAX_FIELD_LEN`] on why that
+/// is the accepted shape and where a total-size bound belongs instead.
+fn take_length_within_cap(cursor: &mut Cursor<'_>) -> Result<usize, OpError> {
     let len = cursor.take_length()?;
     if len > MAX_FIELD_LEN {
         return Err(OpError::FieldTooLong(len));
@@ -784,7 +792,7 @@ fn take_checked_length(cursor: &mut Cursor<'_>) -> Result<usize, OpError> {
 }
 
 fn take_string(cursor: &mut Cursor<'_>) -> Result<String, OpError> {
-    let len = take_checked_length(cursor)?;
+    let len = take_length_within_cap(cursor)?;
     // A prefix claiming more than the input holds is a LengthMismatch rather
     // than a Truncated: the input is not short, the claim is wrong, and saying
     // so points at the right half of the problem.
@@ -793,12 +801,10 @@ fn take_string(cursor: &mut Cursor<'_>) -> Result<String, OpError> {
 }
 
 fn take_string_list(cursor: &mut Cursor<'_>) -> Result<Vec<String>, OpError> {
-    let count = take_checked_length(cursor)?;
+    let count = take_length_within_cap(cursor)?;
     // Deliberately NOT `Vec::with_capacity(count)`: the count is a hostile
-    // peer's claim, and reserving on it is the memory-exhaustion lever the
-    // length cap exists to close. `MAX_FIELD_LEN` bounds the count, but each
-    // element still has to be read before it is real, so the vector grows as
-    // elements actually arrive.
+    // peer's claim, and reserving on it is the memory-exhaustion lever the cap
+    // exists to close. The vector grows as elements actually arrive.
     let mut items = Vec::new();
     for _ in 0..count {
         items.push(take_string(cursor)?);
@@ -914,8 +920,60 @@ mod tests {
         ]
     }
 
+    // ─── Layout offsets ───────────────────────────────────────────────────
+    //
+    // Named once, so a test that pokes at a byte says WHICH byte rather than
+    // re-deriving `1 + 1 + 32 + 32` and leaving the reader to check the
+    // arithmetic. These mirror `canonical_bytes`'s documented layout:
+    //
+    //     version 1 | kind 1 | stoa 32 | author 32 | <kind-specific>
+
     /// Offset of the kind byte. Version is first, kind second.
     const KIND_AT: usize = 1;
+    /// Offset of the 32-byte Stoa address.
+    const STOA_AT: usize = KIND_AT + 1;
+    /// Offset of the 32-byte author key.
+    const AUTHOR_AT: usize = STOA_AT + 32;
+    /// Offset of the first kind-specific byte — where every kind's own fields
+    /// begin, and where the common header ends.
+    const KIND_FIELDS_AT: usize = AUTHOR_AT + 32;
+
+    /// Width of a length prefix. Every variable-length field carries one.
+    const LEN_PREFIX: usize = 4;
+    /// Width of an optional field's presence tag.
+    const OPTION_TAG: usize = 1;
+
+    /// Where a `Post`'s body length prefix sits: after the two option tags.
+    const POST_BODY_LEN_AT: usize = KIND_FIELDS_AT + OPTION_TAG + OPTION_TAG;
+    /// Where a `Post`'s body text begins.
+    const POST_BODY_AT: usize = POST_BODY_LEN_AT + LEN_PREFIX;
+
+    /// Byte offsets within a `StoaMetadata` op, derived from its title length.
+    ///
+    /// Returned as named fields rather than computed at each call site,
+    /// because the description's position DEPENDS on the title's length — the
+    /// one offset here that is not a constant. Spelling it inline forced each
+    /// test to hardcode its own fixture's title length as a magic number and
+    /// then explain the coupling in a comment; this makes the dependency an
+    /// argument instead.
+    struct MetadataOffsets {
+        title_len_at: usize,
+        title_at: usize,
+        description_len_at: usize,
+        description_at: usize,
+    }
+
+    fn metadata_offsets(title_len: usize) -> MetadataOffsets {
+        let title_len_at = KIND_FIELDS_AT;
+        let title_at = title_len_at + LEN_PREFIX;
+        let description_len_at = title_at + title_len;
+        MetadataOffsets {
+            title_len_at,
+            title_at,
+            description_len_at,
+            description_at: description_len_at + LEN_PREFIX,
+        }
+    }
 
     // ─── Encoding ─────────────────────────────────────────────────────────
 
@@ -1518,8 +1576,8 @@ mod tests {
         // how two peers derive different ids for one op.
         let op = a_post();
         let bytes = op.canonical_bytes();
-        // The thread tag is the first byte after version, kind, stoa, author.
-        let tag_at = 1 + 1 + 32 + 32;
+        // The thread tag is a Post's first kind-specific byte.
+        let tag_at = KIND_FIELDS_AT;
         assert_eq!(bytes[tag_at], 0, "the fixture's thread is absent");
         let mut bad = bytes.clone();
         bad[tag_at] = 2;
@@ -1532,8 +1590,7 @@ mod tests {
         // this is reachable from any peer sending a malformed op. `[0x02; 32]`
         // is genuinely invalid — probed, not assumed, since all-0xFF decodes.
         let mut bytes = a_post().canonical_bytes();
-        let author_at = 1 + 1 + 32;
-        for b in bytes.iter_mut().skip(author_at).take(32) {
+        for b in bytes.iter_mut().skip(AUTHOR_AT).take(32) {
             *b = 0x02;
         }
         assert_eq!(
@@ -1546,10 +1603,10 @@ mod tests {
     fn a_lying_length_prefix_is_refused() {
         let op = a_post();
         let mut bytes = op.canonical_bytes();
-        // The body's length prefix: after version, kind, stoa, author, and the
-        // two absent-option tags.
-        let body_len_at = 1 + 1 + 32 + 32 + 1 + 1;
-        bytes[body_len_at..body_len_at + 4].copy_from_slice(&1000u32.to_be_bytes());
+        // Under MAX_FIELD_LEN on purpose: a claim above the cap dies as
+        // FieldTooLong and never reaches the input comparison this pins.
+        bytes[POST_BODY_LEN_AT..POST_BODY_LEN_AT + LEN_PREFIX]
+            .copy_from_slice(&1000u32.to_be_bytes());
         assert_eq!(Op::decode(&bytes), Err(OpError::LengthMismatch));
     }
 
@@ -1562,8 +1619,8 @@ mod tests {
         // input — so this asserts the specific error.
         let op = a_post();
         let mut bytes = op.canonical_bytes();
-        let body_len_at = 1 + 1 + 32 + 32 + 1 + 1;
-        bytes[body_len_at..body_len_at + 4].copy_from_slice(&u32::MAX.to_be_bytes());
+        bytes[POST_BODY_LEN_AT..POST_BODY_LEN_AT + LEN_PREFIX]
+            .copy_from_slice(&u32::MAX.to_be_bytes());
         assert_eq!(
             Op::decode(&bytes),
             Err(OpError::FieldTooLong(u32::MAX as usize))
@@ -1666,9 +1723,7 @@ mod tests {
     fn an_invalid_utf8_body_is_refused() {
         let op = a_post();
         let mut bytes = op.canonical_bytes();
-        // First byte of the body, after its length prefix.
-        let body_at = 1 + 1 + 32 + 32 + 1 + 1 + 4;
-        bytes[body_at] = 0x80; // a lone continuation byte
+        bytes[POST_BODY_AT] = 0x80; // a lone continuation byte
         assert_eq!(Op::decode(&bytes), Err(OpError::InvalidText));
     }
 
@@ -1920,10 +1975,9 @@ mod tests {
         // Without this the test would pass whenever the two merely differ,
         // which they do for a dozen reasons having nothing to do with the kind
         // byte — the trap this project has shipped three times.
-        let head = 1 + 1 + 32 + 32;
         assert_eq!(
-            revise.canonical_bytes()[head..],
-            metadata.canonical_bytes()[head..],
+            revise.canonical_bytes()[KIND_FIELDS_AT..],
+            metadata.canonical_bytes()[KIND_FIELDS_AT..],
             "the fixture must differ ONLY in the kind byte"
         );
         assert_ne!(
@@ -2013,10 +2067,9 @@ mod tests {
         // (§4.4), so a field larger than that could never have arrived
         // legitimately. The refusal must come from the CAP rather than from
         // running out of input, which is why this asserts the specific error.
-        let op = a_metadata_op();
-        let mut bytes = op.canonical_bytes();
-        let title_len_at = 1 + 1 + 32 + 32;
-        bytes[title_len_at..title_len_at + 4].copy_from_slice(&u32::MAX.to_be_bytes());
+        let mut bytes = a_metadata_op_with_lengths(2, 2);
+        let at = metadata_offsets(2).title_len_at;
+        bytes[at..at + LEN_PREFIX].copy_from_slice(&u32::MAX.to_be_bytes());
         assert_eq!(
             Op::decode(&bytes),
             Err(OpError::FieldTooLong(u32::MAX as usize))
@@ -2027,18 +2080,9 @@ mod tests {
     fn an_over_long_metadata_description_is_refused_before_allocating() {
         // The second field needs its own case: a cap applied to the first
         // string only would leave this one an open memory-exhaustion lever.
-        let op = Op {
-            stoa: a_stoa(),
-            author: a_key(2).public_key(),
-            kind: OpKind::StoaMetadata {
-                title: "ab".to_string(),
-                description: "cd".to_string(),
-            },
-        };
-        let mut bytes = op.canonical_bytes();
-        // Title is 2 bytes, so the description's prefix follows it.
-        let description_len_at = 1 + 1 + 32 + 32 + 4 + 2;
-        bytes[description_len_at..description_len_at + 4].copy_from_slice(&u32::MAX.to_be_bytes());
+        let mut bytes = a_metadata_op_with_lengths(2, 2);
+        let at = metadata_offsets(2).description_len_at;
+        bytes[at..at + LEN_PREFIX].copy_from_slice(&u32::MAX.to_be_bytes());
         assert_eq!(
             Op::decode(&bytes),
             Err(OpError::FieldTooLong(u32::MAX as usize))
@@ -2104,11 +2148,11 @@ mod tests {
         // field it was promised, then finds bytes after it. Different errors,
         // same refusal, and the distinction is worth pinning — a caller
         // matching only on LengthMismatch would mishandle the second.
-        let title_len_at = 1 + 1 + 32 + 32;
-
-        // Over-claiming, on the title.
+        // Over-claiming, on the title. 1000 stays under MAX_FIELD_LEN, or this
+        // would die as FieldTooLong and never reach the input comparison.
         let mut over = a_metadata_op_with_lengths(4, 4);
-        over[title_len_at..title_len_at + 4].copy_from_slice(&1000u32.to_be_bytes());
+        let over_at = metadata_offsets(4).title_len_at;
+        over[over_at..over_at + LEN_PREFIX].copy_from_slice(&1000u32.to_be_bytes());
         assert_eq!(Op::decode(&over), Err(OpError::LengthMismatch));
 
         // Under-claiming, on the DESCRIPTION rather than the title, because
@@ -2117,9 +2161,9 @@ mod tests {
         // the middle of the title's text, and the resulting error would be
         // whatever those four bytes happened to spell — a test passing for a
         // reason unrelated to under-claiming.
-        let description_len_at = title_len_at + 4 + 4;
         let mut under = a_metadata_op_with_lengths(4, 6);
-        under[description_len_at..description_len_at + 4].copy_from_slice(&2u32.to_be_bytes());
+        let under_at = metadata_offsets(4).description_len_at;
+        under[under_at..under_at + LEN_PREFIX].copy_from_slice(&2u32.to_be_bytes());
         assert_eq!(Op::decode(&under), Err(OpError::TrailingBytes));
     }
 
@@ -2140,18 +2184,17 @@ mod tests {
         //
         // The op-format analogue of the same property op-model pinned for the
         // genesis record — two agents reaching it from opposite ends.
-        let title_len_at = 1 + 1 + 32 + 32;
+        let at = metadata_offsets(4).title_len_at;
 
         let mut over_cap = a_metadata_op_with_lengths(4, 4);
-        over_cap[title_len_at..title_len_at + 4]
-            .copy_from_slice(&((MAX_FIELD_LEN + 1) as u32).to_be_bytes());
+        over_cap[at..at + LEN_PREFIX].copy_from_slice(&((MAX_FIELD_LEN + 1) as u32).to_be_bytes());
 
         // Under the cap on purpose. A claim of u32::MAX would die as
         // FieldTooLong and never reach the input comparison at all — which is
         // exactly how the genesis lying-prefix test stopped testing anything
         // once a cap landed in front of it.
         let mut past_input = a_metadata_op_with_lengths(4, 4);
-        past_input[title_len_at..title_len_at + 4]
+        past_input[at..at + LEN_PREFIX]
             .copy_from_slice(&((MAX_FIELD_LEN - 1) as u32).to_be_bytes());
 
         assert_eq!(
@@ -2178,18 +2221,9 @@ mod tests {
         // Both fields, and not lossily converted — `from_utf8_lossy` would map
         // distinct inputs onto one op, which is the ambiguity a canonical
         // encoding exists to remove.
-        let op = Op {
-            stoa: a_stoa(),
-            author: a_key(2).public_key(),
-            kind: OpKind::StoaMetadata {
-                title: "ab".to_string(),
-                description: "cd".to_string(),
-            },
-        };
-        let title_at = 1 + 1 + 32 + 32 + 4;
-        let description_at = title_at + 2 + 4;
-        for at in [title_at, description_at] {
-            let mut bytes = op.canonical_bytes();
+        let offsets = metadata_offsets(2);
+        for at in [offsets.title_at, offsets.description_at] {
+            let mut bytes = a_metadata_op_with_lengths(2, 2);
             bytes[at] = 0x80; // a lone continuation byte
             assert_eq!(Op::decode(&bytes), Err(OpError::InvalidText));
         }
