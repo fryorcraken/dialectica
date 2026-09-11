@@ -96,6 +96,12 @@ Not done here and deliberately not started.
 - [ ] **Measurement, not reasoning**: ship able to observe whether `noise`
       drifts into meaning "disagree". §7.4 says the first finding that
       contradicts it is its answer, and that is only true if it can be observed.
+- [ ] **Parked, deliberately undesigned:** whether a disagreeing reply counts as
+      an implicit assessment (§7.4, §13). Do not build it before the explicit
+      controls have been observed — if they are used, this is redundant; if they
+      are not, it was always going to be the real signal. The measurement above
+      is what tells the two apart, which is the second reason it is not
+      optional.
 
 ## 7. Not in scope
 

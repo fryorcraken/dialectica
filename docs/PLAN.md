@@ -1803,6 +1803,49 @@ separation, and whether the distribution display reads as informative or as
 noise itself. Ship it able to be measured, and treat the first finding that
 contradicts this section as the section's answer.
 
+#### Open: a disagreeing reply is itself an assessment
+
+**Parked, not designed.** Recorded here because the observation is good and
+would otherwise be lost.
+
+**Replying to say "I disagree" is implicitly "this is good quality, and I am
+engaging with it."** Nobody writes a rebuttal to spam — they scroll past. So a
+disagreeing reply lands in the top-right cell of the table above, and it is the
+cell that is hardest to collect explicitly.
+
+Three reasons it is worth taking seriously rather than filing as a nicety:
+
+- **It is the organic form of the signal this section exists to capture.** A
+  reader who would never click two buttons has already expressed the judgement
+  by writing.
+- **It is costly, which makes it hard to fake.** Unlike a click, a substantive
+  reply takes effort, so it resists the minting attack §7.2 rule 2 admits it
+  cannot stop. That makes it a *better* signal than the explicit control, not a
+  weaker proxy for one.
+- **It needs no new op.** A reply is already a `Post` with a parent (§11), so
+  the data is present in the log today.
+
+**What must be settled before it is built**, and why it is not obvious:
+
+- **A reply is not necessarily a disagreement**, and inferring which from text
+  is sentiment analysis — an expensive, locale-specific, wrong-by-default
+  classifier that this project should not own. The candidate answers are an
+  explicit response axis attached to the reply itself (cheap, honest, but back
+  to asking the reader to declare) or counting *any* substantive reply as a
+  weak assessment regardless of stance (no classifier, but it also rewards
+  pile-ons and flame wars, which is the failure mode of every engagement
+  metric ever shipped).
+- **It creates an incentive to reply rather than to assess**, and a forum that
+  rewards replying is a forum that rewards argument volume. That may be
+  acceptable here — argument is the point — but it is the kind of thing that
+  looks fine in design and is corrosive in practice.
+- **Self-replies and reply chains** would need excluding or bounding, or an
+  author raises their own post by arguing with their critics.
+
+Settle it against observation of whether the explicit controls are used at all.
+If they are, this is redundant; if they are not, this is the fallback that was
+always going to be the real signal.
+
 ---
 
 ## 8. Privacy posture
@@ -2118,6 +2161,12 @@ thing (§2.3).
   concurrently?** The one genuine merge question in the design (§5.7), and it
   does not arise while the creator is the sole moderator — so it is answered
   alongside mutable moderation, not before.
+- **Should a disagreeing reply count as an assessment?** Written up in §7.4 —
+  replying to disagree is implicitly "good quality, and I engage", it is costly
+  enough to resist minting, and it needs no new op. Blocked on avoiding
+  sentiment analysis, and on whether rewarding replies rewards argument volume.
+  **Decide it against observation of whether the explicit controls get used**,
+  not before.
 - ~~**When the `policy` field lands.**~~ **Answered: it is in the genesis
   record now**, with `open` as its only accepted value — `dialectica-core`'s
   `stoa::Policy`. The reasoning stands as written and is why it landed early: a
