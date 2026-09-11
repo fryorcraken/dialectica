@@ -109,7 +109,8 @@ that cannot be tested").
 
 | Requirement | Testable by | Fails if |
 |---|---|---|
-| An ordering is derived from ops and published as nothing | Encode every op kind; assert no score field. Two logs, differing by one vote, produce different orderings with no error | a score reaches the wire, or peers reconcile |
+| An ordering is derived from ops — **no op carries a score** | **Testable today, and written** (`op::tests::a_vote_carries_no_score_field`). Pins the vote encoding's length against its enumerated fields, the pattern `an_op_carries_no_ordering_fields` already uses | a score field is added to the vote op |
+| — **and peers never reconcile** | A peer's ordering changes with **no new op arriving**. Observable after a transport lands: a reconciling implementation emits traffic a conforming one does not | scores are gossiped rather than derived |
 | A hidden post is excluded, never ranked down | Hidden post with more votes than any other; assert absent at every position | exclusion becomes a score penalty |
 | Exclusion follows the moderation resolver | Compare stored `is_hidden` against a direct resolve; feed a non-binding `hide` | a second copy of the authority rule drifts |
 | Counts distinct voting identities | One identity votes twice; assert count is one | repeated votes accumulate |
@@ -125,13 +126,28 @@ that cannot be tested").
 
 **Gaps to state plainly rather than imply away:**
 
-- **Every row is untested until a scorer exists.** This change ships no code.
+- **One row is testable today and now written** — the no-score-field pin above.
+  **Every other row waits on a scorer**, which this change does not ship. An
+  earlier draft said *every* row was untested, which was both false and falsely
+  *negative*: an over-broad disclaimer tells the next reader not to write a test
+  that is writable now, which is the false-coverage problem inverted.
+- **"Age only via a value no author supplies" is _vacuously satisfied_ today**,
+  not merely untested: no op carries a timestamp, so the field it forbids
+  reading does not exist. Recorded as vacuous deliberately — this is the §6
+  "a new check retires an old test" trap pre-armed, and the day an authorship
+  time arrives, this requirement stops being free and needs a real test.
 - **The `is_hidden` backfill on late genesis** needs a genesis record arriving
   after the ops it authorises — constructible, but it depends on the projection,
   which is another change.
-- **`K_mod`, `K_vouch` and the earned-weight cap are unpinned numbers.** No test
-  can assert a value nobody derived; what a test *can* pin is the **ordering**
-  `plain < earned < K_vouch < K_mod`, and that is what should be written.
+- **The weight ordering is _not expressible in this delta_.** An earlier draft
+  claimed a test could pin `plain < earned < K_vouch < K_mod`. It cannot:
+  `earned` and `K_vouch` live in PLAN §7.3 and are deferred to the vouch
+  proposal (§5), so two of four terms are out of scope — and the one in-scope
+  relation is under `MAY` ("a vote by a moderator **may** weigh more"), which
+  `K_mod == plain` satisfies. **Nothing in this spec pins the ordering at any
+  point**, and it becomes testable when the vouch proposal lands. What *is*
+  pinnable here, and is scheduled above, is the **asymmetry** under a `SHALL`:
+  a moderator's upvote and downvote differ in magnitude.
 - **Nothing here tests the vouch mechanism**, which is a separate proposal (§5).
 - **The single axis's conflation is not testable at all.** It is a claim about
   user behaviour, and the only honest response is instrumentation, not a unit

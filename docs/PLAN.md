@@ -1485,14 +1485,30 @@ withdrawn or re-gated before the next release on whichever of these fires first:
   by its own description, and it is the moment an attacker can *find* a Stoa to
   attack. **This is a precondition, not a warning: `top` must not ship enabled
   in the same release as broadcast discovery.**
-- **A Stoa exceeds a few hundred participating identities.** Below that a
-  moderator reading the Stoa notices a brigade; above it nobody reads everything
-  and the signal becomes load-bearing rather than decorative.
+- **A moderator can no longer read every post in their own Stoa within a
+  session.** That is the moment the score stops being decorative and starts
+  deciding what gets seen, because nobody is checking the whole Stoa any more.
+  **The moderator is the observer and the owner of this check** — it is a
+  judgement they make from their own view, in their own client.
+
+  **An earlier draft said "a Stoa exceeds a few hundred participating
+  identities", and that was unanswerable rather than merely vague.** Rule 1
+  establishes that two peers hold different ops by design, so there is **no
+  vantage point from which a Stoa's identity count is a well-defined
+  quantity** — and a count of freely mintable identities is attacker-controlled
+  in both directions, so an attacker could trip the trigger or stay under it at
+  will. A trigger needing an auditor this architecture cannot have is a trigger
+  that never fires. The replacement is per-peer observable and has a named
+  person, which is what the other three already had.
 - **The first sybil attempt is observed** — a burst of votes, in either
   direction, from identities with no posting history. One is enough; the
   question was never whether an attacker *could*, only whether one had bothered.
-  Rule 5's separate per-class vote counts are what make this a query rather than
-  an investigation.
+  Rule 5's separate per-class vote counts make this a query rather than an
+  investigation — **but a query nobody runs is not an observation.** The
+  moderator owns it, the client surfaces it **unprompted** rather than waiting
+  to be asked, and the cadence is *whenever the projection is rebuilt*, since
+  that is when the counts change and it costs nothing extra. An alert a person
+  must remember to go looking for is the same failure as no alert.
 - **A nullifier-bound vote credential lands** (RLN, §7). Rule 3's end state is
   then available and the interim has no remaining justification.
 

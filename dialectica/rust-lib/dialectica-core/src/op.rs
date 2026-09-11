@@ -1842,6 +1842,38 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_vote_carries_no_score_field() {
+        // §7.2 rule 1: "Relevance is a local projection, never an op. No score
+        // is ever published." A published score is a claim no peer could
+        // verify, and it would let a peer assert a ranking instead of deriving
+        // one.
+        //
+        // Same technique as `an_op_carries_no_ordering_fields` above: the vote
+        // encoding is fixed-length, so accounting for every byte is what makes
+        // the omission *enforced* rather than merely documented. A score,
+        // weight or rank field cannot be added without this failing.
+        let op = Op {
+            stoa: a_stoa(),
+            author: a_key(2).public_key(),
+            kind: OpKind::Vote {
+                target: an_id(3),
+                direction: VoteDirection::Up,
+            },
+        };
+        let expected = 1  // version
+            + 1           // kind
+            + 32          // stoa
+            + 32          // author
+            + 32          // target
+            + 1; // direction
+        assert_eq!(
+            op.canonical_bytes().len(),
+            expected,
+            "the vote encoding has a field the layout does not account for"
+        );
+    }
+
     // ─── The Stoa metadata op ─────────────────────────────────────────────
 
     fn a_metadata_op() -> Op {

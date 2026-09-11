@@ -23,14 +23,15 @@ It follows that two peers holding different ops SHALL rank differently, and this
 
 #### Scenario: Two peers holding different ops rank differently
 
-- **WHEN** one peer holds a vote op that another does not, and both order the same posts
-- **THEN** the two orderings may differ
+- **WHEN** one peer holds a vote that another does not, and that vote changes the score of a post both hold
+- **THEN** the two orderings differ in that post's position
 - **AND** neither peer reports an error, and neither adjusts its ordering toward the other's
 
-#### Scenario: An ordering is a function of the ops held
+#### Scenario: An ordering does not read the sequence ops were appended in
 
-- **WHEN** two peers hold the same ops with the same recorded arrival metadata, appended in different sequences
+- **WHEN** two peers hold the same ops with the same recorded arrival metadata, appended in opposite sequences, and those ops include votes that tie on score
 - **THEN** both produce the same ordering
+- **AND** the result is not the sequence either peer appended them in
 
 ### Requirement: A hidden post is excluded from every ordering, never ranked down
 

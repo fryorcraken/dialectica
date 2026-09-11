@@ -111,7 +111,7 @@ No new op and no version bump.
 - `docs/PLAN.md` §7.2 — rules 2, 3, 4 rewritten; rule 6 added; the reserved
   shape corrected.
 - `docs/PLAN.md` §7.3 — new, design-only: vouching's vocabulary, why it is never
-  published, and how weight accrues from assessments the reader already makes.
+  published, and how weight accrues from votes the reader already casts.
 - `docs/PLAN.md` §7.4 — new: one vote axis, vouch, report; what the literature
   rejected and why; bridging as the named future direction.
 - New capability `relevance-ordering` (delta only; not merged here). **No spec

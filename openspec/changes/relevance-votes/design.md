@@ -504,12 +504,12 @@ read, not only in an archived design doc:
 >   spammable" by its own description, and it is the moment an attacker can find
 >   a Stoa to attack. **This one is a precondition, not a warning** — `top` must
 >   not ship enabled in the same release as broadcast discovery.
-> - **A Stoa exceeds a few hundred participating identities.** Below that, a
->   moderator reading the Stoa notices a brigade; above it, nobody is reading
->   everything and the signal is load-bearing rather than decorative.
+> - **A moderator can no longer read every post in their own Stoa within a
+>   session.** The moment the score stops being decorative and starts deciding
+>   what is seen. **The moderator is the observer and owns the check.**
 > - **The first sybil attempt is observed** — a burst of votes from identities
->   with no posting history, in either direction. One is enough; the question was
->   never whether an attacker *could*, only whether one had bothered.
+>   with no posting history, in either direction. One is enough. The moderator
+>   owns it, the client surfaces it **unprompted** on every projection rebuild.
 > - **A nullifier-bound vote credential lands** (RLN, §7). Then rule 3's end
 >   state is available and the interim has no remaining justification.
 >
@@ -519,11 +519,29 @@ read, not only in an archived design doc:
 > written here rather than only in a change document because the first condition
 > fires inside someone else's change, and they will not read this one.
 
-The third condition is the one with teeth and the one at risk of being ignored,
-so it needs a cheap way to be observed: the projection's separate
-`plain_up`/`plain_down` counts (§1(c)) plus identity-first-seen make "votes from
-identities with no posts" a query rather than an investigation. That is a
-second, smaller reason to keep the counts separable.
+**A trigger needs an observer who exists, and one draft's did not.** The second
+condition originally read "a Stoa exceeds a few hundred participating
+identities". Review found it unanswerable rather than merely imprecise, and the
+diagnosis generalises: **rule 1 establishes that two peers hold different ops by
+design, so there is no vantage point from which a Stoa's identity count is
+well-defined.** Worse, identities are free to mint, so the count is
+attacker-controlled in both directions — an attacker could trip the trigger or
+stay under it at will.
+
+The other three conditions pass because somebody **trips over** them: broadcast
+discovery fires inside someone else's change and PLAN names its owner; RLN is a
+code-level fact; a vote burst is visible in one peer's own log. The replacement
+matches that standard — it is per-peer observable and names a person — and it is
+what the original justification actually rested on, since "a moderator reading
+the Stoa notices a brigade" was always a claim about a moderator's own view
+rather than about a population count.
+
+The sybil-burst condition has teeth and is the one at risk of being ignored. The
+projection's separate `plain_up`/`plain_down` counts (§1(c)) plus
+identity-first-seen make it a query rather than an investigation — **but a query
+nobody runs is not an observation**, so it is surfaced unprompted on projection
+rebuild rather than waiting to be asked. That is a second, smaller reason to
+keep the counts separable.
 
 ## 10. Is the owner right? Yes, with two corrections
 
