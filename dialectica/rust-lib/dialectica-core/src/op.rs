@@ -68,6 +68,11 @@
 //! session counter, not a local sequence number, not anything that varies with
 //! one peer's history" — applies with equal force to a value inside a signed op
 //! that every peer must agree about.
+//!
+//! **No posting policy, in the one kind that might have carried one.**
+//! [`OpKind::StoaMetadata`] supersedes a Stoa's *display* metadata and not its
+//! policy; the reasoning is on that variant, and at length in the
+//! `stoa-metadata-op` change's `design.md`.
 
 use crate::cursor::{Cursor, OutOfBounds};
 use crate::identity::{
@@ -93,15 +98,37 @@ const VERSION_1: u8 = 1;
 
 /// The maximum length of any single variable-length field, in bytes.
 ///
-/// §4.4 caps an SDS message at **150 KiB**, "a network-wide gossipsub
-/// validation limit, not unilaterally raisable". A field longer than that
-/// cannot reach a peer whatever this code does, so accepting one only means
-/// allocating for a record that could never have arrived legitimately.
+/// Derived from §4.4's **150 KiB** SDS message cap, "a network-wide gossipsub
+/// validation limit, not unilaterally raisable" — so no single field larger
+/// than this could have arrived inside one message.
 ///
-/// The cap is checked *before* allocating, which is the point: a 4-byte length
-/// prefix can claim 4 GiB, and a decoder that reserved that much on the promise
-/// of a hostile peer would be a remote memory-exhaustion lever. `Cursor::take`
-/// would refuse the read afterwards — but only after the allocation.
+/// # What this cap does, and what it deliberately does not
+///
+/// Its job is bounding **allocation before data**: a 4-byte length prefix can
+/// claim 4 GiB, and a decoder that reserved that much on a hostile peer's
+/// promise would be a remote memory-exhaustion lever. `Cursor::take` would
+/// refuse the read afterwards — but only after the allocation. Checking the
+/// claim first is the whole point, which is why `take_length_within_cap` compares
+/// before it reads.
+///
+/// **It does NOT bound the total size of a decoded op, and must not be read as
+/// doing so.** The bound is per field and does not compose: a metadata op with
+/// both fields at the cap decodes at 307,274 bytes, twice the SDS cap, and the
+/// `Post` attachment path reaches 768,076 bytes because `take_string_list`
+/// bounds the element count and each element separately. Both were measured,
+/// not estimated.
+///
+/// That is not a hole to close here, for two reasons. Amplification is roughly
+/// 1:1 — reaching 307 KB of decoded op costs the sender 307 KB — so it is not
+/// a lever in the sense the per-field cap closes. And **the total-size check
+/// belongs at the transport boundary, where the SDS frame is known.** This
+/// module is handed a byte slice and cannot see the frame it arrived in, so a
+/// combined bound here would be a guess at a number the caller already has.
+/// Put it where the frame is; do not add it here.
+///
+/// The value is pinned by `the_field_cap_is_pinned_to_a_known_answer` — a cap
+/// that silently drifted upward would still refuse an absurd prefix and still
+/// pass every test that only probes absurd values.
 const MAX_FIELD_LEN: usize = 150 * 1024;
 
 /// A 32-byte op id: the hash of an op's canonical bytes.
@@ -329,14 +356,59 @@ pub enum OpKind {
         target: OpId,
         direction: VoteDirection,
     },
+    /// What the Stoa is called *today* (§5.7).
+    ///
+    /// The genesis record's title is a **founding** value: it is inside the
+    /// address preimage, so changing it mints a different Stoa. This op carries
+    /// the current one. §5.7 states the relationship — "genesis values are what
+    /// the *address commits to* and can never change; the metadata op carries
+    /// what the Stoa is called *today*. A reader prefers the latest valid op and
+    /// falls back to the genesis values."
+    ///
+    /// The Stoa this applies to is [`Op::stoa`], like every other kind; the
+    /// signer is [`Op::author`]. Neither is repeated here.
+    ///
+    /// **No `policy`, and that is the answer to §5.7's open question** rather
+    /// than an omission. Three reasons, at length in the `stoa-metadata-op`
+    /// change's `design.md`; the one that decides it: §5.7's own reader rule
+    /// falls back to the genesis value when no op has been seen, and a peer that
+    /// missed a *tightening* would fall back to the **looser** founding policy.
+    /// That is the widening `stoa.rs` refuses on decode — "treating an
+    /// unrecognised policy as open is how a token-gated Stoa silently becomes
+    /// world-postable" — arriving instead by resolution. Refusing to default a
+    /// policy and then handing one back by fallback closes the front door only.
+    ///
+    /// Leaving it out costs no version to add later, and that was checked rather
+    /// than assumed. §13 records that `policy` landed in the *genesis* record
+    /// early because "adding the field later would have changed the address of
+    /// every Stoa already created" — that pressure does not transfer, because an
+    /// op's id is the hash of that one op. A future policy-changing act takes
+    /// the next free kind discriminant and an older client meets it as
+    /// [`OpError::UnknownKind`], changing no existing op's id and no Stoa's
+    /// address.
+    StoaMetadata {
+        /// The displayed title, superseding the genesis title for display.
+        title: String,
+        /// A field the genesis record deliberately does not have at all.
+        ///
+        /// A description is not identity, so it has no business in an address
+        /// preimage where every re-wording would mint a new Stoa. Carrying it
+        /// here is part of what makes this a metadata op rather than a
+        /// title-override op: the genesis record is the minimum needed to
+        /// *identify* a Stoa, this is what a reader needs to *render* one.
+        description: String,
+    },
 }
 
 impl OpKind {
-    // On the wire and inside every signature. Explicit, and never reordered.
+    // On the wire and inside every signature. Explicit, and never reordered:
+    // inserting a value into the used range would re-mean every op already
+    // signed. A new kind takes the next free value and nothing else moves.
     const POST: u8 = 0;
     const REVISE: u8 = 1;
     const MODERATE: u8 = 2;
     const VOTE: u8 = 3;
+    const STOA_METADATA: u8 = 4;
 
     fn to_byte(&self) -> u8 {
         match self {
@@ -344,6 +416,7 @@ impl OpKind {
             OpKind::Revise { .. } => Self::REVISE,
             OpKind::Moderate { .. } => Self::MODERATE,
             OpKind::Vote { .. } => Self::VOTE,
+            OpKind::StoaMetadata { .. } => Self::STOA_METADATA,
         }
     }
 }
@@ -504,6 +577,14 @@ impl Op {
                 out.extend_from_slice(target.as_bytes());
                 out.push(direction.to_byte());
             }
+            OpKind::StoaMetadata { title, description } => {
+                // Two adjacent variable-length fields, so both are prefixed
+                // through the same helper the other kinds use. Without prefixes
+                // title "ab" + description "c" and title "a" + description "bc"
+                // encode identically — two different acts with one op id.
+                put_bytes(&mut out, title.as_bytes());
+                put_bytes(&mut out, description.as_bytes());
+            }
         }
         out
     }
@@ -552,6 +633,12 @@ impl Op {
             OpKind::VOTE => OpKind::Vote {
                 target: OpId(cursor.take_array::<32>()?),
                 direction: VoteDirection::from_byte(cursor.take(1)?[0])?,
+            },
+            OpKind::STOA_METADATA => OpKind::StoaMetadata {
+                // Through `take_string`, so the length cap and the bounds check
+                // come from the shared path rather than a second copy of them.
+                title: take_string(&mut cursor)?,
+                description: take_string(&mut cursor)?,
             },
             other => return Err(OpError::UnknownKind(other)),
         };
@@ -684,11 +771,19 @@ fn put_option_id(out: &mut Vec<u8>, id: &Option<OpId>) {
 
 // ─── Decoding helpers ─────────────────────────────────────────────────────
 
-/// A length prefix, refused if it exceeds what SDS could have delivered.
+/// A length prefix, refused if it claims more than [`MAX_FIELD_LEN`].
 ///
-/// The cap is checked here rather than after reading, because the whole point
+/// The cap is applied here rather than after reading, because the whole point
 /// is to refuse before allocating on a hostile peer's promise.
-fn take_checked_length(cursor: &mut Cursor<'_>) -> Result<usize, OpError> {
+///
+/// **The returned count means different things to its two callers**, and the
+/// cap applies to the number either way rather than to any total. In
+/// [`take_string`] it is a count of BYTES; in [`take_string_list`] it is a
+/// count of ELEMENTS, each of which is then separately capped as it is read.
+/// So a list is bounded at `MAX_FIELD_LEN` elements of `MAX_FIELD_LEN` bytes,
+/// not at `MAX_FIELD_LEN` bytes in total — see [`MAX_FIELD_LEN`] on why that
+/// is the accepted shape and where a total-size bound belongs instead.
+fn take_length_within_cap(cursor: &mut Cursor<'_>) -> Result<usize, OpError> {
     let len = cursor.take_length()?;
     if len > MAX_FIELD_LEN {
         return Err(OpError::FieldTooLong(len));
@@ -697,7 +792,7 @@ fn take_checked_length(cursor: &mut Cursor<'_>) -> Result<usize, OpError> {
 }
 
 fn take_string(cursor: &mut Cursor<'_>) -> Result<String, OpError> {
-    let len = take_checked_length(cursor)?;
+    let len = take_length_within_cap(cursor)?;
     // A prefix claiming more than the input holds is a LengthMismatch rather
     // than a Truncated: the input is not short, the claim is wrong, and saying
     // so points at the right half of the problem.
@@ -706,12 +801,10 @@ fn take_string(cursor: &mut Cursor<'_>) -> Result<String, OpError> {
 }
 
 fn take_string_list(cursor: &mut Cursor<'_>) -> Result<Vec<String>, OpError> {
-    let count = take_checked_length(cursor)?;
+    let count = take_length_within_cap(cursor)?;
     // Deliberately NOT `Vec::with_capacity(count)`: the count is a hostile
-    // peer's claim, and reserving on it is the memory-exhaustion lever the
-    // length cap exists to close. `MAX_FIELD_LEN` bounds the count, but each
-    // element still has to be read before it is real, so the vector grows as
-    // elements actually arrive.
+    // peer's claim, and reserving on it is the memory-exhaustion lever the cap
+    // exists to close. The vector grows as elements actually arrive.
     let mut items = Vec::new();
     for _ in 0..count {
         items.push(take_string(cursor)?);
@@ -810,17 +903,77 @@ mod tests {
             },
             Op {
                 stoa,
-                author,
+                author: author.clone(),
                 kind: OpKind::Vote {
                     target: an_id(11),
                     direction: VoteDirection::Up,
                 },
             },
+            Op {
+                stoa,
+                author,
+                kind: OpKind::StoaMetadata {
+                    title: "The Agora, renamed".to_string(),
+                    description: "A marketplace of arguments".to_string(),
+                },
+            },
         ]
     }
 
+    // ─── Layout offsets ───────────────────────────────────────────────────
+    //
+    // Named once, so a test that pokes at a byte says WHICH byte rather than
+    // re-deriving `1 + 1 + 32 + 32` and leaving the reader to check the
+    // arithmetic. These mirror `canonical_bytes`'s documented layout:
+    //
+    //     version 1 | kind 1 | stoa 32 | author 32 | <kind-specific>
+
     /// Offset of the kind byte. Version is first, kind second.
     const KIND_AT: usize = 1;
+    /// Offset of the 32-byte Stoa address.
+    const STOA_AT: usize = KIND_AT + 1;
+    /// Offset of the 32-byte author key.
+    const AUTHOR_AT: usize = STOA_AT + 32;
+    /// Offset of the first kind-specific byte — where every kind's own fields
+    /// begin, and where the common header ends.
+    const KIND_FIELDS_AT: usize = AUTHOR_AT + 32;
+
+    /// Width of a length prefix. Every variable-length field carries one.
+    const LEN_PREFIX: usize = 4;
+    /// Width of an optional field's presence tag.
+    const OPTION_TAG: usize = 1;
+
+    /// Where a `Post`'s body length prefix sits: after the two option tags.
+    const POST_BODY_LEN_AT: usize = KIND_FIELDS_AT + OPTION_TAG + OPTION_TAG;
+    /// Where a `Post`'s body text begins.
+    const POST_BODY_AT: usize = POST_BODY_LEN_AT + LEN_PREFIX;
+
+    /// Byte offsets within a `StoaMetadata` op, derived from its title length.
+    ///
+    /// Returned as named fields rather than computed at each call site,
+    /// because the description's position DEPENDS on the title's length — the
+    /// one offset here that is not a constant. Spelling it inline forced each
+    /// test to hardcode its own fixture's title length as a magic number and
+    /// then explain the coupling in a comment; this makes the dependency an
+    /// argument instead.
+    struct MetadataOffsets {
+        title_len_at: usize,
+        title_at: usize,
+        description_len_at: usize,
+        description_at: usize,
+    }
+
+    fn metadata_offsets(title_len: usize) -> MetadataOffsets {
+        let title_len_at = KIND_FIELDS_AT;
+        let title_at = title_len_at + LEN_PREFIX;
+        let description_len_at = title_at + title_len;
+        MetadataOffsets {
+            title_len_at,
+            title_at,
+            description_len_at,
+            description_at: description_len_at + LEN_PREFIX,
+        }
+    }
 
     // ─── Encoding ─────────────────────────────────────────────────────────
 
@@ -1423,8 +1576,8 @@ mod tests {
         // how two peers derive different ids for one op.
         let op = a_post();
         let bytes = op.canonical_bytes();
-        // The thread tag is the first byte after version, kind, stoa, author.
-        let tag_at = 1 + 1 + 32 + 32;
+        // The thread tag is a Post's first kind-specific byte.
+        let tag_at = KIND_FIELDS_AT;
         assert_eq!(bytes[tag_at], 0, "the fixture's thread is absent");
         let mut bad = bytes.clone();
         bad[tag_at] = 2;
@@ -1437,8 +1590,7 @@ mod tests {
         // this is reachable from any peer sending a malformed op. `[0x02; 32]`
         // is genuinely invalid — probed, not assumed, since all-0xFF decodes.
         let mut bytes = a_post().canonical_bytes();
-        let author_at = 1 + 1 + 32;
-        for b in bytes.iter_mut().skip(author_at).take(32) {
+        for b in bytes.iter_mut().skip(AUTHOR_AT).take(32) {
             *b = 0x02;
         }
         assert_eq!(
@@ -1451,10 +1603,10 @@ mod tests {
     fn a_lying_length_prefix_is_refused() {
         let op = a_post();
         let mut bytes = op.canonical_bytes();
-        // The body's length prefix: after version, kind, stoa, author, and the
-        // two absent-option tags.
-        let body_len_at = 1 + 1 + 32 + 32 + 1 + 1;
-        bytes[body_len_at..body_len_at + 4].copy_from_slice(&1000u32.to_be_bytes());
+        // Under MAX_FIELD_LEN on purpose: a claim above the cap dies as
+        // FieldTooLong and never reaches the input comparison this pins.
+        bytes[POST_BODY_LEN_AT..POST_BODY_LEN_AT + LEN_PREFIX]
+            .copy_from_slice(&1000u32.to_be_bytes());
         assert_eq!(Op::decode(&bytes), Err(OpError::LengthMismatch));
     }
 
@@ -1467,11 +1619,79 @@ mod tests {
         // input — so this asserts the specific error.
         let op = a_post();
         let mut bytes = op.canonical_bytes();
-        let body_len_at = 1 + 1 + 32 + 32 + 1 + 1;
-        bytes[body_len_at..body_len_at + 4].copy_from_slice(&u32::MAX.to_be_bytes());
+        bytes[POST_BODY_LEN_AT..POST_BODY_LEN_AT + LEN_PREFIX]
+            .copy_from_slice(&u32::MAX.to_be_bytes());
         assert_eq!(
             Op::decode(&bytes),
             Err(OpError::FieldTooLong(u32::MAX as usize))
+        );
+    }
+
+    #[test]
+    fn the_field_cap_is_pinned_to_a_known_answer() {
+        // The cap's VALUE, which nothing else checks.
+        //
+        // Every other cap test probes `u32::MAX` — about 28,000x the cap — so
+        // it proves that *a* cap exists and nothing at all about *where*. A cap
+        // silently raised to 150 MB still refuses 4 GiB and still passes all of
+        // them, while leaving open the very memory-exhaustion lever the cap
+        // exists to close. That is this repo's own defect class — asserting
+        // against a value so far outside the boundary that the boundary is
+        // unconstrained — in a new dress.
+        //
+        // The boundary pair below cannot catch it either: both are expressed in
+        // terms of `MAX_FIELD_LEN`, so they MOVE with a drifted cap. Only a
+        // hardcoded pin is left, and `cargo mutants` structurally cannot cover
+        // it — it mutates functions, not `const` values.
+        //
+        // 150 KiB is §4.4's SDS message cap. If this fails, do NOT update the
+        // expected value: work out why the cap moved and whether the network
+        // can survive it.
+        assert_eq!(MAX_FIELD_LEN, 150 * 1024);
+    }
+
+    /// A post whose body is exactly `len` bytes.
+    ///
+    /// Returns real bytes rather than a doctored prefix, because the accept
+    /// side has to actually contain the data it claims — a prefix claiming
+    /// 150 KiB over a short input is a `LengthMismatch` and would prove nothing
+    /// about the cap.
+    fn a_post_with_body_of(len: usize) -> Vec<u8> {
+        Op {
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: "a".repeat(len),
+                attachments: vec![],
+            },
+            ..a_post()
+        }
+        .canonical_bytes()
+    }
+
+    #[test]
+    fn a_field_exactly_at_the_cap_is_accepted() {
+        // The accept half of the boundary. Without it the cap is bounded from
+        // one side only, and `len > MAX_FIELD_LEN` tightened to `len >= …`
+        // would pass every other test in this module.
+        let bytes = a_post_with_body_of(MAX_FIELD_LEN);
+        let op = Op::decode(&bytes).expect("a field exactly at the cap must decode");
+        match op.kind {
+            OpKind::Post { body, .. } => assert_eq!(body.len(), MAX_FIELD_LEN),
+            other => panic!("expected a post, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_field_one_byte_over_the_cap_is_refused() {
+        // The refuse half, one byte the other side. This is what catches an
+        // off-by-one — `len > MAX_FIELD_LEN + 1` — which every `u32::MAX` test
+        // in this module survives, and it asserts the exact claimed length so
+        // the refusal is demonstrably the cap's and not the input's.
+        let bytes = a_post_with_body_of(MAX_FIELD_LEN + 1);
+        assert_eq!(
+            Op::decode(&bytes),
+            Err(OpError::FieldTooLong(MAX_FIELD_LEN + 1))
         );
     }
 
@@ -1503,9 +1723,7 @@ mod tests {
     fn an_invalid_utf8_body_is_refused() {
         let op = a_post();
         let mut bytes = op.canonical_bytes();
-        // First byte of the body, after its length prefix.
-        let body_at = 1 + 1 + 32 + 32 + 1 + 1 + 4;
-        bytes[body_at] = 0x80; // a lone continuation byte
+        bytes[POST_BODY_AT] = 0x80; // a lone continuation byte
         assert_eq!(Op::decode(&bytes), Err(OpError::InvalidText));
     }
 
@@ -1514,13 +1732,28 @@ mod tests {
         // The blanket property, because the specific cases above cannot cover
         // every shape an attacker may send. PHASE0-FINDINGS §3: a panic aborts
         // the module process, so every one of these must be a Result.
-        let valid = a_post().canonical_bytes();
-        for n in 0..valid.len().min(80) {
-            for b in [0u8, 1, 2, 99, 0x80, 0xFF] {
-                let mut bytes = valid.clone();
-                bytes[n] = b;
-                let _ = Op::decode(&bytes);
-                let _ = SignedOp::from_bytes(&bytes);
+        //
+        // **Seeded from EVERY kind, and every byte of each.** This test was
+        // previously seeded from `a_post()` alone and capped at the first 80
+        // bytes, which made it a guard that looked blanket and covered one
+        // case: a post's kind byte is 0, and the flip set below has never
+        // contained every kind discriminant, so no other kind's decode arm was
+        // ever the arm being fuzzed. The point of this test is to catch a
+        // FUTURE kind added without the bounds-checked cursor discipline, and
+        // narrowed that way it could not.
+        //
+        // `truncation_at_any_point_is_refused` and `trailing_bytes_are_refused`
+        // both iterate `one_of_each_kind()` already; this is the third of the
+        // blanket properties and it now does too.
+        for op in one_of_each_kind() {
+            let valid = op.canonical_bytes();
+            for n in 0..valid.len() {
+                for b in [0u8, 1, 2, 4, 99, 0x80, 0xFF] {
+                    let mut bytes = valid.clone();
+                    bytes[n] = b;
+                    let _ = Op::decode(&bytes);
+                    let _ = SignedOp::from_bytes(&bytes);
+                }
             }
         }
         // And entirely arbitrary inputs, including the empty one.
@@ -1607,5 +1840,625 @@ mod tests {
             expected,
             "the encoding has a field the layout does not account for"
         );
+    }
+
+    // ─── The Stoa metadata op ─────────────────────────────────────────────
+
+    fn a_metadata_op() -> Op {
+        Op {
+            stoa: a_stoa(),
+            author: a_key(2).public_key(),
+            kind: OpKind::StoaMetadata {
+                title: "Renamed".to_string(),
+                description: "Now with a description".to_string(),
+            },
+        }
+    }
+
+    #[test]
+    fn the_metadata_fields_participate_in_the_encoding() {
+        // Varying each in turn catches one left out of the encode arm, which a
+        // round-trip test cannot see: the value comes back from the struct it
+        // never left.
+        let base = a_metadata_op();
+        let others = [
+            Op {
+                kind: OpKind::StoaMetadata {
+                    title: "A different name".to_string(),
+                    description: "Now with a description".to_string(),
+                },
+                ..base.clone()
+            },
+            Op {
+                kind: OpKind::StoaMetadata {
+                    title: "Renamed".to_string(),
+                    description: "A different description".to_string(),
+                },
+                ..base.clone()
+            },
+        ];
+        for other in others {
+            assert_ne!(
+                base.canonical_bytes(),
+                other.canonical_bytes(),
+                "a metadata field is missing from the encoding"
+            );
+            assert_ne!(
+                base.id(),
+                other.id(),
+                "a metadata field is missing from the id"
+            );
+        }
+    }
+
+    #[test]
+    fn a_metadata_ops_title_and_description_cannot_be_confused() {
+        // The concatenation trap, and the reason both fields are prefixed.
+        // Title "ab" + description "c" against title "a" + description "bc":
+        // the same concatenated text, split differently. Without the length
+        // prefixes these encode identically — two different acts, one op id.
+        let stoa = a_stoa();
+        let author = a_key(2).public_key();
+        let one = Op {
+            stoa,
+            author: author.clone(),
+            kind: OpKind::StoaMetadata {
+                title: "ab".to_string(),
+                description: "c".to_string(),
+            },
+        };
+        let two = Op {
+            stoa,
+            author,
+            kind: OpKind::StoaMetadata {
+                title: "a".to_string(),
+                description: "bc".to_string(),
+            },
+        };
+        assert_ne!(
+            one.canonical_bytes(),
+            two.canonical_bytes(),
+            "two distinct metadata ops must not share an encoding"
+        );
+        assert_ne!(one.id(), two.id());
+    }
+
+    #[test]
+    fn a_metadata_op_and_a_revision_do_not_share_a_preimage() {
+        // THE property, at the level of the bytes, and the fixture is the whole
+        // test: two ops whose kind-specific tails are byte-identical, so that
+        // the ONLY thing separating their preimages is the kind byte. Delete
+        // `out.push(self.kind.to_byte())` and these encode alike.
+        //
+        // A `Revise` tail is  target[32] | len(4) | body | count(4)
+        // A metadata tail is  len(4) | title | len(4) | description
+        //
+        // Aligning them: let the target's first four bytes spell the title's
+        // length, so 00 00 00 24 (36). The title is then the target's remaining
+        // 28 bytes, followed by the body's own 4-byte prefix and the body —
+        // 28 + 4 + 4 = 36, as claimed. What follows in the Revise is the
+        // attachment count, four zero bytes, which the metadata reads as a
+        // zero-length description.
+        let stoa = a_stoa();
+        let author = a_key(2).public_key();
+
+        let mut target_bytes = [0u8; 32];
+        target_bytes[3] = 36;
+        // The tail 28 bytes must be valid UTF-8, since they become the title.
+        for (i, b) in target_bytes[4..].iter_mut().enumerate() {
+            *b = b'a' + (i as u8 % 26);
+        }
+
+        let mut title = String::from_utf8(target_bytes[4..].to_vec()).unwrap();
+        title.push_str("\u{0}\u{0}\u{0}\u{4}"); // the body's length prefix
+        title.push_str("wxyz"); // the body
+
+        let revise = Op {
+            stoa,
+            author: author.clone(),
+            kind: OpKind::Revise {
+                target: OpId(target_bytes),
+                body: "wxyz".to_string(),
+                attachments: vec![],
+            },
+        };
+        let metadata = Op {
+            stoa,
+            author,
+            kind: OpKind::StoaMetadata {
+                title,
+                description: String::new(),
+            },
+        };
+
+        // Assert the fixture really is aligned before asserting the property.
+        // Without this the test would pass whenever the two merely differ,
+        // which they do for a dozen reasons having nothing to do with the kind
+        // byte — the trap this project has shipped three times.
+        assert_eq!(
+            revise.canonical_bytes()[KIND_FIELDS_AT..],
+            metadata.canonical_bytes()[KIND_FIELDS_AT..],
+            "the fixture must differ ONLY in the kind byte"
+        );
+        assert_ne!(
+            revise.canonical_bytes(),
+            metadata.canonical_bytes(),
+            "a revision and a metadata op must not share a signing preimage"
+        );
+        assert_ne!(revise.id(), metadata.id());
+    }
+
+    #[test]
+    fn a_signature_over_a_metadata_op_does_not_verify_as_a_moderation() {
+        // The consequence at the level that matters, and the pairing that makes
+        // it worth having: a metadata op and a moderation are BOTH
+        // moderator-signed acts by the same key in the same Stoa. If a
+        // signature did not commit to which, a moderator persuaded to rename a
+        // Stoa would have signed a hide.
+        let key = a_key(2);
+        let stoa = a_stoa();
+
+        let metadata = Op {
+            stoa,
+            author: key.public_key(),
+            kind: OpKind::StoaMetadata {
+                title: "Renamed".to_string(),
+                description: String::new(),
+            },
+        };
+        let signed_metadata = metadata.sign(&key);
+
+        let forged = SignedOp {
+            op: Op {
+                stoa,
+                author: key.public_key(),
+                kind: OpKind::Moderate {
+                    target: an_id(1),
+                    action: ModerationAction::Hide,
+                },
+            },
+            signature: signed_metadata.signature.clone(),
+        };
+        assert!(
+            !forged.verify(),
+            "a rename's signature must not authorise a hide"
+        );
+        // And the original is genuinely valid, so this is not passing because
+        // both are broken.
+        assert!(signed_metadata.verify());
+    }
+
+    #[test]
+    fn a_metadata_op_carries_no_policy_and_no_ordering_field() {
+        // The layout pinned against hardcoded sizes, as
+        // `an_op_carries_no_ordering_fields` does for a post. A `policy` byte,
+        // a Lamport value or a sequence number cannot be added to the encode
+        // arm without this failing — which is what makes each omission enforced
+        // rather than merely documented.
+        //
+        // The title and description lengths are the LITERALS below, not
+        // `title.len()` read back off the fixture: asking the implementation
+        // what it wrote and agreeing is the defect this project has shipped
+        // three times.
+        let op = Op {
+            stoa: a_stoa(),
+            author: a_key(2).public_key(),
+            kind: OpKind::StoaMetadata {
+                title: "abcde".to_string(),         // 5 bytes
+                description: "fghijkl".to_string(), // 7 bytes
+            },
+        };
+        let expected = 1  // version
+            + 1           // kind
+            + 32          // stoa
+            + 32          // author
+            + 4 + 5       // title, length-prefixed
+            + 4 + 7; // description, length-prefixed
+        assert_eq!(
+            op.canonical_bytes().len(),
+            expected,
+            "the metadata encoding has a field the layout does not account for"
+        );
+    }
+
+    #[test]
+    fn an_over_long_metadata_title_is_refused_before_allocating() {
+        // A 4-byte prefix can claim 4 GiB, and SDS caps a message at 150 KiB
+        // (§4.4), so a field larger than that could never have arrived
+        // legitimately. The refusal must come from the CAP rather than from
+        // running out of input, which is why this asserts the specific error.
+        let mut bytes = a_metadata_op_with_lengths(2, 2);
+        let at = metadata_offsets(2).title_len_at;
+        bytes[at..at + LEN_PREFIX].copy_from_slice(&u32::MAX.to_be_bytes());
+        assert_eq!(
+            Op::decode(&bytes),
+            Err(OpError::FieldTooLong(u32::MAX as usize))
+        );
+    }
+
+    #[test]
+    fn an_over_long_metadata_description_is_refused_before_allocating() {
+        // The second field needs its own case: a cap applied to the first
+        // string only would leave this one an open memory-exhaustion lever.
+        let mut bytes = a_metadata_op_with_lengths(2, 2);
+        let at = metadata_offsets(2).description_len_at;
+        bytes[at..at + LEN_PREFIX].copy_from_slice(&u32::MAX.to_be_bytes());
+        assert_eq!(
+            Op::decode(&bytes),
+            Err(OpError::FieldTooLong(u32::MAX as usize))
+        );
+    }
+
+    /// A metadata op with a title of `title_len` and a description of
+    /// `description_len`, as real bytes.
+    fn a_metadata_op_with_lengths(title_len: usize, description_len: usize) -> Vec<u8> {
+        Op {
+            stoa: a_stoa(),
+            author: a_key(2).public_key(),
+            kind: OpKind::StoaMetadata {
+                title: "a".repeat(title_len),
+                description: "b".repeat(description_len),
+            },
+        }
+        .canonical_bytes()
+    }
+
+    #[test]
+    fn a_metadata_field_exactly_at_the_cap_is_accepted() {
+        // The accept half of the boundary, for both fields at once. The two
+        // together decode to over 300 KB — twice the SDS message cap — which is
+        // deliberate and is documented on `MAX_FIELD_LEN`: the cap bounds
+        // allocation-before-data per field, not the total size of an op. The
+        // total-size check belongs at the transport boundary, where the frame
+        // is known.
+        let bytes = a_metadata_op_with_lengths(MAX_FIELD_LEN, MAX_FIELD_LEN);
+        let op = Op::decode(&bytes).expect("fields exactly at the cap must decode");
+        match op.kind {
+            OpKind::StoaMetadata { title, description } => {
+                assert_eq!(title.len(), MAX_FIELD_LEN);
+                assert_eq!(description.len(), MAX_FIELD_LEN);
+            }
+            other => panic!("expected metadata, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_metadata_field_one_byte_over_the_cap_is_refused() {
+        // The refuse half, one byte over, for EACH field independently — a cap
+        // applied to the title only would leave the description open, and a
+        // `u32::MAX` probe cannot tell the difference.
+        for (title_len, description_len) in [(MAX_FIELD_LEN + 1, 2), (2, MAX_FIELD_LEN + 1)] {
+            let bytes = a_metadata_op_with_lengths(title_len, description_len);
+            assert_eq!(
+                Op::decode(&bytes),
+                Err(OpError::FieldTooLong(MAX_FIELD_LEN + 1)),
+                "title {title_len}, description {description_len}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_lying_metadata_length_prefix_is_refused_in_either_direction() {
+        // The spec requires each malformation be "reported distinguishably",
+        // and calls out a prefix disagreeing "in either direction". Both
+        // directions were previously covered for a Post only.
+        //
+        // OVER-claiming is a LengthMismatch: the input is not short, the claim
+        // is wrong. UNDER-claiming is TrailingBytes: the decoder reads the
+        // field it was promised, then finds bytes after it. Different errors,
+        // same refusal, and the distinction is worth pinning — a caller
+        // matching only on LengthMismatch would mishandle the second.
+        // Over-claiming, on the title. 1000 stays under MAX_FIELD_LEN, or this
+        // would die as FieldTooLong and never reach the input comparison.
+        let mut over = a_metadata_op_with_lengths(4, 4);
+        let over_at = metadata_offsets(4).title_len_at;
+        over[over_at..over_at + LEN_PREFIX].copy_from_slice(&1000u32.to_be_bytes());
+        assert_eq!(Op::decode(&over), Err(OpError::LengthMismatch));
+
+        // Under-claiming, on the DESCRIPTION rather than the title, because
+        // the description is the last field. Shrinking the title's prefix
+        // instead would make the decoder read the description's length from
+        // the middle of the title's text, and the resulting error would be
+        // whatever those four bytes happened to spell — a test passing for a
+        // reason unrelated to under-claiming.
+        let mut under = a_metadata_op_with_lengths(4, 6);
+        let under_at = metadata_offsets(4).description_len_at;
+        under[under_at..under_at + LEN_PREFIX].copy_from_slice(&2u32.to_be_bytes());
+        assert_eq!(Op::decode(&under), Err(OpError::TrailingBytes));
+    }
+
+    #[test]
+    fn the_metadata_caps_two_length_bounds_are_reported_distinguishably() {
+        // There are TWO bounds on one length prefix, and they must not collapse
+        // into one error:
+        //
+        //   1. the CAP   — len > MAX_FIELD_LEN            => FieldTooLong
+        //   2. the INPUT — a claim under the cap, past the
+        //                  bytes that remain               => LengthMismatch
+        //
+        // Each is pinned separately elsewhere; nothing pinned that they stay
+        // DIFFERENT, and a decoder reporting either for both would pass every
+        // one of those tests. A caller matching on FieldTooLong to say "no peer
+        // could have sent that" and on LengthMismatch to say "this op is
+        // corrupt" gets both wrong if they merge.
+        //
+        // The op-format analogue of the same property op-model pinned for the
+        // genesis record — two agents reaching it from opposite ends.
+        let at = metadata_offsets(4).title_len_at;
+
+        let mut over_cap = a_metadata_op_with_lengths(4, 4);
+        over_cap[at..at + LEN_PREFIX].copy_from_slice(&((MAX_FIELD_LEN + 1) as u32).to_be_bytes());
+
+        // Under the cap on purpose. A claim of u32::MAX would die as
+        // FieldTooLong and never reach the input comparison at all — which is
+        // exactly how the genesis lying-prefix test stopped testing anything
+        // once a cap landed in front of it.
+        let mut past_input = a_metadata_op_with_lengths(4, 4);
+        past_input[at..at + LEN_PREFIX]
+            .copy_from_slice(&((MAX_FIELD_LEN - 1) as u32).to_be_bytes());
+
+        assert_eq!(
+            Op::decode(&over_cap),
+            Err(OpError::FieldTooLong(MAX_FIELD_LEN + 1))
+        );
+        assert_eq!(Op::decode(&past_input), Err(OpError::LengthMismatch));
+    }
+
+    #[test]
+    fn trailing_bytes_after_a_metadata_op_are_refused() {
+        // Metadata-specific rather than relying on the generic loop: the
+        // decode arm consumes two variable-length fields and then must leave
+        // the cursor exhausted. An arm that stopped early would be caught only
+        // by `trailing_bytes_are_refused`, and a future kind is as likely to
+        // regress this as any other property.
+        let mut bytes = a_metadata_op().canonical_bytes();
+        bytes.push(0);
+        assert_eq!(Op::decode(&bytes), Err(OpError::TrailingBytes));
+    }
+
+    #[test]
+    fn invalid_utf8_in_metadata_is_refused() {
+        // Both fields, and not lossily converted — `from_utf8_lossy` would map
+        // distinct inputs onto one op, which is the ambiguity a canonical
+        // encoding exists to remove.
+        let offsets = metadata_offsets(2);
+        for at in [offsets.title_at, offsets.description_at] {
+            let mut bytes = a_metadata_op_with_lengths(2, 2);
+            bytes[at] = 0x80; // a lone continuation byte
+            assert_eq!(Op::decode(&bytes), Err(OpError::InvalidText));
+        }
+    }
+
+    #[test]
+    fn a_metadata_op_round_trips_through_multibyte_and_empty_text() {
+        // Empty is legitimate and must not be confused with absent — a zero
+        // length prefix is a real encoding.
+        for (title, description) in [
+            ("", ""),
+            ("Ἀγορά", "ἡ ἀγορά — the marketplace"),
+            ("🏛", ""),
+            ("", "a\0b"),
+        ] {
+            let op = Op {
+                kind: OpKind::StoaMetadata {
+                    title: title.to_string(),
+                    description: description.to_string(),
+                },
+                ..a_metadata_op()
+            };
+            assert_eq!(Op::decode(&op.canonical_bytes()).unwrap(), op);
+        }
+    }
+
+    #[test]
+    fn display_text_is_preserved_exactly_and_never_normalised() {
+        // Strict UTF-8 with NO normalisation, and that is a canonicality
+        // requirement rather than an oversight. Normalising, case-folding or
+        // stripping at decode would mean an accepted byte string re-encodes to
+        // something other than itself — two peers, two op ids, for what each
+        // believes is one op. The encoding's whole job is that they agree.
+        //
+        // The consequence is that display text is attacker-controlled: these
+        // are exactly the shapes used to impersonate a Stoa by name — a
+        // right-to-left override, a zero-width joiner, a Cyrillic homoglyph of
+        // "Agora". They MUST survive intact here, and the obligation to render
+        // them safely sits with the renderer. §4.8 already says a name is never
+        // an identifier; this is the data-layer half of that.
+        for hostile in [
+            "Agora\u{202E}txet desrever", // right-to-left override
+            "Ag\u{200B}ora",              // zero-width space
+            "\u{0410}gora",               // Cyrillic А, a homoglyph of A
+            "agora",                      // differs from "Agora" only by case
+            "e\u{0301}",                  // combining acute, NOT folded to é
+        ] {
+            let op = Op {
+                kind: OpKind::StoaMetadata {
+                    title: hostile.to_string(),
+                    description: String::new(),
+                },
+                ..a_metadata_op()
+            };
+            let bytes = op.canonical_bytes();
+            let decoded = Op::decode(&bytes).unwrap();
+            match &decoded.kind {
+                OpKind::StoaMetadata { title, .. } => {
+                    // Compared against the ORIGINAL literal, not against
+                    // anything the decoder produced.
+                    assert_eq!(title, hostile, "display text was transformed");
+                }
+                other => panic!("expected metadata, got {other:?}"),
+            }
+            // And re-encoding reproduces the same bytes, which is the
+            // canonicality property the non-transformation exists to protect.
+            assert_eq!(decoded.canonical_bytes(), bytes);
+        }
+
+        // The pair that would collide under NFC normalisation must stay
+        // distinct: "e" + combining acute against the precomposed "é".
+        let combining = Op {
+            kind: OpKind::StoaMetadata {
+                title: "e\u{0301}".to_string(),
+                description: String::new(),
+            },
+            ..a_metadata_op()
+        };
+        let precomposed = Op {
+            kind: OpKind::StoaMetadata {
+                title: "\u{00E9}".to_string(),
+                description: String::new(),
+            },
+            ..a_metadata_op()
+        };
+        assert_ne!(
+            combining.canonical_bytes(),
+            precomposed.canonical_bytes(),
+            "normalisation would collapse two distinct ops onto one encoding"
+        );
+        assert_ne!(combining.id(), precomposed.id());
+    }
+
+    #[test]
+    fn renaming_a_stoa_does_not_change_its_address() {
+        // The whole point of the split. The genesis record is immutable and
+        // address-determining; the metadata op carries the current name. A
+        // rename that moved the address would not be a rename, it would be a
+        // different Stoa — which is exactly what editing the genesis title
+        // does, and why this op exists.
+        let genesis = Genesis {
+            creator: a_key(1).public_key(),
+            policy: Policy::Open,
+            title: "Agora".to_string(),
+        };
+        // Fallible since main capped the genesis title at `MAX_TITLE_BYTES`;
+        // "Agora" is five bytes, so the error arm is unreachable here.
+        let address = genesis
+            .address()
+            .expect("a five-byte title is well under MAX_TITLE_BYTES");
+
+        let rename = Op {
+            stoa: address,
+            author: a_key(1).public_key(),
+            kind: OpKind::StoaMetadata {
+                title: "The Agora".to_string(),
+                description: "Renamed".to_string(),
+            },
+        };
+        assert!(rename.sign(&a_key(1)).verify());
+
+        // The address is still the genesis record's, and the genesis record
+        // still carries its FOUNDING title — both remain answerable.
+        assert_eq!(
+            genesis
+                .address()
+                .expect("a five-byte title is well under MAX_TITLE_BYTES"),
+            address
+        );
+        assert_eq!(genesis.title, "Agora");
+        // And the hardcoded address from `stoa.rs`'s pinned known-answer test,
+        // so this is checked against a value no code in this test produced.
+        assert_eq!(
+            address.to_hex(),
+            "80329cf05603a0c9ce7a749a53e271253307ba89d4924856e4017459d03a025f",
+            "a rename must not move the Stoa address"
+        );
+    }
+
+    #[test]
+    fn a_metadata_op_by_a_non_moderator_is_authentic() {
+        // Specified, by the "authenticity, not authority" requirement: a
+        // metadata op signed by a peer who is not a moderator really IS from
+        // that peer and must verify. Whether the rename BINDS needs the Stoa's
+        // moderator set, which this type does not have and §3.3 puts on read.
+        //
+        // Pinned so that nobody reads `verify() == true` as "this Stoa is now
+        // called that" — which is precisely the conflation §6.2 measured in the
+        // nearest kin project.
+        let random_peer = a_key(9);
+        let op = Op {
+            stoa: a_stoa(),
+            author: random_peer.public_key(),
+            kind: OpKind::StoaMetadata {
+                title: "Hijacked".to_string(),
+                description: String::new(),
+            },
+        };
+        assert!(
+            op.sign(&random_peer).verify(),
+            "authenticity holds regardless of authority"
+        );
+    }
+
+    #[test]
+    fn a_metadata_op_replayed_into_another_stoa_does_not_verify() {
+        // A rename lifted from one Stoa's channel and put on another's must
+        // fail, rather than arriving as a rename of a Stoa its signer never
+        // addressed. The Stoa is inside the signed bytes, which is what makes
+        // this hold.
+        let key = a_key(2);
+        let signed = a_metadata_op().sign(&key);
+        let elsewhere = SignedOp {
+            op: Op {
+                stoa: crate::identity::stoa_address(b"a different stoa"),
+                ..signed.op.clone()
+            },
+            signature: signed.signature.clone(),
+        };
+        assert!(!elsewhere.verify());
+    }
+
+    #[test]
+    fn an_unallocated_kind_discriminant_is_refused_as_unknown() {
+        // What makes "a later kind costs an unused discriminant, not a version
+        // bump" true: an older client meeting a discriminant it does not know
+        // refuses with a NAMED error rather than misparsing.
+        //
+        // This pins the PROPERTY, not a particular number. Naming "5" in the
+        // prose would go stale the moment another kind lands there while this
+        // test still passed — so the value is found by scanning upward from
+        // the highest allocated discriminant instead. Add a kind and this
+        // keeps testing the first genuinely free value.
+        let highest = one_of_each_kind()
+            .iter()
+            .map(|op| op.canonical_bytes()[KIND_AT])
+            .max()
+            .expect("one_of_each_kind is never empty");
+        let unallocated = highest + 1;
+
+        let mut bytes = a_metadata_op().canonical_bytes();
+        bytes[KIND_AT] = unallocated;
+        assert_eq!(
+            Op::decode(&bytes),
+            Err(OpError::UnknownKind(unallocated)),
+            "discriminant {unallocated} must be refused, not misparsed"
+        );
+    }
+
+    #[test]
+    fn the_metadata_kind_discriminant_is_pinned_to_a_known_answer() {
+        // Consensus-critical: the discriminant is inside every signature and
+        // every op id, so changing it re-mints the id of every metadata op in
+        // existence with no error anywhere, because each peer stays internally
+        // consistent.
+        //
+        // Hardcoded, not read back from `OpKind::STOA_METADATA` — asking the
+        // implementation what it wrote and agreeing is the defect this project
+        // has shipped three times. If this fails, do NOT update the expected
+        // value: work out what changed and whether the network survives it.
+        assert_eq!(
+            a_metadata_op().canonical_bytes()[KIND_AT],
+            4,
+            "the Stoa metadata kind discriminant changed"
+        );
+        // And it is distinct from every discriminant already allocated.
+        for op in one_of_each_kind() {
+            if matches!(op.kind, OpKind::StoaMetadata { .. }) {
+                continue;
+            }
+            assert_ne!(
+                op.canonical_bytes()[KIND_AT],
+                4,
+                "another kind reuses the Stoa metadata discriminant"
+            );
+        }
     }
 }
