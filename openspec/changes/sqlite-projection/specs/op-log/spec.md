@@ -156,6 +156,19 @@ It SHALL NOT read such storage on a best-effort basis. Ops are the authority for
 - **THEN** the open succeeds
 - **AND** every op stored is readable
 
+### Requirement: A persistent log verifies the layout its declared version promises
+
+A declared layout version is a claim about the storage beside it, not a fact about it. An implementation that persists SHALL, when opening storage declaring a version it understands, verify that the storage actually has that layout, and SHALL refuse the open by name when it does not.
+
+It SHALL NOT defer that discovery to the first read. A store that opens successfully and then fails every read reports the failure as though the storage could not be reached, when the fact is that the storage is not the layout it declares — and those two call for different responses. The refusal SHALL be distinguishable from the refusal of an unknown layout version, because a reader told to find a build that understands the layout cannot act on that advice when the build in hand already declares it.
+
+#### Scenario: Storage declaring a known version without that layout is refused at open
+
+- **WHEN** a log is opened over storage declaring a layout version it understands, whose structure is absent or altered
+- **THEN** the open fails
+- **AND** the failure names the declared version and what was missing
+- **AND** no op is read from that storage
+
 ### Requirement: A persistent log stores the inputs a ranking is computed from, never a ranking
 
 An implementation that persists SHALL record, for each op, the values a later relevance projection computes from: the identity of the op's author, and the point in the ordering from which a score would decay.

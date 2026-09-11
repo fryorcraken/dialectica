@@ -270,9 +270,85 @@ impl SqliteOpLog {
                 found,
                 expected: LAYOUT_VERSION,
             });
+        } else {
+            // THE VERSION IS A CLAIM, AND THIS IS THE ONLY THING THAT CHECKS IT.
+            //
+            // `PRAGMA user_version` is one integer any writer can stamp. A file
+            // carrying our number whose `ops` table is missing or altered took
+            // the branch above and opened `Ok`, and then EVERY read failed with
+            // `Storage("no such table: ops")` — an error naming the disk when
+            // the fact is that the file is not the layout it declares. A caller
+            // cannot tell those apart, and they call for different responses.
+            //
+            // This is the same refuse-rather-than-read-hopefully posture the
+            // version check itself has, applied to the half the version check
+            // cannot see. `create_schema` writes the pragma LAST, so the one
+            // file this could false-positive on — a crash midway through
+            // creation — has version 0 and takes the create branch instead.
+            //
+            // `LIMIT 0` deliberately: it prepares and runs the statement, which
+            // is what proves the table and its name exist, and reads no row, so
+            // the cost does not grow with the store.
+            Self::check_layout(&conn)?;
         }
 
         Ok(SqliteOpLog { conn })
+    }
+
+    /// Prove the store actually has the layout its `user_version` claims.
+    ///
+    /// # Why the version number alone is not enough
+    ///
+    /// `PRAGMA user_version` is a single integer with no relationship to the
+    /// tables beside it. Anything can stamp it. A file carrying this build's
+    /// number with no `ops` table is not a hypothetical — it is what a
+    /// half-restored backup, a hand-edited store, or a partially-`DROP`ped file
+    /// looks like, and without this it opened `Ok` and failed at the first read
+    /// as `Storage("no such table: ops")`. That error blames the disk. The disk
+    /// is fine; the file is mislabelled, and that is a different thing to be
+    /// told.
+    ///
+    /// # Why the columns and not merely the table
+    ///
+    /// `SELECT 1 FROM ops` proves a table called `ops` exists and nothing about
+    /// its shape, so a store whose columns were renamed or dropped would still
+    /// pass. Naming the columns every read depends on is what makes this a
+    /// check on the LAYOUT rather than on the name. The list is
+    /// [`SELECT_COLUMNS`] plus the ordering columns — exactly what
+    /// [`SqliteOpLog::ordered_read`] and [`SqliteOpLog::get`] touch — so a
+    /// column either read or ordered on cannot go missing unnoticed.
+    ///
+    /// `LIMIT 0` reads no row: preparing and running the statement is what
+    /// establishes the layout, and the cost does not grow with the store.
+    ///
+    /// # This is not a migration, and must not become one
+    ///
+    /// Refusing is the whole behaviour. `design.md` records that there is no
+    /// migration path by design, and a check that repaired what it found would
+    /// be one — written against a layout nobody has described, over a file this
+    /// build did not write.
+    fn check_layout(conn: &Connection) -> Result<(), OpLogError> {
+        conn.query_row(
+            &format!(
+                "SELECT {SELECT_COLUMNS}, op_id, stoa, target, author, score_epoch,
+                        sort_ordered, sort_lamport, sort_msg_present, sort_msg
+                 FROM ops LIMIT 0"
+            ),
+            [],
+            |_| Ok(()),
+        )
+        // `LIMIT 0` returns no row, so `QueryReturnedNoRows` is the SUCCESS
+        // case and every other error is the layout being wrong. Matching on it
+        // rather than using `optional()` keeps that reading explicit: the
+        // question asked is "could this statement be prepared and run", not
+        // "did it find anything".
+        .or_else(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => Ok(()),
+            other => Err(OpLogError::LayoutDoesNotMatchItsVersion {
+                version: LAYOUT_VERSION,
+                why: other.to_string(),
+            }),
+        })
     }
 
     /// The whole schema, in one place, with every column's reason beside it.
@@ -305,8 +381,35 @@ impl SqliteOpLog {
     /// The columns beside it — `stoa`, `target`, and the three sort columns —
     /// are **derived from those bytes at append time and are indexes, not
     /// authority**. If one ever disagreed with the blob, the blob is right.
+    ///
+    /// # The failure path rolls back explicitly
+    ///
+    /// `execute_batch` stops at the first failing statement and returns, with
+    /// the `BEGIN` still open. Dropping the connection would make rusqlite roll
+    /// it back, so the old code was sound — **by accident rather than by
+    /// invariant**, and only while no caller holds the connection past a failed
+    /// create. `from_connection` propagates the error and drops it today; a
+    /// caller that retried instead would meet "cannot start a transaction
+    /// within a transaction" and be told the wrong thing about what went wrong.
+    /// The `ROLLBACK` below makes the guarantee this function's own.
+    ///
+    /// # `PRAGMA user_version` IS LAST, AND MUST STAY LAST
+    ///
+    /// It is the commit point for the *layout claim*, and every other statement
+    /// has to be true before it is made. A crash — or a failure — anywhere
+    /// before it leaves a file at version `0`, which `from_connection` reads as
+    /// "never stamped" and creates cleanly. Moving the pragma earlier, or
+    /// splitting this batch so the pragma lands in a separate one that can
+    /// succeed on its own, produces exactly the file `check_layout` exists to
+    /// refuse: version `1` stamped over tables that were never created. That
+    /// file is then permanently unopenable, because there is no migration path
+    /// by design — so the ordering here is not tidiness, it is what keeps a
+    /// crash mid-create recoverable.
+    ///
+    /// A later "add a migration" refactor is the change this warning is
+    /// addressed to.
     fn create_schema(conn: &Connection) -> Result<(), OpLogError> {
-        conn.execute_batch(&format!(
+        let result = conn.execute_batch(&format!(
             "BEGIN;
              CREATE TABLE ops (
                  -- §3.1's idempotence AND `cmp_ops`'s precondition, in one
@@ -479,10 +582,32 @@ impl SqliteOpLog {
              -- — which is the right side of rule 5's trade.
              CREATE INDEX ops_by_target_author ON ops (target, author);
 
+             -- LAST, DELIBERATELY. See this function's documentation: this is
+             -- the layout CLAIM, and everything it claims must already be true
+             -- when it is made. A crash or failure before this point leaves
+             -- version 0, which reopens as a fresh store and creates cleanly.
+             -- Moving it earlier — or into a batch of its own — strands a file
+             -- at version 1 with no tables, which `check_layout` then refuses
+             -- forever, because there is no migration path by design.
              PRAGMA user_version = {LAYOUT_VERSION};
              COMMIT;"
-        ))
-        .map_err(storage)
+        ));
+
+        if let Err(e) = result {
+            // EXPLICIT, not left to `Drop`. `execute_batch` returns at the
+            // first failing statement with the `BEGIN` still open; rusqlite
+            // rolling back on drop made that sound only for as long as every
+            // caller drops the connection on this path. Stating it here makes
+            // it a property of this function instead of of its callers.
+            //
+            // The rollback's own result is discarded on purpose: the caller is
+            // owed the error that CAUSED the failure, not a second error from
+            // cleaning up after it. A failed `ROLLBACK` here means the
+            // transaction was never open — which is the state we wanted.
+            let _ = conn.execute_batch("ROLLBACK;");
+            return Err(storage(e));
+        }
+        Ok(())
     }
 
     /// The one `SELECT`, shared by all three ordered reads.
@@ -869,6 +994,112 @@ mod tests {
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
         assert_eq!(stamped, LAYOUT_VERSION);
+    }
+
+    #[test]
+    fn a_store_stamped_with_our_version_but_missing_the_tables_is_refused_at_open() {
+        // The gap the version check cannot see. `PRAGMA user_version` is one
+        // integer and anything can write it, so a file carrying OUR number is a
+        // claim rather than a fact — and before `check_layout` such a file
+        // opened `Ok` and failed at the first read with
+        // `Storage("no such table: ops")`, blaming the disk for a mislabelled
+        // file.
+        //
+        // Asserted at OPEN and not merely "some error eventually": that the
+        // failure arrives at the moment the claim is made is the whole finding.
+        let dir = TempDir::new("stamped-but-empty");
+        let path = dir.file("log.sqlite");
+
+        // An otherwise-empty database stamped with this build's version. Built
+        // by hand rather than by creating and dropping, so nothing about the
+        // real schema is involved — this is what a half-restored backup or a
+        // hand-edited file looks like.
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(&format!("PRAGMA user_version = {LAYOUT_VERSION};"))
+            .unwrap();
+        drop(conn);
+
+        match SqliteOpLog::open(&path) {
+            Err(OpLogError::LayoutDoesNotMatchItsVersion { version, why }) => {
+                assert_eq!(version, LAYOUT_VERSION);
+                // The underlying reason is carried through rather than
+                // swallowed: a reader holding this file needs to know WHICH
+                // part of the layout was missing.
+                assert!(
+                    why.contains("ops"),
+                    "the refusal must name what was missing, got {why:?}"
+                );
+            }
+            other => panic!(
+                "a store stamped with our version but without our layout must be \
+                 refused at open, got {other:?}"
+            ),
+        }
+    }
+
+    #[test]
+    fn a_store_whose_ops_table_lost_a_column_is_refused_too() {
+        // One step weaker than the test above and the one a table-name-only
+        // check would pass: the table is called `ops` and is not the `ops` this
+        // build reads. `SELECT 1 FROM ops LIMIT 0` cannot tell the difference,
+        // which is why `check_layout` names the columns.
+        let dir = TempDir::new("stamped-wrong-columns");
+        let path = dir.file("log.sqlite");
+
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(&format!(
+            "CREATE TABLE ops (op_id BLOB PRIMARY KEY NOT NULL, op_bytes BLOB NOT NULL);
+             PRAGMA user_version = {LAYOUT_VERSION};"
+        ))
+        .unwrap();
+        drop(conn);
+
+        match SqliteOpLog::open(&path) {
+            Err(OpLogError::LayoutDoesNotMatchItsVersion { version, .. }) => {
+                assert_eq!(version, LAYOUT_VERSION);
+            }
+            other => panic!(
+                "a table named `ops` that is not our `ops` must be refused, got {other:?}"
+            ),
+        }
+    }
+
+    #[test]
+    fn a_store_this_build_wrote_passes_its_own_layout_check() {
+        // The other side of the boundary, and not a formality: a `check_layout`
+        // naming a column the schema does not have would refuse every real
+        // store, and every other test here opens a store this build just
+        // created — so the two would fail together and name the wrong cause.
+        // This one is about the reopen specifically.
+        let dir = TempDir::new("stamped-and-correct");
+        let path = dir.file("log.sqlite");
+
+        let mut log = SqliteOpLog::open(&path).unwrap();
+        log.append(signed(a_post("survives")), Arrival::unordered())
+            .unwrap();
+        drop(log);
+
+        let reopened = SqliteOpLog::open(&path)
+            .expect("a store this build wrote must pass this build's layout check");
+        assert_eq!(reopened.len().unwrap(), 1);
+    }
+
+    #[test]
+    fn the_layout_mismatch_refusal_names_the_version_and_the_reason() {
+        // The variant is one thing; what a human reads is another. This message
+        // has to distinguish itself from `UnknownLayoutVersion`'s, or a reader
+        // holding a mislabelled file is told to find "a build that knows that
+        // layout" — advice that cannot help, because this build IS that build.
+        let rendered = OpLogError::LayoutDoesNotMatchItsVersion {
+            version: 1,
+            why: "no such table: ops".to_string(),
+        }
+        .to_string();
+        assert!(rendered.contains('1'), "the declared version is not named");
+        assert!(
+            rendered.contains("no such table: ops"),
+            "the underlying reason is not named"
+        );
     }
 
     #[test]
@@ -1511,6 +1742,16 @@ mod tests {
             OpLogError::UnknownLayoutVersion {
                 found: 2,
                 expected: 1,
+            }
+            .to_string(),
+            // The two layout errors are the pair most at risk of reading the
+            // same, and they are the pair a reader most needs told apart:
+            // `UnknownLayoutVersion` says "find the build that wrote this",
+            // which is advice this one cannot act on — this build IS that
+            // build, and the file is mislabelled.
+            OpLogError::LayoutDoesNotMatchItsVersion {
+                version: 1,
+                why: "no such table: ops".to_string(),
             }
             .to_string(),
             OpLogError::CorruptEntry("bytes".to_string()).to_string(),

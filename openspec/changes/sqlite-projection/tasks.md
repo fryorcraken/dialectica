@@ -67,11 +67,31 @@ middle so a reviewer can see it without a database in the diff.
       carries a message id — and collapsing them loses a fact the peer received.
 - [x] Four indexes: ordering, by-Stoa, by-target, and the reserved
       `(target, author)`.
-- [x] **§7.2 rule 5 answered**: `score_epoch` is a Lamport timestamp, `-1` when
-      absent, never a wall clock. **No `score` column** — a stored weight is
-      unanswerable under per-reader vouching, not merely stale.
+- [x] **§7.2 rule 5 answered**: `score_epoch` is a Lamport timestamp, `NULL`
+      when absent, never a wall clock. **`NULL` and not `-1`**: `u64::MAX as
+      i64` IS `-1`, so a `-1` sentinel made an unordered op and one ordered at
+      the maximum store the same value. That was the first draft, it is the
+      defect this change fixed, and it is spelled out here because this is the
+      schema section a future reader consults first. See the Tests section's
+      `score_epoch` entry and `sqlite.rs`'s column comment. **No `score`
+      column** — a stored weight is unanswerable under per-reader vouching, not
+      merely stale.
 - [x] `PRAGMA user_version` checked on open; an unknown layout is **refused by
       name** in both directions, never read best-effort.
+- [x] **The declared version is also CHECKED, not just compared.** A file
+      stamped with our number whose `ops` table is missing or altered used to
+      open `Ok` and fail every later read as `Storage("no such table: ops")` —
+      an error blaming the disk for a mislabelled file. `check_layout` names
+      every column a read or an `ORDER BY` touches and refuses as
+      `LayoutDoesNotMatchItsVersion`, a variant distinct from
+      `UnknownLayoutVersion` because "find the build that wrote this" is advice
+      this case cannot act on.
+- [x] `create_schema` **rolls back explicitly** on failure. Dropping the
+      connection already rolled back, so the old code was sound by accident
+      rather than by invariant. `PRAGMA user_version` stays LAST in the batch —
+      it is the layout claim, and a crash before it leaves version 0, which
+      reopens as fresh; stamping it earlier strands a file that `check_layout`
+      then refuses forever.
 - [x] `LAYOUT_VERSION` pinned by a hardcoded `assert_eq!`, because
       `cargo mutants` cannot see a wrong `const`.
 
@@ -105,9 +125,20 @@ middle so a reviewer can see it without a database in the diff.
 - [x] **Prefix-confusion fixtures are CONSTRUCTED, not hunted.** The first
       version picked titles whose hashes agreed in byte 0 and guarded that
       coincidence — a review found 2-byte (`stoa`) and 8-byte (`target`) prefix
-      matches passing all 443 tests. `SHARED_PREFIX_BYTES` is now a named
+      matches passing the whole suite. `SHARED_PREFIX_BYTES` is now a named
       constant, the keys are built from raw bytes, and the guards pin that the
       prefix agrees **and** that the next byte differs.
+- [x] **The superseded copies in `log/mod.rs` are DELETED, not left beside the
+      corrected ones.** A second review re-ran the experiment: narrowing
+      `MemoryOpLog::iter_stoa` to a 2-byte prefix still passed `mod.rs`'s
+      `two_stoas_sharing_an_address_prefix_are_not_confused` and failed
+      `contract.rs`'s. `mod.rs` is the file a reader opens first, and this
+      project has a recorded hazard that a known-weak test is the template the
+      next one is written against — so the weak copies were the defect, not
+      merely redundant. `mod.rs` keeps only the two tests that are NOT trait
+      behaviours and so have nowhere else to live: the two-log convergence test
+      and `an_entry_reports_the_target_its_kind_names`. Every other name it held
+      was verified present in `contract.rs` before deletion.
 - [x] `every_ordering_shape` carries **differing-length, prefix-related**
       message ids. With all ids 32 bytes, length-vs-lexicographic could never
       disagree, and the headline agreement test could not catch a dropped
