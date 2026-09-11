@@ -105,6 +105,39 @@ The two checks are therefore one expression, in one function
 (`is_valid_revision`), in a fixed order, rather than two conditions a caller
 composes.
 
+**This is a construction rule, and it lives here rather than in the spec for a
+reason worth stating.** A resolver performing the two checks in either order
+rejects exactly the same set of versions — a candidate failing either is dropped
+regardless — so no observer can tell the orders apart, now or after any future
+change. What the spec requires is the part that *is* observable and *is*
+pinnable: that a version failing verification is dropped whatever its author
+field claims (`a_forged_revision_is_dropped` asserts both halves — that the op
+does not verify, and that its author field matches the victim's).
+
+The ordering still matters, which is why it is written down at all: it is what
+keeps the property alive under an edit that reorders or removes one check, and a
+maintainer reading `is_valid_revision` should know that the sequence is load-
+bearing rather than incidental.
+
+### Decision: The unreachable match arm answers rather than panics
+
+A code-shape rule, not a requirement, for the same reason: the arm cannot be
+entered, so no observer distinguishes an implementation that answers from one
+that panics there. `current` is either `original` — which `current_version`
+established is a `Post` before returning — or an entry the `find` matched as a
+`Revise`. Nothing else reaches `body()` or `attachments()`.
+
+It answers anyway because the cost of being wrong about that reasoning is
+asymmetric. This module runs on attacker-supplied content, and PHASE0-FINDINGS
+§3 measured that a panic aborts the module process: **an empty body is a
+rendering; a crash is a denial of service.** An `unreachable!()` here would be a
+correct assertion about today's code and a remote kill switch if a later change
+made it wrong.
+
+The testable contract above it is the enclosing one — "resolving never aborts
+the process" — which the spec states and
+`resolving_against_a_log_of_junk_never_panics` pins.
+
 ### Decision: The resolver defines no order, and takes the first entry
 
 `OpLog::iter_target` already returns entries in `cmp_ops` order. The resolver is
@@ -158,6 +191,24 @@ resolver, and a reader who assumed it held everywhere would be relying on a
 guarantee the degraded order does not make. What holds in both regimes is that
 the answer is a pure function of the ops held.
 
+### Decision: Generic over the trait, not the implementation
+
+`current_version` is generic over `OpLog` rather than taking `&MemoryOpLog`.
+
+§3.3 names SQLite as the log's destination and `op-log`'s design makes the trait
+the seam to it, so a resolver naming the concrete type would have to be
+*rewritten* when that lands rather than relinked. The cost of the generic is one
+type parameter and no runtime indirection.
+
+**Deliberately not a spec requirement.** It is an internal Rust API shape with no
+observable behaviour — a caller sees the same answers either way, and the wire
+contract does not expose it at all. Putting it in the spec would place
+implementation structure into a behaviour contract, which is the thing the spec
+exists not to be. It carried a `NO SPEC:` marker at first, which was also wrong:
+that marker means "the spec left this open, should it be a requirement?", and
+here the answer is a settled no rather than an open question. The test keeps its
+compile-time pin; the reasoning lives here.
+
 ### Decision: An op that is not a post resolves to absence, not to a distinct error
 
 `current_version` returns `Option`, and `None` covers both "the log does not hold
@@ -195,6 +246,18 @@ a `Revise` depending on whether the post was ever edited. That is exactly the
 branch a caller should not have to get right: written at four call sites, one of
 them eventually reads "match `Revise`, else empty" and silently renders every
 unedited post blank. CLAUDE.md's "a guard is a job" applied to a projection.
+
+`is_revised()` is on the type for the same reason, and for one more. §5.7 asks
+that "the UI can show that a post was edited", so whether a post has been
+revised is a question the resolver is *for* — not a fact a caller should have to
+reconstruct. The reconstruction is `v.current.id() != v.original.id()`, which is
+short enough to look like it belongs at the call site and is exactly the kind of
+thing that gets spelled four ways: by pointer equality (wrong — two `&Entry`
+into the same log are equal by address only incidentally), by comparing bodies
+(wrong — an author may revise to identical text), or by asking whether `current`
+is a `Revise` (right today, and silently wrong if a future kind can supersede a
+post). One method, compared by op id, which is the identity the whole log is
+keyed on.
 
 **Neither falls back to `original` when the current version's field is empty**,
 and this is the decision in the pair most likely to be "fixed" into a bug by a

@@ -99,10 +99,11 @@ ascending op id, which carries no recency at all.
 | 4 | The **`Revise` kind check** removed, so a moderation or vote can be a "version" | `the_kind_check_holds_at_the_top_of_the_order`, `a_moderation_or_a_vote_on_the_post_is_not_a_version_of_it`, `resolving_against_a_log_of_junk_never_panics` (**3**) |
 | 5 | The **"only a post has versions" guard** removed | `an_op_that_is_not_a_post_has_no_current_version`, `a_revision_of_a_revision_is_not_a_version_of_the_post`, `an_op_naming_itself_terminates` (3) |
 | 6 | **`body()` reads `original`** instead of `current` | 14 tests |
-| 7 | **`is_revised()`** always `false` | `a_reply_is_a_post_and_has_versions`, `an_empty_revision_body_is_an_edit_and_not_an_absence`, `the_highest_lamport_revision_is_current`, `under_a_transport_order_a_peer_missing_the_newest_revision_resolves_to_an_older_one` (4) |
+| 7 | **`is_revised()`** always `false` | 7, led by `whether_a_post_was_revised_is_decided_by_op_id_not_by_content` |
 | 8 | **`attachments()` reads `original`** instead of `current` | `the_attachments_come_from_the_current_version` (1) |
 | 9 | **`attachments()` falls back to `original` when `current`'s list is empty** — the empty-means-unset mistake | `a_revision_clearing_the_attachments_removes_them` (1) |
 | 10 | **`body()` falls back to `original` when `current`'s body is empty** — the same mistake on the other field | `an_empty_revision_body_is_an_edit_and_not_an_absence` (1) |
+| 11 | **`is_revised()` compares content instead of op id** | `whether_a_post_was_revised_is_decided_by_op_id_not_by_content` (1) |
 
 **Mutation 4 found a real gap in the tests, which is why it is worth doing.** On
 its first run only ONE test failed. `resolving_against_a_log_of_junk_never_panics`
@@ -118,7 +119,7 @@ everything except the kind check says they should win. The mutation then failed 
 values and message ids *against* op-id order — the revision with the lower op id
 carries the higher Lamport value, or the higher message id — so a resolver that
 ignored the arrival metadata and fell back to op id returns the opposite of what
-is asserted. Mutation 3's 11 failures are what confirms those fixtures bite.
+is asserted. Mutation 3's 12 failures are what confirms those fixtures bite.
 
 ## 6. What the blind spec-test review found, and what it cost
 
@@ -213,10 +214,93 @@ both items below record decisions that were implicit.
       rather than a parameter choice, that a metadata op names an `Address` and
       so needs its own read, and that relevance scoring (§7.2) does *not* need
       one because it folds over `iter`/`iter_stoa` and consumes a resolver's
-      output. Done here rather than on the moderation branch because this change
-      sits below `op-log` in the stack.
+      output.
 
-## 8. PLAN.md
+      **On which branch this was done, and where it should have gone.**
+      `log.rs` belongs to `op-log`, which is the *base* of both resolver
+      branches; the two resolvers are **siblings**, neither an ancestor of the
+      other. So either could have made this edit, and both would conflict if
+      both did.
+
+      **The right home was `op-log` itself** — a change to a file should land on
+      the branch that owns it, which keeps a sibling from editing another
+      change's file at all. It stayed here because by the time that was clear the
+      cost had inverted: `op-log` was one commit from settled, moving the edit
+      meant a commit there *and* a rebase here, and the narrowed doc had already
+      merged into `op-log`'s own copy through an earlier push.
+
+      Recorded for the next person facing the choice, since the general rule and
+      the exception are both worth having: **put the edit on the branch that owns
+      the file**, and if you find yourself weighing otherwise, weigh it before
+      the owning branch is nearly settled rather than after.
+
+## 8. What the design review found
+
+- [x] **[IMPORTANT] PLAN §5.7 was stale in exactly the way this change spent a
+      round fixing.** §4 above corrected the "Lamport order decides currency"
+      claim in the module docs, the `find` comment, the field doc, the spec and
+      the proposal — and left it uncorrected in **PLAN.md, the document all five
+      were restating**. A reader stopping at the bullet got the pre-correction
+      answer. The bullet is now "The ordering rule decides currency", keeps the
+      rule as written, and adds that no Lamport value reaches us today so
+      currency is presently *convergent* rather than *temporal*. §13 was checked
+      and needed nothing — its ordering entry already says ops "are recorded as
+      unordered and fall back to a defined degraded order".
+
+- [x] **[IMPORTANT] The three unpinnable properties were not one category.**
+      The separating test is not "can a test pin it?" but **"does a
+      conforming-but-different implementation behave differently for any
+      observer, now or after a future change elsewhere?"** By that test they
+      split two-to-one, and they have been moved accordingly. See §9.
+
+- [x] **[MEDIUM] `is_revised()` was undocumented as a decision.** Its four
+      mutation kills were **incidental** — every one of those tests asserted it
+      alongside a different subject, so nothing pinned it as its own contract,
+      and neither `design.md` nor the spec recorded that the resolver exposes an
+      edited/not-edited predicate at all. Now: a spec requirement with four
+      scenarios, a `design.md` paragraph on why it lives on `CurrentVersion`
+      rather than at the call site (the same "a guard is a job" argument already
+      made for `body()`/`attachments()`, plus the three ways a call site would
+      get it wrong), and two dedicated tests. Mutation 7 went 4 → **7** kills,
+      and new mutation 11 — comparing content instead of op id — dies to exactly
+      the new test, which is the point: that fixture is a revision to *identical
+      content*, where the two candidate rules disagree.
+
+- [x] **[MEDIUM] The `NO SPEC:` marker was in the wrong home.** It carried a
+      design rationale, not an unspecified-behaviour default — and `tasks.md` §5
+      argued it should never become a requirement while keeping the marker
+      anyway. Moved to `design.md` as "Generic over the trait, not the
+      implementation"; the test keeps its compile-time pin. **This change now
+      has no `NO SPEC:` markers**, which is correct: every choice it made is
+      either specified or recorded as a design decision.
+
+- [x] **[LOW] Two false claims, both fixed.** The mutation-3 narrative said 11
+      where the table said 12. **Re-measured rather than guessed: 12 is right**
+      — the table was correct and the sentence was stale from before the
+      degraded-partial-set test was added. And §7's "this change sits below
+      `op-log` in the stack" was simply false: `op-log` is the *base* of both
+      resolver branches and the two resolvers are **siblings**. Corrected, with
+      the real reason and the better alternative (the edit properly belongs to
+      `op-log` itself).
+
+- [x] **[INFO] Duplication at the ceiling.** The convergence-not-recency
+      argument exists in four places and is not to gain a fifth. No action taken.
+
+## 9. Where each unpinnable property ended up
+
+| Property | Home | Why |
+|---|---|---|
+| Verify **before** compare | `design.md` | Constrains nothing observable — either order rejects the same set. The spec keeps the observable half, which is pinnable and pinned: a version failing verification is dropped whatever its author field claims. |
+| The unreachable match arm | `design.md` | Not a requirement at all, a code-shape rule about a branch that cannot be entered. The enclosing contract — "resolving never aborts the process" — stays in the spec and is pinned by `resolving_against_a_log_of_junk_never_panics`. |
+| **Defines no order of its own** | **spec** | The exception. A resolver with its own copy of the rule passes today and diverges from every other reader of the log on the first change to `arrival.rs`, silently. That is a contract about system-wide consistency, and `op-log`'s spec states the same requirement about the log itself — removing it here would leave this resolver as the one reader not bound by a rule every other reader is. |
+
+Both surviving spec entries had their testability meta-commentary **cut**. "A
+reader verifying this must inspect the implementation, not run the suite" is
+instruction to a reviewer, and it was what made the requirements read as
+apologies for themselves. A requirement states what must hold; where to look is
+not its job.
+
+## 10. PLAN.md
 
 - [x] One line in §5.7 that the resolver exists, per the document model.
 - [x] Reasoning stays in `design.md`; not duplicated into PLAN.md.

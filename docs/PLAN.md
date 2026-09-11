@@ -996,9 +996,17 @@ merge strategy. Two versions of a post do not *conflict* — they are ordered:
 - **Authorship decides validity.** A version signed by anyone other than the
   post's original author is invalid and dropped on read (§3.3). There is no
   case where two authors contend for one post.
-- **Lamport order decides currency.** Among an author's own versions, the
+- **The ordering rule decides currency.** Among an author's own versions, the
   highest Lamport timestamp is current, ties broken by ascending message id —
   the same rule SDS already applies (§4.4), so nothing new is invented.
+
+  **But no Lamport value reaches us today** (§13), so in the running system
+  every version falls to the degraded order: ascending op id, which is a hash
+  and carries no recency. What currency means right now is therefore
+  *convergent* rather than *temporal* — two peers holding the same versions
+  agree on which is current, though neither can say which was written last.
+  The rule above is what the same code yields unchanged once the upstream gap
+  closes.
 - **History is kept.** Superseded versions stay in the op log. The UI can show
   that a post was edited, and a moderator acting on a post is acting on a
   version they can name.

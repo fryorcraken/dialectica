@@ -1228,6 +1228,85 @@ mod tests {
     }
 
     #[test]
+    fn whether_a_post_was_revised_is_decided_by_op_id_not_by_content() {
+        // §5.7: "The UI can show that a post was edited." Its own test, because
+        // every other assertion of `is_revised()` here rides alongside a
+        // different subject — so this predicate had no test that would fail for
+        // the reason it names.
+        //
+        // The fixture is the one that separates the candidate rules: a revision
+        // whose body and attachments are IDENTICAL to the original's. An
+        // implementation comparing content reports "not revised"; only comparing
+        // op ids reports the truth. An author really does revise back to the
+        // same text — undoing a typo fix, restoring a paragraph.
+        let post = a_post("unchanged");
+        let id = post.op.id();
+        let same_again = a_revision(id, "unchanged");
+        assert_ne!(
+            same_again.op.id(),
+            id,
+            "the fixture needs two distinct ops with one body"
+        );
+
+        let mut log = MemoryOpLog::new();
+        log.append(post, Arrival::ordered(1, a_message_id(1)));
+        log.append(same_again.clone(), Arrival::ordered(2, a_message_id(1)));
+
+        let resolved = current_version(&log, &id).unwrap();
+        assert!(
+            resolved.is_revised(),
+            "a revision to identical content is still a revision"
+        );
+        assert_eq!(resolved.current.id(), same_again.op.id());
+        assert_eq!(resolved.body(), "unchanged");
+    }
+
+    #[test]
+    fn a_dropped_version_does_not_make_a_post_look_revised() {
+        // The other direction, and the one that matters to a reader: reporting
+        // an edit the reader then cannot see is worse than reporting none,
+        // because it says their view is stale when it is correct.
+        //
+        // All three drop reasons, each as the ONLY version of its post.
+        let post = a_post("mine");
+        let id = post.op.id();
+        let key = author();
+
+        let dropped: [SignedOp; 3] = [
+            // Wrong author.
+            a_revision_by(&stranger(), id, "hijacked"),
+            // Fails verification.
+            a_forged_revision(&post.op.author, &stranger(), id, "forged"),
+            // Right author, right target, wrong kind.
+            Op {
+                stoa: a_stoa(),
+                author: key.public_key(),
+                kind: OpKind::Moderate {
+                    target: id,
+                    action: ModerationAction::Hide,
+                },
+            }
+            .sign(&key),
+        ];
+
+        for candidate in dropped {
+            let mut log = MemoryOpLog::new();
+            log.append(post.clone(), Arrival::ordered(1, a_message_id(1)));
+            // At the top of the order, so only the drop can exclude it.
+            log.append(candidate.clone(), Arrival::ordered(9, a_message_id(1)));
+            assert_eq!(log.iter_target(&id).len(), 1, "the candidate does name it");
+
+            let resolved = current_version(&log, &id).unwrap();
+            assert!(
+                !resolved.is_revised(),
+                "a dropped version must not report the post as edited"
+            );
+            assert_eq!(resolved.current.id(), id);
+            assert_eq!(resolved.body(), "mine");
+        }
+    }
+
+    #[test]
     fn a_revision_clearing_the_attachments_removes_them() {
         // The attachment counterpart of the test above, and the sharper of the
         // two. §4.6 makes attachments Logos Storage CIDs, so a resolver that
@@ -1566,12 +1645,10 @@ mod tests {
 
     #[test]
     fn the_resolver_is_generic_over_the_log_trait() {
-        // NO SPEC: the spec requires a resolver over the log's read API; it does
-        // not require that the resolver be generic over the `OpLog` trait rather
-        // than written against `MemoryOpLog`. Chosen: generic, because §3.3's
-        // SQLite implementation is the reason the trait exists — a resolver
-        // naming the concrete type would have to be rewritten rather than
-        // relinked.
+        // Not a `NO SPEC:` default — a recorded design decision, argued in
+        // `design.md` ("Generic over the trait, not the implementation"). It is
+        // an internal Rust API shape with no observable behaviour, so it is
+        // deliberately not a spec requirement.
         //
         // Pinned by calling it through a generic function, which does not
         // compile if `current_version` names a concrete log type.

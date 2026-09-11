@@ -53,9 +53,7 @@ Because a version is valid only against the post's author, there is no case in w
 
 A version SHALL be verified to be authentic before its author is considered, and SHALL be dropped if it is not. The store holds whatever arrived, including forgeries, so validity SHALL be established when the post is read rather than assumed from the op's presence in the log.
 
-Order matters between the two checks. An op's author field is a claim carried in the op; only verification turns that claim into a fact about who sent it. An authorship comparison performed against an unverified author field compares one attacker-supplied string to another, and passes for anyone who writes the victim's key into the field.
-
-**The ordering of the two checks is not externally observable**, and is stated here as a construction requirement rather than a behavioural one. A resolver performing them in either order rejects exactly the same set of versions, because a version failing either check is dropped regardless. What a test can pin is that *both* checks happen — the scenarios below do that — and a reader verifying this requirement must inspect the implementation, not only its outputs. It is recorded as a requirement because the ordering is what makes the property survive a later edit that removes one check.
+An op's author field is a claim carried in the op; only verification turns that claim into a fact about who sent it. A version whose signature does not verify SHALL therefore be dropped whatever its author field says, so that writing a victim's key into that field gains an attacker nothing.
 
 #### Scenario: A forged version is dropped
 
@@ -79,7 +77,7 @@ Among the versions of a post that are authentic and by the post's author, the cu
 
 The ordering rule is defined once for all ops, so a resolver comparing values itself would be a second implementation that could disagree with the first — and two orders that disagree produce no error, only two peers rendering one post differently.
 
-**"Defines no order of its own" is not pinnable by test**, and is stated here as a construction requirement. A resolver containing a *correct* second implementation of the ordering rule produces identical answers to one that delegates, so no observation distinguishes them; what the requirement guards against is the second implementation drifting from the first in some later change, which is a risk about code rather than about behaviour. Verifying it means reading the implementation for the absence of a comparison, not running the suite.
+This binds even though a resolver carrying a *correct* copy of the ordering rule would answer identically today. The contract is system-wide consistency across every reader of the log: a copy passes now and diverges from every other reader on the first change to the shared rule, silently, because two orders that disagree produce no error.
 
 **Placing first is not the same as being most recent, and the difference is live rather than theoretical.** The ordering rule leads with the highest Lamport timestamp only where the transport supplied one. Where it did not — which is every op today, since no Lamport value reaches the system — the rule falls back to ascending op id, and an op id is a hash of the op's own bytes carrying no recency whatever.
 
@@ -112,6 +110,35 @@ So under the order in force today, the current version is a **convergent arbitra
 
 - **WHEN** one version of a post carries a Lamport timestamp and another carries none
 - **THEN** the version the transport ordered is current, whatever its timestamp and whatever the other's op id
+
+### Requirement: A reader can tell whether a post has been revised
+
+Resolving a post SHALL report whether the version to render is the post as first published or a later version of it.
+
+A reader shows an edited post differently from an unedited one, and cannot derive the distinction from the content alone: an author may revise a post to text identical to the original, and a post that was never revised is not distinguishable from one revised back. The answer SHALL therefore be determined by which op the current version is, not by comparing content.
+
+A version that is dropped — by authorship, by verification, or by kind — SHALL NOT cause a post to be reported as revised. Reporting an edit that a reader then cannot see would be worse than reporting none, because it tells the reader their view is stale when it is correct.
+
+#### Scenario: An unrevised post is reported as not revised
+
+- **WHEN** a post with no versions is resolved
+- **THEN** it is reported as not revised
+
+#### Scenario: A revised post is reported as revised
+
+- **WHEN** a post with a valid version by its author is resolved
+- **THEN** it is reported as revised
+
+#### Scenario: A version restoring the original content still counts as a revision
+
+- **WHEN** a post is revised by its author to content identical to the original
+- **THEN** it is reported as revised
+- **AND** the report is not derived from comparing content
+
+#### Scenario: A dropped version does not make a post look revised
+
+- **WHEN** the only version of a post is one that is dropped, whether by a mismatched author, a failed verification, or a kind that is not a version
+- **THEN** the post is reported as not revised
 
 ### Requirement: The current version's content wholly replaces the original's
 
@@ -227,8 +254,6 @@ Reporting absence rather than a distinct failure keeps the resolver's outcomes t
 Resolving SHALL NOT panic for any contents the log may hold, including ops that do not verify, ops naming absent targets, ops naming themselves, and ops of every kind naming one target at once.
 
 Everything in the log arrived from a peer and is attacker-controlled. A panic here aborts the module process, which turns a malformed or malicious op into a denial of service against the peer that received it.
-
-Where reading a field of the current version requires distinguishing the kinds of op that can carry one, the case that cannot arise SHALL still answer rather than abort. **That case is unreachable by construction and therefore untestable**: the current version is either the original, already established to be a post, or a candidate matched as a version. It is required anyway because the cost of being wrong is asymmetric — an empty answer is a rendering, and an abort is the denial of service this requirement exists to prevent.
 
 #### Scenario: A log of adversarial ops resolves without a panic
 
