@@ -23,12 +23,14 @@ Judge each against the spec:
 - **Remove** what tests an implementation detail rather than a behaviour, or
   what a spec-derived test already covers.
 
-An inherited test is not exempt from the mutation rule below. It is more
-suspect, not less: it was written by whoever wrote the code, so it is the most
-likely to test what was built rather than what was asked for.
+An inherited test is not exempt from the invariant below — it is *more* suspect,
+not less, since it was written by whoever wrote the code and is therefore the
+most likely to pin what was built rather than what was asked for.
 
-Read the dev's handover note on which tests they were least confident in and
-where the spec was silent. A spec that was silent is a finding — report it.
+Read the dev's handover note: which tests they were least confident in, and
+every `NO SPEC:` marker they left. Each marker is behaviour chosen rather than
+specified — keep the marker, and report it so the spec-writer can decide whether
+the choice was right.
 
 ## A test must be able to fail for the reason it names
 

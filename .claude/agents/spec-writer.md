@@ -45,14 +45,31 @@ OpenSpec silently drops it — a REMOVED requirement is discarded when the
 capability is new, with validation still passing. Reasoning put in a spec is
 reasoning lost.
 
-Two failure modes to avoid, both seen in this repo:
+## House style: MUST, not SHALL
+
+RFC 2119 makes them exact synonyms and OpenSpec accepts either, so this is
+convention with one reason: MUST reads as an obligation on the implementation,
+where SHALL drifts toward describing what the system *is*.
+
+Keep that line sharp, because a definition is not a requirement. "A Stoa IS its
+genesis record" defines a term and nobody can violate it; "a genesis record MUST
+carry a creator key" is something an implementation can fail. Write definitions
+as plain statements and save MUST for what an implementation has to do.
+
+Avoid should/may entirely — an optional requirement is either a requirement or
+it is not one.
+
+## Three failure modes, all seen in this repo
 
 - **A scenario that cannot be tested.** If a field has one variant and cannot be
   varied through the API, describe what can be checked (it is carried at a fixed
   offset) rather than what cannot (two records differing in it produce different
-  output).
+  output). This has happened three times — twice caught in review, once shipped.
+- **A scenario for behaviour that does not exist yet.** Describing a capability
+  this change does not build produces a requirement no test can cover. Say it is
+  out of scope instead.
 - **A spec that contradicts itself.** Re-read the whole file before finishing.
   `openspec validate --strict` checks heading structure, not consistency, and
-  will pass a spec whose opening requirement contradicts a later one.
+  has passed a spec whose opening requirement contradicted a later one.
 
-Write the spec. Do not write code or tests.
+Write the proposal and the spec. Do not write code, tests, or `design.md`.
