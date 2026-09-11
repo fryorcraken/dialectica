@@ -2124,6 +2124,44 @@ mod tests {
     }
 
     #[test]
+    fn the_metadata_caps_two_length_bounds_are_reported_distinguishably() {
+        // There are TWO bounds on one length prefix, and they must not collapse
+        // into one error:
+        //
+        //   1. the CAP   — len > MAX_FIELD_LEN            => FieldTooLong
+        //   2. the INPUT — a claim under the cap, past the
+        //                  bytes that remain               => LengthMismatch
+        //
+        // Each is pinned separately elsewhere; nothing pinned that they stay
+        // DIFFERENT, and a decoder reporting either for both would pass every
+        // one of those tests. A caller matching on FieldTooLong to say "no peer
+        // could have sent that" and on LengthMismatch to say "this op is
+        // corrupt" gets both wrong if they merge.
+        //
+        // The op-format analogue of the same property op-model pinned for the
+        // genesis record — two agents reaching it from opposite ends.
+        let title_len_at = 1 + 1 + 32 + 32;
+
+        let mut over_cap = a_metadata_op_with_lengths(4, 4);
+        over_cap[title_len_at..title_len_at + 4]
+            .copy_from_slice(&((MAX_FIELD_LEN + 1) as u32).to_be_bytes());
+
+        // Under the cap on purpose. A claim of u32::MAX would die as
+        // FieldTooLong and never reach the input comparison at all — which is
+        // exactly how the genesis lying-prefix test stopped testing anything
+        // once a cap landed in front of it.
+        let mut past_input = a_metadata_op_with_lengths(4, 4);
+        past_input[title_len_at..title_len_at + 4]
+            .copy_from_slice(&((MAX_FIELD_LEN - 1) as u32).to_be_bytes());
+
+        assert_eq!(
+            Op::decode(&over_cap),
+            Err(OpError::FieldTooLong(MAX_FIELD_LEN + 1))
+        );
+        assert_eq!(Op::decode(&past_input), Err(OpError::LengthMismatch));
+    }
+
+    #[test]
     fn trailing_bytes_after_a_metadata_op_are_refused() {
         // Metadata-specific rather than relying on the generic loop: the
         // decode arm consumes two variable-length fields and then must leave
@@ -2257,7 +2295,11 @@ mod tests {
             policy: Policy::Open,
             title: "Agora".to_string(),
         };
-        let address = genesis.address();
+        // Fallible since main capped the genesis title at `MAX_TITLE_BYTES`;
+        // "Agora" is five bytes, so the error arm is unreachable here.
+        let address = genesis
+            .address()
+            .expect("a five-byte title is well under MAX_TITLE_BYTES");
 
         let rename = Op {
             stoa: address,
@@ -2271,7 +2313,12 @@ mod tests {
 
         // The address is still the genesis record's, and the genesis record
         // still carries its FOUNDING title — both remain answerable.
-        assert_eq!(genesis.address(), address);
+        assert_eq!(
+            genesis
+                .address()
+                .expect("a five-byte title is well under MAX_TITLE_BYTES"),
+            address
+        );
         assert_eq!(genesis.title, "Agora");
         // And the hardcoded address from `stoa.rs`'s pinned known-answer test,
         // so this is checked against a value no code in this test produced.

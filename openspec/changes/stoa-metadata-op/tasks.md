@@ -97,6 +97,25 @@
 
       Inherited, not introduced; fixed for both paths in one commit.
 
+- [x] 4.6 After rebasing onto main's title cap, pin that the op format's TWO
+      length bounds stay distinguishable:
+
+        1. the CAP   — `len > MAX_FIELD_LEN` => `FieldTooLong`
+        2. the INPUT — a claim under the cap but past the remaining bytes
+                       => `LengthMismatch`
+
+      Each was pinned separately; nothing pinned that they stay DIFFERENT, and
+      a decoder reporting either for both passed all of them. The op-format
+      analogue of a property op-model reached independently for the genesis
+      record. Mutation-verified in BOTH directions: the cap reporting
+      `LengthMismatch` fails 7 tests, the input bound reporting `FieldTooLong`
+      fails 4, and the new test is the only one in both sets.
+
+      Note my lying-prefix tests already claimed 1000 bytes — well under
+      `MAX_FIELD_LEN` — so they were never at risk of the defect main had to
+      fix in `stoa.rs`, where a `u32::MAX` claim died on the cap and the
+      lying-prefix path stopped being exercised at all.
+
 ## 5. What the op does not carry
 
 - [x] 5.1 Write `a_metadata_op_carries_no_policy_and_no_ordering_field`: the

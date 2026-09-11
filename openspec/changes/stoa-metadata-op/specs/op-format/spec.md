@@ -74,6 +74,12 @@ The refusal SHALL be reported as an over-long field, distinguishably from runnin
 - **THEN** they are equal
 - **AND** a change to either fails rather than passing quietly
 
+#### Scenario: The cap and the available-input bound are reported distinguishably
+
+- **WHEN** one length prefix claims more than the cap, and another claims less than the cap but more than the input holds
+- **THEN** the first fails as an over-long field and the second as a length mismatch
+- **AND** the two do not collapse into one error, so a caller can tell "no peer could have sent this" from "this op is corrupt"
+
 ### Requirement: Text fields are validated as UTF-8 and not otherwise transformed
 
 Decoding SHALL reject text that is not valid UTF-8, and SHALL NOT normalise, case-fold, reorder, strip or otherwise transform text that is valid.
