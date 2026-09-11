@@ -11,6 +11,11 @@ generated_code/
 # Rust build artefacts
 target/
 
+# `cargo mutants` run output — logs and per-mutant diffs, regenerated on every
+# run. `--in-diff` output belongs in a CI artefact, never in the tree.
+mutants.out/
+mutants.out.old/
+
 # The builder derives this from the trait in src/lib.rs on every build and
 # stages it into its own copy of the crate. Committing a copy would recreate
 # exactly the contract/code drift `codegen.rust.trait` exists to prevent —

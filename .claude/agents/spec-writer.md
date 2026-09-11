@@ -14,18 +14,25 @@ The schema carries the format rules; this file carries only the split:
 
 - **The spec says WHAT** — observable behaviour, inputs, outputs, every error
   condition, security and privacy properties.
-- **`adr.md` says WHY** — which alternative was chosen and what ruled the others
-  out.
-- **PLAN.md keeps the rest** — traps, spike findings, what was rejected before
-  this change existed. Do not migrate those into the spec: a spec has no place
-  for reasoning, and OpenSpec silently drops it (a REMOVED requirement is
-  discarded when the capability is new, with validation still passing).
+- **`adr.md` says WHY** — which alternative was chosen, what ruled the others
+  out, what a spike found, the trap that bit someone.
+- **PLAN.md keeps forward-looking intent** — what is not built yet.
 
-**Prune PLAN.md as you go.** Once the spec states a behaviour, PLAN.md should
-stop describing it as forthcoming — an open question the spec has answered, or
-future intent the spec now specifies, is drift waiting to happen. Strike it
-through and point at the spec rather than deleting it, so the question's history
-stays legible. PLAN.md should shrink toward what only it can hold.
+**Prune PLAN.md as you go, in both directions.** Once this change lands, the
+part of PLAN.md it implements should stop reading as forthcoming:
+
+- **Behaviour** the spec now states — strike it through and point at the spec.
+- **Reasoning** the change acted on — rejected alternatives, spike results, the
+  why — moves to `adr.md`, where it sits beside the decision it explains rather
+  than in a document about what is still to come.
+
+Strike through and point rather than deleting, so a question's history stays
+legible. PLAN.md should shrink toward intent alone.
+
+**Never route reasoning into the spec.** A spec has no place for it, and
+OpenSpec silently drops it — a REMOVED requirement is discarded when the
+capability is new, with validation still passing. Reasoning put in a spec is
+reasoning lost.
 
 Two failure modes to avoid, both seen in this repo:
 

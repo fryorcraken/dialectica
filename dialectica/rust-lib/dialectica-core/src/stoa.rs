@@ -72,6 +72,16 @@ pub enum Policy {
 }
 
 impl Policy {
+    /// Every variant, so a test can iterate them.
+    ///
+    /// Exists because `cargo mutants` found that replacing [`Policy::to_byte`]
+    /// with a hardcoded `0` survived the suite — true while there is one
+    /// variant, and silently wrong the moment there are two. A test iterating
+    /// this fails when a new variant is added without a discriminant.
+    ///
+    /// **Add every new variant here.**
+    pub const ALL: [Policy; 1] = [Policy::Open];
+
     /// Explicit discriminants: these bytes are on the wire and in the address,
     /// so they are part of the format and must not follow declaration order.
     const OPEN: u8 = 0;
@@ -230,6 +240,23 @@ impl Genesis {
 /// slicing at each field is how a decoder acquires a panicking index — and a
 /// panic here is reached from inbound peer data, where PHASE0-FINDINGS §3
 /// measured what an unguarded panic costs: the module process aborts.
+///
+/// **Probably the generic half of op decoding, but not extracted yet.** Every
+/// op will decode attacker-controlled bytes with the same five failure modes
+/// (truncation, trailing bytes, a length prefix lying in either direction, an
+/// unknown version), so this and the length-prefix discipline are the obvious
+/// candidates to share.
+///
+/// It stays private because there is exactly ONE decoder today, and an
+/// abstraction derived from one instance is a guess. The specific reason to
+/// wait: a genesis record is the only op that is self-identifying by hash — its
+/// encoding IS its address preimage — where a post or a moderation op is
+/// addressed by its own id and carries a signature this does not. A generic
+/// framing is therefore likely `(version, type, payload, signature)`, which the
+/// genesis record fits awkwardly.
+///
+/// The second decoder is what will show which parts are genuinely shared. When
+/// it arrives, making this `pub(crate)` and moving it is the cheap half.
 struct Cursor<'a> {
     bytes: &'a [u8],
     at: usize,
@@ -555,6 +582,33 @@ mod tests {
             "80329cf05603a0c9ce7a749a53e271253307ba89d4924856e4017459d03a025f",
             "Stoa address derivation changed"
         );
+    }
+
+    #[test]
+    fn every_policy_round_trips_through_its_discriminant() {
+        // Found by `cargo mutants`: replacing `to_byte` with a hardcoded `0`
+        // survived the whole suite, because `Policy::OPEN` IS 0 while there is
+        // one variant. The moment a second lands, a `to_byte` that ignored its
+        // input would encode every policy as Open — silently, since the
+        // discriminant is inside the address.
+        //
+        // Iterating every variant is what makes this fail then rather than
+        // needing to be remembered. Add new variants to ALL_POLICIES.
+        for policy in Policy::ALL {
+            assert_eq!(
+                Policy::from_byte(policy.to_byte()),
+                Ok(policy),
+                "{policy:?} did not round-trip through its discriminant"
+            );
+        }
+        // Distinct variants must not share a byte, or two policies collide.
+        let mut seen = std::collections::HashSet::new();
+        for policy in Policy::ALL {
+            assert!(
+                seen.insert(policy.to_byte()),
+                "{policy:?} reuses a discriminant"
+            );
+        }
     }
 
     #[test]

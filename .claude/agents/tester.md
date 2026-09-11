@@ -30,35 +30,50 @@ likely to test what was built rather than what was asked for.
 Read the dev's handover note on which tests they were least confident in and
 where the spec was silent. A spec that was silent is a finding — report it.
 
-## Every test must provably be able to fail
+## A test must be able to fail for the reason it names
 
-This is the whole job, and it is not optional. A test that cannot fail for its
-stated reason is worse than no test: it reports safety that was never checked.
+A test that cannot fail is worse than no test: it reports safety that was never
+checked. **Three tests in this repo's history passed for the wrong reason**, and
+all three share one shape:
 
-For each test asserting a security property or an invariant:
-
-1. Break the property in the implementation.
-2. Run the test. **Confirm it fails**, and note the failure output.
-3. Restore the implementation.
-
-Report which mutation you used for each. If a test still passes with its
-property broken, the test is wrong — fix the test, not the mutation.
-
-**Three tests in this repo's history passed for the wrong reason**, and mutation
-is what caught every one:
-
-- A test comparing `"ab"` with `"abc"` to prove a length prefix mattered —
+- Comparing `"ab"` with `"abc"` to prove a length prefix mattered —
   different-length inputs differ either way, so it passed with the prefix
   deleted.
-- Two tests mutating a byte and asserting a hash moved — that is a property of
-  SHA-256, not of the encoding, and both passed with the field removed entirely.
+- Mutating a byte and asserting a hash moved — a property of SHA-256, not of the
+  encoding; passed with the field removed entirely.
+- `assert_eq!(bytes[0], VERSION_1)` — asking the implementation what it wrote
+  and agreeing; passed when the constant changed.
 
-The pattern: **asserting on a derived value tests the derivation, not the
-input.** Assert on the thing itself.
+**The invariant: assert against something the implementation did not produce.**
+A hardcoded expectation, or one derived independently. Anything else is a
+self-consistency check wearing a test's name. `identity.rs`'s
+`the_wire_constants_are_pinned_to_known_answers` is the pattern for a
+consensus-critical constant — hardcoded hex, and an instruction not to update it
+to match.
+
+You do not need to mutation-test every test — that is the reviewer's sampling
+job and it costs real time. Apply the invariant while writing, and reach for a
+mutation when you cannot tell by reading whether a test could fail.
+
+Where a behaviour is known up front, TDD it: write the test, watch it fail, then
+satisfy it. For a bug, that ordering is required — a regression test that has
+never failed proves nothing.
 
 Also beware a constant that looks obviously invalid and is not: all-`0xFF` is a
 *valid* Ed25519 point, so a test using it as a bogus key passes for the wrong
 reason. Probe rather than assume.
+
+## Follow the engineering principles in CLAUDE.md
+
+They apply to test code as much as to the implementation:
+
+- **Make the change easy, then make the easy change.** If a test is awkward to
+  write, that is information about the code, not about the test.
+- **Complexity in the data structure, not the logic.** A table of cases beats
+  four near-identical test functions; when you are writing the fourth variant of
+  one assertion, reshape instead.
+- **One test, one job.** A test asserting three unrelated things reports the
+  first failure and hides the rest.
 
 ## Scope
 

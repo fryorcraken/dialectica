@@ -27,7 +27,19 @@ artifacts:
       visible behaviour, it does not belong here.
 
       **Format**
-      - `### Requirement: <name>`, then SHALL/MUST prose
+      - `### Requirement: <name>`, then normative prose
+
+      **Use MUST, not SHALL.** RFC 2119 makes them exact synonyms and OpenSpec
+      accepts either, so this is a house style with one reason: MUST reads as an
+      obligation on the implementation, where SHALL drifts toward describing
+      what the system is. Keep that line sharp — a definition is not a
+      requirement. "A Stoa IS its genesis record" defines a term and nobody can
+      violate it; "a genesis record MUST carry a creator key" is a requirement
+      an implementation can fail. Write definitions as plain statements and save
+      MUST for what an implementation has to do.
+
+      Avoid should/may entirely: an optional requirement is either a real
+      requirement or not one.
       - `#### Scenario: <name>` with WHEN/THEN bullets — exactly four hashes
       - Every requirement needs at least one scenario
 
@@ -108,13 +120,19 @@ apply:
     Work the tasks in order, marking each complete as you go.
 
     Write the code from the SPEC, not from the tasks — the tasks are an ordering,
-    the spec is the contract. Where the spec is silent, check `adr.md` before
-    inventing an answer, and record a new decision there if you had to make one.
+    the spec is the contract.
 
-    Write tests as you go, and keep them. A separate agent owns the final suite
-    and will adapt, keep or remove them — but developing untested is not the
-    alternative, and a test written while implementing usually encodes an edge
-    case that would otherwise have to be rediscovered.
+    **Where the spec is silent, the kind of decision decides where it goes.** A
+    decision about observable behaviour belongs in the SPEC — report it so the
+    spec-writer can capture it, and mark the test `// NO SPEC: <what you chose>`
+    so it is visible rather than quietly permanent. A decision about technology
+    or strategy goes in `adr.md`, with the alternatives and what ruled them out.
+
+    Write tests as you go. A separate agent owns the final suite and will adapt,
+    keep or remove them — but a test written while implementing usually encodes
+    an edge case that would otherwise have to be rediscovered. TDD where the
+    behaviour is known up front; for a bug it is required, since a regression
+    test that has never failed proves nothing.
 
     Stop and say so if a task cannot be done as written. A task list that was
     wrong is information; silently doing something else is not.

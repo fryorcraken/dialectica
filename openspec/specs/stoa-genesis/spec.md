@@ -7,11 +7,15 @@ Defines what a Stoa's genesis record contains and how it encodes to bytes, so th
 
 ### Requirement: A Stoa is defined by its genesis record
 
-A Stoa SHALL be defined by a genesis record carrying its creator's public key, a posting policy, and a human-readable title.
+A Stoa **is** its genesis record: the record is not metadata describing a Stoa that exists elsewhere, it is the whole of what a Stoa is. That is what makes creation permissionless — there is no registry to register with, so publishing the record is the entire act of creation.
 
-The record SHALL be immutable. Creating a Stoa requires no approval and no registration with any service: publishing the record is the whole act of creation.
+A genesis record MUST carry its creator's public key, a posting policy, and a human-readable title.
+
+The record MUST be immutable. Creating a Stoa requires no approval and no registration with any service: publishing the record is the whole act of creation.
 
 The creator's key in this record is what makes the creator the Stoa's initial sole moderator, so a record whose creator key is absent or malformed does not describe a Stoa at all.
+
+The record's values are **founding** values, not current ones. The record fixes what the Stoa was created as, and therefore what its address commits to; it does not fix what the Stoa is called today. Superseding a title or policy is a separate capability — a moderator-signed metadata op — and is out of scope here. This requirement establishes only that the genesis values are immutable and that changing the displayed title therefore cannot change the address.
 
 #### Scenario: A genesis record yields a Stoa address
 

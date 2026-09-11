@@ -306,6 +306,21 @@ cannot be prevented from *arriving*: SDS has no membership and `senderId` is
 self-asserted. Verification therefore happens on **read**, filtering unsigned or
 badly-signed ops out. The store may hold junk; the reader never trusts it.
 
+**A generic op decoder is coming, and is deliberately not built yet.** Every op
+decodes attacker-controlled bytes with the same failure modes — truncation,
+trailing bytes, a length prefix lying in either direction, an unknown version —
+and the genesis record's decoder (see the `stoa-genesis` spec) already has all
+of them, with a bounds-checked cursor as the reusable half.
+
+It stays specific to one op because there is exactly one decoder, and an
+abstraction derived from a single instance is a guess. The concrete reason to
+wait: a genesis record is the only op **self-identifying by hash** — its
+encoding IS its address preimage — where a post or a moderation op is addressed
+by its own id and carries a signature the genesis record does not. So a generic
+framing probably looks like `(version, type, payload, signature)`, which the
+genesis record fits badly. The second decoder is what shows where the seam
+really is.
+
 ---
 
 ## 4. Addressing and transport
@@ -998,6 +1013,17 @@ own answer:
 - **Stoa metadata** — title, description, policy (§7.1). Owned by the Stoa's
   moderators rather than by any author, so the same moderator-scoped
   last-write-wins rule applies.
+
+  **The genesis record now carries a founding title and policy** (see the
+  `stoa-genesis` spec), which makes the relationship concrete: genesis values
+  are what the *address commits to* and can never change; the metadata op
+  carries what the Stoa is called *today*. A reader prefers the latest valid
+  op and falls back to the genesis values.
+
+  The op itself is not built. What it needs, beyond the last-write-wins rule:
+  whether a metadata op may change `policy` as well as the display fields —
+  tightening a policy retroactively changes who may post, which is a different
+  kind of act from a rename and may warrant a different rule.
 - **The moderator set itself.** Deferred with mutable moderation (§6), and the
   one place where a real ordering decision is still open — a set edited
   concurrently by two moderators is the first genuine merge question this design
