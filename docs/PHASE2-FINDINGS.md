@@ -47,17 +47,21 @@ deliverable SDS hands to the channel layer carries two fields:
     senderId*: SdsParticipantID
 ```
 
-In `handleIncoming`, the fully deserialised SDS message `msg` is in scope and is
-demonstrably read for its ordering fields — `msg.messageId` is used as the
-pending-content stash key — and then only two of them are copied forward:
+In `handleIncoming` (`logos_delivery/channels/scalable_data_sync/scalable_data_sync.nim`),
+the fully deserialised SDS message `msg` is in scope and is demonstrably read
+for its ordering fields — `msg.messageId` is the pending-content stash key on
+line 223 — and then, on the very next line, only two of them are copied forward:
 
 ```nim
+      self.pendingContent[msg.messageId] =
         SdsDeliverable(content: unwrapped.message, senderId: msg.senderId)
 ```
 
-`msg.messageId`, the Lamport timestamp, the causal history and the bloom filter
-are all available on `msg` **at that exact line** and are simply not carried.
-This is the single point where ordering metadata is discarded.
+**The adjacency is the evidence.** `msg.messageId` is used as a key and
+discarded as a value in one statement. The Lamport timestamp, the causal history
+and the bloom filter are equally available on `msg` and equally not carried. The
+same two-field construction is repeated for the immediate-delivery path on line
+232. This is the single point where ordering metadata is discarded.
 
 **Layer 2 — the Reliable Channel API event.** By the time the event type is
 built there is nothing left to drop:
@@ -117,10 +121,20 @@ releases them in causal order, and the receive path emits in that order. So a
 consumer gets correctly-ordered events **and no way to verify the order, detect
 a gap, or re-sort after the fact.**
 
-The cost of that is concrete: the pending-content stash is capped
-(`MaxPendingContent = 32`), and on overflow the oldest pending entry is dropped
-with only a `warn`. **To a consumer that is a message which never arrives, with
-no ordering field that could reveal the hole.** Any future dialectica-side
+The cost of that is concrete: the pending-content stash is capped at
+`MaxPendingContent = 32`, and on overflow the oldest pending entry is evicted
+with only a log line —
+
+```nim
+        self.pendingContent.del(oldest)
+        warn "SDS pending-content stash full, dropping oldest entry",
+          channelId = self.channelId, dropped = oldest
+```
+
+**To a consumer that is a message which never arrives, with no ordering field
+that could reveal the hole.** Note what the eviction picks, too: the first key
+the table iteration yields, which in a hash table is not the oldest by any
+causal or temporal measure despite the message saying "oldest". Any future dialectica-side
 completeness check has nothing at this layer to key on — which is an argument
 for the §13 filing, not merely a curiosity.
 
