@@ -543,6 +543,13 @@ Does not promise:
   own posts.
 - **No membership.** Anyone can join a channel.
 - **No delivery to absent peers.** ACK means "some participants received it".
+- **No ordering metadata reaching the application.** The Lamport total order and
+  the message-id tie-break above are real and are what SDS orders its own log
+  by — but they stop below us. The Reliable Channel API's received-message event
+  carries the payload alone, so neither value reaches a consumer, and
+  `channelMessageReceived` cannot forward what it never got. **Read the promises
+  above as internal to SDS, not as an interface.** §13 has the finding and what
+  each upstream layer would have to add.
 - **150 KiB max message size**, hard cap — a network-wide gossipsub validation
   limit, not unilaterally raisable. See §4.6.
 
@@ -1696,19 +1703,36 @@ thing (§2.3).
   `(target, action, epoch)` tuple" and a tuple needs `action` to be a field.
   Last-write-wins over a set of one was not an ordering, and a moderation
   system with no correction path makes every mistake permanent.
-- **§5.7's ordering rule has no input at the contract we have.** It orders by
-  Lamport timestamp with a message-id tiebreak, and §4.4 has SDS supplying
-  both — but `contracts/delivery_module.lidl` exposes
-  `channelMessageReceived(channelId, senderId, payload, timestamp)`, with no
-  Lamport clock and no SDS message id. `timestamp` is the delivery module's
-  own, and §11 records that its units differ per event.
+- ~~**§5.7's ordering rule has no input at the contract we have.**~~
+  **Answered: the rule stands unchanged; its input is missing upstream, and the
+  gap is a layer below the LIDL contract.** `dialectica-core`'s `arrival::Arrival`
+  records what the transport supplied alongside an op, and `arrival::cmp_ops`
+  applies §5.7's rule to it. No application-level ordering was designed, because
+  SDS's rule — insert by Lamport timestamp, ties by ascending message id — is
+  already §5.7's.
 
-  Ops deliberately carry neither (`op.rs`): a self-asserted Lamport value is
-  forgeable by the author it is meant to order, so inventing a field would be
-  worse than the gap. So either delivery exposes SDS's ordering metadata, or
-  §5.7 needs a rule that runs on what the transport actually provides. **This
-  blocks the op log and the revision/moderation resolvers, not the op format**
-  — which is why the format landed without it. Settle it before the store.
+  The investigation moved where the gap is. It is **not** that
+  `delivery_module.lidl` forgot to forward the fields: the Reliable Channel API's
+  `MessageReceivedEvent`, which the delivery module consumes, carries exactly one
+  field — the reassembled payload — so `channelMessageReceived` never receives
+  them either. Closing this needs a change at both layers, and neither is
+  dialectica's; `openspec/changes/op-ordering/design.md` records the field names
+  and types for filing.
+
+  Two findings worth carrying forward. **`channelMessageReceived`'s `timestamp`
+  is unusable for ordering** — it is the receiving peer's own `CLOCK_REALTIME`
+  read taken when its callback fires, so it differs per peer for one message,
+  which is worse than §11's units problem and worth filing separately as a bug.
+  And **a dialectica-side Lamport clock is the one thing not to build**: SDS's
+  clock advances on traffic no application sees and is initialised from epoch-ms,
+  so a clock advanced on op arrivals could not be made to agree with it — and two
+  orders that disagree produce no error, only two peers rendering a thread
+  differently.
+
+  Until the fields arrive, ops are recorded as unordered and fall back to a
+  defined degraded order (ascending op id, always below any op the transport did
+  order) that is identical on every peer and reports itself as degraded. **The op
+  log and the resolvers are unblocked**: they have a defined thing to key on.
 
 ---
 
