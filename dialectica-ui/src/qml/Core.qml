@@ -1,5 +1,9 @@
 pragma Singleton
-import QtQuick
+// QtQml, not QtQuick: the only type here is `QtObject`, which QtQml provides.
+// Importing QtQuick pulled in the whole graphical stack for nothing and the
+// linter said so ("Unused import"). This file has no visual element at all,
+// which is the point of it.
+import QtQml
 
 // The one place the view talks to the core module.
 //

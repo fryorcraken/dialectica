@@ -331,12 +331,21 @@ jobs:
 
       # Qt6. The Qt5 tools are a trap here (see the note above), so the package
       # names are the qt6 ones and the tool lookup below prefers qt6 paths.
+      #
+      # `qml6-module-qtqml` is what supplies the **`Qt` namespace object's**
+      # qmltypes — `Qt.AlignHCenter`, `Qt.PointingHandCursor`,
+      # `Qt.RightButton`. Without it qmllint resolves none of them and reports
+      # `Property "AlignHCenter" not found on type "Qt"` on perfectly valid
+      # code. It is a separate package from `qml6-module-qtquick` and is easy
+      # to omit, because nothing imports "QtQml" by name — QtQuick pulls it in
+      # at runtime, so the app works and only the LINTER is blind.
       - name: Install Qt
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             qt6-base-dev qt6-declarative-dev \
             qt6-declarative-dev-tools \
+            qml6-module-qtqml qml6-module-qtqml-workerscript \
             qml6-module-qtquick qml6-module-qtquick-controls \
             qml6-module-qtquick-layouts qml6-module-qtquick-templates \
             qml6-module-qtquick-window \
