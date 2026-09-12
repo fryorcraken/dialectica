@@ -357,16 +357,24 @@ a signature.
 
 ### 4.1 One reliability channel per Stoa
 
+**Specified — see the `op-transport` spec**, which carries one channel per Stoa,
+channel identity as a pure function of the Stoa address, the sender identifier
+never reaching an authorisation decision, and the receive-side validation
+boundary. The behaviour below is struck through; the reasoning under it is not,
+because it is what the spec deliberately does not carry.
+
 `channelCreate(channelId, contentTopic, senderId)` decouples channel from topic.
 
-- `contentTopic` = the Stoa, hashed and bucketed: `/dialectica/1/s/<hex>/proto`
-- `channelId` = the Stoa, and **the same value for every peer in it** — it is the
-  rendezvous, not a local handle (§4.3)
+- ~~`contentTopic` = the Stoa, hashed and bucketed: `/dialectica/1/s/<hex>/proto`~~
+- ~~`channelId` = the Stoa, and **the same value for every peer in it** — it is the
+  rendezvous, not a local handle~~
 - `senderId` = **one per user per Stoa, permanent** — every participant's is
   different (the API requires it); what is stable is that a given user keeps
   theirs across sessions. A transport self-filter, not an author identity; see
-  below
-- `threadId` and `parentPostId` live in the **payload**, never the topic
+  below. **Not yet built**: §9.2's MVP ships one identity per user, so the
+  per-Stoa scope this bullet assumes is the destination rather than the present
+  state.
+- ~~`threadId` and `parentPostId` live in the **payload**, never the topic~~
 
 **`senderId` is not an author identity, and the plan should not treat it as
 one.** It exists so SDS can tell a participant's own messages from everyone
@@ -470,12 +478,12 @@ immutability SDS assumes is what §5.2's permanent per-user identity supplies.
 same requirement in informal prose — quote the spec, not the tutorial, when the
 strength of the obligation is the point.)
 
-**So the channel id can carry no per-peer state.** Not a session counter, not a
-local sequence number, not anything that varies with one peer's history. A value
-that differs between peers does not produce an error: it produces two Stoas that
-cannot see each other, silently and permanently. §4.5 states the same rule from
-the other direction — derive `channelId` as a pure function of the addressed
-object.
+~~**So the channel id can carry no per-peer state.**~~ **Specified — the
+`op-transport` spec's "Channel identity is a pure function of the Stoa address"
+carries this, including that a deterministic epoch is not a permitted variant of
+it.** Kept in one line because it is the rule the rest of this section reasons
+about: a value that differs between peers produces no error, it produces two
+Stoas that cannot see each other, silently and permanently.
 
 **Set aside, 2026-09-12: `logos-messaging/logos-delivery#4116`.** The issue
 reports that closing a channel which has received a peer message and then
@@ -490,8 +498,12 @@ That argument is below and rests on the shared node, not on any bug.
 
 **What it does change** is recorded at the end of this section.
 
-**Dialectica closes a channel in two places: when a user leaves a Stoa, and on
-shutdown.** Both, and the second is the one that looks optional and is not.
+~~**Dialectica closes a channel in two places: when a user leaves a Stoa, and on
+shutdown.**~~ **Specified — the `op-transport` spec carries both closes, that the
+shared node is never stopped, that closing is best-effort, and that a closed
+channel is reopenable under the same identity.** The argument for why the second
+close is not optional stays below, since the spec states the obligation and not
+the reasoning.
 
 **The delivery node is not ours to stop, and it outlives us.**
 `delivery_module` is a separate, shared process — `createNode` is called once
@@ -564,7 +576,10 @@ Does not promise:
   own posts.
 - **No membership.** Anyone can join a channel.
 - **No delivery to absent peers.** ACK means "some participants received it".
-- **No ordering metadata reaching the application.** The Lamport total order and
+- **No ordering metadata reaching the application** — ~~and what a receiving peer
+  therefore records~~ **is specified: the `op-transport` spec's "An arrival over
+  this transport carries no ordering metadata" and "The arrival timestamp is a
+  local clock reading and orders nothing".** The Lamport total order and
   the message-id tie-break above are real and are what SDS orders its own log
   by — but they stop below us. What dialectica receives from the delivery
   module is `channelMessageReceived(channelId, senderId, payload, timestamp)`,
@@ -593,10 +608,11 @@ Not built now. Named so the data model does not foreclose it:
 This turns one hot channel into many cold ones and drops the participant set per
 channel to people actually in that conversation.
 
-To keep it cheap: derive `channelId` as a pure function of the addressed object
-— Stoa now, `(stoa, thread)` later — and never let channel identity leak into
-payloads or storage keys. Ops carry `threadId` from day one anyway (the topic
-cannot carry it), so the split becomes a routing change rather than a migration.
+To keep it cheap: ~~derive `channelId` as a pure function of the addressed object~~
+— **specified for the Stoa case in the `op-transport` spec; `(stoa, thread)` is
+the part still ahead** — and never let channel identity leak into payloads or
+storage keys. Ops carry `threadId` from day one anyway (the topic cannot carry
+it), so the split becomes a routing change rather than a migration.
 
 ### 4.6 Images and attachments go to Logos Storage
 
@@ -3685,7 +3701,9 @@ the costs below were named and accepted.
 5. Upvote / downvote
 6. Share a Stoa — copy its address
 7. Join a Stoa by address
-8. **Receive ops from other peers**, over delivery's reliable channel
+8. ~~**Receive ops from other peers**, over delivery's reliable channel~~ —
+   **specified: the `op-transport` spec.** Publishing and receiving both, with the
+   receive-side validation boundary.
 9. **View a feed; view a thread**
 10. **Persistence on disk** of Stoas, identities and messages
 
@@ -3892,10 +3910,15 @@ at build or run time, not review time.
   it double-counts completions.
 - **`createNode` exactly once per context.** The delivery node is a singleton
   per Logos Core instance; `stop()` kills traffic for every module using it.
+  Contracted in the `op-transport` spec; kept here because it presents as a
+  runtime failure in someone else's module.
 - **`messageReceived`'s timestamp is nanoseconds**; every other event is
   ISO-8601 (delivery bug #26).
 - **`messageReceived` fires for your own messages; `channelMessageReceived` does
-  not** — own sends come back as `channelMessageSent`.
+  not** — own sends come back as `channelMessageSent`. The consequence is
+  contracted in the `op-transport` spec ("A peer's own published op is not
+  received back as an arrival"); the asymmetry itself stays here, because it is
+  what makes a missing-own-post bug look like a storage bug.
 
 ---
 
@@ -4143,6 +4166,20 @@ thing (§2.3).
   trying to reconcile with a clock we cannot read and the objection
   disappears. The mistake was letting "we cannot match SDS" stand in for "we
   cannot order".
+
+  **The withdrawal has not reached the spec, and that is an open contradiction
+  rather than a loose end.** `op-ordering`'s leading requirement still states
+  that "A peer SHALL NOT compute a Lamport timestamp of its own, and SHALL NOT
+  maintain a second logical clock alongside the transport's". The plan withdrew
+  that above; the spec has not been changed, so the two disagree today.
+  **Resolving it needs its own change**, because withdrawing the prohibition
+  without the replacement leaves a requirement that forbids nothing and requires
+  nothing in its place — and the replacement is the design this entry says is
+  not done here: an author-set counter is not an ordering until it has a bound,
+  and both adversarial cases below are unaddressed. The `op-transport` spec was
+  written deliberately neutral to how this resolves: it contracts what the
+  transport supplies, which is nothing, and says so without depending on the
+  prohibition being either live or withdrawn.
 
   ### The layering rule, which everything above is a consequence of
 
