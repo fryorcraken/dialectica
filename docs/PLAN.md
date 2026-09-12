@@ -1036,13 +1036,18 @@ each is cheap to avoid now and structural to undo later:
 **The verifier ships in the same change as the field**, and there are now two
 measured instances of the alternative. OpChan's commented-out expiry check is one
 (above). Spasm — a signer-agnostic social protocol, the nearest thing to prior
-art — is the other: its `SpasmEventProofV2` is declared, copied between
-representations, and hashed into the event id, and **nothing anywhere verifies
-it**. Its own test fixtures pass a proof whose value is the literal string
-`"invalid-proof-value"` and assert that the event converts successfully; the only
-assertions about proofs check that mutating one changes the event id. A
-credential field nobody checks is worse than no field at all, because it reads as
-a guarantee to everything downstream.
+art — is the other, and the evidence is an **absence**: its `SpasmEventProofV2` is
+declared, copied between representations, and hashed into the event id, and
+**there is no validator anywhere**. Not a dead helper, not a commented-out check,
+not a TODO. `utils.ts` is six thousand lines, holds the real
+`verifyEthereumSignature` and `getVerifiedSigners`, and contains **zero
+occurrences of "proof" in any casing** — as do `spasm.ts` and `index.ts`.
+Signatures get `ethers.verifyMessage` and a thorough test suite; proofs get
+carried. Its fixtures accordingly ship placeholder proofs (`value:
+"proof-value1"`, `protocol.name: "proof-protocol-name1"`) that convert through and
+are asserted equal to the expected output, so a meaningless proof sails through by
+construction. **A credential field nobody checks is worse than no field at all**,
+because it reads as a guarantee to everything downstream.
 
 **Two properties that sound like one, and the design consequence.** It is
 tempting to divide credentials into self-contained proofs and external lookups,
@@ -1054,7 +1059,10 @@ lives:
   through a sibling module: it depends when, and at what height, it was asked.
   **The rule to keep is that a claim must be verifiable to the same verdict by
   every peer holding it, and a verifier that answers differently to two peers is
-  not a verifier.** Appendix A records the measured failure — OpChan's
+  not a verifier.** "Holding it" carries the load: a peer with no verifier module
+  is not *disagreeing* about the claim, it simply does not have one to evaluate,
+  which is a different axis and is settled under composability below. Appendix A
+  records the measured failure — OpChan's
   proof-of-holding was an HTTP call to a third-party indexer, and "a peer without
   an API key computed different scores".
 - **Assertion freshness** — is what the credential claims *still true*? **Here a
@@ -1083,9 +1091,9 @@ wrong and none is obvious:
 
 - **The window needs a clock every peer agrees on.** A wall-clock timestamp is
   author-asserted, so a lying `createdAt` extends a proof's life and the claimant
-  is exactly the party with the motive. This is §13's unbounded-field problem
-  arriving at credentials; §13 owns the answer, and it is not to be re-derived
-  here.
+  is exactly the party with the motive. This is §13's author-asserted-clock
+  problem — the one it says "must be clamped" — arriving at credentials; §13 owns
+  the answer, and it is not to be re-derived here.
 - **The window belongs to the credential type, not to the forum.** A LEZ balance
   can move in one block; an ENS registration lasts a year. One global constant
   would be wrong for both.
@@ -1130,21 +1138,47 @@ reach for `moderation-resolution`'s requirement that two readers resolving from
 the same ops reach the same outcome, and conclude that divergent module sets break
 it. That applies the wrong section's rule. It governs *moderation*, which must
 converge because a hide binds what everyone sees. **Scoring never had that
-requirement and could not have** — §7.3's vouching is per-reader and never
-published, and §7.2 rule 1 "already says two peers rank differently and that is
-correct". A missing credential module is one more such reason, in a class the
-design already treats as correct.
+requirement and could not have**, and §7.3 is the proof: a vouch is per-reader and
+**never published**, so two readers holding *identical* ops already compute
+different scores by design.
+
+**This is a new cause of that divergence, not the one §7.2 rule 1 names.** Rule 1's
+divergence comes from peers holding different op sets; §7.3's comes from private
+per-reader state; a missing credential module is a third — same ops, different
+module sets. What matters is that §7.3 established the *class*: divergence in
+ranking is correct rather than broken, and the mechanism producing it is free to
+vary.
 
 **The boundary, which is the rule a future reader must not cross:**
 
-> **A proof may influence what a reader sees and how they rank it. It may never
-> determine what binds.**
+> **A supplementary, externally-anchored proof may influence what a reader sees
+> and how they rank it. It may never determine what binds.**
 
 Moderation authority stays convergent, decided from the ops and the moderator set
 alone; relevance and display stay local. **This is the axis §7.3 already drew**
 between a vouch and a moderation — a reader may privately weight whose judgement
-they trust, and that never touches what a moderator's hide does. Credentials land
-on the vouching side of it. The axis is not new; it is newly applied.
+they trust, and that never touches what a moderator's hide does — and §7.2 rule 4
+draws the same line from the other end, where "a credential may amplify promotion
+but never suppression". Credentials of this kind land on the vouching side of it.
+The axis is not new; it is newly applied.
+
+**The qualifier is load-bearing, because §7.1 is the deliberate exception.** A
+token-gated Stoa declares "holds ≥ N of token T" as a **posting policy**, and that
+is a credential which does determine what binds — §7.1 calls it "a claim in §5.5's
+terms" and §7 puts policy gating *first* in the sequence, before credential-gated
+scoring, with "both arrive through §5.5's claims interface." The two are not in
+conflict because they are different things:
+
+- A **genesis-declared posting policy** is immutable, inside the address preimage,
+  and fail-closed by construction — an unknown policy discriminant is refused
+  rather than defaulted (§13). Every peer holds it because every peer hashed it to
+  get the Stoa's address. That is precisely why it *can* gate, and it is the one
+  case where the convergence machinery genuinely is required rather than avoidable.
+- A **supplementary credential** is optional, per-reader, and evaluated by a module
+  a given peer may not have. That is why it may only add weight.
+
+So the rule above governs the second kind. §7.1 is not an exception to be
+reconciled later; it is the reason the qualifier exists.
 
 **A moderator decides what the Stoa honours, and that half does converge.** Which
 NFT series on which chain, which token on which LEZ — that is a judgement about the
@@ -1157,13 +1191,28 @@ and it is clean:
 | **Whether a given reader can evaluate it** | **No, and need not** | Local module set, local score, local display — the two strictly-local effects above |
 
 So the declaration travels the **existing moderator-authority path** and only the
-evaluation is local. **The likely home is a `StoaMetadata` op** (§5.7), because
-this is mutable moderator-authored Stoa state and that is what `StoaMetadata`
-already is: a moderator publishes it, every peer verifies authority on read, and a
-Stoa can change what it honours without minting a new Stoa. The genesis record is
-the **wrong** home for exactly the reason it was right for `policy` — it is
-immutable and address-determining, and a Stoa's accepted proofs will change. **No
-field is designed here and none should be**; this records the shape, not the
+evaluation is local.
+
+**Where it lives is unexamined, and the obvious answer is the one a spec already
+argues against.** A `StoaMetadata` op (§5.7) looks right — mutable,
+moderator-authored, authority checked on read, and a Stoa's accepted proofs will
+change over its life. But the `stoa-metadata` spec carries a requirement titled
+"Current metadata does not include the posting policy", and its reasoning is
+**authorisation-shaped, which a credential declaration also is**: "a rename is
+cosmetic; a policy change is authorisation", and "the fallback rule inverts safely
+for a title and unsafely for a policy" — a peer that missed a *tightening* falls
+back to the looser founding value. A peer missing a declaration that **narrows**
+what a Stoa honours would fall back to honouring **more**, which is the same
+silent widening by the same route.
+
+That spec also names what adding such a field would require: a second accepted
+value so a change is expressible, a settled ordering so "the current declaration"
+is determinable, and a fallback rule specified separately and **fail-closed**. So
+the honest statement is that **a credential declaration needs the `stoa-metadata`
+spec's fail-closed test applied to it, and that has not been done.** Genesis is
+not simply "wrong" either — it is immutable, which is a real cost if accepted
+proofs change, and a real safety property if they should not silently loosen. **No
+field is designed here and none should be**; this records the tension, not the
 encoding.
 
 **A forged declaration must not be able to make a reader install anything or
