@@ -236,8 +236,25 @@ These are structural and bite at build time, not review time.
   `/run/user/1000`) in `[basecamp.profiles.<n>]`. The in-profile `xdg-tmp`
   default overflows the 108-byte `sun_path` cap and **every module segfaults**
   at "Failed to register module for remote access".
-- **`lgs basecamp setup` strips every comment from `scaffold.toml`.** Run
-  `git diff scaffold.toml` after any `setup`.
+- **`lgs basecamp` rewrites `scaffold.toml` and strips every comment — and
+  not only on `setup`.** A plain `lgs basecamp modules`, which reads like a
+  query, deleted 77 lines of comments. Assume **any** `lgs basecamp` verb
+  rewrites the file, and run `git diff scaffold.toml` after every one.
+
+- **`lgs` builds whichever checkout it is run from, worktrees included.**
+  `[modules.*]` uses **relative** flake refs (`path:./dialectica#lgx`),
+  resolved against `scaffold.toml`'s own directory — and `scaffold.toml` is
+  tracked, so each worktree has its own. There is no `--directory` flag and
+  none is needed: the cwd decides.
+
+  **Keep those refs relative.** An absolute path would pin every worktree's
+  build to one checkout, which is the failure this note exists to prevent —
+  and it fails *silently*, with a green build of the wrong tree.
+
+  The awkward part is reaching the worktree at all, since `cd <dir> && lgs …`
+  is the shape that costs a permission prompt. Run `lgs` from a shell already
+  in the worktree, or accept the one prompt — **do not conclude `lgs` cannot
+  target a worktree**, which is the wrong lesson and was drawn once already.
 - **The UI's icon must be a 256×256 PNG**, and the UI module must declare core
   in `dependencies` with **matching versions**.
 
