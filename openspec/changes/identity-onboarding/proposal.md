@@ -24,6 +24,9 @@ change.
   recomputed. This is the substantive new obligation in this change and the one
   worth reviewing hardest — see Decisions below and the spec's requirement
   "A chosen derivation path is recorded, because it cannot be recomputed".
+- **One device holds the master key**, and the path record has exactly one
+  writer. A scope limit taken on purpose; additional devices arrive later through
+  an approved per-device key, which is a separate change.
 - `getCapabilities` gains no new shape and **its derivation is unchanged**; it
   begins answering `canPost: true` because a keystore now exists.
 
@@ -156,16 +159,54 @@ recorded as unsettled because nobody has decided it.
   open explicitly; writing only on selection is chosen because it never persists
   a choice the user did not make. Losing a slate costs a click, because nothing
   was published.
-- **Is a passphrase required?** **UNSETTLED, and recorded as such.** The keystore
-  is Argon2id over a passphrase and the MVP has no passphrase UI. A fixed
-  development passphrase is refused outright — it would be shared by every
-  install and known to every reader of the source, while the file recorded itself
-  as encrypted, which is protection that reads as strong. The spec requires only
-  that whichever protection is applied be **recorded in the file and reportable
-  to the caller**, so an unencrypted keystore is a state the interface can name
-  rather than a silent default. Choosing between "prompt", "environment variable
-  only" and "unencrypted with a visible warning" is a product decision and is
-  out of scope here.
+- **Is a passphrase required?** **UNSETTLED, and deferred by the owner** — *"fine
+  to not spec a password for now"*. The keystore is Argon2id over a passphrase and
+  the MVP has no passphrase UI. The spec requires only that whichever protection
+  is applied be **recorded in the file and reportable to the caller**, so an
+  unencrypted keystore is a state the interface can name rather than a silent
+  default.
+
+  Two things the spec records so the question is not later thought answered. **A
+  fixed passphrase compiled into the build is refused outright**: identical across
+  every install, readable in the source, defending a stolen file against nobody —
+  while the file records itself as encrypted. The failure mode is not weak
+  protection but protection that reads as strong, which is worse than recorded
+  plaintext, because an audit can see plaintext. And **approving a second device's
+  key does not resolve it**: see the device-portability decision below.
+
+### One device holds the master key, and a second device gets an approved key
+
+The owner's scope limit: *"it's fine for now to assume ONE main device that has
+root master key"*, with a second instance — a phone, a storage-backup daemon —
+expected to *"generate an ephemeral key on 2nd device and approved"*, so the
+master key never leaves the first device.
+
+**Taking the single-device limit buys the absence of a class of problem**, which
+is why it is worth a requirement rather than being left implicit. With one writer
+of the path record there is no reconciliation between divergent records, no
+question of which device's record is authoritative, and no per-device path
+allocation to keep disjoint. It also simplifies the deferred backup: a restore
+targets that one device rather than being a sync protocol between peers.
+
+The second-device approval flow is **recorded as direction and not specified
+here** — it needs its own capability — but it is recorded so that the
+single-writer requirement is not misread as a claim that additional devices are
+impossible.
+
+**It does not help the passphrase conundrum, and the two are easy to conflate.**
+They concern different things:
+
+- Approving a second device's key is about **authorisation**: how another instance
+  signs without holding the master key. It is sound, and it reduces how many
+  devices hold the master key at all — arguably the larger security win.
+- The fixed-passphrase problem is about **encryption at rest of the master key on
+  the one device that has it**. That file still exists, still encrypted under
+  whatever key, and if that key were a source constant it would still be worthless
+  against a stolen disk. Nothing a second device does supplies device one with
+  something to encrypt under.
+
+So the second-device design is welcome and orthogonal. The passphrase question
+stays open on its own terms.
 
 ### A correction this proposal exists partly to record
 

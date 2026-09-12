@@ -196,6 +196,36 @@ does not belong in the keystore file, whose every field is accounted for.
 - **THEN** every recorded pairing of Stoa and path can be read back
 - **AND** reading them requires nothing beyond the stored record itself
 
+### Requirement: One device holds the master key, and the record has one writer
+
+The master key SHALL be held on a single device, and the record of chosen
+derivation paths SHALL have exactly one writer.
+
+This is a deliberate scope limit rather than a property of the design, and taking
+it buys the absence of a whole class of problem: with one writer there is no
+reconciliation between divergent records, no question of which device's record is
+authoritative, and no per-device path allocation to keep disjoint. A restore is a
+restore onto that device, not a sync protocol between peers.
+
+**Additional devices are not this capability's concern**, and the intended shape
+is recorded so that this requirement is not mistaken for a claim that additional
+devices are impossible: a second instance — a phone, or a daemon performing
+storage backups — would generate its own key locally and have it approved by the
+device holding the master key, so that the master key never leaves the one device.
+Specifying that approval is a separate change with its own capability.
+
+#### Scenario: The record is written by one writer
+
+- **WHEN** chosen paths are recorded
+- **THEN** the module is the only writer of that record
+- **AND** no reconciliation between two versions of it is required
+
+#### Scenario: A restore targets the device holding the master key
+
+- **WHEN** a record is restored alongside a master key
+- **THEN** the identities in use are those the record names
+- **AND** no other device's record participates
+
 ### Requirement: The interface can state that identity recovery needs the record
 
 The module SHALL make available, to a caller, that a master key alone is not
@@ -291,8 +321,29 @@ none is supplied, and it records which. A caller that is not told cannot say whi
 of the two happened, and "the secret on your disk is in the clear" is not a fact a
 user should have to read the source to learn.
 
-This requirement is about reporting, not about which protection to apply. Whether a
-passphrase is obtained, and how, is not settled by this capability.
+This requirement is about reporting, not about which protection to apply. **Whether
+a passphrase is obtained, and how, is deliberately not settled** — the owner has
+deferred it, and this capability requires only that whichever protection applies be
+recorded in the file and reportable, so that an unencrypted keystore is a state the
+interface can name rather than a silent default.
+
+Two things are worth stating so that the question is not later thought answered
+when it is not:
+
+- **A single fixed passphrase compiled into the build is not an option**, however
+  it is labelled. It would be identical across every install and readable in the
+  source, so it defends a stolen keystore file against nobody — while the file
+  records itself as encrypted and every inspection of it, including this project's
+  own, reports it as protected. The failure mode is not weak protection but
+  protection that reads as strong, which is worse than `Protection::None`: an
+  audit can see the latter.
+- **Approving a second device's key does not resolve this.** The two concern
+  different things. A second device generating its own key and having it approved
+  is about *authorisation* — how another instance signs without holding the master
+  key — and it usefully reduces how many devices hold the master key at all. But
+  the master key still rests encrypted on the one device that has it, and what it
+  is encrypted under is untouched by anything a second device does. The questions
+  are adjacent and independent.
 
 #### Scenario: An encrypted store is reported as encrypted
 
