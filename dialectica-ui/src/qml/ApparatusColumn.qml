@@ -21,6 +21,6 @@ Rectangle {
         anchors.topMargin: Theme.cardPaddingY
         spacing: 18
 
-        Text { text: "APPARATUS"; font: Theme.label; color: Theme.inkMuted }
+        Text { text: "APPARATUS"; font: Theme.label; color: Theme.inkMuted; textFormat: Text.PlainText }
     }
 }

@@ -20,6 +20,7 @@ Column {
         text: "\u25B2"
         font.pixelSize: 15
         color: root.vote > 0 ? Theme.ink : Theme.rule2
+        textFormat: Text.PlainText
         MouseArea {
             anchors.fill: parent
             enabled: root.interactive
@@ -33,6 +34,7 @@ Column {
         text: Math.max(0, root.score)        // the floor, applied in one place
         font: Theme.address
         color: root.score > 0 ? Theme.ink : Theme.inkMuted
+        textFormat: Text.PlainText
     }
 
     Text {
@@ -40,6 +42,7 @@ Column {
         text: "\u25BC"
         font.pixelSize: 15
         color: root.vote < 0 ? Theme.ink : Theme.rule2
+        textFormat: Text.PlainText
         MouseArea {
             anchors.fill: parent
             enabled: root.interactive

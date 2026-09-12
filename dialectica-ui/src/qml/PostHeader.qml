@@ -43,7 +43,7 @@ RowLayout {
         color: Theme.ink
         implicitWidth: modLabel.implicitWidth + 14
         implicitHeight: modLabel.implicitHeight + 4
-        Text { id: modLabel; anchors.centerIn: parent; text: "MODERATOR"; font: Theme.label; color: Theme.paper }
+        Text { id: modLabel; anchors.centerIn: parent; text: "MODERATOR"; font: Theme.label; color: Theme.paper; textFormat: Text.PlainText }
     }
 
     Rectangle {                          // YOU VOUCHED — visible to its owner only
@@ -53,7 +53,7 @@ RowLayout {
         border.color: Theme.accent
         implicitWidth: vouchLabel.implicitWidth + 12
         implicitHeight: vouchLabel.implicitHeight + 4
-        Text { id: vouchLabel; anchors.centerIn: parent; text: "YOU VOUCHED"; font: Theme.label; color: Theme.accent }
+        Text { id: vouchLabel; anchors.centerIn: parent; text: "YOU VOUCHED"; font: Theme.label; color: Theme.accent; textFormat: Text.PlainText }
     }
 
     Text {                               // edited — a state, never a version number
@@ -61,6 +61,7 @@ RowLayout {
         text: "edited"
         font: Theme.note
         color: Theme.accent
+        textFormat: Text.PlainText
     }
 
     Item { Layout.fillWidth: true }

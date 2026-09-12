@@ -32,6 +32,7 @@ RowLayout {
             text: root.label
             font: Theme.label
             color: root.caveat ? Theme.accent : Theme.inkMuted
+            textFormat: Text.PlainText
         }
         Text {
             text: root.body
@@ -39,6 +40,9 @@ RowLayout {
             color: Theme.inkSoft
             wrapMode: Text.WordWrap
             lineHeight: 1.4
+            // `body` is a bound property, so a caller may one day put a
+            // peer-supplied string here. AutoText would sniff it.
+            textFormat: Text.PlainText
             Layout.fillWidth: true
         }
         Text {
@@ -46,6 +50,7 @@ RowLayout {
             text: root.linkText
             font: Theme.bodySmall
             color: Theme.accent
+            textFormat: Text.PlainText
             MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor

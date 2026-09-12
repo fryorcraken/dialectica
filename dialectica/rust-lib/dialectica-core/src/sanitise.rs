@@ -107,11 +107,31 @@ impl Sanitised {
 ///   space inside a word breaks a reader's string comparison while rendering
 ///   identically.
 /// - `U+FEFF` — zero-width no-break space, the BOM in its in-band spelling.
+/// - `U+2060..=U+2064` — word joiner and the invisible operators (function
+///   application, times, separator, plus). **Added by review, and the finding
+///   is worth keeping** because the list was incomplete against its own stated
+///   criterion rather than against some wider standard: `U+2060` is the
+///   documented non-deprecated replacement for `U+FEFF` in exactly the
+///   word-joining role, so `sanitise("we\u{2060}ll")` and
+///   `sanitise("we\u{FEFF}ll")` were doing the same job and getting different
+///   answers. A rule that produces two answers for one job is the shape a
+///   bypass is built from.
 /// - `U+061C` — Arabic letter mark, a bidi control that is not in either range
 ///   above and does the same thing.
 /// - `U+200E`, `U+200F` — left-to-right and right-to-left marks. Adjacent to the
 ///   zero-width run and deliberately included: they are directional controls
 ///   with no glyph, which is this function's whole criterion.
+///
+/// - `U+FFF9..=U+FFFB` — the interlinear annotation delimiters. Review called
+///   these arguable and left the call here; they are **in**, because they meet
+///   the stated criterion exactly: they have no glyph and they restructure the
+///   text around them, marking a run as an annotation anchored to another run.
+///   Unicode's own guidance is that they are not for open interchange and
+///   should be stripped by a receiver, which is precisely this function's
+///   position. The cost of including them is a post that legitimately uses
+///   interlinear annotation rendering as plain text with a "3 removed" chip;
+///   the cost of omitting them is a glyphless construct that can reorder what
+///   a reader sees. The second is the failure this module exists to prevent.
 ///
 /// **Whitespace is NOT here, and that is the boundary worth being careful
 /// about.** A space, a tab and a newline are invisible in the sense of having no
@@ -124,8 +144,10 @@ fn is_invisible(c: char) -> bool {
         | '\u{2066}'..='\u{2069}'
         | '\u{200B}'..='\u{200D}'
         | '\u{200E}' | '\u{200F}'
+        | '\u{2060}'..='\u{2064}'
         | '\u{061C}'
         | '\u{FEFF}'
+        | '\u{FFF9}'..='\u{FFFB}'
     )
 }
 
@@ -268,6 +290,12 @@ mod tests {
     /// not marked — and they SHOULD survive, because each asserts that the
     /// sanitiser leaves something alone. A negative test that failed against a
     /// no-op would be asserting the wrong thing.
+    ///
+    /// The three tests covering `U+2060..=U+2064` and `U+FFF9..=U+FFFB` were
+    /// checked the same way, against the narrower list they were written to
+    /// correct: exactly those three failed and the other 23 passed, so each
+    /// pins the range it names rather than something a neighbouring range
+    /// already covered.
     fn assert_did_something(input: &str, out: &Sanitised) {
         assert!(
             out.text != input || !out.is_clean(),
@@ -335,6 +363,48 @@ mod tests {
     }
 
     #[test]
+    fn the_word_joiner_and_the_invisible_operators_are_removed() {
+        // Found by review: the list was incomplete against its OWN criterion.
+        // U+2060 WORD JOINER is the documented non-deprecated replacement for
+        // U+FEFF in the word-joining role, so before this the two characters
+        // did the same job and got different answers — which is the shape a
+        // bypass is built from, not merely an omission.
+        for c in ['\u{2060}', '\u{2061}', '\u{2062}', '\u{2063}', '\u{2064}'] {
+            let input = format!("we{c}ll");
+            let out = sanitise(&input);
+            assert_eq!(out.removed, 1, "U+{:04X} was not removed", c as u32);
+            assert_eq!(out.text, "well");
+            assert_did_something(&input, &out);
+        }
+    }
+
+    #[test]
+    fn the_word_joiner_and_the_bom_now_get_the_same_answer() {
+        // The regression stated as the property rather than as two separate
+        // counts: these two characters are interchangeable for the same job,
+        // so a sanitiser treating them differently is wrong whichever way the
+        // difference runs. This fails against the pre-review list.
+        let joiner = sanitise("we\u{2060}ll");
+        let bom = sanitise("we\u{FEFF}ll");
+        assert_eq!(joiner, bom, "U+2060 and U+FEFF must be handled identically");
+        assert_eq!(joiner.removed, 1);
+    }
+
+    #[test]
+    fn the_interlinear_annotation_delimiters_are_removed() {
+        // Review left this call to me and I included them: they have no glyph
+        // and they restructure the text around them, which is the criterion.
+        // Unicode's own guidance is that they are not for open interchange and
+        // a receiver should strip them.
+        for c in ['\u{FFF9}', '\u{FFFA}', '\u{FFFB}'] {
+            let input = format!("a{c}b");
+            let out = sanitise(&input);
+            assert_eq!(out.removed, 1, "U+{:04X} was not removed", c as u32);
+            assert_eq!(out.text, "ab");
+        }
+    }
+
+    #[test]
     fn the_boundary_characters_around_each_range_are_kept() {
         // THE boundary test, at the boundary rather than far past it. This
         // project's defect family includes "a boundary test that tests a value
@@ -346,7 +416,12 @@ mod tests {
         for c in [
             '\u{2029}', // just below 202A
             '\u{202F}', // just above 202E — NARROW NO-BREAK SPACE, a real space
-            '\u{2065}', // just below 2066
+            '\u{205F}', // just below 2060 — MEDIUM MATHEMATICAL SPACE, real
+            '\u{2065}', // between 2064 and 2066 — the one gap between the two
+            // removed ranges, and the only code point in it. A range written
+            // as 2060..=2069 would swallow it; it is unassigned, but a
+            // sanitiser that cannot tell the two ranges apart has stopped
+            // describing what it claims to.
             '\u{206A}', // just above 2069
             '\u{200A}', // just below 200B — HAIR SPACE, a real space
             '\u{2010}', // above the 200E/200F pair — HYPHEN
@@ -354,6 +429,9 @@ mod tests {
             '\u{FF00}', // just above FEFF
             '\u{061B}', // just below 061C
             '\u{061D}', // just above 061C
+            '\u{FFF8}', // just below FFF9
+            '\u{FFFC}', // just above FFFB — OBJECT REPLACEMENT CHARACTER,
+            // which DOES have a visible rendering and is content
         ] {
             let input = format!("a{c}b");
             let out = sanitise(&input);

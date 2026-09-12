@@ -94,6 +94,20 @@ ScreenFrame {
             return
         }
 
+        // A success MUST carry `items`. Core guarantees the two shapes are
+        // disjoint — `error_json` never emits `items` and the page shape never
+        // emits `error`, with a wire test asserting the two replies differ —
+        // but "empty and unreadable must never look alike" is the whole point
+        // of this screen, so it does not rest on a guarantee made one module
+        // away. A reply that is neither shape is a failure here rather than an
+        // `undefined` assigned to `rows`, which would render as an empty feed.
+        if (reply.value.items === undefined || !Array.isArray(reply.value.items)) {
+            screen.readState = "failed"
+            screen.failure = "The core module answered without a list of posts, "
+                           + "so what it holds for this Stoa is unknown."
+            return
+        }
+
         screen.rows = reply.value.items
         screen.hasMore = reply.value.hasMore === true
         screen.failure = ""
@@ -132,6 +146,15 @@ ScreenFrame {
 
         Item { Layout.fillWidth: true }
 
+        // The row is a Repeater over a model, which is what SPEC.md requires:
+        // an ordering must be able to disappear without the layout changing.
+        //
+        // There is deliberately NO click handler. With one ordering there is
+        // nothing to select, and `reload()` does not read `ordering` — so a
+        // handler that set it and re-read the feed was code that ran and
+        // changed nothing, which is worse than absent: it reads as a working
+        // control. It arrives with the second ordering, which is the change
+        // that gives it something to do.
         Repeater {
             model: screen.orderings
             delegate: Text {
@@ -140,16 +163,6 @@ ScreenFrame {
                 font: Theme.bodySmall
                 color: screen.ordering === modelData.key ? Theme.ink : Theme.inkMuted
                 textFormat: Text.PlainText
-
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                        screen.ordering = modelData.key
-                        screen.page = 0
-                        screen.reload()
-                    }
-                }
             }
         }
 
@@ -160,6 +173,13 @@ ScreenFrame {
             text: "SHOW HIDDEN"
             font: Theme.label
             color: screen.includeHidden ? Theme.accent : Theme.inkMuted
+            // Explicit even though the text is a literal today. QML's default
+            // is AutoText, which SNIFFS its input and switches to rich text
+            // when the string looks like markup — so an element left on the
+            // default is one dynamic binding away from rendering peer markup,
+            // and nothing about that change would look like it touched
+            // rendering. CI now greps for this on every Text.
+            textFormat: Text.PlainText
 
             MouseArea {
                 anchors.fill: parent
@@ -296,7 +316,11 @@ ScreenFrame {
             // peer count available, so the copy string's "%1 PEERS REACHABLE"
             // half is deliberately not used.
             Text {
-                text: "STORE READ OK · 0 POSTS HELD"
+                // Bound, not a literal reading "0". It only renders when the
+                // list is empty, so the literal was accurate — and a literal
+                // among bound neighbours is the kind of thing that stays
+                // accurate right up until the visibility condition changes.
+                text: "STORE READ OK · " + screen.rows.length + " POSTS HELD"
                 font: Theme.label
                 color: Theme.inkMuted
                 textFormat: Text.PlainText

@@ -25,6 +25,7 @@ Rectangle {
         text: root.text
         font: Theme.body
         color: root.filled ? Theme.paper : Theme.ink
+        textFormat: Text.PlainText
     }
 
     MouseArea {
