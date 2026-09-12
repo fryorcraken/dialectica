@@ -282,23 +282,6 @@ pub enum Unlock {
 /// module doc.
 pub const PASSPHRASE_ENV: &str = "DIALECTICA_PASSPHRASE";
 
-/// The derivation context [`Keystore::creator_public_key`] uses.
-///
-/// **All zeros, and it is a domain rather than a Stoa.** A real Stoa address is
-/// the output of [`crate::identity::stoa_address`], a SHA-256 over a genesis
-/// record, so no record anyone can construct hashes to this value — finding one
-/// would be a preimage attack on the hash. That is what makes it safe to reuse
-/// `derive_stoa_key`'s machinery for a purpose that is not a Stoa, rather than
-/// adding a second derivation function whose salt would then have to be kept
-/// distinct from that one's forever.
-///
-/// **Address-determining, and therefore pinned by a hardcoded assertion.** Every
-/// Stoa a user creates hashes this key into its address, so changing this constant
-/// re-mints the creator identity of every Stoa they have made — with no error
-/// anywhere, because each peer stays internally consistent. `cargo mutants`
-/// mutates functions and not `const`s, so only a deliberate assertion pins it.
-const CREATOR_KEY_DOMAIN: Address = Address::from_bytes([0u8; 32]);
-
 /// How to open the keystore, decided from the file's own state and the
 /// environment.
 ///
@@ -648,12 +631,18 @@ impl Keystore {
         }
     }
 
-    /// The per-Stoa signing key for this identity (§5.2).
+    /// The per-Stoa signing key for this identity (§5.2's destination).
     ///
-    /// There is no accessor for the root itself, and that is deliberate: the
-    /// root is the one value that, if leaked, yields every Stoa identity a user
-    /// has, and nothing outside this type needs it. Callers need keys that
+    /// There is no accessor for the root secret itself, and that is deliberate:
+    /// the root is the one value that, if leaked, yields every Stoa identity a
+    /// user has, and nothing outside this type needs it. Callers need keys that
     /// *sign*, which is what this hands back.
+    ///
+    /// **Built and, in the MVP, not called by any handler** — see
+    /// [`Keystore::identity_key`], which is the key the module actually signs and
+    /// creates with today. This is kept because §5.2 is where identity is going
+    /// and PLAN.md §9.2 says so in as many words: restoring per-Stoa identity is
+    /// switching this call back on, not a redesign.
     pub fn stoa_key(&self, stoa: &Address) -> SecretKey {
         crate::identity::derive_stoa_key(&self.root, stoa)
     }
@@ -669,46 +658,38 @@ impl Keystore {
         self.stoa_public_key(stoa).address()
     }
 
-    /// The public key a Stoa this identity creates names as its creator.
+    /// **The** signing key of this identity: the root key itself, used directly.
     ///
-    /// # Why this is not a per-Stoa key, and why that is a decision rather than
-    /// an oversight
+    /// This is the key the module signs, creates and moderates with today, and it
+    /// is one key across every Stoa. That is PLAN.md §5.2's MVP subsection
+    /// applied literally — *"one identity per user means **not calling**
+    /// `derive_stoa_key` and signing with the root key directly"* — and the
+    /// reasoning, including what it costs, lives in `design.md` under Decisions
+    /// rather than here.
     ///
-    /// §5.2 gives a user one identity **per Stoa**, derived from the root and the
-    /// **Stoa's address**. For a creator key that derivation is circular: the
-    /// address is the hash of the record, and the record is what names the
-    /// creator, so the address is not knowable until after the creator is chosen.
-    /// There is no per-Stoa key to derive from a Stoa that does not exist yet.
+    /// The one thing worth stating at the call site: **there is exactly one
+    /// derivation position, so a creator and a poster cannot be two keys.** A
+    /// Stoa's creator is its sole moderator, and a creator key the peer never
+    /// signs with is a Stoa nobody can moderate — permanently, because the
+    /// creator is fixed inside the address preimage.
     ///
-    /// So this derives from a **fixed, named domain** instead of from a Stoa
-    /// address — the empty derivation context, which no real Stoa address can
-    /// collide with, since [`crate::identity::stoa_address`] is a hash and
-    /// therefore never all-zero by any means anyone can arrange.
-    ///
-    /// # What this costs, stated plainly
-    ///
-    /// **A creator key is linkable across every Stoa one peer creates**, which is
-    /// exactly what §5.2's per-Stoa identity exists to prevent for posting. That
-    /// is a real privacy cost and it is recorded rather than hidden: the spec is
-    /// silent on which key a creation uses, so this is unspecified behaviour and
-    /// `wire.rs` carries the `NO SPEC:` marker for it.
-    ///
-    /// The alternatives, and why each was declined:
-    ///
-    /// - **Derive from the title.** Then two Stoas with the same title share a
-    ///   creator key, and the address is a function of the title alone — so a
-    ///   third party could compute a peer's address for any title, which is worse
-    ///   than linkability.
-    /// - **A fresh random key per creation.** The root secret is the only thing
-    ///   backed up, so a key minted outside it is a moderator key that vanishes
-    ///   with the device. A Stoa whose sole moderator's key is unrecoverable can
-    ///   never be moderated again, and the address cannot be un-minted.
-    /// - **Take the key from the caller.** The spec forbids it in as many words,
-    ///   and for the right reason.
-    ///
-    /// Whoever specifies this should know all three were considered.
-    pub fn creator_public_key(&self) -> PublicKey {
-        self.stoa_public_key(&CREATOR_KEY_DOMAIN)
+    /// Infallible: every 32-byte string is a valid Ed25519 seed, and the root is
+    /// 32 bytes by its own type. The `expect` is unreachable rather than
+    /// optimistic.
+    pub fn identity_key(&self) -> SecretKey {
+        SecretKey::from_bytes(self.root.as_slice())
+            .expect("the root secret is 32 bytes, which is always a valid seed")
+    }
+
+    /// The public half of [`Keystore::identity_key`] — what a genesis record
+    /// names as its creator, and what an op published now is attributed to.
+    pub fn identity_public_key(&self) -> PublicKey {
+        self.identity_key().public_key()
+    }
+
+    /// The address this identity is known by — what the capability probe reports.
+    pub fn identity_address(&self) -> Address {
+        self.identity_public_key().address()
     }
 
     /// Load and unlock a keystore.
@@ -2953,93 +2934,130 @@ mod tests {
     }
 
     #[test]
-    fn the_creator_key_domain_is_pinned_to_a_known_answer() {
-        // ADDRESS-DETERMINING. Every Stoa a user creates hashes their creator key
-        // into its address, so changing this domain re-mints the creator identity
-        // of every Stoa they have made — with no error anywhere, because each peer
-        // stays internally consistent.
+    fn the_identity_key_is_pinned_to_a_known_answer() {
+        // ADDRESS-DETERMINING. Every Stoa a user creates hashes this key into its
+        // address, so a change here re-mints the creator identity of every Stoa
+        // they have made — with no error anywhere, because each peer stays
+        // internally consistent.
         //
-        // Hardcoded and asserted through the DERIVED KEY, not only the domain:
-        // asserting `CREATOR_KEY_DOMAIN == [0;32]` alone would pass for an
-        // implementation that ignored the constant. The hex below is the public
-        // key a keystore rooted at `[7; 32]` presents as a creator, and it was
-        // obtained by running the derivation — but it is frozen here, so a change
-        // to the salt, the HKDF, or the domain fails this rather than passing
-        // quietly.
+        // Frozen hex rather than a re-derivation, so the assertion is not the
+        // implementation agreeing with itself. It is the Ed25519 public key of
+        // the seed `[7; 32]`, and an `identity_key` that expanded, hashed or
+        // domain-separated the root instead of using it directly fails this.
+        //
+        // What this catches that the sibling test below does NOT, stated so the
+        // overlap is visible: that test re-derives through
+        // `SecretKey::from_bytes`, so both would move together under a change to
+        // the SCHEME — a different curve, a different seed-to-key step. Only this
+        // frozen value refuses that silently.
         //
         // If this fails, do NOT update the expected value to match. Work out what
         // changed and whether the Stoas anyone has already created can survive it.
         assert_eq!(
-            *CREATOR_KEY_DOMAIN.as_bytes(),
-            [0u8; 32],
-            "the creator key derivation domain changed"
-        );
-        assert_eq!(
-            a_keystore(7).creator_public_key().to_hex(),
-            "9fa53303ce8e3d36c4a0dc16e196f179250ef351fb780a5c523080f7245227d6",
-            "the creator key derivation changed"
+            a_keystore(7).identity_public_key().to_hex(),
+            "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c",
+            "the identity key derivation changed"
         );
     }
 
     #[test]
-    fn the_creator_key_is_not_any_real_stoas_identity() {
-        // The domain is not a Stoa, and the property that makes it safe to reuse
-        // `derive_stoa_key` for it: a real Stoa address is a SHA-256 over a genesis
-        // record, so no record anyone can construct hashes to all-zero. A creator
-        // key colliding with some Stoa's posting identity would link the two.
+    fn no_stoa_address_a_caller_can_name_reaches_the_identity_key() {
+        // The security property the deleted `CREATOR_KEY_DOMAIN` did NOT have.
         //
-        // # WHAT THIS TEST CAN AND CANNOT ESTABLISH
+        // Its justification was that no genesis record hashes to all-zero, so no
+        // real Stoa address could collide with the domain. That was true about
+        // records and irrelevant about arguments: `get_capabilities` takes a
+        // caller-supplied hex string, and nothing constrained it to be an address
+        // any record produced — so `{"stoa":"00…00"}` reached the creator identity
+        // through `stoa_address`, and a later signing path taking a caller's
+        // address would have signed under the moderator key.
         //
-        // **It cannot establish the general claim, and no test can.** "No real
-        // Stoa address is the creator domain" rests on SHA-256 preimage
-        // resistance, which is not checkable by enumeration: the four cases below
-        // are four points out of 2^256, so a domain colliding with any Stoa they
-        // do not name passes them.
-        //
-        // Measured, so the limit is stated rather than assumed: with the domain set
-        // to `stoa_address(b"Agora")` — a value this list DOES contain — the loop
-        // fails; with it set to 32 arbitrary non-zero bytes, the loop PASSES and
-        // only `the_creator_key_domain_is_pinned_to_a_known_answer` catches the
-        // change. So the pinning test is the one doing the load-bearing work, and
-        // this one is a spot check beneath it.
-        //
-        // What it does establish is narrower and still worth having: the derivation
-        // is **injective over its context** — the same root under two different
-        // contexts gives two different keys — so the creator key is not a value
-        // every Stoa's posting identity also happens to be. `assert_ne` over four
-        // contexts would fail for a `stoa_public_key` that ignored its argument, or
-        // a `creator_public_key` that returned the root key some other path also
-        // returns.
-        //
-        // The structural argument, which is what actually makes the domain safe,
-        // lives on `CREATOR_KEY_DOMAIN` and is not a test's to make.
+        // That is now closed by CONSTRUCTION rather than by a check: the identity
+        // key takes no address at all, so there is no argument to choose. This
+        // test pins the consequence — for every context a caller could name,
+        // including the old domain, the per-Stoa derivation stays a DIFFERENT key
+        // from the one a creation and the probe use.
         let ks = a_keystore(7);
-        let creator = ks.creator_public_key().to_hex();
-        for name in [
-            b"a genesis record".as_slice(),
-            b"".as_slice(),
-            b"Agora".as_slice(),
-            &[0u8; 32],
+        let identity = ks.identity_public_key().to_hex();
+        for bytes in [
+            [0u8; 32],
+            [0xffu8; 32],
+            *crate::identity::stoa_address(b"Agora").as_bytes(),
         ] {
-            let stoa = crate::identity::stoa_address(name);
-            // The fixture must not be the domain itself, or the assertion below
-            // would be asserting a collision must exist rather than must not.
             assert_ne!(
-                stoa.as_bytes(),
-                CREATOR_KEY_DOMAIN.as_bytes(),
-                "a fixture Stoa address hashed to the creator domain, which would \
-                 be a SHA-256 preimage — the fixture is wrong, not the code"
-            );
-            assert_ne!(
-                ks.stoa_public_key(&stoa).to_hex(),
-                creator,
-                "the creator key collided with a Stoa's posting identity"
+                ks.stoa_public_key(&Address::from_bytes(bytes)).to_hex(),
+                identity,
+                "a caller-nameable context reached the identity key"
             );
         }
     }
 
     #[test]
-    fn the_creator_key_is_stable_and_differs_between_keystores() {
+    fn the_identity_key_is_the_root_used_directly_and_not_a_derived_one() {
+        // The MVP's one-identity rule, stated as the property rather than as the
+        // absence of a call: the key this keystore signs with is the root itself.
+        // `derive_stoa_key` stays built — the `identity` capability requires the
+        // primitive and the per-Stoa destination is where §5.2 goes — so the
+        // assertion that matters is that no handler's key comes out of it.
+        let ks = a_keystore(7);
+        assert_eq!(
+            ks.identity_public_key().to_hex(),
+            crate::identity::SecretKey::from_bytes(&[7u8; 32])
+                .unwrap()
+                .public_key()
+                .to_hex(),
+            "the identity key must be the root secret used directly"
+        );
+        // And distinct from the per-Stoa derivation, which is the whole reason
+        // the two cannot be confused for one another.
+        assert_ne!(
+            ks.identity_public_key().to_hex(),
+            ks.stoa_public_key(&crate::identity::stoa_address(b"Agora"))
+                .to_hex(),
+            "the root identity and a per-Stoa identity must remain different keys"
+        );
+    }
+
+    #[test]
+    fn the_creator_of_a_stoa_this_keystore_made_can_moderate_it() {
+        // THE property a creator key exists to have, and the one no test asked
+        // for before this one: a peer that creates a Stoa is its sole moderator,
+        // so the key the genesis record names must be the key that peer actually
+        // presents when it acts in that Stoa.
+        //
+        // `Moderators::of(genesis).contains(k)` is the whole authority check —
+        // `moderation.rs` names `genesis.creator` as the sole moderator — so
+        // asking it about the key this peer posts with is asking whether a creator
+        // can moderate its own Stoa. It could not before: creation named
+        // `creator_public_key` (a synthetic all-zero derivation domain) while the
+        // probe reported `stoa_address(stoa)`, and the two were never equal.
+        let ks = a_keystore(7);
+        let genesis = crate::stoa::Genesis {
+            creator: ks.identity_public_key(),
+            policy: crate::stoa::Policy::Open,
+            title: "Agora".to_string(),
+        };
+        let stoa = genesis.address().unwrap();
+        let moderators = crate::moderation::Moderators::of(&genesis).unwrap();
+        assert!(
+            moderators.contains(&ks.identity_public_key()),
+            "the creator named in the genesis record must be the key this peer \
+             presents in that Stoa, or the Stoa's sole moderator is an identity \
+             it will never sign an op with"
+        );
+        // And the probe's answer is that same key's address, so what a view shows
+        // as "you" is what the record names. This is the pair the adapter wires
+        // up, checked here because `cfg(logos_scaffold)` is not built by tests.
+        assert_eq!(
+            ks.identity_address().to_hex(),
+            genesis.creator.address().to_hex(),
+            "the probe's identity must be the creator's own address"
+        );
+        assert_eq!(moderators.stoa(), &stoa);
+    }
+
+    #[test]
+    fn the_identity_key_is_stable_and_differs_between_keystores() {
         // Stable, because a Stoa's creator is fixed inside its address forever: a
         // creator key that varied between calls would make the second creation of
         // one title a DIFFERENT Stoa, which is the behaviour the spec pins against.
@@ -3048,14 +3066,14 @@ mod tests {
         // under one identity and nobody could moderate their own.
         let ks = a_keystore(7);
         assert_eq!(
-            ks.creator_public_key().to_hex(),
-            ks.creator_public_key().to_hex(),
-            "the creator key must not vary between calls"
+            ks.identity_public_key().to_hex(),
+            ks.identity_public_key().to_hex(),
+            "the identity key must not vary between calls"
         );
         assert_ne!(
-            ks.creator_public_key().to_hex(),
-            a_keystore(8).creator_public_key().to_hex(),
-            "two users must not share a creator identity"
+            ks.identity_public_key().to_hex(),
+            a_keystore(8).identity_public_key().to_hex(),
+            "two users must not share an identity"
         );
     }
 }

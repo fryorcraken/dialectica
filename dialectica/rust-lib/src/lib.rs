@@ -333,9 +333,17 @@ impl DialecticaModule for Dialectica {
             Ok(d) => d,
             Err(e) => return e,
         };
-        core::get_capabilities(&request, |stoa| {
+        core::get_capabilities(&request, |_stoa| {
+            // `identity_address` and not `stoa_address(stoa)`: PLAN.md §5.2's MVP
+            // subsection gives a user ONE identity across every Stoa, which means
+            // not calling `derive_stoa_key` at all. The `stoa` argument is still
+            // taken — and still validated by `core` — because the probe is scoped
+            // to a Stoa and stays so when per-Stoa identity is switched back on.
+            //
+            // The one key is what makes a creator able to moderate what it made:
+            // `create_stoa` below names this same key.
             let path = core::keystore::default_path_in(&dir);
-            core::keystore::open_from_env(&path).map(|ks| ks.stoa_address(stoa).to_hex())
+            core::keystore::open_from_env(&path).map(|ks| ks.identity_address().to_hex())
         })
     }
 
@@ -368,13 +376,13 @@ impl DialecticaModule for Dialectica {
             core::create_stoa(
                 &request,
                 || {
-                    // `creator_public_key` and not a per-Stoa key: the per-Stoa
-                    // derivation takes the Stoa's ADDRESS, and the address is the
-                    // hash of the record that names the creator — so it is not
-                    // knowable until after the creator is chosen. That method
-                    // carries the argument and the privacy cost.
+                    // The SAME key `get_capabilities` above reports. That identity
+                    // is what makes the creator able to moderate what it created:
+                    // `Moderators::of(genesis)` names `genesis.creator` as the sole
+                    // moderator, so a creator key this peer would never sign with
+                    // would be a Stoa nobody can moderate, permanently.
                     let path = core::keystore::default_path_in(&dir);
-                    core::keystore::open_from_env(&path).map(|ks| ks.creator_public_key())
+                    core::keystore::open_from_env(&path).map(|ks| ks.identity_public_key())
                 },
                 store,
             )

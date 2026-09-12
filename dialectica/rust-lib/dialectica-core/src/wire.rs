@@ -1994,23 +1994,19 @@ mod tests {
 
     #[test]
     fn the_creator_key_is_whatever_the_lookup_supplies_and_this_handler_chooses_none() {
-        // NO SPEC: the spec says the creator is "the key the caller would sign an
-        // op with", and §5.2 makes that PER STOA — derived from the root and the
-        // Stoa's address. For a creator key that derivation is circular: the
-        // address is the hash of the record, and the record names the creator, so
-        // the address is not knowable until after the creator is chosen.
+        // WHICH key the adapter supplies is settled — `Keystore::identity_key`,
+        // the root used directly, the same key the capability probe reports — and
+        // `keystore.rs` pins that pair with
+        // `the_creator_of_a_stoa_this_keystore_made_can_moderate_it`. It is not
+        // this handler's decision to make: `core` cannot read the environment or
+        // know the host's layout, so the key arrives through a closure exactly as
+        // the probe's identity does.
         //
-        // WHICH key is therefore unspecified, and the choice is deliberately NOT
-        // made here: this handler takes whatever the lookup hands it, and the
-        // adapter supplies `Keystore::creator_public_key`, which carries the
-        // argument and states the privacy cost (a creator key is linkable across
-        // every Stoa one peer creates).
-        //
-        // What this test pins is the part that IS specified: the record's creator
-        // is the lookup's key exactly, unmodified — no re-derivation, no
-        // substitution, no fallback. Two different lookups produce two different
-        // Stoas from one title, which is what shows the key reaches the record
-        // rather than a constant doing so.
+        // What this test pins is the part this handler IS responsible for: the
+        // record's creator is the lookup's key exactly, unmodified — no
+        // re-derivation, no substitution, no fallback. Two different lookups
+        // produce two different Stoas from one title, which is what shows the key
+        // reaches the record rather than a constant doing so.
         let mut one = a_membership_store();
         let mut two = a_membership_store();
         let a = create_stoa(
