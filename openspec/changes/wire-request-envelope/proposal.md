@@ -39,10 +39,17 @@ boundary, and it currently has no stated shape.
   refusals it is currently indistinguishable from: a request that is not valid
   JSON at all, and an object that is missing a required field. Three different
   caller mistakes, three different messages.
-- The rule applies to **every** method, including ones that take no parameters
-  and ones whose fields are all optional. Those are precisely the methods where
-  the check has no side effect visible to a correct caller, and precisely the
-  methods where its absence is invisible.
+- The rule applies to **every method that reads a field of its request**,
+  including ones whose fields are all optional. Those are precisely the methods
+  where the check has no side effect visible to a correct caller, and precisely
+  the methods where its absence is invisible.
+- **The scope is stated as the field read rather than the parameter**, because
+  "every method that accepts a request" had two readings that disagreed about the
+  panic probe — which takes a request string and never decodes it. The probe is
+  outside the envelope rule, and the panic-guard requirement is amended to say so
+  positively: the probe's request is opaque text, it reaches its panic for every
+  request shape, and it refuses none. An excluded method with no rule of its own
+  would be a gap rather than a decision.
 - **An empty object `{}` stays valid** for a method with no required fields. The
   contract refuses non-objects, not empty ones — stated explicitly so the new
   requirement cannot be read as forbidding the request shape a
@@ -54,17 +61,28 @@ boundary, and it currently has no stated shape.
 
 **Modified Capabilities**
 
-- `module-wire-contract` — one existing requirement, **"Every method takes JSON
-  and returns JSON"**, is amended. It is the requirement that already words the
-  envelope's two halves and already says of the reply that "anything that is not
-  an object is outside this contract"; the request half belongs beside it, in the
-  same requirement, rather than in a second requirement asserting the mirror rule
-  somewhere else in the same file. Its existing scenarios are carried unchanged
-  and new ones added.
+- `module-wire-contract` — **two** existing requirements are amended.
 
-  The heading is verbatim from `openspec/specs/module-wire-contract/spec.md`'s
-  own `### Requirement:` line, checked against the file: a `MODIFIED` heading
-  that matches nothing applies nothing, silently.
+  1. **"Every method takes JSON and returns JSON"** gains the request half. It is
+     the requirement that already words the envelope's two halves and already says
+     of the reply that "anything that is not an object is outside this contract";
+     the request half belongs beside it, in the same requirement, rather than in a
+     second requirement asserting the mirror rule somewhere else in the same file.
+  2. **"A panic in a handler becomes the error shape and the module keeps
+     serving"** gains the panic probe's own contract: its request is opaque text,
+     it reaches its panic for every request shape including a non-object, and it
+     refuses none. This is what the envelope rule's one exclusion rests on, and
+     stating it here rather than nowhere is what makes the exclusion a decision
+     instead of a silence. It also closes a gap that predates this change — the
+     requirement's "exercised rather than merely asserted" scenario depends on a
+     probe whose contract was never written down, so nothing said the probe must
+     panic on *whatever* it is given.
+
+  Both headings are verbatim from `openspec/specs/module-wire-contract/spec.md`'s
+  own `### Requirement:` lines, checked against the file, and each MODIFIED block
+  carries every existing scenario of its requirement forward: a `MODIFIED` heading
+  that matches nothing applies nothing, silently, and a `MODIFIED` block replaces
+  the whole requirement including its scenarios.
 
 **No new capability.** A standalone `wire-request-envelope` capability would have
 had to restate this contract's error shape, its one-failure-shape rule and its
@@ -78,6 +96,16 @@ already paid for once.
   request gains one check between the parse and the first field read, and the
   hostile-input fixtures gain a non-object case. No reply shape changes for any
   request that was already being served.
+- **One `NO SPEC:` marker is now specified and should be reworded, not deleted.**
+  `panic_probe_still_panics_on_a_non_object_rather_than_refusing_it` carries a
+  marker saying the spec "says nothing about a method that takes a request string
+  it never decodes". It now does: the panic-guard requirement states the probe's
+  request is opaque text and that it refuses no request for its shape. The test
+  becomes a spec-pinning test rather than an unspecified default, so the marker
+  goes and a reference to the requirement replaces it. The test's assertions do
+  not change; only the comment above them does. **Code is not edited in this
+  change** — reviewers are reading that file — and the replacement text is
+  recorded in the report handed to whoever picks it up.
 - **No behaviour change for any correct caller.** Every request the surface
   serves today is an object; this refuses inputs that are currently served only
   by accident, and on today's surface not even that.
