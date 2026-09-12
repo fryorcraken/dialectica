@@ -162,6 +162,28 @@ filesystem access outside the plugin directory. A view therefore *cannot* fetch
 or read anything itself. This is a platform constraint, not a preference: work
 that touches the network or disk belongs in core, always.
 
+### SDS is transport: use its API as it is, and build what we need above it
+
+**SDS is HTTP or TCP in this stack, and the application layer is ours.** TCP
+retransmits, orders within a connection and reports a failed transfer — and it
+still cannot tell you your file is half-written, because it does not know what
+a complete file is. Only the application does.
+
+So: **SDS repairing what it can see is not a substitute for dialectica knowing
+what a complete thread is.** Ordering, recency and causality at forum scope are
+dialectica's to build, carried inside the signed op preimage where a relay can
+neither forge nor strip them.
+
+The trap this exists to prevent is treating a missing transport field as a
+blocker. It is not — an application that can only order its own content while
+the transport hands it ordering metadata breaks the moment that transport
+changes, and SDS is LIP-109 at *raw*, the weakest maturity tier, with an API
+marked Developer Preview. **File the upstream gap; do not wait on it, and do
+not design around it.**
+
+`docs/PLAN.md` §13 works this through, including the two claims about it that
+were wrong.
+
 ### The core API is the deliverable
 
 The core module's API is the part of this project to be most deliberate about.

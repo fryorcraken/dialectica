@@ -553,9 +553,11 @@ Does not promise:
   value — so nothing in it orders anything. (Do not read those four fields as
   contradicting §13's "one field": that is the Reliable Channel event one layer
   further down, and the delivery module adds the three it can supply locally.)
-  **Read the promises above as internal to SDS, not as an interface.** §13 has
-  the finding, the layers the values are dropped at, and what each would
-  have to add.
+  **Read the promises above as internal to SDS, not as an interface** — which
+  is the right posture regardless of what upstream forwards. SDS is transport;
+  ordering at forum scope is dialectica's, carried in the signed op. §13 has
+  the layers the values are dropped at and the layering rule that makes this a
+  division of labour rather than a blocker.
 - **150 KiB max message size**, hard cap — a network-wide gossipsub validation
   limit, not unilaterally raisable. See §4.6.
 
@@ -2917,6 +2919,27 @@ thing (§2.3).
   trying to reconcile with a clock we cannot read and the objection
   disappears. The mistake was letting "we cannot match SDS" stand in for "we
   cannot order".
+
+  ### The layering rule, which everything above is a consequence of
+
+  **Use SDS's API as it is, and build the ordering and causality the
+  application needs on top of it.** SDS is HTTP or TCP in this stack. TCP
+  retransmits, orders within a connection, and tells you a transfer failed —
+  and it still cannot tell you your file is half-written, because it does not
+  know what a complete file is. Only the application does.
+
+  So SDS repairing what it can see is not a substitute for dialectica knowing
+  what a **complete thread** is, and no upstream change would make it one.
+
+  **This reframes the whole entry.** The missing fields are not a deficiency
+  waiting on a fix we should design around — they were never ours to depend
+  on. An application that can only order its own content while the transport
+  hands it ordering metadata breaks the moment that transport changes, and
+  §4.4 already warns that SDS is LIP-109 at *raw*, the weakest maturity tier,
+  with an API marked Developer Preview that expects to change.
+
+  Read the rest of §13 as *what dialectica owns*, not as *what upstream owes
+  us*. The upstream filing is still worth making; nothing here waits on it.
 
   **What we may build at our own layer**, carried inside the signed op
   preimage so a relay cannot forge or strip it:
