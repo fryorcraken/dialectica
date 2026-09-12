@@ -924,6 +924,121 @@ Four properties this has to have, each of which decides something:
   adjectives and the two nouns are independent draws rather than four views of
   the same bits.
 
+##### The byte budget, and where the name's independence from the mark comes from
+
+`H` is SHA-256, so the name's digest is **32 bytes**. The name consumes a fixed
+slice of them:
+
+| Bytes | Use |
+|---|---|
+| `0` | first adjective index (256 entries, 8 bits, one byte exactly) |
+| `1` | second adjective index |
+| `2..4` | first noun index (512 entries needs 9 bits; take 2 bytes and reduce) |
+| `4..6` | second noun index |
+| `6..12` | **re-derivation reserve** for the denylist, below |
+| `12..32` | unused by the name scheme |
+
+**The name stops at byte 12.** Bytes `12..32` of *this* digest are simply unread.
+
+**Correcting the reason an earlier draft of this subsection gave, because the
+conclusion was right and the mechanism was invented.** That draft described
+`12..32` as "reserved for the identicon", so that disjoint byte ranges would make
+name and mark independent. **That mechanism does not exist, and cannot.** The two
+derive from *different digests*:
+
+- the **name** from `H(NAME_PREFIX || public_key)` (this section);
+- the **mark** from the **address**, which `identity.rs` computes as
+  `SHA256(AUTHOR_ADDRESS_PREFIX || 0x01 || public_key)` — and the mark
+  (`docs/IDENTICON.md`) reads bytes `12..19` **of the address**, not of the
+  name's digest.
+
+So the name's bytes `12..32` and the mark's bytes `12..19` are slices of two
+unrelated hashes. They were never in danger of overlapping, a byte reservation
+across them does no work, and the hazard the draft described — "a near-miss on
+one correlating with a near-miss on the other" — **cannot arise, because there is
+no shared digest to overlap in.**
+
+**The independence is real; it comes from domain separation.** `NAME_PREFIX` and
+`AUTHOR_ADDRESS_PREFIX` are distinct 32-byte separators, so the two digests are
+independent functions of the same key. Grinding keys for a target's name yields
+an unrelated mark each time, and grinding for the mark yields an unrelated name;
+they must be landed together, so **the costs multiply rather than add.** That
+property holds because the hashes differ, and it would hold no matter which bytes
+each side read.
+
+**So why keep the byte budget at all?** Two reasons, neither of them the
+independence claim:
+
+- **The re-derivation reserve is a real requirement** (below), and it needs a
+  stated bound whether or not anything else reads the digest.
+- **Belt and braces, cheaply.** Writing down that the name stops at byte 12 costs
+  a table row and means that if the two schemes are ever unified onto one digest
+  — which is a plausible simplification — the boundary is already recorded rather
+  than being rediscovered. It is *not* load-bearing today and must not be
+  described as though it were.
+
+Two notes on the arithmetic:
+
+- **Reducing a 16-bit draw into 512 entries by `% 512` is exactly uniform**,
+  because 512 = 2⁹ divides 2¹⁶ evenly — 128 times. There is no modulo bias to
+  trade off. **This makes the power-of-two list sizes load-bearing rather than
+  incidental**: 512 and 256 were chosen as the honest ceilings of the source
+  material (below), and it is a genuine piece of luck that the honest numbers are
+  also the ones that divide cleanly. A list of, say, 500 would introduce a real
+  if tiny bias and would need this paragraph to say so.
+
+  *(An earlier draft of this subsection claimed a bias "of about one part in 2¹⁶
+  per entry". That was wrong in the safe direction — the instinct that "modulo is
+  fine here" is a claim with a magnitude was right, and the magnitude is zero.)*
+- **The re-derivation reserve is why the name's slice is 12 bytes and not 6.**
+  The denylist re-derives a refused combination *from the next hash bytes*, so
+  the number of bytes a name consumes is **data-dependent, not fixed**.
+
+  **On a refusal, all four slots are redrawn, not only the offending one.** This
+  is the choice worth stating because it decides the reserve's size: redrawing
+  the whole name costs 6 bytes per attempt, so `6..12` buys **one** full
+  re-draw, and a second refusal exhausts the reserve. Redrawing only the
+  offending slot would be cheaper per attempt but makes the denylist harder to
+  reason about — a refused *pair* is refused because of the combination, so
+  changing one half can land on a second refused pair, and the loop's
+  termination becomes a property of the denylist's shape rather than of the
+  budget. Whole-name redraw keeps termination arithmetic.
+
+  **If the reserve is exhausted the derivation must fail loudly rather than read
+  on.** The reason is *not* that reading on would corrupt the mark — as
+  established above, it could not, since the mark is in a different digest.
+  It is that reading past byte 12 makes the name's consumption unbounded, so two
+  implementations that disagree about how far to read produce **different names
+  for the same key**, which is the two-peers-disagree failure this whole scheme
+  exists to prevent. A bounded slice is what makes the derivation checkable
+  against a test vector at all.
+
+**What the pair is worth, stated without overstating it.** The name space is 2³⁴
+(below) and `docs/IDENTICON.md` counts the mark at roughly 12,400 perceptually
+distinct results, about 2¹³·⁶. Independent, the bundle is about **2⁴⁷·⁶** — the
+mark multiplying the name rather than adding to it.
+
+**Two cross-document mismatches to fix wherever the two are next restated
+together**, recorded here because each document is right about its own half and
+wrong about the other's:
+
+- `docs/IDENTICON.md` multiplies the mark against **2²⁵**, which was this
+  section's *three-word* space from a superseded draft. Against the four-word
+  2³⁴ the bundle is correspondingly larger, so its 2³⁸·⁶ understates the pair.
+- It also states that "bytes 0..11 are reserved for the generated-name scheme",
+  meaning bytes of the **address**. The name scheme reads no address bytes at
+  all, so nothing is reserved there and nothing needs to be. **Both documents
+  independently invented the same shared-digest story**, which is worth noting as
+  a failure mode rather than a typo: two authors each assumed the other's scheme
+  read the digest they were looking at, and neither checked.
+
+**It does not change the threat model.** 2⁴⁷·⁶ is still reachable by a machine
+with unlimited regeneration, and the grinding subsection below applies unchanged:
+an attacker hunting *any* lookalike rather than one exact target searches a much
+smaller set. **This raises the cost of casual impersonation and does not defeat a
+motivated attacker. The address remains the identity**, and none of this is a
+reason to show one less often.
+
 #### One source: Greek philosophy and letters
 
 **An earlier draft of this section drew on ten science-fiction book universes.**
@@ -1007,6 +1122,79 @@ fully settled a form, the settled form wins — `thales`, `solon`, `sappho`,
 `hypatia`, not a stricter transliteration nobody would recognise. The convention
 serves recognisability; it does not outrank it.
 
+#### What is excluded from the lists, and why
+
+These are the rules the curation work is bound by. They are stated here rather
+than left to the person writing the lists, because **each one was reached by an
+argument that is not recoverable from the word it excludes.**
+
+**1. The project's own vocabulary.** A Greek wordlist inside a project whose
+vocabulary is Greek will collide with it, and the collision is worst in a feed,
+where every row attributes a post to one of these names.
+
+| Excluded | Why |
+|---|---|
+| `stoa` | the core concept (§1). *measured attic stoa kairos* reads as a Stoa rather than a person. **`stoic` survives as an adjective** — in the adjective slot it cannot be misread as naming a place, and it is one of the best words available. It must never be a noun. |
+| `dialectic`, `dialectical` | the project's name and its method. A user called *dialectic* sounds like the application speaking. |
+| `delta` | the logo (§8.1). Same failure. |
+| `genesis` | names the founding record (§5.1), the most load-bearing term in the address construction. |
+| `agora` | **kept, and flagged first-to-drop.** It is common enough English to survive and is not a term of art in this design — but `docs/UI-BRIEF.md` uses "Join *Agora*?" as its worked example of a forgeable Stoa title. If the picker ever reads ambiguously, this is the first noun to remove. |
+
+**2. Words that assert authority.** `moderator`, `archon`, `ephor`,
+`magistrate`, `strategos`. A non-moderator generated as *calm bronze archon
+telos* has been handed apparent standing **by the wordlist**, which is precisely
+what §5.2.1's rendering obligations exist to prevent — a name is never a
+credential. This is the exclusion most likely to be re-proposed by someone who
+likes the word, and it is also where the authority-name exclusion below comes
+from: the two are the same failure reached by different doors.
+
+**3. A few names that are an argument rather than a name.** **Plato, Aristotle,
+Socrates**, and anything else whose invocation is itself a move in a debate: a
+user rendered *sober ionic plato* is signed by Plato on every post, and someone
+disagreeing with them is visually disagreeing with Plato. They neither earned it
+nor chose it, but they benefit from it.
+
+**Deliberately a short list.** Everything arguable is **kept** — the pooled noun
+list was chosen for its size, and a cautious sweep through the canon would undo
+exactly what it was chosen for. The long tail is the point: *sober ionic thales*
+is still Greek and still serious, and nobody treats "Thales said so" as an
+argument.
+
+**4. Connotation.** The name is assigned-then-chosen, so a user cannot be blamed
+for the word they were handed — but **the system can be blamed for generating
+it**, and "the hash chose it" is not a defence anyone accepts. Rejected by
+category, because the categories outlast the examples:
+
+- **Boasts** — `titan`, `colossus`, `olympian`, `paragon`, `sovereign`. A name
+  that congratulates its bearer is embarrassing to everyone who did not pick it.
+- **Tyranny and violence** — `tyrant`, `despot`, `nemesis`, `scourge`,
+  `hecatomb`, and the `furies`. `tyrant` is the clearest case in the whole list:
+  a live political insult in English, generated by the system and attached to a
+  participant in a **political argument forum**, which is a system defaming a
+  user.
+- **Disorder as an accusation** — `chaos`, `discord`, `eris`, `strife`. In a
+  forum whose subject is disagreement these read as a verdict on the person.
+- **Pathology and death** — `plague`, `miasma`, `lethe`, `thanatos`, `charon`,
+  `hades`. Grim attached to a human being who is about to post.
+- **Anything mapping onto a real group** — `barbarian` (Greek for the people who
+  did not speak Greek: an ethnic slur with a classical wrapper), `helot`,
+  `pariah`, `metic`. The etymology is interesting and irrelevant; the English
+  word lands as the English word.
+- **Sexual and bodily** — `satyr`, `priapic`, `bacchant`. Named so the next
+  person adding words does not rediscover it.
+
+**Two kept after argument, recorded because they are the near-misses.**
+`chimera` and `hydra` are monsters but not insults in English — fully absorbed
+as "a thing of mixed parts" and "a problem that regrows", neither a claim about
+the person. **`siren` was dropped** despite the same absorption, because
+attached to a person it is gendered in a way the others are not.
+
+**The rule underneath all of it, which is the thing to keep if the lists are ever
+rebuilt from scratch: a generated name may describe a texture, never a verdict.**
+`attic`, `measured`, `tidal` and `spare` describe nothing about their bearer.
+`heroic` and `craven` both do, in opposite directions, and both are wrong for the
+same reason. `attic` is a texture; `plato` is a verdict.
+
 #### The arithmetic, and why the name is four words
 
 **The list sizes were derived from what the sources honestly yield, and the word
@@ -1014,7 +1202,20 @@ count then followed from the arithmetic.** That order matters: the alternative �
 picking a target space and padding the lists to reach it — produces names that
 read as filler, which costs the register this whole revision exists to buy.
 
-**What the sources honestly yield:**
+**What the sources honestly yield — and these are estimates, not counts.** No
+list has been written; the numbers below come from inventorying candidates by
+category and judging where each category runs out. **The whole four-word decision
+rests on them**, so the honest status matters: the claim "512 adjectives in one
+voice is padding" is a judgement, and the way to falsify it is to write the list
+and count. **The conclusion survives a generous error, which is why it is safe to
+decide on now.** Suppose the estimate is wrong by a fifth and 300 honest
+adjectives exist: `300 × 300 × 512 = 46,080,000`, and
+`12,497,500 / 46,080,000 = 0.27121`, so `1 − e^-0.27121 = 0.2375` — **5,000
+identities still collide at 24% at three words.** Rescuing three words would take
+an adjective list of about **700** — `700 × 700 × 512 = 250,880,000` puts 5,000
+at 4.9% — and 700 sober Greek adjectives in one voice is roughly three times the
+estimate, which is not a plausible error but an entirely different claim about
+the source material.
 
 - **Adjectives: 256.** The single-voice constraint is a real limit. Geographic
   adjectives of the Greek world give roughly 70 usable; the schools and
@@ -1047,9 +1248,12 @@ By hand at k = 5,000: `k(k−1)/2 = 12,497,500`, and `12,497,500 / 33,554,432 =
 0.37245`, so `1 − e^-0.37245 = 1 − 0.68902 = 0.311`.
 
 **31% fails the bar**, and it is worth being blunt that this is *worse* than the
-16.8-million space it replaces on every count except register — because the
-Greek-only sources are smaller than ten SF universes pooled, and honest sizes
-are smaller still than the ones a previous draft assumed.
+space it replaces on every count except register. The superseded SF scheme was
+**256 adjectives × 256 adjectives × 256 nouns = 2²⁴ ≈ 16.8 million** at three
+words, with 5,000 identities colliding at 53%; Greek-only sources are smaller
+than ten SF universes pooled, so the honest noun list grows from 256 to 512
+while the adjective list cannot grow at all, and 2²⁵ at three words leaves
+5,000 at 31%. Better than 53% and still a failure.
 
 **Therefore the name is four words: two adjectives and two nouns.**
 
@@ -1210,19 +1414,25 @@ visible rather than averaged away.
 **1. The name space, at 2³⁴.** Reduces *accidental* collisions, and nothing
 else. Covered in full above.
 
-**2. An identicon derived from the same key — intended, and undesigned here.**
-A visual glyph computed from the public key alongside the name, so that two
-identities sharing a name still look different at a glance. The property it must
-have is the one the name already has: **derived from the key, hence
+**2. An identicon — designed in `docs/IDENTICON.md`, not here.**
+A visual glyph shown alongside the name, so that two identities sharing a name
+still look different at a glance. The property it must have is the one the name
+already has: **derived from the key, hence
 deterministic, unregistrable and identical on every peer.** It earns its place
 on *accidental* collisions — a reader comparing two rows sees two different
 pictures without reading a word.
 
-**It is forgeable in exactly the way the name is, and this must not be softened
-into a security property.** An attacker grinds for a key whose name *and* glyph
-both read close; that is a two-channel search rather than a one-channel search,
-which raises the cost by a factor and changes the kind of protection not at all.
-**A second forgeable channel is still forgeable.** The visual design is
+**It varies independently of the name**, because the two derive from
+differently-domain-separated hashes of the same key — the name from
+`H(NAME_PREFIX || key)`, the mark from the address (see the byte budget above).
+So an attacker must land both at once and the costs multiply rather than add.
+
+**It is nonetheless forgeable in exactly the way the name is, and this must not
+be softened into a security property.** An attacker grinds for a key whose name
+*and* glyph both read close; independence makes that a two-channel search rather
+than a one-channel search, which raises the cost by a factor and changes the kind
+of protection not at all. **A second forgeable channel is still forgeable**, and a
+multiplied cost is still a cost a machine pays once. The visual design is
 deliberately not attempted here — what is settled is that it is wanted and what
 it must be derived from.
 
@@ -1280,9 +1490,10 @@ touches the control being limited.
   than a list of one kind, because a proper name beside an abstract noun can
   compose into a reading neither word carries alone. So the practical
   requirement is a denylist applied at generation — a derived name landing on a
-  refused combination is re-derived from the next hash bytes, deterministically,
-  so every peer skips identically — and the denylist matters more at four words
-  than it did at three.
+  refused combination **redraws all four slots** from the next six hash bytes,
+  deterministically, so every peer skips identically. The byte budget above bounds
+  this at one re-draw and requires a loud failure beyond it; the denylist matters
+  more at four words than it did at three.
 - **The lists are versioned and effectively frozen, and a word removal is a
   scheme version bump.** This is the most operationally important line in the
   section, so it is worth spelling out the mechanism rather than asserting the
@@ -1295,8 +1506,12 @@ touches the control being limited.
   which users report as impersonation.
 
   So `NAME_PREFIX` is versioned, and **any change to the lists — a removal, an
-  addition, a reordering, a size change, or a change to the number of words —
-  mints a new version rather than editing the current one.** The version bump is
+  addition, a reordering, a size change, a change to the number of words, or a
+  change to the byte budget above — mints a new version rather than editing the
+  current one.** The byte budget belongs in that list for the same reason as the
+  rest: moving the name's slice re-reads different bytes and so renames everyone.
+  It does **not** disturb the mark, which reads a different digest entirely. The
+  version bump is
   what stops the disagreement: it makes the old and new schemes distinct
   derivations rather than two peers' answers to one question. It is also why the
   *first* version must be conservative: shipping a word that has to come out
@@ -1358,11 +1573,12 @@ says, which is that section's general shape:
   derived from what the sources honestly yield, and the word count was chosen to
   fit them, so a later decision to "just add more adjectives" changes the
   arithmetic that justified four words and needs a version bump either way.
-- **The identicon's visual design** — but not whether there is one. It is
-  **intended** (see "Four layers" above), and what is settled is the property it
-  must have: derived from the same public key, hence deterministic, stable and
-  unregistrable. What it looks like is the owner's half of the work. Recorded
-  here as design not yet done, rather than as a decision not yet taken.
+- ~~**The identicon's visual design.**~~ **Settled elsewhere:
+  `docs/IDENTICON.md`.** It reads bytes `12..19` of the **address** and counts
+  about 12,400 perceptually distinct marks. Nothing in this section constrains
+  it, and the byte budget above does not hand it anything — the two schemes read
+  different digests. Left in this list as a pointer, because a reader arriving
+  from "Four layers" above will otherwise look for the design here.
 - **How many refreshes is too many to be honest about.** If a user refreshes
   two hundred times, the interface has watched someone hunt for a specific name
   and has no idea whether they are picking a favourite or building an

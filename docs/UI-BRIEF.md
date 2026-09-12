@@ -92,8 +92,15 @@ another.
 work.** A small visual glyph derived from the same key, giving recognition a
 second channel. What is fixed is where it comes from — the key — so it is stable
 forever, identical on every peer, and not something anyone can choose or
-register. What it looks like is open. **What it cannot do is in obligation 6,
-and that half is not negotiable.**
+register. What it looks like is open.
+
+**The mark and the name are computed by two separate hashes of the same key**,
+which has one consequence worth designing around: **they vary independently.**
+Two identities with similar names have unrelated marks, and two with similar
+marks have unrelated names. So the glyph is genuinely a second opinion rather
+than a restatement of the first — **design it to be compared at a glance**, since
+that independence is the whole of what it buys. **What it cannot do is in
+obligation 6, and that half is not negotiable.**
 
 **At onboarding the user picks from a slate of five, and can refresh the slate
 as often as they like.** So the name is chosen and carries intent — someone who
@@ -112,8 +119,9 @@ Two consequences for you:
 - **A name is not unique and not an identifier** — see obligation 6 below.
   Accidental collisions are now rare: in a Stoa of a thousand the chance two
   people share a name is **about 0.003%**, and at five thousand **about 0.07%**.
-  (An earlier three-word scheme gave 3% and better-than-even; the fourth word is
-  what bought this.) **Rare is not never**, and none of it touches deliberate
+  (The superseded science-fiction scheme — three words, 2²⁴ — gave 3% at a
+  thousand and better than even at five thousand. The fourth word is what bought
+  the change.) **Rare is not never**, and none of it touches deliberate
   impersonation — which is the whole of obligation 6.
 
 ### 3. Posts are never edited in place
@@ -377,13 +385,14 @@ the numbers. Does nothing else, and nothing at all about impersonation.
 
 **2. The identicon** — intended, and yours to design. A glyph derived from the
 same key, shown with the name. It earns its place on *accidental* collisions:
-two people who happen to share a name still look different at a glance. **It is
-forgeable in exactly the way the name is.** An attacker grinds for a key whose
-name *and* glyph both read close — a two-channel search instead of a one-channel
-search, which raises their cost by a factor and changes nothing about the kind
-of protection on offer. **A second forgeable channel is still forgeable**, and
-the identicon must never be rendered as a verification mark, a badge, or
-anything that reads as "checked".
+two people who happen to share a name still look different at a glance, because
+name and glyph come from separate parts of the hash and vary independently.
+**It is nonetheless forgeable in exactly the way the name is.** An attacker
+grinds for a key whose name *and* glyph both read close — a two-channel search
+instead of a one-channel search, which raises their cost by a factor and changes
+nothing about the kind of protection on offer. **A second forgeable channel is
+still forgeable**, and the identicon must never be rendered as a verification
+mark, a badge, or anything that reads as "checked".
 
 **3. Vouching** (see the vote control section). The one layer an attacker cannot
 mint, because **a vouch points at a key** — not at a name, not at a picture. A
