@@ -18,9 +18,17 @@ The one exception to not reading the implementation is the mutation sampling in
 part 2, which necessarily edits code. Change it, run the test, restore it, and
 read no further than the lines you are mutating.
 
-**Work in your own worktree or a scratch copy of the crate.** Mutation runs
-collide: two reviewers sharing a tree see each other's broken code and cannot
-tell it from the author's. Confirm the tree is clean when you finish.
+**You get a worktree of your own** under `.claude/worktrees/`, on a branch named
+`review/<name>/spec-test`. Mutation runs collide: two reviewers sharing a tree see
+each other's broken code and cannot tell it from the author's.
+
+**When you finish, remove the worktree rather than restoring it** —
+`git worktree remove <absolute-path> --force`. Restoring depends on your having
+tracked every edit, and one missed restore ships a deliberately broken line into
+the piece; removing the tree needs no bookkeeping and cannot half-succeed. Your
+findings file is already committed and cherry-picked, so nothing you want lives
+there. (The per-mutation restore above is different and still necessary — that is
+what lets the *next* mutation mean something.)
 
 **Assume nothing you are told is true.** The PR description, the commit
 messages, the task list and the tester's report are all *claims*. Verify each
@@ -116,6 +124,32 @@ Reasoning left in PLAN.md is the `design-reviewer`'s check, not yours.
 
 ## Output
 
-Findings only, do not fix. For each: file, line, what is wrong, a concrete
-failure scenario, and severity. Say plainly which areas were clean rather than
-padding the list. If you ran mutations, report which ones and what happened.
+## Output
+
+**Findings only, do not fix.** Write them to
+`openspec/changes/<name>/findings/spec-test.md`, **each as an unticked checkbox**
+so whoever acts on it flips your box rather than writing their own list:
+
+```markdown
+- [ ] **`spec-writer`** — the "every method that accepts a request" clause
+      **Scenario:** a sixth method with all-optional fields, parsing `Value`
+      directly, serves `[]` as a request that named nothing.
+      **Measured:** added it — all 487 tests passed.
+```
+
+Lead with **who it is for** (`spec-writer`, `dev-writer` or `tester`), then where,
+what is wrong, a concrete failure scenario, and severity. One box per thing that
+must happen — an unticked box blocks the merge, so do not open one for an
+observation nobody needs to act on. Say which areas were clean in prose, not as
+boxes, rather than padding the list.
+
+If you ran mutations, report which ones and what happened — **a mutation that
+survived is the strongest finding you can write**, because it is a measurement
+rather than a judgement.
+
+**Then commit that one file** on `review/<name>/spec-test`, **tick your own row**
+in `tasks.md`'s stage block in the same commit, and **cherry-pick that commit onto
+the local `piece/<name>`**. Do not push — the runner does. Never `git add -A`.
+
+**Your final report is a pointer, not a copy** — the path, the entry count, and who
+each is for.
