@@ -72,7 +72,7 @@ check", never "every handler is checked".
 
 This is the finding that generated the measurement in A3.
 
-## A3. The recorded mitigation was measured not to work — **Fixed in this pass**
+## A3. The recorded mitigation was measured not to work — **Fixed (`4606f8d`)**
 
 For: `design-reviewer` → `dev-writer`
 
@@ -102,7 +102,7 @@ So a trait-driven sweep would live in the one crate that cannot run it. That is
 worth as much as the review that produced it, and unwritten the next agent spends
 the same afternoon on it.
 
-**Fixed in this pass**: recorded in `design.md` as a rejected alternative with its
+**Fixed** in `4606f8d`: recorded in `design.md` as a rejected alternative with its
 reason, beside the `include_str!` alternative it sits next to. Also records that
 the sixth method was **built and measured** — 487 tests passing with it in place —
 because "the mitigation is reviewer attention" reads very differently once you

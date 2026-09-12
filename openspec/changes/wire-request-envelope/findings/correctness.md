@@ -37,7 +37,7 @@ concede a second parse would have left the cost in place to keep a sentence
 true.
 
 The test that came with it, `the_feed_path_parses_its_request_once`, is the
-piece's weakest — see F3 in `spec-test.md`. Renamed in this pass.
+piece's weakest — see R6 in `readability.md`. Renamed in `4606f8d`.
 
 ## C2. `parse_index`'s refusal message was factually false — **Fixed**
 

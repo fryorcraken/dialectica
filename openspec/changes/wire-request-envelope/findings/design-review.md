@@ -113,7 +113,7 @@ The note also says what would change that — a view given reason to *branch* on
 which refusal came back — so the next person to add a refusal has the test rather
 than the conclusion.
 
-## D7. The recorded mitigation was the one measured not to work — **Fixed in this pass**
+## D7. The recorded mitigation was the one measured not to work — **Fixed (`4606f8d`)**
 
 For: `dev-writer`
 
@@ -130,6 +130,6 @@ that the mechanical alternative was investigated and is structurally unavailable
 and that human attention was the thing **measured** to fail. A reader would
 reasonably conclude nobody had tried.
 
-**Fixed in this pass**, as a rejected alternative in `design.md` beside the
+**Fixed** in `4606f8d`, as a rejected alternative in `design.md` beside the
 `include_str!` entry, carrying both the impossibility argument and the
 measurement.
