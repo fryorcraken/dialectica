@@ -1583,19 +1583,27 @@ mod tests {
         assert!(!seen.contains(&never.address().unwrap()));
     }
 
-    #[test]
-    fn membership_is_not_lost_because_a_stoa_has_no_ops() {
-        // The other direction of the op-log boundary, asserted at this layer:
-        // this store holds no ops and has no way to reach any, so a Stoa with no
-        // ops is listed like any other. The wire-level and cross-store versions
-        // of this requirement live in `wire.rs`.
-        let mut store = MembershipStore::in_memory().unwrap();
-        for n in 0..3 {
-            let g = a_record(&format!("Quiet {n}"));
-            store.join(&g.address().unwrap(), &g).unwrap();
-        }
-        assert_eq!(every_stoa(&store, 10).len(), 3);
-    }
+    // `membership_is_not_lost_because_a_stoa_has_no_ops` WAS HERE, AND IS DELETED.
+    //
+    // `findings/spec-test.md` entry 4: it built three memberships and asserted the
+    // listing held three, which is what
+    // `every_stoa_is_reachable_by_paging_and_appears_exactly_once` already asserts
+    // over a larger population and a page size that does not divide it. The only
+    // thing its name added was the op-log claim, and that claim is not testable at
+    // this layer — so the test told a reader the property was covered while
+    // exercising nothing of it.
+    //
+    // SATISFIED BY CONSTRUCTION at this layer, and what makes the absence real:
+    // `list`'s only material is `self.conn`, and `open` / `in_memory` are the only
+    // constructors — neither takes a log, a path to one, or anything through which
+    // one could be reached. `grep -n "OpLog\|ops.sqlite" membership.rs` returns
+    // nothing outside comments, so there is no code path to break.
+    //
+    // The version of this requirement that CAN fail lives at the wire, where a real
+    // op store and a real membership store share one directory and an
+    // implementation that went looking would find the ops:
+    // `wire.rs::an_empty_op_log_does_not_empty_the_listing` and
+    // `wire.rs::an_op_for_a_stoa_the_peer_is_not_in_creates_no_membership`.
 
     #[test]
     fn an_empty_title_is_recordable_and_reads_back_empty() {

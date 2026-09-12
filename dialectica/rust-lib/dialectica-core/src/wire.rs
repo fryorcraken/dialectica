@@ -2533,77 +2533,111 @@ mod tests {
         // peer that joined a Stoa because an op mentioned it would be a peer any
         // stranger can enrol.
         //
-        // Asserted against the observable STATE rather than against a function not
-        // having been called: a real op log holding real ops for an unjoined Stoa,
-        // beside a real membership store, and the listing is untouched. That is
-        // also the honest shape — there is no call to spy on, because the two types
-        // share no state at all.
-        let mut store = a_membership_store();
+        // WHAT THIS TEST USED TO DO, AND WHY IT WAS CHANGED. It built five ops in a
+        // `MemoryOpLog`, asserted `len() == 5` under the comment "the fixture must
+        // reach the assertion", and then never read the log again. Changing the
+        // loop to `0..0` was predicted to fail it and **observed to pass**
+        // (`findings/spec-test.md` entry 4): the ops could not reach any assertion,
+        // because a `MemoryOpLog` and a `MembershipStore` share no state. The
+        // surviving content was `contains(unjoined) == false` on a store nothing
+        // was joined into — true of any empty store.
+        //
+        // The fixture now REACHES the assertion: the op store and the membership
+        // store are the same directory on a real disk, so an implementation that
+        // derived membership from what it found in that directory has the material
+        // to do it and is caught doing it. That is the shape
+        // `a_membership_is_recordable_into_a_store_that_previously_held_none`
+        // already had, and the only shape at this boundary that can fail.
+        let dir = WireTempDir::new("ops-enrol-nobody");
         let unjoined = a_joinable_record("A Stoa nobody here joined");
         let unjoined_address = unjoined.address().unwrap();
 
         // Many ops, not one: a handler that enrolled on the Nth would pass a
-        // single-op test.
-        let mut log = MemoryOpLog::new();
-        for n in 0..5 {
-            let key = feed_key(7);
-            let op = Op {
-                stoa: unjoined_address,
-                author: key.public_key(),
-                kind: OpKind::Post {
-                    thread: None,
-                    parent: None,
-                    body: format!("post {n}"),
-                    attachments: vec![],
-                },
+        // single-op test. On a real disk, in the same directory the membership
+        // store is about to be opened in.
+        {
+            let mut log = crate::log::SqliteOpLog::open(&dir.path().join("ops.sqlite"))
+                .expect("a fresh op store is creatable");
+            for n in 0..5 {
+                log.append(
+                    an_op_in(unjoined_address, &format!("post {n}")),
+                    Arrival::unordered(),
+                )
+                .unwrap();
             }
-            .sign(&key);
-            log.append(op, Arrival::unordered()).unwrap();
+            assert_eq!(log.len().unwrap(), 5, "the ops must be on the disk");
         }
-        assert_eq!(
-            log.len().unwrap(),
-            5,
-            "the fixture must reach the assertion"
-        );
 
         // The peer is in no Stoa for that address, and the listing does not
-        // contain it.
-        assert!(!store.contains(&unjoined_address).unwrap());
-        assert_eq!(listed(&store, 20).len(), 0);
+        // contain it — asked through the wire, against the same directory.
+        let listing =
+            with_membership_store("list_stoas", &membership_path_in(dir.path()), |store| {
+                list_stoas("{}", store)
+            });
+        let lv: serde_json::Value = serde_json::from_str(&listing).unwrap();
+        // The error arm first, spelled out: an implementation that derived
+        // membership from those ops can fail EITHER by listing a Stoa nobody
+        // joined or by choking on what it derived, and both are this test's
+        // business. Without this arm the failure arrives as an `unwrap` on
+        // `None`, which names nothing.
+        assert!(
+            lv.get("error").is_none(),
+            "a listing beside an op store must not fail: {listing}"
+        );
+        assert_eq!(
+            lv["items"].as_array().unwrap().len(),
+            0,
+            "five ops for a Stoa nobody joined must enrol nobody: {listing}"
+        );
 
         // And an op for an unjoined Stoa does not disturb a membership that DOES
         // exist. The retained record is compared byte for byte, which is what
         // catches a store that re-wrote the row rather than leaving it alone.
         let joined = a_joinable_record("The one Stoa");
         let joined_address = joined.address().unwrap();
-        join_stoa(&join_request(&joined, &joined_address), &mut store);
-        let before = store.get(&joined_address).unwrap().unwrap();
-
-        let key = feed_key(7);
-        let op = Op {
-            stoa: unjoined_address,
-            author: key.public_key(),
-            kind: OpKind::Post {
-                thread: None,
-                parent: None,
-                body: "another".to_string(),
-                attachments: vec![],
-            },
-        }
-        .sign(&key);
-        log.append(op, Arrival::unordered()).unwrap();
-
-        assert_eq!(
-            store.len().unwrap(),
-            1,
-            "the peer is still in exactly one Stoa"
+        assert_ne!(
+            joined_address, unjoined_address,
+            "the fixture's two Stoas must differ, or the assertions below prove nothing"
         );
+        with_membership_store("join_stoa", &membership_path_in(dir.path()), |store| {
+            join_stoa(&join_request(&joined, &joined_address), store)
+        });
+        let before = with_membership_store("_probe", &membership_path_in(dir.path()), |store| {
+            serde_json::to_string(&store.get(&joined_address).unwrap().unwrap().genesis.title)
+                .unwrap()
+        });
+
+        {
+            let mut log = crate::log::SqliteOpLog::open(&dir.path().join("ops.sqlite"))
+                .expect("the op store must reopen");
+            log.append(an_op_in(unjoined_address, "another"), Arrival::unordered())
+                .unwrap();
+            assert_eq!(log.len().unwrap(), 6, "the sixth op must be on the disk");
+        }
+
+        let after = with_membership_store("list_stoas", &membership_path_in(dir.path()), |store| {
+            list_stoas("{}", store)
+        });
+        let av: serde_json::Value = serde_json::from_str(&after).unwrap();
+        let addresses: Vec<&str> = av["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["stoa"].as_str().unwrap())
+            .collect();
         assert_eq!(
-            store.get(&joined_address).unwrap().unwrap(),
-            before,
+            addresses,
+            vec![joined_address.to_hex().as_str()],
+            "the peer is still in exactly the one Stoa it joined: {after}"
+        );
+        let still = with_membership_store("_probe", &membership_path_in(dir.path()), |store| {
+            serde_json::to_string(&store.get(&joined_address).unwrap().unwrap().genesis.title)
+                .unwrap()
+        });
+        assert_eq!(
+            still, before,
             "that Stoa's retained record must be unchanged"
         );
-        assert!(!store.contains(&unjoined_address).unwrap());
     }
 
     #[test]
@@ -2611,16 +2645,40 @@ mod tests {
         // The other direction of the same boundary, at the wire. A peer in several
         // Stoas whose op log holds NOTHING must still list every one of them — an
         // answer derived from the log would list none.
-        let mut store = a_membership_store();
+        //
+        // As above, the op store is a REAL one in the SAME directory rather than a
+        // `MemoryOpLog` the listing cannot reach. The previous version created a
+        // `MemoryOpLog`, asserted `len() == 0`, and never touched it again, which
+        // made this a second copy of
+        // `every_stoa_is_reachable_by_paging_and_appears_once`
+        // (`findings/spec-test.md` entry 4).
+        let dir = WireTempDir::new("quiet-stoas");
         for n in 0..3 {
-            create(&mut store, &format!("Quiet {n}"));
+            let title = format!("Quiet {n}");
+            with_membership_store("create_stoa", &membership_path_in(dir.path()), |store| {
+                create_stoa(
+                    &serde_json::json!({ "title": &title }).to_string(),
+                    || Ok(creator_key()),
+                    store,
+                )
+            });
         }
-        let log = MemoryOpLog::new();
-        assert_eq!(log.len().unwrap(), 0, "the fixture must have no ops");
+        // An op store that exists, opens, and holds nothing — the state an
+        // implementation reading it would answer "no Stoas" from.
+        {
+            let log = crate::log::SqliteOpLog::open(&dir.path().join("ops.sqlite"))
+                .expect("a fresh op store is creatable");
+            assert_eq!(log.len().unwrap(), 0, "the op store on disk must be empty");
+        }
+        let listing =
+            with_membership_store("list_stoas", &membership_path_in(dir.path()), |store| {
+                list_stoas(&serde_json::json!({ "perPage": 20 }).to_string(), store)
+            });
+        let lv: serde_json::Value = serde_json::from_str(&listing).unwrap();
         assert_eq!(
-            listed(&store, 20).len(),
+            lv["items"].as_array().unwrap().len(),
             3,
-            "every Stoa the peer is in must be listed however few ops it holds"
+            "every Stoa the peer is in must be listed however few ops it holds: {listing}"
         );
     }
 
@@ -3396,29 +3454,36 @@ mod tests {
         join_stoa(&join_request(&real, &claimed), &mut holding_it);
         let from_holding_it = join_stoa(&request, &mut holding_it);
 
-        let mut with_ops = a_membership_store();
+        // The third case is on a REAL DISK, in the same directory as its op log.
+        // In-memory, as this was, the ops sat somewhere the store could not have
+        // reached even in principle, so "a verifier that looked would have found
+        // them" was not true of the fixture. Now it is: the ops are one
+        // `dir.join("ops.sqlite")` away from the store being used.
         let elsewhere = a_joinable_record("Elsewhere");
-        join_stoa(
-            &join_request(&elsewhere, &elsewhere.address().unwrap()),
-            &mut with_ops,
-        );
         {
-            // A real op log, on a real disk, holding ops for the very Stoa being
-            // verified — the material a verifier tempted to "look it up" would
-            // reach for.
             let mut log = crate::log::SqliteOpLog::open(&dir.path().join("ops.sqlite"))
                 .expect("a fresh op store is creatable");
             for n in 0..3 {
                 log.append(an_op_in(claimed, &format!("op {n}")), Arrival::unordered())
                     .unwrap();
             }
-            assert_eq!(
-                log.len().unwrap(),
-                3,
-                "the fixture must reach the assertion"
-            );
+            // The ops are on the disk, which is the state this third case differs
+            // by. NOT "the fixture must reach the assertion", which this said
+            // before and which was backwards: reaching the assertion is exactly
+            // what must not happen. The assertion is that the three replies agree,
+            // and a reply derived from ops would differ.
+            assert_eq!(log.len().unwrap(), 3, "the ops must be on the disk");
         }
-        let from_with_ops = join_stoa(&request, &mut with_ops);
+        with_membership_store("join_stoa", &membership_path_in(dir.path()), |store| {
+            join_stoa(
+                &join_request(&elsewhere, &elsewhere.address().unwrap()),
+                store,
+            )
+        });
+        let from_with_ops =
+            with_membership_store("join_stoa", &membership_path_in(dir.path()), |store| {
+                join_stoa(&request, store)
+            });
 
         assert_eq!(
             from_empty, from_holding_it,

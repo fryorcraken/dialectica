@@ -324,7 +324,53 @@ should not be in the test, because it tells the next reader the property is cove
 
 `wire.rs:2530`, `wire.rs:2610`, `wire.rs:3318`, `membership.rs:1587`
 
-**Outcome:**
+**Outcome: FIXED**, all four sites, and the entry is right on every one of them.
+Addressed here rather than by `tester` because three of the four needed the
+fixture to be rebuilt around a real on-disk store, which is a change to what the
+test *does* and not to what it asserts.
+
+The rule this entry rests on, and the one I applied: **a fixture that cannot
+affect the assertion should not be in the test.** A `MemoryOpLog` beside a
+`MembershipStore` shares no state, so ops in it cannot reach anything — the fix is
+to put the ops where an implementation that went looking would find them, which is
+the same directory as the membership store on a real disk.
+
+- **`an_op_for_a_stoa_the_peer_is_not_in_creates_no_membership`** — rebuilt on a
+  real `SqliteOpLog` in the directory the membership store is opened in, reached
+  through `with_membership_store` / `list_stoas`. Also now asserts the error arm
+  explicitly, because a derived listing can fail either by listing a Stoa nobody
+  joined or by choking on what it derived.
+- **`an_empty_op_log_does_not_empty_the_listing`** — same, the other direction: a
+  real op store that exists, opens and holds nothing, in the same directory.
+- **`a_join_verified_at_the_wire_needs_no_op_log_and_no_prior_membership`**, third
+  case — was an in-memory store beside an on-disk log, so the ops sat somewhere the
+  store could not have reached even in principle. Now on disk, in that directory.
+  **This entry's sibling defect, not listed here but the same one:** `wire.rs:3337`
+  carried a second copy of *"the fixture must reach the assertion"*, and there it
+  was not merely false but backwards — reaching the assertion is exactly what must
+  not happen, since the assertion is that the three replies agree. Corrected.
+- **`membership_is_not_lost_because_a_stoa_has_no_ops`** — **deleted**, with the
+  reasoning left in a comment where it was. The entry is right that it was a
+  restatement of `every_stoa`; on checking,
+  `every_stoa_is_reachable_by_paging_and_appears_exactly_once` already asserts the
+  same thing over a larger population and a page size that does not divide it, so a
+  rewrite would have been a third copy. The op-log property is labelled
+  satisfied-by-construction at that layer with what makes the absence real:
+  `list`'s only material is `self.conn`, `open`/`in_memory` are the only
+  constructors and neither can be handed a log, and `grep -n "OpLog\|ops.sqlite"
+  membership.rs` returns nothing outside comments.
+
+**The tests that fail without the fix, both mutations run.** Mutating
+`MembershipStore::open` to derive membership from a sibling `ops.sqlite`:
+`an_op_for_a_stoa_the_peer_is_not_in_creates_no_membership` **fails**. Mutating it
+the other way — `DELETE FROM stoas` when the sibling log is empty:
+`an_empty_op_log_does_not_empty_the_listing` **fails**, `left: 0, right: 3`. Both
+old versions passed under both mutations. Also re-ran this entry's own `0..5` →
+`0..0`, which the old test survived and the new one fails on.
+
+`a_membership_is_recordable_into_a_store_that_previously_held_none` is left alone —
+this entry is right that it was already the honest one, and it is now the shape the
+other three follow.
 
 ---
 
@@ -433,7 +479,37 @@ silently removes the Purpose paragraphs a reader of those citations lands on.
 loses the paragraph #37 added, with nothing in this PR's diff review explaining why.
 Rebase onto `origin/main` and confirm the three files show no change.
 
-**Outcome:**
+**Outcome: FIXED**, and the entry's diagnosis was exact — `git diff origin/main --
+openspec/specs` showed twelve deletions across those three files, and
+`git log --oneline origin/main --not HEAD` showed the single missing commit,
+`2b9b7f5` (#37).
+
+**Merged rather than rebased**, which departs from the entry's suggested verb and
+not from its requirement. Thirteen commits sit on this branch, four of them
+reviewers' findings files cherry-picked from their own worktrees; a rebase rewrites
+every one and then needs a force-push, which the flow forbids. Nothing was at risk
+in the merge: `git diff <merge-base> HEAD` over `openspec/specs` and
+`.claude/agents/README.md` is **empty**, so the two sides touch disjoint files and
+the merge carried main's additions in without a conflict.
+
+**Confirmed after the merge**, which is the check the entry asks for:
+`git diff origin/main --stat -- openspec/specs` is now **empty**, and
+`grep -n "## Purpose"` finds the section in all three of
+`openspec/specs/identity/spec.md`, `module-wire-contract/spec.md` and
+`stoa-metadata/spec.md`.
+
+One thing worth adding to the entry's stakes, stated as what I measured rather
+than as what I was told. `2b9b7f5`'s own commit message says that before it, these
+three specs had no `## Purpose`, so `openspec list --specs` reported all three as
+holding **zero requirements** and `openspec show --type spec --json` **errored** on
+them — the inventory understated three capabilities to zero, identity among them.
+So a Purpose is not decoration for this toolchain; it is what makes a spec
+enumerable. I did **not** independently verify the stronger claim I was handed,
+that `openspec archive` aborts and writes nothing without one — the archive doc
+that would say so (`docs/OPENSPEC-ARCHIVE.md`) is on an unmerged branch and not in
+this tree, and I did not run a destructive archive to find out. What I did verify:
+`openspec validate --specs --strict` from inside this worktree now reports
+**11 passed, 0 failed**.
 
 ---
 
