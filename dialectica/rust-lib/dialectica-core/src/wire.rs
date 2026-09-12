@@ -11,6 +11,19 @@
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
+/// The request envelope, deliberately in a file of its own.
+///
+/// [`Request`]'s guarantee is that a handler holding one went through the
+/// envelope check — and a tuple struct's private field is private to its
+/// **defining module**, not its defining type. While the type lived in this
+/// file, every handler here could write `Request(map)` and skip the check; the
+/// claim in its doc comment was false for exactly the population it named. The
+/// boundary is the fix, and it holds only while **this file contains no
+/// constructor and that file contains no handler**.
+mod request;
+
+pub use request::{Request, REQUEST_NOT_AN_OBJECT};
+
 /// The one failure shape (PLAN.md §2.5). Everything that goes wrong comes back
 /// through here, so a view has exactly one error branch to render — never a
 /// partial success.
@@ -19,83 +32,6 @@ pub fn error_json(message: &str) -> String {
     // malformed JSON for a message containing a quote or a newline, turning a
     // diagnosable error into a parse failure at the view.
     serde_json::json!({ "error": message }).to_string()
-}
-
-/// The refusal for a request that is not a JSON object.
-///
-/// A `const` rather than a literal at five call sites, because the spec's
-/// obligation is about what the message *says*: it must be distinguishable from
-/// "invalid JSON" and from "missing field", so that three caller mistakes
-/// produce three messages. Five copies would drift and one would eventually
-/// collide with a neighbour.
-pub const REQUEST_NOT_AN_OBJECT: &str = "the request must be a JSON object";
-
-/// A request that is known to be a JSON object, because it cannot be built from
-/// anything else.
-///
-/// # Why this is a type and not a branch
-///
-/// `serde_json::Value::get` answers `None` for **every** non-object. So with a
-/// bare `Value` in hand, `parsed.get("stoa")` cannot tell an array from an
-/// object missing its `stoa` — and a handler whose fields are all optional
-/// serves an array as a request that named nothing. That is the defect this
-/// exists to close, and it is latent rather than reachable only because every
-/// method on today's surface happens to require a field.
-///
-/// The fix could have been one `if !parsed.is_object()` per handler. It was not,
-/// for a reason that outlives style: **a branch has to be got right at every
-/// call site, and "is it checked everywhere?" is then a question you answer by
-/// reading every handler.** A new method that forgets the branch compiles,
-/// passes clippy, and silently reintroduces the defect.
-///
-/// With this type the question is answered by the compiler. The inner map is
-/// private and [`Request::parse`] is the only constructor, so a handler holding
-/// a `Request` provably went through the check — and a handler written next
-/// month inherits it without its author knowing this change happened.
-///
-/// # What it does NOT constrain
-///
-/// The envelope, not the fields. [`Request::get`] hands back a `&Value` and each
-/// handler still decides what type it wanted; a wrong-typed field is that
-/// handler's error to report, with its own message. An **unknown** field is
-/// carried and ignored, which the contract states deliberately — strictness is a
-/// forward-compatibility policy and not an envelope rule.
-pub struct Request(serde_json::Map<String, serde_json::Value>);
-
-impl Request {
-    /// Parse a request string, refusing anything that is not a JSON object.
-    ///
-    /// The `Err` arm is already the wire reply, so a caller cannot invent a
-    /// second error shape while converting one — the same convention
-    /// [`parse_channel_id`] follows.
-    ///
-    /// **Two steps rather than one, on purpose.** Deserialising straight into a
-    /// `Map` would let serde refuse an array for free, but its message
-    /// (`invalid type: sequence, expected a map`) arrives through the same `Err`
-    /// arm as a genuine parse failure and would be reported as `invalid JSON`.
-    /// The spec requires those two be told apart, so the parse stays untyped and
-    /// the type check is ours.
-    pub fn parse(request: &str) -> Result<Self, String> {
-        let parsed: serde_json::Value = match serde_json::from_str(request) {
-            Ok(v) => v,
-            Err(e) => return Err(error_json(&format!("invalid JSON: {e}"))),
-        };
-        match parsed {
-            serde_json::Value::Object(map) => Ok(Request(map)),
-            // Every other variant, named by the `_` rather than enumerated:
-            // an array, a number, a string, a boolean, `null`. All of them
-            // answer `None` to every field read, which is the whole defect.
-            _ => Err(error_json(REQUEST_NOT_AN_OBJECT)),
-        }
-    }
-
-    /// A field, or `None` because the request genuinely lacks it.
-    ///
-    /// Unlike `Value::get`, a `None` here means exactly one thing: this object
-    /// has no such key. That is the ambiguity the type removes.
-    pub fn get(&self, field: &str) -> Option<&serde_json::Value> {
-        self.0.get(field)
-    }
 }
 
 /// The panic guard. No handler may unwind.
@@ -1640,9 +1576,26 @@ mod tests {
     /// Every method that accepts a request, behind one uniform call, so a new
     /// method is added to the sweep in one place rather than to each test.
     ///
-    /// `panic_probe` is absent on purpose: it takes a request and never decodes
-    /// it, so it has no field read for the envelope to protect (design.md §4).
-    /// `version` is absent because it takes no request at all.
+    /// # ADD YOUR METHOD HERE
+    ///
+    /// **If you are adding a method to this crate's wire surface that takes a
+    /// request, add it to this list and give it a fixture in
+    /// [`a_served_request`]. That is an obligation, not a courtesy.** Nothing
+    /// checks it: an unlisted method is silently unswept, the envelope sweeps
+    /// below go green without it, and the guarantee the sweep exists to state is
+    /// then a statement about four methods that reads as a statement about
+    /// every one.
+    ///
+    /// The compiler cannot check this and a source-scanning test was rejected
+    /// for failing on unrelated things (see `design.md`'s rejected
+    /// alternatives), so the obligation is written here, where an author adding
+    /// a method has to be in order to add it.
+    ///
+    /// Two absences are deliberate rather than forgotten:
+    ///
+    /// - `panic_probe` takes a request and never decodes it, so it has no field
+    ///   read for the envelope to protect (design.md §4).
+    /// - `version` takes no request at all.
     fn every_request_taking_method() -> Vec<NamedMethod> {
         fn ping_m(r: &str) -> String {
             ping(r)
@@ -1878,6 +1831,56 @@ mod tests {
             "panic_probe must still reach its panic, got {message:?}"
         );
         assert_ne!(message, REQUEST_NOT_AN_OBJECT);
+    }
+
+    #[test]
+    fn the_bypass_this_module_boundary_closes() {
+        // NOT A TEST OF BEHAVIOUR, and said so plainly: this is the honest half
+        // of the guarantee, because what it asserts cannot be asserted at
+        // runtime at all.
+        //
+        // The claim in `Request`'s doc is that a handler holding one went
+        // through the check. While `Request` was defined IN THIS FILE that was
+        // false, because a tuple struct's private field is private to its
+        // defining MODULE and every handler lives here. Verified before the fix
+        // by compiling, from this very `mod tests`:
+        //
+        //     let bypass = Request(serde_json::Map::new());
+        //     let inner_read = bypass.0.len();     // compiled, ran, returned 0
+        //
+        // Neither line contains a `from_str`, so the mitigation originally
+        // recorded — "a second parse is visible in review as an anomaly" — never
+        // applied to it.
+        //
+        // After the move to `wire::request` the first line fails to compile
+        // here. Verified, verbatim:
+        //
+        //     error[E0423]: cannot initialize a tuple struct which contains
+        //                   private fields
+        //       --> dialectica-core/src/wire.rs
+        //       note: constructor is not visible here due to private fields
+        //       --> dialectica-core/src/wire/request.rs
+        //
+        // That is a compile error, so it cannot be written as a `#[test]` in
+        // this file — a compile-fail assertion would have to be a
+        // `compile_fail` doctest, and this crate's doctest run is empty by
+        // design. Recording the verified error is therefore the whole proof, and
+        // it is deliberately stated as such rather than dressed up as a test
+        // that passes for a weaker reason.
+        //
+        // What IS testable, and is: the positive half lives in
+        // `wire::request::tests::request_is_constructible_here_because_this_module_defines_it`,
+        // which compiles the same line inside the defining module. Together they
+        // say the refusal above is about the boundary and not about a typo.
+        //
+        // And the runtime half of the guarantee — that the only constructor
+        // reachable from here refuses a non-object — is
+        // `request_parse_is_the_only_way_to_reach_a_field_read`, below.
+        let through_the_constructor = Request::parse(r#"{"payload":1}"#);
+        assert!(
+            through_the_constructor.is_ok(),
+            "the only reachable way in must still work"
+        );
     }
 
     #[test]
