@@ -22,7 +22,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 /// constructor and that file contains no handler**.
 mod request;
 
-pub use request::{Request, REQUEST_NOT_AN_OBJECT};
+pub use request::{Request, MAX_REQUEST_BYTES, REQUEST_NOT_AN_OBJECT};
 
 /// The one failure shape (PLAN.md §2.5). Everything that goes wrong comes back
 /// through here, so a view has exactly one error branch to render — never a
@@ -90,12 +90,30 @@ pub fn version(crate_version: &str) -> String {
 /// Trivial by design, but it validates at the boundary, which is the habit the
 /// security posture asks for: inbound JSON is attacker-controlled and is
 /// rejected here rather than deeper in.
+///
+/// # `payload` is the surface's one `<any>` field, and that decides its `null`
+///
+/// The contract keys a field's `null` reading to its declared type and
+/// optionality, and gives three readings. `payload` takes **reading 1**: a field
+/// documented as carrying any JSON value carries a `null` through as that value,
+/// and that reading takes precedence over the required-field one. So
+/// `{"payload":null}` is served as `{"pong":null}` rather than refused —
+/// `payload` is required, but for a field whose type admits `null` the `null` is
+/// not a malformed parameter, it *is* the parameter.
+///
+/// That precedence is the part worth stating here rather than leaving to be
+/// derived: without it, `payload` is reachable by two readings that disagree, and
+/// this method is where they meet. Pinned by
+/// `pings_payload_carries_an_explicit_null_through_as_a_value`.
 pub fn ping(request: &str) -> String {
     guarded("ping", || {
         let parsed = match Request::parse(request) {
             Ok(r) => r,
             Err(e) => return e,
         };
+        // Note what is NOT here: a `Some(Value::Null)` arm collapsing a null into
+        // the missing-field refusal. A `<any>` field's null is a value (reading
+        // 1), so the only absence is a genuine one.
         let Some(payload) = parsed.get("payload") else {
             return error_json("missing field: payload");
         };
@@ -325,6 +343,20 @@ pub fn genesis_for(
         Some(_) => return Err(error_json("genesis must be a string")),
         None => return Err(error_json("missing field: genesis")),
     };
+    // BEFORE the decode. `hex::decode` allocates `hex_str.len() / 2` bytes from
+    // a length the caller chose, and a genesis record has a known maximum — so a
+    // 64 MiB hex string can be refused for nothing rather than decoded into a
+    // 32 MiB `Vec` that `Genesis::decode` then rejects. The bound comes from
+    // `stoa` rather than being spelled out here: the largest record the format
+    // can hold is that module's knowledge, and a number copied over would drift
+    // from it silently.
+    if hex_str.len() > crate::stoa::MAX_CANONICAL_BYTES * 2 {
+        return Err(error_json(&format!(
+            "genesis is {} hex characters, over the {} the format allows",
+            hex_str.len(),
+            crate::stoa::MAX_CANONICAL_BYTES * 2
+        )));
+    }
     let bytes = match hex::decode(hex_str) {
         Ok(b) => b,
         Err(_) => return Err(error_json("genesis is not valid hex")),
@@ -396,6 +428,17 @@ fn list_threads_inner<L: crate::log::OpLog>(
             Err(e) => return e,
         };
 
+        // The contract's reading 2 again, and this is the field the contract
+        // names as its worked example: an optional flag whose `null` reads as
+        // absent BECAUSE `false` is the restrictive default. Hidden content stays
+        // excluded, so no caller reaches a wider answer by naming the field with
+        // no value.
+        //
+        // Flip the default to `true` and this arm becomes the authorisation
+        // bypass the contract's `SHALL NOT` forbids — the `null` would have to be
+        // refused as a wrong type instead. See `parse_index`'s doc for the full
+        // statement of the limit; it is one rule with two instances, not two
+        // local habits.
         let include_hidden = match parsed.get("includeHidden") {
             None | Some(serde_json::Value::Null) => false,
             Some(serde_json::Value::Bool(b)) => *b,
@@ -462,8 +505,36 @@ pub fn list_threads_from_request<L: crate::log::OpLog>(
 /// Separated out because `page` and `perPage` are the same parsing job with the
 /// same three failure modes, and a second copy would eventually disagree with
 /// the first about whether `-1` is an error or a zero.
+///
+/// # WHY AN EXPLICIT `null` IS ABSENT HERE, AND WHEN COPYING THAT IS WRONG
+///
+/// [`Request::get`] distinguishes `{"page":null}` from `{}` faithfully —
+/// `Some(Null)` against `None` — and this reader deliberately collapses them.
+/// That is the contract's **reading 2**: an optional field treats a `null` as
+/// absent and acts on its restrictive default. `page` defaults to 0 and
+/// `perPage` to the module's own value, so a null-sending caller gets strictly no
+/// more than it would have got by omitting the field.
+///
+/// **The restrictive direction is the licence, and it does not travel with the
+/// spelling.** The contract states the limit as a `SHALL NOT`: a field must not
+/// read `null` as absent where the resulting default is the *permissive* choice,
+/// and such a field refuses the `null` as a wrong type instead (reading 3). So
+/// this spelling is the template the next optional field gets written from, and
+/// the property that makes it safe is not in the spelling.
+///
+/// A future `asModerator`, `includeRemoved` or `bypassPolicy` written as
+/// `None | Some(Null) => <permissive default>` would let `{"bypassPolicy":null}`
+/// reach the permissive branch by naming a field with no value, while a
+/// presence-checking validator upstream sees the field as set — the two
+/// disagreeing about whether the caller asked for anything. **Before copying this
+/// match arm, check which way your default leans; if it leans permissive, the
+/// contract requires you to refuse the null rather than default it.**
 fn parse_index(parsed: &Request, field: &str) -> Result<Option<usize>, String> {
     match parsed.get(field) {
+        // A null reads as absent HERE because the default it falls to is the
+        // restrictive one. That is the load-bearing half, not the collapse — see
+        // the doc above before copying this arm to a field whose default widens
+        // what the caller may see.
         None | Some(serde_json::Value::Null) => Ok(None),
         Some(serde_json::Value::Number(n)) => match n.as_u64() {
             // `as_u64` refuses a negative and a fractional number, which is
@@ -1188,6 +1259,60 @@ mod tests {
         log
     }
 
+    /// A log holding two threads, one of them hidden by the Stoa's moderator.
+    ///
+    /// Needed because `includeHidden` is the contract's worked example for a
+    /// null-reads-as-absent field, and "the null took the restrictive default"
+    /// cannot be asserted against a log where the flag changes nothing — both
+    /// answers would be identical and the test would pass for the wrong reason.
+    ///
+    /// The hider is `feed_key(1)`, which is [`feed_genesis`]'s creator and
+    /// therefore the Stoa's only moderator: a hide op signed by anyone else is
+    /// unauthorised and filtered on read, so the thread would stay visible and
+    /// the fixture would silently be the one-visible-thread case again.
+    fn log_with_a_hidden_thread() -> MemoryOpLog {
+        let stoa = feed_genesis().address().unwrap();
+        let poster = feed_key(2);
+        let visible = Op {
+            stoa,
+            author: poster.public_key(),
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: "visible".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&poster);
+        let to_hide = Op {
+            stoa,
+            author: poster.public_key(),
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: "hidden".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&poster);
+        let moderator = feed_key(1);
+        let hide = Op {
+            stoa,
+            author: moderator.public_key(),
+            kind: OpKind::Moderate {
+                target: to_hide.op.id(),
+                action: crate::op::ModerationAction::Hide,
+            },
+        }
+        .sign(&moderator);
+
+        let mut log = MemoryOpLog::new();
+        log.append(visible, Arrival::unordered()).unwrap();
+        log.append(to_hide, Arrival::unordered()).unwrap();
+        log.append(hide, Arrival::unordered()).unwrap();
+        log
+    }
+
     fn feed_request(extra: &str) -> String {
         let stoa = feed_genesis().address().unwrap().to_hex();
         if extra.is_empty() {
@@ -1536,6 +1661,57 @@ mod tests {
     }
 
     #[test]
+    fn an_over_long_genesis_hex_string_is_refused_before_it_is_decoded() {
+        // NO SPEC: the spec set bounds no field's length. This is the same
+        // absent decision `MAX_REQUEST_BYTES` is, one layer in — and it is kept
+        // beside the request cap rather than folded into it because they refuse
+        // different things: the request cap bounds what any request may cost,
+        // and this bounds what THIS field may allocate no matter how small the
+        // request around it is.
+        //
+        // The assertion is about ORDERING, which is the only part that matters:
+        // the fixture is over-long AND not valid hex. An implementation that
+        // decoded first answers "genesis is not valid hex"; only one that checks
+        // the length first can answer for the length. Swap the two lines in
+        // `genesis_for` and this goes red while every other genesis test stays
+        // green.
+        let stoa = feed_genesis().address().unwrap().to_hex();
+        let over_long = "z".repeat(crate::stoa::MAX_CANONICAL_BYTES * 2 + 1);
+        let request = format!(r#"{{"stoa":"{stoa}","genesis":"{over_long}"}}"#);
+        assert!(
+            request.len() < MAX_REQUEST_BYTES,
+            "the request must be well under the envelope cap, or THAT is what refuses it"
+        );
+
+        let out = list_threads_from_request(&request, || {
+            Ok::<_, crate::log::OpLogError>(log_with_body("hello"))
+        });
+        let message = error_message(&out);
+        assert!(
+            message.contains("over the") && message.contains("hex characters"),
+            "an over-long genesis must be refused for its length, got {message:?}"
+        );
+        assert!(
+            !message.contains("not valid hex"),
+            "the length must be checked BEFORE the decode, got {message:?}"
+        );
+
+        // The boundary from the other side: a hex string of exactly the largest
+        // record the format allows must still reach the decode, so a `>` written
+        // as `>=` is caught. Junk of that length is "not valid hex", which is the
+        // refusal it has always earned.
+        let exactly_at_bound = "z".repeat(crate::stoa::MAX_CANONICAL_BYTES * 2);
+        let at_bound_request = format!(r#"{{"stoa":"{stoa}","genesis":"{exactly_at_bound}"}}"#);
+        let at_bound = error_message(&list_threads_from_request(&at_bound_request, || {
+            Ok::<_, crate::log::OpLogError>(log_with_body("hello"))
+        }));
+        assert!(
+            at_bound.contains("not valid hex"),
+            "a hex string at the format's own bound must still be decoded, got {at_bound:?}"
+        );
+    }
+
+    #[test]
     fn a_store_that_cannot_be_opened_is_the_error_shape_and_not_an_empty_feed() {
         // The failure one step earlier than the read: opening the store. It is
         // just as easy to flatten into an empty page here, and it renders
@@ -1573,29 +1749,51 @@ mod tests {
     /// A method named, and callable with a raw request string.
     type NamedMethod = (&'static str, fn(&str) -> String);
 
-    /// Every method that accepts a request, behind one uniform call, so a new
-    /// method is added to the sweep in one place rather than to each test.
+    /// A named field, the request that supplies it, and the call that reads it.
+    ///
+    /// A boxed closure rather than a `fn` pointer because each case captures a
+    /// different fixture — a `log`, a lookup, a genesis record — and a plain `fn`
+    /// cannot close over any of them. The alias is for `clippy::type_complexity`,
+    /// the same reason `NamedMethod` exists.
+    type NullReadingCase = (&'static str, String, Box<dyn Fn(&str) -> String>);
+
+    /// Every method that **reads a field of its request**, behind one uniform
+    /// call, so a new method is added to the sweep in one place rather than to
+    /// each test.
+    ///
+    /// The name is the contract's scope, which is the field read and not the
+    /// parameter: reading one field is enough to be inside the envelope rule, and
+    /// requiring none is not enough to be outside it.
     ///
     /// # ADD YOUR METHOD HERE
     ///
-    /// **If you are adding a method to this crate's wire surface that takes a
-    /// request, add it to this list and give it a fixture in
-    /// [`a_served_request`]. That is an obligation, not a courtesy.** Nothing
-    /// checks it: an unlisted method is silently unswept, the envelope sweeps
-    /// below go green without it, and the guarantee the sweep exists to state is
-    /// then a statement about four methods that reads as a statement about
-    /// every one.
+    /// **If you are adding a method to this crate's wire surface that reads a
+    /// field of its request, add it to this list and give it a fixture in
+    /// [`a_served_request`]. That is an obligation, not a courtesy.**
     ///
-    /// The compiler cannot check this and a source-scanning test was rejected
-    /// for failing on unrelated things (see `design.md`'s rejected
-    /// alternatives), so the obligation is written here, where an author adding
-    /// a method has to be in order to add it.
+    /// Nothing checks it, and the cost was measured rather than imagined: a
+    /// reviewer built a sixth method — a handler parsing `Value` directly with
+    /// all-optional fields, serving `[]` as a request that named nothing — and the
+    /// whole suite passed. An unlisted method is silently unswept, every sweep
+    /// below goes green without it, and a guarantee about five methods reads as a
+    /// guarantee about the surface.
     ///
-    /// Two absences are deliberate rather than forgotten:
+    /// The compiler cannot force this. Moving `Request` behind a module boundary
+    /// makes it impossible to hold one without the check, but nothing obliges a
+    /// handler to hold one at all — see
+    /// `the_sixth_method_the_boundary_does_not_stop`, which builds that method and
+    /// demonstrates it. And a source-scanning test was rejected for failing on
+    /// unrelated things (see `design.md`'s rejected alternatives). So the
+    /// obligation is written here, where an author adding a method has to be in
+    /// order to add it.
     ///
-    /// - `panic_probe` takes a request and never decodes it, so it has no field
-    ///   read for the envelope to protect (design.md §4).
-    /// - `version` takes no request at all.
+    /// Two absences are deliberate rather than forgotten, and both are now
+    /// governed by the spec rather than chosen here:
+    ///
+    /// - `panic_probe` takes a request and reads no field of it, passing it
+    ///   through as opaque text. The envelope rule's third case puts it outside,
+    ///   and its own requirement gives it a contract instead (design.md §4).
+    /// - `version` takes no request at all — the rule's second case.
     fn every_request_taking_method() -> Vec<NamedMethod> {
         fn ping_m(r: &str) -> String {
             ping(r)
@@ -1814,16 +2012,20 @@ mod tests {
 
     #[test]
     fn panic_probe_still_panics_on_a_non_object_rather_than_refusing_it() {
-        // NO SPEC: the spec scopes the rule to methods that "accept a request",
-        // and says nothing about a method that takes a request string it never
-        // decodes. `panic_probe` is that method — it formats the raw string
-        // into a panic message and reads no field, so there is nothing for the
-        // envelope to protect. Envelope-checking it would make
-        // `panic_probe("[]")` a refusal instead of an exercise of the guard,
-        // which is the only reason the method exists.
+        // SPECIFIED, and the `NO SPEC:` marker that stood here is gone rather
+        // than reworded around: the envelope rule is now scoped by "reads a field
+        // of its request", and the probe's own requirement — "A panic in a
+        // handler becomes the error shape and the module keeps serving" — gives
+        // the probe a contract of its own. It treats its request as opaque text,
+        // reaches its panic for every request shape including a non-object and
+        // including text that is not JSON, refuses none, and carries the request
+        // in its message.
         //
-        // Pinned so the choice is visible: if the spec later says every method
-        // taking a string must envelope-check it, this test is what fails.
+        // The exclusion is still worth a comment, because the reason it is not a
+        // gap is not visible from the code: a probe that can refuse a request is
+        // a probe there are requests the guard is not exercised against, so the
+        // two rules cannot both reach it and the panic-guard one wins. That is
+        // the spec's own words, not this test's reasoning.
         let out = panic_probe("[]");
         let message = error_message(&out);
         assert!(
@@ -1831,6 +2033,369 @@ mod tests {
             "panic_probe must still reach its panic, got {message:?}"
         );
         assert_ne!(message, REQUEST_NOT_AN_OBJECT);
+        // The probe's own requirement also obliges the request to reach the
+        // message, which is "the observable difference between passing the text
+        // through and decoding it". Asserted here because the exclusion and the
+        // pass-through are one claim: a probe that decoded its request in order
+        // to refuse it could not carry the raw text.
+        assert!(
+            message.contains("[]"),
+            "the probe must carry the request it was given, got {message:?}"
+        );
+    }
+
+    #[test]
+    fn every_request_taking_method_refuses_an_oversized_request() {
+        // NO SPEC: the spec set says nothing about a size limit on a request —
+        // not that there is one, not that there is not. This is therefore an
+        // ABSENT decision rather than a rejected one, and the number is
+        // `dev-writer`'s choice pending the spec-writer: 4 MiB, derived in
+        // `MAX_REQUEST_BYTES`'s doc from what a legitimate composed op can
+        // carry.
+        //
+        // What made it necessary is measured rather than theorised: a 64 MiB
+        // request padded with one ignored field was ACCEPTED and served, at
+        // 92.6 ms and ~2N transient heap, for a 373-byte reply — an inverted
+        // amplification nothing downstream can notice. `ping` echoes `payload`,
+        // so 32 MiB in produced a 33,554,443-byte reply.
+        //
+        // Swept across every method rather than asserted once on
+        // `Request::parse`, because the claim being made is about the SURFACE:
+        // the envelope bounds every request-taking method, including one written
+        // next month. If this test ever has to be edited to exempt a method,
+        // that is the signal that the method reached around the type.
+        let oversized = format!(r#"{{"junk":"{}"}}"#, "x".repeat(MAX_REQUEST_BYTES));
+        assert!(oversized.len() > MAX_REQUEST_BYTES);
+        for (name, method) in every_request_taking_method() {
+            let message = error_message(&method(&oversized));
+            assert!(
+                message.contains("over the") && message.contains("byte limit"),
+                "{name} must refuse an oversized request for its size, got {message:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_request_within_the_cap_is_still_served() {
+        // The other half, and the one that stops a cap of zero from satisfying
+        // the sweep above. Every method's own served fixture is far under the
+        // cap, so this is really asserting that the check did not fire at all —
+        // which is what `an_object_supplying_only_its_required_fields_is_served`
+        // would also catch, except that a cap mistakenly written as
+        // `request.len() < MAX_REQUEST_BYTES` (refusing everything SMALL) would
+        // break both and only this one names the reason.
+        for (name, method) in every_request_taking_method() {
+            let served = a_served_request(name);
+            assert!(
+                served.len() < MAX_REQUEST_BYTES,
+                "{name}'s fixture must be under the cap for this test to mean anything"
+            );
+            let out = method(&served);
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(
+                v.get("error").is_none(),
+                "{name} refused a request well under the cap: {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn pings_payload_carries_an_explicit_null_through_as_a_value() {
+        // Reading 1, and the surface's only instance of it: `payload` is
+        // documented `<any>`, so a `null` is the value rather than a malformed
+        // parameter — and that reading takes precedence over the required-field
+        // one, which `payload` also satisfies.
+        //
+        // The assertion is that `pong` is PRESENT and holds `null`, which is a
+        // different statement from `v["pong"].is_null()`: indexing a missing key
+        // in `serde_json` yields `Value::Null` too, so the weaker spelling passes
+        // against a reply that dropped the field entirely. That is the two-
+        // explanations-one-answer shape this project keeps finding.
+        let out = ping(r#"{"payload":null}"#);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(
+            v.get("error").is_none(),
+            "a `<any>` field's null is a value, not a refusal: {out}"
+        );
+        assert_eq!(
+            v.as_object().and_then(|o| o.get("pong")),
+            Some(&serde_json::Value::Null),
+            "the null must be CARRIED, not dropped: {out}"
+        );
+        // And the whole reply, hardcoded, because the shape is the contract.
+        assert_eq!(out, r#"{"pong":null}"#);
+
+        // The two it must be told apart from. Omitting the field is the missing
+        // one, not a null value — so reading 1 has not been implemented by
+        // treating a null as absent.
+        assert_eq!(error_message(&ping("{}")), "missing field: payload");
+    }
+
+    #[test]
+    fn a_null_optional_field_takes_the_restrictive_default() {
+        // Reading 2, and the assertion the contract actually names: not merely
+        // "a null is accepted" but that the reply EQUALS the one omitting the
+        // field gives, and that it is the restrictive reply.
+        //
+        // `includeHidden` is the worked example — a hidden thread must stay
+        // hidden for `null`. Comparing against the omitted-field reply is what
+        // makes this fail if `null` were ever read as `true`: both replies would
+        // still parse, both would still be error-free, and only the comparison
+        // sees the difference.
+        let log = log_with_body("hello");
+        let omitted = list_threads(&feed_request(""), &log, &feed_genesis());
+        let null_valued = list_threads(
+            &feed_request(r#""includeHidden":null"#),
+            &log,
+            &feed_genesis(),
+        );
+        assert_eq!(
+            null_valued, omitted,
+            "a null optional field must answer exactly as omitting it does"
+        );
+        // And it is the restrictive side of the flag, not just the same side.
+        // `true` must differ from both, or the comparison above is satisfied by
+        // a handler that ignores the flag altogether.
+        let explicitly_true = list_threads(
+            &feed_request(r#""includeHidden":true"#),
+            &log,
+            &feed_genesis(),
+        );
+        let hidden_log = log_with_a_hidden_thread();
+        let with_hidden_excluded = list_threads(
+            &feed_request(r#""includeHidden":null"#),
+            &hidden_log,
+            &feed_genesis(),
+        );
+        let with_hidden_included = list_threads(
+            &feed_request(r#""includeHidden":true"#),
+            &hidden_log,
+            &feed_genesis(),
+        );
+        assert_ne!(
+            with_hidden_excluded, with_hidden_included,
+            "the flag must actually change the answer, or this test proves nothing \
+             about which side a null lands on ({explicitly_true})"
+        );
+        let excluded: serde_json::Value = serde_json::from_str(&with_hidden_excluded).unwrap();
+        let included: serde_json::Value = serde_json::from_str(&with_hidden_included).unwrap();
+        assert!(
+            excluded["items"].as_array().unwrap().len()
+                < included["items"].as_array().unwrap().len(),
+            "a null must land on the side that shows LESS: {with_hidden_excluded} \
+             vs {with_hidden_included}"
+        );
+
+        // `page` and `perPage` are the same reading through `parse_index`, and
+        // the same assertion: identical to omission.
+        for field in [r#""page":null"#, r#""perPage":null"#] {
+            assert_eq!(
+                list_threads(&feed_request(field), &log, &feed_genesis()),
+                omitted,
+                "{field} must answer exactly as omitting it does"
+            );
+        }
+    }
+
+    #[test]
+    fn a_null_required_field_is_refused_as_a_wrong_type_and_not_as_missing() {
+        // Reading 3, and the distinction the contract makes explicit: the caller
+        // DID name the field, so "missing" would describe a request it did not
+        // make. Asserted on both halves — what the message says, and what it must
+        // not say — because "an error came back" is true of both readings.
+        let stoa = feed_genesis().address().unwrap().to_hex();
+        for (request, field, method) in [
+            (
+                r#"{"stoa":null}"#.to_string(),
+                "stoa",
+                "get_capabilities" as &str,
+            ),
+            (
+                format!(r#"{{"stoa":"{stoa}","genesis":null}}"#),
+                "genesis",
+                "list_threads_from_request",
+            ),
+            (
+                r#"{"channelId":null}"#.to_string(),
+                "channelId",
+                "parse_channel_id",
+            ),
+        ] {
+            let out = match method {
+                "get_capabilities" => get_capabilities(&request, |_| Ok("abcd".to_string())),
+                "list_threads_from_request" => list_threads_from_request(&request, || {
+                    Ok::<_, crate::log::OpLogError>(log_with_body("hello"))
+                }),
+                "parse_channel_id" => match parse_channel_id(&request) {
+                    Ok(id) => serde_json::json!({ "channelId": id }).to_string(),
+                    Err(e) => e,
+                },
+                other => panic!("unhandled method {other}"),
+            };
+            let message = error_message(&out);
+            assert_eq!(
+                message,
+                format!("{field} must be a string"),
+                "{method}: a null required field is a wrong type, got {message:?}"
+            );
+            assert!(
+                !message.contains("missing"),
+                "{method}: a named field must not be reported as missing, got {message:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn one_field_has_one_null_reading() {
+        // The contract's "and never two for one field", asserted as the property
+        // rather than field by field: every field the surface reads, supplied as
+        // `null`, produces exactly ONE of the three outcomes.
+        //
+        // What this catches that the three tests above do not: a field acquiring
+        // a second reading later. A future `Some(Value::Null)` arm added to
+        // `ping` would leave all three of those tests green for `payload` if it
+        // returned the same answer by a different route — but a field landing in
+        // two buckets here is a count, and the count is what is asserted.
+        let stoa = feed_genesis().address().unwrap().to_hex();
+        let cases: Vec<NullReadingCase> = vec![
+            (
+                "payload",
+                r#"{"payload":null}"#.to_string(),
+                Box::new(|r: &str| ping(r)),
+            ),
+            (
+                "stoa",
+                r#"{"stoa":null}"#.to_string(),
+                Box::new(|r: &str| get_capabilities(r, |_| Ok("abcd".to_string()))),
+            ),
+            (
+                "genesis",
+                format!(r#"{{"stoa":"{stoa}","genesis":null}}"#),
+                Box::new(|r: &str| {
+                    list_threads_from_request(r, || {
+                        Ok::<_, crate::log::OpLogError>(log_with_body("hello"))
+                    })
+                }),
+            ),
+            (
+                "channelId",
+                r#"{"channelId":null}"#.to_string(),
+                Box::new(|r: &str| match parse_channel_id(r) {
+                    Ok(id) => serde_json::json!({ "channelId": id }).to_string(),
+                    Err(e) => e,
+                }),
+            ),
+            (
+                "page",
+                feed_request(r#""page":null"#),
+                Box::new(|r: &str| list_threads(r, &log_with_body("hello"), &feed_genesis())),
+            ),
+            (
+                "perPage",
+                feed_request(r#""perPage":null"#),
+                Box::new(|r: &str| list_threads(r, &log_with_body("hello"), &feed_genesis())),
+            ),
+            (
+                "includeHidden",
+                feed_request(r#""includeHidden":null"#),
+                Box::new(|r: &str| list_threads(r, &log_with_body("hello"), &feed_genesis())),
+            ),
+        ];
+
+        for (field, request, call) in cases {
+            let out = call(&request);
+            let v: serde_json::Value = serde_json::from_str(&out)
+                .unwrap_or_else(|e| panic!("{field}: reply must be JSON ({e}): {out}"));
+
+            let refused_as_wrong_type = v
+                .get("error")
+                .and_then(|e| e.as_str())
+                .is_some_and(|m| m.contains("must be"));
+            let refused_as_missing = v
+                .get("error")
+                .and_then(|e| e.as_str())
+                .is_some_and(|m| m.contains("missing"));
+            let served = v.get("error").is_none();
+
+            // A null must NEVER be reported as missing — that is the one outcome
+            // the contract rules out for every field, whichever reading applies.
+            assert!(
+                !refused_as_missing,
+                "{field}: a null was reported as missing: {out}"
+            );
+            let outcomes = [refused_as_wrong_type, served]
+                .iter()
+                .filter(|b| **b)
+                .count();
+            assert_eq!(
+                outcomes, 1,
+                "{field} must produce exactly one outcome, got {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_sixth_method_the_boundary_does_not_stop() {
+        // WHAT THE MODULE BOUNDARY DOES NOT FIX, built rather than asserted,
+        // because the honest scope of the fix is the thing most likely to be
+        // overclaimed.
+        //
+        // The reviewer's sixth method — a handler parsing `Value` directly with
+        // all-optional fields — was built and served `[]` as a request that named
+        // nothing, with the whole suite green. The question put to this change was
+        // whether the module boundary stops it.
+        //
+        // IT DOES NOT. Verified here: this compiles and serves `[]` with
+        // `Request` moved out of reach. The boundary closes exactly one hole —
+        // constructing a `Request` without going through `parse` — and it cannot
+        // close this one, because nothing in the type system obliges a handler to
+        // hold a `Request` at all. A handler that never mentions the type is
+        // never constrained by it.
+        //
+        // So the guarantee is precisely: a handler that reads fields THROUGH
+        // `Request` went through the envelope check. It is not "every handler is
+        // checked", and design.md says so in those words.
+        //
+        // What remains against this is the sweep — `every_request_taking_method`,
+        // whose doc now states the obligation — and review. Both are human, and
+        // that is the residual.
+        fn a_handler_that_never_holds_a_request(request: &str) -> String {
+            let parsed: serde_json::Value = match serde_json::from_str(request) {
+                Ok(v) => v,
+                Err(e) => return error_json(&format!("invalid JSON: {e}")),
+            };
+            let page = parsed.get("page").and_then(|v| v.as_u64()).unwrap_or(0);
+            serde_json::json!({ "items": [], "page": page, "hasMore": false }).to_string()
+        }
+
+        let served_an_array = a_handler_that_never_holds_a_request("[]");
+        let v: serde_json::Value = serde_json::from_str(&served_an_array).unwrap();
+        assert!(
+            v.get("error").is_none() && v.get("items").is_some(),
+            "if this ever FAILS, the compiler gained a way to force a handler \
+             through the envelope and design.md's residual is stale — which is a \
+             better outcome than this test passing: {served_an_array}"
+        );
+
+        // And the contrast, which is what the boundary did buy: the same handler
+        // written through `Request` cannot do this, and needs no author to
+        // remember why.
+        fn the_same_handler_through_the_type(request: &str) -> String {
+            let parsed = match Request::parse(request) {
+                Ok(r) => r,
+                Err(e) => return e,
+            };
+            let page = match parse_index(&parsed, "page") {
+                Ok(v) => v.unwrap_or(0),
+                Err(e) => return e,
+            };
+            serde_json::json!({ "items": [], "page": page, "hasMore": false }).to_string()
+        }
+        assert_eq!(
+            error_message(&the_same_handler_through_the_type("[]")),
+            REQUEST_NOT_AN_OBJECT,
+            "the type is what makes the difference, and it is the only thing that does"
+        );
     }
 
     #[test]
@@ -1876,6 +2441,12 @@ mod tests {
         // And the runtime half of the guarantee — that the only constructor
         // reachable from here refuses a non-object — is
         // `request_parse_is_the_only_way_to_reach_a_field_read`, below.
+        //
+        // What this does NOT buy:
+        // `the_sixth_method_the_boundary_does_not_stop`, above, builds a handler
+        // that never mentions `Request` and serves an array. The claim is about
+        // handlers that hold a `Request`, not about every handler, and that is the
+        // claim design.md now makes.
         let through_the_constructor = Request::parse(r#"{"payload":1}"#);
         assert!(
             through_the_constructor.is_ok(),
@@ -1933,9 +2504,21 @@ mod tests {
         assert_eq!(parsed.get("s"), Some(&serde_json::json!("x")));
         assert_eq!(parsed.get("n"), Some(&serde_json::json!(7)));
         assert_eq!(parsed.get("b"), Some(&serde_json::json!(true)));
-        // An explicit `null` is PRESENT, and that is not the same as absent —
-        // `parse_index` and `includeHidden` both distinguish them, so a `parse`
-        // that dropped nulls while building the map would change their meaning.
+        // An explicit `null` is PRESENT, and that is now the contract's own words
+        // rather than this test's inference: "A field holding an explicit `null`
+        // is present, not absent", with three readings keyed to the field's
+        // declared type and optionality. The envelope must therefore preserve the
+        // distinction and decide none of it — a `parse` that dropped nulls while
+        // building the map would take the choice away from all three readings at
+        // once, and `ping`'s `<any>` payload would lose the value it is
+        // documented to carry.
+        //
+        // A mutation making `get` drop nulls (`.filter(|v| !v.is_null())`) passed
+        // 486 of 487 tests when this change was first written; the three readings
+        // are now pinned individually as well, in
+        // `pings_payload_carries_an_explicit_null_through_as_a_value`,
+        // `a_null_optional_field_takes_the_restrictive_default` and
+        // `a_null_required_field_is_refused_as_a_wrong_type_and_not_as_missing`.
         assert_eq!(parsed.get("z"), Some(&serde_json::json!(null)));
         assert_eq!(parsed.get("o"), Some(&serde_json::json!({"k": [1]})));
 
