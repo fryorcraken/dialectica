@@ -102,6 +102,51 @@ pub struct Membership {
     pub genesis: Genesis,
 }
 
+impl Membership {
+    /// The **only** way to build a `Membership` from a caller's address and a
+    /// caller's record: by verifying that they are the same Stoa.
+    ///
+    /// # Why this is a constructor and not a check inside `join`
+    ///
+    /// It was a check inside [`MembershipStore::join`], and a second identical one
+    /// in `wire::genesis_for`. Two guards enforcing one property, and **no test
+    /// distinguished them** — deleting either left the suite green, because
+    /// whichever remained refused the same inputs. Both directions were measured:
+    /// `findings/spec-test.md` entry 2 deleted the store's and 546 of 550 passed;
+    /// deleting `genesis_for`'s left **550 of 550** passing.
+    ///
+    /// The project's rule for that shape is CLAUDE.md's: *"prefer reshaping state
+    /// so an invariant holds by construction over adding a branch that checks
+    /// it."* So the pair is now a type that cannot be built wrong. `join` takes a
+    /// `Membership` and has no guard, because there is no longer an unverified pair
+    /// for it to receive — and a caller reaching for one has to come through here,
+    /// which is the one place the refusal is tested.
+    ///
+    /// **Verification consults only its two arguments.** No index, no registry, no
+    /// peer, no network call. That is what makes a pasted address
+    /// self-authenticating (§4.8): [`Genesis::matches`] re-derives the address from
+    /// the record and compares, so a wrong or tampered record cannot survive, and
+    /// detecting it needs nobody's cooperation.
+    ///
+    /// Encoding is checked first because it is the more specific failure: a record
+    /// whose title exceeds the genesis cap has no canonical encoding and therefore
+    /// no address at all, so it is not "the wrong Stoa" — it is not a Stoa. A
+    /// caller telling a user "that record cannot be a Stoa" versus "that record is
+    /// not the Stoa you pasted" needs the two apart.
+    pub fn verified(stoa: &Address, genesis: &Genesis) -> Result<Self, MembershipError> {
+        genesis
+            .canonical_bytes()
+            .map_err(MembershipError::UnencodableRecord)?;
+        if !genesis.matches(stoa) {
+            return Err(MembershipError::RecordDoesNotMatchAddress);
+        }
+        Ok(Membership {
+            stoa: *stoa,
+            genesis: genesis.clone(),
+        })
+    }
+}
+
 /// Why a membership operation did not happen.
 ///
 /// Each variant names a **different** mistake, for the reason `GenesisError`
@@ -368,22 +413,26 @@ impl MembershipStore {
         Ok(())
     }
 
-    /// Record a Stoa this peer is in, verifying the record against the address.
+    /// Record a Stoa this peer is in.
     ///
-    /// # Why both, when the record determines the address
+    /// # There is no verification here, and that is the point
     ///
-    /// This reads as redundant and is not. The address is the **caller's claim**
-    /// about what it thinks it is joining, the record is the material, and a
-    /// refusal is the two disagreeing. A `join` taking only a record could not
-    /// fail — it would record whatever it was handed — and the whole point of the
-    /// join shape is that a mismatch is refusable. A record differing in any field
-    /// hashes to a different address, so this one check covers every field at
-    /// once.
+    /// A [`Membership`] cannot be built from an address and a record that disagree
+    /// — [`Membership::verified`] is the only constructor that takes a caller's pair
+    /// and it refuses a mismatch. So this function has no guard to forget, no guard
+    /// to duplicate, and no unverified pair it could be handed.
     ///
-    /// **Verification consults only its two arguments.** No index, no registry, no
-    /// peer, no network call. That is the property that makes a pasted address
-    /// self-authenticating, and it is why the check is here rather than in a
-    /// caller that could forget it.
+    /// It used to check, and `wire::genesis_for` checked the same predicate one
+    /// layer up. Two guards, one property, and no test that could tell them apart:
+    /// deleting either left the other refusing the same inputs, so the suite stayed
+    /// green both ways (`findings/spec-test.md` entry 2 — 546/550 deleting the
+    /// store's, and a re-run measured **550/550** deleting the wire's). The pair
+    /// became a type instead of the guard becoming a third.
+    ///
+    /// The address is still the **caller's claim** about what it thinks it is
+    /// joining and the record is still the material; that distinction did not move,
+    /// it is just now enforced where the pair is made rather than where it is
+    /// written.
     ///
     /// # Idempotent, and non-destructive
     ///
@@ -391,26 +440,21 @@ impl MembershipStore {
     /// the input a user supplies twice: reporting the second attempt as an error
     /// would make a harmless action look broken, and REPLACE would make a join a
     /// way to overwrite what a peer already holds.
-    pub fn join(&mut self, stoa: &Address, genesis: &Genesis) -> Result<Joined, MembershipError> {
-        // Encoding first, because it is fallible — a record whose title exceeds
-        // the genesis cap has no encoding and therefore no address, so it is not
-        // the record any address names. Doing it before any statement runs is what
-        // makes a refused join leave nothing behind.
-        let bytes = genesis
+    pub fn join(&mut self, membership: &Membership) -> Result<Joined, MembershipError> {
+        // Infallible in practice and still handled: `Membership::verified` already
+        // encoded this record once, so a record that reaches here has an encoding.
+        // Re-encoding rather than carrying the bytes keeps `Membership` a plain
+        // pair a caller can read, which is what `list` hands back.
+        let bytes = membership
+            .genesis
             .canonical_bytes()
             .map_err(MembershipError::UnencodableRecord)?;
-
-        // The self-authenticating check. `Genesis::matches` re-derives the address
-        // from the record and compares; a tampered record cannot survive it.
-        if !genesis.matches(stoa) {
-            return Err(MembershipError::RecordDoesNotMatchAddress);
-        }
 
         let changed = self
             .conn
             .execute(
                 "INSERT OR IGNORE INTO stoas (stoa, genesis_bytes) VALUES (?1, ?2)",
-                rusqlite::params![stoa.as_bytes().as_slice(), bytes],
+                rusqlite::params![membership.stoa.as_bytes().as_slice(), bytes],
             )
             .map_err(storage)?;
 
@@ -711,6 +755,16 @@ mod tests {
         }
     }
 
+    /// Join a record under the address it actually names.
+    ///
+    /// The matching-pair case, which is most of them. A test that means to join a
+    /// MISMATCHED pair calls `Membership::verified` directly and asserts on its
+    /// refusal, because that is now the only place a mismatch can be refused —
+    /// `join` takes a `Membership` and there is no unverified pair to hand it.
+    fn join_matching(store: &mut MembershipStore, g: &Genesis) -> Result<Joined, MembershipError> {
+        store.join(&Membership::verified(&g.address().unwrap(), g)?)
+    }
+
     /// Every Stoa a store holds, paged through to the end.
     ///
     /// A helper rather than one `list(0, large)` call, because "every Stoa is
@@ -923,7 +977,7 @@ mod tests {
 
         let mut store = MembershipStore::open(&path).unwrap();
         let g = a_record("Agora");
-        store.join(&g.address().unwrap(), &g).unwrap();
+        join_matching(&mut store, &g).unwrap();
         drop(store);
 
         let reopened = MembershipStore::open(&path)
@@ -995,7 +1049,7 @@ mod tests {
         let g = a_record("Agora");
         let address = g.address().unwrap();
 
-        assert_eq!(store.join(&address, &g).unwrap(), Joined::Recorded);
+        assert_eq!(join_matching(&mut store, &g).unwrap(), Joined::Recorded);
         assert!(store.contains(&address).unwrap());
         let held = store.get(&address).unwrap().expect("the Stoa is retained");
         assert_eq!(
@@ -1012,6 +1066,15 @@ mod tests {
         // vice versa. The record's whole encoding reaches its address, so one
         // comparison covers every field — but only a test that varies each one
         // shows that.
+        //
+        // ASSERTED AGAINST `Membership::verified`, WHICH IS NOW THE ONLY REFUSAL
+        // SITE. It used to assert against `store.join`, which checked the same
+        // predicate `wire::genesis_for` checked — two guards, and no test could
+        // tell them apart, because deleting either left the other refusing the
+        // same inputs (`findings/spec-test.md` entry 2; deleting the wire's half
+        // left 550/550 green). `join` now takes a `Membership` and cannot be handed
+        // a mismatched pair at all, so this is the one place the refusal exists to
+        // be tested.
         let real = a_record("Agora");
         let address = real.address().unwrap();
 
@@ -1025,9 +1088,9 @@ mod tests {
         };
 
         for impostor in [other_creator, other_title] {
-            let mut store = MembershipStore::in_memory().unwrap();
+            let store = MembershipStore::in_memory().unwrap();
             assert_eq!(
-                store.join(&address, &impostor),
+                Membership::verified(&address, &impostor),
                 Err(MembershipError::RecordDoesNotMatchAddress),
                 "a substituted record must be refused"
             );
@@ -1035,7 +1098,8 @@ mod tests {
             assert!(!store.contains(&address).unwrap());
             // ...and not in the one the supplied record would have named either,
             // which is the half a store that "helpfully" filed it under the
-            // record's own address would fail.
+            // record's own address would fail. Nothing was written because nothing
+            // reached the store: there is no `Membership` to hand it.
             assert!(!store.contains(&impostor.address().unwrap()).unwrap());
             assert_eq!(store.len().unwrap(), 0);
         }
@@ -1047,14 +1111,17 @@ mod tests {
         // so it is not the record any address names. `Genesis` is a plain struct a
         // caller may build directly, so this is reachable without going through
         // the decoder — and `canonical_bytes` is fallible precisely for it.
-        let mut store = MembershipStore::in_memory().unwrap();
+        let store = MembershipStore::in_memory().unwrap();
         let too_long = Genesis {
             title: "x".repeat(2000),
             ..a_record("Agora")
         };
         let some_address = a_record("Agora").address().unwrap();
 
-        match store.join(&some_address, &too_long) {
+        // Refused by `Membership::verified` — the constructor, which is what
+        // "before anything is written" now means literally: there is no value to
+        // hand `join`, so no statement can run.
+        match Membership::verified(&some_address, &too_long) {
             Err(MembershipError::UnencodableRecord(_)) => {}
             other => panic!("an unencodable record must be refused, got {other:?}"),
         }
@@ -1073,13 +1140,11 @@ mod tests {
         // This reaches `{"error":"..."}`, so the sentence is the whole of what a
         // user sees. Asserted on the rendered string because that is the contract;
         // asserting only on the variant would have passed the wrong wording.
-        let mut store = MembershipStore::in_memory().unwrap();
         let too_long = Genesis {
             title: "x".repeat(2000),
             ..a_record("Agora")
         };
-        let rendered = store
-            .join(&a_record("Agora").address().unwrap(), &too_long)
+        let rendered = Membership::verified(&a_record("Agora").address().unwrap(), &too_long)
             .expect_err("an unencodable record must be refused")
             .to_string();
         assert!(
@@ -1121,11 +1186,11 @@ mod tests {
         let g = a_record("Agora");
         let address = g.address().unwrap();
 
-        assert_eq!(store.join(&address, &g).unwrap(), Joined::Recorded);
+        assert_eq!(join_matching(&mut store, &g).unwrap(), Joined::Recorded);
         let before = store.get(&address).unwrap().unwrap();
 
         assert_eq!(
-            store.join(&address, &g).unwrap(),
+            join_matching(&mut store, &g).unwrap(),
             Joined::AlreadyIn,
             "a repeated join must succeed and report that nothing changed"
         );
@@ -1152,12 +1217,14 @@ mod tests {
         let a2 = two.address().unwrap();
         assert_ne!(a1, a2, "the fixture must be two distinct Stoas");
 
-        store.join(&a1, &one).unwrap();
-        store.join(&a2, &two).unwrap();
+        join_matching(&mut store, &one).unwrap();
+        join_matching(&mut store, &two).unwrap();
 
-        // The cross pairing is refused, which is what stops the overwrite.
+        // The cross pairing cannot even be BUILT, which is what stops the
+        // overwrite — stronger than it being refused at the write, because there is
+        // no value a future caller could carry past the check.
         assert_eq!(
-            store.join(&a1, &two),
+            Membership::verified(&a1, &two),
             Err(MembershipError::RecordDoesNotMatchAddress)
         );
         assert_eq!(store.get(&a1).unwrap().unwrap().genesis, one);
@@ -1168,10 +1235,20 @@ mod tests {
     #[test]
     fn verification_consults_only_the_two_inputs() {
         // The property that makes a pasted address self-authenticating: the
-        // decision needs no index, no peer and no network call. Shown by making
-        // the same decision against an EMPTY store and against a store already
-        // holding the Stoa — a verifier that consulted the store would have
-        // different material available in the two cases.
+        // decision needs no index, no peer and no network call.
+        //
+        // SATISFIED BY CONSTRUCTION SINCE THE RESHAPE, and this test is now only
+        // half of what it was — said plainly rather than left to look like more.
+        // `Membership::verified` is an associated function with no `self`, so there
+        // is no store, no connection and no handle it could consult: the property
+        // is in the signature, and no fixture can vary what it does not receive.
+        // The previous version made the same call against an empty and a populated
+        // store and compared the two answers, which WAS a real test while
+        // verification lived on `MembershipStore` and had a `self` to reach through.
+        //
+        // What is left, and it is worth keeping: the refusal itself, against a
+        // hardcoded variant. A store is still built and still asserted untouched,
+        // because "nothing was written" is the half that remains observable.
         let g = a_record("Agora");
         let address = g.address().unwrap();
         let impostor = Genesis {
@@ -1179,18 +1256,22 @@ mod tests {
             ..g.clone()
         };
 
-        let mut empty = MembershipStore::in_memory().unwrap();
-        let from_empty = empty.join(&address, &impostor);
-
-        let mut populated = MembershipStore::in_memory().unwrap();
-        populated.join(&address, &g).unwrap();
-        let from_populated = populated.join(&address, &impostor);
-
         assert_eq!(
-            from_empty, from_populated,
-            "the verification's answer must not depend on what the store holds"
+            Membership::verified(&address, &impostor),
+            Err(MembershipError::RecordDoesNotMatchAddress),
+            "a record naming another creator must be refused"
         );
-        assert_eq!(from_empty, Err(MembershipError::RecordDoesNotMatchAddress));
+
+        // And a populated store is not a way past it: the refusal is the same, and
+        // the store is unchanged, because nothing reached it.
+        let mut populated = MembershipStore::in_memory().unwrap();
+        join_matching(&mut populated, &g).unwrap();
+        assert_eq!(
+            Membership::verified(&address, &impostor),
+            Err(MembershipError::RecordDoesNotMatchAddress)
+        );
+        assert_eq!(populated.len().unwrap(), 1);
+        assert_eq!(populated.get(&address).unwrap().unwrap().genesis, g);
     }
 
     // ─── What is retained ─────────────────────────────────────────────────
@@ -1210,7 +1291,7 @@ mod tests {
         let address = g.address().unwrap();
 
         let mut store = MembershipStore::open(&path).unwrap();
-        store.join(&address, &g).unwrap();
+        join_matching(&mut store, &g).unwrap();
         drop(store);
 
         let reopened = MembershipStore::open(&path).unwrap();
@@ -1231,7 +1312,7 @@ mod tests {
         let mut store = MembershipStore::in_memory().unwrap();
         let g = a_record("The Painted Porch");
         let address = g.address().unwrap();
-        store.join(&address, &g).unwrap();
+        join_matching(&mut store, &g).unwrap();
 
         let held = store.get(&address).unwrap().unwrap();
         assert_eq!(held.genesis.title, "The Painted Porch");
@@ -1323,8 +1404,8 @@ mod tests {
         let two = a_record("Two");
 
         let mut store = MembershipStore::open(&path).unwrap();
-        store.join(&one.address().unwrap(), &one).unwrap();
-        store.join(&two.address().unwrap(), &two).unwrap();
+        join_matching(&mut store, &one).unwrap();
+        join_matching(&mut store, &two).unwrap();
         drop(store);
 
         let reopened = MembershipStore::open(&path).unwrap();
@@ -1351,8 +1432,12 @@ mod tests {
             ..real.clone()
         };
 
-        let mut store = MembershipStore::open(&path).unwrap();
-        assert!(store.join(&address, &impostor).is_err());
+        // The refusal is at the constructor, so the store is opened, handed
+        // nothing, and closed — which is a sharper version of "leaves nothing
+        // behind" than the one this test had: the file is touched by the open and
+        // by no write, because there was no `Membership` to write.
+        let store = MembershipStore::open(&path).unwrap();
+        assert!(Membership::verified(&address, &impostor).is_err());
         drop(store);
 
         let reopened = MembershipStore::open(&path).unwrap();
@@ -1384,7 +1469,7 @@ mod tests {
         for n in 0..7 {
             let g = a_record(&format!("Stoa {n}"));
             let address = g.address().unwrap();
-            store.join(&address, &g).unwrap();
+            join_matching(&mut store, &g).unwrap();
             expected.push(address);
         }
         expected.sort_unstable();
@@ -1412,11 +1497,11 @@ mod tests {
 
         let mut forwards = MembershipStore::in_memory().unwrap();
         for g in records.iter() {
-            forwards.join(&g.address().unwrap(), g).unwrap();
+            join_matching(&mut forwards, g).unwrap();
         }
         let mut backwards = MembershipStore::in_memory().unwrap();
         for g in records.iter().rev() {
-            backwards.join(&g.address().unwrap(), g).unwrap();
+            join_matching(&mut backwards, g).unwrap();
         }
 
         let a: Vec<Address> = every_stoa(&forwards, 2).iter().map(|m| m.stoa).collect();
@@ -1434,7 +1519,7 @@ mod tests {
         let mut store = MembershipStore::in_memory().unwrap();
         for n in 0..4 {
             let g = a_record(&format!("S{n}"));
-            store.join(&g.address().unwrap(), &g).unwrap();
+            join_matching(&mut store, &g).unwrap();
         }
         let first = store.list(0, 2).unwrap();
         assert_eq!(first.items.len(), 2);
@@ -1461,7 +1546,7 @@ mod tests {
         // tell. Answering empty is the honest reply.
         let mut store = MembershipStore::in_memory().unwrap();
         let g = a_record("Agora");
-        store.join(&g.address().unwrap(), &g).unwrap();
+        join_matching(&mut store, &g).unwrap();
 
         let page = store.list(usize::MAX, 20).unwrap();
         assert_eq!(
@@ -1488,7 +1573,7 @@ mod tests {
         let mut store = MembershipStore::in_memory().unwrap();
         for n in 0..3 {
             let g = a_record(&format!("S{n}"));
-            store.join(&g.address().unwrap(), &g).unwrap();
+            join_matching(&mut store, &g).unwrap();
         }
 
         let below = store.list(0, (i64::MAX as usize) - 1).unwrap();
@@ -1524,7 +1609,7 @@ mod tests {
         let mut store = MembershipStore::in_memory().unwrap();
         for n in 0..3 {
             let g = a_record(&format!("S{n}"));
-            store.join(&g.address().unwrap(), &g).unwrap();
+            join_matching(&mut store, &g).unwrap();
         }
 
         // NO SPEC: the spec does not say what a `per_page` of zero lists. The wire
@@ -1556,7 +1641,7 @@ mod tests {
         assert!(store.is_empty().unwrap(), "a fresh store is empty");
 
         let g = a_record("Agora");
-        store.join(&g.address().unwrap(), &g).unwrap();
+        join_matching(&mut store, &g).unwrap();
         assert!(
             !store.is_empty().unwrap(),
             "a store holding a membership is not empty"
@@ -1576,7 +1661,7 @@ mod tests {
         let mut store = MembershipStore::in_memory().unwrap();
         let joined = a_record("Joined");
         let never = a_record("Never joined");
-        store.join(&joined.address().unwrap(), &joined).unwrap();
+        join_matching(&mut store, &joined).unwrap();
 
         let seen: Vec<Address> = every_stoa(&store, 10).iter().map(|m| m.stoa).collect();
         assert_eq!(seen, vec![joined.address().unwrap()]);
@@ -1616,7 +1701,7 @@ mod tests {
         let mut store = MembershipStore::in_memory().unwrap();
         let g = a_record("");
         let address = g.address().unwrap();
-        store.join(&address, &g).unwrap();
+        join_matching(&mut store, &g).unwrap();
         assert_eq!(store.get(&address).unwrap().unwrap().genesis.title, "");
     }
 
@@ -1630,7 +1715,7 @@ mod tests {
         let nasty = "Agora\u{202E}\u{200B}\u{0430}";
         let g = a_record(nasty);
         let address = g.address().unwrap();
-        store.join(&address, &g).unwrap();
+        join_matching(&mut store, &g).unwrap();
 
         let held = store.get(&address).unwrap().unwrap();
         assert_eq!(

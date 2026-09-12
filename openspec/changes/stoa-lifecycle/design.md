@@ -128,10 +128,11 @@ the statement to `INSERT OR REPLACE` and delete the single
 `assert_eq!(…, Joined::AlreadyIn)` in
 `a_repeated_join_is_idempotent_and_leaves_the_record_untouched`, and **544 tests
 pass with zero failures** — the same as the baseline. That is not a gap in the
-test: `join` verifies the record against the address *before* it inserts, so a
-mismatched pair is unreachable and the only record REPLACE could ever write over
-a row is the byte-identical one. The `Joined` value is the sole witness, the test
-says so in its own comment, and nothing else can be.
+test: a mismatched pair cannot reach `join` at all (see *"Verification is a
+constructor"* below — `Membership::verified` refuses one and `join` takes nothing
+else), so the only record REPLACE could ever write over a row is the
+byte-identical one. The `Joined` value is the sole witness, the test says so in its
+own comment, and nothing else can be.
 
 **And the wire deliberately hides the distinction.** `create_stoa` and
 `join_stoa` both discard `Joined` with `Ok(_)` (`wire.rs`), argued there: the
@@ -144,12 +145,70 @@ only be checked against `MembershipStore` directly. That is the right trade for
 the reply shape; it means the store's own test is the only thing holding the
 verb.
 
-**The write verifies before it inserts, and `MembershipStore::join` takes the
-address and the record separately** so that the verification is inside the store
-rather than in a caller that could forget it. A caller holding a `Genesis` can
-always derive its address, so a store taking only the record could not express a
-mismatch at all — and the whole point of the join shape is that a mismatch is
-refusable.
+### Verification is a constructor, not a guard: `Membership::verified` is the only way to pair an address with a record
+
+**Chosen:** `MembershipStore::join` takes a `&Membership`, and
+`Membership::verified(&Address, &Genesis)` is the only way to build one from a
+caller's pair. `join` has no check of its own, because there is no longer an
+unverified pair it could be handed.
+
+**What this replaced, and why it had to change.** `join` took the address and the
+record separately and verified them, and `wire::genesis_for` verified the same
+predicate one layer up. Both were argued as deliberate — the store's check made
+its invariant hold for every caller, the wire's carried the safety argument for a
+caller-supplied record — and the arguments were sound. **The problem was that no
+test could tell the two apart.** Measured both ways:
+
+| Guard deleted | Result |
+|---|---|
+| `MembershipStore::join`'s | 546 of 550 pass — only the four `membership.rs` tests fail (`findings/spec-test.md` entry 2) |
+| `wire::genesis_for`'s | **550 of 550 pass.** Not one test notices |
+
+So each guard was covered only by the *other* guard still being there. Every
+wire-level test naming verification — including
+`a_record_that_does_not_match_the_address_is_refused_and_joins_neither_stoa` and
+`a_join_verified_at_the_wire_needs_no_op_log_and_no_prior_membership` — read as
+"the wire refuses a mismatched record" and in fact established only that
+*something somewhere* refused it. Two live code paths giving the same answer is
+this project's recurring test defect in its sharpest form.
+
+**Why a constructor and not a third test.** CLAUDE.md: *"prefer reshaping state so
+an invariant holds by construction over adding a branch that checks it… when you
+find yourself writing the fourth slightly-different copy of a guard, that is the
+signal to reshape rather than to add a fourth test."* The reviewer's own suggested
+fix — assert that the refusal carries `genesis_for`'s message rather than the
+store's — **provably cannot work**: the two messages are byte-identical (the same
+sentence was hardcoded in both modules, `findings/readability.md` entry 7), so no
+assertion on the reply can distinguish which guard fired.
+
+`Membership` was *already* the verified pair — `list` hands it back, and its
+doc-comment already claimed "`MembershipStore` guarantees they agree". Making it
+the type `join` accepts turned that comment into the type system's problem. The
+reshape also collapsed `readability.md` entry 7 (one sentence, two modules) to a
+single copy, and let `genesis_for` return the pair so the verification now happens
+**once** per request rather than twice.
+
+**The measurement that shows it worked.** Deleting the one remaining guard now
+fails **8 tests across both layers** — the four in `membership.rs` *and* four at
+the wire, including all three the reviewer named as surviving the old mutation.
+Before: 4 and 0 depending on which copy you deleted. There is now no deletion that
+leaves the property untested.
+
+**What it cost.** 29 test call sites changed. Most became a `join_matching(store,
+&g)` helper (the matching-pair case); the mismatch tests now assert against
+`Membership::verified`, which is the honest place, since that is where the refusal
+lives. Two tests got weaker in a way worth naming rather than hiding:
+`verification_consults_only_the_two_inputs` used to compare the answer from an
+empty store against a populated one, which was a real test while verification had
+a `self` to reach through — it is now satisfied by construction (an associated
+function with no `self` has no store to consult) and the test says so, keeping only
+the refusal assertion that remains observable.
+
+**Alternative considered: keep both guards and pin each.** Ruled out because the
+wire's guard is **not separately pinnable** — both check the same predicate and
+render the same sentence, so a test reaching only the wire's cannot observe
+anything the store's would not also produce. Keeping two guards would have meant
+keeping a guard that no test can hold, which is how this finding arose.
 
 ### `joinStoa` takes `{stoa, genesis}`, departing from PLAN §9.1's `{address}`
 
@@ -201,11 +260,18 @@ the spec asks for fall out:
 - "Creating and then joining the same Stoa is one membership" is true because
   there is one write path, not because two were checked against each other.
 
-The title bound is refused **before** the write, and that ordering is not
-incidental: `Genesis::canonical_bytes()` is fallible for an over-cap title, and
-building the record's bytes is what the store needs, so a failed encode returns
-before any statement runs. The spec's "the refusal happens first, so a failed
-creation leaves nothing behind" is therefore structural.
+The title bound is refused **before** the write, and the mechanism is worth naming
+precisely because a code comment here credited the wrong one
+(`findings/readability.md` entry 1, verified by running it): the refusal is
+`create_stoa`'s own `genesis.address()` call, which is
+`stoa_address(&self.canonical_bytes()?)` and fails for an over-cap title before
+the store is touched at all. The reply is `{"error":"title: title is 1025 bytes,
+the maximum is 1024"}` — `create_stoa`'s `"title: {e}"` prefix. It is **not**
+`MembershipStore`'s encode-before-write ordering, which renders a different
+sentence and is never reached on this path. The spec's "the refusal happens first,
+so a failed creation leaves nothing behind" holds either way; the explanation
+mattered because a reader editing the store to preserve it would have been
+preserving the wrong thing.
 
 ### The creator key is taken as a `PublicKey`, and the handler takes a closure
 

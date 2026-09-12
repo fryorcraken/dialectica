@@ -287,26 +287,38 @@ pub fn list_threads<L: crate::log::OpLog>(
     list_threads_inner(request, log, genesis)
 }
 
-/// Decode a genesis record from its hex form and check it names this Stoa.
+/// Decode a genesis record from a request's hex form as the verified pair it and
+/// the address make.
 ///
 /// # Why the caller supplies the record at all
 ///
 /// [`Moderators::of`](crate::moderation::Moderators::of) needs a genesis record
-/// and there is nowhere else to get one: §9.1 Stage D is where `joinStoa`
-/// records what a peer has joined, and it does not exist. Until it does, the
-/// record travels with the request.
+/// and `list_threads` has nowhere else to get one: a membership now retains the
+/// record per Stoa ([`crate::membership::MembershipStore::get`]), so "there is
+/// nowhere else" is no longer true — but this capability deliberately does not
+/// read it yet, which is a scope decision rather than an impossibility. Until it
+/// does, the record travels with the request.
 ///
 /// **That is not a weakening, because the record is self-authenticating.** §4.8:
 /// an address *is* the hash of the genesis record, so a wrong or tampered record
-/// fails to match the address it claims. This function verifies rather than
-/// trusts, and a mismatch is an error and never a read of something close
-/// enough. A caller cannot use this to install themselves as a Stoa's moderator:
-/// changing the creator changes the record, which changes the address, which no
-/// longer matches the Stoa whose posts are being read.
+/// fails to match the address it claims. A caller cannot use this to install
+/// themselves as a Stoa's moderator: changing the creator changes the record,
+/// which changes the address, which no longer matches the Stoa whose posts are
+/// being read.
+///
+/// # It returns a `Membership`, so the verification happens exactly once
+///
+/// This used to verify here and return a bare `Genesis`, which
+/// [`crate::membership::MembershipStore::join`] then verified again — two guards
+/// on one predicate, and **no test could tell them apart**: deleting either left
+/// the suite green (`findings/spec-test.md` entry 2, and a re-run measuring
+/// 550/550 for the wire's half). Returning the verified pair means a caller that
+/// wants to store what it decoded already holds the only type `join` accepts,
+/// with nothing left to re-check and nothing left to forget.
 pub fn genesis_for(
     parsed: &serde_json::Value,
     stoa: &crate::identity::Address,
-) -> Result<crate::stoa::Genesis, String> {
+) -> Result<crate::membership::Membership, String> {
     let hex_str = match parsed.get("genesis") {
         Some(serde_json::Value::String(s)) => s,
         Some(_) => return Err(error_json("genesis must be a string")),
@@ -320,15 +332,7 @@ pub fn genesis_for(
         Ok(g) => g,
         Err(e) => return Err(error_json(&format!("genesis: {e}"))),
     };
-    // The self-authenticating check, and the whole reason a caller-supplied
-    // record is safe. `matches` re-derives the address from the record and
-    // compares; a tampered record cannot survive it.
-    if !genesis.matches(stoa) {
-        return Err(error_json(
-            "the genesis record does not hash to the Stoa address it was given with",
-        ));
-    }
-    Ok(genesis)
+    crate::membership::Membership::verified(stoa, &genesis).map_err(|e| error_json(&e.to_string()))
 }
 
 fn list_threads_inner<L: crate::log::OpLog>(
@@ -428,8 +432,9 @@ pub fn list_threads_from_request<L: crate::log::OpLog>(
             Some(_) => return error_json("stoa must be a string"),
             None => return error_json("missing field: stoa"),
         };
+        // The verified pair; this path wants only the record half.
         let genesis = match genesis_for(&parsed, &stoa) {
-            Ok(g) => g,
+            Ok(m) => m.genesis,
             Err(e) => return e,
         };
         // Opening the store is itself fallible, and a failure here is §2.5's
@@ -648,7 +653,15 @@ pub fn create_stoa(
         // there being one write path rather than two that have to agree:
         // "creating the same title twice yields one Stoa", and "creating and then
         // joining the same Stoa is one membership".
-        match store.join(&stoa, &genesis) {
+        //
+        // `verified` cannot refuse this pair — the address came from this very
+        // record two lines up — and it is still called rather than bypassed,
+        // because a constructor a caller may skip is not an invariant.
+        let membership = match crate::membership::Membership::verified(&stoa, &genesis) {
+            Ok(m) => m,
+            Err(e) => return error_json(&e.to_string()),
+        };
+        match store.join(&membership) {
             Ok(_) => stoa_reply(&stoa, &genesis),
             Err(e) => error_json(&e.to_string()),
         }
@@ -668,8 +681,9 @@ pub fn create_stoa(
 /// it to come from.
 ///
 /// So a bare address is not joinable, and this signature says so rather than
-/// leaving a caller to discover it after joining. `MembershipStore::join` does the
-/// verification, and it consults nothing but its two arguments.
+/// leaving a caller to discover it after joining.
+/// [`crate::membership::Membership::verified`] does the verification — once, and it
+/// consults nothing but its two arguments.
 ///
 /// # A repeated join is not a failure
 ///
@@ -687,21 +701,22 @@ pub fn join_stoa(request: &str, store: &mut crate::membership::MembershipStore) 
             Ok(a) => a,
             Err(e) => return e,
         };
-        // `genesis_for` is the feed path's decoder and already verifies the record
-        // against the address. Reused rather than reimplemented: a second decoder
-        // would be a second place for the verification to be forgotten, and this
-        // one carries the argument for why a caller-supplied record is safe.
-        let genesis = match genesis_for(&parsed, &stoa) {
-            Ok(g) => g,
+        // `genesis_for` is the feed path's decoder and it returns the VERIFIED
+        // pair, which is the only type `join` accepts. Reused rather than
+        // reimplemented: a second decoder would be a second place for the
+        // verification to be forgotten, and this one carries the argument for why
+        // a caller-supplied record is safe.
+        //
+        // ONE verification, at one place. This handler used to verify here and the
+        // store used to verify again, and no test could tell the two apart —
+        // deleting either left the suite green. There is nothing to re-check now,
+        // because a `Membership` that disagrees with itself cannot be built.
+        let membership = match genesis_for(&parsed, &stoa) {
+            Ok(m) => m,
             Err(e) => return e,
         };
-
-        // `join` verifies again. That is not redundant belt-and-braces: the store's
-        // check is what makes the store's own invariant hold for every caller,
-        // including ones that do not come through this handler, and it is the only
-        // place a test of the store alone can exercise.
-        match store.join(&stoa, &genesis) {
-            Ok(_) => stoa_reply(&stoa, &genesis),
+        match store.join(&membership) {
+            Ok(_) => stoa_reply(&membership.stoa, &membership.genesis),
             Err(e) => error_json(&e.to_string()),
         }
     })
