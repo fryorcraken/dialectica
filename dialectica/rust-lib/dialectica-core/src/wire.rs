@@ -242,6 +242,269 @@ pub fn capability_for(
     }
 }
 
+// ─── The feed ─────────────────────────────────────────────────────────────
+
+/// `{"stoa":"…", "page":N, "perPage":N, "includeHidden":bool}` -> one page.
+///
+/// The reply is the ecosystem's pagination shape —
+/// `{"items":[…],"page":N,"hasMore":bool}` — and this is the first method in the
+/// project to implement it, so it sets the precedent §9.1 says it would.
+///
+/// # There is no `order` parameter, and that is the decision
+///
+/// §9.1 proposes `order` with `new` and `active`, and then records that both are
+/// defined by a Lamport timestamp that does not reach us, so both would today be
+/// served as ascending op id. **An accepted-but-degraded parameter is a method
+/// telling its caller a falsehood** — §9.1's own words are that "a view asking
+/// for `top` and silently getting `new` has been told a falsehood no test will
+/// catch", and the same objection applies with equal force to `new` itself.
+///
+/// So the method serves the one order core can honestly compute and does not
+/// take an argument naming it. Adding a second ordering later adds the parameter
+/// then, when there is a second answer for it to select between. See
+/// [`crate::feed`] for what "convergent" claims and the much larger thing it
+/// does not.
+///
+/// # Every argument is optional except the Stoa
+///
+/// `page` defaults to 0 and `perPage` to the module's default, because a view
+/// rendering a first page should not have to spell both. The Stoa has no
+/// sensible default — §5.2 makes identity per-Stoa, so "which Stoa" is not a
+/// question this peer can answer on the caller's behalf.
+///
+/// # The genesis record is a parameter, because authority cannot be guessed
+///
+/// [`Moderators::of`](crate::moderation::Moderators::of) is the only way to
+/// build a moderator set and it takes a genesis record, which is the fail-closed
+/// property made structural. This handler inherits it: a caller with no genesis
+/// record cannot ask for a feed, rather than getting one with moderation
+/// silently not applied.
+pub fn list_threads<L: crate::log::OpLog>(
+    request: &str,
+    log: &L,
+    genesis: &crate::stoa::Genesis,
+) -> String {
+    list_threads_inner(request, log, genesis)
+}
+
+/// Decode a genesis record from its hex form and check it names this Stoa.
+///
+/// # Why the caller supplies the record at all
+///
+/// [`Moderators::of`](crate::moderation::Moderators::of) needs a genesis record
+/// and there is nowhere else to get one: §9.1 Stage D is where `joinStoa`
+/// records what a peer has joined, and it does not exist. Until it does, the
+/// record travels with the request.
+///
+/// **That is not a weakening, because the record is self-authenticating.** §4.8:
+/// an address *is* the hash of the genesis record, so a wrong or tampered record
+/// fails to match the address it claims. This function verifies rather than
+/// trusts, and a mismatch is an error and never a read of something close
+/// enough. A caller cannot use this to install themselves as a Stoa's moderator:
+/// changing the creator changes the record, which changes the address, which no
+/// longer matches the Stoa whose posts are being read.
+pub fn genesis_for(
+    parsed: &serde_json::Value,
+    stoa: &crate::identity::Address,
+) -> Result<crate::stoa::Genesis, String> {
+    let hex_str = match parsed.get("genesis") {
+        Some(serde_json::Value::String(s)) => s,
+        Some(_) => return Err(error_json("genesis must be a string")),
+        None => return Err(error_json("missing field: genesis")),
+    };
+    let bytes = match hex::decode(hex_str) {
+        Ok(b) => b,
+        Err(_) => return Err(error_json("genesis is not valid hex")),
+    };
+    let genesis = match crate::stoa::Genesis::decode(&bytes) {
+        Ok(g) => g,
+        Err(e) => return Err(error_json(&format!("genesis: {e}"))),
+    };
+    // The self-authenticating check, and the whole reason a caller-supplied
+    // record is safe. `matches` re-derives the address from the record and
+    // compares; a tampered record cannot survive it.
+    if !genesis.matches(stoa) {
+        return Err(error_json(
+            "the genesis record does not hash to the Stoa address it was given with",
+        ));
+    }
+    Ok(genesis)
+}
+
+fn list_threads_inner<L: crate::log::OpLog>(
+    request: &str,
+    log: &L,
+    genesis: &crate::stoa::Genesis,
+) -> String {
+    guarded("list_threads", || {
+        let parsed: serde_json::Value = match serde_json::from_str(request) {
+            Ok(v) => v,
+            Err(e) => return error_json(&format!("invalid JSON: {e}")),
+        };
+
+        let stoa = match parsed.get("stoa") {
+            Some(serde_json::Value::String(s)) => match crate::identity::Address::from_hex(s) {
+                Ok(a) => a,
+                Err(e) => return error_json(&format!("stoa: {e}")),
+            },
+            Some(_) => return error_json("stoa must be a string"),
+            None => return error_json("missing field: stoa"),
+        };
+
+        // The Stoa asked for must be the one the genesis record names, or the
+        // moderator set being applied governs a different Stoa than the posts
+        // being filtered. That is check 3 of `moderation.rs`'s three, at the
+        // one place a caller could otherwise pair them wrongly.
+        let genesis_address = match genesis.address() {
+            Ok(a) => a,
+            Err(e) => return error_json(&format!("genesis: {e}")),
+        };
+        if genesis_address != stoa {
+            return error_json(
+                "the genesis record does not describe the Stoa this feed was asked for",
+            );
+        }
+
+        let moderators = match crate::moderation::Moderators::of(genesis) {
+            Ok(m) => m,
+            Err(e) => return error_json(&format!("genesis: {e}")),
+        };
+
+        // A present-but-wrong-typed field is a different mistake from an absent
+        // one, and a negative or fractional page is neither — each is refused by
+        // name rather than coerced, because coercing would answer a question the
+        // caller did not ask.
+        let page = match parse_index(&parsed, "page") {
+            Ok(v) => v.unwrap_or(0),
+            Err(e) => return e,
+        };
+        let per_page = match parse_index(&parsed, "perPage") {
+            Ok(v) => crate::feed::clamp_per_page(v),
+            Err(e) => return e,
+        };
+
+        let include_hidden = match parsed.get("includeHidden") {
+            None | Some(serde_json::Value::Null) => false,
+            Some(serde_json::Value::Bool(b)) => *b,
+            Some(_) => return error_json("includeHidden must be a boolean"),
+        };
+
+        match crate::feed::list_threads(log, &moderators, &stoa, page, per_page, include_hidden) {
+            Ok(page) => feed_page_json(&page),
+            // §11.1 obligation 5: a storage failure is the error shape and NEVER
+            // an empty feed. The two mean opposite things and render identically
+            // if this arm is ever softened.
+            Err(e) => error_json(&e.to_string()),
+        }
+    })
+}
+
+/// The feed handler as the module actually calls it: genesis record included.
+///
+/// [`list_threads`] takes a decoded [`Genesis`](crate::stoa::Genesis) because
+/// that is the shape worth testing directly — the moderator set is the thing
+/// under test and threading a hex string through every fixture would be
+/// asserting on decoding at the same time. This is the one-argument form the
+/// adapter forwards to, and it is thin on purpose: parse, verify, delegate.
+///
+/// The `store` closure supplies the log. The adapter holds a persistence path
+/// and opens a store per call; passing a closure rather than a path keeps this
+/// crate free of any opinion about where storage lives, which is the same reason
+/// [`get_capabilities`] takes a lookup.
+pub fn list_threads_from_request<L: crate::log::OpLog>(
+    request: &str,
+    store: impl FnOnce() -> Result<L, crate::log::OpLogError>,
+) -> String {
+    guarded("list_threads", || {
+        let parsed: serde_json::Value = match serde_json::from_str(request) {
+            Ok(v) => v,
+            Err(e) => return error_json(&format!("invalid JSON: {e}")),
+        };
+        let stoa = match parsed.get("stoa") {
+            Some(serde_json::Value::String(s)) => match crate::identity::Address::from_hex(s) {
+                Ok(a) => a,
+                Err(e) => return error_json(&format!("stoa: {e}")),
+            },
+            Some(_) => return error_json("stoa must be a string"),
+            None => return error_json("missing field: stoa"),
+        };
+        let genesis = match genesis_for(&parsed, &stoa) {
+            Ok(g) => g,
+            Err(e) => return e,
+        };
+        // Opening the store is itself fallible, and a failure here is §2.5's
+        // error shape rather than an empty feed — the same rule the read path
+        // follows, applied one step earlier where it is just as easy to get
+        // wrong.
+        let log = match store() {
+            Ok(l) => l,
+            Err(e) => return error_json(&e.to_string()),
+        };
+        list_threads(request, &log, &genesis)
+    })
+}
+
+/// A non-negative integer field, absent, or a refusal already in the wire shape.
+///
+/// Separated out because `page` and `perPage` are the same parsing job with the
+/// same three failure modes, and a second copy would eventually disagree with
+/// the first about whether `-1` is an error or a zero.
+fn parse_index(parsed: &serde_json::Value, field: &str) -> Result<Option<usize>, String> {
+    match parsed.get(field) {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::Number(n)) => match n.as_u64() {
+            // `as_u64` refuses a negative and a fractional number, which is
+            // exactly the set that should be refused: a page of -1 is not a
+            // page, and silently clamping it to 0 would serve the first page to
+            // a caller who asked for something impossible.
+            Some(v) => Ok(Some(v as usize)),
+            None => Err(error_json(&format!(
+                "{field} must be a non-negative whole number"
+            ))),
+        },
+        Some(_) => Err(error_json(&format!("{field} must be a number"))),
+    }
+}
+
+/// One sanitised string as the view receives it.
+///
+/// **An object rather than a bare string, always** — even when nothing was
+/// found. A shape that was sometimes a string and sometimes an object would make
+/// every view branch on the type before rendering, and the branch would be
+/// written once and forgotten at the second call site.
+fn sanitised_json(s: &crate::sanitise::Sanitised) -> serde_json::Value {
+    serde_json::json!({
+        "text": s.text,
+        "removed": s.removed,
+        "marked": s.marked,
+    })
+}
+
+/// The pagination shape, built in one place.
+fn feed_page_json(page: &crate::feed::FeedPage) -> String {
+    let items: Vec<serde_json::Value> = page
+        .items
+        .iter()
+        .map(|row| {
+            serde_json::json!({
+                "thread": row.thread,
+                "currentVersion": row.current_version,
+                "author": row.author,
+                "body": sanitised_json(&row.body),
+                "attachments": row.attachments.iter().map(sanitised_json).collect::<Vec<_>>(),
+                "isRevised": row.is_revised,
+                "isHidden": row.is_hidden,
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "items": items,
+        "page": page.page,
+        "hasMore": page.has_more,
+    })
+    .to_string()
+}
+
 // ─── The two halves of the delivery bridge that CAN be tested ─────────────
 //
 // `modules().delivery_module` cannot appear in this file: it calls `lp_*`
@@ -877,6 +1140,413 @@ mod tests {
         assert_eq!(v["reason"], r#"at "C:\keys" — he said "no""#);
     }
 
+    // ─── The feed handler ─────────────────────────────────────────────────
+
+    use crate::arrival::Arrival;
+    use crate::log::{MemoryOpLog, OpLog};
+    use crate::op::{Op, OpKind};
+    use crate::stoa::{Genesis, Policy};
+
+    fn feed_key(seed: u8) -> crate::identity::SecretKey {
+        crate::identity::SecretKey::from_bytes(&[seed; 32]).unwrap()
+    }
+
+    fn feed_genesis() -> Genesis {
+        Genesis {
+            creator: feed_key(1).public_key(),
+            policy: Policy::Open,
+            title: "Agora".to_string(),
+        }
+    }
+
+    /// A log holding one thread head with this body.
+    fn log_with_body(body: &str) -> MemoryOpLog {
+        let key = feed_key(2);
+        let op = Op {
+            stoa: feed_genesis().address().unwrap(),
+            author: key.public_key(),
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: body.to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&key);
+        let mut log = MemoryOpLog::new();
+        log.append(op, Arrival::unordered()).unwrap();
+        log
+    }
+
+    fn feed_request(extra: &str) -> String {
+        let stoa = feed_genesis().address().unwrap().to_hex();
+        if extra.is_empty() {
+            format!(r#"{{"stoa":"{stoa}"}}"#)
+        } else {
+            format!(r#"{{"stoa":"{stoa}",{extra}}}"#)
+        }
+    }
+
+    #[test]
+    fn the_feed_reply_is_the_ecosystems_pagination_shape() {
+        // The precedent-setting shape, pinned by key name. A view is written
+        // against these exact names and renaming one is a breaking change no
+        // type checker would catch.
+        let log = log_with_body("hello");
+        let out = list_threads(&feed_request(""), &log, &feed_genesis());
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v["items"].is_array(), "got {out}");
+        assert_eq!(v["page"], 0);
+        assert_eq!(v["hasMore"], false);
+
+        let row = &v["items"][0];
+        for field in [
+            "thread",
+            "currentVersion",
+            "author",
+            "body",
+            "attachments",
+            "isRevised",
+            "isHidden",
+        ] {
+            assert!(row.get(field).is_some(), "row is missing {field}: {out}");
+        }
+        assert_eq!(row["body"]["text"], "hello");
+    }
+
+    #[test]
+    fn a_sanitised_string_is_always_an_object_even_when_nothing_was_found() {
+        // A shape that was sometimes a string and sometimes an object would
+        // make every view branch on the type before rendering.
+        let log = log_with_body("perfectly ordinary");
+        let out = list_threads(&feed_request(""), &log, &feed_genesis());
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let body = &v["items"][0]["body"];
+        assert!(body.is_object(), "got {out}");
+        assert_eq!(body["removed"], 0);
+        assert_eq!(body["marked"], 0);
+    }
+
+    #[test]
+    fn the_feed_hands_the_view_sanitised_text_and_the_counts_beside_it() {
+        // End to end through the wire: the obligation is met at the boundary
+        // the view actually reads from, not only in the sanitiser's own tests.
+        let log = log_with_body("p\u{0430}ypal\u{202E}x");
+        let out = list_threads(&feed_request(""), &log, &feed_genesis());
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let body = &v["items"][0]["body"];
+        assert_eq!(body["removed"], 1);
+        assert_eq!(body["marked"], 1);
+        assert!(
+            !body["text"].as_str().unwrap().contains('\u{202E}'),
+            "an override reached the view: {out}"
+        );
+    }
+
+    #[test]
+    fn the_feed_takes_no_ordering_parameter_and_ignores_one_offered() {
+        // The KISS decision, pinned. An `order` field must not select anything,
+        // because there is only one order and accepting a name for a second
+        // would be telling the caller a falsehood. It is ignored rather than
+        // refused: an unknown field is not a caller error.
+        let log = log_with_body("hello");
+        let plain = list_threads(&feed_request(""), &log, &feed_genesis());
+        let with_order = list_threads(
+            &feed_request(r#""order":"top""#),
+            &log,
+            &feed_genesis(),
+        );
+        assert_eq!(
+            plain, with_order,
+            "an ordering argument must not change the answer while there is one ordering"
+        );
+    }
+
+    #[test]
+    fn a_malformed_feed_request_is_the_error_shape_and_carries_no_items() {
+        // §2.5: never a partial success. A reply carrying both an error and an
+        // empty `items` list would render as an empty feed in any view that
+        // checked `items` first.
+        let log = log_with_body("hello");
+        let stoa = feed_genesis().address().unwrap().to_hex();
+        for bad in [
+            "not json".to_string(),
+            r#"{}"#.to_string(),
+            r#"{"stoa":7}"#.to_string(),
+            r#"{"stoa":"nothex"}"#.to_string(),
+            r#"{"stoa":"00ff"}"#.to_string(),
+            format!(r#"{{"stoa":"{stoa}","page":-1}}"#),
+            format!(r#"{{"stoa":"{stoa}","page":1.5}}"#),
+            format!(r#"{{"stoa":"{stoa}","perPage":"many"}}"#),
+            format!(r#"{{"stoa":"{stoa}","includeHidden":"yes"}}"#),
+        ] {
+            let out = list_threads(&bad, &log, &feed_genesis());
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(v.get("error").is_some(), "for {bad:?}, got {out}");
+            assert!(
+                v.get("items").is_none(),
+                "a failure must never also carry a result — §2.5, got {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_feed_asked_for_a_stoa_the_genesis_record_does_not_describe_is_refused() {
+        // Pairing a moderator set with the wrong Stoa would apply one Stoa's
+        // authority to another's posts. Refused rather than served with
+        // moderation quietly not applying.
+        let log = log_with_body("hello");
+        let elsewhere = Genesis {
+            creator: feed_key(1).public_key(),
+            policy: Policy::Open,
+            title: "Somewhere else".to_string(),
+        }
+        .address()
+        .unwrap();
+        let out = list_threads(
+            &format!(r#"{{"stoa":"{}"}}"#, elsewhere.to_hex()),
+            &log,
+            &feed_genesis(),
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_some(), "got {out}");
+        assert!(v.get("items").is_none());
+    }
+
+    #[test]
+    fn an_absent_page_and_per_page_default_rather_than_failing() {
+        // A view rendering a first page should not have to spell both.
+        let log = log_with_body("hello");
+        let out = list_threads(&feed_request(""), &log, &feed_genesis());
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["page"], 0);
+        assert_eq!(v["items"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn an_oversized_per_page_is_clamped_rather_than_refused() {
+        // A caller asking for a million rows is not attacking anything, and
+        // refusing the page outright would be a worse answer than a smaller one
+        // — but the reply must not actually be built at that size.
+        let log = log_with_body("hello");
+        let out = list_threads(
+            &feed_request(r#""perPage":1000000"#),
+            &log,
+            &feed_genesis(),
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_none(), "got {out}");
+        assert_eq!(v["items"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_store_failure_reaches_the_view_as_the_error_shape_and_not_as_an_empty_feed() {
+        // §11.1 obligation 5 at the wire, which is the layer the view reads.
+        // This is the whole of screen 07's correctness: an empty feed and a
+        // broken store must not produce the same reply.
+        struct BrokenLog;
+        impl OpLog for BrokenLog {
+            fn append(
+                &mut self,
+                _op: crate::op::SignedOp,
+                _arrival: Arrival,
+            ) -> Result<crate::log::Appended, crate::log::OpLogError> {
+                Err(crate::log::OpLogError::Storage("database is locked".into()))
+            }
+            fn get(
+                &self,
+                _id: &crate::op::OpId,
+            ) -> Result<Option<crate::log::Entry>, crate::log::OpLogError> {
+                Err(crate::log::OpLogError::Storage("database is locked".into()))
+            }
+            fn iter(&self) -> Result<Vec<crate::log::Entry>, crate::log::OpLogError> {
+                Err(crate::log::OpLogError::Storage("database is locked".into()))
+            }
+            fn iter_stoa(
+                &self,
+                _stoa: &Address,
+            ) -> Result<Vec<crate::log::Entry>, crate::log::OpLogError> {
+                Err(crate::log::OpLogError::Storage("database is locked".into()))
+            }
+            fn iter_target(
+                &self,
+                _target: &crate::op::OpId,
+            ) -> Result<Vec<crate::log::Entry>, crate::log::OpLogError> {
+                Err(crate::log::OpLogError::Storage("database is locked".into()))
+            }
+            fn len(&self) -> Result<usize, crate::log::OpLogError> {
+                Err(crate::log::OpLogError::Storage("database is locked".into()))
+            }
+        }
+
+        let out = list_threads(&feed_request(""), &BrokenLog, &feed_genesis());
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_some(), "got {out}");
+        assert!(
+            v.get("items").is_none(),
+            "a broken store must not render as a quiet Stoa"
+        );
+        assert!(
+            v["error"].as_str().unwrap().contains("database is locked"),
+            "the reason must survive so the view can name it, got {out}"
+        );
+
+        // And the contrast that makes screen 07 possible: an EMPTY store with
+        // the same request produces a success with an empty list. The two
+        // replies must be distinguishable, which is the whole requirement.
+        let empty = list_threads(&feed_request(""), &MemoryOpLog::new(), &feed_genesis());
+        let ev: serde_json::Value = serde_json::from_str(&empty).unwrap();
+        assert!(ev.get("error").is_none(), "got {empty}");
+        assert_eq!(ev["items"].as_array().unwrap().len(), 0);
+        assert_ne!(out, empty, "empty and unreadable must never be the same reply");
+    }
+
+    #[test]
+    fn the_feed_handler_is_never_a_panic() {
+        // The guard, on a handler that runs over attacker-supplied content. A
+        // panic here aborts the module process rather than failing one call.
+        struct PanickingLog;
+        impl OpLog for PanickingLog {
+            fn append(
+                &mut self,
+                _op: crate::op::SignedOp,
+                _arrival: Arrival,
+            ) -> Result<crate::log::Appended, crate::log::OpLogError> {
+                panic!("the storage layer exploded")
+            }
+            fn get(
+                &self,
+                _id: &crate::op::OpId,
+            ) -> Result<Option<crate::log::Entry>, crate::log::OpLogError> {
+                panic!("the storage layer exploded")
+            }
+            fn iter(&self) -> Result<Vec<crate::log::Entry>, crate::log::OpLogError> {
+                panic!("the storage layer exploded")
+            }
+            fn iter_stoa(
+                &self,
+                _stoa: &Address,
+            ) -> Result<Vec<crate::log::Entry>, crate::log::OpLogError> {
+                panic!("the storage layer exploded")
+            }
+            fn iter_target(
+                &self,
+                _target: &crate::op::OpId,
+            ) -> Result<Vec<crate::log::Entry>, crate::log::OpLogError> {
+                panic!("the storage layer exploded")
+            }
+            fn len(&self) -> Result<usize, crate::log::OpLogError> {
+                panic!("the storage layer exploded")
+            }
+        }
+
+        let out = list_threads(&feed_request(""), &PanickingLog, &feed_genesis());
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_some(), "got {out}");
+        assert!(v.get("items").is_none());
+    }
+
+    // ─── The genesis record travelling with the request ───────────────────
+
+    fn genesis_hex() -> String {
+        hex::encode(feed_genesis().canonical_bytes().unwrap())
+    }
+
+    fn full_request() -> String {
+        format!(
+            r#"{{"stoa":"{}","genesis":"{}"}}"#,
+            feed_genesis().address().unwrap().to_hex(),
+            genesis_hex()
+        )
+    }
+
+    #[test]
+    fn a_request_carrying_its_genesis_record_reads_the_feed() {
+        let log = log_with_body("hello");
+        let out = list_threads_from_request(&full_request(), || {
+            Ok::<_, crate::log::OpLogError>(log)
+        });
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_none(), "got {out}");
+        assert_eq!(v["items"].as_array().unwrap().len(), 1);
+        assert_eq!(v["items"][0]["body"]["text"], "hello");
+    }
+
+    #[test]
+    fn a_genesis_record_that_does_not_hash_to_the_stoa_is_refused() {
+        // THE security property §4.8 rests on: an address IS the hash of the
+        // genesis record, so a caller cannot supply a record naming themselves
+        // as creator and have it accepted for someone else's Stoa. Without this
+        // check, the moderator set is whatever the caller says it is.
+        let attacker = Genesis {
+            creator: feed_key(9).public_key(),
+            policy: Policy::Open,
+            title: "Agora".to_string(),
+        };
+        // The attacker's record is perfectly well-formed — it just describes a
+        // different Stoa.
+        assert!(attacker.address().is_ok());
+
+        let request = format!(
+            r#"{{"stoa":"{}","genesis":"{}"}}"#,
+            feed_genesis().address().unwrap().to_hex(),
+            hex::encode(attacker.canonical_bytes().unwrap())
+        );
+        let out = list_threads_from_request(&request, || {
+            Ok::<_, crate::log::OpLogError>(log_with_body("hello"))
+        });
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(
+            v.get("error").is_some(),
+            "a record that does not hash to the address must be refused, got {out}"
+        );
+        assert!(v.get("items").is_none());
+    }
+
+    #[test]
+    fn a_missing_or_malformed_genesis_record_is_refused_by_name() {
+        let stoa = feed_genesis().address().unwrap().to_hex();
+        for (bad, why) in [
+            (format!(r#"{{"stoa":"{stoa}"}}"#), "missing"),
+            (format!(r#"{{"stoa":"{stoa}","genesis":7}}"#), "must be a string"),
+            (format!(r#"{{"stoa":"{stoa}","genesis":"nothex!"}}"#), "hex"),
+            (format!(r#"{{"stoa":"{stoa}","genesis":""}}"#), "genesis"),
+        ] {
+            let out = list_threads_from_request(&bad, || {
+                Ok::<_, crate::log::OpLogError>(log_with_body("hello"))
+            });
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(v.get("error").is_some(), "for {bad:?}, got {out}");
+            assert!(
+                v["error"].as_str().unwrap().contains(why),
+                "the message must say WHICH mistake ({why}), got {out}"
+            );
+            assert!(v.get("items").is_none());
+        }
+    }
+
+    #[test]
+    fn a_store_that_cannot_be_opened_is_the_error_shape_and_not_an_empty_feed() {
+        // The failure one step earlier than the read: opening the store. It is
+        // just as easy to flatten into an empty page here, and it renders
+        // identically if it is.
+        let out = list_threads_from_request(&full_request(), || {
+            Err::<MemoryOpLog, _>(crate::log::OpLogError::Storage(
+                "unable to open database file".into(),
+            ))
+        });
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_some(), "got {out}");
+        assert!(v.get("items").is_none());
+        assert!(
+            v["error"]
+                .as_str()
+                .unwrap()
+                .contains("unable to open database file"),
+            "the reason must reach the view so it can be named, got {out}"
+        );
+    }
+
     #[test]
     fn every_handler_answers_with_an_object_carrying_exactly_one_top_level_shape() {
         // The wire contract is only useful if it holds for EVERY method, so
@@ -890,6 +1560,8 @@ mod tests {
                 "abcd".to_string()
             )),
             get_capabilities("garbage", |_| Ok("abcd".to_string())),
+            list_threads(&feed_request(""), &log_with_body("hello"), &feed_genesis()),
+            list_threads("garbage", &log_with_body("hello"), &feed_genesis()),
         ] {
             let v: serde_json::Value = serde_json::from_str(&out)
                 .unwrap_or_else(|e| panic!("handler emitted invalid JSON ({e}): {out}"));

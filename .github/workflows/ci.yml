@@ -231,6 +231,48 @@ jobs:
           done
           [ "$fail" -eq 0 ] && echo "ok: layout imports present"
 
+      # SPEC.md states the rule as an invariant over Text elements: "never bind
+      # raw peer text to a Text element with textFormat StyledText or RichText".
+      # The trap is that QML's DEFAULT is `Text.AutoText`, which sniffs its
+      # input and switches to rich text when the string looks like markup — so
+      # an element that simply omits the property is opted in to rich text, not
+      # out of it.
+      #
+      # This decays one element at a time and each decay looks harmless: the
+      # element added today binds a literal, and the binding that makes it
+      # dynamic arrives in a later change that has no reason to think it
+      # touched rendering. Review catches that once; a grep catches it forever,
+      # which is why this is a gate rather than a convention.
+      #
+      # Counts `Text {` openings against `textFormat:` assignments per file.
+      # Deliberately crude: it cannot tell WHICH Text lacks the property, only
+      # that one does. That is the honest limit of a grep, and it is enough —
+      # the failure names the file and the file is small. A parser here would
+      # be the elaborate thing this does not need to be.
+      #
+      # `\bText {` and not `Text {`: the loose pattern also matches the tail of
+      # `SanitisedText {`, so a file using that component was reported as
+      # missing a textFormat it did not need. Found by running this check
+      # against the tree it was written for, which is the only way a
+      # false POSITIVE shows up — a green gate never reveals one.
+      #
+      # Local components deriving from Text (SanitisedText, AddressLabel) set
+      # the property once on their own root, and their own file's check is what
+      # covers them.
+      - name: every QML Text declares an explicit textFormat
+        run: |
+          set -eu
+          fail=0
+          for f in dialectica-ui/src/qml/*.qml; do
+            opens=$(grep -cE '\bText \{' "$f" || true)
+            formats=$(grep -c 'textFormat:' "$f" || true)
+            if [ "$opens" -gt "$formats" ]; then
+              echo "::error file=$f::$opens Text element(s) but only $formats textFormat assignment(s) — QML defaults to AutoText, which renders markup found in peer-supplied strings. Add 'textFormat: Text.PlainText' to each."
+              fail=1
+            fi
+          done
+          [ "$fail" -eq 0 ] && echo "ok: every Text declares a textFormat"
+
       # scaffold.toml is destroyed a little on every `lgs basecamp` verb:
       # PHASE0-FINDINGS §4 records that `setup`, `modules` AND `install` each
       # strip every comment from it, and that the comments were lost twice
@@ -264,23 +306,27 @@ jobs:
   # ─── qml ─────────────────────────────────────────────────────────────────
   # WHAT THIS JOB CANNOT SEE, stated up front because PLAN.md §10 asks for it:
   #
-  #   There are NO QML component tests in this repo yet, so this job does not
-  #   run any. It proves the view PARSES and lints clean; it proves nothing
-  #   about what `Main.qml`'s call() function does with a reply.
+  #   It does not RENDER anything. The specs drive component logic — the call
+  #   path's four branches, the feed's three states, what SanitisedText binds —
+  #   through a fake bridge, with QT_QPA_PLATFORM=offscreen. Nothing here would
+  #   notice a component that computes correctly and lays out unusably, and
+  #   nothing here has ever been seen drawing in basecamp.
   #
-  # radicle's equivalent job runs `run-qml-tests.sh` over a dozen tst_*.qml
-  # specs with REQUIRE_QML_TESTS=1 and asserts the reported totals equal the
-  # spec count. That assertion is deliberately NOT ported as a stub: a
-  # spec-count check over zero specs is the exact false green PLAN.md §10 warns
-  # about — it passes loudest when there is nothing to run.
+  # The earlier version of this block said there were no QML tests and named
+  # `Main.qml`'s call() as the first thing to add. That is now done, in
+  # dialectica-ui/tests/, and the call path moved to the `Core` singleton where
+  # every screen reaches it through one function.
   #
-  # `Main.qml`'s call() IS testable (it parses JSON, branches on an `error`
-  # key, and reports a missing `logos` bridge), and a QtTest spec injecting a
-  # fake bridge would pin that down. That is the first thing to add here; the
-  # runner-discovery and REQUIRE_QML_TESTS machinery to copy is
-  # radicle-ui/tests/run-qml-tests.sh, which exists precisely because a
-  # `qmltestrunner` on PATH is often the Qt5 one and fails against Qt6 QML with
-  # an empty error and a bare exit 1 — indistinguishable from a broken test.
+  # `Core.bridge` exists SO THAT these tests can exist: `logos` is injected into
+  # the QML context by basecamp, so a function reading the global directly has
+  # branches no harness can reach. The property defaults to the global, so
+  # production behaviour is unchanged.
+  #
+  # The runner-discovery and REQUIRE_QML_TESTS machinery is ported from
+  # radicle-ui/tests/run-qml-tests.sh and is not boilerplate: a `qmltestrunner`
+  # on PATH is often the Qt5 one, which fails against Qt6 QML with an empty
+  # error and a bare exit 1 — indistinguishable from a broken test. The script
+  # smoke-tests whatever it finds before trusting a pass OR a failure from it.
   qml:
     name: QML lint
     runs-on: ubuntu-latest
@@ -289,12 +335,21 @@ jobs:
 
       # Qt6. The Qt5 tools are a trap here (see the note above), so the package
       # names are the qt6 ones and the tool lookup below prefers qt6 paths.
+      #
+      # `qml6-module-qtqml` is what supplies the **`Qt` namespace object's**
+      # qmltypes — `Qt.AlignHCenter`, `Qt.PointingHandCursor`,
+      # `Qt.RightButton`. Without it qmllint resolves none of them and reports
+      # `Property "AlignHCenter" not found on type "Qt"` on perfectly valid
+      # code. It is a separate package from `qml6-module-qtquick` and is easy
+      # to omit, because nothing imports "QtQml" by name — QtQuick pulls it in
+      # at runtime, so the app works and only the LINTER is blind.
       - name: Install Qt
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             qt6-base-dev qt6-declarative-dev \
             qt6-declarative-dev-tools \
+            qml6-module-qtqml qml6-module-qtqml-workerscript \
             qml6-module-qtquick qml6-module-qtquick-controls \
             qml6-module-qtquick-layouts qml6-module-qtquick-templates \
             qml6-module-qtquick-window \
@@ -404,10 +459,12 @@ jobs:
           #
           # `logos` is injected into the QML context by the host, so it is by
           # construction not declared in QML scope and qmllint cannot see it.
-          # Main.qml already guards it (`typeof logos === "undefined"`), which
-          # is the correct handling for a bridge that may be absent — the
-          # warning is about a property of the sandbox, not a defect. qmllint
-          # exits 255 on any warning, so without this the gate is unusable.
+          # `Core.qml` reaches it exactly once, through a `typeof` guard, and
+          # exposes it as the `bridge` property every call goes through — so the
+          # unqualified read is confined to one initialiser and a missing bridge
+          # is a diagnosed state rather than a crash. The warning is about a
+          # property of the sandbox, not a defect; qmllint exits 255 on any
+          # warning, so without this the gate is unusable.
           #
           # Verified narrow: with this flag set, a file with a real syntax error
           # still exits 255.
@@ -421,6 +478,38 @@ jobs:
             exit 1
           fi
           echo "ok: qmllint clean"
+
+      # The component tests. `REQUIRE_QML_TESTS=1` so a missing or
+      # wrong-major-version runner FAILS rather than skipping: a job that
+      # quietly stops testing is the false green this file is written against.
+      #
+      # QtTest ships with qt6-declarative-dev-tools, installed above.
+      - name: QML component tests
+        env:
+          REQUIRE_QML_TESTS: "1"
+        run: dialectica-ui/tests/run-qml-tests.sh
+
+      # The spec-count assertion radicle's job has, which was deliberately NOT
+      # ported while there were zero specs — "a spec-count check over zero specs
+      # is the exact false green PLAN.md §10 warns about; it passes loudest when
+      # there is nothing to run."
+      #
+      # It is safe now, and it is the half that catches the failure the step
+      # above cannot: a runner that silently stops discovering specs still exits
+      # 0. Asserting the script RAN as many spec files as exist on disk is what
+      # notices. The floor is derived from the directory rather than hardcoded,
+      # so adding a spec does not require editing this.
+      - name: every QML spec file actually ran
+        run: |
+          set -eu
+          on_disk=$(ls dialectica-ui/tests/tst_*.qml | wc -l)
+          [ "$on_disk" -gt 0 ] || { echo "::error::no QML specs found"; exit 1; }
+          reported=$(REQUIRE_QML_TESTS=1 dialectica-ui/tests/run-qml-tests.sh | grep -c '^--- tst_')
+          if [ "$on_disk" -ne "$reported" ]; then
+            echo "::error::$on_disk spec file(s) on disk but the runner ran $reported — a spec stopped being discovered"
+            exit 1
+          fi
+          echo "ok: all $on_disk QML spec file(s) ran"
 
   # ─── rust ────────────────────────────────────────────────────────────────
   # The core module's whole decision surface. `src/core.rs` holds every
