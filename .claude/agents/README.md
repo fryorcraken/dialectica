@@ -82,13 +82,41 @@ by whoever is orchestrating. And `openspec archive` runs once, on merge — spli
 across several merges, the contract lands at a different time from the code that
 honours it.
 
+### One writer at a time; reviewers in parallel
+
+**A piece has at most one `spec-writer`, `dev-writer` or `tester` running at any
+moment** — not one of each, one in total. Two at once is two agents editing the
+same files with no way to resolve it, but the sharper reason is the contract:
+
+**A spec must not move while code is being written against it.** `spec-writer` and
+`dev-writer` are sequential jobs, and running them together means the
+implementation is built against a contract that changed underneath it, with neither
+agent knowing. This session did exactly that — a `spec-writer` reworded the envelope
+rule's scope while four reviewers read the code implementing it, so their findings
+were against a contract that had already moved.
+
+That holds on the way back too. When review routes a spec gap to `spec-writer`,
+**stop the fixer, let the spec land, then restart it against the new text** — a
+`dev-writer` fixing code while the requirement it answers is being rewritten is the
+same failure, just later in the flow.
+
+**Reviewers run in parallel, up to six**, because each writes only its own findings
+file and no two write the same path.
+
+The exception that makes worktrees non-negotiable: a reviewer that runs `cargo
+test` or `cargo mutants` **does** mutate the tree, breaking the code deliberately
+to see whether a test notices. Two sharing a tree see each other's broken code and
+report it as the author's; this has happened here.
+
+Every branch rule below follows from that asymmetry, so read it that way rather
+than as bookkeeping.
+
 ### Branch names say which kind of branch it is
 
 | Name | Whose | Holds |
 |---|---|---|
-| `piece/<name>` | the piece | **the** task branch — the one the PR is open on |
+| `piece/<name>` | the piece | **the** task branch — the one the PR is open on. Spec, code, tests and findings-fixes all commit here directly |
 | `review/<name>/<dimension>` | one reviewer | its findings file, nothing else — cherry-picked onto the piece, never pushed |
-| `fix/<name>/<what>` | one fixer | the change, plus its ticks |
 
 Named for the role and not the stage, because `dev/x` invites a `test/x` beside
 it — which is the shape this section exists to stop.
@@ -108,15 +136,17 @@ rather than merged shows here even though its content is in, so read the commits
 rather than the count. Say in the closing comment where the work went, and keep
 the branch.
 
-**Only the runner pushes.** Every other agent commits on its own branch,
-cherry-picks that commit onto the local `piece/<name>`, and stops.
+**Only the runner pushes.** With one pusher there is no race to lose, no rebase to
+retry, and no force-push to be tempted by.
 
-Cherry-pick rather than merge, so the task branch reads as a flat sequence of
-findings and fixes rather than six merge commits carrying six branches. And with
-one pusher there is no race to lose, no rebase to retry, and no force-push to be
-tempted by. It also serialises the conflicts: two reviewers never write the same
-path, but two fixers on one piece routinely write the same file, and the runner is
-the one who can see both changes.
+**Only reviewers get a side branch**, because only reviewers run genuinely in
+parallel — six at once, while a fixer may still be changing the code they are
+reading. A reviewer's own branch is what stops its commit racing that. Everyone
+else writes the piece one at a time and commits to it directly; a side branch there
+would add a step to get wrong and misname the commits besides.
+
+Cherry-pick rather than merge, so the task branch reads as a flat sequence rather
+than six merge commits carrying six branches.
 
 **Never `git add -A`** — commit named paths. Worktrees collect build output and a
 gitignored SDK symlink, and sweeping up another agent's half-finished edit
@@ -161,10 +191,21 @@ edge of merge with zero reviewers and another missing four, neither visible unti
 someone asked.
 
 **`findings/<dimension>.md`**, one file per reviewer — `correctness`, `security`,
-`readability`, `architecture`, `spec-test`, `design-review`. Written by the
-reviewer, ticked by whoever acts on each entry (**fixed** / **rejected, with the
-argument** / **deferred, and where to**), and deleted by the runner before merge
-once every entry is ticked.
+`readability`, `architecture`, `spec-test`, `design-review`. **Every finding is a
+checkbox**, written unticked by the reviewer:
+
+```markdown
+- [ ] **`dev-writer`** — `wire.rs:96` — what is wrong
+      **Scenario:** inputs → wrong output. **Measured:** the number, if there is one.
+```
+
+Whoever acts on it flips the box and appends the outcome — **fixed** (with the test
+that fails without it), **rejected** (with the argument), or **deferred** (and where
+to) — without editing the reviewer's text. The runner deletes the directory before
+merge, once no box is empty.
+
+So "blocks the merge" is literal and checkable: `grep -rn "^- \[ \]"` over the
+directory either returns lines or it does not.
 
 Three consequences worth knowing whatever your role:
 

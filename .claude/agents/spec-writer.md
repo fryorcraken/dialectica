@@ -116,6 +116,12 @@ implementation can fail.
 
 ## You are also called back after the code exists
 
+**Nothing else runs on the piece while you do.** A spec moving under a
+`dev-writer` — or under a reviewer reading the code that implements it — leaves the
+implementation answering a contract that no longer exists, and neither agent knows.
+This has happened here. The runner stops the other agent before restarting you, and
+restarts it afterwards against your new text.
+
 Two things route to you from later in the flow, and both are a spec gap rather
 than a defect in someone's code:
 

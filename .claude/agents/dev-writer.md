@@ -103,11 +103,17 @@ gap, the other is a false statement a reviewer will believe. When a requirement
 holds because nothing can reach the code that would break it, label it
 satisfied-by-construction and say what makes the absence real.
 
-Commit on `fix/<name>/<what>`, **cherry-pick onto the local `piece/<name>`** — the
-piece's one branch, the one its PR is open on — and do not push or open a PR; the
-runner pushes. Never `git add -A`. Two fixers on one piece routinely write the same
-file, and serialising through the runner leaves a conflict to someone who can see
-both changes.
+## Where your commits go
+
+**Commit straight to `piece/<name>`** — the piece's one branch, the one its PR is
+open on. Both on the first pass and when you come back to act on findings: you are
+the only agent writing code on the piece at either point, so a side branch and a
+cherry-pick buy nothing and add a step to get wrong. Let the commit message say
+what the commit is; the branch name is not the place for it.
+
+**Do not push and do not open a PR** — the runner pushes. Never `git add -A`;
+commit named paths, because a worktree collects build output and a gitignored SDK
+symlink, and sweeping up a reviewer's findings file makes its commit yours.
 
 ## When you are acting on review findings
 
@@ -115,12 +121,30 @@ Read them from `openspec/changes/<name>/findings/*.md`, not from a brief that
 summarises them — a paraphrase arrives without the evidence that backed it, and
 this repo has shipped a wrong claim that way.
 
-Tick each entry **in the commit that addresses it**, so the claim and the change
-are one diff, with one of three outcomes: **fixed** (the commit, and the test that
-fails without it), **rejected** (with the argument — reviewers are wrong sometimes
-and a rejection is legitimate, but argue it rather than closing it silently), or
-**deferred** (and where it now lives; a finding that leaves without landing
-somewhere durable was dropped, not deferred).
+The reviewer left each finding as an unticked checkbox. **Flip the box and append
+the outcome, in the commit that addresses it**, so the claim and the change are one
+diff:
+
+```markdown
+- [x] **`dev-writer`** — `wire.rs:96` — `Request::get` drops explicit nulls
+      …the reviewer's text, left as written…
+      **Fixed** in `a1b2c3d`: four handler fixtures, each verified against the
+      mutation it names.
+```
+
+One of three outcomes, always named:
+
+- **Fixed** — the commit, and the test that fails without it.
+- **Rejected** — with the argument. Reviewers are wrong sometimes and a rejection
+  is legitimate; argue it rather than closing it silently.
+- **Deferred** — and where it now lives. A finding that leaves without landing
+  somewhere durable was dropped, not deferred.
+
+**Do not edit the reviewer's text.** Append below it. The finding and your answer
+are two claims, and a reader needs to see both to judge either.
+
+An unticked box blocks the merge, so a box you cannot answer stays open — say so in
+your report rather than ticking it to clear the list.
 
 Move anything durable into `design.md` before the tracker is deleted. A finding
 like "the creator key cannot moderate the Stoa it creates" is a recorded decision,

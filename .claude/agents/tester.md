@@ -76,11 +76,13 @@ rather than writing a test that cannot fail.
 
 ## Where your work lands
 
-Commit your tests on `fix/<name>/tests`, **tick the tests row** in `tasks.md`'s
-stage block in the same commit, and **cherry-pick onto the local `piece/<name>`** —
-the piece's one branch, the one its PR is open on. Do not push, and do not open a
-PR: the runner pushes. Never `git add -A`; a worktree collects build output and a
-gitignored SDK symlink.
+**Commit straight to `piece/<name>`** — the piece's one branch, the one its PR is
+open on — and **tick the tests row** in `tasks.md`'s stage block in the same commit.
+Same when you come back to act on a finding: you are the only agent writing tests
+on the piece either time, so no side branch and no cherry-pick are needed.
+
+**Do not push and do not open a PR** — the runner pushes. Never `git add -A`; a
+worktree collects build output and a gitignored SDK symlink.
 
 Report what you kept, adapted and removed, and why. Report the
 predicted-versus-observed failure for each test you proved can fail — if they

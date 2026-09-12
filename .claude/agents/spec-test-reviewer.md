@@ -116,11 +116,28 @@ Reasoning left in PLAN.md is the `design-reviewer`'s check, not yours.
 
 ## Output
 
+## Output
+
 **Findings only, do not fix.** Write them to
-`openspec/changes/<name>/findings/spec-test.md`. For each: file, line, what is
-wrong, a concrete failure scenario, and severity. Say plainly which areas were
-clean rather than padding the list. If you ran mutations, report which ones and
-what happened — a mutation that survived is the strongest finding you can write.
+`openspec/changes/<name>/findings/spec-test.md`, **each as an unticked checkbox**
+so whoever acts on it flips your box rather than writing their own list:
+
+```markdown
+- [ ] **`spec-writer`** — the "every method that accepts a request" clause
+      **Scenario:** a sixth method with all-optional fields, parsing `Value`
+      directly, serves `[]` as a request that named nothing.
+      **Measured:** added it — all 487 tests passed.
+```
+
+Lead with **who it is for** (`spec-writer`, `dev-writer` or `tester`), then where,
+what is wrong, a concrete failure scenario, and severity. One box per thing that
+must happen — an unticked box blocks the merge, so do not open one for an
+observation nobody needs to act on. Say which areas were clean in prose, not as
+boxes, rather than padding the list.
+
+If you ran mutations, report which ones and what happened — **a mutation that
+survived is the strongest finding you can write**, because it is a measurement
+rather than a judgement.
 
 **Then commit that one file** on `review/<name>/spec-test`, **tick your own row**
 in `tasks.md`'s stage block in the same commit, and **cherry-pick that commit onto

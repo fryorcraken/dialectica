@@ -114,6 +114,18 @@ project a stalled session.
   unprompted; adding `--jq '.[].tag_name'` makes it unanalysable and costs a
   click. Run it plain and read the JSON.
 
+- **A long output is not a reason to pipe.** This is the most common way the rule
+  gets broken by someone who knows it: `cargo test … 2>&1 | tail -30` to keep the
+  output manageable turns a call the checker would have approved into a prompt,
+  which is the opposite of what the pipe was for. Run it plain — `cargo test`
+  prints its failures at the end, and you can read the whole thing.
+
+  Two related shapes that catch people mid-task: `cd <dir> && cargo test
+  --manifest-path <abs-path>` prompts even though the manifest path is absolute,
+  because the `cd` is what defeats the analyser and the `cd` was never needed;
+  and `openspec`, which genuinely has no directory flag, is the one case where
+  `cd <dir> && openspec …` is right — **with no path argument after it**.
+
 - **Never `readlink` or `ls` a `/nix/store` path** to find where a build
   artefact went. Use the documented artefact paths under `.scaffold/basecamp/`.
 

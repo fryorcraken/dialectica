@@ -101,11 +101,26 @@ tick each of those rows. Say in your report which dimensions you covered, so an
 unticked row still means nobody has done it.
 
 Write your findings to
-`openspec/changes/<name>/findings/<your-dimension>.md`. For each: file, line, what
-is wrong, a concrete failure scenario, severity, and the measurement where you
-have one — "486 of 487 tests pass under this mutation" is checkable, "this looks
-under-tested" is not. Separate genuine defects from stylistic preferences and say
-which is which. Say plainly which areas were clean rather than padding the list.
+`openspec/changes/<name>/findings/<your-dimension>.md`, **each as an unticked
+checkbox** so whoever acts on it flips your box rather than writing their own list:
+
+```markdown
+- [ ] **`dev-writer`** — `wire.rs:96` — `Request::get` drops explicit nulls
+      **Scenario:** `{"payload":null}` → `ping` answers `{"error":"missing field"}`
+      where it must answer `{"pong":null}`; four of seven readers observe it.
+      **Measured:** 486 of 487 tests pass under this mutation.
+```
+
+Lead with **who it is for** (`spec-writer`, `dev-writer` or `tester`), then
+`file:line`, what is wrong, a concrete failure scenario, severity, and the
+measurement where you have one — "486 of 487 tests pass under this mutation" is
+checkable, "this looks under-tested" is not.
+
+An unticked box blocks the merge, so **one box per thing that must happen**: do not
+bundle two defects into one entry, and do not open a box for an observation nobody
+needs to act on. Separate genuine defects from stylistic preferences and say which
+is which. Say plainly which areas were clean, in prose rather than as boxes, rather
+than padding the list.
 
 **Then commit that one file** on `review/<name>/<your-dimension>`, and in the same
 commit **tick the one stage row that names your dimension** — `tasks.md` carries

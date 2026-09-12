@@ -74,10 +74,22 @@ Judge each against this and say which part is missing:
 `openspec/changes/<name>/findings/design-review.md` — `design-review.md`, not
 `design.md`, which is the change's own document and would collide silently.
 
-For each: what is wrong, where, and why it matters. Distinguish "the code
-contradicts a recorded decision" (serious) from "a decision was not recorded" (a
-gap) from "an entry is thin" (a suggestion). Say plainly if the decisions are in
-good shape rather than padding the list.
+**Each finding is an unticked checkbox**, so whoever acts on it flips your box
+rather than writing their own list:
+
+```markdown
+- [ ] **`dev-writer`** — `design.md:70` claims a guarantee the code does not give
+      "a handler holding a `Request` provably went through the check" is false
+      inside the crate: `Request(Map::new())` compiles anywhere in `wire.rs`,
+      which is where every handler lives. The recorded concession names a
+      different, smaller mechanism (`from_str`). **Verified:** it compiles.
+```
+
+Lead with **who it is for**, then where, what is wrong, and why it matters.
+Distinguish "the code contradicts a recorded decision" (serious) from "a decision
+was not recorded" (a gap) from "an entry is thin" (a suggestion). One box per thing
+that must happen — an unticked box blocks the merge. Say plainly in prose if the
+decisions are in good shape rather than padding the list with boxes.
 
 **Prefer reading the code over trusting the prose.** A recorded concession has
 been found here naming the *wrong mechanism*, so it described a smaller hole than
