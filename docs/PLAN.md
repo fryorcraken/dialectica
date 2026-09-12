@@ -279,6 +279,25 @@ and the generator has a regression test for decoding exactly the binary event
 payload shape we need, so a typed Rust client with `Vec<u8>` payloads is the
 expected output. The open question is the bridge, not the API.
 
+**The contract is in this repo, so read it rather than reasoning about it:**
+`dialectica/contracts/delivery_module.lidl` is the converted `.lidl` the override
+points at (above), and it is the whole surface. Everything §9.2's MVP needs is
+there: `createNode`, `start`, `stop`, `send`, `subscribe`, `unsubscribe`,
+`storeQuery`, the four `channel*` methods, `getNodeInfo` /
+`getAvailableNodeInfoIDs` / `getAvailableConfigs`, `collectOpenMetricsText`; and
+the events `messageSent` / `messageError` / `messagePropagated` /
+`messageReceived`, `connectionStateChanged`, `channelMessageReceived` /
+`channelMessageSent` / `channelMessageError`, `nodeStarted` / `nodeStopped`.
+
+> **A correction, recorded in place because of how it happened.** It was stated
+> in session that the contract **lacked** `createNode`, `channelCreate` and
+> `channelSend`. **That was wrong** — all three are in the file above, with
+> docstrings. The claim came from a transport spike's report rather than from
+> opening the contract, which is the same failure §13's `SdsDeliverable` note
+> records and the same one §12 warns about for the stale working trees: **a
+> summary of a file is not the file.** The file is committed here and costs one
+> `Read`. There is no reason to take a second-hand account of it.
+
 ### 3.3 The local store is ours
 
 **An "op" is a signed operation, and it is the unit everything else is built
@@ -823,6 +842,41 @@ it is.
 identity in Stoa A cannot be tied to their identity in Stoa B by the protocol.
 Within a Stoa, a pseudonym is stable by design, and §4.1's `senderId` links a
 Stoa's posts to that one pseudonym and no further.
+
+#### The MVP ships ONE identity per user, and this section is the destination
+
+**Owner decision, recorded not argued: for the MVP a user has one identity
+across every Stoa.** Everything above stays the design — it is where this goes,
+and the MVP is a waypoint on the way there, not a change of mind. §9.2 lists the
+scope this belongs to.
+
+**The cost is exactly what this section protects against, and it is accepted
+knowingly.** Anyone observing two Stoas can link the same participant across
+them: one key signs in both, so the public key is the join. Cross-Stoa
+unlinkability is **suspended, not withdrawn** — the property is still wanted,
+still argued for above, and does not hold in the MVP. Do not describe the MVP as
+having it, and do not describe the design as having dropped it.
+
+**What makes the shortcut cheap to reverse is that the mechanism already
+exists.** `derive_stoa_key(root, stoa_address)` is built and tested
+(`dialectica-core`'s `identity.rs`; the HKDF expansion and its reasoning are in
+that function's own doc comment). One identity per user means **not calling it**
+and signing with the root key directly. Restoring per-Stoa identity is switching
+that call back on, not a redesign — no wire-format change, no address change, no
+new primitive.
+
+**The deferred work is the flows, not the crypto.** Creating or joining a Stoa
+has to ask *which* identity, which means a create-or-select step at both of
+those moments, and a keystore that holds more than one identity for a user to
+select from. That is UI and state, and it is the part the MVP is not paying for.
+
+Two things this does not suspend. **§4.1's `senderId` requirements still hold** —
+one value per user per Stoa, permanent, and different from every other
+participant's — so an MVP signing with one key still needs a per-Stoa
+`senderId`, which is a transport identifier and not an author identity. And
+§13's open question about SDS-R disclosure gets *sharper* rather than softer:
+its answer above ("under per-Stoa identity this leaks nothing the channel does
+not already leak") is exactly the premise the MVP removes.
 
 ### 5.2.1 What an identity is called
 
@@ -2121,6 +2175,17 @@ own answer:
   has. It does not arise while the creator is the sole moderator.
 
 ## 6. Moderation
+
+> **Out of the MVP, by owner decision — scope, not a design change (§9.2).** The
+> MVP ships **no moderation UI and no moderation op-publishing path**. Nothing
+> here is withdrawn and nothing is deleted: `moderation::resolve` and its spec
+> are built, tested and merged, and they stay. The read-time authority check
+> below **remains the design** whenever the publishing half lands, and the
+> limitation two paragraphs down — that an `Unhide` cannot currently win — is
+> the reason the sequencing is comfortable rather than merely convenient: a
+> moderation UI shipped today would have to carry an irreversibility warning at
+> the point of action. Read the rest of this section as the design that is
+> waiting, not as behaviour the MVP has.
 
 **Signed ops with a Stoa moderator set.** Every op is signed by its author.
 Moderation ops are valid only when signed by a current moderator, and every peer
@@ -3604,6 +3669,66 @@ method sets the precedent for every later one, so its spec is the one that
 should pin the envelope — `items`, `page`, `hasMore` — rather than each
 subsequent spec restating it and slowly disagreeing.
 
+### 9.2 The MVP, as scoped by the owner
+
+**The owner has directed a rush to a working MVP.** This section exists so the
+staging is visible in one place rather than inferred from ten sections that each
+mention a part of it. It is a **record of a scope decision**, not an argument:
+the costs below were named and accepted.
+
+**In the MVP:**
+
+1. Create an identity
+2. Create a Stoa
+3. Post
+4. Reply to a post
+5. Upvote / downvote
+6. Share a Stoa — copy its address
+7. Join a Stoa by address
+8. **Receive ops from other peers**, over delivery's reliable channel
+9. **View a feed; view a thread**
+10. **Persistence on disk** of Stoas, identities and messages
+
+All of it over **delivery's reliable channel** (§4.1). **No Logos Storage** —
+§4.6's attachments-by-CID are out, so a post in the MVP is text.
+
+**Out of the MVP:** moderation (§6), per-Stoa identity (§5.2), Logos Storage
+(§4.6).
+
+Nothing on either list is deleted or withdrawn. `moderation.rs` and its specs are
+built, tested and merged and they stay; `derive_stoa_key` is built and simply is
+not called; §4.6 stands as the attachment design for when attachments ship.
+
+#### How this sits against §9.1's stages
+
+**§9.1's Stage A/B/C/D ordering is not renumbered or restructured by this
+section** — it is the dependency analysis, and it still holds. Cross-reference
+only:
+
+- **Stage A (read a Stoa)** and **Stage B (compose)** are both in the MVP, and
+  the MVP therefore spans two of §9.1's stages rather than sitting inside one.
+  §9.1's argument for why B needs A is what makes that ordering safe to collapse;
+  its point was never that the stages must ship separately, only that no stage
+  needs a later one.
+- **Stage C (moderate) is out**, which is the §6 exclusion seen from the staging
+  side.
+- **Stage D (reach another Stoa)** is **in**, via items 6 and 7 — sharing and
+  joining by address, §4.8 Phase 1. This is the one place the MVP scope departs
+  from §9.1's ordering, and it is a deliberate reordering rather than an
+  oversight: D before C. §9.1 permits it, since D depends on A and on nothing
+  later.
+
+**Votes are the one item that contradicts a §9.1 decision, and it is worth
+naming rather than reconciling quietly.** §9.1 deliberately does not stage votes,
+on the reasoning that §7.2 rule 2 ships no score, so a vote button publishes an
+op that changes nothing a reader sees — *"a control with no visible effect
+teaches users the app is broken."* Item 5 puts the control in the MVP anyway.
+**That argument is not refuted by this scope decision and should be read
+alongside it**: whoever builds the vote control inherits the problem §9.1
+identified, and the honest options are a visible per-post tally that is not a
+ranking, or a control whose effect the copy does not overstate. §7.4 settles the
+control's shape; it does not settle this.
+
 ---
 
 ## 10. CI
@@ -3801,6 +3926,13 @@ Two of these are **stale working trees** and will mislead if read directly:
 `logos-messaging/logos-delivery` predates reliable channels entirely. Use
 `git show v0.2.1:<path>` for the delivery API.
 
+**The one exception, and reach for it first: the delivery module's interface is
+vendored here.** `dialectica/contracts/delivery_module.lidl` is the converted
+v0.2.1 contract the build actually compiles against — every method, every event,
+every docstring. For "does delivery expose X?" that file is both the nearest and
+the most authoritative answer, and §3.2 records the correction that followed from
+answering it from a report instead.
+
 `logos-module-builder` and `logos-rust-sdk` are not local checkouts — they are
 flake inputs. The Rust module examples and doctests live inside the
 `logos-rust-sdk` source, under `tests/` and `doctests/`.
@@ -3819,6 +3951,24 @@ thing (§2.3).
   form does not work from Rust; a committed `.lidl` does, and the bridge has
   carried a live call into delivery's own implementation
   (PHASE0-FINDINGS §1, §6).
+- **Should every root identity be derived?** Raised by the owner and **recorded
+  unanswered, for the owner's own review** of identity and derivation: *"I would
+  expect us to have all root identities using derivation."* Today §5.1's root
+  secret is generated (`SecretKey::generate`) and only the per-Stoa key is derived
+  from it (§5.2, `derive_stoa_key`) — and §9.2's MVP does not call even that. The
+  question is whether a root should itself be a derived child of something
+  higher, and what that something is. **Do not answer it here**; it touches §5.1,
+  §5.6's keystore and the LEZ key-tree path in the next entry, and the owner has
+  reserved it.
+- **The LEZ forum-key branch should say `dialectica`, not `Forum`** — an upstream
+  ask on LEZ rather than a dialectica change, recorded so it is not re-derived.
+  The LEZ key tree separates branches by root HMAC domain —
+  `/LEE-Keys/v1/Master/Public` and `/LEE-Keys/v1/Master/Private`. A prior
+  investigation proposed `/LEE-Keys/v1/Master/Forum` as a third branch for forum
+  keys. **The owner does not want that path**: they want `dialectica` in it. The
+  preference is recorded; the shape of the ask, and whether LEZ wants an
+  app-named branch at all, is upstream's to answer. Nothing in dialectica depends
+  on it today — §5.1's construction is our own HKDF, not a LEZ key-tree path.
 - What is the actual participant ceiling for one SDS channel? Unmeasured, and
   the answer sets when §4.5 stops being optional. With SDS now the *only* sync
   layer, there is no CRDT fallback if a channel degrades.

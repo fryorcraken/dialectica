@@ -21,6 +21,32 @@ argument between positions.
 > superseded. The *word counts* remain curation work, but the shape, the sizes
 > and the source are decided. `git log docs/PLAN.md` answers what has landed;
 > this block does not try to.
+>
+> Also reconciled against **§9.2** (the first release's scope), which suspends
+> one property this brief previously stated as fact — see the box below.
+
+---
+
+## What is in the first release, and why that matters to you
+
+**The project is pushing for a working release, and it is a subset of this
+brief.** PLAN.md §9.2 is the authority; this is the designer's-eye version.
+**The rest of the brief still describes the intended product** — the point of
+naming the subset is so you know which constraints are live now and which are
+waiting, not so you design only the subset.
+
+**In the first release:** create an identity; create a Stoa; post; reply; upvote
+and downvote; share a Stoa by copying its address; join a Stoa by pasting an
+address; receive other people's posts; view a feed and view a thread; and have
+all of it survive closing the app.
+
+**Not in the first release:** moderation, attachments, and per-Stoa identity.
+
+Each of those three has a consequence for design rather than just for scope, and
+each is marked where it belongs: **moderation** under *Moderation* and in the
+obligations, **attachments** under *Thread*, and **per-Stoa identity** in
+constraint 2 — which is the one that changes something this brief previously
+asserted as true, so read it rather than skimming it.
 
 ---
 
@@ -56,22 +82,45 @@ yet" is true; "this Stoa is empty" is a claim you cannot make. Similarly, a
 count of *anything* global — members, total posts — is unknowable. Do not show
 one.
 
-### 2. Identity is per-Stoa, permanent, and pseudonymous
+### 2. Identity is permanent and pseudonymous — and in the first release, one per person
 
-A person has a **different, unlinkable identity in every Stoa**. That is a
-privacy property, by construction — the same human in two Stoas cannot be
+**The design is a different, unlinkable identity in every Stoa**, which is a
+privacy property by construction: the same human in two Stoas cannot be
 correlated. There is no global profile, no avatar service, no display name
-registry. No rotation: an identity is permanent within its Stoa.
+registry. No rotation: an identity is permanent.
 
-**Design implication:** no cross-Stoa profile page, no "also active in" links,
-no unified inbox that would correlate identities.
+**The first release ships one identity per person, used in every Stoa** — a
+deliberate scope decision (PLAN.md §9.2), taken to get a working product out.
+**So the unlinkability above does not hold yet.** In the first release, one key
+signs in every Stoa a person joins, and an observer watching two Stoas can tell
+it is the same participant. The property is **suspended, not abandoned**: the
+mechanism for per-Stoa identity is already built in the core and simply is not
+switched on, and switching it on later is not a redesign.
+
+**What that means for you, and it cuts both ways:**
+
+- **Design as though unlinkability holds.** No cross-Stoa profile page, no "also
+  active in" links, no unified inbox, no "your identities" comparison view.
+  Anything that *displays* a correlation the protocol is meant to prevent becomes
+  wrong the moment per-Stoa identity lands, and is a bad idea now regardless.
+- **But do not claim it in copy.** No onboarding line promising that the Stoas a
+  person joins cannot be connected, and no privacy explainer asserting it. The
+  interface must not tell a user they have a property they do not have — that is
+  the one failure here that could actually harm someone.
+- **What arrives with per-Stoa identity is a flow, and it is worth knowing it is
+  coming:** creating or joining a Stoa will ask *which* identity, with a
+  create-or-select step at that moment. Nothing needs designing for it now, but a
+  join flow (below) that assumes there is exactly one possible identity forever
+  will need reopening.
 
 **Identities have generated names, and this is new.** An identity renders as
 **two adjectives and two nouns drawn from Greek philosophy and letters** —
 something like *measured attic thales praxis* or *sober ionic stoic kairos* —
 computed from the key itself. Nobody types a name; there is no registry to hold
-one and a typed name carried between Stoas would undo the unlinkability above
-with a text field.
+one, and a typed name carried between Stoas would undo the unlinkability above
+with a text field — which is a reason that outlives the first release's
+suspension of it, since a name field would make the property unrestorable rather
+than merely switched off.
 
 **The register is deliberate and it is the point: sober, plain, adult.** The
 adjectives are geographic and temperamental (`attic`, `ionic`, `doric`,
@@ -145,6 +194,14 @@ is honest and worth designing to rather than around.
 - A "show hidden" view is explicitly wanted.
 - **A hide is currently irreversible** (see the warning below), and that must be
   said at the moment of action.
+
+**Split by release, because the two halves separate cleanly.** The first release
+ships **no way to publish a hide** — no moderation screen, no hide control (see
+*Moderation*). What it can still do is the read half: the core already answers
+whether a post is hidden, so omitting hidden posts, and a "show hidden" view, are
+available and correct from day one, and they need no key and no moderator status.
+The irreversibility warning attaches to the *control*, so it arrives when the
+control does.
 
 ### 5. Attacker-supplied content is everywhere
 
@@ -241,6 +298,11 @@ A reply is just a post that names a parent, so threads nest naturally.
 Each post shows: author identity, body, attachments, whether it was edited, the
 up/down control, and a report action.
 
+**Attachments are not in the first release** — posts are text (PLAN.md §9.2
+excludes Logos Storage, which is where attachment bytes live). Design the post so
+an attachment area can appear later without the layout changing; do not design a
+post that looks unfinished without one.
+
 ### Composition
 
 **Gate every posting affordance on whether the user can actually post.** The
@@ -255,6 +317,14 @@ to owner-only and replace the key".
 submitted** — it loses whatever the user typed. Surface the reason instead.
 
 ### Moderation
+
+> **Not in the first release** (PLAN.md §9.2). The core's moderation logic is
+> built and merged, and the first release ships **no moderation screen and no way
+> to publish a moderation action**. It is scope, not a change of design — what
+> follows, and every moderation obligation in this brief, is what a later release
+> must do. The irreversibility warning below is part of why the sequencing is
+> comfortable: a hide control shipped today would have to warn that its action
+> cannot be undone.
 
 Moderators see a hide control on any post. **See the irreversibility warning.**
 
@@ -477,7 +547,9 @@ moderation, and moderation is a separate, binding thing.
 
 ### Still genuinely unsettled
 
-Whether attachments render as inline images or as links.
+Whether attachments render as inline images or as links — and note that
+attachments are out of the first release entirely (see Thread, above), so this is
+a question for a later one.
 
 ---
 
