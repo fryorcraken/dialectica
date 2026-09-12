@@ -14,7 +14,7 @@ per-role models and tool limits.
 | `openspec/specs/` | **What** the system does — the behaviour contract | `openspec/specs/`, current |
 | `design.md` | **How**, and **why this approach** (Decisions) | `changes/archive/<date>-<name>/` |
 | `tasks.md` | The ordered checklist | `changes/archive/<date>-<name>/` |
-| `findings.md` | What review found, and what was done about each | **Deleted before merge** — durable reasoning moves to `design.md` first |
+| `findings/<dimension>.md` | What each reviewer found, and what was done about it | **Deleted before merge** — durable reasoning moves to `design.md` first |
 
 A change in flight lives in `openspec/changes/<name>/`, and its `specs/` holds a
 **delta**. `openspec archive` merges the delta into `openspec/specs/` and moves
@@ -82,7 +82,7 @@ by whoever is orchestrating. And `openspec archive` runs once, on merge — spli
 across several merges, the contract lands at a different time from the code that
 honours it.
 
-## Findings go in `openspec/changes/<name>/findings.md`
+## Findings go in `openspec/changes/<name>/findings/`
 
 Written by the reviewer, ticked by the fixer, deleted before merge.
 
@@ -98,10 +98,27 @@ Two reasons, and the second is why this is a rule rather than a preference:
   occupies it twice. That is what crowds out the state a runner needs to keep,
   and it is how a piece of work ends up with no agent on it.
 
-**Reviewers append, never rewrite another entry.** Each one carries: who it is
-for (`spec-writer`, `dev-writer` or `tester`), the defect, a failure scenario
-concrete enough to reproduce (inputs → wrong output, or the mutation that
-survives), `file:line`, and the measurement where there is one.
+**One file per reviewer, named for what it reviewed.** Reviewers run in parallel
+in separate worktrees, so a shared file would be six writers on one path — which
+git resolves as a conflict, not a merge:
+
+```
+openspec/changes/<name>/findings/
+    correctness.md  security.md  readability.md  architecture.md
+    spec-test.md    design-review.md
+```
+
+(`design-review.md`, not `design.md` — the change already has one of those.)
+
+Each reviewer writes and commits its own file without coordinating. **Findings
+stay attributable**, which is what a rejection needs: a fixer that disagrees
+knows which reviewer to argue with, and the runner can send it back to that agent
+while it still holds its measurements.
+
+Each entry carries: who it is for (`spec-writer`, `dev-writer` or `tester`), the
+defect, a failure scenario concrete enough to reproduce (inputs → wrong output,
+or the mutation that survives), `file:line`, and the measurement where there is
+one.
 
 **The fixer ticks in the commit that addresses it**, so the claim and the change
 are one diff. Record one of three outcomes:
@@ -109,16 +126,20 @@ are one diff. Record one of three outcomes:
 - **Fixed** — the commit, and the test that fails without it.
 - **Rejected** — with the argument. Reviewers are wrong sometimes; a rejection is
   a legitimate outcome, but argue it rather than closing it silently.
-- **Deferred** — and where it now lives. A finding that leaves this file without
-  landing somewhere durable was dropped, not deferred.
+- **Deferred** — and where it now lives. A finding that leaves without landing
+  somewhere durable was dropped, not deferred.
 
-**An outstanding entry blocks the merge.** That is why this is a file and not a
+**An unticked entry blocks the merge.** That is why this is a file and not a
 convention — a forgotten finding now stops a PR instead of evaporating.
 
-**Move durable reasoning into `design.md` before deleting.** "The creator key
-cannot moderate the Stoa it creates" is a recorded decision, not a task; the
-tracker is scaffolding, the reasoning is not. Deleting the file is the last
-commit.
+**The runner deletes the directory**, as the last commit before merge, having
+checked every entry is ticked. Not the fixer: with several fixers across six
+files, "whoever finishes last" is an owner nobody is, and that is how a gate gets
+skipped. The runner is the one role that sees all six.
+
+**Move durable reasoning into `design.md` first.** "The creator key cannot
+moderate the Stoa it creates" is a recorded decision, not a task; the tracker is
+scaffolding, the reasoning is not.
 
 ### Handing over between agents
 
@@ -140,16 +161,16 @@ beside the decision it rules out.
 believe X" license different actions, and an agent given the second as the first
 will not re-check it.
 
-**Two steps belong to whoever is running the change, not to any agent:**
+**Three steps belong to whoever is running the change, not to any agent:**
 
-- **Routing findings and launching the fixer.** The reviewer writes to
-  `findings.md` and the fixer ticks there, so the runner's job is to dispatch,
-  not to carry the content: name the file in the brief and let the agent read the
-  reviewer's own words. Re-run only the reviewers whose findings led to changes.
-- **`openspec validate` and `openspec archive`.** Archive is where the delta is
-  merged into `openspec/specs/` — skip the step, or decline its sync prompt, and
-  the change ships with its spec never promoted. Do it once the change is
-  otherwise done, and take the sync.
+- **Routing findings and launching the fixer.** Name the files in the brief and
+  let the agent read the reviewers' own words; the runner dispatches rather than
+  carries content. Re-run only the reviewers whose findings led to changes.
+- **Checking every entry is ticked, then deleting `findings/`** as the last
+  commit before merge.
+- **`openspec validate` and `openspec archive`.** Skip archive, or decline its
+  sync prompt, and the change ships with its spec never promoted. Do it once the
+  change is otherwise done, and take the sync.
 
 The reviewers run in parallel and ask different questions:
 
