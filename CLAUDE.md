@@ -154,6 +154,27 @@ be inspected without knowing a session-specific path.
 Clean up when done: leftovers are harmless to the repo but confusing to the
 next reader.
 
+### Worktrees are not scratch: they go in `.claude/worktrees/`
+
+`./tmp/` is for **files**. A git worktree is a second checkout of the repo, and
+it belongs in `.claude/worktrees/<name>/`, which is where the harness's own
+worktree mechanism puts them.
+
+This distinction has already been got wrong: reading the scratch-file rule above
+as covering worktrees put ~27 checkouts under `tmp/` alongside 34 in
+`.claude/worktrees/`, so an agent looking for a sibling's branch had to guess
+which scheme that sibling used. Two conventions is worse than either one.
+
+The cost is not the disk. Every stale checkout is a **full copy of every file in
+the repo**, so a `grep` across the repo root hits each one — and a citation
+taken from a stale copy reads exactly like a citation from the real tree. Verify
+a quote came from the main checkout or the worktree you are working in, never
+from whatever the recursive search happened to hit first.
+
+So: **prune a worktree as soon as its branch is merged or abandoned**
+(`git worktree remove <path>`), and check `git worktree list` when the count
+starts feeling unfamiliar.
+
 ## What this is
 
 **Dialectica is a decentralized forum built on the Logos stack.** The name is
