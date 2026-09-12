@@ -12,15 +12,21 @@ argument between positions.
 > with it as changes land — it is a live document, not a snapshot. If something
 > here disagrees with PLAN.md, PLAN.md wins and this file has a bug. Last
 > reconciled against **PLAN.md §7.2-§7.3** (votes and vouching), **§9.1**
-> (the Phase 3 API) and **§5.2.1** (what an identity is called).
+> (the Phase 3 API) and **§5.2.1** (what an identity is called, reconciled at the
+> three-word revision).
 >
-> **The generated name's vocabulary is settled as of §5.2.1**: four words — two
-> adjectives and two nouns — drawn from Greek philosophy and letters, derived
-> from the key and never typed. An earlier version of this block called the
-> wordlist provisional and the shape "adjectives plus a noun"; both are
-> superseded. The *word counts* remain curation work, but the shape, the sizes
-> and the source are decided. `git log docs/PLAN.md` answers what has landed;
-> this block does not try to.
+> **The generated name's shape is settled as of §5.2.1**: **three words —
+> adjective + noun + "of" + place** — like *measured aporia of lampsacus*, derived
+> from the key and never typed. The noun and the place are Greek; the adjective is
+> any English adjective. **This supersedes a four-word form** (two adjectives and
+> two nouns) that an earlier version of this block described as settled, and before
+> that an "adjectives plus a noun" form. The shape, the list sizes and the sources
+> are decided; the word lists themselves remain curation work.
+>
+> **If you designed against the four-word form, two things changed for you**: the
+> name is shorter, and the no-truncation rule now exempts the connector — see
+> constraint 2. `git log docs/PLAN.md` answers what has landed; this block does not
+> try to.
 
 ---
 
@@ -67,26 +73,43 @@ registry. No rotation: an identity is permanent within its Stoa.
 no unified inbox that would correlate identities.
 
 **Identities have generated names, and this is new.** An identity renders as
-**two adjectives and two nouns drawn from Greek philosophy and letters** —
-something like *measured attic thales praxis* or *sober ionic stoic kairos* —
+**an adjective, a Greek noun, the word "of", and a Greek place** — *measured
+aporia of lampsacus*, *brittle kairos of abdera*, *luminous stasis of delos* —
 computed from the key itself. Nobody types a name; there is no registry to hold
 one and a typed name carried between Stoas would undo the unlinkability above
 with a text field.
 
-**The register is deliberate and it is the point: sober, plain, adult.** The
-adjectives are geographic and temperamental (`attic`, `ionic`, `doric`,
-`measured`, `sober`, `patient`, `laconic`); the nouns pool the vocabulary of
-Greek thought (`logos`, `praxis`, `techne`, `aporia`, `kairos`) with thinkers
-and writers (`thales`, `hypatia`, `solon`, `sappho`). **If a name reads like a
-fantasy handle, something has gone wrong** — an earlier draft drew on science
-fiction and produced *vermilion patient sandworm*, which is why this note
+**The register comes from the shape and from the two Greek words in it.** The
+nouns are the vocabulary of Greek thought (`logos`, `praxis`, `techne`, `aporia`,
+`kairos`) plus named Greeks — thinkers, writers, mathematicians, physicians,
+historians (`thales`, `hypatia`, `solon`, `sappho`). The places are Greek, real and
+mythological (`lampsacus`, `abdera`, `delos`, `elea`, `dodona`). **The adjective is
+any English adjective** and is not held to a classical register — `brittle`,
+`luminous` and `damp` draw alongside `attic` and `measured`. *X of Y* with two Greek
+words in it reads as a name in the classical manner regardless. **If a name reads
+like a fantasy handle, something has gone wrong** — an earlier draft drew on
+science fiction and produced *vermilion patient sandworm*, which is why this note
 exists.
 
-**It is four words, and they all matter.** This is longer than a typical
-username and the length is not decorative: it is what makes accidental
-collisions rare (see below). **Do not truncate or elide it** — dropping the tail
-removes one of the two nouns, which is most of what distinguishes one name from
-another.
+**Two consequences for you, and the second is a relaxation you should take
+advantage of.**
+
+- **The three content words all matter and none may be truncated.** The adjective,
+  the noun and the place are the whole of what distinguishes one name from another
+  — dropping the tail removes the place, which is the part most likely to differ
+  between two similar names. Do not elide any of them, and do not truncate mid-word.
+- **"of" may be dropped in a cramped row.** It is fixed literal text, not part of
+  what is computed from the key, so it carries no information at all. A narrow row
+  may render *measured aporia lampsacus* and has lost nothing. This is the only part
+  of the name a layout is allowed to touch.
+
+**Expect names you cannot pronounce, and design for that.** The place list keeps
+its entire tail — every catalogued Greek polis, including the ones nobody can
+place — because two earlier attempts to filter for familiarity were rejected. So
+some names will be hard to read and some pairs will be hard to tell apart
+(`stielanaioi` beside `sileraioi` is the worst case, and it is in the list). **This
+is settled and is not a design question you can reopen**; it is a reason to lean on
+the identicon and the address, which is obligation 6.
 
 **An identicon is intended alongside the name, and designing it is part of your
 work.** A small visual glyph derived from the same key, giving recognition a
@@ -117,12 +140,21 @@ Two consequences for you:
 - **An onboarding screen exists that did not before**: five identities, pick
   one, refresh for more. It is the first thing a new user sees in a Stoa.
 - **A name is not unique and not an identifier** — see obligation 6 below.
-  Accidental collisions are now rare: in a Stoa of a thousand the chance two
-  people share a name is **about 0.003%**, and at five thousand **about 0.07%**.
-  (The superseded science-fiction scheme — three words, 2²⁴ — gave 3% at a
-  thousand and better than even at five thousand. The fourth word is what bought
-  the change.) **Rare is not never**, and none of it touches deliberate
-  impersonation — which is the whole of obligation 6.
+  Accidental collisions are rare: in a Stoa of a thousand the chance two people
+  share a name is **about 0.006%**, and at five thousand **about 0.15%**. (The
+  superseded science-fiction scheme gave 3% at a thousand and better than even at
+  five thousand; the long list sizes are what bought the change. A four-word form
+  reached roughly half these figures and was dropped in favour of a shorter name —
+  0.15% is well inside what the design will accept.)
+
+  **Treat those as floors rather than as the number.** They assume names are drawn
+  evenly, and they are not: a user refreshes until they like one, so names
+  concentrate wherever they read well. The plausible worst case is **about twice
+  the figures above** — call it 0.3% at five thousand. That is an estimate nobody
+  has measured, and it is flagged as one.
+
+  **Rare is not never**, and none of it touches deliberate impersonation — which is
+  the whole of obligation 6.
 
 ### 3. Posts are never edited in place
 
@@ -352,11 +384,13 @@ interface must be correct when two identities present the same name.
 never cross Stoas, so the privacy property in constraint 2 is not what rules
 this out — do not reach for it here.)*
 
-And a bigger name space is not the lever it appears to be: **the space was
-enlarged roughly a thousandfold and this paragraph did not change.** It lengthens
-the odds of an *accidental* collision, which is worth doing and is all it does;
-it costs a deliberate impersonator only a constant factor, because refresh is
-unlimited. Treat "two identities can present the same name" as permanent.
+And the size of the name space is not the lever it appears to be: **the space was
+enlarged roughly five-hundred-fold against the superseded scheme, then halved again
+when the name went from four words to three, and this paragraph did not change
+either time.** Size lengthens the odds of an *accidental* collision, which is worth
+doing and is all it does; it costs a deliberate impersonator only a constant factor,
+because refresh is unlimited. Treat "two identities can present the same name" as
+permanent.
 
 Two people in one Stoa can hold the same name by chance, and a name resembling
 anyone else's can be obtained **by pressing refresh** — there is no cost to
@@ -381,12 +415,16 @@ four mitigations they would suggest the problem is handled; it is not, because
 **three of them are recognition aids and the fourth is the only guarantee.**
 
 **1. The name space.** Makes an accidental collision rare — see constraint 2 for
-the numbers. Does nothing else, and nothing at all about impersonation.
+the numbers, and for why they are floors rather than figures. Does nothing else, and
+nothing at all about impersonation. **It also does nothing about two names that are
+merely hard to tell apart**, which constraint 2 says to expect: only an exact match
+counts as a collision, and a reader confusing `stielanaioi` with `sileraioi` is not
+one.
 
 **2. The identicon** — intended, and yours to design. A glyph derived from the
 same key, shown with the name. It earns its place on *accidental* collisions:
 two people who happen to share a name still look different at a glance, because
-name and glyph come from separate parts of the hash and vary independently.
+name and glyph come from two separate hashes of the key and vary independently.
 **It is nonetheless forgeable in exactly the way the name is.** An attacker
 grinds for a key whose name *and* glyph both read close — a two-channel search
 instead of a one-channel search, which raises their cost by a factor and changes
