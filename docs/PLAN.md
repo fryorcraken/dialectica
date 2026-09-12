@@ -1098,6 +1098,126 @@ Three consequences, each subtle enough to be worth naming:
   is **open** (§13) — but it is a decision, not a bug, and it must not be
   discovered by the first person it happens to.
 
+#### Composability: two levels, and the constraint the first one carries
+
+The requirement is that credentials be **composable**, at two levels: a Stoa
+adopting an identity system its participants install, and a fork adding a
+credential type of its own. **The first is preferred and unproven; the second is
+the fallback if it proves infeasible.** They are recorded in that relationship
+rather than as two options of equal standing.
+
+**Level 2 — a fork adds its own credential type — is nearly free**, and it is the
+fallback. A fork controls its own op format, so it allocates a `Credential` kind,
+ships, and diverges from upstream by one discriminant. Nothing in this design has
+to anticipate it. The single thing that would prevent it is door-closer 2 above:
+if credential checking were welded into op verification, a fork could not add a
+credential without forking the verification path, and every peer running upstream
+code would reject its ops rather than ignoring them. Keeping that seam clean is
+what makes level 2 free, which is a second reason to hold the line there.
+
+**Level 1 — a Stoa adopts an identity system its participants install — is the
+preferred direction, and whether it is technically feasible is open** (§13). "This
+Stoa supports Base NFTs; install `dialectica-nft-eth` to read proof of ownership"
+means **peers within one Stoa run different module sets**. A peer without the
+module cannot verify the proof at all — not "verifies it as invalid", but cannot
+evaluate it. What follows describes the only form of level 1 that appears to work
+at all; it does not establish that the form is worth having.
+
+That collides directly with `moderation-resolution`'s requirement that two
+readers resolving from the same ops reach the same outcome while consulting
+nothing outside those ops. A Stoa where half the peers can check a credential and
+half cannot is a Stoa whose readers legitimately disagree about who has standing.
+**This is the convergence requirement arriving from a fourth direction** — after
+moderation authority (§6), revision ordering (§5.7), and the proof-versus-lookup
+split above — which is why it is the spine of this whole section rather than an
+aside. A verdict computed from anything other than the ops a peer holds is a
+verdict two peers can disagree about, and this design has no tolerance for that
+anywhere it has looked.
+
+**It does not kill level 1, but it bounds it severely.** Two things follow:
+
+- **An unverifiable credential must be distinguishable from an absent one.** The
+  peer reports "I cannot check this", never "this person does not hold it".
+  §6 already supplies the pattern: a reader lacking a Stoa's genesis record
+  "cannot report that Stoa's targets as either hidden or not hidden" — it declines
+  to answer rather than answering "not hidden". A missing verifier module wants
+  the same shape. Not copying it yields a **false negative** — the direction that
+  silently strips standing from people who have it, and the harder one to notice,
+  because nothing appears broken.
+
+  **The consequence, stated plainly because it bounds what level 1 can ever
+  mean: a credential can only ever *add* weight, never gate participation.**
+  Gating on something half the peers cannot evaluate partitions the Stoa — some
+  peers render a post, others refuse it, and §6.1's honest ceiling ("moderation
+  can only change what conforming peers render") becomes a disagreement about who
+  is conforming. Adding weight degrades gracefully: a peer lacking the module
+  ranks that credential's holder lower than a peer that has it, which is §7.2
+  rule 1's blessed divergence rather than a partition. This also means §7.1's
+  token-gated Stoas are **not** an instance of level 1 — they gate, so they
+  require a credential every peer can check, which is what makes LP-0005's
+  local verifiability load-bearing there rather than incidental.
+
+- **Where a Stoa declares which credentials it honours is an open question**
+  (§13), with two candidates and a real tension. The **genesis record** is the
+  one artefact every peer holds and hashes, so putting the declaration there
+  makes "which credentials does this Stoa honour" itself verifiable rather than
+  one more piece of unverifiable state — the same argument that put `policy`
+  there. But a genesis record is immutable and address-determining, so a Stoa
+  could never adopt a new credential type afterwards. A **metadata op** (§5.7's
+  `StoaMetadata`) is mutable and carries its own moderator-authority question,
+  and §13 already records why `policy` was kept out of it: a peer that missed a
+  tightening falls back to the looser founding value. Both options are recorded
+  and **neither is chosen**; choosing needs a credential that exists.
+
+**Whether the constrained form is worth having is the open question, and it is
+not rhetorical.** A credential that can only add weight to a ranking is a much
+smaller thing than "this Stoa supports Base NFTs" sounds like: it cannot keep
+anyone out, it cannot mark anyone as verified in a way every reader sees, and the
+peers that lack the module experience the Stoa as though the credential were not
+there. A reader should meet that gap here rather than discover it after building
+the module. **What would settle it is an attempt** — someone running a
+module-set-divergent Stoa and finding out whether the abstention surface is
+tolerable in practice, or whether it reads as a forum that cannot make up its
+mind about who is who. That is the deciding experiment; it is named rather than
+run, and until it is run level 1 is a direction rather than a plan.
+
+**A forward note on the interface**, recorded here because there is no surface to
+put it on yet and `docs/UI-BRIEF.md` describes only what exists. If level 1 ever
+ships, the view must distinguish **unverified** from **not a holder** — the
+abstention above is worthless if the UI collapses it into a negative — and must
+never present "install this module" as though the Stoa were broken without it. A
+Stoa is fully readable without any credential module; the module only adds
+resolution the reader would otherwise lack.
+
+#### The substrate goal, and why it is not now
+
+A stated goal, **deliberately deferred**: dialectica's *data* should be
+unopinionated enough that someone else can build a different UI, a different
+relevance score, or a different moderation system on the same op log. That is a
+later review and an explicit non-goal for now — recorded because it changes how to
+read some decisions already made, not because anything should be built toward it.
+
+**Three choices already serve it, and each was made for another reason**, which is
+the through-line worth seeing. §3.3's op log stores "inputs and never
+conclusions" — no score, no vote tally, no hidden flag — so the inputs survive for
+someone else to fold differently, which is exactly what an alternative relevance
+score needs. §6 and §5.7 decide authority and currency **on read** rather than
+baking them in at write, so an alternative moderation system reads the same ops
+and reaches its own conclusions. And the op format being the whole surface —
+"anything not expressible as an op is not expressible at all" — means there is no
+side-channel state a re-implementer would have to reverse-engineer.
+
+**The honest counterweight**: a substrate and an application pull in opposite
+directions, and this project has consistently chosen the application. The
+moderation resolver's `Hide`-preferring tie-break is a policy decision baked into
+a resolver; §7.2's weights are policy; the rendering obligations in
+`docs/UI-BRIEF.md` are policy. None of that is wrong — an application that refuses
+to conclude anything is not a forum — but a future split would have to separate
+"what the ops say" from "what dialectica concludes from them", and **that boundary
+does not currently exist as a boundary.** It runs through the resolvers rather
+than between them and anything else. Whoever conducts that review is deciding
+where to *draw* a line, not looking for one already there.
+
 ### 5.6 The keystore
 
 **Built** — see the `keystore` and `posting-capability` specs. An encrypted root
@@ -3167,6 +3287,27 @@ thing (§2.3).
   "specified as a property and deferred in mechanism" (§7.3 uses that phrasing for
   vouch decay) — and it cannot be answered before a credential exists to expire.
   **Recorded so it is a decision rather than a surprise**, per §5.5.
+
+- **Is a Stoa-adopted identity module (§5.5 level 1) technically feasible, and is
+  the form that works worth having?** Two questions, and the second is the harder
+  one. Peers running different module sets cannot all evaluate the same
+  credential, which bounds level 1 to credentials that **add weight and never
+  gate** — anything stronger partitions the Stoa. The open part is whether that
+  constrained form is worth building: it keeps nobody out and is invisible to
+  peers lacking the module. **Settled by an attempt**, not by more analysis — run
+  a module-set-divergent Stoa and find out whether the abstention surface is
+  tolerable. Level 2 (a fork adds the credential) is the fallback if it is not.
+
+- **Where does a Stoa declare which credentials it honours?** §5.5's level-1
+  composability needs the declaration somewhere, and the two candidates trade off
+  against each other: the **genesis record** makes the declaration verifiable to
+  every peer (the argument that put `policy` there) but is immutable, so a Stoa
+  could never adopt a credential type later; a **`StoaMetadata` op** is mutable
+  but reintroduces the fallback hazard §13 records for `policy` — a peer that
+  missed a tightening falls back to the looser founding value — and carries the
+  moderator-authority question of any mutable Stoa state. **Not answerable before
+  a credential type exists**, because the choice turns on whether adoption is
+  expected to change over a Stoa's life.
 
 - **What does a peer do when the verifier module is absent or unreachable?** An
   external credential is checked by a sibling module — `lez_core` for a LEZ
