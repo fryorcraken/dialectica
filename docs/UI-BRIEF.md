@@ -227,8 +227,9 @@ Sketched functionally. Composition and hierarchy are yours.
 ### Stoa list — where a person starts
 
 Stoas the user has joined **or created**. **There is no directory to browse**;
-you join by pasting an address someone gave you, or by following a link in a
-post.
+a Stoa reaches the user because somebody shared it, or because an affordance in a
+post carries it. **An address alone is not enough to join** — see *Joining a
+Stoa*, which is the screen where that matters and where it is argued.
 
 A Stoa's *founding* title is fixed forever, while its *current* title can be
 changed by moderators — so two Stoas can share a display name and still be
@@ -283,6 +284,15 @@ A title, and nothing else. The creator's key comes from the user's own keystore
 and **cannot be supplied** — a Stoa created under someone else's key is one the
 creator cannot moderate, and its address cannot be un-minted.
 
+**The key recorded as creator is the same key the user posts under**, which is
+the one identity constraint 2 describes. It matters here because a Stoa's creator
+is its sole moderator: a creator key the user does not sign with would be a Stoa
+nobody can moderate, permanently, since the creator is fixed inside the address.
+Nothing on this screen shows any of that today — moderation is out of the first
+release — but a later "you moderate this Stoa" badge will be answering the same
+question, so do not design as though the creator and the poster could be
+different people.
+
 **Requirements:**
 - **Show the new Stoa's address after creating it.** It is the only way to share
   the Stoa, and there is no registry to look it up in later.
@@ -293,7 +303,17 @@ creator cannot moderate, and its address cannot be un-minted.
   different title — do not present this as a name collision to resolve, and do
   not add a counter to the title on the user's behalf.
 - Creation fails when there is no usable key, with the same reason vocabulary the
-  posting probe uses. Gate the affordance on that probe, never on a build flag.
+  posting probe uses — so a failure here reads identically to a failure to post,
+  which is deliberate.
+
+  **This screen cannot gate itself on that probe, and an earlier version of this
+  brief asked it to.** The probe is `getCapabilities({stoa})` and takes a Stoa
+  address; at creation there is no Stoa yet, so there is nothing to ask it about.
+  Design the create affordance to be **always offered and able to fail well**:
+  show the core's own reason, and route the user to whatever fixes it (creating or
+  unlocking an identity), rather than hiding the button. Gating on a build flag is
+  still wrong, and so is guessing at key state from anything other than an answer
+  the core gave.
 
 ### Feed — a Stoa's posts
 
