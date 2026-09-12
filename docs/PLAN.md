@@ -824,6 +824,769 @@ identity in Stoa A cannot be tied to their identity in Stoa B by the protocol.
 Within a Stoa, a pseudonym is stable by design, and §4.1's `senderId` links a
 Stoa's posts to that one pseudonym and no further.
 
+### 5.2.1 What an identity is called
+
+**A display name is generated from the identity's public key, never typed.**
+Words drawn from Greek philosophy and letters — *measured attic stoic*, *sober
+ionic thales* — not `user_8f3a` and not a handle someone registered. The shape
+is settled below and is **four words**, for reasons that are arithmetic rather
+than aesthetic.
+
+**But a user is not handed one.** At onboarding they are shown a slate of five
+generated identities and pick one, and they may refresh the slate as many times
+as they like. So a name is *chosen* in the ordinary sense — it carries intent,
+and a user who refreshed forty times meant the one they kept.
+
+**What is being chosen is the key, and the name is the key's shadow.** This
+distinction is not pedantry and it is the single most important sentence in this
+section for anyone writing copy: *"pick your identity"* is true, *"pick your
+username"* is false. A user who believes they picked a name will later ask to
+change it, and they cannot — §5.3 has no rotation, so an identity is permanent
+within its Stoa and the name is a pure function of it. The only way to get a
+different name is a different identity, which is a different person as far as
+this Stoa is concerned. An interface that obscures this generates a support
+question it cannot answer.
+
+Placed here, immediately after the section that defines what an identity *is*,
+because "what does an identity look like on screen?" is the next question a
+reader of §5.2 asks, and the answer is a consequence of §5.2 rather than an
+independent feature. Every constraint below falls out of per-Stoa permanent
+pseudonymity: there is no registry to hold chosen names, no cross-Stoa profile
+to carry one, and no rotation to let a user abandon one.
+
+#### Why drawn rather than typed
+
+The slate makes this a choice, so the question is not "chosen or not" but
+**"chosen from a generated set, or typed into a box"**. Three reasons for the
+former, in ascending order of how conclusive they are.
+
+- **A 32-byte address is unreadable, and unreadable identity is not
+  pseudonymity in any useful sense.** A reader who cannot tell two participants
+  apart at a glance cannot follow an argument between them, which is the one
+  thing this forum is named for. A hex prefix technically distinguishes them and
+  is read by nobody.
+- **There is no registry, so chosen names cannot be unique.** §1's
+  permissionless property is not a preference here — there is no service to
+  hold a namespace and no authority to arbitrate a claim. A chosen-name system
+  with no uniqueness is strictly worse than a generated one: it *invites* the
+  impersonation it cannot prevent, because choosing implies a claim was granted.
+- **A typed name is a cross-Stoa correlation channel, and it defeats §5.2.**
+  This is the decisive one. The same human typing `fryorcraken` into six Stoas
+  has linked six identities the protocol went to real trouble to keep apart —
+  key derivation per Stoa, a hashed topic bucket, a `senderId` scoped to one
+  channel — and has done it with a text field. A drawn name cannot carry
+  arbitrary information across Stoas, because the user selects from what the
+  keys happen to produce rather than supplying the string.
+
+  **The slate weakens this rather than preserving it whole, and that is worth
+  being exact about.** A determined user can refresh until each of their Stoa
+  identities lands on the same noun, and has then built a weak cross-Stoa
+  signal by hand. It is far worse than a text field — one shared word among
+  three, deniable, and costing many refreshes per Stoa — but it is not zero, and
+  the honest claim is that drawing raises the cost of self-linkage rather than
+  removing the channel. Nothing here can prevent a user who wants to be
+  correlated from correlating themselves, and it is not obvious that anything
+  should.
+
+That third point generalises past names, and is worth stating as a rule: **any
+user-supplied string that persists across Stoas is a linkage channel.** The same
+argument will apply to avatars, signatures, bios and anything else a future
+version is tempted to let people carry between Stoas.
+
+#### The derivation
+
+```
+name = words(H(NAME_PREFIX || public_key))
+```
+
+with `NAME_PREFIX` a fixed 32-byte domain separator in the style §5.1 already
+uses for addresses — versioned, so a future wordlist or scheme mints different
+names from identical keys rather than silently colliding with this one.
+
+Four properties this has to have, each of which decides something:
+
+- **Deterministic and total.** The same key yields the same name on every peer,
+  forever, with no lookup and no state. This is why it is a hash of the key and
+  not an op: **a name is not published and cannot be**, because a published name
+  is one two peers could disagree about, and two peers rendering one identity
+  differently is a bug users report as impersonation.
+- **Derived from the public key, not from the address.** The address is already
+  `H(prefix || genesis_record)` and §5.1 keeps that record extensible against a
+  future key log. Deriving the name from the *key* means a name tracks the key
+  that signs, which is what a reader is actually being shown. If rotation ever
+  lands (§5.3), this is the seam where the question "does the name change?"
+  arrives, and it should arrive loudly rather than being pre-answered here by
+  an accident of which input was hashed.
+- **Distinct domain separation from every address prefix.** `identity.rs`
+  already keeps author and Stoa addresses in separate domains so no byte string
+  is both. The name domain joins that set for the same reason.
+- **Index extraction is from distinct hash bytes per slot**, so that the two
+  adjectives and the two nouns are independent draws rather than four views of
+  the same bits.
+
+##### The byte budget, and where the name's independence from the mark comes from
+
+`H` is SHA-256, so the name's digest is **32 bytes**. The name consumes a fixed
+slice of them:
+
+| Bytes | Use |
+|---|---|
+| `0` | first adjective index (256 entries, 8 bits, one byte exactly) |
+| `1` | second adjective index |
+| `2..4` | first noun index (512 entries needs 9 bits; take 2 bytes and reduce) |
+| `4..6` | second noun index |
+| `6..12` | **re-derivation reserve** for the denylist, below |
+| `12..32` | unused by the name scheme |
+
+**The name stops at byte 12.** Bytes `12..32` of *this* digest are simply unread.
+
+**Correcting the reason an earlier draft of this subsection gave, because the
+conclusion was right and the mechanism was invented.** That draft described
+`12..32` as "reserved for the identicon", so that disjoint byte ranges would make
+name and mark independent. **That mechanism does not exist, and cannot.** The two
+derive from *different digests*:
+
+- the **name** from `H(NAME_PREFIX || public_key)` (this section);
+- the **mark** from the **address**, which `identity.rs` computes as
+  `SHA256(AUTHOR_ADDRESS_PREFIX || 0x01 || public_key)` — and the mark
+  (`docs/IDENTICON.md`) reads bytes `12..19` **of the address**, not of the
+  name's digest.
+
+So the name's bytes `12..32` and the mark's bytes `12..19` are slices of two
+unrelated hashes. They were never in danger of overlapping, a byte reservation
+across them does no work, and the hazard the draft described — "a near-miss on
+one correlating with a near-miss on the other" — **cannot arise, because there is
+no shared digest to overlap in.**
+
+**The independence is real; it comes from domain separation.** `NAME_PREFIX` and
+`AUTHOR_ADDRESS_PREFIX` are distinct 32-byte separators, so the two digests are
+independent functions of the same key. Grinding keys for a target's name yields
+an unrelated mark each time, and grinding for the mark yields an unrelated name;
+they must be landed together, so **the costs multiply rather than add.** That
+property holds because the hashes differ, and it would hold no matter which bytes
+each side read.
+
+**So why keep the byte budget at all?** Two reasons, neither of them the
+independence claim:
+
+- **The re-derivation reserve is a real requirement** (below), and it needs a
+  stated bound whether or not anything else reads the digest.
+- **Belt and braces, cheaply.** Writing down that the name stops at byte 12 costs
+  a table row and means that if the two schemes are ever unified onto one digest
+  — which is a plausible simplification — the boundary is already recorded rather
+  than being rediscovered. It is *not* load-bearing today and must not be
+  described as though it were.
+
+Two notes on the arithmetic:
+
+- **Reducing a 16-bit draw into 512 entries by `% 512` is exactly uniform**,
+  because 512 = 2⁹ divides 2¹⁶ evenly — 128 times. There is no modulo bias to
+  trade off. **This makes the power-of-two list sizes load-bearing rather than
+  incidental**: 512 and 256 were chosen as the honest ceilings of the source
+  material (below), and it is a genuine piece of luck that the honest numbers are
+  also the ones that divide cleanly. A list of, say, 500 would introduce a real
+  if tiny bias and would need this paragraph to say so.
+
+  *(An earlier draft of this subsection claimed a bias "of about one part in 2¹⁶
+  per entry". That was wrong in the safe direction — the instinct that "modulo is
+  fine here" is a claim with a magnitude was right, and the magnitude is zero.)*
+- **The re-derivation reserve is why the name's slice is 12 bytes and not 6.**
+  The denylist re-derives a refused combination *from the next hash bytes*, so
+  the number of bytes a name consumes is **data-dependent, not fixed**.
+
+  **On a refusal, all four slots are redrawn, not only the offending one.** This
+  is the choice worth stating because it decides the reserve's size: redrawing
+  the whole name costs 6 bytes per attempt, so `6..12` buys **one** full
+  re-draw, and a second refusal exhausts the reserve. Redrawing only the
+  offending slot would be cheaper per attempt but makes the denylist harder to
+  reason about — a refused *pair* is refused because of the combination, so
+  changing one half can land on a second refused pair, and the loop's
+  termination becomes a property of the denylist's shape rather than of the
+  budget. Whole-name redraw keeps termination arithmetic.
+
+  **If the reserve is exhausted the derivation must fail loudly rather than read
+  on.** The reason is *not* that reading on would corrupt the mark — as
+  established above, it could not, since the mark is in a different digest.
+  It is that reading past byte 12 makes the name's consumption unbounded, so two
+  implementations that disagree about how far to read produce **different names
+  for the same key**, which is the two-peers-disagree failure this whole scheme
+  exists to prevent. A bounded slice is what makes the derivation checkable
+  against a test vector at all.
+
+**What the pair is worth, stated without overstating it.** The name space is 2³⁴
+(below) and `docs/IDENTICON.md` counts the mark at roughly 12,400 perceptually
+distinct results, about 2¹³·⁶. Independent, the bundle is about **2⁴⁷·⁶** — the
+mark multiplying the name rather than adding to it.
+
+**Two cross-document mismatches to fix wherever the two are next restated
+together**, recorded here because each document is right about its own half and
+wrong about the other's:
+
+- `docs/IDENTICON.md` multiplies the mark against **2²⁵**, which was this
+  section's *three-word* space from a superseded draft. Against the four-word
+  2³⁴ the bundle is correspondingly larger, so its 2³⁸·⁶ understates the pair.
+- It also states that "bytes 0..11 are reserved for the generated-name scheme",
+  meaning bytes of the **address**. The name scheme reads no address bytes at
+  all, so nothing is reserved there and nothing needs to be. **Both documents
+  independently invented the same shared-digest story**, which is worth noting as
+  a failure mode rather than a typo: two authors each assumed the other's scheme
+  read the digest they were looking at, and neither checked.
+
+**It does not change the threat model.** 2⁴⁷·⁶ is still reachable by a machine
+with unlimited regeneration, and the grinding subsection below applies unchanged:
+an attacker hunting *any* lookalike rather than one exact target searches a much
+smaller set. **This raises the cost of casual impersonation and does not defeat a
+motivated attacker. The address remains the identity**, and none of this is a
+reason to show one less often.
+
+#### One source: Greek philosophy and letters
+
+**An earlier draft of this section drew on ten science-fiction book universes.**
+That is withdrawn entirely — no SF vocabulary survives, and neither do the
+mythological creatures a middle draft added. The register was the reason: the
+owner asked for something more serious, and *vermilion patient sandworm* is a
+fantasy handle where *measured attic stoic* is a name an adult will accept
+being called in an argument. **If a generated name sounds like a gamertag, it
+is wrong.**
+
+Two constraints survive the change intact, and one is retired by it:
+
+- **The words must survive being torn out of context.** A wordlist entry is read
+  by people who have not read Diogenes Laertius. `attic`, `stoic`, `praxis` and
+  `thales` work alone; a minor scholiast's name is noise. This constraint did
+  most of the work in the SF selection and does more here, because the Greek
+  corpus has a far longer tail of obscurity available to be wrong about.
+- **A name may describe a texture, never a verdict.** Derived in the earlier
+  draft as the rule behind the tone exclusions, and now the load-bearing test
+  for the whole list. `attic` is a texture; `plato` is a verdict.
+- **~~No single source may dominate.~~ Retired.** It existed because a name
+  drawn from one universe reads as an allegiance the user did not declare. With
+  one source there is nothing to balance, and the flavour is *Greek thought*
+  on purpose rather than by accident.
+
+**Public domain by two and a half thousand years**, which retires the trademark
+paragraph the SF list needed: there is no estate, no mark, and no proprietor.
+The material is also, unlike a novel's coinages, already half-naturalised into
+English — `stoic`, `attic`, `praxis`, `ethos` are English words with Greek
+parents, which is exactly why they survive decontextualisation.
+
+**The nouns pool two kinds of word**, which is the owner's decision taken for
+the size of the resulting list:
+
+| Kind | What it supplies | Examples |
+|---|---|---|
+| the vocabulary of Greek thought | abstractions that have naturalised into English | `logos`, `ethos`, `kairos`, `praxis`, `techne`, `aporia`, `kanon`, `stasis`, `arete`, `episteme` |
+| thinkers, writers and makers | proper names with register | `thales`, `hypatia`, `solon`, `sappho`, `theophrastos`, `eratosthenes`, `kleanthes`, `pyrrhon` |
+
+**A small number of names are excluded because they read as an argument rather
+than a name** — Plato, Aristotle and Socrates above all, whose mere invocation
+is a move in a debate, so a user rendered *sober ionic plato* is handed standing
+they did not earn. The exclusion is deliberately short: a handful of the most
+invoked figures, and everything arguable is kept, because the pooled list was
+chosen for its size and a cautious sweep would undo that.
+
+**The adjectives carry the register, and this is where the effort went.** A
+proper name and an abstract noun read very differently attached to a person —
+*sober ionic thales* against *sober ionic praxis* — and the list that reconciles
+them is the adjective list. It is therefore uniformly in **one voice, at once
+geographic and temperamental**:
+
+| Kind | Examples |
+|---|---|
+| geographic | `attic`, `ionic`, `doric`, `aeolic`, `delian`, `samian`, `arcadian`, `laconic`, `rhodian`, `theban` |
+| temperamental | `measured`, `sober`, `plain`, `patient`, `quiet`, `steady`, `temperate`, `candid`, `spare`, `lucid` |
+| dispositional (the schools) | `stoic`, `skeptic`, `eclectic`, `peripatetic`, `aporetic`, `zetetic`, `gnomic`, `ascetic` |
+
+A geographic adjective attached to a person reads as origin, which is a texture
+and never a claim; a temperamental one reads as manner, likewise. Both land the
+same way in front of either kind of noun, which is what makes the pooled noun
+list work at all.
+
+#### Transliteration: one convention, applied throughout
+
+A list assembled from three sources reads as assembled from three sources, so
+the convention is fixed and uniform:
+
+- **kappa → `k`, never `c`** — `kanon`, `kosmos`, `techne`, `kleanthes`, not
+  `canon`, `cosmos`, `Cleanthes`.
+- **`-os` retained, never Latinised to `-us`** — `theophrastos`, `pyrrhon`,
+  `chrysippos`, not `Theophrastus`, `Pyrrho`, `Chrysippus`.
+- **upsilon → `y`** — `physis`, `mythos`, `hyle`.
+- **chi → `ch`** — `techne`, `psyche`, `arche`. (`kh` is more faithful and reads
+  as alien; the constraint that a word survive decontextualisation wins.)
+- **No diacritics, no Greek script** — see the ASCII rule below, which is a bidi
+  decision rather than a typographic preference.
+
+**The one exception, stated so it does not look like drift:** where English has
+fully settled a form, the settled form wins — `thales`, `solon`, `sappho`,
+`hypatia`, not a stricter transliteration nobody would recognise. The convention
+serves recognisability; it does not outrank it.
+
+#### What is excluded from the lists, and why
+
+These are the rules the curation work is bound by. They are stated here rather
+than left to the person writing the lists, because **each one was reached by an
+argument that is not recoverable from the word it excludes.**
+
+**1. The project's own vocabulary.** A Greek wordlist inside a project whose
+vocabulary is Greek will collide with it, and the collision is worst in a feed,
+where every row attributes a post to one of these names.
+
+| Excluded | Why |
+|---|---|
+| `stoa` | the core concept (§1). *measured attic stoa kairos* reads as a Stoa rather than a person. **`stoic` survives as an adjective** — in the adjective slot it cannot be misread as naming a place, and it is one of the best words available. It must never be a noun. |
+| `dialectic`, `dialectical` | the project's name and its method. A user called *dialectic* sounds like the application speaking. |
+| `delta` | the logo (§8.1). Same failure. |
+| `genesis` | names the founding record (§5.1), the most load-bearing term in the address construction. |
+| `agora` | **kept, and flagged first-to-drop.** It is common enough English to survive and is not a term of art in this design — but `docs/UI-BRIEF.md` uses "Join *Agora*?" as its worked example of a forgeable Stoa title. If the picker ever reads ambiguously, this is the first noun to remove. |
+
+**2. Words that assert authority.** `moderator`, `archon`, `ephor`,
+`magistrate`, `strategos`. A non-moderator generated as *calm bronze archon
+telos* has been handed apparent standing **by the wordlist**, which is precisely
+what §5.2.1's rendering obligations exist to prevent — a name is never a
+credential. This is the exclusion most likely to be re-proposed by someone who
+likes the word, and it is also where the authority-name exclusion below comes
+from: the two are the same failure reached by different doors.
+
+**3. A few names that are an argument rather than a name.** **Plato, Aristotle,
+Socrates**, and anything else whose invocation is itself a move in a debate: a
+user rendered *sober ionic plato* is signed by Plato on every post, and someone
+disagreeing with them is visually disagreeing with Plato. They neither earned it
+nor chose it, but they benefit from it.
+
+**Deliberately a short list.** Everything arguable is **kept** — the pooled noun
+list was chosen for its size, and a cautious sweep through the canon would undo
+exactly what it was chosen for. The long tail is the point: *sober ionic thales*
+is still Greek and still serious, and nobody treats "Thales said so" as an
+argument.
+
+**4. Connotation.** The name is assigned-then-chosen, so a user cannot be blamed
+for the word they were handed — but **the system can be blamed for generating
+it**, and "the hash chose it" is not a defence anyone accepts. Rejected by
+category, because the categories outlast the examples:
+
+- **Boasts** — `titan`, `colossus`, `olympian`, `paragon`, `sovereign`. A name
+  that congratulates its bearer is embarrassing to everyone who did not pick it.
+- **Tyranny and violence** — `tyrant`, `despot`, `nemesis`, `scourge`,
+  `hecatomb`, and the `furies`. `tyrant` is the clearest case in the whole list:
+  a live political insult in English, generated by the system and attached to a
+  participant in a **political argument forum**, which is a system defaming a
+  user.
+- **Disorder as an accusation** — `chaos`, `discord`, `eris`, `strife`. In a
+  forum whose subject is disagreement these read as a verdict on the person.
+- **Pathology and death** — `plague`, `miasma`, `lethe`, `thanatos`, `charon`,
+  `hades`. Grim attached to a human being who is about to post.
+- **Anything mapping onto a real group** — `barbarian` (Greek for the people who
+  did not speak Greek: an ethnic slur with a classical wrapper), `helot`,
+  `pariah`, `metic`. The etymology is interesting and irrelevant; the English
+  word lands as the English word.
+- **Sexual and bodily** — `satyr`, `priapic`, `bacchant`. Named so the next
+  person adding words does not rediscover it.
+
+**Two kept after argument, recorded because they are the near-misses.**
+`chimera` and `hydra` are monsters but not insults in English — fully absorbed
+as "a thing of mixed parts" and "a problem that regrows", neither a claim about
+the person. **`siren` was dropped** despite the same absorption, because
+attached to a person it is gendered in a way the others are not.
+
+**The rule underneath all of it, which is the thing to keep if the lists are ever
+rebuilt from scratch: a generated name may describe a texture, never a verdict.**
+`attic`, `measured`, `tidal` and `spare` describe nothing about their bearer.
+`heroic` and `craven` both do, in opposite directions, and both are wrong for the
+same reason. `attic` is a texture; `plato` is a verdict.
+
+#### The arithmetic, and why the name is four words
+
+**The list sizes were derived from what the sources honestly yield, and the word
+count then followed from the arithmetic.** That order matters: the alternative —
+picking a target space and padding the lists to reach it — produces names that
+read as filler, which costs the register this whole revision exists to buy.
+
+**What the sources honestly yield — and these are estimates, not counts.** No
+list has been written; the numbers below come from inventorying candidates by
+category and judging where each category runs out. **The whole four-word decision
+rests on them**, so the honest status matters: the claim "512 adjectives in one
+voice is padding" is a judgement, and the way to falsify it is to write the list
+and count. **The conclusion survives a generous error, which is why it is safe to
+decide on now.** Suppose the estimate is wrong by a fifth and 300 honest
+adjectives exist: `300 × 300 × 512 = 46,080,000`, and
+`12,497,500 / 46,080,000 = 0.27121`, so `1 − e^-0.27121 = 0.2375` — **5,000
+identities still collide at 24% at three words.** Rescuing three words would take
+an adjective list of about **700** — `700 × 700 × 512 = 250,880,000` puts 5,000
+at 4.9% — and 700 sober Greek adjectives in one voice is roughly three times the
+estimate, which is not a plausible error but an entirely different claim about
+the source material.
+
+- **Adjectives: 256.** The single-voice constraint is a real limit. Geographic
+  adjectives of the Greek world give roughly 70 usable; the schools and
+  dispositions give roughly 55 after the tone exclusions; plain English
+  temperament words in the sober register give roughly 90. That is about 215,
+  and reaching 256 is honest work. **512 is not reachable in one voice** — the
+  last two hundred would be either obscure demes or four near-synonyms for
+  *calm*, and a list padded with `placid`/`serene`/`tranquil`/`unruffled` is
+  exactly the filler that loses the register.
+- **Nouns: 512.** The pooled list is deep: roughly 250 terms from the vocabulary
+  of Greek thought, and roughly 250 thinkers, writers and makers once the
+  handful of argument-move names come out. **1,024 is not reachable** without
+  scraping every minor figure in Diogenes Laertius and every technical entry in
+  Liddell–Scott, which reintroduces the "an obscure surname is noise" failure
+  the second constraint forbids.
+
+**So the honest sizes are 256 and 512, and at three words that is not enough.**
+With two adjectives and one noun the space is `256 × 256 × 512` = 2²⁵ =
+**33,554,432**, and birthday collision probability for k identities in one Stoa,
+`1 − exp(−k(k−1)/2S)`, gives:
+
+| Identities in one Stoa | three words, S = 2²⁵ |
+|---|---|
+| 100 | 0.015% |
+| 1,000 | 1.5% |
+| 5,000 | **31%** |
+| 10,000 | **77%** |
+
+By hand at k = 5,000: `k(k−1)/2 = 12,497,500`, and `12,497,500 / 33,554,432 =
+0.37245`, so `1 − e^-0.37245 = 1 − 0.68902 = 0.311`.
+
+**31% fails the bar**, and it is worth being blunt that this is *worse* than the
+space it replaces on every count except register. The superseded SF scheme was
+**256 adjectives × 256 adjectives × 256 nouns = 2²⁴ ≈ 16.8 million** at three
+words, with 5,000 identities colliding at 53%; Greek-only sources are smaller
+than ten SF universes pooled, so the honest noun list grows from 256 to 512
+while the adjective list cannot grow at all, and 2²⁵ at three words leaves
+5,000 at 31%. Better than 53% and still a failure.
+
+**Therefore the name is four words: two adjectives and two nouns.**
+
+```
+S = 256 × 256 × 512 × 512 = 2³⁴ = 17,179,869,184
+```
+
+| Identities in one Stoa | **four words, S = 2³⁴** |
+|---|---|
+| 100 | 0.00003% |
+| 1,000 | 0.003% |
+| 5,000 | **0.073%** |
+| 10,000 | **0.29%** |
+
+By hand at k = 5,000: `12,497,500 / 17,179,869,184 = 0.00072745`, and for x this
+small `1 − e^-x ≈ x`, so **0.073%**. At k = 10,000: `49,995,000 /
+17,179,869,184 = 0.0029101`, giving `1 − e^-0.0029101 = 0.002906`, so **0.29%**.
+
+**This reverses the recommendation an earlier draft of this section made**, and
+the reversal should be visible rather than quietly corrected. That draft argued
+for three words against a fourth, on the grounds that a name renders on every
+feed row and recognition degrades with length before information content does.
+**That argument is still true and it now loses**, because its premise changed:
+it was made against lists of 512 and 1,024 that a blended SF-and-Greek corpus
+could sustain, and the Greek-only sources do not sustain them. Given a choice
+between a fourth word and a padded list, **the fourth word is the lesser cost**
+— length is a fixed, honest price, where padding degrades every name drawn from
+the padded region and cannot be undone without a scheme version bump.
+
+Two things make the fourth word cheaper here than it would have been:
+
+- **The second noun is a noun, not a third adjective.** *measured attic thales
+  praxis* has two content words a reader can latch onto rather than a longer
+  run of modifiers, and the pooled noun list is the one with the range to
+  support two draws.
+- **The register absorbs length better than the old one did.** Four Greek words
+  read as a name in the classical manner; four SF words read as a string of
+  adjectives. This is a genuine difference and not a rationalisation, but it is
+  a taste claim and is marked as one.
+
+**So: collisions are now rare rather than expected — and the interface rule does
+not change.** A Stoa of five thousand has under a one-in-a-thousand chance of
+containing a pair. That is a different world from 53%, and it changes nothing
+about what the interface must do, because the rule was never a response to the
+rate:
+
+> **A name is never presented as unique, and never used as an identifier.** The
+> address is the identity. This is the same rule §4.8 and §5.7 already state for
+> Stoa titles, arriving a second time by a different route — which is the
+> strongest evidence it is the right rule rather than a local patch.
+
+What the interface does on collision is therefore nothing special: it
+disambiguates the same way it always should, by showing the address alongside
+the name where it matters. **What it must not do is renumber.** Appending `#2`
+to the second `measured attic thales praxis` requires agreeing which one was
+second, which is arrival order — a per-peer fact (§3.3), so two peers would
+number them oppositely and each would be sure the other was the impostor.
+
+**A second collision question the slate introduces: two identical names in one
+picker.** Five draws from 2³⁴ collide with probability about `5·4/2S` = `10/S` —
+roughly one slate in 1.7 billion, against one in 1.7 million at 2²⁴. A user will
+never see it, and at this size arguably no deployment ever will. **The picker
+still discards and redraws a duplicate**, because the handling is three lines
+and the alternative is a display that reads as broken in the one case it
+appears.
+
+This one *is* worth handling, and it is cheap precisely because it is local:
+the slate is generated on one peer, at one moment, with nothing published. So
+**the picker discards and redraws a duplicate before displaying**, which is a
+presentation rule with no protocol consequence whatsoever — unlike the
+cross-identity collision above, where discarding is impossible because both
+identities already exist and neither peer may decide which one is real. The two
+cases look alike and are not: one is a choice about what to draw, the other is a
+fact about what exists.
+
+**Regeneration discards keys, and the user cannot see it.** Each refresh mints
+five keypairs and keeps at most one; the rest are gone, unrecoverable, and were
+never anywhere. This sounds alarming and is not: a discarded key was never an
+identity — it signed nothing, appeared in no op, and no peer ever heard of it.
+There is nothing to lose. **The only case that would matter is if a refresh
+could discard a key the user had already used**, which is why selection and use
+must be one step: an identity becomes real when it signs, and nothing signs
+during onboarding. Whether the keystore writes on every refresh or only on
+selection is an implementation question with no user-visible consequence, and is
+deliberately not decided here.
+
+#### Grinding — and the slate makes this the central finding
+
+The question was what it costs an attacker to mint keys until one derives a name
+resembling a moderator's. **Refreshable onboarding is that attack, shipped as a
+feature.**
+
+This is worth stating as plainly as possible because it inverts the usual
+framing. An earlier draft of this section argued that grinding was cheap — about
+S derivations to hit one specific name, seconds on one core — and concluded that
+enlarging the wordlist could not fix it. **The move to 2³⁴ is the interesting
+test of that claim, and it does not overturn it**: 17 billion derivations is
+minutes rather than seconds on one core, and trivially parallel, so the cost
+went from negligible to slightly less negligible. An attacker hunting one
+specific name now waits; an attacker hunting *any* name close enough to mislead
+a reader — which is the actual attack — searches a far smaller target set and
+waits no longer than before. Both halves stand, and both are *beside the point*:
+**with unlimited
+regeneration the attacker does not need a script.** They press refresh. The
+difference between a user refreshing for a name they like and an attacker
+refreshing for a name that impersonates a moderator is **intent, not mechanism**,
+and no interface can distinguish them, because there is nothing to distinguish.
+
+**This is not a reason to remove regeneration.** The slate is good onboarding
+and the attack exists without it — a key is a key, and anyone willing to run a
+loop had this already. What it removes is the *option of leaning on cost*. Any
+argument of the form "an attacker would have to grind for that" is unavailable
+here, and this section must not contain one.
+
+So: what actually defends against impersonation?
+
+**Nothing does, and the address is the identity.** That is the honest answer and
+it is already this project's answer for Stoa titles (§4.8, §5.7) — a title is
+moderator-chosen, unverified and freely duplicable, so a join confirmation
+showing only a title has shown the reader precisely the forgeable half. A
+generated name is the same shape in a second location: **freely reachable by
+anyone willing to press a button, attached to an address nobody can forge.**
+
+What the attacker gets is a *lookalike name on a different address*. They cannot
+forge the 256-bit address and they cannot forge a signature, so nothing they
+publish is attributable to the impersonated identity. The whole attack is
+social: a reader who recognises people by name is fooled; a reader who has the
+address in front of them is not.
+
+**The interface consequence is therefore identical in shape to the join
+confirmation, and belongs on §11.1's list:**
+
+> **A name alone is the forgeable half.** Wherever recognition carries weight —
+> a moderator's name above all, because that is what converts a button press
+> into apparent authority — the address must be present and not one click away.
+> A name is never unique and never an identifier.
+
+**Enlarging the space is the wrong instinct *for this problem*, and the move to
+2³⁴ is not a counter-example.** The space grew because the honest lists were too
+small for three words to hold an acceptable *accidental* collision rate, and for
+no other reason. Against grinding it bought minutes. A space big enough to
+resist search — say 2⁶⁴ — is a space nobody curated, which forfeits every
+property the source constraints above exist to protect: it would be scraped, and
+it would ship slurs and verdicts. **Curation and search-resistance are in direct
+opposition, and curation wins**, because search-resistance was never achievable
+by this route and is not the relevant axis. The two motives are easy to conflate
+and must not be: **the space grew to help honest users tell each other apart,
+not to make anyone harder to imitate.**
+
+#### Four layers, and only one of them settles anything
+
+Three further recognition aids exist or are intended, and listing them flatly
+would invite exactly the wrong conclusion — that between them the problem is
+handled. It is not. **Three of the four are recognition aids and the fourth is
+the only guarantee**, and they are set out in that order so the asymmetry is
+visible rather than averaged away.
+
+**1. The name space, at 2³⁴.** Reduces *accidental* collisions, and nothing
+else. Covered in full above.
+
+**2. An identicon — designed in `docs/IDENTICON.md`, not here.**
+A visual glyph shown alongside the name, so that two identities sharing a name
+still look different at a glance. The property it must have is the one the name
+already has: **derived from the key, hence
+deterministic, unregistrable and identical on every peer.** It earns its place
+on *accidental* collisions — a reader comparing two rows sees two different
+pictures without reading a word.
+
+**It varies independently of the name**, because the two derive from
+differently-domain-separated hashes of the same key — the name from
+`H(NAME_PREFIX || key)`, the mark from the address (see the byte budget above).
+So an attacker must land both at once and the costs multiply rather than add.
+
+**It is nonetheless forgeable in exactly the way the name is, and this must not
+be softened into a security property.** An attacker grinds for a key whose name
+*and* glyph both read close; independence makes that a two-channel search rather
+than a one-channel search, which raises the cost by a factor and changes the kind
+of protection not at all. **A second forgeable channel is still forgeable**, and a
+multiplied cost is still a cost a machine pays once. The visual design is
+deliberately not attempted here — what is settled is that it is wanted and what
+it must be derived from.
+
+**3. Vouching (§7.3) — the only layer an attacker cannot mint, and the most
+limited.** A vouch, declared or earned, points at **a key**, not at a name and
+not at a picture. So a lookalike gets the name, gets a near-matching glyph, and
+does **not** get the vouch — the reader's own prior judgement does not transfer
+to the impostor, because it was never attached to anything the impostor could
+copy. That is the only distinction on this list that does not reduce to "look
+more carefully".
+
+Two limits, both structural in §7.3 as it stands, and both must be stated or
+this reads as a solution:
+
+- **It is private and never published**, which is §7.3's core privacy property.
+  So it protects a reader from being fooled by an impersonation of *someone that
+  reader has already vouched for*. It does nothing for a reader meeting either
+  party for the first time — which is most impersonation, and in a
+  permissionless forum the common case.
+- **Earned weight accrues from upvotes the reader has already cast** (§7.3), so
+  a reader's vouched set is **empty at onboarding** and stays thin until they
+  have read for a while. New users have no vouches and are simultaneously the
+  least equipped to spot an impostor. The layer is weakest exactly where the
+  exposure is highest.
+
+**4. The address — the only thing that settles identity.** Unforgeable,
+unmintable, and what every signature actually binds to. Its one weakness is not
+cryptographic: **it settles the question only if someone looks.** That is
+precisely why §11.1 requires it to be *present* rather than one click away
+wherever recognition carries weight, and above all wherever a moderator is
+named.
+
+The shape to carry away: **layers 1–3 make an honest mistake less likely; only
+layer 4 makes a dishonest claim false.** An interface that shows a name and a
+glyph and no address has shipped three recognition aids and zero guarantees.
+
+Two mitigations available and deliberately not taken, recorded so nobody
+re-proposes them as fixes. **Deriving the name from the key and the Stoa address
+together** helps not at all: the attacker grinds within one Stoa and would
+simply grind against that Stoa's derivation. **Rate-limiting the refresh** helps
+not at all either: it inconveniences the honest user at onboarding, which is the
+worst possible moment to add friction, while an attacker who is willing to run
+the derivation outside the app — which is trivial, since it is a hash — never
+touches the control being limited.
+
+#### Word-level failure modes
+
+- **Combinations, not just words.** Two individually innocuous adjectives can
+  compose into a slur or an insult aimed at a real group. Vetting single words
+  is insufficient; the generated *combination* is what ships. **The fourth word
+  makes this materially harder**, and that is the one real cost of the shape
+  chosen above: 256² ordered adjective pairs was already past hand review, and
+  the noun pair adds 512² more, with the adjective–noun and noun–noun junctions
+  on top. A pooled noun list of thinkers and abstractions is also more exposed
+  than a list of one kind, because a proper name beside an abstract noun can
+  compose into a reading neither word carries alone. So the practical
+  requirement is a denylist applied at generation — a derived name landing on a
+  refused combination **redraws all four slots** from the next six hash bytes,
+  deterministically, so every peer skips identically. The byte budget above bounds
+  this at one re-draw and requires a loud failure beyond it; the denylist matters
+  more at four words than it did at three.
+- **The lists are versioned and effectively frozen, and a word removal is a
+  scheme version bump.** This is the most operationally important line in the
+  section, so it is worth spelling out the mechanism rather than asserting the
+  rule. `name = words(H(NAME_PREFIX || public_key))` maps hash bytes to list
+  indices, so removing one word **reindexes the list** and every identity whose
+  name drew on an index at or after the removed one now renders differently.
+  That happens **on peers that have updated and not on peers that have not** —
+  so the same key renders as two different people depending on who is looking,
+  which is the two-peers-disagree failure this whole scheme exists to avoid, and
+  which users report as impersonation.
+
+  So `NAME_PREFIX` is versioned, and **any change to the lists — a removal, an
+  addition, a reordering, a size change, a change to the number of words, or a
+  change to the byte budget above — mints a new version rather than editing the
+  current one.** The byte budget belongs in that list for the same reason as the
+  rest: moving the name's slice re-reads different bytes and so renames everyone.
+  It does **not** disturb the mark, which reads a different digest entirely. The
+  version bump is
+  what stops the disagreement: it makes the old and new schemes distinct
+  derivations rather than two peers' answers to one question. It is also why the
+  *first* version must be conservative: shipping a word that has to come out
+  later is not a patch, it is a migration in which everybody's name changes at
+  once.
+- **ASCII-only, and this is a bidi decision rather than a parochial one.** These
+  are display strings composed by us from a fixed list, so unlike post bodies
+  they are the one piece of rendered text the project fully controls. Keeping
+  them ASCII means a generated name can never itself carry a bidi override or a
+  homoglyph — it removes the attack from this surface entirely rather than
+  mitigating it. **The bidi obligation still applies to everything a name is
+  rendered *next to*** (§11.1), which is the usual case, and a name sitting
+  beside an attacker-controlled body can still be visually captured by it.
+
+#### Rendering obligations this creates
+
+Collected here for §11.1 ("Rendering obligations, collected"), which arrives
+with the `vouching-state` change and is not in this file until that lands. Each
+is a place where core's honest answer is incomplete without something the view
+says, which is that section's general shape:
+
+- **A name is never unique and never an identifier.** The address is the
+  identity. This is the obligation Stoa titles already carry, now applying to
+  the thing *every post is attributed to* — a much larger surface, since a feed
+  renders a name per row.
+- **A name alone is the forgeable half.** Wherever recognition carries weight,
+  and above all wherever a **moderator** is named, the address must be present
+  rather than one click away. Anyone can reach any name by pressing refresh.
+- **Never imply a user's names are linked across Stoas**, and never build a
+  screen that puts them side by side without the owner deciding to (below). The
+  names are unlinkable by construction and an interface that groups them has
+  undone §5.2 in the presentation layer.
+- **Never present a name as changeable.** It is a function of a permanent key
+  (§5.3). Copy that says "pick your username" promises a settings screen that
+  cannot exist.
+- **Never present the recognition layers as adding up to a defence.** An
+  identicon and a vouch are recognition aids; the address is the only thing that
+  settles who published something. A screen that shows name and glyph and calls
+  the pair "verified" has said something false.
+- **A four-word name needs room, and must not be truncated to fit.** It is
+  longer than the three-word form earlier drafts assumed, and a layout that
+  elides the tail has removed one of the two nouns — which is most of the
+  distinguishing content, since the adjectives are drawn from the smaller list.
+  If a row cannot hold the name, the row is wrong.
+
+#### What is not decided here
+
+- **Whether the same human sees their own names across Stoas in one place.**
+  They necessarily know their own identities, so a local, never-published "your
+  identities" list leaks nothing to anyone else — but it is a screen whose whole
+  content is the correlation §5.2 protects, and building it makes that
+  correlation one screenshot away. Not decided; it is a real convenience against
+  a real hazard, and it wants the owner's judgement rather than a default.
+- **The list contents.** The *sizes* are decided — 256 adjectives and 512 nouns,
+  and the four-word shape follows from them — and so are the source, the
+  transliteration convention and the exclusion rules. What is not written is the
+  768 words themselves, which is curation work rather than design work. **The
+  sizes are load-bearing in a way the earlier draft's were not**: they were
+  derived from what the sources honestly yield, and the word count was chosen to
+  fit them, so a later decision to "just add more adjectives" changes the
+  arithmetic that justified four words and needs a version bump either way.
+- ~~**The identicon's visual design.**~~ **Settled elsewhere:
+  `docs/IDENTICON.md`.** It reads bytes `12..19` of the **address** and counts
+  about 12,400 perceptually distinct marks. Nothing in this section constrains
+  it, and the byte budget above does not hand it anything — the two schemes read
+  different digests. Left in this list as a pointer, because a reader arriving
+  from "Four layers" above will otherwise look for the design here.
+- **How many refreshes is too many to be honest about.** If a user refreshes
+  two hundred times, the interface has watched someone hunt for a specific name
+  and has no idea whether they are picking a favourite or building an
+  impersonation. Saying nothing is the current assumption and is probably right;
+  the alternative — some nudge after N refreshes — would annoy every honest user
+  to inconvenience no attacker, per the rate-limiting argument above. Recorded
+  because it will be proposed.
+
 ### 5.3 No rotation in v1
 
 Deliberate, and the reasoning is ordering: **a key that can be discarded at will
