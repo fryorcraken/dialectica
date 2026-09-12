@@ -26,6 +26,7 @@ pub mod op;
 pub mod revision;
 pub mod sanitise;
 pub mod stoa;
+pub mod transport;
 pub mod wire;
 
 // The wire surface is re-exported at the crate root because it IS the module's
@@ -34,4 +35,15 @@ pub mod wire;
 pub use wire::{
     callee_error, channel_exists_reply, error_json, get_capabilities, guarded, list_threads,
     list_threads_from_request, panic_probe, parse_channel_id, ping, version,
+};
+
+// The transport surface, re-exported for the same reason the wire one is: the
+// adapter calls these by name, and it holds the `modules().delivery_module`
+// calls that cannot live in this crate at all (§2.3). Everything on either side
+// of those calls is here.
+pub use transport::{
+    accept_inbound, accepted_json, channel_id, channel_json, content_topic, ingest, outbound_for,
+    outbound_payload, parse_publish_request, parse_stoa, published_json, sender_id, InboundError,
+    InboundOp, InboundQueue, IngestError, Ingested, OutboundError, PublishRequest, Pushed,
+    MAX_PAYLOAD_BYTES, MAX_QUEUED_PAYLOADS,
 };
