@@ -54,9 +54,17 @@
       closure, refusing an over-cap title before recording anything.
       (`creation_returns_the_address_of_the_record_it_built`,
       `the_creator_is_the_callers_own_key_and_no_creator_is_accepted_from_the_request`)
-- [x] 3.2 Verify creation without a usable key fails, records no Stoa, and mints
-      no key, across four keystore states.
+- [x] 3.2 Verify creation without a usable key fails and records no Stoa, across
+      four keystore states.
       (`creation_without_a_usable_key_fails_and_records_nothing`)
+      **"Mints no key" is satisfied by construction, not by that test**, and the
+      checkbox used to claim otherwise. The test hands `create_stoa` a closure
+      returning `Err`, so no `Keystore` is in scope and nothing it asserts could
+      distinguish a handler that called `Keystore::generate()` and then returned
+      the error anyway. What actually holds the requirement is that **there is no
+      path from this handler to `Keystore::generate()`** — the handler takes a
+      `PublicKey` through a closure and has no constructor reachable from it. The
+      test's own comment was honest about this; the checkbox was not.
 - [x] 3.3 Verify the title bounds and that bidi/zero-width characters survive.
       (`an_over_long_title_creates_nothing`,
       `a_title_at_the_maximum_length_creates_a_stoa`,
@@ -90,11 +98,57 @@
       it had two inline copies and this change would have made it five.
 - [x] 4.3 Re-export the handlers, plus `with_membership_store` and
       `membership_path_in`, from `dialectica-core/src/lib.rs`.
-- [x] 4.4 Add `Keystore::creator_public_key` with the argument for why a creator
-      key cannot be per-Stoa and what that costs, pinned by a known-answer test.
-      (`the_creator_key_domain_is_pinned_to_a_known_answer`,
-      `the_creator_key_is_not_any_real_stoas_identity`,
-      `the_creator_key_is_stable_and_differs_between_keystores`)
+- [x] 4.4 Add `Keystore::identity_key` / `identity_public_key` / `identity_address`
+      — the root secret used directly, per PLAN §5.2's MVP one-identity rule — and
+      name it as the creator in `create_stoa` and as the identity in
+      `get_capabilities`, so the creator of a Stoa can moderate it. Pinned by a
+      known-answer test, since the value is address-determining.
+      (`the_creator_of_a_stoa_this_keystore_made_can_moderate_it`,
+      `the_identity_key_is_pinned_to_a_known_answer`,
+      `the_identity_key_is_the_root_used_directly_and_not_a_derived_one`,
+      `the_identity_key_is_stable_and_differs_between_keystores`,
+      `no_stoa_address_a_caller_can_name_reaches_the_identity_key`)
+
+      **Replaces the original 4.4**, which added `Keystore::creator_public_key`
+      deriving from a synthetic all-zero domain. That key was not the key the peer
+      posts with, so `Moderators::of(genesis).contains(posting_key)` was false for
+      a Stoa's own creator. `CREATOR_KEY_DOMAIN` and its three now-superseded
+      tests are deleted; `design.md` carries the alternatives and the security
+      argument.
+
+## 4a. Fixes from review
+
+- [x] 4a.1 Fix `MembershipStore::list` answering empty for a valid page 0 at an
+      over-large `per_page`: the `i64::try_from` guard tested the incremented
+      limit. `per_page` now saturates; only `page` refuses.
+      (`a_per_page_at_the_conversion_boundary_still_lists_the_whole_store`)
+- [x] 4a.2 Fix `per_page == 0` reporting a page both empty and not-the-last, which
+      made paging to exhaustion never terminate. Reshaped the remaining boundary
+      to one `split_off` so the page and `has_more` cannot disagree.
+      (`a_per_page_of_zero_terminates_rather_than_paging_forever`)
+- [x] 4a.3 Rename `MembershipError::UndecodableRecord` to `UnencodableRecord` and
+      fix its message: its only construction site is the **encode** side, so a
+      caller was told its record "could not be read" when nothing was read.
+      (`an_encode_failure_does_not_report_itself_as_a_failure_to_read`)
+- [x] 4a.4 Add the missing `false` case for `MembershipStore::is_empty`, which
+      survived `cargo mutants` replaced by `Ok(true)`.
+      (`an_empty_store_and_a_populated_one_disagree_about_being_empty`)
+- [x] 4a.5 Correct three places crediting **version independence** with the
+      boundary between the op store and the membership store. Both layout
+      constants are `1`, so the version check separates nothing; `check_layout`
+      naming columns is what refuses an op-log file. The recovery asymmetry claim
+      is kept — it is a property of the separate file and survives both constants
+      being `1`. (`membership.rs`'s constant doc, the independence test's comment,
+      and `design.md`.)
+- [x] 4a.6 Record in `design.md` what the code held alone: the creator key's
+      rejected alternatives, the `"open"` wire token as the fifth `NO SPEC`
+      subject, the single witness for `INSERT OR IGNORE` over `OR REPLACE` and
+      that the wire hides the distinction, and that two files foreclose a
+      transaction spanning membership and ops.
+- [x] 4a.7 Correct `docs/PLAN.md` §9.1's `joinStoa({address})` — a hash verifies a
+      record but cannot reconstruct one — and strike its duplicated verification
+      reasoning down to a line saying the three calls exist. `design.md` argues
+      the departure.
 
 ## 5. The UI brief
 
@@ -106,7 +160,9 @@
 
 ## 6. Gates
 
-- [x] 6.1 `cargo test -p dialectica -p dialectica-core` — 537 pass, up from 475.
+- [x] 6.1 `cargo test -p dialectica -p dialectica-core` passes. The count is what
+      the command reports; do not write it here, per CLAUDE.md — a number in a
+      checklist cannot fail loudly when it drifts.
 - [x] 6.2 `cargo fmt --check` (no `-p`) exits 0. **`dialectica-core` carries
       pre-existing format drift that this gate structurally cannot see** — the
       known CI gap, since `cargo fmt` does not follow path dependencies. The two

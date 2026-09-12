@@ -554,6 +554,10 @@ fn stoa_reply(stoa: &crate::identity::Address, genesis: &crate::stoa::Genesis) -
 /// view a token-gated Stoa is world-postable.
 fn policy_name(policy: crate::stoa::Policy) -> &'static str {
     match policy {
+        // NO SPEC: the spec requires the posting policy be answerable and fixes no
+        // spelling for it, so this lowercase literal is this change's choice. It is
+        // a lasting one — a view branches on the string, so changing it is a
+        // breaking change to the module surface. `design.md` carries it.
         crate::stoa::Policy::Open => "open",
     }
 }

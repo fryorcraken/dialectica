@@ -64,11 +64,20 @@ use std::path::Path;
 ///
 /// Held in SQLite's own `PRAGMA user_version`, as the op log's is.
 ///
-/// **Independent of [`crate::log::sqlite::LAYOUT_VERSION`] by design.** The two
-/// stores are separate files and neither refusal mentions the other, which is the
-/// asymmetry the separate file buys: a peer holding a membership store from a
-/// future build cannot list its Stoas and can still read every op it holds. That
-/// is the recoverable direction.
+/// **Independent of [`crate::log::sqlite::LAYOUT_VERSION`] by design**, and
+/// independent is not the same as distinguishing. **Both constants are `1`
+/// today**, so the version check cannot tell the two stores apart at all: hand
+/// [`MembershipStore::open`] an op-log file and `found == 1` equals this value,
+/// so it takes the already-stamped branch. What refuses it is `check_layout`,
+/// which names `stoa` and `genesis_bytes` and cannot prepare that statement
+/// against an `ops` table. **Naming the columns is the whole of the boundary**;
+/// do not read the version numbers as holding it.
+///
+/// What being separate files DOES buy, and it survives both constants being `1`:
+/// neither refusal mentions the other, so a peer holding a membership store from
+/// a future build cannot list its Stoas and can still read every op it holds.
+/// That is the recoverable direction — one file makes an unknown membership
+/// layout cost the user their ops.
 ///
 /// **Pinned by a hardcoded assertion**, following `identity.rs`'s wire constants.
 /// `cargo mutants` mutates functions and not `const`s, so a wrong version here is
@@ -737,13 +746,17 @@ mod tests {
 
     #[test]
     fn the_membership_layout_version_is_independent_of_the_op_logs() {
-        // The two are separate files with separate versions, and that
-        // independence is the whole reason membership does not make an op store
-        // unreadable. Today both are 1 — so a test comparing them would pass for
-        // an implementation that read one from the other. What is asserted
-        // instead is that the membership store does not CONSULT the op log's
-        // constant: its refusal names its own expected version, and a store
-        // stamped with the op log's number plus one is refused.
+        // The two are separate FILES, and that is the whole reason membership does
+        // not make an op store unreadable. Their version numbers do not contribute
+        // to it: both are 1 today, so the version check cannot separate the two
+        // stores at all — what refuses an op-log file handed to `open` is
+        // `check_layout` naming `stoa` and `genesis_bytes`.
+        //
+        // So a test comparing the two constants would pass for an implementation
+        // that read one from the other. What is asserted instead is that the
+        // membership store does not CONSULT the op log's constant: its refusal
+        // names its own expected version, and a store stamped with the op log's
+        // number plus one is refused.
         let dir = TempDir::new("independent-version");
         let path = dir.file("stoas.sqlite");
         let store = MembershipStore::open(&path).unwrap();
