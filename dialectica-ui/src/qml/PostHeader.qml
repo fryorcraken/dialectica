@@ -20,7 +20,6 @@ RowLayout {
 
     Identicon {
         address: root.identityAddress
-        isPerson: true
         size: root.markSize
         visible: root.markSize >= Theme.markMinDraw
         Layout.alignment: Qt.AlignVCenter

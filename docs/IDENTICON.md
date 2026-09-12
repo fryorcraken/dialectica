@@ -544,38 +544,20 @@ extending the `accent` series: the mark's palette has a different job from the
 interface's, and a future change to `accent2` should not silently change what
 every identity looks like.
 
-### This change does not ship Theme.qml, and that is a merge dependency
+The eight are declared in `Theme.qml` under a `mark` prefix, in their own block
+separate from the three interface inks. `markInk` and `markRust` duplicate `ink`
+and `accent` by value today; that duplication is deliberate rather than an
+oversight, because the two palettes must be free to diverge.
 
-`Theme.qml` does not exist on `main` — it arrives with the UI implementation
-branch, which a different change owns. `Identicon.qml` therefore references
-eight properties that **must be added to `Theme.qml` when the two branches are
-sequenced**, or the mark renders with undefined colours:
+### Removing isPerson touched two call sites
 
-```qml
-// ---- mark inks: eight, hand-picked, minimum pairwise OKLab 0.080 ----
-readonly property color markInk:    "#26231d"
-readonly property color markIndigo: "#37407e"
-readonly property color markMoss:   "#2f5233"
-readonly property color markPlum:   "#8a4479"
-readonly property color markRust:   "#a33a2b"
-readonly property color markTeal:   "#1f7a7a"
-readonly property color markStone:  "#8f8d84"
-readonly property color markOchre:  "#c98a2e"
-```
+`isPerson` was hard-coded at both of its call sites and nothing read it back, so
+removing the property was two deletions:
 
-`markInk` and `markRust` are deliberately the same values as `ink` and
-`accent`; they are re-declared under mark-scoped names so that iterating the
-interface palette cannot silently change every identity's appearance.
+- `PostHeader.qml` — `isPerson: true`
+- `FeedScreen.qml` — `isPerson: false`
 
-### Two call sites lose a property
-
-Removing `isPerson` makes two lines in files this change does not own invalid.
-Both hard-code the value and nothing reads it back, so both are one-line
-deletions:
-
-- `PostHeader.qml` — delete `isPerson: true`
-- `FeedScreen.qml` — delete `isPerson: false`
-
-Neither file exists on `main` yet, so this change cannot make those edits; they
-belong to whichever branch lands them. Flagged here so the removal is not
-discovered at merge time.
+Nothing replaced them. The Stoa/person distinction is carried by **position**:
+`PostHeader` renders an author's mark beside their name, `FeedScreen` renders the
+Stoa's mark in the Stoa header. A future placement where the surrounding context
+does not disambiguate must label the mark, because the shape no longer does.
