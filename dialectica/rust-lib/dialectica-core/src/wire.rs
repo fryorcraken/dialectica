@@ -2614,11 +2614,16 @@ mod tests {
         // journal, so it distinguishes "nothing happened" from "an append was
         // rolled back", which counting the log afterwards cannot.
         //
-        // The three refusals are chosen to sit at three different depths: one
-        // fails in the parse (before `authoring` is reached at all), one in
-        // `authoring`'s own presence check, and one in its cross-Stoa check — so
-        // a handler that reached the store or the sink on any of those paths is
-        // caught rather than one of them standing in for all three.
+        // The four refusals sit at three different depths: two fail in the parse
+        // (before `authoring` is reached at all), one in `authoring`'s presence
+        // check, and one in its cross-Stoa check — so a handler that reached the
+        // store or the sink on any of those paths is caught rather than one of
+        // them standing in for all three.
+        //
+        // Each case also asserts the refusal MESSAGE, not just that a refusal
+        // happened. That is what keeps the depths honest: the cross-Stoa fixture
+        // previously named an absent target against an empty log, so it refused at
+        // the presence check and was a second copy of the case above it.
         let key = publish_key();
         let stoa = publish_stoa().to_hex();
         let elsewhere = crate::identity::Address::from_hex(&"4d".repeat(32))
@@ -2648,13 +2653,21 @@ mod tests {
                 serde_json::json!({"stoa": stoa, "parent": absent, "body": "x"}).to_string(),
                 "an absent parent",
             ),
-            // Refused in `authoring`: a Stoa nothing in the log belongs to, so
-            // the target read fails before any append.
+            // Refused in `authoring`'s CROSS-STOA check, which is a different
+            // depth from the one above and needs a target that IS held. The
+            // fixture seeds a post into `stoa` and then votes on it naming
+            // `elsewhere`.
+            //
+            // This case used to name an ABSENT target in another Stoa, against an
+            // empty log — so `log.get` returned `None` and it refused at `NotHeld`,
+            // the same path and the same depth as the case above it. The comment
+            // claimed three depths and the fixtures delivered two; a handler that
+            // reached the sink on the cross-Stoa path only would have left this
+            // test green (found by review, findings/correctness.md C2).
             (
-                "vote",
-                serde_json::json!({"stoa": elsewhere, "target": absent, "direction": "up"})
-                    .to_string(),
-                "an absent target in another Stoa",
+                "vote-cross-stoa",
+                serde_json::json!({"stoa": elsewhere, "direction": "up"}).to_string(),
+                "a held target in another Stoa",
             ),
         ];
 
@@ -2663,6 +2676,24 @@ mod tests {
             let mut log = JournallingLog {
                 inner: MemoryOpLog::new(),
                 journal: std::rc::Rc::clone(&journal),
+            };
+
+            // The cross-Stoa case is the only one needing a seeded target, and it
+            // must be seeded BEFORE the journal is cleared, so the seed's own
+            // append does not count as the refusal's.
+            let request = if which == "vote-cross-stoa" {
+                let seed = publish_post(
+                    &publish_request(r#""body":"the target""#),
+                    &mut log,
+                    &key,
+                    &mut ignored_delivery,
+                );
+                let target = as_json(&seed)["opId"].as_str().unwrap().to_string();
+                journal.borrow_mut().clear();
+                serde_json::json!({"stoa": elsewhere, "target": target, "direction": "up"})
+                    .to_string()
+            } else {
+                request
             };
             let sink_journal = std::rc::Rc::clone(&journal);
             let out = match which {
@@ -2676,10 +2707,28 @@ mod tests {
                     sink_journal.borrow_mut().push("deliver")
                 }),
             };
+            let error = as_json(&out)["error"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            assert!(!error.is_empty(), "{why} must be refused, got {out}");
+
+            // Each case must be refused for the reason it was chosen to exercise,
+            // not merely refused. Without this the cross-Stoa fixture silently
+            // degraded into a second copy of the absent-target one, which is
+            // exactly what had happened.
+            let expected_fragment = match why {
+                "a forbidden field" => "author",
+                "an unrecognised direction" => "direction",
+                "an absent parent" => "does not hold",
+                "a held target in another Stoa" => "belongs to Stoa",
+                other => unreachable!("unnamed case: {other}"),
+            };
             assert!(
-                as_json(&out).get("error").is_some(),
-                "{why} must be refused, got {out}"
+                error.contains(expected_fragment),
+                "{why}: expected a refusal mentioning {expected_fragment:?}, got {out}"
             );
+
             assert!(
                 journal.borrow().is_empty(),
                 "{why}: a refused publish must reach neither the store nor delivery, \
@@ -3062,6 +3111,20 @@ mod tests {
                     "a handler panicked rather than refusing, for {request}: {out}"
                 );
             }
+        }
+
+        // Whatever this sweep DID accept must be readable back. "No panic" is not
+        // the only way hostile input can win: an input that succeeds and stores an
+        // op the decoder refuses is worse, because it is reported to the caller as
+        // a publish and then kills every read on the store.
+        //
+        // That is not hypothetical — it is how the over-cap body defect survived
+        // this test. The sweep already fed it `MAX_FIELD_LEN + 1`, asserted "an
+        // object and not a panic", and passed, because the handler *succeeded*.
+        // Asserting the absence of a panic cannot see a wrongful success.
+        for entry in log.iter().expect("the sweep's log must still be readable") {
+            crate::op::SignedOp::from_bytes(&entry.op.to_bytes())
+                .expect("an op a publish accepted must decode again");
         }
     }
 

@@ -91,7 +91,50 @@ enforcing it symmetrically on the encode path is making one existing rule total
 rather than inventing a second bound. A `Refusal::BodyTooLong { len, cap }` at
 the publish path would also let the UI say why.
 
-Outcome:
+**Outcome: fixed**, taking your prescription including the refusal shape. This is
+the most valuable finding of the six reviews, and it was found independently by
+three of them — you, `correctness.md` C1, and `spec-test.md` entry 3 while blind to
+the implementation. Your distinction between the total and the per-field bound is
+what made the fix safe to place: `op.rs:105-127`'s argument is untouched.
+
+What landed:
+
+- **`Refusal::BodyTooLong { len, cap }`**, exactly as you proposed, so the caller
+  is told by how much. Its doc comment records what publishing an over-cap body
+  would have cost, so the next reader cannot mistake the guard for cosmetic.
+- **`authoring::MAX_BODY_LEN`**, defined as `crate::op::MAX_FIELD_LEN` rather than
+  as a second `150 * 1024`. `MAX_FIELD_LEN` is now `pub`, with a doc comment
+  explaining why a *writer* needs the number the decoder enforces — the "checked on
+  the way back in" reasoning holds for ops that arrive and not for ops this peer
+  creates.
+- **`body_within_cap` as its own function**, called from `post` and `reply`, so "is
+  it called everywhere a body is accepted?" has an answer. In `reply` it runs
+  **before** the store read, since an over-cap body is refusable without knowing
+  anything about the parent.
+
+Four tests, and the ordering was TDD rather than reconstructed:
+
+1. `a_body_one_byte_over_the_cap_is_refused_rather_than_signed` — **proven to fail
+   before the fix.** With the guard disabled it returns
+   `Ok(Published { id: 72e9faaa…, appended: Stored })`, the same op id you measured.
+   Covers `post` and `reply`, and asserts the log is untouched.
+2. `the_publish_body_cap_is_the_format_field_cap` — pins the two as one number, so
+   the constants cannot drift into the state where the publish path signs what the
+   format refuses.
+3. `every_op_a_publish_produces_decodes_again` — round-trips through
+   `to_bytes`/`from_bytes`, which closes the structural blind spot: no publish test
+   had ever round-tripped bytes at all. Its comment is explicit that it does **not**
+   reproduce this bug (its longest body is at the cap, so it passed with the guard
+   disabled); it guards the invariant for future fields.
+4. **The sweep's missing closing assertion**, which you identified as the blind
+   gate: `hostile_publish_input_is_never_a_panic` now decodes every op it actually
+   stored. **Proven to fail before the fix** — `FieldTooLong(153601)` — so the sweep
+   can now see a *wrongful success* and not only a panic. That was the gap that let
+   the defect through a test which already fed it the over-cap input.
+
+The `spec-writer` note stands and is routed: no requirement bounds a body from
+above. `tasks.md` §10 also now records the `MemoryOpLog`-only blind spot as
+something the green gate structurally could not see.
 
 ---
 
@@ -153,7 +196,32 @@ Suggested repair: add to the sweep a block pairing a valid `stoa` and a valid
 `target`/`parent` with `direction`/`body` absent and of each wrong type, and
 re-word the table to say which *arm* of each parser the sweep exercises.
 
-Outcome:
+**Outcome: accepted, and routed to the `tester` rather than fixed here.**
+
+The measurement is the part that settles it and it is excellent: the same ordering
+hazard the change fixed for `OpId::from_hex` survives one parser further along,
+and the distinction you draw — the table measures *reachability*, not
+*refusal-path coverage* — is exactly right. A panic on `required_direction`'s `Err`
+arm survives the sweep because every hostile-text fixture supplies `direction` as a
+well-formed JSON string, and the wrong-typed ones malform `stoa` and die at parser
+one.
+
+Not fixed here for a reason of ownership rather than effort: this is a test-suite
+gap whose repair is new sweep fixtures, and the tester owns the suite. Writing them
+myself would also mean re-deriving the reachability table you have already built,
+and I would be checking my own work against it.
+
+**What I have done** is stop `tasks.md` §10's table claiming more than it measured:
+it now says which *arm* of each parser the sweep reaches, and records that a
+wrong-typed `direction` or a missing `body` paired with a valid Stoa is not among
+the fixtures — so the next reader meets the gap rather than a row of "yes".
+
+Your sharpest observation is the one I want the tester to act on:
+`every_publish_refusal_is_the_error_shape_and_carries_no_op_id` does reach
+`required_direction`'s `Err` arm, but asserts only that an `error` key exists —
+which a *caught panic* also satisfies. So no test in the repo distinguishes a
+refusal from a panic on that parser. That is the `starts_with("panic in ")`
+assertion the sweep already has, missing from the one test that gets there.
 
 ---
 
@@ -208,7 +276,34 @@ treats everything crossing the module wire as untrusted, and a compromised or
 buggy view can drive this at whatever rate it likes against a module whose caller
 gives up after 20 seconds (`keystore.rs:132`).
 
-Outcome:
+**Outcome: accepted, deferred, and recorded in `design.md`** rather than fixed in
+this commit. The finding is right on both the ordering and the contradiction: the
+adapter inverts `parsed_object`'s own stated principle, and the most expensive side
+effect in the path happens before the first validation.
+
+Why not now. Every candidate fix changes the adapter's structure, and the adapter
+is the one file **no gate in this repo compiles** — `cfg(logos_scaffold)` is set by
+`build.rs` only when the builder's generated provider is present. So a reshape
+there is a change whose compilation I cannot check, landing in the same commit as a
+security fix whose regression tests I can. Those belong apart, and the second is
+the one with a measured exploit.
+
+The shape it wants is also not the cheap one it first appears. Hoisting
+`reject_forbidden_fields` alone fixes the `author`-field case and leaves the
+missing-`body`, wrong-typed-`body`, non-hex-`parent` and unrecognised-`direction`
+cases still paying for a keystore unlock — so the real fix is a validate-only
+entry point per handler, which is the `PublishRequest` reshape
+`findings/architecture.md` A3 describes. **That is the same reshape**, and doing it
+once serves both findings.
+
+**Where it now lives:** `design.md`'s parse-prologue entry, which already carries
+the A2/A3 reshape, now names this as a second reason to do it — with your ordering
+measurement, so whoever takes it knows the cost is a 64 MiB Argon2id derivation per
+refused request and not merely tidiness.
+
+Your caveat is the right one and I have preserved it: local-UI-reachable is not
+remote-unauthenticated, and the reason it still counts is that CLAUDE.md's posture
+treats the module wire as untrusted.
 
 ---
 
@@ -243,7 +338,24 @@ censorship-resistant forum"*) shows the project already treats that as a real
 category. A one-line note in the spec saying the disclosure is deliberate and
 scoped to a same-privilege caller would settle it.
 
-Outcome:
+**Outcome: recorded in `design.md`, and routed to the `spec-writer`** for the
+one-line note you suggest. No code change, which is what the finding recommends.
+
+The reasoning I am adopting is yours: today the caller is the local view, which can
+read the store anyway, so `actual` crosses no trust boundary — and the
+distinguishability of the three refusals is a genuine spec requirement, so removing
+the field would cost something real to buy nothing. What makes it worth writing down
+is the trigger you name: the moment any handler becomes reachable by something less
+privileged than the local view, `actual` is a cross-Stoa read for a caller that
+could not otherwise perform one.
+
+`design.md`'s new `Refusal::Storage` entry is the wrong home for it, so it sits with
+the refusal-distinguishability reasoning instead, alongside the `log/sqlite.rs`
+precedent you cite — the project already treats a prefix-matching restricted read as
+a cross-Stoa leak, which is what makes this the same category rather than a
+hypothetical.
+
+Graded LOW and treated as LOW: recorded for a decision, not actioned.
 
 ---
 

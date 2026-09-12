@@ -78,11 +78,27 @@ slightly-different copy of a guard is the signal to reshape rather than to add a
 fourth test; this change added the looping test, which is the right test and is not
 a reshape.
 
-**Not done here** because it changes no behaviour but does reshape three call
-sites, and a refactor belongs in its own commit that leaves every gate green. It is
-a precondition of the next operation rather than a cleanup after it: `OpKind`
-already has a `Moderate` variant, so `publish_moderation` is the copy that would
-otherwise make this the fourth.
+**A second reason to want it, found by the security review.** The adapter runs a
+full Argon2id keystore unlock (64 MiB, RFC 9106 option 2) and opens SQLite
+*before* calling the handler — so before any field is validated. Every refusal in
+this change therefore pays for a keystore decrypt first: a request carrying an
+`author` field, which the spec requires be refused, still costs the derivation.
+That inverts the "parse the whole request first, then act" principle this section
+states.
+
+Hoisting `reject_forbidden_fields` alone would not fix it — the missing-`body`,
+wrong-typed-`body`, non-hex-`parent` and unrecognised-`direction` cases would still
+pay. What fixes it is a validate-only entry point, which is the request type above:
+parse and refuse without a key, then derive a key only for a request that survived.
+So the reshape and the cost-amplification fix are one change.
+
+**Not done here** because it changes no behaviour but does reshape three call sites
+plus the adapter — and the adapter is the one file no gate in this repo compiles, so
+restructuring it belongs in a commit that can be reviewed for that alone rather than
+riding along with a security fix whose tests do run. It is a precondition of the
+next operation rather than a cleanup after it: `OpKind` already has a `Moderate`
+variant, so `publish_moderation` is the copy that would otherwise make this the
+fourth.
 
 ### The three operations share one `publish` and differ only in what they build
 
@@ -155,6 +171,22 @@ category, and the next reword breaks the test without breaking the behaviour.
 So `authoring.rs` returns a `Refusal` enum whose `Display` is the wire message.
 Tests assert on the variant; the message is asserted separately, once, where it
 is pinned as a shape.
+
+**What the distinguishability discloses, and why that is accepted here.**
+`WrongStoa` carries the Stoa the op *actually* belongs to, so the three refusals
+together answer, for any op id a caller can name: do you hold it, is it a post, and
+which Stoa is it in. Today the caller is the local view, which can read the store
+directly, so this crosses no trust boundary — and the distinction is a spec
+requirement, since a propagation gap and a category mistake need opposite responses.
+
+Recorded because the trigger is specific: **the moment a publish handler is reachable
+by anything less privileged than the local view** — a remote RPC, a multi-user host —
+`actual` becomes a cross-Stoa read for a caller that could not otherwise perform one.
+The project already treats that as a real category rather than a hypothetical;
+`log/sqlite.rs` refuses a prefix-matching restricted read on the ground that it is
+"a cross-Stoa leak in a censorship-resistant forum". If that day comes, `actual` is
+the field to drop first, and dropping it costs only the wording, not the
+distinguishability.
 
 ### A reply's thread is derived as `parent.thread.unwrap_or(parent_id)`
 

@@ -129,7 +129,21 @@ const VERSION_1: u8 = 1;
 /// The value is pinned by `the_field_cap_is_pinned_to_a_known_answer` — a cap
 /// that silently drifted upward would still refuse an absurd prefix and still
 /// pass every test that only probes absurd values.
-const MAX_FIELD_LEN: usize = 150 * 1024;
+///
+/// # Why this is `pub`, and what depends on it
+///
+/// **A writer needs the same number the decoder enforces.** The encode helpers do
+/// not check it — `put_bytes` writes any length — on the reasoning that the cap is
+/// "checked on the way back in". That reasoning holds for ops that *arrive* and not
+/// for ops this peer *creates*: an over-cap field encodes, signs and stores
+/// happily, and is then refused by this module's own decoder, which is a row no
+/// read can get past. So any path that builds an `Op` from caller input must refuse
+/// the field before signing it, and to do that it has to see this value.
+///
+/// `authoring::MAX_BODY_LEN` is that use, and
+/// `the_publish_body_cap_is_the_format_field_cap` pins the two as one number rather
+/// than two that agree today.
+pub const MAX_FIELD_LEN: usize = 150 * 1024;
 
 /// A 32-byte op id: the hash of an op's canonical bytes.
 ///

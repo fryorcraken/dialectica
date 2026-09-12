@@ -259,6 +259,29 @@ covered by the marker above.
   | `required_string("body")`, `publish_reply`'s third | yes — same case, valid Stoa, valid parent |
   | `required_string("body")`, `publish_post`'s second | yes — same case, valid Stoa |
 
+  **What that table measures is reachability, and not refusal-path coverage** —
+  a distinction review had to draw for us (`findings/security.md` S2), because
+  this section's earlier wording read as though "yes" meant the parser was
+  fully exercised. It does not. Every hostile-*text* fixture supplies
+  `direction` and `body` as well-formed JSON **strings**, so those parsers are
+  entered only on their **success** arms; the wrong-*typed* fixtures
+  (`direction` as null, object, array, number) also malform `stoa`, so all
+  three handlers refuse at parser one and never reach them.
+
+  Measured: a `panic!` placed unconditionally in `required_direction` fails the
+  sweep, and a `panic!` on only its `Err` arm **passes**. So the ordering hazard
+  this change fixed for `OpId::from_hex` is still present one parser along. No
+  fixture pairs a valid Stoa and a valid target with a missing or wrong-typed
+  `direction`.
+
+  Worse, and for the `tester`:
+  `every_publish_refusal_is_the_error_shape_and_carries_no_op_id` *does* reach
+  that `Err` arm, but asserts only that an `error` key is present — which a
+  caught panic satisfies too. So **no test here distinguishes a refusal from a
+  panic on the direction parser.** The sweep's `starts_with("panic in ")`
+  assertion is the thing that would, and it is missing from the one test that
+  gets there.
+
   What reaches those last parsers is the hostile-*text* block, which pairs a
   valid Stoa and a valid op id with adversarial `body` and `direction`. The
   wrong-length blocks reach only the first parser in each handler, by

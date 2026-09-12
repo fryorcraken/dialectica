@@ -107,6 +107,22 @@ pub enum Refusal {
         requested: Address,
         actual: Address,
     },
+    /// The body is longer than `op-format` will decode.
+    ///
+    /// **Refused before signing, because the alternative is a corrupt row.** The
+    /// encode path has no cap — `put_bytes` writes any length — while the decode
+    /// path refuses over [`crate::op::MAX_FIELD_LEN`]. Without this guard an
+    /// over-cap body signs, appends and reports success, and then every list read
+    /// on that store fails to decode it: `ordered_read` propagates the first
+    /// decode error, so one row kills the whole read, permanently and across a
+    /// restart, with no API able to remove it. The op is also undecodable by every
+    /// conforming peer, so the caller is told it published something no reader can
+    /// ever render.
+    ///
+    /// The bound belongs here rather than in the encoder because this is where a
+    /// caller can be *told*. It carries both numbers so the message can say by how
+    /// much.
+    BodyTooLong { len: usize, cap: usize },
     /// The store could not be reached. Never "the store held nothing".
     Storage(OpLogError),
 }
@@ -141,6 +157,11 @@ impl std::fmt::Display for Refusal {
                 actual.to_hex(),
                 requested.to_hex()
             ),
+            Refusal::BodyTooLong { len, cap } => write!(
+                f,
+                "the body is {len} bytes and the format decodes at most {cap}; \
+                 nothing was published"
+            ),
             Refusal::Storage(e) => write!(f, "{e}"),
         }
     }
@@ -174,6 +195,32 @@ fn publish<L: OpLog>(log: &mut L, key: &SecretKey, op: Op) -> Result<Published, 
     Ok(Published { id, appended })
 }
 
+/// The longest body a publish will sign, which is the longest one the format will
+/// decode.
+///
+/// **Not a second number.** It is `op-format`'s own field cap, and
+/// `the_publish_body_cap_is_the_format_field_cap` pins them as one value rather
+/// than two that happen to agree — a drifted cap would otherwise leave this path
+/// signing bodies the decoder refuses, which is the defect this constant exists to
+/// prevent.
+pub const MAX_BODY_LEN: usize = crate::op::MAX_FIELD_LEN;
+
+/// Refuse a body the format cannot decode, before anything is signed.
+///
+/// Its own function rather than a line in each handler, because a guard is a job:
+/// "is it called everywhere a body is accepted?" stays a question with an answer.
+/// Two callers today, `post` and `reply`; a third operation carrying a
+/// caller-supplied variable-length field needs it too.
+fn body_within_cap(body: &str) -> Result<(), Refusal> {
+    if body.len() > MAX_BODY_LEN {
+        return Err(Refusal::BodyTooLong {
+            len: body.len(),
+            cap: MAX_BODY_LEN,
+        });
+    }
+    Ok(())
+}
+
 /// Publish a top-level post: a `Post` naming no parent and no thread.
 ///
 /// `thread: None` because a thread-opening post cannot know its own thread id —
@@ -184,12 +231,18 @@ fn publish<L: OpLog>(log: &mut L, key: &SecretKey, op: Op) -> Result<Published, 
 /// variable-length field as a value rather than an absence, and refusing it here
 /// would make the publish path disagree with the format about what an op may
 /// contain.
+///
+/// An **over-cap body is refused**, and the asymmetry with the empty case is not
+/// arbitrary: an empty body decodes, and a body over
+/// [`crate::op::MAX_FIELD_LEN`] does not. See [`Refusal::BodyTooLong`] for what
+/// publishing one would cost.
 pub fn post<L: OpLog>(
     log: &mut L,
     key: &SecretKey,
     stoa: Address,
     body: String,
 ) -> Result<Published, Refusal> {
+    body_within_cap(&body)?;
     publish(
         log,
         key,
@@ -273,6 +326,11 @@ pub fn reply<L: OpLog>(
     parent: OpId,
     body: String,
 ) -> Result<Published, Refusal> {
+    // Before the store read: a body the format cannot decode is refusable without
+    // knowing anything about the parent, so there is no reason to go to disk for
+    // it.
+    body_within_cap(&body)?;
+
     let entry = log.get(&parent)?.ok_or(Refusal::NotHeld {
         what: "parent",
         id: parent,
@@ -1355,13 +1413,103 @@ mod tests {
         // the cap must encode, hash and store without a panic — and a panic
         // aborts the module process, so this is a denial of service and not a
         // cosmetic failure.
+        //
+        // The cap is referenced rather than written as a literal. It used to be
+        // `150 * 1024` here, which meant a drifted cap would silently move this
+        // test off the boundary it exists to sit on.
         let stoa = a_stoa("Agora");
         let key = a_key(A_ROOT, &stoa);
         let mut log = a_log();
 
-        let body = "x".repeat(150 * 1024);
+        let body = "x".repeat(MAX_BODY_LEN);
         let published = post(&mut log, &key, stoa, body.clone()).unwrap();
         assert_eq!(body_of(&stored(&log, &published.id)).len(), body.len());
+    }
+
+    #[test]
+    fn the_publish_body_cap_is_the_format_field_cap() {
+        // One number, not two that agree today. If these were independent
+        // constants, raising the format's cap would leave the publish path
+        // refusing bodies the format accepts, and LOWERING it would leave the
+        // publish path signing bodies the format refuses — which is the defect
+        // this pair exists to prevent, in the direction that corrupts a store.
+        assert_eq!(MAX_BODY_LEN, crate::op::MAX_FIELD_LEN);
+    }
+
+    #[test]
+    fn a_body_one_byte_over_the_cap_is_refused_rather_than_signed() {
+        // The boundary tested on the side that was missing. A body AT the cap
+        // round-trips (above); one byte over does not decode, so signing it
+        // produces an op this module's own decoder refuses.
+        //
+        // What publishing it would cost, and why this is not a cosmetic refusal:
+        // the op is appended and reported as published, and from then on every
+        // list read on that store fails — `ordered_read` propagates the first
+        // decode error, so one row kills the whole read, across a restart, with no
+        // API able to remove it. The op is also undecodable by every conforming
+        // peer. Found by review (findings/security.md S1, findings/correctness.md
+        // C1, findings/spec-test.md entry 3), measured against SqliteOpLog.
+        let stoa = a_stoa("Agora");
+        let key = a_key(A_ROOT, &stoa);
+        let mut log = a_log();
+
+        let over = "x".repeat(MAX_BODY_LEN + 1);
+        assert_eq!(
+            post(&mut log, &key, stoa, over.clone()),
+            Err(Refusal::BodyTooLong {
+                len: MAX_BODY_LEN + 1,
+                cap: MAX_BODY_LEN,
+            }),
+            "a body the format cannot decode must be refused before it is signed"
+        );
+        assert_eq!(log.len().unwrap(), 0, "a refused publish appends nothing");
+
+        // A reply too, and before the parent is even looked up: the body is
+        // refusable without a store read.
+        let seed = post(&mut log, &key, stoa, "the subject".to_string()).unwrap();
+        assert_eq!(
+            reply(&mut log, &key, stoa, seed.id, over),
+            Err(Refusal::BodyTooLong {
+                len: MAX_BODY_LEN + 1,
+                cap: MAX_BODY_LEN,
+            }),
+        );
+        assert_eq!(log.len().unwrap(), 1, "only the seed is stored");
+    }
+
+    #[test]
+    fn every_op_a_publish_produces_decodes_again() {
+        // The property the cap exists to protect, asserted directly rather than
+        // through the cap: whatever this path signs, `op-format` can read back.
+        //
+        // Be honest about what this does and does not catch. It does NOT reproduce
+        // the over-cap defect: its longest body is AT the cap, so it passed even
+        // with the guard disabled. What it pins is the invariant going forward —
+        // any future field this path writes gets round-tripped, so an encode/decode
+        // asymmetry in a NEW field fails here rather than in a user's store.
+        //
+        // The reason no such test existed is recorded in tasks.md §10: every
+        // publish test uses `MemoryOpLog`, which stores the live `SignedOp` and
+        // never round-trips it through bytes, so no fixture here could observe an
+        // asymmetry at all. This one goes through `to_bytes`/`from_bytes`
+        // explicitly, which is what closes that blind spot.
+        let stoa = a_stoa("Agora");
+        let key = a_key(A_ROOT, &stoa);
+        let mut log = a_log();
+
+        let bodies = ["", "short", &"x".repeat(MAX_BODY_LEN)];
+        for body in bodies {
+            let published = post(&mut log, &key, stoa, body.to_string()).unwrap();
+            let signed = stored(&log, &published.id);
+            let bytes = signed.to_bytes();
+            let decoded = crate::op::SignedOp::from_bytes(&bytes)
+                .expect("an op this path published must decode again");
+            assert_eq!(
+                decoded.op.id(),
+                published.id,
+                "a published op must decode back to the same op id"
+            );
+        }
     }
 
     // ─── A storage failure is never a silent success ──────────────────────

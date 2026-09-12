@@ -90,6 +90,46 @@ cannot produce bytes that `decode` would refuse.
 `MAX_FIELD_LEN + 1` through `publish_post` against a `SqliteOpLog`, assert the
 reply is the error shape, and assert `iter_stoa` still returns `Ok`.
 
+**Outcome: fixed.** Found independently by three reviewers — you, `security.md` S1
+and `spec-test.md` entry 3 while blind to the implementation — which is why it went
+in first and with the most care. `findings/security.md` S1 carries the full account
+of the fix; the parts that answer *your* framing specifically:
+
+- **Your note for the fixer was the load-bearing one.** `MAX_FIELD_LEN` was private,
+  so the publish path could not check it. It is now `pub`, with a doc comment saying
+  why a writer needs the number the decoder enforces — and
+  `the_publish_body_cap_is_the_format_field_cap` pins `authoring::MAX_BODY_LEN` to it
+  so they cannot become two constants that agree today. That is your "export the
+  cap" option; I did not take the fallible-encoder option, because making
+  `canonical_bytes`/`sign` return a `Result` would put a failure case on every op
+  construction in the crate to catch one caller's input, and the boundary that can
+  *tell* the caller is the publish path.
+- **The regression test is the shape you specified**, minus the `SqliteOpLog`:
+  `a_body_one_byte_over_the_cap_is_refused_rather_than_signed`, proven to fail before
+  the fix with `Ok(Published { id: 72e9faaa…, appended: Stored })` — the same op id
+  you and the security reviewer both measured, which is a pleasing three-way
+  agreement. It covers `post` and `reply` and asserts the log is untouched.
+- **Your reason 3 is the one I acted on structurally**, because it is the class and
+  not the instance: the publish path never round-tripped bytes at all.
+  `every_op_a_publish_produces_decodes_again` now goes through
+  `to_bytes`/`from_bytes` explicitly, and its comment is honest that it does *not*
+  reproduce this bug (its longest body is at the cap, so it passes with the guard
+  disabled) — it guards the invariant for the next field. The blind spot itself is
+  now written into `tasks.md` §10, where you correctly noted it was missing.
+- The sweep also gains the closing assertion `security.md` S2 asked for, so a
+  *wrongful success* is now visible to it and not only a panic. Proven to fail before
+  the fix: `FieldTooLong(153601)`.
+
+Not done: a `SqliteOpLog` fixture. Every publish test uses `MemoryOpLog`, and adding
+the production store to this layer is a test-suite decision for the `tester` — the
+byte round-trip closes the same class without it, and your measurement against the
+real store is recorded here as the evidence rather than re-created.
+
+**Your `cargo mutants` note is worth preserving**: 14 mutants, 0 missed, and it still
+could not have found this, because the cap is a `const` and mutants mutates
+functions. That is the second time this repo has recorded mutants being blind to a
+`const`.
+
 **`spec-writer` note.** No requirement in
 `specs/content-authoring/spec.md` says an over-long body is refused. "An empty
 body SHALL be accepted" contracts the lower bound and nothing contracts the
@@ -137,7 +177,28 @@ they take no sink and cannot cover delivery.
 seed a post into `stoa`, then vote naming `elsewhere` with that seed's id. Then
 the comment's "three depths" becomes true.
 
-**Outcome:**
+**Outcome: fixed, exactly as prescribed, plus a guard against it recurring.**
+
+The fourth case now seeds a post into `stoa`, clears the journal so the seed's own
+append is not counted as the refusal's, and votes on that seed's id naming
+`elsewhere`. The comment is corrected to "four refusals at three depths — two in
+the parse", which is what the fixtures actually deliver.
+
+**The part worth more than the fix.** Every case now also asserts the refusal
+*message* rather than only that some refusal happened, keyed to the reason the case
+exists: `"author"`, `"direction"`, `"does not hold"`, `"belongs to Stoa"`. Without
+that, this fixture can silently degrade back into a duplicate of the case above it
+— which is precisely what had happened — and nothing would notice.
+
+Proven: restoring the old absent-target fixture now fails with
+`expected a refusal mentioning "belongs to Stoa", got {"error":"this peer does not
+hold the target 9b9b…"}`. Before this change that substitution was invisible.
+
+This is the project's recurring defect family in its purest form — two explanations
+giving the same answer on the fixture chosen — and it is the second instance found
+in this one test file. Worth noting for `MEMORY.md`: the discriminator here is not a
+better fixture but an assertion on *which* refusal, and that pattern generalises to
+any table-driven test whose rows are meant to exercise different paths.
 
 ---
 
@@ -156,7 +217,16 @@ which is precisely what a boundary test exists to avoid. `op.rs:1689` and
 private. If C1's fix exports the cap, this literal should become a reference to
 it.
 
-**Outcome:**
+**Outcome: fixed**, and your conditional is what made it free — C1's fix exports the
+cap, so the literal became a reference in the same commit.
+`a_maximal_body_publishes_rather_than_panicking` now builds its body from
+`MAX_BODY_LEN`, and its comment records why: as a literal, a drifted cap would have
+silently moved this test off the boundary it exists to sit on, while
+`the_field_cap_is_pinned_to_a_known_answer` kept passing over in `op.rs`.
+
+The two new boundary tests use the constant for the same reason, so the "at the cap"
+and "one byte over" pair move together by construction rather than by someone
+remembering to edit both.
 
 ---
 
@@ -181,7 +251,16 @@ correction. The commit message corrects `tasks.md`; this comment was not
 corrected with it. A reader who reaches this comment first draws the conclusion
 the commit was written to retract.
 
-**Outcome:**
+**Outcome: fixed** in `4324364`. Found independently by the readability reviewer
+(entry 1), which is why it went in the first commit. The comment now states the
+ordering *is* observable, names the test that observes it, and records that the old
+claim was load-bearing while it stood — so the retraction is legible rather than
+merely absent.
+
+Your framing is the one I kept: `tasks.md` §10 itself says a note claiming
+unobservability "stops anyone looking for a way to observe it", and this was the last
+copy of that note still standing in the code. Two reviewers reaching it separately is
+a reasonable proxy for the test a comment cannot have.
 
 ---
 
