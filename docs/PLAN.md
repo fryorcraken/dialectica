@@ -370,7 +370,8 @@ long as it holds that channel open. With one channel per Stoa and one permanent
 identity per user per Stoa (§5.2), these agree by construction — a user's
 `senderId` is stable exactly where SDS wants it stable, and no rotation
 machinery is needed. Changing it would mean closing and re-opening the channel,
-which §4.3 makes a crash risk.
+which §5.2 rules out for a different reason: the identity is permanent, so
+there is nothing to rotate to.
 
 **What a reliable channel discloses.** Every receiving peer is handed the sender
 id with every message — `event channelMessageReceived(channelId, senderId,
@@ -457,23 +458,26 @@ cannot see each other, silently and permanently. §4.5 states the same rule from
 the other direction — derive `channelId` as a pure function of the addressed
 object.
 
-**Live bug, read it before touching channel lifecycle:
-`logos-messaging/logos-delivery#4116`.** Closing a channel that has received a
-peer message and then re-creating it with the same id kills the whole node
-process — and the v0.2.1 docstring claims the opposite (the issue reproduces on
-0.2.0; whether it was re-confirmed at 0.2.1 is not recorded), so following the
-documentation is what walks you into it. The issue has the conditions and the
-repro; do not restate them here, they will be wrong once it is fixed.
+**Set aside, 2026-09-12: `logos-messaging/logos-delivery#4116`.** The issue
+reports that closing a channel which has received a peer message and then
+re-creating it with the same id kills the node process. **We are no longer
+designing around it.** It was never deterministically reproduced, the spike
+that was meant to settle it never created a node, and an undetermined bug was
+shaping a real user-facing restriction. Treat the documented behaviour as
+correct until something here actually fails.
 
-What it costs *us* is the shape below, which stands on its own.
+**What this does not change:** the reason dialectica closes channels at all.
+That argument is below and rests on the shared node, not on any bug.
+
+**What it does change** is recorded at the end of this section.
 
 **Dialectica closes a channel in two places: when a user leaves a Stoa, and on
 shutdown.** Both, and the second is the one that looks optional and is not.
 
 **The delivery node is not ours to stop, and it outlives us.**
 `delivery_module` is a separate, shared process — `createNode` is called once
-per context (§11), and issue #4116 notes in passing that when the node dies "any
-other module sharing that node loses it too". So dialectica exiting does not
+per context (§11), and when the node dies, any other module sharing that node
+loses it too. So dialectica exiting does not
 stop the node, and the node's own `stop()` is not the alternative: calling it
 would tear delivery down for every other module using it, which is not
 dialectica's call to make.
@@ -502,43 +506,29 @@ only "stops its SDS loops" and does not mention the unsubscribe at all.
 That is why both cases close: leaving a Stoa and shutting down are the same
 situation — a channel that must not outlive the app that opened it.
 
-So dialectica closes channels, and #4116 makes a close followed by a re-create
-dangerous. Three ways out; the first is ruled out by this section's own rule.
+**Re-creating a channel is allowed.** Close and reopen the same id within one
+node's lifetime — to recover from an error, or because a user left a Stoa and
+rejoined. There is no epoch in the channel id and no restriction on reopening.
 
-**Ruled out — a per-peer epoch in the channel id, bumped on each open.** That is
-what a per-peer value in a rendezvous field costs: peer A reopens at
+An earlier version of this section forbade all of that to avoid #4116, at the
+cost of one real limitation: **rejoining a Stoa required a restart.** That
+limitation is withdrawn along with the premise.
+
+**The channel id stays a pure function of the addressed object.** No epoch in
+it — not a per-peer one, and not a deterministic one either.
+
+The per-peer form is ruled out by this section's own rule: peer A reopens at
 `stoa-abc/e8` while peer B is still on `stoa-abc/e7`, and they stop seeing each
-other with no error anywhere, which is worse than the crash because it is
-silent.
+other with **no error anywhere** — a silent permanent partition, which §4.5
+rules out independently of any bug.
 
-**Legitimate but unbuilt — a *deterministic* epoch every peer computes
-identically**, from a genesis-record field or a coarse clock bucket. The issue
-confirms that create → close → create with a *different* id does not reproduce,
-so this genuinely avoids both the crash and the partition. It is not designed
-here, and the hard part is that a value which changes must change for everyone
-at once — a rendezvous problem at each boundary. **This is the option to revisit
-if the assumption below fails.**
-
-**Chosen for v1 — leave the id alone and never re-create a channel inside one
-node's lifetime.** The bug needs a close and a re-create in the same node;
-dialectica controls whether that ever happens. Concretely:
-
-- **Open each Stoa's channel once per node lifetime.** Do not close and reopen
-  as a way of recovering from an error, refreshing state, or reacting to
-  connectivity changes. Reopen only after the node itself has gone away.
-- **On leaving a Stoa, close and do not reopen in that session.** Rejoining
-  before restart is the one user-visible path into the bug; make it re-create
-  the node, or defer the rejoin, or accept it as a known limitation until #4116
-  is fixed.
-
-That leaves the ordinary restart safe, since the node is new.
-
-**Untested, and the approach above rests on it:** #4116 reproduces within one
-running node. Whether persisted SDS state surviving a full process restart
-corrupts a fresh `createNode` the same way is unknown. Two runs against a real
-node, with peer traffic received in the first, settles it — worth doing before
-relying on any of this, because the failure surfaces at startup while the code
-responsible ran in the previous session.
+**A deterministic epoch is ruled out for a different reason, and it is a
+judgement about whose problem this is.** Making every peer recompute a matching
+epoch is a rendezvous problem at each boundary — a value that changes must
+change for everyone at once — and dialectica would carry that complexity
+forever in order to route around a defect in `logos-delivery`. **If re-creating
+a channel kills the node, that is an upstream bug and it gets fixed upstream.**
+Do not reintroduce an epoch here as the remedy.
 
 ### 4.4 What SDS does and does not promise
 
@@ -557,11 +547,17 @@ Does not promise:
 - **No delivery to absent peers.** ACK means "some participants received it".
 - **No ordering metadata reaching the application.** The Lamport total order and
   the message-id tie-break above are real and are what SDS orders its own log
-  by — but they stop below us. The Reliable Channel API's received-message event
-  carries the payload alone, so neither value reaches a consumer, and
-  `channelMessageReceived` cannot forward what it never got. **Read the promises
-  above as internal to SDS, not as an interface.** §13 has the finding and what
-  each upstream layer would have to add.
+  by — but they stop below us. What dialectica receives from the delivery
+  module is `channelMessageReceived(channelId, senderId, payload, timestamp)`,
+  and that `timestamp` is the *receiving peer's own clock read*, not a wire
+  value — so nothing in it orders anything. (Do not read those four fields as
+  contradicting §13's "one field": that is the Reliable Channel event one layer
+  further down, and the delivery module adds the three it can supply locally.)
+  **Read the promises above as internal to SDS, not as an interface** — which
+  is the right posture regardless of what upstream forwards. SDS is transport;
+  ordering at forum scope is dialectica's, carried in the signed op. §13 has
+  the layers the values are dropped at and the layering rule that makes this a
+  division of labour rather than a blocker.
 - **150 KiB max message size**, hard cap — a network-wide gossipsub validation
   limit, not unilaterally raisable. See §4.6.
 
@@ -1085,10 +1081,11 @@ the op that decided. `Moderate` carries `Hide` or `Unhide`, ordered by §5.7's
 rule. Not built: applying it in a materialised view, and everything below that
 depends on a mutable moderator set.
 
-**"A hide binds" is conditional on an ordering the transport does not yet
-supply, and that is the sharpest limitation in this section.** §5.7 orders
-competing moderations by Lamport timestamp; no Lamport value reaches us
-(§13), so every op is unordered and the fallback is ascending op id. A
+**"A hide binds" is conditional on an ordering we have not built yet, and that
+is the sharpest limitation in this section.** §5.7 orders competing moderations
+by Lamport timestamp; no Lamport value reaches us and — per §13 — **none is
+coming, because ordering at forum scope was never the transport's to supply.**
+So every op is currently unordered and the fallback is ascending op id. A
 `Moderate` op carries no nonce and no timestamp, so for one Stoa, one moderator
 and one target there are **exactly two possible ops** — and an unordered
 comparison between them resolves the same way forever. Last-write-wins has no
@@ -1100,8 +1097,12 @@ moderation. What that does **not** restore is the ability to *reverse* a hide:
 until Lamport values arrive, an `Unhide` competing with a `Hide` of the same
 target loses regardless of when it was published. A moderator who hides
 something by mistake cannot currently un-hide it by publishing an `Unhide`
-alone. That is deliberate — the alternative was the veto — and it resolves
-itself when §13's upstream gap closes, with no change to this code.
+alone. That is deliberate — the alternative was the veto.
+
+**What closes it is dialectica's own Lamport counter (§13), not an upstream
+fix.** This is a change of owner rather than of mechanism: the resolver code
+needs no change either way, but the work is ours and schedulable rather than
+somebody else's and indefinite. **Nobody should be waiting for it.**
 
 **This becomes a UI requirement the moment a hide button exists**, and there is
 no user-facing surface yet to carry it, so it is recorded here for whoever
@@ -1109,9 +1110,9 @@ builds one. A moderator pressing "hide" is currently taking an action that
 cannot be undone on the peers that matter, and nothing in the core will warn
 them — `moderation::resolve` answers what is hidden, not what a future reversal
 would do. The honest interface says so at the point of action rather than
-offering an "unhide" that silently fails to bind. When the transport supplies
-Lamport values the warning is removed along with the tie-break, and the two
-should be removed together.
+offering an "unhide" that silently fails to bind. **When dialectica's Lamport
+counter lands, the warning is removed along with the tie-break, and the two
+should be removed together.**
 
 The record carries **no per-peer value** — no epoch, no session counter. Every
 peer hashes it to obtain the Stoa's address, so a value varying with one peer's
@@ -2164,10 +2165,12 @@ discriminant, and for the same reason: a view asking for `top` and silently
 getting `new` has been told a falsehood no test will catch.
 
 **Both of those orderings are currently degraded, and that is unresolved** —
-§7.2 defines each in terms of a Lamport timestamp that §13 says does not reach
-us, so both fall back to ascending op id today. Section 8 below carries the
-question of what they may honestly be called until that changes; it is named
-here so that nobody reads this paragraph as saying the orderings work.
+§7.2 defines each in terms of a Lamport timestamp no op carries yet, so both
+fall back to ascending op id today. Per §13 the fix is **ours** (a `createdAt`
+and a Lamport counter in the signed preimage), not an upstream one, so this is
+work that can be scheduled rather than waited on. Section 8 below carries the
+question of what they may honestly be called until then; it is named here so
+that nobody reads this paragraph as saying the orderings work.
 
 **Hidden threads are omitted by default**, and the parameter that includes them
 is explicit (§7.2 rule 4, §11.1). Worth stating precisely because "hidden
@@ -2496,9 +2499,17 @@ being asked for rather than discovering it from a stalled view.
   two names and have the interface state that ordering is currently degraded.
   **This plan does not choose**, and it is a genuine open question rather than a
   deferred detail — a first-run forum whose ordering is arbitrary is a different
-  product from one whose ordering is chronological. What would decide it: §13's
-  upstream gap closing, which removes the question entirely and is why nobody
-  should build elaborate machinery around it in the meantime.
+  product from one whose ordering is chronological.
+
+  **What would decide it has changed, and the earlier answer was wrong.** This
+  bullet used to say the question was removed by §13's upstream gap closing,
+  and that nobody should build machinery around it meanwhile. §13 now
+  establishes that recency is **ours** — an author-asserted `createdAt` in the
+  signed preimage, cheap and needing nothing from upstream. So the question is
+  not waiting on anyone: **it is decided by whether we add that field**, and
+  the advice to sit still was advice to wait for something that was never
+  coming. The scope of "elaborate machinery" is narrower than it looked — a
+  timestamp field is not elaborate.
 
 - **Whether `listThreads`'s `replyCount` is worth its cost before then.** It is
   a fold over moderation-resolved replies per row, and under the degraded order
@@ -2753,7 +2764,10 @@ thing (§2.3).
   the answer sets when §4.5 stops being optional. With SDS now the *only* sync
   layer, there is no CRDT fallback if a channel degrades.
 - How far back does SDS-Repair realistically reach in a live Stoa? That number
-  decides how urgent snapshots are.
+  decides how urgent snapshots are — **and it is less load-bearing than it
+  looks**, because §13 establishes that thread completeness is computable from
+  the parent pointers we already hold. A thread-scoped, demand-driven repair
+  is ours to build whatever SDS-R reaches.
 - **How is the moderator set ordered when two moderators edit it
   concurrently?** The one genuine merge question in the design (§5.7), and it
   does not arise while the creator is the sole moderator — so it is answered
@@ -2819,10 +2833,6 @@ thing (§2.3).
   points the other way. RLN's per-epoch nullifiers are the better candidate and
   are also unverified here. This is the load-bearing unknown in the claims
   design: settle it before any credential carries weight in ranking or gating.
-- **Does #4116 survive a process restart?** §4.3's approach — never re-create a
-  channel inside one node's lifetime — assumes persisted SDS state does not
-  corrupt a fresh `createNode`. Two runs against a real node, with peer traffic
-  received in the first, settles it.
 - ~~**Are votes an op in v1 at all?**~~ **Answered: yes, and they are read —
   §7.2 rule 2's `top` counts them.** The kind is in the op format (`op.rs`),
   carrying a target and a direction, so the history accumulated from v1 and the
@@ -2862,23 +2872,162 @@ thing (§2.3).
   SDS's rule — insert by Lamport timestamp, ties by ascending message id — is
   already §5.7's.
 
-  The investigation moved where the gap is. It is **not** that
-  `delivery_module.lidl` forgot to forward the fields: the Reliable Channel API's
-  `MessageReceivedEvent`, which the delivery module consumes, carries exactly one
-  field — the reassembled payload — so `channelMessageReceived` never receives
-  them either. Closing this needs a change at both layers, and neither is
-  dialectica's; `openspec/changes/op-ordering/design.md` records the field names
-  and types for filing.
+  The gap is **two layers**, both documented with quoted source in
+  `openspec/changes/archive/2026-09-11-op-ordering/design.md`:
 
-  Two findings worth carrying forward. **`channelMessageReceived`'s `timestamp`
-  is unusable for ordering** — it is the receiving peer's own `CLOCK_REALTIME`
-  read taken when its callback fires, so it differs per peer for one message,
-  which is worse than §11's units problem and worth filing separately as a bug.
-  And **a dialectica-side Lamport clock is the one thing not to build**: SDS's
-  clock advances on traffic no application sees and is initialised from epoch-ms,
-  so a clock advanced on op arrivals could not be made to agree with it — and two
-  orders that disagree produce no error, only two peers rendering a thread
-  differently.
+  1. **The Reliable Channel API's `MessageReceivedEvent` carries one field** —
+     the reassembled payload (LIP text quoted at design.md:40-54). The spec
+     knows which value orders: it says elsewhere that the timestamp it wraps
+     "acts only as a uniqueness salt; ordering is provided by the SDS Lamport
+     timestamp", and then does not pass that timestamp on.
+  2. **The delivery module drops even the timestamp it forwards**
+     (`delivery_module_plugin.cpp` at tag `v0.2.1`, quoted at design.md:56-69).
+
+  **The values exist at the bottom and are real.** `nim-sds` declares them as
+  first-class fields on every message — `sds/types/sds_message.nim`:
+
+  ```nim
+  type SdsMessage* {.requiresInit.} = object
+    messageId*: SdsMessageID
+    lamportTimestamp*: int64
+    ...
+  ```
+
+  So this is a **forwarding gap, not a protocol limitation**: the data SDS
+  needs for §5.7's rule is present on the wire and is discarded on the way up.
+  That is the sentence an upstream filing should lead with.
+
+  > **A correction, recorded because of how it happened.** This entry briefly
+  > claimed the event carries *three* fields and that the values were dropped
+  > lower still, inside SDS, in a type called `SdsDeliverable` — presented in
+  > bold as a correction of the sourced two-layer finding above. **That was
+  > wrong and the type does not exist**: a sweep of every upstream checkout on
+  > this machine found `SdsDeliverable` nowhere outside dialectica's own prose.
+  > It came from an agent report that was written into this document without
+  > being checked against source, and it cited as its evidence the very design
+  > document that says "One field."
+  >
+  > **The lesson is about direction of travel.** A claim that *removes*
+  > sourcing — replacing a quoted line number with a summary — should be held
+  > to a higher standard than the claim it replaces, not a lower one. The
+  > caveat it carried ("no realised copy to read") read as a narrow sourcing
+  > gap about one field; it should have been read as a signal that nobody had
+  > opened the file.
+
+  Two findings worth carrying forward. **The `timestamp` we do receive is
+  unusable for ordering** — it is the receiving peer's own `CLOCK_REALTIME`
+  read taken when its callback fires, so it differs per peer for one message.
+  It is not a preference for a local clock over a wire value: **there is no
+  wire timestamp on this event at all.** Exactly one event
+  (`messageReceived`) reads a real wire timestamp, which is why only that one
+  shows §11's units divergence — the two traps are one divergence seen from
+  both ends.
+
+  ~~And **a dialectica-side Lamport clock is the one thing not to build**~~
+  — **withdrawn, 2026-09-12.** The argument was that SDS's clock advances on
+  traffic no application sees and is initialised from epoch-ms, so a
+  dialectica clock could never be made to agree with it.
+
+  **That is true and it is not a reason.** It assumes our clock must agree
+  with SDS's, and it does not: **a dialectica-level clock needs to agree with
+  other peers' dialectica clocks**, and every peer sees the same ops. Stop
+  trying to reconcile with a clock we cannot read and the objection
+  disappears. The mistake was letting "we cannot match SDS" stand in for "we
+  cannot order".
+
+  ### The layering rule, which everything above is a consequence of
+
+  **Use SDS's API as it is, and build the ordering and causality the
+  application needs on top of it.** SDS is HTTP or TCP in this stack. TCP
+  retransmits, orders within a connection, and tells you a transfer failed —
+  and it still cannot tell you your file is half-written, because it does not
+  know what a complete file is. Only the application does.
+
+  So SDS repairing what it can see is not a substitute for dialectica knowing
+  what a **complete thread** is, and no upstream change would make it one.
+
+  **This reframes the whole entry.** The missing fields are not a deficiency
+  waiting on a fix we should design around — they were never ours to depend
+  on. An application that can only order its own content while the transport
+  hands it ordering metadata breaks the moment that transport changes, and
+  §4.4 already warns that SDS is LIP-109 at *raw*, the weakest maturity tier,
+  with an API marked Developer Preview that expects to change.
+
+  Read the rest of §13 as *what dialectica owns*, not as *what upstream owes
+  us*. The upstream filing is still worth making; nothing here waits on it.
+
+  **What we may build at our own layer**, carried inside the signed op
+  preimage so a relay cannot forge or strip it:
+
+  - **An author-asserted wall-clock `createdAt`.** Cheap, needs nothing from
+    upstream, and gives a real recency ordering today. It is *asserted*, so it
+    **must be clamped** and must never feed a security decision — Appendix A
+    records the nearest kin project reading an unclamped author timestamp for
+    decay, which lets a post pin itself to the top permanently.
+  - **A dialectica Lamport counter**, advanced on the ops we receive.
+    Self-consistent across peers without reference to SDS.
+
+  **Causality is ours too, and an earlier draft of this entry got that
+  wrong.** It claimed happened-before was the one thing unrecoverable at our
+  layer. It is not: **a Lamport counter is the causality mechanism.** Alice
+  receives an op at N, sets her clock to `max(local, N)`, and replies at N+1;
+  the reply carries "I had seen something at N". That is precisely the
+  written-knowing-about relation, and a dialectica counter supplies it.
+
+  The error was conflating the counter with the wall clock, and attributing
+  the wall clock's weakness to both.
+
+  **What SDS's `causalHistory` adds is not causality but *gap detection*** —
+  an explicit list of message ids the sender held, so a receiver can notice
+  "this references X and I do not have X". A scalar counter cannot: N+1 says
+  she had seen *something* at N, never *which*.
+
+  **But we already have that edge, and at the granularity we actually want.**
+  A reply names its parent op id inside the signed preimage — it must, that is
+  what makes it a reply — so "I hold a reply to X and no X" is detectable with
+  no `causalHistory` at all. **The parent pointer is the causal edge the forum
+  cares about.**
+
+  And the scopes differ in a way that matters more than the mechanism:
+
+  - **SDS repairs per Stoa.** One channel per Stoa (§4.1), so its machinery
+    chases gaps across every thread at once — most of which a given reader
+    will never open.
+  - **Dialectica needs repair per thread.** Someone opening a thread wants
+    *that* thread complete. Ops missing from threads nobody is reading are not
+    urgent and may never be worth fetching.
+
+  A thread is a tree walkable from its root, so the set of ops needed to
+  render it completely is computable from the ops we hold. That is a better
+  repair trigger than a filter over the whole Stoa, because it is
+  **demand-driven**: repair what someone is looking at.
+
+  **So SDS's reliability machinery is both more than we need and differently
+  shaped** — global where we want local, a message graph where we have a post
+  tree. Losing `causalHistory` costs less than it appears to.
+
+  **Nothing about ordering requires the upstream gap to close**, and nothing
+  about thread completeness does either. Recency, total order and
+  happened-before are all buildable here; the gap is a reason to build them
+  rather than a reason to wait.
+
+  Not designed here; §5.7 keeps its rule and `Arrival` its shape until one is.
+
+  **Two adversarial cases the design must answer, named now so they are not
+  discovered later.** Both fields sit in a signed op, so a *relay* cannot
+  forge them — but the **author** controls both completely, and an author is
+  not trusted:
+
+  - **A far-future `createdAt`** pins a post to the top of a recency ordering
+    permanently. Appendix A measures exactly this failure in the nearest kin
+    project. The clamp is the whole defence and it is not specified here.
+  - **An arbitrarily high Lamport counter** does the same to the total order,
+    and is the attack the `createdAt` clamp does not cover. A counter is only
+    meaningful relative to ops a peer has seen, so the bound is different in
+    kind from a wall-clock clamp.
+
+  Neither is hard, and neither is optional. **A field a malicious peer sets
+  freely is not an ordering until it has a bound.**
 
   Until the fields arrive, ops are recorded as unordered and fall back to a
   defined degraded order (ascending op id, always below any op the transport did
