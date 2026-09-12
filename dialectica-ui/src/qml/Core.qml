@@ -21,6 +21,20 @@ QtObject {
 
     readonly property string moduleName: "dialectica"
 
+    // The host's bridge, as a property rather than a direct read of the global.
+    //
+    // **This exists so the call path can be tested, and that is the whole
+    // reason.** `logos` is injected into the QML context by basecamp, so a test
+    // harness has no way to provide one — a function reading the global
+    // directly is a function whose four branches (valid reply, error reply,
+    // malformed JSON, absent bridge) cannot be exercised anywhere.
+    //
+    // The default keeps production behaviour identical: `typeof` rather than a
+    // bare reference because an undeclared identifier THROWS on evaluation, and
+    // a property initialiser that throws leaves the singleton unusable — which
+    // would turn "no bridge" from a diagnosable message into a dead view.
+    property var bridge: (typeof logos !== "undefined") ? logos : null
+
     // A reply, normalised into exactly one of two shapes for the caller:
     //   { ok: true,  value: <parsed JSON> }
     //   { ok: false, error: "<message>" }
@@ -33,12 +47,12 @@ QtObject {
         // The bridge is injected by the host. Absent means the view is running
         // somewhere that provides no core, which is worth saying plainly: a
         // silent failure here looks exactly like a Stoa with nothing in it.
-        if (typeof logos === "undefined" || !logos.callModule)
+        if (!root.bridge || !root.bridge.callModule)
             return { ok: false, error: "The core module is not reachable from this view." }
 
         var raw
         try {
-            raw = String(logos.callModule(root.moduleName, method, args))
+            raw = String(root.bridge.callModule(root.moduleName, method, args))
         } catch (e) {
             return { ok: false, error: "The call to the core module failed: " + e }
         }
