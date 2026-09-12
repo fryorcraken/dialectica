@@ -92,6 +92,34 @@ pub trait DialecticaModule: Send + 'static {
     /// error shape.
     fn delivery_channel_exists(&mut self, request: String) -> String;
 
+    /// What a caller may do in a Stoa right now, and why not if not.
+    ///
+    /// Takes `{"stoa":"<hex>"}` and returns
+    /// `{"canPost":bool, "identity":"…" | "reason":"…"}` — the `|` is
+    /// exclusive. Every posting affordance in the view is gated on this and
+    /// never on a build flag (PLAN.md §5.6): a compose box the user typed into
+    /// and cannot submit has lost their draft.
+    ///
+    /// The probe re-determines its answer on every call by design, so a view
+    /// asks it whenever it renders rather than caching it.
+    fn get_capabilities(&mut self, request: String) -> String;
+
+    /// One page of a Stoa's thread heads.
+    ///
+    /// Takes `{"stoa":"<hex>", "page":N, "perPage":N, "includeHidden":bool}`
+    /// and returns `{"items":[…],"page":N,"hasMore":bool}` — the ecosystem's
+    /// pagination shape, of which this is the project's first instance.
+    ///
+    /// **There is no `order` argument**, because core computes exactly one
+    /// ordering and an accepted-but-degraded parameter would be a method
+    /// telling its caller a falsehood. See `dialectica_core::feed` for what
+    /// that ordering claims and the much larger thing it does not.
+    ///
+    /// A storage failure comes back as the error shape and NEVER as an empty
+    /// page: the two mean opposite things and render identically if they are
+    /// ever collapsed.
+    fn list_threads(&mut self, request: String) -> String;
+
     /// Framework plumbing, not a contract method — the generator skips
     /// defaulted methods when deriving the `.lidl`.
     fn on_context_ready(&mut self, _ctx: &RustModuleContext) {}
@@ -135,11 +163,28 @@ include!(concat!(
 /// The module instance.
 ///
 /// `Default`-constructed and a process-global singleton — the SDK gives no
-/// constructor injection (PLAN.md §2.3), so this deliberately holds no state.
-/// When Phase 1 needs state, it goes in `core` behind an `Arc`, not here.
+/// constructor injection (PLAN.md §2.3), and `interface: "universal"` scans this
+/// type's `public:` surface, so a constructor taking parameters (even
+/// all-defaulted ones) miscompiles. The one genuinely parameterless constructor
+/// is what `Default` provides.
+///
+/// # The one piece of state, and why it cannot be anywhere else
+///
+/// The persistence path arrives through `on_context_ready` and through nothing
+/// else. It is the host telling this instance where its storage lives, it is
+/// not knowable before that callback, and every read this module serves needs
+/// it. So it is held here, as the only field, and every handler that needs a
+/// store opens one from it.
+///
+/// `Option<String>` rather than `String`, because "the host has not told us
+/// yet" is a real state a call can arrive in — the dispatch table is live before
+/// the callback in principle — and it must produce an honest error rather than a
+/// read against an empty path.
 #[cfg(logos_scaffold)]
 #[derive(Default)]
-struct Dialectica;
+struct Dialectica {
+    persistence_path: Option<String>,
+}
 
 // A thin adapter and nothing more. Every method forwards straight into `core`,
 // which is where the guard and the decisions live. If a body here ever grows
@@ -190,11 +235,49 @@ impl DialecticaModule for Dialectica {
         })
     }
 
+    fn get_capabilities(&mut self, request: String) -> String {
+        // The keystore path is derived from the persistence path the host gave
+        // us, which is why this is not a bare forward: `core` cannot read the
+        // environment or know the host's layout (PLAN.md §2.3), so the adapter
+        // supplies the lookup and `core` decides what its result means.
+        let Some(dir) = self.persistence_path.clone() else {
+            return core::error_json(
+                "the host has not yet told this module where its storage is; \
+                 try again once the module is ready",
+            );
+        };
+        core::get_capabilities(&request, |stoa| {
+            let path = core::keystore::default_path_in(std::path::Path::new(&dir));
+            core::keystore::open_from_env(&path).map(|ks| ks.stoa_address(stoa).to_hex())
+        })
+    }
+
+    fn list_threads(&mut self, request: String) -> String {
+        let Some(dir) = self.persistence_path.clone() else {
+            return core::error_json(
+                "the host has not yet told this module where its storage is; \
+                 try again once the module is ready",
+            );
+        };
+        // The store is opened per call rather than held open, which is the
+        // simple thing and the correct one today: the host may hand the same
+        // path to another instance, and a handle held across calls would have to
+        // answer what happens when it goes stale. `SqliteOpLog::open` is cheap
+        // and its failure is exactly the "unreadable store" the view renders as
+        // screen 07's failed state.
+        core::list_threads_from_request(&request, || {
+            core::log::SqliteOpLog::open(&std::path::Path::new(&dir).join("ops.sqlite"))
+        })
+    }
+
     fn on_context_ready(&mut self, ctx: &RustModuleContext) {
         eprintln!(
             "dialectica ready: instance {} (persistence: {})",
             ctx.instance_id, ctx.instance_persistence_path
         );
+        // The ONLY place this is set. Every read this module serves needs it and
+        // nothing else supplies it.
+        self.persistence_path = Some(ctx.instance_persistence_path.clone());
     }
 }
 
