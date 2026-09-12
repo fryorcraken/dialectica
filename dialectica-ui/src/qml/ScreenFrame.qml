@@ -11,11 +11,8 @@ import QtQuick.Layouts
 // a forum reader. So the column is gone and the card is one column.
 //
 // The rendering obligations the notes carried are not gone; they live in
-// docs/UI-BRIEF.md and, where they are user-facing, in the screen itself.
-// UI-BRIEF's "do not label an ordering 'new' unless it is one" is met by
-// FeedScreen's `orderings` model carrying no label at all while there is only
-// one ordering — the note's own claim, "same order for everyone", turned out to
-// be the thing the brief warns against.
+// docs/UI-BRIEF.md, which is where a screen built in this card goes to find out
+// what it is and is not allowed to claim.
 Rectangle {
     id: root
 

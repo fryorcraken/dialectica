@@ -9,27 +9,29 @@ import QtQuick.Layouts
 // module, via the `Core` singleton, which is the only place a core call is
 // written.
 //
-// This is Stage A of PLAN.md §9.1 and only its first screen: a feed over one
-// Stoa, with the empty and unreadable states that must never look alike. There
-// is no onboarding, no Stoa list, no thread view and no composer — each is a
-// later change, and each needs core methods that do not exist yet.
+// ## There is no screen here yet, and that is the point
+//
+// This file is the CHASSIS: the desk ground, a scrolling viewport, and one card
+// centred in it at the supplied width. It hosts no screen, because none of the
+// screens worth building can render anything yet — no identity exists, no Stoa
+// exists, and core is read-only. Identity creation is the first screen (PLAN.md
+// §9.1), and it arrives as its own change.
+//
+// A module that loads and shows an empty card is honest about that: it proves
+// the plugin loads, the theme resolves and the card sizes itself, which is
+// exactly what this change fixed and all it claims. A module that showed a feed
+// over a Stoa that cannot exist would be asserting something false, and the
+// first launch already demonstrated what that costs to debug.
+//
+// ## Why no StackLayout and no loader
+//
+// Sibling screens are coming and the eventual shape here is almost certainly a
+// StackLayout or a Loader keyed on some route. It is not built yet DELIBERATELY:
+// navigation written before there are two destinations encodes a guess about how
+// they are selected, and the first real screen is what turns that guess into a
+// fact. One screen needs no navigation; two will say what kind it needs.
 Item {
     id: root
-
-    // Which Stoa this view reads.
-    //
-    // **Nothing in core answers this yet**, and that is honest rather than
-    // unfinished: §9.1 Stage D is where `joinStoa` and a list of held Stoas
-    // arrive, and until then there is no source for an address but the one a
-    // developer supplies. So it is empty by default and the feed says plainly
-    // that it was given nothing, rather than inventing a Stoa to show.
-    property string stoaAddress: ""
-    property string stoaTitle: ""
-
-    // The Stoa's genesis record, hex. See FeedScreen — it travels with the
-    // request because nothing records joined Stoas yet, and it is safe to pass
-    // because core verifies it hashes to the address.
-    property string stoaGenesis: ""
 
     Rectangle {
         anchors.fill: parent
@@ -62,11 +64,11 @@ Item {
 
             Item { Layout.preferredHeight: DTheme.cardPaddingY }
 
-            FeedScreen {
+            // The card the first screen will be built in. Empty until that
+            // screen exists; its own implicitHeight keeps it from collapsing
+            // into the spacers above and below.
+            ScreenFrame {
                 id: frame
-                stoaAddress: root.stoaAddress
-                stoaTitle: root.stoaTitle
-                stoaGenesis: root.stoaGenesis
                 Layout.alignment: Qt.AlignHCenter
                 Layout.preferredWidth: Math.min(DTheme.cardWidth, root.width - 2 * DTheme.cardPaddingX)
             }

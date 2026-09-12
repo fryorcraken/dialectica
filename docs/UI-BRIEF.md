@@ -230,14 +230,21 @@ and it resolves when an upstream gap closes, but until then:
 - Whatever you design, **the labels must be able to change** when the real
   ordering arrives, without the layout changing around them.
 
-**What this resolved to, and why it went further than a neutral label.** The
-label shipped as "same order for everyone" and was removed: it is exactly the
-general promise the paragraph above forbids, and with a single ordering there is
-nothing to choose between, so a rendered label was furniture asserting a
-falsehood. The row stays a model with one unlabelled entry — satisfying the
-"labels must be able to change" requirement — and draws nothing until a second
-ordering exists to tell apart. A control that names no alternative is not a
-control.
+**A neutral label is not automatically an honest one, and this was learned the
+expensive way.** A first attempt labelled the ordering "same order for everyone".
+That reads neutral, but it is exactly the general promise the paragraph above
+forbids — it is true only of today's fallback, and it becomes false the moment
+vote-weighting makes two readers' orders legitimately differ.
+
+So the rule is stronger than "pick a neutral word":
+
+- **While only one ordering exists, an ordering control has nothing to choose
+  between** and should render nothing. A control that names no alternative is
+  not a control; it is furniture, and furniture that makes a claim is furniture
+  that can be wrong.
+- Keep the ordering a **model** rather than hard-coded labels, so a second entry
+  can arrive without the layout changing around it — which is what the "labels
+  must be able to change" requirement above is asking for.
 
 This is the clearest instance of the project's tone problem in miniature: the
 convergent order is genuinely useful and genuinely not chronological, and the
@@ -336,17 +343,24 @@ Removal is moderation, which is a different and binding thing.
 A storage failure must never render as an empty feed. An empty feed and "we
 could not read the store" look identical and mean opposite things.
 
-**There is a third case, and it was found by shipping the bug.** When no Stoa
-address has been supplied, the view has not read anything: no store was opened,
-no file was touched. Rendering that as a storage failure put two fabricated
-sentences on screen — "The store could not be read" and "Posts you already hold
-are on disk and unreadable right now" — above the only true line, which was also
-the smallest text in the panel. It invented a fact about the reader's data.
+**There is a third case, and it was found by shipping the bug.** When the view
+has not been given what it needs to read anything — no Stoa address, no identity,
+no selection — then no store was opened and no file was touched. An early screen
+rendered that as a storage failure, which put fabricated sentences on screen
+("the store could not be read", "posts you already hold are on disk and
+unreadable right now") above the only true line. It invented a fact about the
+reader's data.
 
-So the rule generalises: **a state may only make the claims that are true of
-it.** "We have not asked" is not a failure, gets no accent border and no retry
-control (there is nothing to retry), and must not borrow the language of either
-neighbour. Three states, three vocabularies.
+So the rule generalises, and it binds **every** screen, not only a feed: **a
+state may only make the claims that are true of it.** "We have not asked" is not
+a failure — it gets no accent border and no retry control, because there is
+nothing to retry — and it must not borrow the language of either neighbour.
+Three states, three vocabularies.
+
+This applies directly to the screens being built first. An identity screen before
+a key exists, and a Stoa screen before any Stoa is held, are both in the
+"have-not-asked" state rather than a failed one, and neither may imply that
+something went wrong.
 
 **6. A generated name is never unique and never an identifier — the address is.**
 This is obligation 2b again, now applying to the thing **every post is

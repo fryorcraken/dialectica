@@ -7,4 +7,3 @@ PostHeader 1.0 PostHeader.qml
 FlatButton 1.0 FlatButton.qml
 ScreenFrame 1.0 ScreenFrame.qml
 SanitisedText 1.0 SanitisedText.qml
-FeedScreen 1.0 FeedScreen.qml

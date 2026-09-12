@@ -289,7 +289,22 @@ These are structural and bite at build time, not review time.
   **intersection with the container**, never `item.width`/`item.height` or
   `visible`: an overflowing layout child keeps its own geometry and stays
   `visible: true`, so every property-based assertion passes while the user sees
-  nothing. `dialectica-ui/tests/tst_feed_layout.qml` is the local instance.
+  nothing. `dialectica-ui/tests/geometry.js` holds those measuring helpers and
+  `tst_geometry.qml` both tests them and pins the card's `implicitHeight`.
+  **Import the helpers from a new screen's layout spec rather than copying
+  them** — a copy that quietly drops `verticallyOverlap`'s strict-inequality
+  tolerance, or compares against `item.height` after all, still passes its own
+  suite while no longer measuring the thing they exist to measure.
+
+- **`waitForRendering` blocks for its full timeout when nothing is dirty**, and
+  then returns false. So a `settle()`-style helper called before changing
+  anything does not synchronise — it sleeps, and the geometry read after it is
+  whatever was on screen before. A first draft of `tst_geometry.qml` opened each
+  test with a bare wait and paid 5s a time for no synchronisation at all; the
+  suite still passed, which is the point. Wait only *after* a change, and assert
+  the wait's return value so a timeout fails loudly instead of silently
+  measuring a stale frame. Items whose geometry is set directly, with no layout
+  governing them, need no wait — `mapToItem` reflects the assignment on the spot.
 
 ## Scaffold: what `lgs` does and does not do
 
