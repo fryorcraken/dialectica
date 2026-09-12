@@ -200,7 +200,48 @@ rather than two comments agreeing.
 **Severity:** medium. The code is right now; the regression it already suffered
 once has no gate.
 
-**Outcome:**
+**Outcome: FIXED**, taking the second of the two options this entry offers —
+moving the pairing into `core` — and then adding the first as well, because the
+two close different halves.
+
+Addressed here rather than by `tester` (whom it is addressed to) because the fix
+is a code reshape, not a test: the reason no test could pin this is that there was
+nothing in `core` to point a test at. Same finding as `architecture.md` entry 1,
+answered once in both files.
+
+`core::keystore::creator_and_poster_in(dir) -> (PublicKey, Address)` now derives
+both halves in one expression from one `identity_key()` root, with
+`creator_key_in` / `poster_address_in` as the wrappers the adapter calls. Two call
+sites that had to agree became one derivation, so divergence is no longer
+representable.
+
+**The test that fails without it:**
+`wire.rs::the_creator_a_creation_names_is_the_identity_the_probe_reports`. It
+drives *both* wire handlers through those `core` functions against a real on-disk
+keystore. Running this entry's own named mutation — pointing the poster half at
+`ks.stoa_address(...)` — gives **550 passed, 1 failed**, and the one failure is
+that test. Before this change the same mutation left the suite at 550/550.
+
+**And the grep gate this entry asks for**, for the half no test can reach (that
+the adapter still *calls* those functions rather than picking an accessor itself):
+a new Lint step, `the adapter derives the creator and the poster in one place`.
+Both of its checks were verified to fire — removing `poster_address_in` trips the
+name check, and calling `ks.stoa_address(...)` while leaving the name present trips
+the banned-accessor check.
+
+Two corrections to this entry, neither affecting its conclusion:
+
+- The entry says `cargo mutants` "structurally cannot see it". Confirmed, and now
+  partly moot: the derivation it could not mutate lives in a `core` function a test
+  calls directly.
+- `keystore.rs:3048-3055`'s comment claiming to check "the pair the adapter wires
+  up" is corrected in the same commit rather than the test being deleted — the
+  entry is right that the test cannot pin the adapter, and the test is still worth
+  having for what it does pin.
+
+Recorded in `design.md` under *"Where that decision lives:
+`core::keystore::creator_and_poster_in`, because two agreeing call sites are not
+one derivation"*, including what the gate cannot see.
 
 ---
 

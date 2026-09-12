@@ -382,6 +382,67 @@ pub fn default_path_in(dir: &Path) -> PathBuf {
     dir.join("identity.key")
 }
 
+/// Open this peer's keystore out of a storage directory.
+///
+/// [`default_path_in`] then [`open_from_env`], which is the pair every caller
+/// wanting "the keystore in this directory" spelled for itself. It is here rather
+/// than in the module crate because both of those are `core` functions over a
+/// `&Path`: the host's directory is the only thing the adapter knows and `core`
+/// does not, and the directory is already an ordinary argument.
+pub fn open_in(dir: &Path) -> Result<Keystore, KeystoreError> {
+    open_from_env(&default_path_in(dir))
+}
+
+/// The key a Stoa this peer creates names as its creator.
+///
+/// # Why this exists as a named function rather than at the call site
+///
+/// A Stoa's creator is its sole moderator (§6) and the creator is fixed inside
+/// the address preimage forever, so **a creator key this peer would never sign
+/// with is a Stoa nobody can moderate, permanently.** That has already shipped
+/// wrong once here: creation named `derive_stoa_key(root, [0u8; 32])` while the
+/// capability probe reported `derive_stoa_key(root, stoa_address)`, so
+/// `Moderators::of(genesis).contains(posting_key)` was false for a Stoa's own
+/// creator.
+///
+/// The fix for that named the same accessor in two places. **Two call sites that
+/// agree is not the same thing as one derivation**, and the two sites were in
+/// `cfg(logos_scaffold)` code that `cargo test` does not compile, no CI job reads
+/// and `cargo mutants` reports unviable on — so re-diverging them restored the
+/// bug with every gate green. Naming the pairing here is what lets a test reach
+/// it: see [`creator_and_poster_in`].
+pub fn creator_key_in(dir: &Path) -> Result<PublicKey, KeystoreError> {
+    Ok(creator_and_poster_in(dir)?.0)
+}
+
+/// The address this peer posts and is known by — what the capability probe
+/// reports.
+///
+/// The partner of [`creator_key_in`]; both are [`creator_and_poster_in`], which
+/// is where the reasoning is.
+pub fn poster_address_in(dir: &Path) -> Result<Address, KeystoreError> {
+    Ok(creator_and_poster_in(dir)?.1)
+}
+
+/// The creator key and the poster address, **derived once, together**.
+///
+/// This is the function that makes "a Stoa's creator is the key its creator will
+/// actually sign with" a property of one expression rather than of two call sites
+/// agreeing. Both halves come from the one [`Keystore::identity_key`] root, so
+/// they cannot be two keys: there is no argument to pass differently and no
+/// second accessor to reach for.
+///
+/// `identity_*` and **not** `stoa_*`: PLAN.md §5.2's MVP subsection gives a user
+/// one identity across every Stoa, which means not calling `derive_stoa_key` at
+/// all. `Keystore::stoa_key` and its siblings still exist and still take a
+/// caller-chosen `Address`; nothing in this module's wired surface reaches them.
+pub fn creator_and_poster_in(dir: &Path) -> Result<(PublicKey, Address), KeystoreError> {
+    let ks = open_in(dir)?;
+    let creator = ks.identity_public_key();
+    let poster = creator.address();
+    Ok((creator, poster))
+}
+
 /// Everything that can go wrong, each arm distinguishable.
 ///
 /// **Distinguishable is the requirement, not a nicety.** The probe turns each
@@ -3046,8 +3107,14 @@ mod tests {
              it will never sign an op with"
         );
         // And the probe's answer is that same key's address, so what a view shows
-        // as "you" is what the record names. This is the pair the adapter wires
-        // up, checked here because `cfg(logos_scaffold)` is not built by tests.
+        // as "you" is what the record names.
+        //
+        // This asserts a property of TWO `Keystore` METHODS, and it is true
+        // whatever the module wires up — it once read as though it checked the
+        // adapter's pairing, which it cannot. The pairing the module actually
+        // uses is `keystore::creator_and_poster_in`, pinned through both wire
+        // handlers by `wire.rs`'s
+        // `the_creator_a_creation_names_is_the_identity_the_probe_reports`.
         assert_eq!(
             ks.identity_address().to_hex(),
             genesis.creator.address().to_hex(),

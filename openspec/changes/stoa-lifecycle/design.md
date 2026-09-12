@@ -326,6 +326,78 @@ address-determining property and the pinning obligation —
 `[7; 32]` root — but not the preimage argument, which has no purpose once there
 is no synthetic context.
 
+### Where that decision lives: `core::keystore::creator_and_poster_in`, because two agreeing call sites are not one derivation
+
+Found by two reviewers independently — `findings/security.md` entry 3 and
+`findings/architecture.md` entry 1 — and it is about the *shape* of the fix above
+rather than about which key it chose.
+
+**The problem, measured rather than argued.** The fix named
+`identity_public_key()` at `dialectica/rust-lib/src/lib.rs:385` and
+`identity_address()` at `:346`. Those are two independent call sites that have to
+agree, and they sit in the one file no gate reads:
+
+- `cargo test` does not compile it. `build.rs` sets `logos_scaffold` only when
+  `generated/provider_gen.rs` exists, and `git ls-files dialectica/rust-lib/generated`
+  is empty — the builder writes that file and committing a copy would recreate the
+  contract drift `codegen.rust.trait` exists to prevent.
+- `cargo mutants` cannot see the accessors either: run over `keystore.rs` filtered
+  to the six identity/stoa accessors, **all 6 mutants came back unviable** (no
+  `Default` for the key types).
+- The Rust job's clippy and fmt never reach the file, and no Lint-job check read it.
+- **Build LGX** does compile the adapter, so a *type* error would be caught — but
+  `stoa_address` and `identity_address` return the same type, so the wrong *method*
+  compiles green.
+
+So changing `:346` back to `ks.stoa_address(_stoa)` restored the bug this
+Decision exists to prevent, **with every gate green**. A correctness property no
+gate can see is one revert away from being wrong again.
+
+**Chosen:** move the pairing into `core` as a single derivation —
+`keystore::creator_and_poster_in(dir) -> (PublicKey, Address)`, with
+`creator_key_in` and `poster_address_in` as the two thin wrappers the adapter
+calls. Both halves now come out of one expression over one `identity_key()` root,
+so there is no argument to pass differently and no second accessor to reach for:
+the invariant holds **by construction** rather than by two comments agreeing.
+
+**Why it could move at all, which is the load-bearing observation.** Both closure
+bodies contained *no host type*. Each was `core::keystore::default_path_in(&dir)`
+then `core::keystore::open_from_env(&path)` then one accessor — three `core`
+functions over a `&Path`. The stated reason for the closure ("`core` cannot read
+the environment or know the host's layout") applies to **which directory**, not to
+**which accessor**, and the directory is already an ordinary argument everywhere
+else. The closure parameter stays; only the body moved.
+
+**What now pins it.** `wire.rs`'s
+`the_creator_a_creation_names_is_the_identity_the_probe_reports` drives *both wire
+handlers* through the two `core` functions, against a real on-disk keystore, and
+asserts the probe's reported identity is the address of the key the creation
+recorded as creator. Pointing the derivation at `stoa_address` fails that test and
+**only** that test — verified by running the mutation: 550 passed, 1 failed.
+
+That is strictly stronger than what stood before. `keystore.rs`'s
+`the_creator_of_a_stoa_this_keystore_made_can_moderate_it` asserts
+`identity_address() == identity_public_key().address()`, a property of two
+`Keystore` methods that is true whatever the module wires up; its comment claimed
+to be "the pair the adapter wires up, checked here because `cfg(logos_scaffold)`
+is not built by tests", which it structurally could not be. The comment is
+corrected rather than the test deleted — the test is fine, its description was not.
+
+**And a CI grep, for the half no test can reach.** The test proves the derivation
+is *correct*; it cannot prove the adapter still *calls* it. A new Lint step
+(`the adapter derives the creator and the poster in one place`) asserts both
+wrapper names appear in the adapter and that it names no `Keystore` accessor
+itself. Both halves were verified to fire: removing `poster_address_in` trips the
+first, and calling `ks.stoa_address(...)` while leaving the name in place trips the
+second. Stated as what it cannot see: it reads text, so it says nothing about
+correctness — that half is the test's.
+
+**Alternative considered: leave it, and rely on review.** Ruled out by the
+evidence in the finding — this exact divergence already shipped once and was
+caught by a human reading code, not by a gate. `.claude/agents/README.md`'s rule
+applies: *"say what a gate cannot see rather than reporting it as passed."* The
+answer here is that the gap was closable, so it was closed.
+
 ### The reply names its title as founding
 
 `{"stoa":"<hex>","foundingTitle":"…","policy":"open"}` for create and join;

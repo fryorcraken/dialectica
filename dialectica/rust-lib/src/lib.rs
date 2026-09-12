@@ -333,17 +333,18 @@ impl DialecticaModule for Dialectica {
             Ok(d) => d,
             Err(e) => return e,
         };
+        // `poster_address_in` and not an accessor chosen here: WHICH key this is
+        // is a decision, and this file is not compiled by `cargo test`, read by
+        // any CI gate, or mutable by `cargo mutants`. It lived here as two call
+        // sites that had to agree, and re-diverging them restored a shipped bug
+        // with every gate green. `core::keystore::creator_and_poster_in` derives
+        // both halves in one expression and
+        // `the_creator_a_creation_names_is_the_identity_the_probe_reports` fails
+        // when they disagree. The `stoa` argument is still taken — and still
+        // validated by `core` — because the probe is scoped to a Stoa and stays
+        // so when per-Stoa identity is switched back on.
         core::get_capabilities(&request, |_stoa| {
-            // `identity_address` and not `stoa_address(stoa)`: PLAN.md §5.2's MVP
-            // subsection gives a user ONE identity across every Stoa, which means
-            // not calling `derive_stoa_key` at all. The `stoa` argument is still
-            // taken — and still validated by `core` — because the probe is scoped
-            // to a Stoa and stays so when per-Stoa identity is switched back on.
-            //
-            // The one key is what makes a creator able to moderate what it made:
-            // `create_stoa` below names this same key.
-            let path = core::keystore::default_path_in(&dir);
-            core::keystore::open_from_env(&path).map(|ks| ks.identity_address().to_hex())
+            core::keystore::poster_address_in(&dir).map(|a| a.to_hex())
         })
     }
 
@@ -373,19 +374,11 @@ impl DialecticaModule for Dialectica {
         // store holds what was created. `core` cannot know either layout, so the
         // adapter supplies both and `core` decides what their failures mean.
         core::with_membership_store("create_stoa", &core::membership_path_in(&dir), |store| {
-            core::create_stoa(
-                &request,
-                || {
-                    // The SAME key `get_capabilities` above reports. That identity
-                    // is what makes the creator able to moderate what it created:
-                    // `Moderators::of(genesis)` names `genesis.creator` as the sole
-                    // moderator, so a creator key this peer would never sign with
-                    // would be a Stoa nobody can moderate, permanently.
-                    let path = core::keystore::default_path_in(&dir);
-                    core::keystore::open_from_env(&path).map(|ks| ks.identity_public_key())
-                },
-                store,
-            )
+            // The SAME derivation `get_capabilities` above reports — one
+            // expression in `core`, not two call sites here agreeing. See
+            // `core::keystore::creator_and_poster_in` for why that distinction is
+            // the whole point.
+            core::create_stoa(&request, || core::keystore::creator_key_in(&dir), store)
         })
     }
 

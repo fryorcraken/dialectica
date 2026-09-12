@@ -3288,6 +3288,87 @@ mod tests {
     }
 
     #[test]
+    fn the_creator_a_creation_names_is_the_identity_the_probe_reports() {
+        // THE property the `4313cf6` bug broke, pinned where `cargo test` reaches
+        // it. A Stoa's creator is its sole moderator and is fixed inside the
+        // address preimage forever, so a creator key this peer would never sign
+        // with is a Stoa nobody can moderate — permanently, and with no error
+        // anywhere.
+        //
+        // WHY THIS TEST AND NOT `keystore.rs`'s. That one asserts
+        // `identity_address() == identity_public_key().address()`, which is a fact
+        // about two `Keystore` methods and is true whatever the module wires up.
+        // This one goes through the two WIRE HANDLERS, each reached through the
+        // `core::keystore` function the adapter calls — so it fails for the
+        // mutation that actually shipped: pointing one of the two at
+        // `stoa_address(stoa)` while leaving the other alone.
+        //
+        // The mutation it catches, verified by running it: change
+        // `creator_and_poster_in`'s second element to `ks.stoa_address(&creator.address())`
+        // and this test fails, where the whole rest of the suite passes.
+        let dir = WireTempDir::new("creator-is-poster");
+        crate::keystore::Keystore::generate()
+            .create(
+                &crate::keystore::default_path_in(dir.path()),
+                &crate::keystore::Unlock::Unencrypted,
+            )
+            .expect("a keystore is writable into a fresh directory");
+
+        // `create_stoa` is given the creator key exactly as the adapter gives it.
+        let mut store = a_membership_store();
+        let out = create_stoa(
+            &serde_json::json!({ "title": "Agora" }).to_string(),
+            || crate::keystore::creator_key_in(dir.path()),
+            &mut store,
+        );
+        let created: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(
+            created.get("error").is_none(),
+            "creation must succeed: {out}"
+        );
+        let stoa = crate::identity::Address::from_hex(created["stoa"].as_str().unwrap()).unwrap();
+
+        // `get_capabilities` is given the identity lookup exactly as the adapter
+        // gives it — including the `_stoa` argument it must NOT use to derive.
+        let probe = get_capabilities(
+            &serde_json::json!({ "stoa": stoa.to_hex() }).to_string(),
+            |_stoa| crate::keystore::poster_address_in(dir.path()).map(|a| a.to_hex()),
+        );
+        let probed: serde_json::Value = serde_json::from_str(&probe).unwrap();
+
+        // The record the creation retained, read back out of the store rather than
+        // rebuilt, so the creator asserted on is the one that went into the
+        // address preimage.
+        let genesis = store.get(&stoa).unwrap().unwrap().genesis;
+        let moderators = crate::moderation::Moderators::of(&genesis).unwrap();
+
+        // Half one: the identity the probe reports IS the creator's own address.
+        // This is the half that fails when the two derivations diverge.
+        assert_eq!(
+            probed["identity"].as_str(),
+            Some(genesis.creator.address().to_hex().as_str()),
+            "the identity the probe reports must be the address of the key the \
+             creation named as creator, or a view shows the user an identity that \
+             cannot moderate what they just made: probe {probe}"
+        );
+
+        // Half two: and that key is therefore the Stoa's moderator, which is the
+        // authority check the whole pairing exists to satisfy.
+        let reported =
+            crate::identity::Address::from_hex(probed["identity"].as_str().unwrap()).unwrap();
+        assert_eq!(moderators.stoa(), &stoa);
+        assert!(
+            moderators.contains(&genesis.creator),
+            "the creator must be the Stoa's moderator"
+        );
+        assert_eq!(
+            reported,
+            genesis.creator.address(),
+            "and the moderator's address must be the one the probe reported"
+        );
+    }
+
+    #[test]
     fn a_join_verified_at_the_wire_needs_no_op_log_and_no_prior_membership() {
         // "Verification consults nothing but the two inputs", at the wire. Shown by
         // making the SAME decision in three states that differ in everything a

@@ -68,7 +68,38 @@ body, which is the part carrying the decision.
 
 `dialectica/rust-lib/src/lib.rs:336-347` and `dialectica/rust-lib/src/lib.rs:375-389`
 
-**Outcome:**
+**Outcome: FIXED**, in exactly the shape this entry proposes. Same seam as
+`findings/security.md` entry 3, found independently by both dimensions; answered
+once in both files.
+
+The observation that made it possible is this entry's, and it is the load-bearing
+one: **the closure bodies contain no host type at all** — three `core` functions
+over a `&Path`, so "this crate cannot read the environment or know the host's
+layout" applies to *which directory* and not to *which accessor*. That is what I
+checked first, and it holds.
+
+Implemented slightly tighter than the two functions suggested. Rather than
+`core::creator_key_in(&dir)` and `core::identity_in(&dir)` as two independent
+functions — which would still be two derivation positions, just relocated somewhere
+a test can reach — both are wrappers over one
+`core::keystore::creator_and_poster_in(dir) -> (PublicKey, Address)`. Both halves
+come out of one expression over one `identity_key()` root, so "the creator and the
+poster are one key" is a property of one function rather than of two that agree.
+The closure parameter stays, per this entry's own note and Checked-and-clean #2.
+
+**The test that fails without it:**
+`wire.rs::the_creator_a_creation_names_is_the_identity_the_probe_reports`, which
+drives both wire handlers through those functions against a real on-disk keystore.
+This entry's own named failure scenario — swapping in a `stoa_*` accessor — now
+gives **550 passed, 1 failed**; before, the suite stayed at 550/550.
+
+A Lint step was added for the residue a test still cannot reach (whether the
+adapter *calls* those functions at all): `the adapter derives the creator and the
+poster in one place`. Both its checks were verified to fire.
+
+`design.md` records it under *"Where that decision lives:
+`core::keystore::creator_and_poster_in`, because two agreeing call sites are not
+one derivation"* — including what the grep cannot see, which is correctness.
 
 ---
 
