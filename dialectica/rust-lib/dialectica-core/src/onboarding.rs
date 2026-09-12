@@ -77,6 +77,21 @@ const SLATE_PATH_PREFIX: &[u8; 32] = b"/dialectica/1/Slate/Path\0\0\0\0\0\0\0\0"
 /// several simultaneous collisions.
 const MAX_PATH_WALK: u32 = 64;
 
+/// One past the largest derivation path this build can produce.
+///
+/// **The mask and the read-back guard are one rule, and this is where it lives.**
+/// [`derive_path`] masks the top bit off, so every path this build writes is below
+/// 2³¹ — and `identity_store`'s decode refuses anything at or above this value for
+/// the same reason it refuses a negative one. Naming the bound once is what makes
+/// "is it applied everywhere?" a question with an answer: review found the mask
+/// applied at one call site and the guard bounding the whole of `u32`, which is a
+/// wider range than any slate can offer, so a hand-edited row in [2³¹, 2³²) was
+/// accepted and derived a working identity nobody chose.
+///
+/// Two rules that must agree cannot be two constants. A reader changing the mask
+/// changes the guard, because there is only one thing to change.
+pub const PATH_LIMIT: u32 = 0x8000_0000;
+
 /// The 32 bytes a slate is reproduced from.
 ///
 /// **Public randomness, not key material**, and the type says so by being
@@ -142,7 +157,8 @@ impl SlateNonce {
 /// - The value is a positive SQLite `INTEGER` on every path through
 ///   [`crate::identity_store`], so a stored path never needs reinterpreting and
 ///   the out-of-range refusal there is about a hand-edited file rather than about
-///   values this code writes.
+///   values this code writes. That refusal is bounded by [`PATH_LIMIT`], the same
+///   constant this mask is expressed in, so the two cannot drift apart.
 /// - It is a valid **non-hardened** BIP-32 index. `proposal.md` records the LEZ
 ///   wallet direction, where a path would be handed to
 ///   `get_public_key_for_path`; a path above 2³¹ is the hardened range and would
@@ -164,7 +180,11 @@ pub fn derive_path(nonce: &SlateNonce, index: u32) -> u32 {
     let digest: [u8; 32] = hasher.finalize().into();
     let mut head = [0u8; 4];
     head.copy_from_slice(&digest[..4]);
-    u32::from_be_bytes(head) & 0x7fff_ffff
+    // `PATH_LIMIT - 1` rather than a literal `0x7fff_ffff`, so the mask and
+    // `identity_store`'s read-back guard are the same constant rather than two
+    // that have to be kept in step. `PATH_LIMIT` is a power of two, so masking
+    // with `PATH_LIMIT - 1` is exactly "keep every path below it".
+    u32::from_be_bytes(head) & (PATH_LIMIT - 1)
 }
 
 /// One candidate identity: what the view is shown, and what keeping it needs.

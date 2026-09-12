@@ -80,12 +80,21 @@ pub enum IdentityStoreError {
     /// things: one blames the disk, this one says the file is mislabelled. A
     /// half-restored backup or a hand-edited store looks exactly like this.
     LayoutDoesNotMatchItsVersion { version: i32, why: String },
-    /// A stored path was not a value this build can represent as a `u32`.
+    /// A stored path was not a value this build's derivation can produce.
     ///
     /// SQLite's `INTEGER` is an `i64`, so a row can hold a negative or oversized
     /// value that no derivation this build performs could have written. Refused
     /// rather than clamped: coercing would name an identity the user never chose,
     /// which is the one outcome the spec calls unrecoverable.
+    ///
+    /// **The bound is `onboarding::PATH_LIMIT`, not `u32::MAX`.** Review found this
+    /// guard bounding the whole of `u32` while the values `derive_path` writes are
+    /// bounded to below 2³¹, so every row in [2³¹, 2³²) was inside the guard,
+    /// outside what any slate can offer, and accepted silently — and because
+    /// `derive_stoa_key_at_path` has no range precondition, such a row derives a
+    /// working Ed25519 key. The user then posts under an identity they never
+    /// picked, with no error anywhere, which is exactly the outcome the refusal
+    /// exists to prevent and the wider bound let through.
     PathOutOfRange { stoa: String, found: i64 },
     /// A stored Stoa address was not 32 bytes.
     StoaNotAnAddress { found: usize },
@@ -311,7 +320,22 @@ impl IdentityStore {
     /// second choice for one Stoa is a constraint violation, not a row this code
     /// decided to keep. That is the refusal being structural rather than a branch
     /// somebody has to remember at every write.
+    ///
+    /// # The range is checked on the way in as well as on the way out
+    ///
+    /// [`path_from_row`] refuses a stored path at or above
+    /// [`crate::onboarding::PATH_LIMIT`], and this refuses writing one. Both, rather
+    /// than only the read, so the invariant is a property of the table's contents
+    /// rather than of every caller having got it right: a row this build wrote and
+    /// then could not read back would be a store it had bricked itself, which is a
+    /// worse failure than the write being refused.
     pub fn record_path(&self, stoa: &Address, path: u32) -> Result<(), IdentityStoreError> {
+        if path >= crate::onboarding::PATH_LIMIT {
+            return Err(IdentityStoreError::PathOutOfRange {
+                stoa: stoa.to_hex(),
+                found: i64::from(path),
+            });
+        }
         let affected = self
             .conn
             .execute(
@@ -408,23 +432,52 @@ impl IdentityStore {
     }
 }
 
-/// Narrow a stored `i64` back to the `u32` a path is.
+/// Narrow a stored `i64` back to a path **this build's derivation can produce**.
 ///
 /// A named function rather than an inline `try_into` at each of the two read
-/// sites, so that "a stored path outside `u32` is refused and never clamped" is
-/// one rule with one answer to "is it applied everywhere?" — CLAUDE.md's "a guard
-/// is a job".
+/// sites, so that "a stored path outside the writable range is refused and never
+/// clamped" is one rule with one answer to "is it applied everywhere?" —
+/// CLAUDE.md's "a guard is a job".
 ///
 /// Refusing rather than clamping matters more here than it usually would: a
 /// clamped path derives a *valid* key, so the user would be handed a working
 /// identity that is not the one they chose, with no error anywhere. The spec calls
 /// storing an identity the user did not choose unrecoverable, because the choice
 /// cannot be recomputed.
+///
+/// # The bound is the writable range, not `u32`
+///
+/// The first version of this guard fit in `u32` and stopped there, and its own doc
+/// comment claimed the rule had "one answer to *is it applied everywhere?*" — but
+/// the *mask* in [`crate::onboarding::derive_path`] and this *guard* were two
+/// rules, and only the narrower one was the mask. Review measured the consequence:
+/// a hand-edited, restored or file-synced row of `0x8000_0001` is accepted,
+/// `derive_stoa_key_at_path` has no range precondition, and `whoAmI` reports a
+/// working address that is not the user's, with nothing refusing anywhere.
+///
+/// Expressing the bound as [`crate::onboarding::PATH_LIMIT`] is what makes the two
+/// one rule: the mask is `PATH_LIMIT - 1` and the guard is `< PATH_LIMIT`, so a
+/// reader widening one widens the other because there is a single constant to
+/// change. `every_path_a_slate_can_offer_is_inside_the_range_the_record_accepts`
+/// asserts the two against each other rather than each against a literal.
+///
+/// Note what this still does **not** claim: it bounds the path to the range a
+/// slate can offer, not to the five paths a *particular* nonce offers. Those five
+/// are not knowable here — the nonce is not stored, deliberately, and the record
+/// outlives every slate — and the suite itself records paths `1` and `2` by hand.
+/// So the guarantee is "a value this build's derivation could have produced", which
+/// is the property the refusal's reasoning needs and the strongest one available at
+/// this layer.
 fn path_from_row(raw: i64, stoa_hex: String) -> Result<u32, IdentityStoreError> {
-    u32::try_from(raw).map_err(|_| IdentityStoreError::PathOutOfRange {
-        stoa: stoa_hex,
+    let out_of_range = || IdentityStoreError::PathOutOfRange {
+        stoa: stoa_hex.clone(),
         found: raw,
-    })
+    };
+    let path = u32::try_from(raw).map_err(|_| out_of_range())?;
+    if path >= crate::onboarding::PATH_LIMIT {
+        return Err(out_of_range());
+    }
+    Ok(path)
 }
 
 #[cfg(test)]
@@ -739,6 +792,141 @@ mod tests {
                 "path {bad} was not refused by all_paths"
             );
         }
+    }
+
+    #[test]
+    fn a_stored_path_this_build_could_not_have_written_is_refused() {
+        // The regression test for the review finding that `path_from_row` bounded
+        // the whole of `u32` while `derive_path` masks every path it writes below
+        // `PATH_LIMIT`. A row in [2^31, 2^32) is inside `u32`, outside every slate
+        // this build can offer, and derives a perfectly valid key — so accepting
+        // one hands the user a working identity nobody chose, which is the one
+        // outcome the spec calls unrecoverable.
+        //
+        // The values are chosen against the BOUNDARY rather than picked for
+        // flavour: `PATH_LIMIT` itself is the first refused value and
+        // `PATH_LIMIT - 1` the last accepted one, so a guard written with the
+        // comparison inverted fails here rather than passing on both.
+        let dir = TempDir::new("path-above-the-writable-range");
+        let path = dir.store_path();
+        let stoa = a_stoa(b"one");
+        IdentityStore::open(&path)
+            .unwrap()
+            .record_path(&stoa, 1)
+            .unwrap();
+
+        let limit = i64::from(crate::onboarding::PATH_LIMIT);
+        for bad in [limit, limit + 1, i64::from(u32::MAX)] {
+            Connection::open(&path)
+                .unwrap()
+                .execute("UPDATE chosen_paths SET path = ?1", rusqlite::params![bad])
+                .unwrap();
+            let store = IdentityStore::open(&path).unwrap();
+            assert!(
+                matches!(
+                    store.path_for(&stoa),
+                    Err(IdentityStoreError::PathOutOfRange { found, .. }) if found == bad
+                ),
+                "path {bad} is above the writable range and was not refused by path_for"
+            );
+            // Through the export read as well: an export carrying a path this
+            // build cannot have written is an export that restores a different
+            // identity.
+            assert!(
+                matches!(
+                    store.all_paths(),
+                    Err(IdentityStoreError::PathOutOfRange { found, .. }) if found == bad
+                ),
+                "path {bad} is above the writable range and was not refused by all_paths"
+            );
+        }
+
+        // The other half of the boundary, and the half that makes the assertions
+        // above mean something: the largest path a slate CAN offer still reads
+        // back. Without this, a guard refusing everything would pass the loop.
+        let highest = limit - 1;
+        Connection::open(&path)
+            .unwrap()
+            .execute(
+                "UPDATE chosen_paths SET path = ?1",
+                rusqlite::params![highest],
+            )
+            .unwrap();
+        let store = IdentityStore::open(&path).unwrap();
+        assert_eq!(
+            store.path_for(&stoa),
+            Ok(Some(crate::onboarding::PATH_LIMIT - 1)),
+            "the largest path a slate can offer must still read back"
+        );
+    }
+
+    #[test]
+    fn recording_a_path_outside_the_writable_range_is_refused_and_stores_nothing() {
+        // The write half of the same rule. A path the read guard would refuse must
+        // not be writable, or this build could brick its own store: a row it wrote
+        // and then refused to read back is unrecoverable, and there is no migration
+        // path by design.
+        let store = IdentityStore::in_memory().unwrap();
+        let stoa = a_stoa(b"one");
+
+        assert!(
+            matches!(
+                store.record_path(&stoa, crate::onboarding::PATH_LIMIT),
+                Err(IdentityStoreError::PathOutOfRange { .. })
+            ),
+            "PATH_LIMIT is the first value outside the writable range and must be refused"
+        );
+        assert!(
+            matches!(
+                store.record_path(&stoa, u32::MAX),
+                Err(IdentityStoreError::PathOutOfRange { .. })
+            ),
+            "u32::MAX is outside the writable range and must be refused"
+        );
+        // Refused means nothing was written, not merely that an error came back:
+        // a refusal that had already inserted would leave the Stoa's primary key
+        // taken and the user unable to choose at all.
+        assert_eq!(store.path_for(&stoa), Ok(None));
+        assert_eq!(store.all_paths(), Ok(vec![]));
+
+        // And the boundary below it writes, so the refusal is not unconditional.
+        store
+            .record_path(&stoa, crate::onboarding::PATH_LIMIT - 1)
+            .unwrap();
+        assert_eq!(
+            store.path_for(&stoa),
+            Ok(Some(crate::onboarding::PATH_LIMIT - 1))
+        );
+    }
+
+    #[test]
+    fn every_path_a_slate_can_offer_is_inside_the_range_the_record_accepts() {
+        // The two rules this change ties together, asserted against each other
+        // rather than each against a literal: every path `derive_path` produces is
+        // a path `path_from_row` accepts. A mask widened without widening the
+        // guard, or a guard narrowed without narrowing the mask, fails here.
+        //
+        // 400 paths across four nonces rather than one slate's five, because the
+        // top bit of a digest is set about half the time and five draws would miss
+        // a broken mask more often than not.
+        let mut checked = 0;
+        for seed in [0x00u8, 0x5a, 0xa5, 0xff] {
+            let nonce = crate::onboarding::SlateNonce::from_hex(&hex::encode([seed; 32])).unwrap();
+            for index in 0..100u32 {
+                let path = crate::onboarding::derive_path(&nonce, index);
+                assert!(
+                    path < crate::onboarding::PATH_LIMIT,
+                    "derive_path produced {path}, which is outside the writable range"
+                );
+                assert_eq!(
+                    path_from_row(i64::from(path), "stoa".to_string()),
+                    Ok(path),
+                    "the record refuses path {path}, which a slate can offer"
+                );
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 400, "the walk did not cover what it claims to");
     }
 
     #[test]

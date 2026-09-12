@@ -15,7 +15,7 @@ dialectica-core`).
 
 ---
 
-## S1 — A hand-edited `path` column derives a *working* identity that is not the user's, and nothing refuses it (HIGH)
+- [x] **S1 — A hand-edited `path` column derives a *working* identity that is not the user's, and nothing refuses it (HIGH)**
 
 **For: `dev-writer`** (and `spec-writer` for the range requirement it needs).
 
@@ -75,6 +75,48 @@ derivation can produce — at minimum `path < 0x8000_0000`, applied in
 function already exists to provide). The spec needs a requirement stating the
 recorded path's admissible range; today it states none, which is why
 `path_from_row`'s bound was free to be the wrong one.
+
+**Fixed.** The finding's diagnosis is exactly right, including that the reason
+the bound was wrong is that the mask and the guard were two rules. So the fix is
+not "change `u32::MAX` to `0x8000_0000`" — that would leave two rules that
+happen to agree today. `onboarding::PATH_LIMIT` is now the single constant:
+`derive_path` masks with `PATH_LIMIT - 1` and `path_from_row` refuses
+`>= PATH_LIMIT`, so widening one widens the other because there is one thing to
+change.
+
+The guard is applied on the **write** side too (`record_path`), which the finding
+did not ask for. Read-only would leave this build able to write a row it then
+refuses to read, and with no migration path by design that is a store bricked by
+its own writer.
+
+Three tests, each watched failing first:
+
+- `a_stored_path_this_build_could_not_have_written_is_refused` — `PATH_LIMIT`,
+  `PATH_LIMIT + 1` and `u32::MAX` through both `path_for` and `all_paths`, plus
+  `PATH_LIMIT - 1` still reading back so a guard refusing everything fails too.
+  Measured failing before the fix: *"path 2147483648 is above the writable range
+  and was not refused by path_for"*.
+- `recording_a_path_outside_the_writable_range_is_refused_and_stores_nothing` —
+  the write half, asserting the record is still empty afterwards rather than only
+  that an error came back.
+- `every_path_a_slate_can_offer_is_inside_the_range_the_record_accepts` — 400
+  paths across four nonces asserted against `path_from_row` directly. This is the
+  one that pins the two rules *to each other* rather than each to a literal, which
+  is the property that was missing. 400 rather than one slate's five because a
+  digest's top bit is set about half the time.
+
+**Not claimed, and said so in `path_from_row`'s doc comment:** this bounds a path
+to the range a slate *can* offer, not to the five a particular nonce *did*. Those
+five are not knowable at this layer — the nonce is deliberately not stored — and
+the finding's own observation that the suite records paths `1` and `2` by hand is
+why. "A value this build's derivation could have produced" is the strongest
+property available here.
+
+**For `spec-writer`:** the finding's last sentence is a live spec gap — there is
+no requirement stating the recorded path's admissible range, and the bound above
+is therefore a dev choice. It is not marked `NO SPEC:` because it is not a silence
+the code chose to fill arbitrarily; it is the mask's range, which the spec does
+constrain indirectly. Recorded in `design.md` under Decisions.
 
 ---
 

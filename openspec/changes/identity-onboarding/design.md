@@ -162,6 +162,49 @@ representable as a positive SQLite `INTEGER` and as a non-hardened BIP-32 index,
 so the recorded value does not need reinterpreting if the LEZ wallet direction
 in `proposal.md` is ever taken.
 
+### The path's range is one constant, because the mask and the read guard are one rule
+
+`onboarding::PATH_LIMIT` is `0x8000_0000`. `derive_path` masks with
+`PATH_LIMIT - 1`; `identity_store::path_from_row` refuses `>= PATH_LIMIT` on read
+and `record_path` refuses it on write.
+
+**Recorded because the first version got this wrong in a way that reads as
+correct.** `path_from_row` bounded the path to `u32`, and its doc comment claimed
+the rule had "one answer to *is it applied everywhere?*". It did not: the mask
+bounded writes to below `2^31` and the guard bounded reads to below `2^32`, so
+every value in `[2^31, 2^32)` was inside the guard, outside what any slate can
+offer, and accepted silently. Security review measured the consequence — a
+hand-edited, restored or file-synced `identity.sqlite` row of `0x8000_0001`
+derives a *working* Ed25519 key, because `derive_stoa_key_at_path` has no range
+precondition, and `whoAmI` then reports an address that is not the user's with
+nothing refusing anywhere. That is the outcome the refusal exists to prevent,
+reached through the refusal.
+
+The alternative considered and rejected was to change the literal in the guard
+from `u32::MAX` to `0x8000_0000`. It closes the measured hole and leaves the
+defect: two rules that agree today, either of which a later reader can widen
+alone. Naming the bound once is CLAUDE.md's "complexity in the data structure"
+applied to a constant — there is one thing to change, so the two cannot drift.
+
+**The guard is on the write side as well as the read side**, which is not
+symmetry for its own sake: a row this build wrote and then refused to read back
+would be a store it had bricked itself, and `create_schema` states there is no
+migration path by design.
+
+**What this does not claim.** It bounds a path to the range a slate *can* offer,
+not to the five a particular nonce *did*. Those five are not knowable at the
+store layer — the nonce is deliberately not stored, and the record outlives every
+slate — so the property is "a value this build's derivation could have produced".
+That is what the refusal's reasoning requires and the strongest available here.
+Narrowing further would mean storing the nonce, which is the held-slate shape
+this design rejects above.
+
+**The spec states no range for the recorded path**, which is why the original
+bound was free to be the wrong one. Flagged to `spec-writer` rather than left as a
+`NO SPEC:` marker, because this is not an arbitrary filling of a silence: the
+range is the mask's, and the mask the spec's requirement that a recorded path be
+what the derivation produced.
+
 **Why derived rather than five random `u32`s.** Five random values would need all
 five stored or re-randomised, which reintroduces the held-slate problem. One
 nonce reproduces all five, and the spec's "Requesting another set yields
