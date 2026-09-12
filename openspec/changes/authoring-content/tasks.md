@@ -135,7 +135,7 @@ handlers:
 | Mutation | Tests that failed |
 |---|---|
 | Sink hoisted above the direction parse in `publish_vote` | `a_refused_publish_reaches_neither_the_append_nor_delivery`, `the_append_completes_before_delivery_is_invoked_on_all_three_handlers`, `the_three_handlers_share_one_signature_the_adapter_can_dispatch_over` |
-| Sink hoisted above the append in `publish_post`, with a correctly **precomputed** op id and the success-arm call removed | `the_append_completes_before_delivery_is_invoked_on_all_three_handlers`, `a_publish_whose_delivery_panics_still_reports_the_op_as_published` |
+| Sink hoisted above the append in `publish_post`, with a correctly **precomputed** op id and the success-arm call removed | `the_append_completes_before_delivery_is_invoked_on_all_three_handlers`, `a_publish_whose_delivery_panics_leaves_the_op_in_the_log` |
 
 The second is the one the original suite could not see at all: a precomputed id
 satisfies "the sink was handed the op that was published", so only a test that
@@ -313,11 +313,18 @@ covered by the marker above.
   variant, so there is nothing to enforce yet. Named in `design.md` rather than
   left to be discovered.
 
-## 11. Two requirements that no test here discharges, and why each is different
+## 11. Three requirements this change does not discharge, and why each is different
 
 These are **not** ticked as tested, because ticking them would be the failure
 `.claude/agents/README.md` names: a scenario that cannot be tested, satisfied on
 paper.
+
+The three are different in kind, and the difference is the point. One is a gap this
+change's **design** creates and could close (the no-identity trigger). One is a
+**contradiction** between the code and the scenario that someone must resolve
+either way (the declined handoff). One is satisfied **structurally**, which is
+stronger than a test and would be weakened by recording it as coverage (no key
+material).
 
 ### "A publish requires a usable identity and says so when there is none" — not discharged here, and the reason is this change's design rather than the spec
 
@@ -372,6 +379,45 @@ shape only when the builder's build has compiled the adapter.
 
 What the spec should **not** be told is that it asks for something unobservable.
 It does not; this change chose a shape that cannot observe it.
+
+### "A declined handoff leaves the op published" — the code contradicts the scenario, and the spec must pick
+
+Found by review, and by two reviewers independently (`findings/design-review.md`
+F6, `findings/spec-test.md` entry 1). **This is a live contradiction, not a
+coverage gap.**
+
+`deliver` is called *inside* `guarded` in all three handlers, so a sink that
+panics is caught and the reply becomes `{"error":"panic in publish_post: …"}`
+with **no `opId`** — for an op that is in the log. The requirement says a publish
+"SHALL NOT be reported as having failed on the strength of a delivery outcome"
+and the scenario's condition is "delivery **refuses or errors** on the handoff",
+which a panic is the most violent form of.
+
+Measured: adding "no `error` key" and "`opId` equals the expected id" to the test
+fails, 530 passed / 1 failed, with the reply printed as the error shape.
+
+The user-visible cost, which is what makes this worth settling rather than
+documenting: a view is told the post failed, shows "posting failed", and the user
+retypes and resubmits — while the first op is already in the log and will be
+handed to delivery again. They are told the opposite of the truth, which is what
+the requirement's second paragraph exists to prevent.
+
+**For the spec-writer**, three routes and they are not equivalent:
+
+1. Move the `deliver` call outside `guarded`, so a sink's panic cannot overwrite a
+   success reply. Honours the scenario as written; needs care that the panic still
+   cannot abort the module process.
+2. Scope the requirement to a sink that *returns* rather than unwinds, and say so
+   — noting that nothing in this API distinguishes the two, which is why the
+   ambiguity exists at all.
+3. Keep the behaviour and contract it: a delivery panic is an infrastructure fault
+   reported as one, with the op still published. This needs the retry path spelled
+   out, because a caller that sees `{"error":…}` and retries publishes nothing new
+   and is told so only by `wasNew`.
+
+The test is renamed `a_publish_whose_delivery_panics_leaves_the_op_in_the_log`,
+which is what it actually pins — it asserted the log and never the reply, while
+its old name claimed the requirement in English.
 
 ### "A refused publish creates no key material" — satisfied structurally, not covered
 

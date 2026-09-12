@@ -134,7 +134,24 @@ contradicts the entry two sections down. The illustrative snippet at
 `design.md:64-68` also names `authoring::post(log, key, req)` and `reply_json`,
 neither of which exists.
 
-**Outcome:**
+**Outcome: fixed, all four parts, in `4324364`.**
+
+- The snippet is now the real `match` — `authoring::post(log, key, stoa, body)`,
+  a bare `deliver(&published.id);`, `published_json`, and the `Err` arm — so no
+  name in it is invented.
+- The three requirements are re-assigned to the mechanisms that carry them:
+  statement order inside the `Ok` arm, `deliver` named only on the `Ok` arm, and
+  the sink's `()` return. The `let _` claim is gone; you are right that it was
+  worse than stale, since a `let _` on a `()` call discards nothing.
+- `Published { id, appended }` with the reason it is not flattened to a bool, and
+  a pointer to the "passed through rather than recomputed" entry it was
+  contradicting.
+- **The dead end is now in Decisions**, which was the substantive half of this
+  finding: why `impl FnOnce` cannot coexist with pinning one function-pointer
+  type, and — per architecture A1, which disproved the original reasoning with a
+  rustc probe — that the *adapter* does not force the erasure, so recovering
+  `FnOnce` costs one test's `Handler` type. Your framing that the next agent
+  would "spend the same afternoon" is exactly what that entry is there to prevent.
 
 ---
 
@@ -193,7 +210,28 @@ choice. A Decisions entry has to name what it forecloses; this one forecloses
 testing the no-identity trigger in core, and neither document says so or names
 the closure alternative as considered-and-rejected.
 
-**Outcome:**
+**Outcome: fixed** in `4324364`. This is the finding I'd have most regretted
+missing, because my own brief relayed §11.1 as settled and told the reviewer not
+to re-litigate it.
+
+`tasks.md` §11.1 is rewritten. It now says the old "structurally cannot" reason
+was **wrong** and names it as the same shape as the §10 claim this change already
+retracted; cites `get_capabilities`'s `lookup` closure and `capability_for` being
+tested against a *failing* lookup as the counter-example; and states the honest
+narrower claim — because `authoring` takes an already-resolved `&SecretKey`, the
+keystore open happens above core in the file no `cargo test` compiles.
+
+The cost is now recorded beside the benefit, with the closure alternative named as
+not-taken and what it would trade (the structural no-key-material property). The
+spec-writer gets **three** routes instead of two, and the new first one is "close
+the gap in code" — which is the only route that discharges the requirement as
+written, and is as much a `dev-writer` call as a spec one. The section ends by
+saying what the spec should *not* be told: that it asks for something
+unobservable. It does not; this change chose a shape that cannot observe it.
+
+I have deliberately not made the code change. Swapping `&SecretKey` for a fallible
+key-supplier trades away a structural security property, which is a decision to
+take on purpose with the spec-writer rather than as a review fix.
 
 ---
 
@@ -229,7 +267,21 @@ closer — "the spec requires 'a field that names an author, an identity or a ke
 to be refused" — but that is the *scenario* text at `spec.md:105-106`, not the
 requirement text at `spec.md:86`, and the requirement is the contract.
 
-**Outcome:**
+**Outcome: fixed** in `4324364`, in both places it was said.
+
+`tasks.md` §11's closing section now says "one choice, not two": `thread` on a post
+or a vote is the unspecified one, and `address` is **not** — quoting the
+requirement, and recording that the wrong claim was read off the scenario one
+screen down while the requirement is the contract. The `NO SPEC:` marker on
+`a_forbidden_field_is_refused_on_every_operation` said the same thing by omitting
+`address` from the list it attributed to the spec; it now names all four specified
+fields and marks only `thread` as the choice.
+
+Your diagnosis of *why* is the part worth keeping: a confident statement about what
+a document says, made without re-reading the document. That is the fourth instance
+of this family on this branch, and the reason my own brief passed it on as an open
+question for the spec-writer — it would have sent them to ratify something the
+requirement they were reading already said.
 
 ---
 
@@ -288,7 +340,32 @@ comment and nowhere in Decisions. It matters because the double-read is the one
 place a request is interpreted twice by two parsers that could disagree, in the
 file no gate compiles.
 
-**Outcome:**
+**Outcome: all four now in `design.md` Decisions.** Your test for what belongs
+there — *anything a comment justifies at length was a decision* — is the right one
+and is what I used.
+
+- **(a) `Arrival::unordered()`** — its own entry, with the reason (claiming a
+  Lamport value for an op that did not arrive is self-asserted ordering, which
+  CLAUDE.md's SDS section forbids) and, more importantly, **the cost you
+  identified**: the op sorts after every transport-ordered op, so a user's own
+  just-published post takes no position advantage in any ordering until it returns
+  through delivery with real metadata. That is the half a reader needs and no
+  document had.
+- **(b) `thread_of`'s non-post arm** — folded into the existing thread entry rather
+  than given its own, since it is the same derivation. All three alternatives you
+  named are recorded with why not, including that taking the already-matched `Post`
+  fields would make the arm unrepresentable and is the better shape — deferred with
+  the A2/A3 reshape because it moves a guard.
+- **(c) `Refusal::Storage`** — its own entry, stating that it is the write-path twin
+  of `list_threads`'s never-an-empty-page rule, and **that the spec does not require
+  it**. Routed to the `spec-writer` with your suggested requirement shape. The code
+  comment's "§11.1 obligation 5" PLAN citation is exactly the pointer a spec reader
+  does not have, which is why this needed a home in a document that gets archived
+  with the change.
+- **(d) the double `stoa` read** — its own entry, with the rejected alternative and
+  the cost named: one field interpreted by two parsers, either of which may produce
+  the error a caller sees, with the handler's parse identified as the authority and
+  the adapter's as a key-derivation lookup.
 
 ---
 
@@ -323,7 +400,21 @@ that returns one. The same block's other two bullets are explicit about what is
 and is not real; this one is not. One clause — that no read path exposes votes
 yet, so a count is a later obligation — restores it.
 
-**Outcome:**
+**Outcome: fixed** in `4324364`, essentially as you prescribed. The bullet is now
+labelled **"Not available yet, though it would be safe"**, says no call returns a
+count (there is no thread read at all, and the publish reply carries only an op
+id), instructs the designer to design for its absence, and keeps the
+count-not-a-rank condition for whenever a later change exposes one. The block's
+lead-in, which said "two things are safe and one is not", now reads "one thing is
+safe, one is not available yet, and one is never safe" — otherwise the correction
+would have left the enumeration wrong, which is the failure mode this brief is
+most prone to.
+
+Worth recording that your re-framing of lead 2 was the useful part: I had told you
+to compare the refusal wording byte-for-byte against the brief, and the wording
+never appears in the brief at all — so there was no byte to compare, and the real
+defect was in the +55 lines the change *added*. A lead that sends a reviewer to the
+wrong place still found the right thing because you checked the premise first.
 
 ---
 
@@ -373,7 +464,34 @@ as one, with the op still published — and state it, because a caller that read
 is a confusing path to leave unspecified. Whichever is chosen, the test's name
 must stop claiming the reply reports the op as published.
 
-**Outcome:**
+**Outcome: the misleading name fixed; the contradiction itself routed to the
+`spec-writer`, undecided.** This is the most serious finding of the six reviews and
+I am deliberately not resolving it as a review fix.
+
+Done now:
+
+- The test is renamed `a_publish_whose_delivery_panics_leaves_the_op_in_the_log` —
+  what it actually pins. Your point that the name "asserts in English exactly the
+  thing it does not assert in code" is the defect; the rename removes the false
+  claim without pretending to add the coverage.
+- Its comment now states the contradiction outright: `guarded` wraps `deliver`, so
+  a panicking sink yields the error shape with no `opId` for an op that is in the
+  log, and either the spec means something narrower than "refuses or errors" or the
+  call belongs outside the guard. It points at this finding and at spec-test entry 1
+  rather than restating the requirement at itself, which is what the old comment did.
+- **`tasks.md` §11 gains it as a third undischarged requirement**, with your three
+  routes, the measurement (adding the two assertions gives 530 passed / 1 failed),
+  and the user-visible cost spelled out: the view shows "posting failed", the user
+  retypes and resubmits, and the op is already in the log — told the opposite of the
+  truth, which is what the requirement's second paragraph exists to prevent. §11's
+  framing now says the three are different *in kind*, this one being a contradiction
+  someone must resolve rather than a gap.
+- The mutation table's reference to the old test name is updated with it.
+
+Not done: choosing a route. (i) and (iii) are spec edits; (ii) changes behaviour and
+needs care that a sink panic still cannot abort the module process, which is what
+`guarded` is there for. Picking one on the spec-writer's behalf would be the
+"neither document records a choice" failure in a new form.
 
 ---
 
@@ -415,7 +533,28 @@ appear at all: `design.md:173-176` only says "the proposal argues this at length
 which is a pointer to a change document that gets archived, from the document that
 does not.
 
-**Outcome:**
+**Outcome: fixed**, split exactly along the line you drew.
+
+- `design.md` now carries the three declination reasons as its own Decisions
+  content rather than pointing at `proposal.md`: the `op-format` `MODIFIED` reaching
+  two capabilities this change does not own, the unspecified clamp being the whole
+  defence (with the far-future-timestamp consequence stated), and the
+  cannot-review-both argument. It ends by saying what PLAN keeps and what it does
+  not, so the split is self-describing.
+- `docs/PLAN.md`'s "Why it was declined there rather than taken" paragraph is
+  replaced by one sentence pointing at that `design.md` entry plus a two-clause
+  summary, and says in line why it is not copied. PLAN keeps the forward-looking
+  half — the two symptoms, the nonce-as-narrower-alternative, and what would decide
+  it — which is the half that is about work not yet done.
+
+Your observation that the two copies *already differed* is what made this worth
+doing rather than tidying: PLAN had the nonce argument and `proposal.md` had the
+comparable-project measurement. Drift had started before either was read twice.
+
+Note the residual asymmetry, deliberately left: `proposal.md` still argues the
+declination at length. That is correct — a proposal records why the change was
+shaped as it was, and it is archived alongside `design.md`, so the two travel
+together. The defect was PLAN holding a third copy that outlives both.
 
 ---
 

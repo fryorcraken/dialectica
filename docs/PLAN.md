@@ -4284,13 +4284,11 @@ thing (§2.3).
   caller, and names this field as the declined fix. So the next reader meets a
   decision rather than a user complaint.
 
-  **Why it was declined there rather than taken:** it is a `MODIFIED` to
-  `op-format`'s "An op carries no ordering field and no per-peer state", a
-  requirement that forbids a wall-clock field in terms `relevance-ordering`'s age
-  requirement and §7.2 rule 5 both rest on; the clamp is the whole defence and is
-  unspecified (see the adversarial cases above — a far-future `createdAt` pins a
-  post to the top permanently, measured in Appendix A); and a change that adds an
-  authoring API and re-versions the op format cannot be reviewed for either.
+  **Why the authoring change declined it** is recorded where that reasoning
+  belongs, in that change's `design.md` under Decisions, rather than copied here —
+  two copies of a rationale drift and the wrong one gets read. In short: it is a
+  `MODIFIED` to `op-format`'s "An op carries no ordering field and no per-peer
+  state", and the clamp that would make it safe is unspecified.
 
   **A nonce is the narrower alternative** — it separates two identical posts and
   does nothing for ordering. Worth naming so the two are not conflated: if only

@@ -49,9 +49,40 @@ it: three named request structs (`PostRequest`, `ReplyRequest`, `VoteRequest`),
 so that holding a value of the type would be *evidence* every field had parsed.
 What shipped is the same statement sequence written out in each of the three
 handlers. The requirement still holds, but it holds three times over rather than
-by construction, and a fourth operation would copy the sequence — including
-`reject_forbidden_fields`. The reshape is recorded as a live option rather than
-as done.
+by construction.
+
+### The reshape this leaves on the table, and why it is a precondition of a fourth operation
+
+Two sequences are copied three times: the parse prologue (`parsed_object`,
+`reject_forbidden_fields`, `required_stoa`, then the per-kind fields) and the
+append-then-deliver tail (`deliver` on the `Ok` arm, `error_json` on the `Err`).
+What is common in both is a **sequence**, which is what a shape can hold and a copy
+cannot — so three requirements this document calls structural are in fact each
+true of three copies independently.
+
+The evidence that this costs something is in the change's own history rather than
+in principle: `tasks.md` §7's mutation 8 had to be re-run per handler, and one of
+the three turned out to be caught only by a sink-call *count* — which would miss a
+hoist that replaced the later call instead of adding to it. A per-handler mutation
+is only writable because there are three independent places to write it.
+
+The shapes: a `deliver_and_reply(Result<Published, Refusal>, &mut dyn FnMut(&OpId))`
+owning the tail, so `deliver` is named once on one success arm and a handler has no
+op id to hoist; and a request type whose single constructor runs the prologue, so a
+fourth operation inherits `reject_forbidden_fields` by taking the type rather than
+by its author remembering to copy three lines. "Is the guard called everywhere?"
+then becomes a question the type system answers instead of one a test loop answers
+— and `tasks.md` §9 already notes the guard being forgotten in one handler is
+invisible without checking all three. CLAUDE.md's rule is that the fourth
+slightly-different copy of a guard is the signal to reshape rather than to add a
+fourth test; this change added the looping test, which is the right test and is not
+a reshape.
+
+**Not done here** because it changes no behaviour but does reshape three call
+sites, and a refactor belongs in its own commit that leaves every gate green. It is
+a precondition of the next operation rather than a cleanup after it: `OpKind`
+already has a `Moderate` variant, so `publish_moderation` is the copy that would
+otherwise make this the fourth.
 
 ### The three operations share one `publish` and differ only in what they build
 
@@ -157,6 +188,22 @@ comment is corrected in this change, because a reader who believed it would
 expect `thread` to be non-`None` on every stored root and derive the thread
 wrongly.
 
+**The non-post arm answers rather than panicking.** `thread_of` matches on an
+`OpKind`, so it needs an arm for kinds that are not posts. It returns the op's own
+id — treating the op as its own thread root, which is the same answer a root post
+gets, so no caller sees a shape it has not already handled. The arm is unreachable
+today: `reply` refuses a non-post parent before `thread_of` is called, and
+`thread_of` has exactly one caller.
+
+Three alternatives, and why not: a `panic!`/`unreachable!` is the one to avoid
+outright, because a panic aborts the module process rather than failing one call.
+An `Option<OpId>` return would push a `None` case onto the single caller that has
+already excluded it. Taking the already-matched `Post` fields instead of `&Op`
+would make the arm *unrepresentable* — the "make the mistake impossible" move this
+project prefers — and is the better shape; it is not taken here only because the
+guard that makes it safe already exists in `reply` and moving it would be a reshape
+of the same family as the prologue/tail one above. Worth doing with those.
+
 ### Publishing does not verify the Stoa's genesis record
 
 `list_threads` takes a genesis record because it needs a moderator set. No
@@ -199,11 +246,73 @@ wrong model whichever operation they sent it to.
 says nothing about one on a post or a vote. Refusing everywhere is chosen, and
 marked in the test.
 
-## What is deliberately not here
+### A locally-published op arrives `unordered`, and pays for it in every ordering
 
-- **No `createdAt`, no nonce.** The proposal argues this at length. The
-  consequence — identical content publishes once — is implemented as the spec
-  contracts it and is visible to the caller through `wasNew`.
+`Arrival` offers `ordered(lamport, message_id)`, `unordered()` and `from_parts`,
+so this is a choice rather than the only option. A published op takes
+`Arrival::unordered()`, because it did not arrive: claiming a Lamport value for an
+op this peer created would be self-asserted ordering, which is the thing
+CLAUDE.md's SDS section says must come from inside a signed preimage a relay
+cannot forge rather than from whoever happens to be writing the row.
+
+**The cost, stated because it is not obvious and is permanent.** An op with no
+Lamport value sorts *after* every transport-ordered op, in the degraded
+ascending-op-id block. So a user's own just-published post takes no position
+advantage in any ordering — it does not appear at the top of the feed it was
+posted into. That is the honest consequence of not inventing an ordering value,
+and it resolves the moment the op comes back through delivery with real transport
+metadata. It is the same gap `createdAt` would close, declined here for the
+reasons the proposal gives.
+
+### A store failure is a distinguishable refusal, not an absent parent
+
+`Refusal::Storage` exists, and a `From<OpLogError>` routes every `?` in the module
+into it, so "the store is broken" never arrives at the caller wearing "the parent
+has not propagated"'s clothes. The two call for opposite responses — fix the disk
+versus wait — and `a_store_that_cannot_be_read_is_a_refusal_and_not_an_absent_parent`
+pins that the underlying reason survives.
+
+This is the write-path twin of `list_threads`'s rule that a storage failure is
+never an empty page. **The spec does not require it** — no requirement in
+`content-authoring` or `module-wire-contract` owns a store failure on the publish
+path — so it is observable behaviour this change chose. Recorded here and routed to
+the spec-writer rather than left as a code comment citing a PLAN section number a
+spec reader does not have open.
+
+### The adapter reads `stoa` twice, and the second parser is the authority
+
+`Dialectica::publishing` parses the request far enough to get the Stoa, because the
+signing key is per-Stoa and must exist before a handler can be called; the handler
+then parses the whole request properly, including that same field. The alternative
+— thread the parsed `Address` in from the adapter — was rejected because it would
+put half the request's validation in `src/lib.rs`, the one file no `cargo test`
+compiles.
+
+The cost is that one field is interpreted by two parsers that could in principle
+disagree, and the error a caller sees for a malformed `stoa` may come from either.
+The handler's parse is the one that owns the contract; the adapter's is a
+key-derivation lookup that happens to need the same bytes.
+
+- **No `createdAt`, no nonce**, and this is the one place that reasoning lives.
+  Three things ruled it out, and each would have to be answered rather than
+  argued around:
+
+  1. It is a `MODIFIED` to `op-format`'s "An op carries no ordering field and no
+     per-peer state" — a requirement that forbids a wall-clock field in terms
+     `relevance-ordering`'s age requirement and PLAN's ranking rules both rest on.
+     Changing it reaches two capabilities this change does not own.
+  2. **The clamp is the whole defence and is unspecified.** An unclamped
+     author-asserted timestamp lets a far-future value pin a post to the top of a
+     recency ordering permanently. Adding the field without specifying the clamp
+     ships the attack.
+  3. A change that adds an authoring API *and* re-versions the op format cannot be
+     reviewed for either.
+
+  The consequence — identical content publishes once — is therefore implemented as
+  the spec contracts it rather than worked around, and is visible to the caller
+  through `wasNew`. PLAN keeps the forward-looking half (that the question is open,
+  that a nonce is the narrower alternative if only deduplication is wanted, and what
+  would decide it); it does not keep a second copy of the three reasons above.
 - **No score, count or tally on a vote reply.** The reply shape is the same
   `{"opId","wasNew"}` as the others. Nothing in this change reads a `Vote` op.
 - **No revision, no moderation, no attachments.** Out of scope per the proposal.

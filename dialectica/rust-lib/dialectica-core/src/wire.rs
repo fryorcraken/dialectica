@@ -2690,12 +2690,26 @@ mod tests {
     }
 
     #[test]
-    fn a_publish_whose_delivery_panics_still_reports_the_op_as_published() {
-        // A declined handoff leaves the op published. A panicking sink is the
-        // most violent decline available, and the guard turns it into the error
-        // shape — but the requirement is about the LOG, so what this pins is
-        // that the op stays: the append completed before delivery was reached
-        // and nothing rolls it back.
+    fn a_publish_whose_delivery_panics_leaves_the_op_in_the_log() {
+        // A panicking sink is the most violent form of "delivery errors on the
+        // handoff". What this pins is that the op STAYS: the append completed
+        // before delivery was reached and nothing rolls it back.
+        //
+        // What it deliberately does NOT pin is the reply, and that gap is a known
+        // open question rather than an oversight. `guarded` wraps the `deliver`
+        // call, so a panicking sink turns a successful publish into
+        // `{"error":"panic in publish_post: …"}` carrying no `opId` — while the op
+        // is in the log. The requirement says a publish "SHALL NOT be reported as
+        // having failed on the strength of a delivery outcome" and its scenario
+        // says the reply "names its op id", so either the spec means something
+        // narrower than "refuses or errors" or the `deliver` call belongs outside
+        // the guard. Nothing in this API distinguishes "declined" from "panicked",
+        // which is why this is the spec-writer's call and not settled here; see
+        // `findings/design-review.md` F6 and `findings/spec-test.md` entry 1.
+        //
+        // This test was named `…_still_reports_the_op_as_published` and asserted
+        // no such thing — the name claimed the requirement while the body checked
+        // only the log. Renamed to what it actually pins.
         let mut log = MemoryOpLog::new();
         let key = publish_key();
 

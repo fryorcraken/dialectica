@@ -74,7 +74,23 @@ at-most-once is worth having — change the test's `Handler` type and recover
 `impl FnOnce`. Do not leave the current reasoning standing; a future reader will
 cite it.
 
-**Outcome:**
+**Outcome: fixed** — the first of the two options, in `4324364`. The doc comment
+at `wire.rs:698` now says the single-pointer requirement is the *test's*, names
+`the_three_handlers_share_one_signature_the_adapter_can_dispatch_over` as its
+source, states explicitly that `Dialectica::publishing` is generic over the
+handler and would accept a generic sink, and records that recovering `FnOnce`
+costs that test's `Handler` type rather than a redesign — so the question is left
+open rather than pre-emptively closed. The test's own comment at `wire.rs:3099`,
+which repeated the same false claim, is corrected with it.
+
+The second option is deliberately not taken here: changing the `Handler` type to
+recover at-most-once is a behaviour-shaped decision about what the erased sink
+buys, and this commit is comment-and-prose only. It is now a live option a reader
+can act on, which it was not before. `design.md` also gains the dead end in
+Decisions (design-review F1).
+
+Your rustc probe is the measurement that settled it, and it is worth saying that
+no gate in this repo could have: the adapter is behind `cfg(logos_scaffold)`.
 
 ---
 
@@ -158,7 +174,26 @@ Note the asymmetry that makes this a real omission rather than taste: the change
 than three times against three near-copies" (`authoring.rs:157-158`). The
 append-then-deliver half of the same ordering requirement got three near-copies.
 
-**Outcome:**
+**Outcome: accepted and deferred**, with the reasoning recorded so it is not
+re-derived. The asymmetry argument is the one that persuades — this change applied
+the principle to sign-then-append and not to append-then-deliver, and
+`cbaacdc`'s own history shows the cost (mutation 8 had to be re-run per handler,
+and one of the three turned out to be caught only by a sink-call count).
+
+Not done here for the reason CLAUDE.md gives: `deliver_and_reply` changes no
+behaviour but does reshape three call sites, and "a diff that reshapes and alters
+behaviour at once cannot be reviewed for either" cuts both ways — a refactor
+belongs in its own commit that leaves every gate green, not appended to a
+comment-correction commit. It also overlaps A3: both findings are the same
+prologue/tail split, and doing one without the other leaves the handlers
+half-reshaped.
+
+**Where it now lives:** recorded in `design.md`'s Decisions entry on the parse
+prologue as a live reshape, together with A3. The next change to touch these
+handlers — most likely the fourth operation, which A3 shows cannot be added
+without copying both guards — should do the reshape first and then be small. If
+that change is `publish_moderation`, this is a precondition of it rather than a
+cleanup after it.
 
 ---
 
@@ -219,7 +254,26 @@ type system answers instead of a question a test loop answers.
 For `design-reviewer`: whichever way this is resolved, `design.md:39-40` names
 three structs that do not exist and must stop doing so in the same change.
 
-**Outcome:**
+**Outcome: split — the documentation half fixed, the reshape deferred with A2.**
+
+The half that was urgent is done in `4324364`: `design.md` no longer claims the
+three structs exist. It now describes what each handler actually reads, says the
+structs were **planned and not built**, says what holding one would have bought
+(a value of the type is evidence every field parsed), and states plainly that the
+requirement therefore holds three times over rather than by construction, and that
+a fourth operation would copy the prologue including `reject_forbidden_fields`.
+Three reviewers independently flagged the phantom structs (you, readability 2,
+design-review F1), which is why that half did not wait.
+
+The reshape itself is deferred with A2, same reason and same home: it is a
+behaviour-preserving refactor of three call sites and belongs in its own green
+commit, and the two findings are one reshape rather than two.
+
+Your CLAUDE.md citation is the sharpest thing in this file — *"when you find
+yourself writing the fourth slightly-different copy of a guard, that is the signal
+to reshape rather than to add a fourth test"*, and the change wrote the looping
+test. That is now recorded in `design.md` rather than only here, because it is the
+kind of reasoning that should survive this directory being deleted.
 
 ---
 
@@ -262,7 +316,22 @@ then adds only its kind check, which is genuinely its own (a vote deliberately
 does not have one — `authoring.rs:313-323` argues that well and it should stay
 outside the shared helper).
 
-**Outcome:**
+**Outcome: agreed, no change** — which is what the finding itself recommends, and
+it is recorded rather than actioned on purpose. Two copies is below this project's
+stated reshape threshold, and refactoring at the second copy is the speculative
+refactoring CLAUDE.md warns against in the same breath as the fourth-copy rule.
+
+Kept because the value is the *trigger condition*, which is now written down: the
+third copy arrives with any op naming a target it must hold — a moderation or a
+revision — and at that point `&'static str` as the discriminator is carrying the
+difference between three guards. The proposed `held_in_stoa` signature and the note
+that `reply`'s kind check stays outside it are the useful part and are preserved
+here verbatim for whoever writes that change.
+
+Not lifted into `design.md`: a reshape that should happen later under a named
+condition is scaffolding for the next change rather than a decision this one took,
+and `design.md` already carries the prologue/tail reshape (A2/A3) which is the one
+a reader needs to know about now.
 
 ---
 
