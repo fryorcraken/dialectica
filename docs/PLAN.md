@@ -975,6 +975,301 @@ later:
   stops signing, and every peer keeps accepting. Check expiry where the claim is
   *used*, not where it is issued.
 
+#### Externally-anchored credentials: keys stay, proofs supplement
+
+**The answer, and a reader can stop here: the identity keys remain the identity,
+and proofs only supplement them.** A proof adds weight to a relevance score and
+may display extra information. It never replaces an identity, renames one,
+authenticates one, or becomes one. So the identity model is **layered** — a
+signing key at the base, optional credentials above it, and **the base unchanged
+by anything above**. Everything below is downstream of that sentence.
+
+That is what makes this subsection a record of a *seam* rather than a design. The
+mechanics are deliberately a later plan; what matters now is that the layering is
+right and that nothing forecloses the upper layer.
+
+A user may one day want to attach an **external** credential to a per-Stoa
+pseudonym — a LEZ token-holding proof (§7.1), an ENS name, an NFT, a DID. The
+question is not whether to support one; it is whether doing so later costs a
+redesign. **It does not, and the evidence is specific:**
+a new op kind takes the next free discriminant, and `op-format`'s spec requires
+that discriminants "be appended, never inserted", so a kind added later "costs
+one unused discriminant and no encoding version, and an older client meets it as
+an unrecognised kind rather than misparsing it". That is a spec requirement with
+a scenario behind it, not an accident of the current encoding.
+
+**So build nothing now.** No credential op kind, no verifier trait, no plugin
+interface. This is recorded because the likely mistake is the opposite one —
+constructing the mechanism early to "make room" — and the room already exists.
+Widening the core API is a decision to make on purpose, not a side effect of
+anticipating a feature.
+
+**Three decisions would close the door**, and this is the half worth knowing —
+each is cheap to avoid now and structural to undo later:
+
+- **A credential arriving as anything other than an op.** §3.3 and `op-format`
+  both state the rule — an op is "the only thing that crosses the wire", and
+  "anything not expressible as an op is not expressible at all". A credential
+  fetched over a side channel, read from a sidecar file, or supplied by the view
+  is state peers cannot verify independently, which breaks §6's "every peer
+  verifies independently" rather than extending it. The pressure to do this will
+  come from whichever credential is most awkward to carry, and that is exactly
+  when to refuse it.
+- **Folding a credential check into op verification.** `identity`'s "Authenticity
+  is not authority" is the seam, and it is already in the right place: a
+  successful verification means "this op is authentically from the author it
+  claims" and must not be read as "this op is permitted". A credential is an
+  authority question, settled on read like moderation (§6), not an authenticity
+  one. Putting it inside signature verification would give that function a second
+  job — and one that depends on another module's availability.
+- **Storing the verdict instead of the evidence.** §3.3 already states the rule
+  for the op log — it "stores **inputs and never conclusions**" — and a
+  credential is where that rule is easiest to break, because caching
+  `verified: true` next to an address is the obvious optimisation. It is also how
+  a conclusion outlives the fact it was drawn from: a stored verdict has no
+  expiry, so it never dies. Spasm's `verified` flag is the shape to avoid
+  inheriting — its own documentation scopes it to "whether this address matches
+  with at least one attached signature", which is a per-event observation, and it
+  is stored on the event and in the database alike. Keep the proof; re-decide the
+  verdict.
+
+**The verifier ships in the same change as the field**, and there are now two
+measured instances of the alternative. OpChan's commented-out expiry check is one
+(above). Spasm — a signer-agnostic social protocol, the nearest thing to prior
+art — is the other, and the evidence is an **absence**: its `SpasmEventProofV2` is
+declared, copied between representations, and hashed into the event id, and
+**there is no validator anywhere**. Not a dead helper, not a commented-out check,
+not a TODO. `utils.ts` is six thousand lines, holds the real
+`verifyEthereumSignature` and `getVerifiedSigners`, and contains **zero
+occurrences of "proof" in any casing** — as do `spasm.ts` and `index.ts`.
+Signatures get `ethers.verifyMessage` and a thorough test suite; proofs get
+carried. Its fixtures accordingly ship placeholder proofs (`value:
+"proof-value1"`, `protocol.name: "proof-protocol-name1"`) that convert through and
+are asserted equal to the expected output, so a meaningless proof sails through by
+construction. **A credential field nobody checks is worse than no field at all**,
+because it reads as a guarantee to everything downstream.
+
+**Two properties that sound like one, and the design consequence.** It is
+tempting to divide credentials into self-contained proofs and external lookups,
+and to prefer the former. That division is real but it is not where the risk
+lives:
+
+- **Verification convergence** — do two peers agree the credential is
+  *well-formed*? A self-contained proof: yes, permanently. A state query resolved
+  through a sibling module: it depends when, and at what height, it was asked.
+  **The rule to keep is that a claim must be verifiable to the same verdict by
+  every peer holding it, and a verifier that answers differently to two peers is
+  not a verifier.** "Holding it" carries the load: a peer with no verifier module
+  is not *disagreeing* about the claim, it simply does not have one to evaluate,
+  which is a different axis and is settled under composability below. Appendix A
+  records the measured failure — OpChan's
+  proof-of-holding was an HTTP call to a third-party indexer, and "a peer without
+  an API key computed different scores".
+- **Assertion freshness** — is what the credential claims *still true*? **Here a
+  proof and a lookup are the same, and neither is fresh.** "I held ≥ N at block H"
+  is true forever and says nothing about now; transfer the tokens and the proof
+  stays valid while the fact goes stale. ENS names expire and transfer, which makes
+  the point from the other side. A proof's only advantage is **honesty**: it names
+  the moment it speaks for, where a lookup answers "now" and hides that "now" has
+  passed.
+
+So the guidance is *not* "prefer proofs". It is that **any ownership credential
+is a statement about a moment**, and that the design must decide what a
+moment-old fact entitles someone to. **That question is identical for LEZ and for
+ENS**, which is the argument for keeping the architecture adaptable rather than
+betting on either. ENS is not ruled out; pinning a block height is the obvious
+mitigation for the convergence half and is **unexplored**.
+
+**The intended answer to the freshness half is expiry, which this section already
+required**: proofs expire and the holder re-proves on a cadence — seven days,
+thirty, whatever the claim warrants — so the reader never chases current state and
+a proof past its window stops counting. That **moves the burden to the claimant**,
+which is what keeps a credential from becoming state a reader has to reach for.
+
+Three things a future design must handle, recorded because each is easy to get
+wrong and none is obvious:
+
+- **The window needs a clock every peer agrees on.** A wall-clock timestamp is
+  author-asserted, so a lying `createdAt` extends a proof's life and the claimant
+  is exactly the party with the motive. This is §13's author-asserted-clock
+  problem — the one it says "must be clamped" — arriving at credentials; §13 owns
+  the answer, and it is not to be re-derived here.
+- **The window belongs to the credential type, not to the forum.** A LEZ balance
+  can move in one block; an ENS registration lasts a year. One global constant
+  would be wrong for both.
+- **Expiry costs liveness.** A user offline for longer than their window silently
+  loses standing. Whether that wants a grace period is **open** (§13) — but it is
+  a decision, not a bug, and must not be discovered by the first person it happens
+  to.
+
+#### Composability: two levels, and why the interesting one works
+
+Credentials are to be **composable**, at two levels: a Stoa adopting an identity
+system its participants install, and a fork adding a credential type of its own.
+**The first is preferred; the second is the fallback.**
+
+**Level 2 — a fork adds its own credential type — is nearly free**, and needs
+nothing from this design: a fork controls its own op format, so it allocates a
+kind and ships. The one thing that would prevent it is door-closer 2 — welding
+credential checks into op verification would force a fork to fork the verification
+path too — which is a second reason to hold that seam.
+
+**Level 1 — a Stoa adopts an identity system its participants install — is the
+preferred direction, and it works.** "This Stoa supports Base NFT series 123;
+click here to install `dialectica-nft-eth`" means **peers within one Stoa run
+different module sets**, and a peer without the module cannot evaluate the proof
+at all.
+
+**That is fine, and the reason is that a proof does strictly two things, both
+local:**
+
+1. **It changes the relevance score of messages** — a local fold, exactly like a
+   vouch.
+2. **It may display extra information** — a local rendering decision.
+
+So a reader who has not installed the module scores those authors as holding
+nothing. **This is not a degraded mode, and that is the whole point: "module not
+installed" and "holds nothing" are the same local answer, and neither reader is
+wrong.** There is no convergence problem here because there is nothing to
+converge on.
+
+**Recorded because it is the mistake this section made once:** it is tempting to
+reach for `moderation-resolution`'s requirement that two readers resolving from
+the same ops reach the same outcome, and conclude that divergent module sets break
+it. That applies the wrong section's rule. It governs *moderation*, which must
+converge because a hide binds what everyone sees. **Scoring never had that
+requirement and could not have**, and §7.3 is the proof: a vouch is per-reader and
+**never published**, so two readers holding *identical* ops already compute
+different scores by design.
+
+**This is a new cause of that divergence, not the one §7.2 rule 1 names.** Rule 1's
+divergence comes from peers holding different op sets; §7.3's comes from private
+per-reader state; a missing credential module is a third — same ops, different
+module sets. What matters is that §7.3 established the *class*: divergence in
+ranking is correct rather than broken, and the mechanism producing it is free to
+vary.
+
+**The boundary, which is the rule a future reader must not cross:**
+
+> **A supplementary, externally-anchored proof may influence what a reader sees
+> and how they rank it. It may never determine what binds.**
+
+Moderation authority stays convergent, decided from the ops and the moderator set
+alone; relevance and display stay local. **This is the axis §7.3 already drew**
+between a vouch and a moderation — a reader may privately weight whose judgement
+they trust, and that never touches what a moderator's hide does — and §7.2 rule 4
+draws the same line from the other end, where "a credential may amplify promotion
+but never suppression". Credentials of this kind land on the vouching side of it.
+The axis is not new; it is newly applied.
+
+**The qualifier is load-bearing, because §7.1 is the deliberate exception.** A
+token-gated Stoa declares "holds ≥ N of token T" as a **posting policy**, and that
+is a credential which does determine what binds — §7.1 calls it "a claim in §5.5's
+terms" and §7 puts policy gating *first* in the sequence, before credential-gated
+scoring, with "both arrive through §5.5's claims interface." The two are not in
+conflict because they are different things:
+
+- A **genesis-declared posting policy** is immutable, inside the address preimage,
+  and fail-closed by construction — an unknown policy discriminant is refused
+  rather than defaulted (§13). Every peer holds it because every peer hashed it to
+  get the Stoa's address. That is precisely why it *can* gate, and it is the one
+  case where the convergence machinery genuinely is required rather than avoidable.
+- A **supplementary credential** is optional, per-reader, and evaluated by a module
+  a given peer may not have. That is why it may only add weight.
+
+So the rule above governs the second kind. §7.1 is not an exception to be
+reconciled later; it is the reason the qualifier exists.
+
+**A moderator decides what the Stoa honours, and that half does converge.** Which
+NFT series on which chain, which token on which LEZ — that is a judgement about the
+Stoa, so it belongs to whoever moderates it. The separation is the organising idea
+and it is clean:
+
+| | Converges? | Why |
+|---|---|---|
+| **What the Stoa honours** — which series, chain, token | **Yes** | A moderator decision, so a moderation fact like any other: decided from the ops and the moderator set |
+| **Whether a given reader can evaluate it** | **No, and need not** | Local module set, local score, local display — the two strictly-local effects above |
+
+So the declaration travels the **existing moderator-authority path** and only the
+evaluation is local.
+
+**Where it lives is unexamined, and the obvious answer is the one a spec already
+argues against.** A `StoaMetadata` op (§5.7) looks right — mutable,
+moderator-authored, authority checked on read, and a Stoa's accepted proofs will
+change over its life. But the `stoa-metadata` spec carries a requirement titled
+"Current metadata does not include the posting policy", and its reasoning is
+**authorisation-shaped, which a credential declaration also is**: "a rename is
+cosmetic; a policy change is authorisation", and "the fallback rule inverts safely
+for a title and unsafely for a policy" — a peer that missed a *tightening* falls
+back to the looser founding value. A peer missing a declaration that **narrows**
+what a Stoa honours would fall back to honouring **more**, which is the same
+silent widening by the same route.
+
+That spec also names what adding such a field would require: a second accepted
+value so a change is expressible, a settled ordering so "the current declaration"
+is determinable, and a fallback rule specified separately and **fail-closed**. So
+the honest statement is that **a credential declaration needs the `stoa-metadata`
+spec's fail-closed test applied to it, and that has not been done.** Genesis is
+not simply "wrong" either — it is immutable, which is a real cost if accepted
+proofs change, and a real safety property if they should not silently loosen. **No
+field is designed here and none should be**; this records the tension, not the
+encoding.
+
+**A forged declaration must not be able to make a reader install anything or
+weight anyone**, and the answer needs no new mechanism:
+
+- The declaration is an op, so it is forgeable only by a current moderator — §6's
+  read-time authority check already covers it. A non-moderator's declaration is
+  authentic and is not a declaration, which is the distinction §6 exists to draw.
+- **Acting on it is always the reader's choice.** A Stoa saying "install
+  `dialectica-nft-eth`" is a recommendation rendered to a human, never an
+  instruction a client follows. A module name arriving over the network is
+  attacker-influenced content in the same class as a Stoa address embedded in a
+  post — and `docs/UI-BRIEF.md` already settles that class: "render it as an
+  affordance the reader chooses to act on. **Never auto-join.**" Same rule, new
+  surface.
+
+**Two interface notes**, recorded here because no surface exists yet and
+`docs/UI-BRIEF.md` describes only what does:
+
+1. A Stoa recommending a module must not present its absence as **brokenness**. A
+   reader without it sees a *correct* view of the Stoa, not a partial one. There is
+   no "unverified versus not a holder" distinction to render, because there is no
+   abstention — a reader either has the module and sees ownership, or does not and
+   sees nothing.
+2. A module recommendation is **attacker-influenced content**. Never auto-install
+   and never auto-fetch; show what is being suggested and let the reader decide,
+   exactly as the join-a-Stoa flow does with an address.
+
+#### The substrate goal, and why it is not now
+
+A stated goal, **deliberately deferred**: dialectica's *data* should be
+unopinionated enough that someone else can build a different UI, a different
+relevance score, or a different moderation system on the same op log. That is a
+later review and an explicit non-goal for now — recorded because it changes how to
+read some decisions already made, not because anything should be built toward it.
+
+**Three choices already serve it, and each was made for another reason**, which is
+the through-line worth seeing. §3.3's op log stores "inputs and never
+conclusions" — no score, no vote tally, no hidden flag — so the inputs survive for
+someone else to fold differently, which is exactly what an alternative relevance
+score needs. §6 and §5.7 decide authority and currency **on read** rather than
+baking them in at write, so an alternative moderation system reads the same ops
+and reaches its own conclusions. And the op format being the whole surface —
+"anything not expressible as an op is not expressible at all" — means there is no
+side-channel state a re-implementer would have to reverse-engineer.
+
+**The honest counterweight**: a substrate and an application pull in opposite
+directions, and this project has consistently chosen the application. The
+moderation resolver's `Hide`-preferring tie-break is a policy decision baked into
+a resolver; §7.2's weights are policy; the rendering obligations in
+`docs/UI-BRIEF.md` are policy. None of that is wrong — an application that refuses
+to conclude anything is not a forum — but a future split would have to separate
+"what the ops say" from "what dialectica concludes from them", and **that boundary
+does not currently exist as a boundary.** It runs through the resolvers rather
+than between them and anything else. Whoever conducts that review is deciding
+where to *draw* a line, not looking for one already there.
+
 ### 5.6 The keystore
 
 **Built** — see the `keystore` and `posting-capability` specs. An encrypted root
@@ -2736,6 +3031,7 @@ development machine, none of them vendored into this repo.
 | OpChan — the nearest kin forum, read for Appendix A. **No local checkout**; clone from GitHub | `logos-messaging/OpChan` |
 | λ-Prize LP-0005 / LP-0016 / LP-0017 — **submission write-ups only, not code.** The solution repos are not cloned here, so every claim about them is the builders' self-assessment | `/home/fryorcraken/src/logos-co/lambda-prize/` |
 | The JS SDK reliable-channels tutorial — informal prose, and §4.3's clearest statement of what a channel id is | `/home/fryorcraken/src/logos-messaging/docs.waku.org/` |
+| Spasm — a signer-agnostic social protocol, read for §5.5's second never-verified-credential instance. **The code is the spec**: versioning lives in format strings (`spasmid01`, `SpasmEventV2`) and the normative reference for its hashing rule is its README, so read `src.ts/`, not the docs site | `/home/fryorcraken/src/spasm-network/spasm.js` |
 
 Two of these are **stale working trees** and will mislead if read directly:
 `logos-delivery-module` sits on a pre-channels branch, and
@@ -3033,6 +3329,28 @@ thing (§2.3).
   defined degraded order (ascending op id, always below any op the transport did
   order) that is identical on every peer and reports itself as degraded. **The op
   log and the resolvers are unblocked**: they have a defined thing to key on.
+
+- **Does an expiring credential want a grace period?** §5.5 settles that proofs
+  expire and the holder re-proves on a cadence, and records the cost: a user
+  offline for longer than their window silently loses standing, and a moderator
+  weighted by token holding quietly stops being weighted. Whether that is
+  acceptable or wants a grace period is not settled. It is a policy question
+  rather than a mechanism one — the same shape as §7.2 rule 5's decay, which is
+  "specified as a property and deferred in mechanism" (§7.3 uses that phrasing for
+  vouch decay) — and it cannot be answered before a credential exists to expire.
+  **Recorded so it is a decision rather than a surprise**, per §5.5.
+
+- **What does a peer do when a verifier module is present but cannot answer?**
+  §5.5 settles the *absent* case and it needs no machinery: a reader without the
+  module scores the author as holding nothing, which is the same local answer, and
+  no peer is wrong. The residue is narrower — a module that is installed but fails
+  a particular check, because the RPC it fronts is down or the chain is
+  unreachable. Scoring the author as holding nothing is the obvious answer and is
+  probably right, since it is what a reader lacking the module already does. What
+  is unexamined is whether a *transient* failure should be distinguishable from a
+  settled one to whoever is looking at the screen, and whether retry belongs in
+  the module or above it. **Not answerable before a credential module exists**,
+  and low stakes either way, because the effects stay local (§5.5).
 
 ---
 
