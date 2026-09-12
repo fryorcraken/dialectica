@@ -975,6 +975,129 @@ later:
   stops signing, and every peer keeps accepting. Check expiry where the claim is
   *used*, not where it is issued.
 
+#### Externally-anchored credentials: the door is open, and nothing is to be built
+
+A user may one day want to attach an **external** credential to a per-Stoa
+pseudonym — a LEZ token-holding proof (§7.1), an ENS name, an NFT, a DID. The
+question this subsection settles is not whether to support one; it is whether
+doing so later costs a redesign. **It does not, and the evidence is specific:**
+a new op kind takes the next free discriminant, and `op-format`'s spec requires
+that discriminants "be appended, never inserted", so a kind added later "costs
+one unused discriminant and no encoding version, and an older client meets it as
+an unrecognised kind rather than misparsing it". That is a spec requirement with
+a scenario behind it, not an accident of the current encoding.
+
+**So build nothing now.** No credential op kind, no verifier trait, no plugin
+interface. This is recorded because the likely mistake is the opposite one —
+constructing the mechanism early to "make room" — and the room already exists.
+Widening the core API is a decision to make on purpose, not a side effect of
+anticipating a feature.
+
+**Three decisions would close the door**, and this is the half worth knowing —
+each is cheap to avoid now and structural to undo later:
+
+- **A credential arriving as anything other than an op.** §3.3 and `op-format`
+  both state the rule — an op is "the only thing that crosses the wire", and
+  "anything not expressible as an op is not expressible at all". A credential
+  fetched over a side channel, read from a sidecar file, or supplied by the view
+  is state peers cannot verify independently, which breaks §6's "every peer
+  verifies independently" rather than extending it. The pressure to do this will
+  come from whichever credential is most awkward to carry, and that is exactly
+  when to refuse it.
+- **Folding a credential check into op verification.** `identity`'s "Authenticity
+  is not authority" is the seam, and it is already in the right place: a
+  successful verification means "this op is authentically from the author it
+  claims" and must not be read as "this op is permitted". A credential is an
+  authority question, settled on read like moderation (§6), not an authenticity
+  one. Putting it inside signature verification would give that function a second
+  job — and one that depends on another module's availability.
+- **Storing the verdict instead of the evidence.** §3.3 already states the rule
+  for the op log — it "stores **inputs and never conclusions**" — and a
+  credential is where that rule is easiest to break, because caching
+  `verified: true` next to an address is the obvious optimisation. It is also how
+  a conclusion outlives the fact it was drawn from: a stored verdict has no
+  expiry, so it never dies. Spasm's `verified` flag is the shape to avoid
+  inheriting — its own documentation scopes it to "whether this address matches
+  with at least one attached signature", which is a per-event observation, and it
+  is stored on the event and in the database alike. Keep the proof; re-decide the
+  verdict.
+
+**The verifier ships in the same change as the field**, and there are now two
+measured instances of the alternative. OpChan's commented-out expiry check is one
+(above). Spasm — a signer-agnostic social protocol, the nearest thing to prior
+art — is the other: its `SpasmEventProofV2` is declared, copied between
+representations, and hashed into the event id, and **nothing anywhere verifies
+it**. Its own test fixtures pass a proof whose value is the literal string
+`"invalid-proof-value"` and assert that the event converts successfully; the only
+assertions about proofs check that mutating one changes the event id. A
+credential field nobody checks is worse than no field at all, because it reads as
+a guarantee to everything downstream.
+
+**Two properties that sound like one, and the design consequence.** It is
+tempting to divide credentials into self-contained proofs and external lookups,
+and to prefer the former. That division is real but it is not where the risk
+lives:
+
+- **Verification convergence** — do two peers agree the credential is
+  *well-formed*? A self-contained proof: yes, permanently; any peer checking it
+  at any time gets the same answer. A state query resolved through a sibling
+  module: it depends when, and at what height, the question was asked. **This
+  difference is real**, and it is the same convergence requirement §6 imposes on
+  moderation authority and §5.7 on revision ordering, arriving from a third
+  direction. That recurrence is the part worth noticing: this design keeps
+  rediscovering that a verdict computed from anything other than the ops
+  themselves is a verdict two peers can disagree about. Appendix A records the
+  measured version — OpChan's proof-of-holding was an HTTP call to a third-party
+  indexer, and "a peer without an API key computed different scores".
+- **Assertion freshness** — is what the credential claims *still true*? **Here a
+  proof and a lookup are the same, and neither is fresh.** "I held ≥ N at block
+  H" is true forever and says nothing about now; transfer the tokens and the
+  proof stays valid while the fact goes stale. ENS names expire and transfer,
+  which makes the point from the other side. A proof's only
+  advantage is **honesty**: it names the moment it speaks for, where a lookup
+  answers "now" and hides that "now" has passed.
+
+So the guidance is *not* "prefer proofs". It is that **any ownership credential
+is a statement about a moment**, and that the design must decide what a
+moment-old fact entitles someone to. **That question is identical for LEZ and for
+ENS**, which is the argument for keeping the architecture adaptable rather than
+betting on either. ENS is not ruled out; pinning a block height is the obvious
+mitigation for the convergence half and is **unexplored**.
+
+**The answer to the freshness half is expiry, and this section already required
+it.** Proofs expire, and the holder re-proves on a cadence — seven days, thirty,
+whatever the claim warrants. The reader never chases current state; a proof older
+than its window simply stops counting.
+
+That is worth stating plainly because of what it preserves: `moderation-resolution`
+requires that two readers resolving from the same ops reach the same outcome and
+that "neither consults any state outside those ops and that set". Expiry keeps
+credentials inside that rule by **moving the burden to the claimant** — the
+freshness problem is solved by publishing another op, not by a reader reaching
+for state. And it dissolves the ENS-versus-LEZ difficulty rather than deciding
+it: a claim cannot be stale-but-still-counted if nothing counts past its window,
+and both credential types get identical treatment. The general form, which is
+the one to hold onto: **a claim must be verifiable to the same verdict by every
+peer holding it, and a verifier that answers differently to two peers is not a
+verifier.**
+
+Three consequences, each subtle enough to be worth naming:
+
+- **The window must be measured in something every peer agrees on.** A
+  wall-clock timestamp is author-asserted, so a lying `createdAt` extends a
+  proof's life and the claimant is precisely the party with the motive. This is
+  §13's unbounded-field problem arriving at credentials, and the answer there is
+  the answer here — dialectica's own Lamport counter is the honest clock. Do not
+  re-derive it; §13 owns it.
+- **The window belongs to the credential type, not to the forum.** A LEZ balance
+  can move in one block; an ENS registration lasts a year. One global constant
+  would be wrong for both, so the window is a property of what is being claimed.
+- **Expiry is a liveness cost, and it is recorded as such.** A user offline for
+  longer than their window silently loses standing, and a moderator weighted by
+  token holding quietly stops being weighted. Whether that wants a grace period
+  is **open** (§13) — but it is a decision, not a bug, and it must not be
+  discovered by the first person it happens to.
+
 ### 5.6 The keystore
 
 **Built** — see the `keystore` and `posting-capability` specs. An encrypted root
@@ -2736,6 +2859,7 @@ development machine, none of them vendored into this repo.
 | OpChan — the nearest kin forum, read for Appendix A. **No local checkout**; clone from GitHub | `logos-messaging/OpChan` |
 | λ-Prize LP-0005 / LP-0016 / LP-0017 — **submission write-ups only, not code.** The solution repos are not cloned here, so every claim about them is the builders' self-assessment | `/home/fryorcraken/src/logos-co/lambda-prize/` |
 | The JS SDK reliable-channels tutorial — informal prose, and §4.3's clearest statement of what a channel id is | `/home/fryorcraken/src/logos-messaging/docs.waku.org/` |
+| Spasm — a signer-agnostic social protocol, read for §5.5's second never-verified-credential instance. **The code is the spec**: versioning lives in format strings (`spasmid01`, `SpasmEventV2`) and the normative reference for its hashing rule is its README, so read `src.ts/`, not the docs site | `/home/fryorcraken/src/spasm-network/spasm.js` |
 
 Two of these are **stale working trees** and will mislead if read directly:
 `logos-delivery-module` sits on a pre-channels branch, and
@@ -3033,6 +3157,29 @@ thing (§2.3).
   defined degraded order (ascending op id, always below any op the transport did
   order) that is identical on every peer and reports itself as degraded. **The op
   log and the resolvers are unblocked**: they have a defined thing to key on.
+
+- **Does an expiring credential want a grace period?** §5.5 settles that proofs
+  expire and the holder re-proves on a cadence, and records the cost: a user
+  offline for longer than their window silently loses standing, and a moderator
+  weighted by token holding quietly stops being weighted. Whether that is
+  acceptable or wants a grace period is not settled. It is a policy question
+  rather than a mechanism one — the same shape as §7.2 rule 5's decay, which is
+  "specified as a property and deferred in mechanism" (§7.3 uses that phrasing for
+  vouch decay) — and it cannot be answered before a credential exists to expire.
+  **Recorded so it is a decision rather than a surprise**, per §5.5.
+
+- **What does a peer do when the verifier module is absent or unreachable?** An
+  external credential is checked by a sibling module — `lez_core` for a LEZ
+  holding proof, an Ethereum module for an ENS name — and that module may not be
+  installed or may not answer. §6 supplies the shape of the answer rather than the
+  answer: `moderation-resolution` already refuses to report a Stoa's targets as
+  either hidden or not hidden when the reader lacks the genesis record, which is
+  **abstention, not a false verdict in either direction**. The open part is
+  whether an unverifiable credential should abstain the same way — conferring no
+  standing while claiming nothing about its validity — and whether that is
+  distinguishable to a reader from a credential that was checked and failed. Note
+  this interacts with the grace-period question above: both make standing depend
+  on something other than the ops a peer holds.
 
 ---
 
