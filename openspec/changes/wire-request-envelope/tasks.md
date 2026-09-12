@@ -24,8 +24,11 @@ is not a verification — the message is.
 - [x] 2.2 Add `Request(serde_json::Map<String, Value>)` with a private field,
   `parse(&str) -> Result<Request, String>` whose `Err` is already the wire shape,
   and `get(&str) -> Option<&Value>`. Verify with
-  `request_parse_is_the_only_way_to_reach_a_field_read`: `[]` and `not json` are
-  both refused, with different messages, and `{}` is accepted.
+  `request_parse_refuses_every_non_object_json_value`: `[]` and `not json` are
+  both refused, with different messages, and `{}` is accepted. (Renamed from
+  `request_parse_is_the_only_way_to_reach_a_field_read` — that name asserted an
+  exclusivity the body does not check and that
+  `the_sixth_method_the_boundary_does_not_stop` disproves.)
 - [x] 2.3 Move `genesis_for` and `parse_index` from `&serde_json::Value` to
   `&Request`. Verify the crate compiles and the existing feed and genesis tests
   still pass unchanged.
