@@ -24,13 +24,13 @@ ColumnLayout {
     // nothing rather than "undefined".
     property var value: ({ text: "", removed: 0, marked: 0 })
 
-    property font bodyFont: Theme.postBody
-    property color bodyColor: Theme.ink
+    property font bodyFont: DTheme.postBody
+    property color bodyColor: DTheme.ink
 
     readonly property int removedCount: value && value.removed ? value.removed : 0
     readonly property int markedCount: value && value.marked ? value.marked : 0
 
-    spacing: Theme.itemGap
+    spacing: DTheme.itemGap
 
     Text {
         text: root.value && root.value.text !== undefined ? root.value.text : ""
@@ -42,7 +42,7 @@ ColumnLayout {
         font: root.bodyFont
         color: root.bodyColor
         wrapMode: Text.WordWrap
-        lineHeight: Theme.lineHeightBody
+        lineHeight: DTheme.lineHeightBody
         Layout.fillWidth: true
     }
 
@@ -51,14 +51,14 @@ ColumnLayout {
     // one that matters.
     RowLayout {
         visible: root.removedCount > 0 || root.markedCount > 0
-        spacing: Theme.itemGap
+        spacing: DTheme.itemGap
         Layout.fillWidth: true
 
         Rectangle {
             visible: root.removedCount > 0
             color: "transparent"
-            border.width: Theme.hairline
-            border.color: Theme.accent
+            border.width: DTheme.hairline
+            border.color: DTheme.accent
             implicitWidth: removedLabel.implicitWidth + 12
             implicitHeight: removedLabel.implicitHeight + 6
 
@@ -67,8 +67,8 @@ ColumnLayout {
                 anchors.centerIn: parent
                 // copy.json `sanitiser.removed`: "%1 removed"
                 text: root.removedCount + " removed"
-                font: Theme.label
-                color: Theme.accent
+                font: DTheme.label
+                color: DTheme.accent
                 textFormat: Text.PlainText
             }
         }
@@ -76,8 +76,8 @@ ColumnLayout {
         Rectangle {
             visible: root.markedCount > 0
             color: "transparent"
-            border.width: Theme.hairline
-            border.color: Theme.accent
+            border.width: DTheme.hairline
+            border.color: DTheme.accent
             implicitWidth: markedLabel.implicitWidth + 12
             implicitHeight: markedLabel.implicitHeight + 6
 
@@ -87,8 +87,8 @@ ColumnLayout {
                 // copy.json `sanitiser.markedTitle`:
                 // "contains %1 marked character(s)"
                 text: "contains " + root.markedCount + " marked character(s)"
-                font: Theme.label
-                color: Theme.accent
+                font: DTheme.label
+                color: DTheme.accent
                 textFormat: Text.PlainText
             }
         }

@@ -1,37 +1,60 @@
 import QtQuick
 import QtQuick.Layouts
 
-// The card: content on paper, apparatus column on the right. Every screen uses
-// it, so a caveat always has somewhere to live next to the thing it qualifies.
+// The card: content on paper. Every screen is built in one.
+//
+// It was a two-column card until the first launch, with a 244px "apparatus"
+// column on the right carrying margin notes. That column was the design
+// bundle's ANNOTATION mechanism — notes explaining the design to someone
+// reading the mockup — and its own copy gives it away: "When real times arrive
+// this label changes and nothing else does" is addressed to a developer, not to
+// a forum reader. So the column is gone and the card is one column.
+//
+// The rendering obligations the notes carried are not gone; they live in
+// docs/UI-BRIEF.md and, where they are user-facing, in the screen itself. The
+// honest ordering label ("same order for everyone") is in FeedScreen's
+// `orderings` model, which is where UI-BRIEF's "do not label an ordering
+// 'new' unless it is one" is actually met.
 Rectangle {
     id: root
 
     default property alias content: body.data
-    property alias apparatus: app.content
 
-    implicitWidth: Theme.cardWidth
-    color: Theme.paper
-    border.width: Theme.hairline
-    border.color: Theme.ink
+    implicitWidth: DTheme.cardWidth
 
-    RowLayout {
-        anchors.fill: parent
-        spacing: 0
+    // A Rectangle is NOT a layout, so nothing derives its height from its
+    // children — and this card's children are its entire content. Without this
+    // the card reported height 0 while holding several hundred pixels: every
+    // child was laid out at the same y, text drew on top of text, and
+    // `Main.qml`'s `contentHeight: frame.implicitHeight + 2 * cardPaddingY`
+    // scrolled over nothing but padding.
+    //
+    // Basecamp is what makes this fatal rather than cosmetic: it hosts a
+    // `ui_qml` view inside a layout, so the view is sized by its PARENT asking
+    // how tall it wants to be. A root that cannot answer gets a size it did not
+    // choose. Radicle's tst_layout.qml records the same defect from the same
+    // cause, found the same way.
+    //
+    // `implicitHeight` rather than `height`: the parent stays free to give the
+    // card more room than it asked for, which is what a Flickable in a tall
+    // window does. Binding `height` would fight the parent instead.
+    implicitHeight: body.implicitHeight + 2 * DTheme.cardPaddingY
 
-        ColumnLayout {
-            id: body
-            Layout.fillWidth: true
-            Layout.alignment: Qt.AlignTop
-            Layout.margins: Theme.cardPaddingY
-            Layout.leftMargin: Theme.cardPaddingX
-            Layout.rightMargin: Theme.cardPaddingX
-            spacing: Theme.blockGap
-        }
+    color: DTheme.paper
+    border.width: DTheme.hairline
+    border.color: DTheme.ink
 
-        ApparatusColumn {
-            id: app
-            Layout.fillHeight: true
-            Layout.preferredWidth: Theme.apparatusWidth
-        }
+    ColumnLayout {
+        id: body
+        objectName: "screenBody"
+
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.leftMargin: DTheme.cardPaddingX
+        anchors.rightMargin: DTheme.cardPaddingX
+        anchors.topMargin: DTheme.cardPaddingY
+
+        spacing: DTheme.blockGap
     }
 }

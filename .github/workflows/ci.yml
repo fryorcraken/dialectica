@@ -479,6 +479,59 @@ jobs:
           fi
           echo "ok: qmllint clean"
 
+      # No QML type of ours may be named something the HOST also registers.
+      #
+      # This is the gate for the defect that made the first basecamp launch
+      # render as white paper with overlapping black system text and none of the
+      # owner's design. Our singleton was called `Theme`; basecamp registers its
+      # own `Logos.Theme`, and that registration outranks a plugin directory's
+      # `qmldir` entry. Every `Theme.x` in the view resolved to basecamp's
+      # object, every token came back `undefined`, and QML fell back to its
+      # defaults. One name collision took the entire visual system out at once.
+      #
+      # WHY THIS IS A GREP AND NOT A QML TEST, which is the part worth keeping:
+      # under `qmltestrunner` there IS no competing singleton, so our `DTheme`
+      # always resolves to our file and an assertion like
+      # `verify(DTheme.paper !== undefined)` passes no matter what — it cannot
+      # fail, and by this project's own standard a check that cannot fail is
+      # worth nothing. The collision is a property of the HOST's namespace, which
+      # the component layer structurally cannot see. What a static check CAN see
+      # is whether we reintroduced a name known to collide, and that is the
+      # failure mode worth catching: the next person to add a `Theme.qml` gets
+      # told here rather than at a launch.
+      #
+      # The list is names basecamp is known to occupy. Add to it whenever a
+      # launch log shows one of ours resolving to a `qrc:/qt/qml/Logos/...` path.
+      - name: no QML type name collides with the host
+        run: |
+          set -eu
+          status=0
+          for name in Theme Style Palette Colors Typography; do
+            if [ -e "dialectica-ui/src/qml/$name.qml" ]; then
+              echo "::error file=dialectica-ui/src/qml/$name.qml::'$name' is a type name basecamp also registers — it will be shadowed and every property will read as undefined at runtime. Prefix it (DTheme, DStyle, …)."
+              status=1
+            fi
+            if grep -rn "^singleton $name \|^$name " dialectica-ui/src/qml/qmldir >/dev/null 2>&1; then
+              echo "::error file=dialectica-ui/src/qml/qmldir::qmldir declares '$name', a name basecamp also registers"
+              status=1
+            fi
+          done
+          # And no file may REFERENCE a bare `Theme.` — the symptom side of the
+          # same defect, which would mean a stale reference survived a rename.
+          #
+          # Comment lines are excluded, because DTheme.qml's own header explains
+          # the collision at length and names `Theme.x` while doing so. Without
+          # the exclusion this gate would be permanently red on a file that is
+          # correct, which is the fastest way to get a gate deleted. `grep -v` on
+          # a leading `//` is crude but exactly matches how these files comment.
+          if grep -rn "[^A-Za-z]Theme\." dialectica-ui/src/qml/*.qml \
+               | grep -v ':[0-9]*: *//' | grep . ; then
+            echo "::error::a QML file references a bare 'Theme.' — dialectica's tokens are 'DTheme.'; a bare Theme resolves to basecamp's singleton"
+            status=1
+          fi
+          [ "$status" -eq 0 ] && echo "ok: no QML type name collides with the host"
+          exit "$status"
+
       # The component tests. `REQUIRE_QML_TESTS=1` so a missing or
       # wrong-major-version runner FAILS rather than skipping: a job that
       # quietly stops testing is the false green this file is written against.

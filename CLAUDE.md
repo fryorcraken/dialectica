@@ -258,6 +258,39 @@ These are structural and bite at build time, not review time.
 - **The UI's icon must be a 256×256 PNG**, and the UI module must declare core
   in `dependencies` with **matching versions**.
 
+- **Basecamp's registered QML singletons outrank your `qmldir`, so never name a
+  type something the host also has.** Our theme singleton was `Theme`; basecamp
+  registers `Logos.Theme`, and its registration won — every `Theme.x` in the
+  view resolved to basecamp's object, every token read `undefined`, and QML fell
+  back to its defaults. The first launch was therefore white paper with
+  overlapping black system text and *none* of the supplied design, from one
+  name collision. It is `DTheme` now.
+
+  The tell in a launch log is a resolution line pointing at `qrc:/qt/qml/Logos/`
+  for a name you own. `Core` resolved correctly in the same file with the same
+  imports, purely because basecamp has no `Core` — so "our other singleton works"
+  is not evidence that a name is safe.
+
+  **A component test cannot catch this**, and that is the durable part: under
+  `qmltestrunner` no competing singleton exists, so any `verify(DTheme.x !==
+  undefined)` passes no matter what. The gate is the `no QML type name collides
+  with the host` step in `ci.yml`, which is static because the collision is a
+  property of the host's namespace that the component layer cannot see.
+
+- **A `Rectangle` used as a card must be given an `implicitHeight`.** Basecamp
+  hosts a `ui_qml` view inside a layout, so the view is sized by its parent
+  asking how tall it wants to be; a Rectangle does not derive that from its
+  children, so a root that only sets `implicitWidth` answers 0. Every child then
+  lays out at the same `y` and the screen is one illegible pile — and any
+  `contentHeight: frame.implicitHeight + …` above it scrolls over nothing.
+
+  Radicle hit this first and its `radicle-ui/tests/tst_layout.qml` records it
+  from the same cause. The coverage that sees it must measure the
+  **intersection with the container**, never `item.width`/`item.height` or
+  `visible`: an overflowing layout child keeps its own geometry and stays
+  `visible: true`, so every property-based assertion passes while the user sees
+  nothing. `dialectica-ui/tests/tst_feed_layout.qml` is the local instance.
+
 ## Scaffold: what `lgs` does and does not do
 
 `lgs new` **cannot generate a module project** — its templates are LEZ zkVM

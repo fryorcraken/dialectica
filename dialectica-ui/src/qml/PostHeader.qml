@@ -14,21 +14,21 @@ RowLayout {
     property bool   edited: false
     property bool   vouched: false          // the VIEWER's own vouch; never a count
     property bool   lookalikeWarning: false
-    property int    markSize: Theme.markInFeed
+    property int    markSize: DTheme.markInFeed
 
     spacing: 10
 
     Identicon {
         address: root.identityAddress
         size: root.markSize
-        visible: root.markSize >= Theme.markMinDraw
+        visible: root.markSize >= DTheme.markMinDraw
         Layout.alignment: Qt.AlignVCenter
     }
 
     Text {
         text: root.generatedName
-        font: Theme.bodySmall
-        color: Theme.ink
+        font: DTheme.bodySmall
+        color: DTheme.ink
         textFormat: Text.PlainText       // peer-supplied: never rich text
     }
 
@@ -39,27 +39,27 @@ RowLayout {
 
     Rectangle {                          // MODERATOR
         visible: root.isModerator
-        color: Theme.ink
+        color: DTheme.ink
         implicitWidth: modLabel.implicitWidth + 14
         implicitHeight: modLabel.implicitHeight + 4
-        Text { id: modLabel; anchors.centerIn: parent; text: "MODERATOR"; font: Theme.label; color: Theme.paper; textFormat: Text.PlainText }
+        Text { id: modLabel; anchors.centerIn: parent; text: "MODERATOR"; font: DTheme.label; color: DTheme.paper; textFormat: Text.PlainText }
     }
 
     Rectangle {                          // YOU VOUCHED — visible to its owner only
         visible: root.vouched
         color: "transparent"
-        border.width: Theme.hairline
-        border.color: Theme.accent
+        border.width: DTheme.hairline
+        border.color: DTheme.accent
         implicitWidth: vouchLabel.implicitWidth + 12
         implicitHeight: vouchLabel.implicitHeight + 4
-        Text { id: vouchLabel; anchors.centerIn: parent; text: "YOU VOUCHED"; font: Theme.label; color: Theme.accent; textFormat: Text.PlainText }
+        Text { id: vouchLabel; anchors.centerIn: parent; text: "YOU VOUCHED"; font: DTheme.label; color: DTheme.accent; textFormat: Text.PlainText }
     }
 
     Text {                               // edited — a state, never a version number
         visible: root.edited
         text: "edited"
-        font: Theme.note
-        color: Theme.accent
+        font: DTheme.note
+        color: DTheme.accent
         textFormat: Text.PlainText
     }
 

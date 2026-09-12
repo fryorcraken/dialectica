@@ -1,11 +1,37 @@
 pragma Singleton
 import QtQuick
 
+// Dialectica's design tokens. **`DTheme`, not `Theme`, and the D is the whole
+// point of the name.**
+//
+// This file was `Theme.qml` and the singleton was `Theme` until the first
+// launch in basecamp, which rendered the feed as white paper with overlapping
+// black system text and no design at all. The cause was a NAME COLLISION:
+// basecamp registers its own `Logos.Theme` singleton, and that registration
+// outranks a plugin directory's `qmldir` entry. So every `Theme.x` in this
+// module resolved to basecamp's object, which has none of these properties,
+// every token came back `undefined`, and QML fell back to its defaults —
+// white ground, black text, no spacing, no borders. The log showed the
+// resolution directly, two lines from one file with one import set:
+//
+//   Identicon.qml "Core"  => .../plugins/dialectica_ui/qml/Core.qml   ← ours
+//   Identicon.qml "Theme" => qrc:/qt/qml/Logos/Theme/Theme.qml        ← theirs
+//
+// `Core` survived because basecamp has no `Core`. `Theme` lost because it does.
+//
+// **Do not rename this back, and do not add a type whose name basecamp might
+// also use.** A name nothing else in the host can claim cannot be shadowed by
+// anything basecamp adds later, which is why this is a rename rather than an
+// import-path adjustment: a versioned module URI would also work today and
+// would still be competing for a namespace with the host.
+//
+// Every token here is load-bearing for a design the owner supplied as a
+// bundle — this one file is what the whole visual system passes through, so a
+// single unresolved name takes all of it out at once.
 QtObject {
     // ---- surfaces -------------------------------------------------------
     readonly property color desk:      "#d9d2c2"   // behind the cards
     readonly property color paper:     "#efe9dc"   // card
-    readonly property color paperDeep: "#e7dfcd"   // apparatus column
     readonly property color field:     "#f7f3ea"   // inset panels, inputs
 
     // ---- interface inks: three, and only three --------------------------
@@ -15,7 +41,7 @@ QtObject {
     readonly property color inkSoft:   "#3a362e"
     readonly property color inkMuted:  "#6f685a"
     readonly property color inkFaint:  "#8c8577"
-    readonly property color accent:    "#a33a2b"   // red: caveats, destructive, apparatus rules
+    readonly property color accent:    "#a33a2b"   // red: caveats, destructive
     readonly property color accent2:   "#4a6b74"   // teal: second fill ink, secondary marks
 
     // ---- mark inks: SEVEN, and they are NOT the interface palette --------
@@ -114,7 +140,6 @@ QtObject {
 
     // ---- metrics --------------------------------------------------------
     readonly property int cardWidth:      1000
-    readonly property int apparatusWidth: 244
     readonly property int cardPaddingX:   34
     readonly property int cardPaddingY:   28
     readonly property int blockGap:       20

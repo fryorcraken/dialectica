@@ -117,6 +117,7 @@ ScreenFrame {
     // ---- header ---------------------------------------------------------
 
     RowLayout {
+        objectName: "feedHeader"
         Layout.fillWidth: true
         spacing: 16
 
@@ -126,24 +127,41 @@ ScreenFrame {
             visible: screen.stoaAddress !== ""
         }
 
+        // The title/address pair takes the slack, and yields it back when the
+        // card is narrow. Before this the column was incompressible — the title
+        // and the `NoWrap` address label between them set a floor wide enough
+        // that at a 760px viewport the header could not fit, and a RowLayout
+        // whose minimums do not fit OVERFLOWS rather than shrinking, so the row
+        // ran past the card's right edge with every child's `width` and
+        // `visible` still perfectly correct. That is radicle's lesson exactly:
+        // only a measurement against the container's bounds can see it.
         ColumnLayout {
             spacing: 2
+            Layout.fillWidth: true
+            // A floor, so the pair degrades rather than vanishing. The address
+            // is already abbreviated to head-8/middle-8/tail-6, and eliding is
+            // how it gives ground without the row overflowing.
+            Layout.minimumWidth: 120
 
             Text {
                 text: screen.stoaTitle
-                font: Theme.heading
-                color: Theme.ink
+                font: DTheme.heading
+                color: DTheme.ink
                 textFormat: Text.PlainText   // peer-supplied: never rich text
                 visible: screen.stoaTitle !== ""
+                elide: Text.ElideRight
+                Layout.fillWidth: true
             }
 
             // The address is on screen beside the title, never one click away.
             // A Stoa's title is moderator-chosen and freely forgeable; the
             // address is the identity.
-            AddressLabel { address: screen.stoaAddress }
+            AddressLabel {
+                address: screen.stoaAddress
+                elide: Text.ElideRight
+                Layout.fillWidth: true
+            }
         }
-
-        Item { Layout.fillWidth: true }
 
         // The row is a Repeater over a model, which is what SPEC.md requires:
         // an ordering must be able to disappear without the layout changing.
@@ -159,9 +177,20 @@ ScreenFrame {
             delegate: Text {
                 required property var modelData
                 text: modelData.label
-                font: Theme.bodySmall
-                color: screen.ordering === modelData.key ? Theme.ink : Theme.inkMuted
+                font: DTheme.bodySmall
+                color: screen.ordering === modelData.key ? DTheme.ink : DTheme.inkMuted
                 textFormat: Text.PlainText
+                // Elides rather than pushing the row wider than the card.
+                //
+                // NOT `Layout.fillWidth`: that made this label greedy and it
+                // then pushed the card itself past the viewport, trading one
+                // overflow for a worse one — two geometry tests that had been
+                // passing went red on the same change, which is the value of
+                // measuring against bounds rather than properties. A minimum
+                // plus an elide lets it give ground without ever asking for more
+                // room than it has.
+                elide: Text.ElideRight
+                Layout.minimumWidth: 0
             }
         }
 
@@ -170,8 +199,8 @@ ScreenFrame {
         // reader's affordance, not a moderator privilege.
         Text {
             text: "SHOW HIDDEN"
-            font: Theme.label
-            color: screen.includeHidden ? Theme.accent : Theme.inkMuted
+            font: DTheme.label
+            color: screen.includeHidden ? DTheme.accent : DTheme.inkMuted
             // Explicit even though the text is a literal today. QML's default
             // is AutoText, which SNIFFS its input and switches to rich text
             // when the string looks like markup — so an element left on the
@@ -204,8 +233,8 @@ ScreenFrame {
     ColumnLayout {
         Layout.fillWidth: true
         spacing: 2
-        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: Theme.hairline; color: Theme.ink }
-        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: Theme.hairline; color: Theme.ink }
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: DTheme.hairline; color: DTheme.ink }
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: DTheme.hairline; color: DTheme.ink }
     }
 
     // ---- state: the store could not be read -----------------------------
@@ -215,24 +244,25 @@ ScreenFrame {
     // opposite things and a reader must never have to tell them apart by
     // reading carefully.
     Rectangle {
+        objectName: "failedPanel"
         visible: screen.readState === "failed"
         Layout.fillWidth: true
-        implicitHeight: failedBody.implicitHeight + 2 * Theme.cardPaddingY
-        color: Theme.field
-        border.width: Theme.border
-        border.color: Theme.accent
+        implicitHeight: failedBody.implicitHeight + 2 * DTheme.cardPaddingY
+        color: DTheme.field
+        border.width: DTheme.border
+        border.color: DTheme.accent
 
         ColumnLayout {
             id: failedBody
             anchors.fill: parent
-            anchors.margins: Theme.cardPaddingY
-            spacing: Theme.itemGap
+            anchors.margins: DTheme.cardPaddingY
+            spacing: DTheme.itemGap
 
             Text {
                 // copy.json `states.failedTitle`
                 text: "The store could not be read, so nothing can be shown."
-                font: Theme.heading
-                color: Theme.accent
+                font: DTheme.heading
+                color: DTheme.accent
                 wrapMode: Text.WordWrap
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
@@ -242,8 +272,8 @@ ScreenFrame {
                 // copy.json `states.failedBody` opens with this sentence, and
                 // it is the load-bearing half: it says what this ISN'T.
                 text: "This is not an empty Stoa. Posts you already hold are on disk and unreadable right now."
-                font: Theme.bodySmall
-                color: Theme.inkSoft
+                font: DTheme.bodySmall
+                color: DTheme.inkSoft
                 wrapMode: Text.WordWrap
                 lineHeight: 1.55
                 textFormat: Text.PlainText
@@ -255,14 +285,15 @@ ScreenFrame {
             // something more soothing and less actionable.
             Text {
                 text: screen.failure
-                font: Theme.address
-                color: Theme.ink
+                font: DTheme.address
+                color: DTheme.ink
                 wrapMode: Text.WrapAnywhere
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
             }
 
             FlatButton {
+                objectName: "retryButton"
                 // copy.json `states.retry`
                 text: "Try reading again"
                 kind: "primary"
@@ -276,24 +307,25 @@ ScreenFrame {
     // Screen 07's empty half. A paper border and a plain statement about THIS
     // MACHINE — never a claim about the Stoa, which this peer cannot make.
     Rectangle {
+        objectName: "emptyPanel"
         visible: screen.readState === "ok" && screen.rows.length === 0
         Layout.fillWidth: true
-        implicitHeight: emptyBody.implicitHeight + 2 * Theme.cardPaddingY
-        color: Theme.paper
-        border.width: Theme.hairline
-        border.color: Theme.rule2
+        implicitHeight: emptyBody.implicitHeight + 2 * DTheme.cardPaddingY
+        color: DTheme.paper
+        border.width: DTheme.hairline
+        border.color: DTheme.rule2
 
         ColumnLayout {
             id: emptyBody
             anchors.fill: parent
-            anchors.margins: Theme.cardPaddingY
-            spacing: Theme.itemGap
+            anchors.margins: DTheme.cardPaddingY
+            spacing: DTheme.itemGap
 
             Text {
                 // copy.json `states.emptyTitle`
                 text: "You have not received anything for this Stoa yet."
-                font: Theme.heading
-                color: Theme.ink
+                font: DTheme.heading
+                color: DTheme.ink
                 wrapMode: Text.WordWrap
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
@@ -302,8 +334,8 @@ ScreenFrame {
             Text {
                 // copy.json `states.emptyBody`
                 text: "The store was read without error; it holds no posts for this address. Other peers may hold posts you have not been sent. This is a fact about your copy, not about the Stoa."
-                font: Theme.bodySmall
-                color: Theme.inkSoft
+                font: DTheme.bodySmall
+                color: DTheme.inkSoft
                 wrapMode: Text.WordWrap
                 lineHeight: 1.55
                 textFormat: Text.PlainText
@@ -320,8 +352,8 @@ ScreenFrame {
                 // among bound neighbours is the kind of thing that stays
                 // accurate right up until the visibility condition changes.
                 text: "STORE READ OK · " + screen.rows.length + " POSTS HELD"
-                font: Theme.label
-                color: Theme.inkMuted
+                font: DTheme.label
+                color: DTheme.inkMuted
                 textFormat: Text.PlainText
             }
         }
@@ -335,7 +367,7 @@ ScreenFrame {
         delegate: ColumnLayout {
             required property var modelData
             Layout.fillWidth: true
-            spacing: Theme.itemGap
+            spacing: DTheme.itemGap
 
             PostHeader {
                 identityAddress: modelData.author
@@ -354,8 +386,8 @@ ScreenFrame {
             Text {
                 visible: modelData.isHidden === true
                 text: "HIDDEN BY A MODERATOR · SHOWN BECAUSE YOU ASKED TO SEE HIDDEN POSTS"
-                font: Theme.label
-                color: Theme.accent
+                font: DTheme.label
+                color: DTheme.accent
                 textFormat: Text.PlainText
             }
 
@@ -369,16 +401,16 @@ ScreenFrame {
                 delegate: SanitisedText {
                     required property var modelData
                     value: modelData
-                    bodyFont: Theme.address
-                    bodyColor: Theme.inkMuted
+                    bodyFont: DTheme.address
+                    bodyColor: DTheme.inkMuted
                     Layout.fillWidth: true
                 }
             }
 
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: Theme.hairline
-                color: Theme.rule
+                Layout.preferredHeight: DTheme.hairline
+                color: DTheme.rule
             }
         }
     }
@@ -391,7 +423,7 @@ ScreenFrame {
     RowLayout {
         visible: screen.readState === "ok" && (screen.hasMore || screen.page > 0)
         Layout.fillWidth: true
-        spacing: Theme.itemGap
+        spacing: DTheme.itemGap
 
         FlatButton {
             text: "Previous"
@@ -419,13 +451,13 @@ ScreenFrame {
         Layout.fillWidth: true
         spacing: 6
 
-        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: Theme.hairline; color: Theme.ink }
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: DTheme.hairline; color: DTheme.ink }
 
         Text {
             // copy.json `compose.blockedTitle`
             text: "You cannot reply in this Stoa yet."
-            font: Theme.heading
-            color: Theme.ink
+            font: DTheme.heading
+            color: DTheme.ink
             textFormat: Text.PlainText
         }
 
@@ -434,8 +466,8 @@ ScreenFrame {
         // it here would mean maintaining the same guidance twice.
         Text {
             text: screen.capability.reason !== undefined ? screen.capability.reason : ""
-            font: Theme.bodySmall
-            color: Theme.inkSoft
+            font: DTheme.bodySmall
+            color: DTheme.inkSoft
             wrapMode: Text.WordWrap
             lineHeight: 1.55
             textFormat: Text.PlainText
@@ -443,23 +475,20 @@ ScreenFrame {
         }
     }
 
-    apparatus: [
-        MarginNote {
-            label: "ON THIS ORDERING"
-            // copy.json `feed.orderingNote`
-            body: "Not newest first. Timestamps do not reach this machine yet, so posts are ordered by a rule every peer computes identically. When real times arrive this label changes and nothing else does."
-        },
-        MarginNote {
-            label: "ON WHAT YOU HOLD"
-            caveat: false
-            body: "Every number here counts what this machine has received. No peer can see the whole of a Stoa, so there is no total to show."
-        },
-        MarginNote {
-            label: "ON THE MARK"
-            caveat: false
-            // The identicon is a second forgeable channel, and saying so is
-            // part of not letting it stand in for the address.
-            body: "The hatched shape is drawn from the address and is identical on every peer. It is a shortcut for recognition, never a proof of anything — which is why the address is printed beside it."
-        }
-    ]
+    // There was an `apparatus:` block here holding three MarginNotes — "ON THIS
+    // ORDERING", "ON WHAT YOU HOLD", "ON THE MARK". They were the design
+    // bundle's annotation of itself, written for someone reading the mockup
+    // rather than for a forum reader, and they are gone with the column that
+    // held them.
+    //
+    // What they explained is still enforced, in the places that actually bind:
+    //
+    // - the ordering's honest label is in the `orderings` model above, which is
+    //   where UI-BRIEF's "do not label an ordering 'new' unless it is one" is
+    //   met;
+    // - "counts what this machine holds" is in the empty state's status line,
+    //   which says POSTS HELD and deliberately renders no peer total;
+    // - "the mark is never a proof" is met by printing the address beside every
+    //   identicon rather than by a note saying so — AddressLabel in the header
+    //   and in every PostHeader.
 }

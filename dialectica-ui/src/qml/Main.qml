@@ -33,20 +33,34 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: Theme.desk
+        color: DTheme.desk
     }
 
     Flickable {
         anchors.fill: parent
         contentWidth: width
-        contentHeight: frame.implicitHeight + 2 * Theme.cardPaddingY
+
+        // Derived from the COLUMN, not from the card plus a repetition of the
+        // padding arithmetic. The old form was
+        // `frame.implicitHeight + 2 * cardPaddingY`, which restated the two
+        // spacer heights below and so had two ways to be wrong: it could
+        // disagree with the spacers, and — the failure that actually shipped —
+        // it silently became just the padding when `ScreenFrame` reported an
+        // implicitHeight of 0, leaving a Flickable that scrolled over nothing
+        // while the card's content was drawn on top of itself.
+        //
+        // Reading the column's own implicitHeight means the spacers are counted
+        // because they are IN it, so the number cannot drift from the layout it
+        // describes.
+        contentHeight: page.implicitHeight
         clip: true
 
         ColumnLayout {
+            id: page
             width: parent.width
             spacing: 0
 
-            Item { Layout.preferredHeight: Theme.cardPaddingY }
+            Item { Layout.preferredHeight: DTheme.cardPaddingY }
 
             FeedScreen {
                 id: frame
@@ -54,10 +68,10 @@ Item {
                 stoaTitle: root.stoaTitle
                 stoaGenesis: root.stoaGenesis
                 Layout.alignment: Qt.AlignHCenter
-                Layout.preferredWidth: Math.min(Theme.cardWidth, root.width - 2 * Theme.cardPaddingX)
+                Layout.preferredWidth: Math.min(DTheme.cardWidth, root.width - 2 * DTheme.cardPaddingX)
             }
 
-            Item { Layout.preferredHeight: Theme.cardPaddingY }
+            Item { Layout.preferredHeight: DTheme.cardPaddingY }
         }
     }
 }
