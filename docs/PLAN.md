@@ -975,12 +975,23 @@ later:
   stops signing, and every peer keeps accepting. Check expiry where the claim is
   *used*, not where it is issued.
 
-#### Externally-anchored credentials: the door is open, and nothing is to be built
+#### Externally-anchored credentials: keys stay, proofs supplement
+
+**The answer, and a reader can stop here: the identity keys remain the identity,
+and proofs only supplement them.** A proof adds weight to a relevance score and
+may display extra information. It never replaces an identity, renames one,
+authenticates one, or becomes one. So the identity model is **layered** — a
+signing key at the base, optional credentials above it, and **the base unchanged
+by anything above**. Everything below is downstream of that sentence.
+
+That is what makes this subsection a record of a *seam* rather than a design. The
+mechanics are deliberately a later plan; what matters now is that the layering is
+right and that nothing forecloses the upper layer.
 
 A user may one day want to attach an **external** credential to a per-Stoa
 pseudonym — a LEZ token-holding proof (§7.1), an ENS name, an NFT, a DID. The
-question this subsection settles is not whether to support one; it is whether
-doing so later costs a redesign. **It does not, and the evidence is specific:**
+question is not whether to support one; it is whether doing so later costs a
+redesign. **It does not, and the evidence is specific:**
 a new op kind takes the next free discriminant, and `op-format`'s spec requires
 that discriminants "be appended, never inserted", so a kind added later "costs
 one unused discriminant and no encoding version, and an older client meets it as
@@ -1039,23 +1050,20 @@ and to prefer the former. That division is real but it is not where the risk
 lives:
 
 - **Verification convergence** — do two peers agree the credential is
-  *well-formed*? A self-contained proof: yes, permanently; any peer checking it
-  at any time gets the same answer. A state query resolved through a sibling
-  module: it depends when, and at what height, the question was asked. **This
-  difference is real**, and it is the same convergence requirement §6 imposes on
-  moderation authority and §5.7 on revision ordering, arriving from a third
-  direction. That recurrence is the part worth noticing: this design keeps
-  rediscovering that a verdict computed from anything other than the ops
-  themselves is a verdict two peers can disagree about. Appendix A records the
-  measured version — OpChan's proof-of-holding was an HTTP call to a third-party
-  indexer, and "a peer without an API key computed different scores".
+  *well-formed*? A self-contained proof: yes, permanently. A state query resolved
+  through a sibling module: it depends when, and at what height, it was asked.
+  **The rule to keep is that a claim must be verifiable to the same verdict by
+  every peer holding it, and a verifier that answers differently to two peers is
+  not a verifier.** Appendix A records the measured failure — OpChan's
+  proof-of-holding was an HTTP call to a third-party indexer, and "a peer without
+  an API key computed different scores".
 - **Assertion freshness** — is what the credential claims *still true*? **Here a
-  proof and a lookup are the same, and neither is fresh.** "I held ≥ N at block
-  H" is true forever and says nothing about now; transfer the tokens and the
-  proof stays valid while the fact goes stale. ENS names expire and transfer,
-  which makes the point from the other side. A proof's only
-  advantage is **honesty**: it names the moment it speaks for, where a lookup
-  answers "now" and hides that "now" has passed.
+  proof and a lookup are the same, and neither is fresh.** "I held ≥ N at block H"
+  is true forever and says nothing about now; transfer the tokens and the proof
+  stays valid while the fact goes stale. ENS names expire and transfer, which makes
+  the point from the other side. A proof's only advantage is **honesty**: it names
+  the moment it speaks for, where a lookup answers "now" and hides that "now" has
+  passed.
 
 So the guidance is *not* "prefer proofs". It is that **any ownership credential
 is a statement about a moment**, and that the design must decide what a
@@ -1064,39 +1072,27 @@ ENS**, which is the argument for keeping the architecture adaptable rather than
 betting on either. ENS is not ruled out; pinning a block height is the obvious
 mitigation for the convergence half and is **unexplored**.
 
-**The answer to the freshness half is expiry, and this section already required
-it.** Proofs expire, and the holder re-proves on a cadence — seven days, thirty,
-whatever the claim warrants. The reader never chases current state; a proof older
-than its window simply stops counting.
+**The intended answer to the freshness half is expiry, which this section already
+required**: proofs expire and the holder re-proves on a cadence — seven days,
+thirty, whatever the claim warrants — so the reader never chases current state and
+a proof past its window stops counting. That **moves the burden to the claimant**,
+which is what keeps a credential from becoming state a reader has to reach for.
 
-That is worth stating plainly because of what it preserves: `moderation-resolution`
-requires that two readers resolving from the same ops reach the same outcome and
-that "neither consults any state outside those ops and that set". Expiry keeps
-credentials inside that rule by **moving the burden to the claimant** — the
-freshness problem is solved by publishing another op, not by a reader reaching
-for state. And it dissolves the ENS-versus-LEZ difficulty rather than deciding
-it: a claim cannot be stale-but-still-counted if nothing counts past its window,
-and both credential types get identical treatment. The general form, which is
-the one to hold onto: **a claim must be verifiable to the same verdict by every
-peer holding it, and a verifier that answers differently to two peers is not a
-verifier.**
+Three things a future design must handle, recorded because each is easy to get
+wrong and none is obvious:
 
-Three consequences, each subtle enough to be worth naming:
-
-- **The window must be measured in something every peer agrees on.** A
-  wall-clock timestamp is author-asserted, so a lying `createdAt` extends a
-  proof's life and the claimant is precisely the party with the motive. This is
-  §13's unbounded-field problem arriving at credentials, and the answer there is
-  the answer here — dialectica's own Lamport counter is the honest clock. Do not
-  re-derive it; §13 owns it.
+- **The window needs a clock every peer agrees on.** A wall-clock timestamp is
+  author-asserted, so a lying `createdAt` extends a proof's life and the claimant
+  is exactly the party with the motive. This is §13's unbounded-field problem
+  arriving at credentials; §13 owns the answer, and it is not to be re-derived
+  here.
 - **The window belongs to the credential type, not to the forum.** A LEZ balance
   can move in one block; an ENS registration lasts a year. One global constant
-  would be wrong for both, so the window is a property of what is being claimed.
-- **Expiry is a liveness cost, and it is recorded as such.** A user offline for
-  longer than their window silently loses standing, and a moderator weighted by
-  token holding quietly stops being weighted. Whether that wants a grace period
-  is **open** (§13) — but it is a decision, not a bug, and it must not be
-  discovered by the first person it happens to.
+  would be wrong for both.
+- **Expiry costs liveness.** A user offline for longer than their window silently
+  loses standing. Whether that wants a grace period is **open** (§13) — but it is
+  a decision, not a bug, and must not be discovered by the first person it happens
+  to.
 
 #### Composability: two levels, and why the interesting one works
 
@@ -1104,14 +1100,11 @@ Credentials are to be **composable**, at two levels: a Stoa adopting an identity
 system its participants install, and a fork adding a credential type of its own.
 **The first is preferred; the second is the fallback.**
 
-**Level 2 — a fork adds its own credential type — is nearly free.** A fork
-controls its own op format, so it allocates a `Credential` kind, ships, and
-diverges from upstream by one discriminant. Nothing in this design has to
-anticipate it. The single thing that would prevent it is door-closer 2 above: if
-credential checking were welded into op verification, a fork could not add a
-credential without forking the verification path, and every peer running upstream
-code would reject its ops rather than ignoring them. Keeping that seam clean is
-what makes level 2 free, which is a second reason to hold the line there.
+**Level 2 — a fork adds its own credential type — is nearly free**, and needs
+nothing from this design: a fork controls its own op format, so it allocates a
+kind and ships. The one thing that would prevent it is door-closer 2 — welding
+credential checks into op verification would force a fork to fork the verification
+path too — which is a second reason to hold that seam.
 
 **Level 1 — a Stoa adopts an identity system its participants install — is the
 preferred direction, and it works.** "This Stoa supports Base NFT series 123;
@@ -1132,18 +1125,15 @@ installed" and "holds nothing" are the same local answer, and neither reader is
 wrong.** There is no convergence problem here because there is nothing to
 converge on.
 
-It is tempting to reach for `moderation-resolution`'s requirement that two readers
-resolving from the same ops reach the same outcome, and conclude that divergent
-module sets break it. **That applies the wrong section's rule.** That requirement
-governs *moderation*, which must converge because a hide is a binding judgement
-about what everyone sees. **Scoring never had that requirement and could not
-have**: §7.3's vouching is per-reader and never published, so two readers already
-compute different scores from identical ops — Alice vouches for Bob, Carole does
-not, and their feeds differ correctly. §7.2 rule 1 says the same, and §7.3 puts it
-exactly: rule 1 "already says two peers rank differently and that is correct; a
-vouch makes that divergence *intentional* rather than merely tolerated." **A
-missing credential module is one more such reason, in a class the design already
-treats as correct rather than broken.**
+**Recorded because it is the mistake this section made once:** it is tempting to
+reach for `moderation-resolution`'s requirement that two readers resolving from
+the same ops reach the same outcome, and conclude that divergent module sets break
+it. That applies the wrong section's rule. It governs *moderation*, which must
+converge because a hide binds what everyone sees. **Scoring never had that
+requirement and could not have** — §7.3's vouching is per-reader and never
+published, and §7.2 rule 1 "already says two peers rank differently and that is
+correct". A missing credential module is one more such reason, in a class the
+design already treats as correct.
 
 **The boundary, which is the rule a future reader must not cross:**
 
