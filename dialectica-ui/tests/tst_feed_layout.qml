@@ -367,13 +367,17 @@ Item {
             var cases = [
                 { name: "a broken store", replies: spec.storeBroken, address: undefined, expect: "failedPanel" },
                 { name: "an empty store", replies: spec.storeEmpty, address: undefined, expect: "emptyPanel" },
-                { name: "no address at all", replies: spec.storeEmpty, address: "", expect: "failedPanel" }
+                // No address is its OWN panel, not the failure one. It used to
+                // expect `failedPanel` here, and that expectation was itself the
+                // copy bug written down: nothing was read, so the storage-failure
+                // panel — and its claims about what is on disk — must not appear.
+                { name: "no address at all", replies: spec.storeEmpty, address: "", expect: "unaskedPanel" }
             ]
 
             for (var c = 0; c < cases.length; c++) {
                 load(cases[c].replies, cases[c].address)
 
-                var panels = ["failedPanel", "emptyPanel"]
+                var panels = ["failedPanel", "emptyPanel", "unaskedPanel"]
                 var shown = []
                 for (var i = 0; i < panels.length; i++) {
                     var p = root.findByName(feed, panels[i])

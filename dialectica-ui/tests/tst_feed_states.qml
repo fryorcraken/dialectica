@@ -135,13 +135,147 @@ TestCase {
         notArray.destroy()
     }
 
-    function test_a_missing_stoa_address_is_a_failure_rather_than_a_silent_empty() {
+    function test_a_missing_stoa_address_is_not_a_silent_empty() {
         Core.bridge = bridgeFor({})
         var screen = feedComponent.createObject(null, { stoaAddress: "" })
 
-        compare(screen.readState, "failed",
-                "a view given no Stoa must say so rather than look empty")
-        verify(screen.failure.length > 0)
+        verify(screen.readState !== "ok",
+               "a view given no Stoa must say so rather than look empty")
+        screen.destroy()
+    }
+
+    // ---- "we never asked" is its own state, not a storage failure --------
+    //
+    // THE COPY BUG, and it is worse than a layout defect because it invents a
+    // fact about the user's data.
+    //
+    // `reload()` short-circuits when `stoaAddress` is empty — it returns BEFORE
+    // touching the bridge. Nothing was read; there is no store involved. But the
+    // old code set `readState = "failed"`, which renders the storage-failure
+    // panel and with it two fabricated sentences: "The store could not be read"
+    // and "This is not an empty Stoa. Posts you already hold are on disk and
+    // unreadable right now." The only true line, "No Stoa address was given to
+    // this view", was the smallest text in the panel.
+    //
+    // UI-BRIEF obligation 5 exists to keep "empty" and "unreadable"
+    // distinguishable. A third case — *we never asked* — was being rendered as
+    // the second, which defeats the obligation from a direction it did not
+    // anticipate.
+    //
+    // The predecessor of this test pinned only `readState === "failed"` and so
+    // let the wrong copy through entirely. That is this project's recorded defect
+    // family: a fixture where two explanations give the same answer.
+
+    function test_no_address_is_its_own_state_and_not_a_storage_failure() {
+        Core.bridge = bridgeFor({})
+        var screen = feedComponent.createObject(null, { stoaAddress: "" })
+
+        compare(screen.readState, "unasked",
+                "no address supplied means the store was never consulted, so "
+                + "this must NOT be the state that renders 'the store could not "
+                + "be read' — nothing was read")
+        screen.destroy()
+    }
+
+    function test_the_no_address_state_never_claims_anything_about_the_store() {
+        // The property stated over the strings themselves rather than over the
+        // state name, because the state name is not what the user reads. A
+        // future change that renamed the state but kept the copy would pass the
+        // test above and still lie on screen.
+        Core.bridge = bridgeFor({})
+        var screen = feedComponent.createObject(null, { stoaAddress: "" })
+
+        // Asserted present BEFORE asserting absent. Without this the whole test
+        // passes vacuously while the properties are undefined — "undefined"
+        // contains none of the forbidden substrings, so a screen that renders no
+        // copy at all would look compliant. Watched it do exactly that.
+        verify(screen.statusTitle !== undefined && screen.statusTitle.length > 0,
+               "the no-address state must SAY something; statusTitle was: "
+               + screen.statusTitle)
+        verify(screen.statusBody !== undefined && screen.statusBody.length > 0,
+               "the no-address state must explain itself; statusBody was: "
+               + screen.statusBody)
+
+        var said = screen.statusTitle + " " + screen.statusBody
+        verify(said.indexOf("store could not be read") < 0,
+               "the no-address state must not claim a failed read; it said: "
+               + said)
+        verify(said.indexOf("on disk") < 0,
+               "the no-address state must not claim anything about what is on "
+               + "disk — nothing was examined. It said: " + said)
+        verify(said.indexOf("not an empty Stoa") < 0,
+               "the no-address state must not assert the Stoa is non-empty; no "
+               + "Stoa was named. It said: " + said)
+        screen.destroy()
+    }
+
+    function test_a_real_store_failure_still_says_the_store_failed() {
+        // The counter-pressure, so the fix above cannot be satisfied by removing
+        // the storage-failure language altogether. When a read genuinely fails,
+        // the panel must still say so — that is obligation 5's other half.
+        var screen = makeScreen({
+            "get_capabilities": '{"canPost":true,"identity":"aa"}',
+            "list_threads": '{"error":"the database at /x/ops.sqlite is locked"}'
+        })
+
+        compare(screen.readState, "failed")
+        var said = screen.statusTitle + " " + screen.statusBody
+        verify(said.indexOf("store could not be read") >= 0,
+               "a real read failure must still name itself as one; it said: "
+               + said)
+        screen.destroy()
+    }
+
+    // ---- the ordering label ---------------------------------------------
+
+    function test_no_ordering_claims_to_be_the_same_for_everyone() {
+        // "same order for everyone" was rendered as the ordering's label. It is
+        // false as an interface promise: UI-BRIEF is explicit that the
+        // convergence is "a property of *this fallback*, not of Dialectica", and
+        // that such a label "must not become the interface's general promise" —
+        // once vote-weighting exists, vouching is per-reader and never
+        // published, so two readers legitimately compute different orders over
+        // identical ops.
+        //
+        // With exactly one ordering there is also nothing to choose between, so
+        // the label was furniture that asserted a falsehood.
+        var screen = makeScreen({
+            "get_capabilities": '{"canPost":true,"identity":"aa"}',
+            "list_threads": '{"items":[],"page":0,"hasMore":false}'
+        })
+
+        for (var i = 0; i < screen.orderings.length; i++) {
+            var label = screen.orderings[i].label
+            var text = label === undefined ? "" : String(label)
+            verify(text.indexOf("same order for everyone") < 0,
+                   "ordering " + i + " is labelled '" + text + "' — that states "
+                   + "as a general property something true only of the degraded "
+                   + "op-id fallback")
+            verify(text.indexOf("everyone") < 0,
+                   "ordering " + i + " is labelled '" + text + "' — no ordering "
+                   + "may promise anything about what other readers see")
+        }
+        screen.destroy()
+    }
+
+    function test_the_ordering_row_is_still_model_driven() {
+        // The counter-pressure to the test above: UI-BRIEF requires that "the
+        // labels must be able to change when the real ordering arrives, without
+        // the layout changing around them", so the row stays a model rather than
+        // being deleted. Removing the false label must not foreclose a second
+        // ordering appearing later.
+        var screen = makeScreen({
+            "get_capabilities": '{"canPost":true,"identity":"aa"}',
+            "list_threads": '{"items":[],"page":0,"hasMore":false}'
+        })
+
+        verify(Array.isArray(screen.orderings),
+               "the orderings must remain a model an ordering can be added to")
+        compare(screen.orderings.length, 1,
+                "core implements exactly one ordering today")
+        verify(screen.orderings[0].key !== undefined,
+                "an ordering must still be identifiable by key, so a future "
+                + "selection control has something to select")
         screen.destroy()
     }
 

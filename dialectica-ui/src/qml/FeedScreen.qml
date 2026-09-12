@@ -28,8 +28,20 @@ ScreenFrame {
     //
     // One enum-ish string rather than several booleans:
     //   "unread"  nothing asked for yet
+    //   "unasked" no Stoa was named, so the store was never consulted
     //   "ok"      the store answered; `rows` is what it holds (possibly none)
     //   "failed"  the store could not be read; `failure` says why
+    //
+    // `unasked` is separate from `failed` because they are different facts and
+    // the copy for one is a lie about the other. `reload()` returns before
+    // touching the bridge when there is no address — nothing is read, no file is
+    // opened — and the failed panel says "The store could not be read" and "Posts
+    // you already hold are on disk and unreadable right now". Both sentences were
+    // fabricated, and the only true line was the smallest text in the panel.
+    //
+    // UI-BRIEF obligation 5 keeps "empty" and "unreadable" apart. This is the
+    // third case it did not anticipate — *we never asked* — and collapsing it
+    // into either of the other two defeats the obligation from a new direction.
     property string readState: "unread"
     property var rows: []
     property string failure: ""
@@ -44,32 +56,87 @@ ScreenFrame {
 
     // ---- the ordering row -----------------------------------------------
     //
-    // Built from a model, as the bundle requires, so that an ordering can
-    // appear or disappear without the layout changing around it.
+    // Still a model, because UI-BRIEF requires that "the labels must be able to
+    // change when the real ordering arrives, without the layout changing around
+    // them". Deleting the row would foreclose that; keeping it costs nothing.
     //
-    // There is exactly ONE entry, because core implements exactly one ordering.
-    // Its label is "same order for everyone", and that label is true OF THIS
-    // ORDERING specifically: with no Lamport timestamp reaching this machine,
-    // the order falls back to ascending op id, which every peer computes
-    // identically from ops they all hold.
+    // There is exactly ONE entry, because core implements exactly one ordering,
+    // and that entry now carries NO LABEL.
     //
-    // It would NOT be true of the feed in general, and that distinction is why
-    // the label lives in the model rather than in the layout. Vouching is
-    // per-reader and never published, so a vote-weighted ordering would give two
-    // readers different orders over the identical op set, and both would be
-    // correct. When such an ordering arrives it joins this model with its own
-    // honest label; this one does not have to change.
+    // It used to read "same order for everyone". That is false as an interface
+    // promise, and UI-BRIEF says so directly: the convergence "is a property of
+    // *this fallback*, not of Dialectica", and such a label "must not become the
+    // interface's general promise". Once vote-weighting exists, vouching is
+    // per-reader and never published, so Alice and Carole compute different
+    // orders over identical ops and neither is wrong.
+    //
+    // With one ordering there is also nothing to choose between, so a rendered
+    // label was furniture that asserted a falsehood to no purpose. The row draws
+    // nothing until there are two orderings to tell apart; the `key` stays so
+    // that a future selection control has something to select.
     property var orderings: [
-        { key: "convergent", label: "same order for everyone" }
+        { key: "convergent", label: "" }
     ]
     property string ordering: "convergent"
+
+    // ---- what each read state SAYS ---------------------------------------
+    //
+    // The copy lives here, keyed by state, rather than inside the panels. Two
+    // reasons, and the second is why the copy bug existed:
+    //
+    // 1. A test can read it. The predecessor of these tests pinned only
+    //    `readState === "failed"` and let a fabricated sentence through, because
+    //    the words were buried in a `Text` element nothing could reach.
+    // 2. One state cannot borrow another's language by accident. The strings and
+    //    the state that selects them are now the same lookup.
+    readonly property var statusCopy: ({
+        "unasked": {
+            // Not a storage failure, and it must not sound like one: nothing was
+            // read, so nothing can be said about what is on disk. It states the
+            // situation and what would change it, per the brief's tone rule —
+            // say what would make it possible, claim no more than is known.
+            title: "No Stoa has been opened.",
+            body: "This view was not given a Stoa address, so nothing has been "
+                + "read and nothing is known about what this machine holds. "
+                + "Open a Stoa by its address to see what has arrived."
+        },
+        "failed": {
+            // copy.json `states.failedTitle`
+            title: "The store could not be read, so nothing can be shown.",
+            // copy.json `states.failedBody` opens with this sentence, and it is
+            // the load-bearing half: it says what this ISN'T.
+            body: "This is not an empty Stoa. Posts you already hold are on disk "
+                + "and unreadable right now."
+        },
+        "ok": {
+            // copy.json `states.emptyTitle` / `states.emptyBody`
+            title: "You have not received anything for this Stoa yet.",
+            body: "The store was read without error; it holds no posts for this "
+                + "address. Other peers may hold posts you have not been sent. "
+                + "This is a fact about your copy, not about the Stoa."
+        }
+    })
+
+    readonly property string statusTitle:
+        screen.statusCopy[screen.readState] !== undefined
+            ? screen.statusCopy[screen.readState].title : ""
+    readonly property string statusBody:
+        screen.statusCopy[screen.readState] !== undefined
+            ? screen.statusCopy[screen.readState].body : ""
 
     Component.onCompleted: screen.reload()
 
     function reload() {
         if (screen.stoaAddress === "") {
-            screen.readState = "failed"
-            screen.failure = "No Stoa address was given to this view."
+            // `unasked`, NOT `failed`: this returns before touching the bridge,
+            // so no store was consulted and no read failed. Calling it a failure
+            // put "the store could not be read" and "posts you already hold are
+            // on disk" on screen — two claims about data nothing had looked at.
+            //
+            // `failure` stays empty for the same reason: it is the place core's
+            // own error text goes, and there is no error here.
+            screen.readState = "unasked"
+            screen.failure = ""
             return
         }
 
@@ -176,7 +243,12 @@ ScreenFrame {
             model: screen.orderings
             delegate: Text {
                 required property var modelData
-                text: modelData.label
+                text: modelData.label === undefined ? "" : modelData.label
+                // An unlabelled ordering draws nothing rather than an empty
+                // gap. Today every entry is unlabelled, so the row is absent
+                // from the header entirely — which is correct while there is
+                // only one ordering and nothing to choose between.
+                visible: text !== ""
                 font: DTheme.bodySmall
                 color: screen.ordering === modelData.key ? DTheme.ink : DTheme.inkMuted
                 textFormat: Text.PlainText
@@ -237,6 +309,54 @@ ScreenFrame {
         Rectangle { Layout.fillWidth: true; Layout.preferredHeight: DTheme.hairline; color: DTheme.ink }
     }
 
+    // ---- state: no Stoa was named ----------------------------------------
+    //
+    // The state that used to borrow the failure panel. It gets its own, and it
+    // deliberately looks NOTHING like that one:
+    //
+    // - no accent border, because nothing is wrong;
+    // - no retry button, because there is nothing to retry — re-reading an
+    //   address that was never supplied would do exactly what it did before;
+    // - no `screen.failure` line, because core never spoke.
+    //
+    // This is the honest shape of "we have not asked yet", and telling it apart
+    // from a storage failure at a glance is the whole point of separating them.
+    Rectangle {
+        objectName: "unaskedPanel"
+        visible: screen.readState === "unasked"
+        Layout.fillWidth: true
+        implicitHeight: unaskedBody.implicitHeight + 2 * DTheme.cardPaddingY
+        color: DTheme.paper
+        border.width: DTheme.hairline
+        border.color: DTheme.rule2
+
+        ColumnLayout {
+            id: unaskedBody
+            anchors.fill: parent
+            anchors.margins: DTheme.cardPaddingY
+            spacing: DTheme.itemGap
+
+            Text {
+                text: screen.statusTitle
+                font: DTheme.heading
+                color: DTheme.ink
+                wrapMode: Text.WordWrap
+                textFormat: Text.PlainText
+                Layout.fillWidth: true
+            }
+
+            Text {
+                text: screen.statusBody
+                font: DTheme.bodySmall
+                color: DTheme.inkSoft
+                wrapMode: Text.WordWrap
+                lineHeight: 1.55
+                textFormat: Text.PlainText
+                Layout.fillWidth: true
+            }
+        }
+    }
+
     // ---- state: the store could not be read -----------------------------
     //
     // Screen 07's failed half. An accent border, the failure named, and a
@@ -258,9 +378,10 @@ ScreenFrame {
             anchors.margins: DTheme.cardPaddingY
             spacing: DTheme.itemGap
 
+            // Both strings come from `statusCopy`, keyed by state, so the words
+            // a test reads are the words drawn here.
             Text {
-                // copy.json `states.failedTitle`
-                text: "The store could not be read, so nothing can be shown."
+                text: screen.statusTitle
                 font: DTheme.heading
                 color: DTheme.accent
                 wrapMode: Text.WordWrap
@@ -269,9 +390,7 @@ ScreenFrame {
             }
 
             Text {
-                // copy.json `states.failedBody` opens with this sentence, and
-                // it is the load-bearing half: it says what this ISN'T.
-                text: "This is not an empty Stoa. Posts you already hold are on disk and unreadable right now."
+                text: screen.statusBody
                 font: DTheme.bodySmall
                 color: DTheme.inkSoft
                 wrapMode: Text.WordWrap
@@ -322,8 +441,7 @@ ScreenFrame {
             spacing: DTheme.itemGap
 
             Text {
-                // copy.json `states.emptyTitle`
-                text: "You have not received anything for this Stoa yet."
+                text: screen.statusTitle
                 font: DTheme.heading
                 color: DTheme.ink
                 wrapMode: Text.WordWrap
@@ -332,8 +450,7 @@ ScreenFrame {
             }
 
             Text {
-                // copy.json `states.emptyBody`
-                text: "The store was read without error; it holds no posts for this address. Other peers may hold posts you have not been sent. This is a fact about your copy, not about the Stoa."
+                text: screen.statusBody
                 font: DTheme.bodySmall
                 color: DTheme.inkSoft
                 wrapMode: Text.WordWrap
