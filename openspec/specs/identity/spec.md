@@ -1,5 +1,9 @@
 # identity Specification
 
+## Purpose
+
+Defines how a user's per-Stoa identity is derived, what an address is derived from, and what a verification of an op does and does not establish — so that a pseudonym is stable within a Stoa, unlinkable across Stoas, and no attacker-supplied key, signature or address can crash a parser or pass as someone else's.
+
 ## Requirements
 
 ### Requirement: A user has one identity per Stoa, and it is permanent

@@ -38,20 +38,30 @@ One exception worth knowing: a change that declares `retire_capabilities` can
 make archive **delete** a spec rather than merge into it. Nothing here does
 that, and it takes an explicit marker.
 
-#### Archiving by hand, when the CLI is not installed
+#### Ask `openspec --version` before concluding anything about the CLI
 
-`openspec` is not installed here (`openspec --version` → 127), so the merge has
-been done by hand. The transformation, for a capability `openspec/specs/` does
-not yet hold, is exactly two edits:
+`openspec archive` is the tool to reach for, and `openspec validate` alongside
+it. This file previously recorded that the CLI was absent and the merge was
+therefore done by hand; the absence was real once, the sentence outlived it, and
+"openspec is not installed" was relayed to five agents in one day on that
+basis. One command settles it — so run the command, and do not take a document's
+word for what is on the machine.
+
+#### What `openspec archive` does to a delta, and what to check because it will not tell you
+
+The transformation, for a capability `openspec/specs/` does not yet hold, is
+exactly two edits:
 
 1. prepend `# <capability> Specification` and a blank line;
 2. rename `## ADDED Requirements` to `## Requirements`.
 
-Everything else is carried across byte-for-byte. Verify by diffing the promoted
-file against the delta and confirming those are the only hunks.
+Everything else is carried across byte-for-byte. That is the check, whoever
+performs it: diff the promoted file against the delta and confirm those are the
+only hunks. The CLI does not report what it changed, so a merge nobody diffed is
+a merge nobody verified.
 
-Four things about that rule cost time to establish, and none is visible from
-the files themselves:
+Four things about that rule cost time to establish, none is visible from the
+files themselves, and none of them is about whether a CLI is available:
 
 - **`stoa-genesis` is NOT a valid reference example.** Its live spec differs
   from its delta by whole added paragraphs and `SHALL` → `MUST` rewrites. Both
@@ -83,6 +93,27 @@ order from `git log --name-status --diff-filter=A -- openspec/changes`, which
 maps each change folder to the commit that introduced it; do not guess it from
 folder names. The archive date is the **merge** date, from that commit, not the
 date you are doing the sweep.
+
+#### `openspec` resolves its root from the cwd, and has no directory flag
+
+Every command reports the root it chose — `openspec list --json` ends with
+`"root": {"path": …, "source": "nearest"}` — and "nearest" is literal: it walks
+up from the **current directory** to the first `openspec/` it finds. There is no
+`--directory`, `-C` or `--root`. `--store` exists but takes a *registered store
+id*, kebab-case, and rejects anything containing a path separator, so it is not
+a directory flag.
+
+Every spec-writer here works in a worktree, so this bites immediately: run from
+the main checkout, a change living in a worktree's `openspec/changes/` is simply
+not listed, and `openspec validate <change>` cannot see it. Confirmed by
+running the same command from both — the main checkout reported two changes, the
+worktree three, each rooted at its own path.
+
+So validating or archiving a worktree's change means running from inside that
+worktree, which is the `cd` shape `CLAUDE.md` says costs a permission prompt.
+Run it from a shell already in the worktree, or accept the one prompt. **Do not
+conclude the change is missing or the CLI is broken** — check the reported root
+first; it is the one line that tells you which tree you are looking at.
 
 ### A spec must never cite a PLAN section number
 
