@@ -82,6 +82,32 @@ by whoever is orchestrating. And `openspec archive` runs once, on merge — spli
 across several merges, the contract lands at a different time from the code that
 honours it.
 
+### Branch names say which kind of branch it is
+
+| Name | Whose | Holds |
+|---|---|---|
+| `piece/<name>` | the piece | **the** task branch — the one the PR is open on |
+| `review/<name>/<dimension>` | one reviewer | its own findings file, nothing else |
+| `fix/<name>/<what>` | one fixer | the change, plus its ticks |
+
+Named for the role and not the stage, because `dev/x` invites a `test/x` beside
+it — which is the shape this section exists to stop.
+
+**A reviewer never commits to `piece/<name>`.** It works in its own worktree on
+its own `review/…` branch, commits **only** its findings file, then merges that
+branch into the task branch. Two reasons:
+
+- A reviewer reads code a fixer may still be pushing to. A reviewer that cannot
+  commit to the task branch cannot corrupt it, and four reviewers have already
+  read one file while a `dev-writer` was mid-change on it.
+- No two reviewers write the same path, so merging one file is always trivial.
+
+**Check which branch you are on before committing** — `git branch -vv`, every
+time, and confirm the upstream too. A worktree created from a branch inherits its
+upstream, and a bare `git push` has landed commits directly on `main` here more
+than once. Commit named paths, never `git add -A`: worktrees collect untracked
+build output and a gitignored SDK symlink.
+
 ## Findings go in `openspec/changes/<name>/findings/`
 
 Written by the reviewer, ticked by the fixer, deleted before merge.
