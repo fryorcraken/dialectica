@@ -529,6 +529,59 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_published_ops_author_is_pinned_to_a_known_answer_from_another_file() {
+        // `a_published_op_verifies_against_the_identity_derived_for_its_stoa`
+        // derives its expectation by calling `derive_stoa_key` — the same
+        // function the fixture's key came from — so it holds however that
+        // derivation is defined. That is the right test for "the author is the
+        // Stoa's identity and not some other key", and it is structurally unable
+        // to notice the derivation itself changing.
+        //
+        // This is the other half, on the same pattern as
+        // `identity.rs::the_wire_constants_are_pinned_to_known_answers`: the
+        // expected author address comes from a HARDCODED seed, so nothing in the
+        // publish path contributes to the expectation.
+        //
+        // The seed is `identity.rs`'s pinned value for
+        // `derive_stoa_key([7; 32], stoa_address(b"a genesis record"))`, and
+        // `keystore.rs::the_identity_survives_a_restart` reaches the same address
+        // by a third route. Every address and signature this peer produces stops
+        // matching everyone else's if it changes, with no error anywhere, because
+        // each peer stays internally consistent.
+        //
+        // **If this fails, do NOT update the expected value to match.** Work out
+        // what changed in the derivation and whether the network survives it.
+        let stoa = crate::identity::stoa_address(b"a genesis record");
+        let key = derive_stoa_key(&A_ROOT, &stoa);
+        let mut log = a_log();
+
+        let published = post(&mut log, &key, stoa, "a pinned body".to_string()).unwrap();
+
+        let pinned_seed =
+            hex::decode("b62b6b592aeb0779541bbe8beac60d8f505342c37c6a9bc990920d93e68026cf")
+                .unwrap();
+        let expected = SecretKey::from_bytes(&pinned_seed)
+            .unwrap()
+            .public_key()
+            .address();
+        assert_eq!(
+            stored(&log, &published.id).op.author.address(),
+            expected,
+            "a published op's author no longer matches the pinned per-Stoa derivation"
+        );
+        // The Stoa address is pinned too, because an author derived correctly
+        // from the WRONG Stoa address would satisfy the assertion above only by
+        // coincidence — and the fixture's Stoa is what makes the seed the right
+        // expectation at all.
+        assert_eq!(
+            stoa.to_hex(),
+            "6b1f1c28061e99c72e3340fb4fd07e8192b394e1327012e140f240a990d89cd8",
+            "Stoa address derivation changed"
+        );
+        assert_eq!(stored(&log, &published.id).op.stoa, stoa);
+    }
+
     // ─── The same content twice is one op ─────────────────────────────────
 
     #[test]
@@ -614,6 +667,81 @@ mod tests {
         .unwrap();
         assert_ne!(mine.id, yours.id, "the same body from two identities");
         assert_eq!(log.len().unwrap(), 2);
+    }
+
+    #[test]
+    fn the_same_body_in_two_stoas_is_two_ops_with_the_identity_held_fixed() {
+        // The spec lists "the same body in two Stoas" and "the same body from two
+        // identities" as two SEPARATE scenarios, and
+        // `content_differing_in_any_way_publishes_a_second_op`'s Stoa leg varies
+        // BOTH at once — because it signs each with the key that Stoa derives,
+        // which is what production does. Two explanations then give the same
+        // answer: the ids differ because the Stoas differ, or because the keys
+        // do. A `post` that ignored its `stoa` argument entirely passes that leg.
+        //
+        // So this holds the key FIXED and varies only the Stoa. There is now one
+        // explanation left for the ids differing, and it is the one the scenario
+        // names. (Signing a Lyceum op with an Agora key is not what production
+        // does; it is what isolating one variable requires, and `post` takes the
+        // two independently so it is expressible.)
+        let agora = a_stoa("Agora");
+        let lyceum = a_stoa("Lyceum");
+        assert_ne!(agora, lyceum, "the fixture needs two Stoas");
+        let one_key = a_key(A_ROOT, &agora);
+
+        let mut log = a_log();
+        let here = post(&mut log, &one_key, agora, "same words".to_string()).unwrap();
+        let there = post(&mut log, &one_key, lyceum, "same words".to_string()).unwrap();
+
+        assert_ne!(
+            here.id, there.id,
+            "the Stoa is inside the signed bytes, so one body in two Stoas is two ops"
+        );
+        assert_eq!(log.len().unwrap(), 2);
+        // And each really landed in the Stoa it named, which is the property the
+        // differing ids are evidence FOR rather than a substitute for.
+        assert_eq!(stored(&log, &here.id).op.stoa, agora);
+        assert_eq!(stored(&log, &there.id).op.stoa, lyceum);
+    }
+
+    #[test]
+    fn two_replies_to_two_siblings_in_one_thread_are_two_ops() {
+        // The spec's "two replies with the same body to different parents are two
+        // ops", with the thread held FIXED.
+        //
+        // `two_replies_with_one_body_to_different_parents_are_two_ops` uses two
+        // ROOTS as the parents, so the parent and the derived thread covary and
+        // the ids differ whichever field the implementation actually wrote. A
+        // `reply` that set `parent: Some(thread)` — dropping the parent entirely
+        // and duplicating the thread — passes it. Verified: that mutation leaves
+        // it green.
+        //
+        // Here both parents are replies in ONE thread, so the two ops agree in
+        // Stoa, author, body and thread and differ only in `parent`. Nothing but
+        // the parent is left to explain two ids.
+        let stoa = a_stoa("Agora");
+        let key = a_key(A_ROOT, &stoa);
+        let mut log = a_log();
+
+        let root = post(&mut log, &key, stoa, "the head".to_string()).unwrap();
+        let sibling_one = reply(&mut log, &key, stoa, root.id, "first".to_string()).unwrap();
+        let sibling_two = reply(&mut log, &key, stoa, root.id, "second".to_string()).unwrap();
+        assert_ne!(sibling_one.id, sibling_two.id, "the fixture needs two");
+
+        let to_one = reply(&mut log, &key, stoa, sibling_one.id, "agreed".to_string()).unwrap();
+        let to_two = reply(&mut log, &key, stoa, sibling_two.id, "agreed".to_string()).unwrap();
+
+        // The thread is the same for both, which is what removes it as an
+        // explanation for the ids differing.
+        assert_eq!(thread_field_of(&stored(&log, &to_one.id)), Some(root.id));
+        assert_eq!(thread_field_of(&stored(&log, &to_two.id)), Some(root.id));
+        assert_eq!(parent_of(&stored(&log, &to_one.id)), Some(sibling_one.id));
+        assert_eq!(parent_of(&stored(&log, &to_two.id)), Some(sibling_two.id));
+        assert_ne!(
+            to_one.id, to_two.id,
+            "the parent is inside the signed bytes, so two parents are two ops"
+        );
+        assert_eq!(log.len().unwrap(), 5);
     }
 
     #[test]

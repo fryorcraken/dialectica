@@ -2435,6 +2435,217 @@ mod tests {
         );
     }
 
+    /// An `OpLog` that records the order in which it was called, in a journal it
+    /// SHARES with a delivery sink.
+    ///
+    /// # Why this exists, when the change's own notes say the ordering is
+    /// unobservable
+    ///
+    /// `tasks.md` §10 records "that the append precedes delivery" as something
+    /// no test through this API can see, on the grounds that the sink cannot read
+    /// the log because the handler holds it mutably for the call's duration. That
+    /// is true of the *log*, and it is not true of the *ordering*: an
+    /// `Rc<RefCell<Vec<_>>>` held by BOTH the log wrapper and the sink is two
+    /// clones of one handle, so neither has to borrow the other. The log appends
+    /// its own name when `append` runs; the sink appends its own when it runs;
+    /// the resulting sequence is evidence, not an argument.
+    ///
+    /// So "sign, append, hand off — **in that order**" becomes a test that can
+    /// fail, which it could not while the only thing pinning it was the order two
+    /// statements happen to be in.
+    struct JournallingLog {
+        inner: MemoryOpLog,
+        journal: std::rc::Rc<std::cell::RefCell<Vec<&'static str>>>,
+    }
+
+    impl crate::log::OpLog for JournallingLog {
+        fn append(
+            &mut self,
+            op: crate::op::SignedOp,
+            arrival: crate::arrival::Arrival,
+        ) -> Result<crate::log::Appended, crate::log::OpLogError> {
+            let out = self.inner.append(op, arrival);
+            // Recorded AFTER the inner append returns, so the journal entry
+            // means "the op is stored", not "an append was attempted".
+            self.journal.borrow_mut().push("append");
+            out
+        }
+        fn get(
+            &self,
+            id: &crate::op::OpId,
+        ) -> Result<Option<crate::log::Entry>, crate::log::OpLogError> {
+            self.inner.get(id)
+        }
+        fn iter(&self) -> Result<Vec<crate::log::Entry>, crate::log::OpLogError> {
+            self.inner.iter()
+        }
+        fn iter_stoa(
+            &self,
+            stoa: &Address,
+        ) -> Result<Vec<crate::log::Entry>, crate::log::OpLogError> {
+            self.inner.iter_stoa(stoa)
+        }
+        fn iter_target(
+            &self,
+            target: &crate::op::OpId,
+        ) -> Result<Vec<crate::log::Entry>, crate::log::OpLogError> {
+            self.inner.iter_target(target)
+        }
+        fn len(&self) -> Result<usize, crate::log::OpLogError> {
+            self.inner.len()
+        }
+    }
+
+    #[test]
+    fn the_append_completes_before_delivery_is_invoked_on_all_three_handlers() {
+        // The spec's ordering requirement, observed rather than argued: "Each
+        // publish operation SHALL sign an op, append it to the local op log, and
+        // hand it to delivery. The append SHALL complete before delivery is
+        // invoked."
+        //
+        // The expected sequence is HARDCODED below and is not read back from
+        // anything the handlers produced. A handler that called the sink first
+        // yields `["deliver", "append"]` and this fails on the comparison.
+        //
+        // All three handlers, because the ordering is a property of each call
+        // site and one of them getting it right says nothing about the other two
+        // — which is the same "is the guard called everywhere?" shape as
+        // `a_forbidden_field_is_refused_on_every_operation`.
+        let key = publish_key();
+        let stoa = publish_stoa().to_hex();
+
+        for which in ["post", "reply", "vote"] {
+            let journal = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+            let mut log = JournallingLog {
+                inner: MemoryOpLog::new(),
+                journal: std::rc::Rc::clone(&journal),
+            };
+
+            // A seed post for the reply and the vote to point at. It goes
+            // through the same log, so the journal is CLEARED afterwards and
+            // only the measured call's sequence is asserted on.
+            let seed = as_json(&publish_post(
+                &publish_request(r#""body":"the subject""#),
+                &mut log,
+                &key,
+                &mut ignored_delivery,
+            ))["opId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            journal.borrow_mut().clear();
+
+            let request =
+                match which {
+                    "post" => serde_json::json!({"stoa": stoa, "body": "ordered"}).to_string(),
+                    "reply" => serde_json::json!({"stoa": stoa, "parent": seed, "body": "ordered"})
+                        .to_string(),
+                    _ => serde_json::json!({"stoa": stoa, "target": seed, "direction": "up"})
+                        .to_string(),
+                };
+            let sink_journal = std::rc::Rc::clone(&journal);
+            let out = match which {
+                "post" => publish_post(&request, &mut log, &key, &mut |_| {
+                    sink_journal.borrow_mut().push("deliver")
+                }),
+                "reply" => publish_reply(&request, &mut log, &key, &mut |_| {
+                    sink_journal.borrow_mut().push("deliver")
+                }),
+                _ => publish_vote(&request, &mut log, &key, &mut |_| {
+                    sink_journal.borrow_mut().push("deliver")
+                }),
+            };
+            assert!(as_json(&out).get("error").is_none(), "for {which}: {out}");
+            assert_eq!(
+                journal.borrow().as_slice(),
+                ["append", "deliver"],
+                "{which} must append before it hands off, and hand off exactly once"
+            );
+        }
+    }
+
+    #[test]
+    fn a_refused_publish_reaches_neither_the_append_nor_delivery() {
+        // The other half of the same requirement: "A publish that is refused
+        // appends nothing — AND delivery was not invoked." Asserted as an EMPTY
+        // journal, so it distinguishes "nothing happened" from "an append was
+        // rolled back", which counting the log afterwards cannot.
+        //
+        // The three refusals are chosen to sit at three different depths: one
+        // fails in the parse (before `authoring` is reached at all), one in
+        // `authoring`'s own presence check, and one in its cross-Stoa check — so
+        // a handler that reached the store or the sink on any of those paths is
+        // caught rather than one of them standing in for all three.
+        let key = publish_key();
+        let stoa = publish_stoa().to_hex();
+        let elsewhere = crate::identity::Address::from_hex(&"4d".repeat(32))
+            .unwrap()
+            .to_hex();
+        let absent = crate::op::OpId::from_hex(&"9b".repeat(32))
+            .unwrap()
+            .to_hex();
+
+        let cases: [(&str, String, &str); 4] = [
+            // Refused in the parse: a forbidden field.
+            (
+                "post",
+                serde_json::json!({"stoa": stoa, "body": "x", "author": "00ff"}).to_string(),
+                "a forbidden field",
+            ),
+            // Refused in the parse: a direction the wire does not recognise.
+            (
+                "vote",
+                serde_json::json!({"stoa": stoa, "target": absent, "direction": "upvote"})
+                    .to_string(),
+                "an unrecognised direction",
+            ),
+            // Refused in `authoring`: the parent is not held.
+            (
+                "reply",
+                serde_json::json!({"stoa": stoa, "parent": absent, "body": "x"}).to_string(),
+                "an absent parent",
+            ),
+            // Refused in `authoring`: a Stoa nothing in the log belongs to, so
+            // the target read fails before any append.
+            (
+                "vote",
+                serde_json::json!({"stoa": elsewhere, "target": absent, "direction": "up"})
+                    .to_string(),
+                "an absent target in another Stoa",
+            ),
+        ];
+
+        for (which, request, why) in cases {
+            let journal = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+            let mut log = JournallingLog {
+                inner: MemoryOpLog::new(),
+                journal: std::rc::Rc::clone(&journal),
+            };
+            let sink_journal = std::rc::Rc::clone(&journal);
+            let out = match which {
+                "post" => publish_post(&request, &mut log, &key, &mut |_| {
+                    sink_journal.borrow_mut().push("deliver")
+                }),
+                "reply" => publish_reply(&request, &mut log, &key, &mut |_| {
+                    sink_journal.borrow_mut().push("deliver")
+                }),
+                _ => publish_vote(&request, &mut log, &key, &mut |_| {
+                    sink_journal.borrow_mut().push("deliver")
+                }),
+            };
+            assert!(
+                as_json(&out).get("error").is_some(),
+                "{why} must be refused, got {out}"
+            );
+            assert!(
+                journal.borrow().is_empty(),
+                "{why}: a refused publish must reach neither the store nor delivery, \
+                 and it reached {:?}",
+                journal.borrow()
+            );
+        }
+    }
+
     #[test]
     fn a_publish_whose_delivery_panics_still_reports_the_op_as_published() {
         // A declined handoff leaves the op published. A panicking sink is the
@@ -2684,6 +2895,42 @@ mod tests {
                 .to_string(),
             );
         }
+        // The same wrong lengths with a VALID Stoa, which is what actually
+        // reaches the op-id parser.
+        //
+        // Every case above malforms the Stoa too, and `stoa` is parsed first in
+        // all three handlers — so each of them refuses before `parent` or
+        // `target` is ever read, and the op-id parser was reached with nothing
+        // but well-formed hex. Verified: an `expect` on `OpId::from_hex` left the
+        // whole suite green, this test included, until these cases existed.
+        //
+        // Non-hex characters as well as wrong lengths, because "64 characters"
+        // and "64 HEX characters" are different acceptances and only the second
+        // is the parser's.
+        for text in [
+            "".to_string(),
+            "0".to_string(),
+            "z".repeat(64),
+            "g".repeat(64),
+            "0".repeat(63),
+            "0".repeat(65),
+            "0".repeat(128),
+            "ff ".repeat(21),
+            "0x".to_string() + &"0".repeat(64),
+            "\u{200B}".repeat(64),
+            "Ἀγορά".to_string(),
+        ] {
+            requests.push(
+                serde_json::json!({
+                    "stoa": stoa,
+                    "body": "x",
+                    "parent": text,
+                    "target": text,
+                    "direction": "up"
+                })
+                .to_string(),
+            );
+        }
 
         for request in &requests {
             for out in [
@@ -2695,6 +2942,23 @@ mod tests {
                 assert!(
                     v.is_object(),
                     "every reply is a JSON object, got {out} for {request}"
+                );
+                // `is_object()` ALONE cannot see a panic, and that is the whole
+                // point of this test. `guarded` catches the unwind and returns
+                // `{"error":"panic in <method>: …"}` — a perfectly well-formed
+                // object — so a handler that panicked on every one of these
+                // inputs would satisfy the assertion above.
+                //
+                // The marker `guarded` writes is what tells the two apart, and it
+                // is the only thing that does. Without this line the requirement
+                // "a publish SHALL NOT panic for any request" has no test, only a
+                // test of the guard that stands in front of it.
+                assert!(
+                    !v["error"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .starts_with("panic in "),
+                    "a handler panicked rather than refusing, for {request}: {out}"
                 );
             }
         }
