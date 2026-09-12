@@ -316,6 +316,39 @@ to owner-only and replace the key".
 **Never gate on a build flag, and never show a compose box that cannot be
 submitted** — it loses whatever the user typed. Surface the reason instead.
 
+**Two obligations the core creates and cannot meet itself.** Both come from the
+publish contract (`content-authoring`), and neither is visible from a screenshot.
+
+**1. Posting the same thing twice posts once, and the interface has to handle
+it.** A post is named by a hash of its own content, and nothing in that content
+varies between two submissions — so one person posting the same body into the same
+Stoa twice produces **one post**. The second submission succeeds and tells you it
+stored nothing new.
+
+That is exactly right for a double-tapped submit button, and it is wrong for
+someone deliberately writing "agreed" twice in one thread, which is ordinary
+forum behaviour. The core reports which of the two happened; **the interface
+decides what the person sees**, and the failing design is the one that reports
+success and shows nothing new, because the person concludes their post vanished.
+Reasonable answers: say so plainly ("you already posted this"), or scroll to and
+highlight the existing post. **Do not** show a spinner that resolves to nothing,
+and do not show a generic error — nothing failed.
+
+This is a known gap with a known fix (a timestamp or nonce inside the post), and
+it is deliberately not fixed yet. Design for the behaviour that exists.
+
+**2. A reply needs its parent, and a peer does not always have it.** A reply names
+the post it answers, and the core works out which thread that is by reading the
+parent. If the parent has not reached this peer yet — ordinary in a peer-to-peer
+forum where two people legitimately hold different sets of posts — the reply is
+**refused**.
+
+So a reply control can fail for a reason that is nobody's fault and is temporary.
+The message must say that: the post being replied to has not arrived here yet, try
+again shortly. It must not read as an error the person caused, and **the draft must
+survive** — this is the one refusal that is expected to succeed on a retry, so
+discarding what they typed is the worst possible response to it.
+
 ### Moderation
 
 > **Not in the first release** (PLAN.md §9.2). The core's moderation logic is
@@ -495,6 +528,28 @@ and no address has given the reader three recognition aids and zero guarantees.
 earlier version of this document described a live three-way choice between one
 axis, two axes, and a one-control/three-gesture shape. **Ignore that if you saw
 it.** The design is:
+
+> **In the first release a vote is recorded and ranks nothing, and this is the
+> hardest honesty problem in the brief.** Pressing up or down publishes a real,
+> signed, permanent record. Nothing reads it yet: there is no score, and neither
+> feed ordering consults votes. The plan was originally to ship no vote control
+> for exactly this reason — *"a control with no visible effect teaches users the
+> app is broken"* — and the owner decided votes ship anyway.
+>
+> So the obligation lands here. **The control must not imply a ranking it does not
+> produce.** Two things are safe and one is not:
+>
+> - **Safe:** showing the reader their own vote back, as state on the button. That
+>   is real, immediate and true — they voted, and the interface remembers.
+> - **Safe:** a plain count of votes on a post, if you show one, presented as a
+>   count and never as a position, a rank, or a reason this post appears where it
+>   does.
+> - **Not safe:** anything suggesting the vote moved the post, changed what anyone
+>   else sees, or fed an ordering. It did not. No "trending", no arrow, no implied
+>   effect on the feed.
+>
+> **Do not let this leak into the ordering controls either.** The feed offers two
+> orderings and neither is vote-based; a "top" or "best" option must not appear.
 
 **One axis — up and down, as on Reddit — plus two things that are not votes.**
 

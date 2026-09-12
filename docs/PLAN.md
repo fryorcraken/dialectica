@@ -3251,10 +3251,13 @@ stage needs a later one**, which is the §4.8 property worth preserving: if D
 never ships, dialectica is a single-Stoa forum, which is a smaller thing than
 intended and not a broken one.
 
-**What is deliberately not staged here:** votes. `op.rs` carries the `Vote`
-kind and §7.2 rule 2 ships no score, so a vote button would publish an op that
-changes nothing a reader can see. A control with no visible effect teaches users
-the app is broken. Votes arrive with scoring, not before.
+~~**What is deliberately not staged here:** votes.~~ **Overridden by the owner's
+MVP scope (§9.2), and publishing a vote is now contracted — see the
+`content-authoring` spec.** The objection this paragraph raised is not refuted and
+the spec does not paper over it: the requirement "A published vote is stored and
+readable, and no ordering consumes it" states the bound rather than an effect, and
+forbids the reply from describing one. What the vote *control* may honestly claim
+in the interface is the live half of the question, and it is §9.2's to carry.
 
 #### 1. What a feed is
 
@@ -3374,25 +3377,22 @@ forum client can do to someone.
 The probe already exists and answers `{"canPost":bool, "identity":"…" |
 "reason":"…"}`. What Stage B adds is the publish path:
 
-- `createPost` — a new thread in a Stoa
-- `createReply` — a post naming a parent, which is the same op kind with
-  `parent` set (`op.rs` has no `Reply` kind, deliberately)
-- `revisePost` — a new version of one of the caller's own posts
+~~- `createPost` — a new thread in a Stoa~~
+~~- `createReply` — a post naming a parent~~
 
-Three properties these share, each of which is a decision:
+**Posting, replying and voting are contracted; see the `content-authoring`
+spec.** It says what a caller supplies, what must hold of the op produced, what
+the peer holds after, and every refusal — including that the reply names the op
+id, that publishing is append-then-hand-off rather than send, that the identity
+is derived from the Stoa and never a parameter, and that a reply names only its
+parent with the thread derived from it. The reasoning for each, and for the
+`createdAt` field that was considered and declined, is in the `authoring-content`
+change's `proposal.md` and `design.md`.
 
-- **They return the op id of what was published**, so the view can scroll to it,
-  render it optimistically, or name it in an error. A publish that returns
-  `{"ok":true}` leaves the view unable to find what it just made.
-- **They are not "send to the network"; they are "append and publish".** The op
-  is signed, appended to the local log and handed to delivery. What the view is
-  told is that the op exists locally — delivery's own outcome arrives later
-  (§2.4: you cannot await a cross-module result inside a method), and a publish
-  call that blocked on it would be a call that can hang.
-- **The identity is not a parameter.** §5.2 gives a user one identity per Stoa,
-  derived from the root key and the Stoa address. The Stoa is a parameter; the
-  identity falls out of it. A method taking an author would be a method that can
-  be asked to sign as someone it is not.
+Still to build: **`revisePost`** — a new version of one of the caller's own posts.
+`post-revision` contracts which version is current; nothing publishes one. Its
+refusals turn on authorship of a target op, which is why it was left out of the
+authoring change rather than folded into it.
 
 **What the view must never do:** show a compose affordance without having asked
 the probe in the current render. The probe is cheap and re-determines its
@@ -3511,13 +3511,19 @@ that is sometimes meaningless is that shape in miniature.
 
 ```
 getCapabilities({stoa})     -> exists today
-createPost({stoa, body, attachments})          -> {op}
-createReply({stoa, thread, parent, body, attachments}) -> {op}
 revisePost({stoa, target, body, attachments})  -> {op}
 getPostHistory({stoa, post, page, perPage})
                             -> {"items":[{version, body, attachments, isCurrent}],
                                 page, hasMore}
 ```
+
+**`createPost`, `createReply` and the vote method are contracted — see the
+`content-authoring` spec, which supersedes the shapes sketched here.** One
+departure is worth flagging because this file sketched it the other way:
+`createReply` takes **no `thread`**. The thread is derived from the parent, so a
+reply filed under the wrong thread is unrepresentable rather than checked, and the
+cost — a reply to a parent this peer does not hold is refused — is contracted
+rather than hidden.
 
 **Stage C — moderate**
 
@@ -3542,9 +3548,9 @@ not support.
 **Methods deliberately NOT proposed**, each with its reason, because a list of
 what was declined is the part that stops the API growing by accident:
 
-- **`vote`** — the op kind exists, nothing reads it (§7.2 rule 2). A method
-  publishing an op with no observable effect is a method that will be called and
-  then explained away.
+- ~~**`vote`**~~ — **now proposed and contracted** (§9.2's scope decision; the
+  `content-authoring` spec). The objection stands as written and the spec bounds
+  what the method may claim rather than claiming an effect it does not have.
 - **`getPost`**, a single-post read — every screen that shows a post shows it
   inside a thread or a feed, and §2.4 makes per-item calls the expensive shape.
   Add it when a screen exists that genuinely wants one post.
@@ -3642,7 +3648,16 @@ being asked for rather than discovering it from a stalled view.
   it: the same gap closing, or a measurement showing the fold is cheap enough
   that the question does not arise.
 
-#### 9. Why this section ships without a spec delta
+#### 9. Why this section shipped without a spec delta
+
+> **Partly superseded.** Stage B's publish half now has one — the
+> `content-authoring` spec — written the way this section says a delta should be:
+> alongside the thing it contracts. The argument below is why *this section* was
+> not itself a delta, and it still holds for everything here that remains
+> unbuilt: the feed and thread reads, `revisePost`, `getPostHistory`, the
+> moderation calls, and the two orderings, which are still an open question
+> rather than a requirement.
+
 
 `.claude/agents/README.md` puts PLAN.md and the specs in different jobs: PLAN.md
 holds **what is not built yet** and the reasoning for it; a spec is a
@@ -3728,6 +3743,14 @@ alongside it**: whoever builds the vote control inherits the problem §9.1
 identified, and the honest options are a visible per-post tally that is not a
 ranking, or a control whose effect the copy does not overstate. §7.4 settles the
 control's shape; it does not settle this.
+
+**The core half is now settled and the UI half is not.** The
+`content-authoring` spec contracts publishing a vote at exactly the honest width —
+the op is signed, appended and readable by its op id and by its target, and the
+reply carries an op id and nothing describing an effect. So core makes no claim a
+reader could be misled by. **What remains is entirely an interface obligation**:
+a vote control must not imply a ranking, and this is the open item, not a
+contracted one. It belongs on §11.1's rendering-obligations list when that lands.
 
 ---
 
@@ -4242,6 +4265,42 @@ thing (§2.3).
   defined degraded order (ascending op id, always below any op the transport did
   order) that is identical on every peer and reports itself as degraded. **The op
   log and the resolvers are unblocked**: they have a defined thing to key on.
+
+- **Should an op carry an author-asserted `createdAt`, and what clamps it?**
+  **Raised by the authoring change, which declined to add it and contracted the
+  consequence instead.** One gap, two symptoms, and the second was not previously
+  written down:
+
+  1. Both accepted feed orderings degrade to ascending op id, because no op
+     carries a value that orders anything (§9.1 §8 has this half).
+  2. **Two identical posts are one op.** An op id hashes bytes carrying no
+     timestamp and no nonce, so one author posting the same body into one Stoa
+     twice publishes once. That is right for a double-clicked submit and wrong for
+     someone deliberately posting "agreed" twice.
+
+  The `content-authoring` spec makes symptom 2 **visible rather than surprising** —
+  its requirement "Publishing the same content twice publishes one op" states the
+  behaviour, requires the newly-stored-or-already-present answer to reach the
+  caller, and names this field as the declined fix. So the next reader meets a
+  decision rather than a user complaint.
+
+  **Why it was declined there rather than taken:** it is a `MODIFIED` to
+  `op-format`'s "An op carries no ordering field and no per-peer state", a
+  requirement that forbids a wall-clock field in terms `relevance-ordering`'s age
+  requirement and §7.2 rule 5 both rest on; the clamp is the whole defence and is
+  unspecified (see the adversarial cases above — a far-future `createdAt` pins a
+  post to the top permanently, measured in Appendix A); and a change that adds an
+  authoring API and re-versions the op format cannot be reviewed for either.
+
+  **A nonce is the narrower alternative** — it separates two identical posts and
+  does nothing for ordering. Worth naming so the two are not conflated: if only
+  symptom 2 needs fixing, a nonce is cheaper and needs no clamp; if ordering is
+  wanted, `createdAt` covers both and the clamp is the work.
+
+  **What would decide it:** whoever takes the ordering question in §9.1 §8, since
+  it is the same field. Whichever change adds it must modify the
+  `content-authoring` requirement above, which is the correct place for the
+  pressure to land.
 
 - **Does an expiring credential want a grace period?** §5.5 settles that proofs
   expire and the holder re-proves on a cadence, and records the cost: a user
