@@ -2926,12 +2926,26 @@ thing (§2.3).
   - **A dialectica Lamport counter**, advanced on the ops we receive.
     Self-consistent across peers without reference to SDS.
 
-  **What is genuinely not recoverable at our layer** is SDS's *causal*
-  ordering: `causalHistory` encodes which messages a sender had actually seen
-  when they sent, and no application-level bookkeeping reconstructs that after
-  the fact. **So the dependency on SDS is for causality, and for nothing
-  else** — recency and ordering are ours to build, and the upstream gap is a
-  reason to build them rather than a reason to wait.
+  **Causality is ours too, and an earlier draft of this entry got that
+  wrong.** It claimed happened-before was the one thing unrecoverable at our
+  layer. It is not: **a Lamport counter is the causality mechanism.** Alice
+  receives an op at N, sets her clock to `max(local, N)`, and replies at N+1;
+  the reply carries "I had seen something at N". That is precisely the
+  written-knowing-about relation, and a dialectica counter supplies it.
+
+  The error was conflating the counter with the wall clock, and attributing
+  the wall clock's weakness to both.
+
+  **What SDS's `causalHistory` adds is not causality but *gap detection*.** It
+  is an explicit list of message ids the sender held, so a receiver can notice
+  "this references X and I do not have X" and request repair. A scalar counter
+  cannot: N+1 says she had seen *something* at N, never *which*. That is
+  reliability machinery rather than ordering, and it is SDS's job — so losing
+  it costs us repair, not order.
+
+  **So nothing about ordering requires the upstream gap to close.** Recency,
+  total order and happened-before are all buildable here; the gap is a reason
+  to build them rather than a reason to wait.
 
   Not designed here; §5.7 keeps its rule and `Arrival` its shape until one is.
 
