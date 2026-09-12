@@ -96,7 +96,10 @@ impl Address {
     /// conversion and this cannot be handed the wrong thing. The same reasoning
     /// as [`PublicKey::from_bytes`], one step further along — there is not even
     /// an error case left to return.
-    pub fn from_bytes(bytes: [u8; 32]) -> Self {
+    /// `const` so that a derivation domain can be a `const Address` rather than a
+    /// function call — see `keystore::CREATOR_KEY_DOMAIN`. Nothing else about the
+    /// constructor changes.
+    pub const fn from_bytes(bytes: [u8; 32]) -> Self {
         Address(bytes)
     }
 

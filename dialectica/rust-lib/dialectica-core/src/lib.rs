@@ -21,6 +21,7 @@ pub mod feed;
 pub mod identity;
 pub mod keystore;
 pub mod log;
+pub mod membership;
 pub mod moderation;
 pub mod op;
 pub mod revision;
@@ -32,6 +33,7 @@ pub mod wire;
 // contract — the adapter calls these by name, and a caller should not have to
 // know which submodule a handler happens to live in.
 pub use wire::{
-    callee_error, channel_exists_reply, error_json, get_capabilities, guarded, list_threads,
-    list_threads_from_request, panic_probe, parse_channel_id, ping, version,
+    callee_error, channel_exists_reply, create_stoa, error_json, get_capabilities, guarded,
+    join_stoa, list_stoas, list_threads, list_threads_from_request, membership_path_in,
+    panic_probe, parse_channel_id, ping, version, with_membership_store,
 };

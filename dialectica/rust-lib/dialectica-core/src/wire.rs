@@ -505,6 +505,336 @@ fn feed_page_json(page: &crate::feed::FeedPage) -> String {
     .to_string()
 }
 
+// ─── Creating, joining and listing Stoas ──────────────────────────────────
+//
+// The contract is the `stoa-membership` spec; the reasoning is in that change's
+// `design.md`. What is repeated here is only what a reader of THIS code needs in
+// order not to undo it.
+
+/// The founding title's field name on the wire, in one place.
+///
+/// **`foundingTitle` and never `title`**, and the name is the requirement rather
+/// than a preference. `stoa-metadata` puts the *current* title in a
+/// moderator-signed op that nothing resolves yet, so every title this capability
+/// reports is the founding one — what the Stoa was created as, possibly long ago.
+///
+/// The alternative shape, `{"title":…,"isFounding":true}`, was rejected: it leaves
+/// a view one forgotten branch away from rendering a founding title as current,
+/// and makes `title` mean two things depending on a sibling field. A name that
+/// cannot be misread costs nothing.
+///
+/// When metadata resolution lands it adds `title` and `isGenesisFallback` **beside**
+/// this field rather than redefining it — PLAN.md §9.1's own shape for `getStoa`.
+const FOUNDING_TITLE: &str = "foundingTitle";
+
+/// What a create or a join reports about the Stoa it settled on.
+///
+/// One function rather than two spellings, because the spec requires both replies
+/// name their title as founding and a second call site is how one of them
+/// eventually spells it differently. The `policy` is here and deliberately not on
+/// a list item: the spec fixes a list item as carrying the address and the
+/// founding title, and widening the paginated envelope's item shape is a decision
+/// for whoever needs it.
+fn stoa_reply(stoa: &crate::identity::Address, genesis: &crate::stoa::Genesis) -> String {
+    serde_json::json!({
+        "stoa": stoa.to_hex(),
+        FOUNDING_TITLE: genesis.title,
+        "policy": policy_name(genesis.policy),
+    })
+    .to_string()
+}
+
+/// A posting policy's name on the wire.
+///
+/// **Exhaustive with no wildcard arm**, so a new variant forces a decision here
+/// rather than defaulting to a name that describes a different policy — the same
+/// position `stoa.rs` takes about the policy *discriminant*, applied to the
+/// display form. `Policy::from_byte` refuses an unknown discriminant rather than
+/// treating it as `Open`; a wildcard here would undo that one layer up, telling a
+/// view a token-gated Stoa is world-postable.
+fn policy_name(policy: crate::stoa::Policy) -> &'static str {
+    match policy {
+        crate::stoa::Policy::Open => "open",
+    }
+}
+
+/// Create a Stoa: `{"title":"…"}` -> `{"stoa":…,"foundingTitle":…,"policy":…}`.
+///
+/// # The creator key is not a parameter, and cannot be
+///
+/// It arrives through `creator`, a closure the adapter supplies. A call that
+/// accepted a creator key would be a call that can be asked to create a Stoa
+/// moderated by somebody else — a Stoa the caller cannot moderate, did not mean to
+/// make, and whose address cannot be un-minted, because the creator is fixed
+/// inside the address preimage forever.
+///
+/// **A `PublicKey`, not a `SecretKey` and not a `Keystore`.** A genesis record is
+/// not an op and carries no signature, so the creator's public key is the whole of
+/// what is needed. Taking a secret would be taking authority the operation does
+/// not use.
+///
+/// # Creation fails without a key rather than inventing one
+///
+/// There is no path from here to `Keystore::generate()`. The closure's failure is
+/// surfaced as its own message and this handler adds no reason vocabulary of its
+/// own — whether a key is usable and why not is the `posting-capability` probe's,
+/// and paraphrasing it here would mean maintaining the same guidance twice.
+///
+/// # The title is refused before anything is recorded
+///
+/// `Genesis::canonical_bytes` is fallible for a title over the genesis cap, and
+/// `MembershipStore::join` encodes before it writes — so an over-long title
+/// returns before any statement runs. That ordering is what makes "a failed
+/// creation leaves nothing behind" structural rather than a rule to remember.
+///
+/// **No bound the genesis record does not have**, which specifically means an
+/// empty title is accepted: the record has no minimum length, the title is not an
+/// identifier, and refusing one here would make a record other peers decode and
+/// verify without complaint unreachable through this surface.
+///
+/// # Creating the same title twice is one Stoa
+///
+/// A genesis record carries no per-peer state — no nonce, no timestamp — so the
+/// same creator and the same title *is* the same record and therefore the same
+/// address. The second call reports that address and leaves one membership,
+/// because it goes through the same `join` a paste does and that write is
+/// `INSERT OR IGNORE`. A user who wants two Stoas gives them two titles.
+pub fn create_stoa(
+    request: &str,
+    creator: impl FnOnce() -> Result<crate::identity::PublicKey, crate::keystore::KeystoreError>,
+    store: &mut crate::membership::MembershipStore,
+) -> String {
+    guarded("create_stoa", || {
+        let parsed: serde_json::Value = match serde_json::from_str(request) {
+            Ok(v) => v,
+            Err(e) => return error_json(&format!("invalid JSON: {e}")),
+        };
+        let title = match parsed.get("title") {
+            Some(serde_json::Value::String(s)) => s.clone(),
+            Some(_) => return error_json("title must be a string"),
+            None => return error_json("missing field: title"),
+        };
+
+        // The key first, so a peer with no usable key is told so before anything
+        // is built or opened. It is also the ONE failure here that is about the
+        // user's state rather than their request, and surfacing the keystore's own
+        // message is what keeps the reason actionable.
+        let creator = match creator() {
+            Ok(k) => k,
+            Err(e) => return error_json(&e.to_string()),
+        };
+
+        let genesis = crate::stoa::Genesis {
+            creator,
+            // NO SPEC: the spec does not say which policy a created Stoa declares
+            // and creation accepts no policy parameter. `Open` is the only variant
+            // `stoa.rs` defines, so it is the only honest answer — and a parameter
+            // selecting between one value would be a parameter that cannot select.
+            policy: crate::stoa::Policy::Open,
+            title,
+        };
+        // Refused HERE, before the store is even opened: a record with no encoding
+        // has no address, so there is nothing to record it under.
+        let stoa = match genesis.address() {
+            Ok(a) => a,
+            Err(e) => return error_json(&format!("title: {e}")),
+        };
+
+        // The SAME write a paste goes through. Two spec requirements fall out of
+        // there being one write path rather than two that have to agree:
+        // "creating the same title twice yields one Stoa", and "creating and then
+        // joining the same Stoa is one membership".
+        match store.join(&stoa, &genesis) {
+            Ok(_) => stoa_reply(&stoa, &genesis),
+            Err(e) => error_json(&e.to_string()),
+        }
+    })
+}
+
+/// Join a Stoa: `{"stoa":"<hex>","genesis":"<hex>"}` -> the same reply shape.
+///
+/// # It takes the record as well as the address, and that is a property of the
+/// address
+///
+/// A Stoa address is a one-way hash of its genesis record: sufficient to **verify**
+/// a record somebody hands over, and insufficient to **reconstruct** one. Since a
+/// membership must retain the record — `moderation-resolution` requires the record
+/// before a reader may decide whether any moderation of that Stoa's content binds
+/// — the record has to arrive with the address, because there is nowhere else for
+/// it to come from.
+///
+/// So a bare address is not joinable, and this signature says so rather than
+/// leaving a caller to discover it after joining. `MembershipStore::join` does the
+/// verification, and it consults nothing but its two arguments.
+///
+/// # A repeated join is not a failure
+///
+/// A pasted address is exactly the input a user supplies twice. The reply is the
+/// same either way and carries no "was this new" flag: the spec asks that the
+/// second attempt succeed and change nothing, and a view that rendered "already
+/// joined" differently would be rendering a distinction the user did not make.
+pub fn join_stoa(request: &str, store: &mut crate::membership::MembershipStore) -> String {
+    guarded("join_stoa", || {
+        let parsed: serde_json::Value = match serde_json::from_str(request) {
+            Ok(v) => v,
+            Err(e) => return error_json(&format!("invalid JSON: {e}")),
+        };
+        let stoa = match parse_stoa(&parsed) {
+            Ok(a) => a,
+            Err(e) => return e,
+        };
+        // `genesis_for` is the feed path's decoder and already verifies the record
+        // against the address. Reused rather than reimplemented: a second decoder
+        // would be a second place for the verification to be forgotten, and this
+        // one carries the argument for why a caller-supplied record is safe.
+        let genesis = match genesis_for(&parsed, &stoa) {
+            Ok(g) => g,
+            Err(e) => return e,
+        };
+
+        // `join` verifies again. That is not redundant belt-and-braces: the store's
+        // check is what makes the store's own invariant hold for every caller,
+        // including ones that do not come through this handler, and it is the only
+        // place a test of the store alone can exercise.
+        match store.join(&stoa, &genesis) {
+            Ok(_) => stoa_reply(&stoa, &genesis),
+            Err(e) => error_json(&e.to_string()),
+        }
+    })
+}
+
+/// One page of the Stoas this peer is in.
+///
+/// `{"page":N,"perPage":N}` -> `{"items":[{"stoa":…,"foundingTitle":…}],"page":N,"hasMore":bool}`.
+///
+/// # Exactly what membership records, and nothing derived from ops
+///
+/// This handler cannot reach the op log: it is handed a `MembershipStore` and
+/// there is no path from one to the other. So "the listing contains the Stoas the
+/// peer is in and no others" holds by construction — a Stoa the peer created with
+/// no ops is listed, and a Stoa for which ops arrived but nobody joined is not.
+///
+/// # `page` and `perPage` behave exactly as the feed's do
+///
+/// [`parse_index`] and [`crate::feed::clamp_per_page`] are reused unchanged, so a
+/// negative page is refused here for the same reason and with the same message as
+/// there. A second interpretation of those arguments is how one method eventually
+/// clamps what the other refuses.
+pub fn list_stoas(request: &str, store: &crate::membership::MembershipStore) -> String {
+    guarded("list_stoas", || {
+        let parsed: serde_json::Value = match serde_json::from_str(request) {
+            Ok(v) => v,
+            Err(e) => return error_json(&format!("invalid JSON: {e}")),
+        };
+        let page = match parse_index(&parsed, "page") {
+            Ok(v) => v.unwrap_or(0),
+            Err(e) => return e,
+        };
+        let per_page = match parse_index(&parsed, "perPage") {
+            Ok(v) => crate::feed::clamp_per_page(v),
+            Err(e) => return e,
+        };
+
+        match store.list(page, per_page) {
+            Ok(page) => membership_page_json(&page),
+            // A storage failure is the error shape and NEVER an empty listing. The
+            // two mean opposite things — "this peer is in no Stoa" versus "this
+            // peer's store is unreadable" — and render identically if this arm is
+            // ever softened. Same obligation `list_threads` carries for a feed.
+            Err(e) => error_json(&e.to_string()),
+        }
+    })
+}
+
+/// Open a membership store and hand it to one of the three handlers above.
+///
+/// # Why the handlers take a store and this takes a path
+///
+/// The three handlers take `&mut MembershipStore` because that is the shape worth
+/// testing: creating a Stoa and then listing it is one store used twice, and an
+/// opener closure would make an in-memory store — the one that needs no temporary
+/// directory and no teardown — unusable for exactly the tests that matter most.
+///
+/// This function is the adapter's entry point, and it is thin on purpose: open,
+/// delegate. It is generic over the handler rather than written three times,
+/// because "turn a failed open into the error shape" is one job however it is
+/// followed up.
+///
+/// **A failed open is the error shape and never an empty answer.** `SqliteOpLog`'s
+/// own documentation makes the argument: an empty listing is indistinguishable
+/// from a peer that is in no Stoa, so flattening this would render a peer whose
+/// store is broken as a peer that has joined nothing — and the user would be
+/// invited to re-paste every address they hold.
+///
+/// The guard wraps this too, rather than only the handler inside it: a panic while
+/// opening a store is a panic in a dispatch handler like any other, and it aborts
+/// the module process the same way.
+pub fn with_membership_store(
+    method: &str,
+    path: &std::path::Path,
+    handler: impl FnOnce(&mut crate::membership::MembershipStore) -> String,
+) -> String {
+    guarded(method, || {
+        match crate::membership::MembershipStore::open(path) {
+            Ok(mut store) => handler(&mut store),
+            Err(e) => error_json(&e.to_string()),
+        }
+    })
+}
+
+/// The membership store's file name inside a host-supplied directory.
+///
+/// A function rather than a literal at the adapter's call site, following
+/// `keystore::default_path_in`: the naming convention belongs with the thing
+/// named, so a rename is one edit rather than a search.
+///
+/// **A file of its own, beside the op log's and never inside it.** `design.md` has
+/// the argument; the load-bearing half is that `SqliteOpLog` refuses any layout
+/// version that is not exactly its own, and its schema is created only for a
+/// never-stamped file — so a membership table added there would reach fresh stores
+/// and never an existing one, and the ways round that are a version bump that
+/// makes an existing store permanently unopenable or a silent repair of a file the
+/// op log's layout check exists to refuse.
+pub fn membership_path_in(dir: &std::path::Path) -> std::path::PathBuf {
+    dir.join("stoas.sqlite")
+}
+
+/// Pull the Stoa address out of a request, or the error shape to send back.
+///
+/// Factored out because create does not take one and both of the other two do, and
+/// because the three-way distinction — absent, wrong-typed, not an address — is
+/// the one `module-wire-contract` requires be reported by name. A second copy
+/// would eventually disagree with the first about which of the three it was.
+fn parse_stoa(parsed: &serde_json::Value) -> Result<crate::identity::Address, String> {
+    match parsed.get("stoa") {
+        Some(serde_json::Value::String(s)) => {
+            crate::identity::Address::from_hex(s).map_err(|e| error_json(&format!("stoa: {e}")))
+        }
+        Some(_) => Err(error_json("stoa must be a string")),
+        None => Err(error_json("missing field: stoa")),
+    }
+}
+
+/// The pagination shape for a membership listing, built in one place.
+fn membership_page_json(page: &crate::membership::MembershipPage) -> String {
+    let items: Vec<serde_json::Value> = page
+        .items
+        .iter()
+        .map(|m| {
+            serde_json::json!({
+                "stoa": m.stoa.to_hex(),
+                FOUNDING_TITLE: m.genesis.title,
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "items": items,
+        "page": page.page,
+        "hasMore": page.has_more,
+    })
+    .to_string()
+}
+
 // ─── The two halves of the delivery bridge that CAN be tested ─────────────
 //
 // `modules().delivery_module` cannot appear in this file: it calls `lp_*`
@@ -940,7 +1270,12 @@ mod tests {
         let sig = sign_op_bytes(&key, b"a post");
         let author = Address::from_hex(reported).expect("the probe reports a parseable address");
         assert!(
-            verify_authored_op(&author, &key.public_key().to_bytes(), b"a post", &sig.to_bytes()),
+            verify_authored_op(
+                &author,
+                &key.public_key().to_bytes(),
+                b"a post",
+                &sig.to_bytes()
+            ),
             "an op signed by this identity is not attributed to the address the \
              probe reported"
         );
@@ -1096,10 +1431,9 @@ mod tests {
         // anything. A panic here does not make one button unavailable — it
         // aborts the module process (PHASE0-FINDINGS §3) and the entire
         // interface is unrenderable.
-        let out = get_capabilities(
-            &format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex()),
-            |_| panic!("the keystore layer exploded"),
-        );
+        let out = get_capabilities(&format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex()), |_| {
+            panic!("the keystore layer exploded")
+        });
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("error").is_some(), "got {out}");
         assert!(v.get("canPost").is_none());
@@ -1251,11 +1585,7 @@ mod tests {
         // refused: an unknown field is not a caller error.
         let log = log_with_body("hello");
         let plain = list_threads(&feed_request(""), &log, &feed_genesis());
-        let with_order = list_threads(
-            &feed_request(r#""order":"top""#),
-            &log,
-            &feed_genesis(),
-        );
+        let with_order = list_threads(&feed_request(r#""order":"top""#), &log, &feed_genesis());
         assert_eq!(
             plain, with_order,
             "an ordering argument must not change the answer while there is one ordering"
@@ -1329,11 +1659,7 @@ mod tests {
         // refusing the page outright would be a worse answer than a smaller one
         // — but the reply must not actually be built at that size.
         let log = log_with_body("hello");
-        let out = list_threads(
-            &feed_request(r#""perPage":1000000"#),
-            &log,
-            &feed_genesis(),
-        );
+        let out = list_threads(&feed_request(r#""perPage":1000000"#), &log, &feed_genesis());
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("error").is_none(), "got {out}");
         assert_eq!(v["items"].as_array().unwrap().len(), 1);
@@ -1398,7 +1724,10 @@ mod tests {
         let ev: serde_json::Value = serde_json::from_str(&empty).unwrap();
         assert!(ev.get("error").is_none(), "got {empty}");
         assert_eq!(ev["items"].as_array().unwrap().len(), 0);
-        assert_ne!(out, empty, "empty and unreadable must never be the same reply");
+        assert_ne!(
+            out, empty,
+            "empty and unreadable must never be the same reply"
+        );
     }
 
     #[test]
@@ -1463,9 +1792,8 @@ mod tests {
     #[test]
     fn a_request_carrying_its_genesis_record_reads_the_feed() {
         let log = log_with_body("hello");
-        let out = list_threads_from_request(&full_request(), || {
-            Ok::<_, crate::log::OpLogError>(log)
-        });
+        let out =
+            list_threads_from_request(&full_request(), || Ok::<_, crate::log::OpLogError>(log));
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("error").is_none(), "got {out}");
         assert_eq!(v["items"].as_array().unwrap().len(), 1);
@@ -1508,7 +1836,10 @@ mod tests {
         let stoa = feed_genesis().address().unwrap().to_hex();
         for (bad, why) in [
             (format!(r#"{{"stoa":"{stoa}"}}"#), "missing"),
-            (format!(r#"{{"stoa":"{stoa}","genesis":7}}"#), "must be a string"),
+            (
+                format!(r#"{{"stoa":"{stoa}","genesis":7}}"#),
+                "must be a string",
+            ),
             (format!(r#"{{"stoa":"{stoa}","genesis":"nothex!"}}"#), "hex"),
             (format!(r#"{{"stoa":"{stoa}","genesis":""}}"#), "genesis"),
         ] {
@@ -1556,16 +1887,926 @@ mod tests {
             ping(r#"{"payload":1}"#),
             ping("garbage"),
             panic_probe("{}"),
-            get_capabilities(&format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex()), |_| Ok(
-                "abcd".to_string()
-            )),
+            get_capabilities(&format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex()), |_| {
+                Ok("abcd".to_string())
+            }),
             get_capabilities("garbage", |_| Ok("abcd".to_string())),
             list_threads(&feed_request(""), &log_with_body("hello"), &feed_genesis()),
             list_threads("garbage", &log_with_body("hello"), &feed_genesis()),
+            create_stoa(
+                r#"{"title":"Agora"}"#,
+                || Ok(feed_key(1).public_key()),
+                &mut a_membership_store(),
+            ),
+            create_stoa(
+                "garbage",
+                || Ok(feed_key(1).public_key()),
+                &mut a_membership_store(),
+            ),
+            join_stoa("garbage", &mut a_membership_store()),
+            list_stoas("{}", &a_membership_store()),
+            list_stoas("garbage", &a_membership_store()),
         ] {
             let v: serde_json::Value = serde_json::from_str(&out)
                 .unwrap_or_else(|e| panic!("handler emitted invalid JSON ({e}): {out}"));
             assert!(v.is_object(), "every reply is a JSON object, got {out}");
         }
+    }
+
+    // ─── Creating, joining and listing Stoas ──────────────────────────────
+
+    use crate::membership::MembershipStore;
+
+    /// A membership store with nothing in it.
+    ///
+    /// In-memory rather than a file, for the reason `MembershipStore::in_memory`'s
+    /// own documentation gives: it is the same code and the same SQL, and a test
+    /// that is not *about* persistence should not need a temporary directory. The
+    /// persistence tests in `membership.rs` use a real file.
+    fn a_membership_store() -> MembershipStore {
+        MembershipStore::in_memory().expect("an in-memory membership store is creatable")
+    }
+
+    /// The key a creation is performed under, in these tests.
+    fn creator_key() -> crate::identity::PublicKey {
+        feed_key(1).public_key()
+    }
+
+    /// A creation that succeeds in finding a key.
+    fn create(store: &mut MembershipStore, title: &str) -> serde_json::Value {
+        let request = serde_json::json!({ "title": title }).to_string();
+        let out = create_stoa(&request, || Ok(creator_key()), store);
+        serde_json::from_str(&out)
+            .unwrap_or_else(|e| panic!("create_stoa emitted invalid JSON ({e}): {out}"))
+    }
+
+    /// Every Stoa a store lists, paged through at `per_page`.
+    fn listed(store: &MembershipStore, per_page: usize) -> Vec<serde_json::Value> {
+        let mut out = Vec::new();
+        let mut page = 0;
+        loop {
+            let request = serde_json::json!({ "page": page, "perPage": per_page }).to_string();
+            let reply = list_stoas(&request, store);
+            let v: serde_json::Value = serde_json::from_str(&reply)
+                .unwrap_or_else(|e| panic!("list_stoas emitted invalid JSON ({e}): {reply}"));
+            let items = v["items"]
+                .as_array()
+                .unwrap_or_else(|| panic!("a listing must carry items: {reply}"));
+            out.extend(items.iter().cloned());
+            if v["hasMore"] != true {
+                return out;
+            }
+            page += 1;
+            assert!(page < 1000, "paging did not terminate");
+        }
+    }
+
+    #[test]
+    fn creation_returns_the_address_of_the_record_it_built() {
+        // The address must be RETURNED: a creation reporting only success leaves
+        // the caller unable to name, share or read what it just made.
+        //
+        // The expected address is derived INDEPENDENTLY here — a record this test
+        // builds from the same title and the same key — rather than read back out
+        // of the reply and agreed with. That is what makes this fail if the handler
+        // returned some other Stoa's address, or the hash of something else.
+        let mut store = a_membership_store();
+        let reply = create(&mut store, "Agora");
+
+        let expected = crate::stoa::Genesis {
+            creator: creator_key(),
+            policy: Policy::Open,
+            title: "Agora".to_string(),
+        }
+        .address()
+        .unwrap();
+        assert_eq!(
+            reply["stoa"].as_str().unwrap(),
+            expected.to_hex(),
+            "the reply must name the address the record just built verifies against"
+        );
+
+        // And the returned address is one the retained record verifies against,
+        // read back out of the store rather than recomputed from the reply.
+        let held = store.get(&expected).unwrap().expect("the Stoa is retained");
+        assert!(held.genesis.matches(&expected));
+    }
+
+    #[test]
+    fn the_creator_key_is_whatever_the_lookup_supplies_and_this_handler_chooses_none() {
+        // NO SPEC: the spec says the creator is "the key the caller would sign an
+        // op with", and §5.2 makes that PER STOA — derived from the root and the
+        // Stoa's address. For a creator key that derivation is circular: the
+        // address is the hash of the record, and the record names the creator, so
+        // the address is not knowable until after the creator is chosen.
+        //
+        // WHICH key is therefore unspecified, and the choice is deliberately NOT
+        // made here: this handler takes whatever the lookup hands it, and the
+        // adapter supplies `Keystore::creator_public_key`, which carries the
+        // argument and states the privacy cost (a creator key is linkable across
+        // every Stoa one peer creates).
+        //
+        // What this test pins is the part that IS specified: the record's creator
+        // is the lookup's key exactly, unmodified — no re-derivation, no
+        // substitution, no fallback. Two different lookups produce two different
+        // Stoas from one title, which is what shows the key reaches the record
+        // rather than a constant doing so.
+        let mut one = a_membership_store();
+        let mut two = a_membership_store();
+        let a = create_stoa(
+            r#"{"title":"Agora"}"#,
+            || Ok(feed_key(1).public_key()),
+            &mut one,
+        );
+        let b = create_stoa(
+            r#"{"title":"Agora"}"#,
+            || Ok(feed_key(2).public_key()),
+            &mut two,
+        );
+        let va: serde_json::Value = serde_json::from_str(&a).unwrap();
+        let vb: serde_json::Value = serde_json::from_str(&b).unwrap();
+        assert_ne!(
+            va["stoa"], vb["stoa"],
+            "the creator key must reach the address, so two keys are two Stoas"
+        );
+
+        // And the stored creator is byte-identical to what the lookup returned.
+        let address = crate::identity::Address::from_hex(va["stoa"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            one.get(&address).unwrap().unwrap().genesis.creator.to_hex(),
+            feed_key(1).public_key().to_hex()
+        );
+    }
+
+    #[test]
+    fn the_creator_is_the_callers_own_key_and_no_creator_is_accepted_from_the_request() {
+        // A call that accepted a creator key would be a call that can be asked to
+        // create a Stoa moderated by somebody else — a Stoa the caller cannot
+        // moderate and whose address cannot be un-minted.
+        //
+        // Shown two ways, because the first alone is weak: the retained record's
+        // creator IS the lookup's key, and a request OFFERING a different creator
+        // is ignored rather than honoured.
+        let mut store = a_membership_store();
+        let request = serde_json::json!({
+            "title": "Agora",
+            "creator": feed_key(9).public_key().to_hex(),
+        })
+        .to_string();
+        let out = create_stoa(&request, || Ok(creator_key()), &mut store);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+
+        let address = crate::identity::Address::from_hex(v["stoa"].as_str().unwrap()).unwrap();
+        let held = store.get(&address).unwrap().unwrap();
+        assert_eq!(
+            held.genesis.creator.to_hex(),
+            creator_key().to_hex(),
+            "the creator must be the key the caller would sign with"
+        );
+        assert_ne!(
+            held.genesis.creator.to_hex(),
+            feed_key(9).public_key().to_hex(),
+            "a creator offered in the request must not reach the record"
+        );
+
+        // The offered creator's Stoa is a DIFFERENT Stoa, and the peer is not in
+        // it — which is what makes the assertion above about more than one field.
+        let attackers = crate::stoa::Genesis {
+            creator: feed_key(9).public_key(),
+            policy: Policy::Open,
+            title: "Agora".to_string(),
+        }
+        .address()
+        .unwrap();
+        assert!(!store.contains(&attackers).unwrap());
+    }
+
+    #[test]
+    fn a_created_stoa_is_listed_immediately_with_no_op_having_arrived() {
+        // The op-log boundary at the wire, in the direction that matters most:
+        // a freshly created Stoa has no ops BY CONSTRUCTION, so an answer derived
+        // from the log would omit precisely the Stoa the user just made.
+        //
+        // There is no op log in this test at all, which is the point — the
+        // listing's material is membership and nothing else.
+        let mut store = a_membership_store();
+        let reply = create(&mut store, "Agora");
+        let address = reply["stoa"].as_str().unwrap().to_string();
+
+        let items = listed(&store, 20);
+        assert_eq!(items.len(), 1, "the created Stoa must be listed");
+        assert_eq!(items[0]["stoa"].as_str().unwrap(), address);
+    }
+
+    #[test]
+    fn creation_without_a_usable_key_fails_and_records_nothing() {
+        // A Stoa created under a key the user does not hold is a Stoa nobody can
+        // moderate and whose address cannot be un-minted. So creation refuses, and
+        // MUST NOT proceed by generating a key for the occasion.
+        //
+        // Every keystore state, because the reason has to survive each one — and
+        // because a handler that special-cased `NotFound` and mishandled `Locked`
+        // would pass a single-variant test.
+        let makers: [fn() -> crate::keystore::KeystoreError; 4] = [
+            || KeystoreError::NotFound,
+            || KeystoreError::Locked,
+            || KeystoreError::WrongPassphrase,
+            || KeystoreError::NotAKeystore,
+        ];
+        for make in makers {
+            let mut store = a_membership_store();
+            let out = create_stoa(r#"{"title":"Agora"}"#, || Err(make()), &mut store);
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(v.get("error").is_some(), "got {out}");
+            assert!(
+                v.get("stoa").is_none(),
+                "a failure must never also carry a result — §2.5, got {out}"
+            );
+            // The keystore's own message reaches the caller, rather than a
+            // paraphrase this handler would have to keep in step with it.
+            assert_eq!(v["error"].as_str().unwrap(), make().to_string());
+            // And nothing was recorded. This is the half that would still pass if
+            // the handler had minted a key: no Stoa exists for the peer to be in.
+            assert_eq!(
+                store.len().unwrap(),
+                0,
+                "a failed creation must leave the peer in no new Stoa"
+            );
+        }
+    }
+
+    #[test]
+    fn an_over_long_title_creates_nothing() {
+        // The refusal happens BEFORE any membership is recorded, which is the
+        // ordering this requirement adds on top of `stoa-genesis`'s bound.
+        let mut store = a_membership_store();
+        let request = serde_json::json!({ "title": "x".repeat(1025) }).to_string();
+        let out = create_stoa(&request, || Ok(creator_key()), &mut store);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_some(), "got {out}");
+        assert!(v.get("stoa").is_none());
+        assert_eq!(
+            store.len().unwrap(),
+            0,
+            "the peer must be in no new Stoa after a refused creation"
+        );
+    }
+
+    #[test]
+    fn a_title_at_the_maximum_length_creates_a_stoa() {
+        // The boundary's other half. Without this, a fencepost error in either
+        // direction is invisible — both still "refuse something long" and every
+        // other test passes.
+        //
+        // 1024 is HARDCODED rather than read from `stoa::MAX_TITLE_BYTES` (which is
+        // private anyway): the bound is network-visible, and a test recomputing it
+        // from the constant survives a change to it.
+        let mut store = a_membership_store();
+        let title = "x".repeat(1024);
+        let reply = create(&mut store, &title);
+        assert!(
+            reply.get("error").is_none(),
+            "a title of exactly the maximum must create a Stoa, got {reply}"
+        );
+        let address = crate::identity::Address::from_hex(reply["stoa"].as_str().unwrap()).unwrap();
+        assert!(store.contains(&address).unwrap());
+        assert_eq!(reply[FOUNDING_TITLE].as_str().unwrap().len(), 1024);
+    }
+
+    #[test]
+    fn an_empty_title_is_accepted_rather_than_refused() {
+        // The record has no minimum length, the title is not an identifier, and
+        // refusing one here would make a record other peers decode and verify
+        // without complaint unreachable through this surface.
+        let mut store = a_membership_store();
+        let reply = create(&mut store, "");
+        assert!(reply.get("error").is_none(), "got {reply}");
+        assert_eq!(
+            reply[FOUNDING_TITLE], "",
+            "the founding title must be reported as the empty string it is"
+        );
+        let address = crate::identity::Address::from_hex(reply["stoa"].as_str().unwrap()).unwrap();
+        assert!(store.contains(&address).unwrap());
+    }
+
+    #[test]
+    fn a_title_carrying_control_or_bidirectional_characters_is_not_rejected_for_that_reason() {
+        // Not rejected, and not altered. The record is hashed to produce the
+        // address, so normalising a title would change the address and split one
+        // Stoa into two that cannot see each other — the same position `op.rs`
+        // takes about display text. Rendering it safely is the view's obligation,
+        // which `docs/UI-BRIEF.md` carries.
+        let mut store = a_membership_store();
+        let nasty = "Agora\u{202E}\u{200B}\u{202D}";
+        let reply = create(&mut store, nasty);
+        assert!(reply.get("error").is_none(), "got {reply}");
+        assert_eq!(
+            reply[FOUNDING_TITLE].as_str().unwrap(),
+            nasty,
+            "the founding title must carry those characters unchanged"
+        );
+
+        // And through a listing too, which is the path a view actually reads from.
+        let items = listed(&store, 20);
+        assert_eq!(items[0][FOUNDING_TITLE].as_str().unwrap(), nasty);
+    }
+
+    #[test]
+    fn the_same_creator_and_title_reach_the_same_stoa() {
+        // The intuitive expectation is the opposite one, which is why this is
+        // pinned. A genesis record carries no nonce and no timestamp, so the same
+        // creator making a record with the same title makes the SAME record — and
+        // promising uniqueness the encoding cannot provide would be contradicting
+        // `stoa-genesis`'s "the record carries no per-peer state".
+        let mut store = a_membership_store();
+        let first = create(&mut store, "Agora");
+        let second = create(&mut store, "Agora");
+
+        assert_eq!(
+            first["stoa"], second["stoa"],
+            "the same creator and title must reach the same address"
+        );
+        assert_eq!(
+            store.len().unwrap(),
+            1,
+            "the peer must be in exactly one Stoa for that address"
+        );
+        assert_eq!(listed(&store, 20).len(), 1);
+    }
+
+    #[test]
+    fn two_titles_are_two_stoas() {
+        // The other side of the requirement above, and the answer a user who wants
+        // two Stoas needs: give them two titles.
+        let mut store = a_membership_store();
+        let one = create(&mut store, "Agora");
+        let two = create(&mut store, "Lyceum");
+        assert_ne!(one["stoa"], two["stoa"], "two titles must be two addresses");
+        assert_eq!(store.len().unwrap(), 2, "the peer must be in both");
+        assert_eq!(listed(&store, 1).len(), 2);
+    }
+
+    /// A record and its address, as a joinable request.
+    fn join_request(genesis: &crate::stoa::Genesis, claim: &crate::identity::Address) -> String {
+        serde_json::json!({
+            "stoa": claim.to_hex(),
+            "genesis": hex::encode(genesis.canonical_bytes().unwrap()),
+        })
+        .to_string()
+    }
+
+    fn a_joinable_record(title: &str) -> crate::stoa::Genesis {
+        crate::stoa::Genesis {
+            creator: feed_key(5).public_key(),
+            policy: Policy::Open,
+            title: title.to_string(),
+        }
+    }
+
+    #[test]
+    fn a_matching_record_joins_and_the_reply_carries_the_address_and_founding_title() {
+        let mut store = a_membership_store();
+        let g = a_joinable_record("Somebody else's Stoa");
+        let address = g.address().unwrap();
+
+        let out = join_stoa(&join_request(&g, &address), &mut store);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_none(), "got {out}");
+        // Both fields, against literals — the reply is what lets a view show what
+        // was joined, and a reply carrying only a title has shown the reader the
+        // forgeable half.
+        assert_eq!(v["stoa"].as_str().unwrap(), address.to_hex());
+        assert_eq!(v[FOUNDING_TITLE].as_str().unwrap(), "Somebody else's Stoa");
+
+        // And the Stoa is among the ones the peer is in.
+        let items = listed(&store, 20);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["stoa"].as_str().unwrap(), address.to_hex());
+    }
+
+    #[test]
+    fn a_record_that_does_not_match_the_address_is_refused_and_joins_neither_stoa() {
+        // The self-authenticating check, at the wire. Every field in turn, because
+        // a check comparing only one would pass a substitution in the other.
+        let real = a_joinable_record("Agora");
+        let address = real.address().unwrap();
+
+        let other_creator = crate::stoa::Genesis {
+            creator: feed_key(9).public_key(),
+            ..real.clone()
+        };
+        let other_title = crate::stoa::Genesis {
+            title: "Not Agora".to_string(),
+            ..real.clone()
+        };
+
+        for impostor in [other_creator, other_title] {
+            let mut store = a_membership_store();
+            let out = join_stoa(&join_request(&impostor, &address), &mut store);
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(v.get("error").is_some(), "got {out}");
+            assert!(
+                v.get("stoa").is_none(),
+                "a failure must never also carry a result — §2.5"
+            );
+            // Not in the Stoa asked for...
+            assert!(!store.contains(&address).unwrap());
+            // ...and not in the one the SUPPLIED RECORD would name either, which is
+            // the half a handler that "helpfully" joined what it was handed would
+            // fail.
+            assert!(!store.contains(&impostor.address().unwrap()).unwrap());
+            assert_eq!(store.len().unwrap(), 0);
+        }
+    }
+
+    #[test]
+    fn a_malformed_record_is_refused_without_a_membership() {
+        // Bytes the genesis encoding refuses to decode, as distinct from bytes that
+        // decode and describe another Stoa. Both are refusals and they are
+        // different mistakes.
+        // Each case is a DIFFERENT decoder refusal, and the messages are asserted
+        // to differ. Without that, four cases that all died as "truncated" would
+        // look like coverage of four paths while exercising one — the fixture trap
+        // this project keeps paying for.
+        let mut store = a_membership_store();
+        let address = a_joinable_record("Agora").address().unwrap();
+        let mut messages = Vec::new();
+        for (bad, why) in [
+            // Nothing at all: the version byte is already missing.
+            ("".to_string(), "ended mid-field"),
+            // A version byte and then nothing: truncated at the creator key.
+            ("01".to_string(), "ended mid-field"),
+            // A version this build does not know — "newer client", not "corrupt".
+            ("ff00".to_string(), "unknown genesis record version"),
+            // Right shape, and an all-zero creator: a low-order point that
+            // decompresses and can never verify a signature. The dangerous case,
+            // and the one a decoder checking only well-formedness would accept.
+            (
+                format!("01{}00{}", "00".repeat(32), "00000000"),
+                "creator key",
+            ),
+            // Right shape, a valid creator, and trailing bytes after a complete
+            // record — refused because accepting them would let two byte strings
+            // decode to one record while hashing to different addresses.
+            (
+                format!(
+                    "{}ff",
+                    hex::encode(a_joinable_record("Agora").canonical_bytes().unwrap())
+                ),
+                "trailing bytes",
+            ),
+        ] {
+            let request =
+                serde_json::json!({ "stoa": address.to_hex(), "genesis": bad }).to_string();
+            let out = join_stoa(&request, &mut store);
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(v.get("error").is_some(), "for {bad:?}, got {out}");
+            assert!(v.get("stoa").is_none());
+            let message = v["error"].as_str().unwrap().to_string();
+            assert!(
+                message.contains(why),
+                "for {bad:?} the refusal must say {why:?}, got {message}"
+            );
+            messages.push(message);
+        }
+        // Three distinct refusals across five cases (two are both truncations),
+        // which is what proves these are not all one path.
+        messages.sort();
+        messages.dedup();
+        assert_eq!(
+            messages.len(),
+            4,
+            "the cases must exercise distinguishable decoder refusals, got {messages:?}"
+        );
+        assert_eq!(store.len().unwrap(), 0, "the peer must be in no new Stoa");
+    }
+
+    #[test]
+    fn a_repeated_join_succeeds_and_leaves_one_membership_unchanged() {
+        // A pasted address is exactly the input a user supplies twice. Reporting
+        // the second attempt as an error would make a harmless action look broken.
+        let mut store = a_membership_store();
+        let g = a_joinable_record("Agora");
+        let address = g.address().unwrap();
+        let request = join_request(&g, &address);
+
+        let first = join_stoa(&request, &mut store);
+        let second = join_stoa(&request, &mut store);
+        let v: serde_json::Value = serde_json::from_str(&second).unwrap();
+        assert!(
+            v.get("error").is_none(),
+            "a repeated join must succeed: {second}"
+        );
+        assert_eq!(
+            first, second,
+            "the two replies must agree — a view has no 'already joined' branch"
+        );
+        assert_eq!(store.len().unwrap(), 1);
+        assert_eq!(listed(&store, 20).len(), 1);
+        // The founding values reported afterwards are unchanged.
+        assert_eq!(
+            listed(&store, 20)[0][FOUNDING_TITLE].as_str().unwrap(),
+            "Agora"
+        );
+    }
+
+    #[test]
+    fn creating_and_then_joining_the_same_stoa_is_one_membership() {
+        // Two different calls reaching one write path. This is the property that
+        // would break first if creation grew a write of its own.
+        let mut store = a_membership_store();
+        let created = create(&mut store, "Agora");
+        let address =
+            crate::identity::Address::from_hex(created["stoa"].as_str().unwrap()).unwrap();
+        let record = store.get(&address).unwrap().unwrap().genesis;
+
+        let out = join_stoa(&join_request(&record, &address), &mut store);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_none(), "got {out}");
+        assert_eq!(
+            store.len().unwrap(),
+            1,
+            "the peer must be in exactly one Stoa for that address"
+        );
+    }
+
+    #[test]
+    fn the_listing_envelope_is_the_ecosystems_pagination_shape() {
+        // The precedent-setting shape, pinned by exact key NAME. A view is written
+        // against these names and renaming one is a breaking change no type
+        // checker would catch.
+        let mut store = a_membership_store();
+        create(&mut store, "Agora");
+
+        let out = list_stoas(r#"{"page":0,"perPage":20}"#, &store);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v["items"].is_array(), "got {out}");
+        assert_eq!(v["page"], 0);
+        assert_eq!(v["hasMore"], false);
+        // Each item carries the address, not only the title — the address is the
+        // identity and the title is decoration.
+        let row = &v["items"][0];
+        assert!(
+            row["stoa"].is_string(),
+            "an item must carry its address: {out}"
+        );
+        assert!(
+            row[FOUNDING_TITLE].is_string(),
+            "an item must carry its founding title: {out}"
+        );
+    }
+
+    #[test]
+    fn a_listed_title_is_named_as_founding_and_never_as_a_bare_title() {
+        // The requirement is that the reply make a founding title distinguishable
+        // from a current one resolved from a metadata op. The FIELD NAME is how
+        // this implementation does it, so the absence of a bare `title` key is as
+        // load-bearing as the presence of `foundingTitle` — a reply carrying both
+        // would put a view one forgotten branch from rendering the wrong one.
+        //
+        // Hardcoded key names on both sides: this is the assertion that fails if
+        // someone "tidies" the field back to `title`.
+        let mut store = a_membership_store();
+        create(&mut store, "Agora");
+        let g = a_joinable_record("Elsewhere");
+        let joined = join_stoa(&join_request(&g, &g.address().unwrap()), &mut store);
+
+        let list: serde_json::Value = serde_json::from_str(&list_stoas("{}", &store)).unwrap();
+        let join: serde_json::Value = serde_json::from_str(&joined).unwrap();
+
+        for v in [&list["items"][0], &join] {
+            assert!(
+                v.get("foundingTitle").is_some(),
+                "the title must be named as founding: {v}"
+            );
+            assert!(
+                v.get("title").is_none(),
+                "a bare `title` would assert a currency nothing has checked: {v}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_peer_in_no_stoa_lists_nothing_and_reports_no_failure() {
+        let store = a_membership_store();
+        let out = list_stoas("{}", &store);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(
+            v.get("error").is_none(),
+            "an empty listing is not a failure: {out}"
+        );
+        assert_eq!(v["items"].as_array().unwrap().len(), 0);
+        assert_eq!(v["page"], 0);
+        // NO SPEC: the spec does not say what `hasMore` holds for an empty listing.
+        // `false` — there is no further page.
+        assert_eq!(v["hasMore"], false);
+    }
+
+    #[test]
+    fn every_stoa_is_reachable_by_paging_and_appears_once() {
+        // A population larger than one page, with a page size that does not divide
+        // it: an off-by-one in the offset or in `hasMore` is invisible when the
+        // last page happens to be full.
+        let mut store = a_membership_store();
+        let mut expected = Vec::new();
+        for n in 0..7 {
+            let reply = create(&mut store, &format!("Stoa {n}"));
+            expected.push(reply["stoa"].as_str().unwrap().to_string());
+        }
+        expected.sort();
+
+        let mut seen: Vec<String> = listed(&store, 3)
+            .iter()
+            .map(|row| row["stoa"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(seen.len(), 7, "every Stoa must be reachable by paging");
+        seen.sort();
+        seen.dedup();
+        assert_eq!(seen.len(), 7, "no Stoa may appear twice");
+        assert_eq!(seen, expected);
+    }
+
+    #[test]
+    fn an_op_for_a_stoa_the_peer_is_not_in_creates_no_membership() {
+        // THE DIRECTION MEMBERSHIP MUST NOT BE DERIVED FROM OPS. An op is
+        // attacker-supplied and its Stoa address is a field the SENDER chose, so a
+        // peer that joined a Stoa because an op mentioned it would be a peer any
+        // stranger can enrol.
+        //
+        // Asserted against the observable STATE rather than against a function not
+        // having been called: a real op log holding real ops for an unjoined Stoa,
+        // beside a real membership store, and the listing is untouched. That is
+        // also the honest shape — there is no call to spy on, because the two types
+        // share no state at all.
+        let mut store = a_membership_store();
+        let unjoined = a_joinable_record("A Stoa nobody here joined");
+        let unjoined_address = unjoined.address().unwrap();
+
+        // Many ops, not one: a handler that enrolled on the Nth would pass a
+        // single-op test.
+        let mut log = MemoryOpLog::new();
+        for n in 0..5 {
+            let key = feed_key(7);
+            let op = Op {
+                stoa: unjoined_address,
+                author: key.public_key(),
+                kind: OpKind::Post {
+                    thread: None,
+                    parent: None,
+                    body: format!("post {n}"),
+                    attachments: vec![],
+                },
+            }
+            .sign(&key);
+            log.append(op, Arrival::unordered()).unwrap();
+        }
+        assert_eq!(
+            log.len().unwrap(),
+            5,
+            "the fixture must reach the assertion"
+        );
+
+        // The peer is in no Stoa for that address, and the listing does not
+        // contain it.
+        assert!(!store.contains(&unjoined_address).unwrap());
+        assert_eq!(listed(&store, 20).len(), 0);
+
+        // And an op for an unjoined Stoa does not disturb a membership that DOES
+        // exist. The retained record is compared byte for byte, which is what
+        // catches a store that re-wrote the row rather than leaving it alone.
+        let joined = a_joinable_record("The one Stoa");
+        let joined_address = joined.address().unwrap();
+        join_stoa(&join_request(&joined, &joined_address), &mut store);
+        let before = store.get(&joined_address).unwrap().unwrap();
+
+        let key = feed_key(7);
+        let op = Op {
+            stoa: unjoined_address,
+            author: key.public_key(),
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: "another".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&key);
+        log.append(op, Arrival::unordered()).unwrap();
+
+        assert_eq!(
+            store.len().unwrap(),
+            1,
+            "the peer is still in exactly one Stoa"
+        );
+        assert_eq!(
+            store.get(&joined_address).unwrap().unwrap(),
+            before,
+            "that Stoa's retained record must be unchanged"
+        );
+        assert!(!store.contains(&unjoined_address).unwrap());
+    }
+
+    #[test]
+    fn an_empty_op_log_does_not_empty_the_listing() {
+        // The other direction of the same boundary, at the wire. A peer in several
+        // Stoas whose op log holds NOTHING must still list every one of them — an
+        // answer derived from the log would list none.
+        let mut store = a_membership_store();
+        for n in 0..3 {
+            create(&mut store, &format!("Quiet {n}"));
+        }
+        let log = MemoryOpLog::new();
+        assert_eq!(log.len().unwrap(), 0, "the fixture must have no ops");
+        assert_eq!(
+            listed(&store, 20).len(),
+            3,
+            "every Stoa the peer is in must be listed however few ops it holds"
+        );
+    }
+
+    #[test]
+    fn a_hostile_request_is_an_error_rather_than_an_abort_and_carries_no_result() {
+        // Every shape the spec enumerates — an absent field, a field of the wrong
+        // type, an address that is not an address, a record that is not a record,
+        // and a record and address that disagree — across all three methods. These
+        // are the first methods on this surface that reach persistent state, so a
+        // panic here aborts the module process and takes the user's session with
+        // it.
+        let g = a_joinable_record("Agora");
+        let address = g.address().unwrap().to_hex();
+        let genesis_hex = hex::encode(g.canonical_bytes().unwrap());
+        let elsewhere = a_joinable_record("Elsewhere").address().unwrap().to_hex();
+
+        // create: the title is the only field, and there is no address to malform.
+        let creates = [
+            "not json".to_string(),
+            r#"{}"#.to_string(),
+            r#"{"title":7}"#.to_string(),
+            r#"{"title":null}"#.to_string(),
+            r#"{"title":["a"]}"#.to_string(),
+            r#"[]"#.to_string(),
+        ];
+        // join: address and record, each malformable, plus the two disagreeing.
+        let joins = [
+            "not json".to_string(),
+            r#"{}"#.to_string(),
+            format!(r#"{{"genesis":"{genesis_hex}"}}"#),
+            format!(r#"{{"stoa":"{address}"}}"#),
+            r#"{"stoa":7,"genesis":"00"}"#.to_string(),
+            format!(r#"{{"stoa":"nothex","genesis":"{genesis_hex}"}}"#),
+            format!(r#"{{"stoa":"00ff","genesis":"{genesis_hex}"}}"#),
+            format!(r#"{{"stoa":"{address}","genesis":7}}"#),
+            format!(r#"{{"stoa":"{address}","genesis":"nothex!"}}"#),
+            // The two disagreeing: a well-formed record for a different Stoa.
+            format!(r#"{{"stoa":"{elsewhere}","genesis":"{genesis_hex}"}}"#),
+        ];
+        // list: the pagination arguments.
+        let lists = [
+            "not json".to_string(),
+            r#"{"page":-1}"#.to_string(),
+            r#"{"page":1.5}"#.to_string(),
+            r#"{"page":"first"}"#.to_string(),
+            r#"{"perPage":"many"}"#.to_string(),
+            r#"{"perPage":-3}"#.to_string(),
+        ];
+
+        for bad in &creates {
+            let out = create_stoa(bad, || Ok(creator_key()), &mut a_membership_store());
+            assert_error_only(&out, bad, "stoa");
+        }
+        for bad in &joins {
+            let out = join_stoa(bad, &mut a_membership_store());
+            assert_error_only(&out, bad, "stoa");
+        }
+        for bad in &lists {
+            let out = list_stoas(bad, &a_membership_store());
+            assert_error_only(&out, bad, "items");
+        }
+
+        // The module answers subsequent calls: a good request after every bad one.
+        let mut store = a_membership_store();
+        let good = create(&mut store, "Agora");
+        assert!(good.get("error").is_none(), "got {good}");
+    }
+
+    /// Assert a reply is the error shape and carries no result field.
+    ///
+    /// A helper because the pair of assertions is the same at every call site and a
+    /// second copy would eventually check only the first half — which is the
+    /// partial-success shape §2.5 forbids, unasserted.
+    fn assert_error_only(out: &str, request: &str, result_field: &str) {
+        let v: serde_json::Value = serde_json::from_str(out)
+            .unwrap_or_else(|e| panic!("for {request:?}, reply was not JSON ({e}): {out}"));
+        assert!(v.get("error").is_some(), "for {request:?}, got {out}");
+        assert!(
+            v.get(result_field).is_none(),
+            "a failure must never also carry a result — §2.5; for {request:?}, got {out}"
+        );
+    }
+
+    #[test]
+    fn a_failed_call_records_nothing_and_disturbs_no_retained_record() {
+        // "A failed call records nothing" over a store that already HOLDS
+        // something, which is the case a test against an empty store cannot see:
+        // an empty store's "unchanged" is indistinguishable from "wiped".
+        let mut store = a_membership_store();
+        let one = create(&mut store, "Agora");
+        let address = crate::identity::Address::from_hex(one["stoa"].as_str().unwrap()).unwrap();
+        let before = store.get(&address).unwrap().unwrap();
+
+        let g = a_joinable_record("Elsewhere");
+        for bad in [
+            r#"{"title":7}"#.to_string(),
+            format!(r#"{{"title":"{}"}}"#, "x".repeat(1025)),
+        ] {
+            let _ = create_stoa(&bad, || Ok(creator_key()), &mut store);
+        }
+        let _ = join_stoa(&join_request(&g, &address), &mut store);
+        let _ = join_stoa(r#"{"stoa":"nothex","genesis":"00"}"#, &mut store);
+
+        assert_eq!(
+            store.len().unwrap(),
+            1,
+            "the set of Stoas the peer is in must be unchanged"
+        );
+        assert_eq!(
+            store.get(&address).unwrap().unwrap(),
+            before,
+            "the retained record of every Stoa must be unchanged"
+        );
+    }
+
+    #[test]
+    fn a_store_that_cannot_be_opened_is_the_error_shape_and_not_an_empty_listing() {
+        // The failure one step earlier than the read, at the adapter's entry point.
+        // An empty listing is indistinguishable from a peer that is in no Stoa, so
+        // flattening this would invite the user to re-paste every address they hold.
+        //
+        // Reached with a path that cannot be a SQLite database: a DIRECTORY.
+        let dir = std::env::temp_dir();
+        let out = with_membership_store("list_stoas", &dir, |store| list_stoas("{}", store));
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_some(), "got {out}");
+        assert!(
+            v.get("items").is_none(),
+            "a failure must never also carry a result — §2.5"
+        );
+    }
+
+    #[test]
+    fn the_membership_path_is_a_file_of_its_own_beside_the_op_logs() {
+        // Hardcoded on both sides, because this is an on-disk name every peer's
+        // installation carries and changing it orphans their memberships. It must
+        // also NOT be the op log's file: sharing one would mean the op log's layout
+        // version had to mean two things, which is the defect the separate file
+        // exists to prevent.
+        let dir = std::path::Path::new("/some/dir");
+        assert_eq!(
+            membership_path_in(dir),
+            std::path::PathBuf::from("/some/dir/stoas.sqlite")
+        );
+        assert_ne!(
+            membership_path_in(dir),
+            dir.join("ops.sqlite"),
+            "membership must not share the op log's file"
+        );
+    }
+
+    #[test]
+    fn the_policy_a_created_stoa_declares_is_reported_by_name() {
+        // NO SPEC: the spec requires the posting policy be answerable from what was
+        // retained and does not say which policy a creation declares or what it is
+        // called on the wire. Creation accepts no policy parameter and always
+        // declares `Open`; the wire name is the literal "open".
+        //
+        // Hardcoded, because it is a wire string a view branches on. `Policy` has
+        // one variant today, so `policy_name` is exhaustively covered by this one
+        // case — and it has no wildcard arm, so a second variant fails to compile
+        // rather than silently rendering as "open".
+        let mut store = a_membership_store();
+        let reply = create(&mut store, "Agora");
+        assert_eq!(reply["policy"], "open");
+
+        let g = a_joinable_record("Elsewhere");
+        let joined = join_stoa(&join_request(&g, &g.address().unwrap()), &mut store);
+        let v: serde_json::Value = serde_json::from_str(&joined).unwrap();
+        assert_eq!(v["policy"], "open");
+    }
+
+    #[test]
+    fn an_unknown_field_in_a_request_is_ignored_rather_than_refused() {
+        // NO SPEC: the spec does not say what an unrecognised field does. Ignored,
+        // matching `list_threads`'s treatment of an offered `order` — an unknown
+        // field is not a caller error, and refusing one would break every view
+        // written against a later, wider request shape.
+        let mut store = a_membership_store();
+        let plain = create_stoa(r#"{"title":"Agora"}"#, || Ok(creator_key()), &mut store);
+        let mut other = a_membership_store();
+        let extra = create_stoa(
+            r#"{"title":"Agora","somethingElse":true,"order":"new"}"#,
+            || Ok(creator_key()),
+            &mut other,
+        );
+        assert_eq!(plain, extra, "an unknown field must not change the answer");
     }
 }
