@@ -2,26 +2,44 @@ import QtQuick
 
 // The contour-and-weave mark.
 //
-// DETERMINISM IS THE WHOLE CONTRACT. The same address must produce the same
-// pixels on every peer, forever. Everything below is integer-indexed off the
-// address hex; there is no randomness, no clock, no locale, no system font,
-// and no floating-point value is ever accumulated across iterations or
-// compared for equality. The only floating-point arithmetic is the per-shape
-// trigonometry the Canvas would do anyway, computed fresh from integers each
-// time.
+// DETERMINISM IS THE WHOLE CONTRACT, and the honest version of it is
+// PATTERN-identity rather than pixel-identity. Every selector below is an
+// integer index off the address hex, so the same address picks the same form,
+// the same three inks, the same weave, angle, pitch and duty on every peer
+// forever. There is no randomness, no clock, no locale, no system font, and no
+// float is accumulated across iterations or compared for equality.
 //
-// TWENTY BYTES of the address are read (bytes 12..31) and TWELVE are not,
-// which is exactly why this can never stand in for showing the address. The
-// mark is a recognition aid; the address is the identity. A reader who needs
-// to know WHO this is reads the address, always.
+// What is NOT promised is byte-identical rasterisation. Device pixel ratio
+// changes the sample grid; at size 19 with stroke 2 the polygon radius is 7.5,
+// putting axis vertices on exact half-integers where a fill rule decides the
+// boundary pixel; and every weave rotates by a non-multiple of 90 degrees for 11
+// of 12 angles, so edge coverage is an antialiasing detail. None of that can
+// change WHICH shape or WHICH inks are drawn, which is the part recognition
+// depends on and the part this contract covers.
 //
-// The byte range is chosen, not arbitrary. AddressLabel abbreviates to head 8,
-// middle 8, tail 6 of the hex body — that is bytes 0..3, 14..17 and 29..31, so
-// 21 of the 32 bytes are invisible at feed density. Reading the high range
-// puts most of that hidden material on screen in a form a reader could notice.
-// Bytes 0..11 are left to the generated-name scheme, so that grinding for a
-// lookalike NAME and grinding for a lookalike MARK are independent searches
-// whose costs multiply rather than add.
+// EIGHT BYTES of the address are read — bytes 12..19, one per dimension — and
+// TWENTY-FOUR are not, which is exactly why this can never stand in for showing
+// the address. The mark is a recognition aid; the address is the identity. A
+// reader who needs to know WHO this is reads the address, always.
+//
+// Why 12..19 and not some wider window: the mark's OUTPUT is about 16 bits of
+// perceptually distinct results, so eight bytes of input (64 bits) already
+// exceeds what the rendering can express by a factor of 2^48. Reading more
+// bytes would change nothing a reader could see — the input was never the
+// binding constraint, the perceptual space is. Widening the read to look
+// thorough would be the exact confusion this file's design note argues against.
+//
+// Bytes 0..11 are reserved for the generated-name scheme. That disjointness is
+// load-bearing: grinding for a lookalike NAME and grinding for a lookalike MARK
+// are then independent searches whose costs multiply rather than add.
+//
+// One honest limitation. AddressLabel abbreviates to head 8, middle 8, tail 6
+// of the hex body — bytes 0..3, 14..17 and 29..31 — so bytes 14..17 are ALREADY
+// on screen in the middle group. Half of what the mark reads therefore sits on
+// ground the abbreviation covers, and only {12, 13, 18, 19} of the 21 bytes the
+// abbreviation hides reach the reader through the mark. That is a weaker version
+// of the criticism this design makes of the bundle's original, reduced rather
+// than eliminated.
 Canvas {
     id: root
 
@@ -34,20 +52,20 @@ Canvas {
     onAddressChanged: requestPaint()
     onSizeChanged: requestPaint()
 
-    // Eight inks, hand-picked rather than sliced off a hue wheel. Adjacent
-    // steps on a wheel land inside a just-noticeable difference and produce
-    // parameter states nobody can tell apart; these are separated in
-    // LIGHTNESS and CHROMA as well as hue, which is what lets a categorical
-    // palette exceed what hue rotation alone can distinguish.
+    // Six inks, hand-picked rather than sliced off a hue wheel, and ordered as
+    // a LIGHTNESS ladder because that is what survives colour-vision
+    // deficiency: under deuteranopia and protanopia the red/green axis
+    // collapses, so inks separated only by hue become one colour.
     //
-    // Minimum pairwise OKLab distance is 0.080 in normal vision. Under
-    // simulated deuteranopia and protanopia — where the red/green axis
-    // collapses — every pair still separates on lightness or on the
-    // blue/yellow axis, which is why Moss is dark and Ochre is light rather
-    // than both sitting mid-range.
+    // Measured minimum pairwise OKLab distance is 0.205 in normal vision and
+    // 0.109 under simulated dichromacy. Six rather than eight is the honest
+    // consequence of holding that floor — see docs/IDENTICON.md.
+    //
+    // The values are frozen constants in Theme, not tunable tokens: editing one
+    // changes every identity's mark and makes two app versions disagree.
     readonly property var inks: [
-        Theme.markInk, Theme.markIndigo, Theme.markMoss, Theme.markPlum,
-        Theme.markRust, Theme.markTeal, Theme.markStone, Theme.markOchre
+        Theme.markInk, Theme.markViolet, Theme.markRust,
+        Theme.markGreen, Theme.markLime, Theme.markSky
     ]
 
     // ---- address bytes --------------------------------------------------
@@ -75,18 +93,38 @@ Canvas {
     // that placement must label it.
     function _form() { return _byte(12) % 11; }
 
-    // Two inks for the weave and one for the outline. The pair is ORDERED and
-    // the two are always different, so (rust, teal) and (teal, rust) are
-    // different marks. Order survives rendering here because the duty cycle is
-    // not 50% — see _duty(). At 50% a swap is a half-phase shift of an
-    // unanchored stripe field, which is invisible, and the original design
-    // claimed an ordering it did not deliver.
-    function _outlineInk() { return inks[_byte(13) % 8]; }
-    function _inkA()       { return inks[_byte(14) % 8]; }
+    // Two inks for the weave and one for the outline, ALL THREE DISTINCT.
+    //
+    // The pair is ORDERED, so (rust, sky) and (sky, rust) are different marks.
+    // Order survives rendering here because the duty cycle is not 50% — see
+    // _duty(). At 50% a swap is a half-phase shift of an unanchored stripe
+    // field, which is invisible, and the bundle's design claimed an ordering it
+    // did not deliver.
+    //
+    // Each is derived by an OFFSET from the previous rather than an independent
+    // draw, which is what guarantees distinctness by construction instead of by
+    // a guard that has to be right at every call site. An earlier version drew
+    // the outline independently, so 1 mark in 8 had ring and ground the same
+    // colour and no visible contour at all — the outline silently vanished on
+    // 12% of identities.
+    function _inkA() { return inks[_byte(14) % 6]; }
     function _inkB() {
-        var i = _byte(14) % 8;
-        var j = _byte(15) % 7;          // 0..6, an offset that is never 0 mod 8
-        return inks[(i + 1 + j) % 8];   // always a different ink from A
+        var i = _byte(14) % 6;
+        var j = _byte(15) % 5;          // 0..4, so the offset is never 0 mod 6
+        return inks[(i + 1 + j) % 6];   // never equal to A
+    }
+    function _outlineInk() {
+        var i = _byte(14) % 6;
+        var j = _byte(15) % 5;
+        var b = (i + 1 + j) % 6;        // B's index
+        // Walk forward from B by an offset that skips A, so all three differ.
+        var k = _byte(13) % 4;          // 0..3
+        var c = b;
+        for (var step = 0; step <= k; step++) {
+            c = (c + 1) % 6;
+            if (c === i) c = (c + 1) % 6;   // never A
+        }
+        return inks[c];
     }
 
     // Weave angle. Parallel stripes have period 180 degrees, not 360 — a field
@@ -246,10 +284,12 @@ Canvas {
             // the lattice carries the same amount of ink B regardless of where
             // the mark's centre falls.
             //
-            // The dots are square rather than round, deliberately: at 19px a
-            // radius-1 arc rasterises to an ambiguous 2x2 smudge, whereas a
-            // 2x2 fillRect is exactly two pixels wide on every renderer. That
-            // is also what keeps this pixel-identical across peers.
+            // The dots are square rather than round because at 19px a radius-1
+            // arc rasterises to an ambiguous smudge while a small fillRect keeps
+            // a legible edge. This is a LEGIBILITY choice, not a determinism
+            // one: the lattice is rotated by a non-multiple of 90 degrees for 11
+            // of the 12 angles, so a rect's boundary coverage is as much an
+            // antialiasing detail as an arc's would be.
             ctx.save();
             ctx.translate(size / 2, size / 2);
             ctx.rotate(_angleDeg() * Math.PI / 180);

@@ -29,9 +29,20 @@ These get conflated, so they are separated here deliberately.
 
 | | before | after |
 |---|---|---|
-| **bytes consumed** | 6 (bytes 0..5) | 20 (bytes 12..31) |
-| **perceptually distinct marks** | ~1,700 | ~66,000 |
-| **combined with the generated name** | ~2^36 | ~2^41 |
+| **bytes consumed** | 6 (bytes 0..5) | 8 (bytes 12..19) |
+| **perceptually distinct marks** | ~1,700 | ~8,900 |
+| **combined with the generated name** | ~2^36 | ~2^38 |
+
+> **These numbers were wrong in an earlier revision of this note and the
+> corrections are recorded in place rather than quietly replaced.** The claimed
+> figures were 20 bytes, ~66,000 marks and a 0.080 colour floor. All three were
+> wrong: the code reads 8 bytes not 20, the outline factor was counted at full
+> cardinality after being described as barely legible, and the colour floor was
+> hand-computed with a gamma error that hid a pair measuring **0.006** under
+> simulated protanopia — a pair that would have shipped as one colour for ~8% of
+> male readers. Every figure below is now computed in the target engine by
+> `dialectica-ui/tests/tst_identicon.qml` and `tmp/render/tst_palette.qml`
+> rather than by hand.
 
 **Only the middle row is what a human collides on.** Reading more bytes into
 unchanged dimensions yields exactly as many distinguishable marks as reading
@@ -106,70 +117,113 @@ The rule applied throughout: **a dimension earns its place only if a reader can
 separate its values at 19px.** Two additions were tried and rejected on that
 test; they are recorded below rather than quietly dropped.
 
-### 1. Eight inks, hand-picked (3 → 8)
+### 1. Six inks, hand-picked and measured (3 → 6)
 
-The single largest win, and the right place to spend the budget: colour is the
-dimension the eye separates fastest and the one that survives shrinking, where
-fine geometry is already mud at 40px.
+The largest win, and the right place to spend the budget: colour is the dimension
+the eye separates fastest and the one that survives shrinking, where fine
+geometry is already mud at 40px.
 
 The palette is **chosen, not computed**. Slicing a hue wheel into N steps puts
 adjacent steps inside a just-noticeable difference — which would manufacture
 exactly the indistinguishable parameter states this change exists to remove.
-These eight vary in **lightness and chroma as well as hue**, which is how the
-reference categorical palettes (ColorBrewer, Tableau) reach 10 without
-muddiness.
 
-Computed in **OKLab**, because equal numeric steps in RGB or HSV are wildly
-unequal to the eye:
+#### The palette is a lightness ladder, and that shape is forced
+
+This is the single most important thing to understand about it, and an earlier
+revision of this note got it wrong.
+
+Under deuteranopia and protanopia the **red/green axis collapses**. What
+dichromats retain is **lightness** and the **blue/yellow axis**. So two inks
+separated mainly by hue are *one colour* for roughly 8% of male readers, however
+far apart they measure in normal vision. The only reliable way to separate a
+categorical palette for those readers is to space it in **lightness**.
+
+Ordering the palette as a monotonic L ladder is therefore not an aesthetic
+choice; it is what makes the set work at all:
 
 | role | hex | L | C | hue |
 |---|---|---|---|---|
-| `markInk` | `#26231d` | 0.258 | 0.013 | — |
-| `markIndigo` | `#37407e` | 0.396 | 0.102 | 274 |
-| `markMoss` | `#2f5233` | 0.402 | 0.066 | 147 |
-| `markPlum` | `#8a4479` | 0.492 | 0.108 | 341 |
-| `markRust` | `#a33a2b` | 0.495 | 0.143 | 31 |
-| `markTeal` | `#1f7a7a` | 0.525 | 0.081 | 195 |
-| `markStone` | `#8f8d84` | 0.643 | 0.013 | — |
-| `markOchre` | `#c98a2e` | 0.653 | 0.154 | 39 |
+| `markInk` | `#1c1a16` | 0.219 | 0.008 | — |
+| `markViolet` | `#4a2a86` | 0.380 | 0.146 | 294 |
+| `markRust` | `#8a3a1c` | 0.452 | 0.117 | 40 |
+| `markGreen` | `#2f7f5c` | 0.537 | 0.096 | 161 |
+| `markLime` | `#8fb520` | 0.720 | 0.169 | 124 |
+| `markSky` | `#8ecbe8` | 0.811 | 0.075 | 229 |
 
-**Floor enforced: 0.080 OKLab.** Closest surviving pair is **Moss/Teal at
-0.080**; every other pair clears 0.10.
+**Measured floor: 0.205 OKLab in normal vision, 0.109 under simulated
+dichromacy**, both at `markRust`/`markGreen`. **No pair falls under 0.10 in
+either condition.**
 
-**Colour-blind checking.** Every pair was simulated under deuteranopia and
-protanopia (Vienot 1999, through Hunt-Pointer-Estevez LMS) and re-measured in
-OKLab. Under both conditions the red/green (`a`) axis collapses, so any pair
-separated *mainly* on `a` becomes one colour for those readers. Two candidate
-pairs failed this and were fixed rather than shipped:
+#### Why six and not eight
 
-- **Moss/Rust** at the original `#3f6b43`: separated almost entirely on `a`
-  (delta-a 0.187, delta-L 0.016), collapsing to **0.034** under deuteranopia —
-  a genuine collision. Fixed by darkening Moss to `#2f5233`, which moves the
-  separation onto **lightness**, the channel dichromats retain: the pair now
-  measures 0.204 normal / **0.100** simulated.
-- **Moss/Plum** then became tight at 0.074 simulated. Fixed by lightening Plum
-  from `#6d3560` to `#8a4479`: now **0.114** simulated.
+**Because eight could not hold the floor.** Every candidate eight-ink set left at
+least one pair under 0.10 simulated, and the mechanism is arithmetic rather than
+bad luck: after hue collapse, separation is dominated by ΔL, so eight rungs need
+ΔL ≈ 0.10 between neighbours — about 0.70 of lightness range. Pushing the top
+rung that high puts it near white, where it stops reading as an *ink* on
+`#efe9dc` paper. Six rungs fit; eight do not.
 
-Worst surviving pair under simulated dichromacy: **0.074**. That is the honest
-floor for ~8% of male readers, and it is below the 0.080 normal-vision floor —
-stated rather than averaged away.
+Candidates tried and rejected, with their worst simulated pair:
 
-**Two candidates were cut for being the same colour to the eye**, and the
-palette is 8 rather than 10 because of it:
+| set | worst simulated pair | verdict |
+|---|---|---|
+| the shipped eight | **0.006** Moss/Rust (protanopia) | two colours for 92% of readers, one for the rest |
+| 8, saturated ladder | 0.047 Indigo/Plum | under floor |
+| 8, even L spacing | 0.087 Stone/Ochre | under floor, and Ochre near white |
+| 7 | 0.098 Plum/Rust | at the line, not over it |
+| **6** | **0.109** Rust/Green | **ships** |
 
-- `markClay #8c5a3c` sat at hue 50 between Rust (31) and Ochre (39) and
-  measured **0.075** against Rust in normal vision — under the floor. Cut.
-- `markOlive #6b6a24` measured **0.062** against Moss. Two greens at similar
-  lightness are one green. Cut.
+**An honest six beats a claimed eight where two are the same colour.**
 
-**An honest 8 beats a claimed 10 where two are the same colour**, so the number
-reported is 8.
+#### How the earlier figures went wrong
 
-The pair is now **genuinely ordered**, which it was not before — see the duty
-cycle below. With P inks, an ordered distinct pair plus an outline gives
-`P x (P-1) x P`: 8 x 7 x 8 = **448**, against 3 x 2 x 3 = 18 before, of which
-only 9 were real once the invisible order is removed. **A ~50x gain on the most
-perceptible dimension.**
+Worth recording, because the failure was methodological rather than arithmetical.
+
+The first pass hand-computed the dichromat simulation and **fed gamma-encoded
+sRGB into the Viénot LMS matrix, which is defined against linear light.** That
+single step error shifted every simulated value, and it did so *plausibly* — the
+numbers looked reasonable, so nothing flagged them. It hid a pair measuring
+**0.006**: `markMoss`/`markRust` under protanopia, effectively the same colour,
+which the note claimed measured 0.100 and declared safe.
+
+Two further hand-computed claims were also wrong and are withdrawn:
+
+- `markOchre` was recorded at L 0.653 / C 0.154 / hue 39. Hue 39 would have sat
+  8° from Rust, which contradicts the same paragraph's claim that every pair
+  cleared 0.10 — an internal inconsistency that should have been caught.
+- `markOlive` was cut claiming it measured 0.062 against Moss. **It measured
+  0.122** — the cut was not numerically justified. It is still out, on the design
+  judgement that two greens at similar lightness read as one green, but that is a
+  judgement and is now stated as one rather than dressed as a measurement.
+
+The lesson is recorded in the instrument rather than in prose: the palette is now
+measured by `tmp/render/tst_palette.qml`, which **self-tests against
+`#808080` → L 0.5998 before reporting anything.** A pipeline that cannot
+reproduce a known value is not trusted to produce unknown ones.
+
+**An honest 6 beats a claimed 8 where two are the same colour**, so the number
+reported is 6.
+
+#### All three inks are now distinct by construction
+
+The ink pair is **genuinely ordered**, which it was not before — see the duty
+cycle below.
+
+A defect found in review and fixed here: the outline was drawn from an
+independent index, with nothing preventing it equalling ink A. **One mark in six
+therefore had ring and ground the same colour and no visible contour at all** —
+the outline silently vanished, on a component whose comment promises "the outline
+is always drawn, so a mark never bleeds into the row behind it".
+
+All three indices are now derived by **offsets from one another** rather than
+independent draws, so distinctness holds by construction rather than by a guard
+that has to be right at every call site. `tst_identicon.qml` asserts it across a
+sweep of byte values, and that test was watched failing against the old
+independent draw before the fix went in.
+
+With six inks: A has 6 choices, B has 5 (never A), the outline has 4 (never A or
+B). That is the ink contribution, before the deflation the next section applies to
+the outline.
 
 ### 2. Eleven pooled forms, no angular/curved split (4 or 5 → 10)
 
@@ -288,66 +342,79 @@ ink B regardless of where the mark's centre falls.
 
 ## Counting the perceptual space, after
 
-| dimension | values | note |
-|---|---|---|
-| form | 10 | 11 in the array; pentagon/hexagon merge at 19px |
-| outline ink | 8 | |
-| ink A | 8 | |
-| ink B | 7 | always different from A |
-| weave kind | 3 | bands / crossed lattice / dot lattice |
-| angle | 12 | 15-degree steps over a half turn |
-| pitch | 4 | 2, 3, 4, 6 |
-| duty | 3 | 0.30 / 0.45 / 0.62 |
+| dimension | parameter values | counted at 19px | why deflated |
+|---|---|---|---|
+| form | 11 | **10** | pentagon/hexagon merge |
+| ink A | 6 | **6** | the ground fills the face; fully legible |
+| ink B | 5 | **5** | never A; covers 30–62% of the face |
+| outline ink | 4 | **2** | see below — a 2px ring is barely legible at 19px |
+| weave kind | 3 | **3** | topologically different fills |
+| duty | 3 | **3** | thin-B vs thick-B is a clear read |
+| angle | 12 | ~2 | see below |
+| pitch | 4 | ~2 | see below |
 
-All three weave kinds are now rotatable periodic fields, so angle and pitch
-apply uniformly to each and the product is a flat multiplication. (That was not
-true while the rings variant existed, which needed its own per-kind arithmetic —
-another small argument for having removed it.)
+**The outline is deflated, and this corrects an inconsistency review caught.**
+The "before" count in this note rates the outline ring "legible at 40px and
+barely at 19px" and generously counts it as 3. An earlier revision of the "after"
+count then took it at **full cardinality 8** — at the same governing 19px. That
+asymmetry flattered the improvement: the old space was deflated across five
+dimensions and the new one across none. A dimension described as barely legible
+cannot contribute its full parameter count. At 19px a 2px ring on the lightness
+ladder reads as roughly *dark ring* versus *light ring*, so it is counted as **2**.
 
-**Raw parameter product:** form x outline x A x B x weave x angle x pitch x duty
-= 10 x 8 x 8 x 7 x 3 x 12 x 4 x 3
+**Angle and pitch are deflated hard, for the same reason.** At 19px the interior
+is about 15px. Twelve 15-degree steps do not give twelve readable orientations on
+a field that narrow — near 0 and 90 degrees they read as "horizontal" or
+"vertical" with a pixel of stair-stepping — and pitch 4 versus 6 is about one
+pixel of bar width. Together they contribute perhaps a factor of **4** at feed
+size, not 48. They earn their place at 40px, where they separate properly.
 
-10 x 8 = 80
-80 x 8 = 640
-640 x 7 = 4,480
-4,480 x 3 = 13,440
-13,440 x 12 = 161,280
-161,280 x 4 = 645,120
-645,120 x 3 = **1,935,360**
+All three weave kinds are now rotatable periodic fields, so angle and pitch apply
+uniformly and the product is a flat multiplication. (That was not true while the
+rings variant existed, which needed per-kind arithmetic — another small argument
+for having removed it.)
+
+**Raw parameter product:** form x A x B x outline x weave x duty x angle x pitch
+= 11 x 6 x 5 x 4 x 3 x 3 x 12 x 4
+
+11 x 6 = 66
+66 x 5 = 330
+330 x 4 = 1,320
+1,320 x 3 = 3,960
+3,960 x 3 = 11,880
+11,880 x 12 = 142,560
+142,560 x 4 = **570,240**
 
 **That number must not be quoted as the perceptual space.** It is the parameter
-count, and the whole point of this note is that the two differ by more than an
-order of magnitude. Deflating it honestly:
+count, and the whole point of this note is that the two differ by nearly two
+orders of magnitude.
 
-- **Angle: 12 → ~8 effective at 19px.** The 15-degree steps near 0 and 90
-  degrees read as "horizontal" or "vertical" with a pixel of stair-stepping
-  rather than as distinct orientations.
-- **Pitch and duty interact.** At pitch 2 with duty 0.62 the field is nearly
-  solid ink B whichever weave kind is chosen, so several (pitch, duty)
-  combinations converge on the same near-solid look.
-- **Crossed lattice saturates at fine pitch.** Crossing two band families at
-  pitch 2 leaves little ink A visible, so that corner of the space carries fewer
-  distinct looks than the parameter count suggests.
+**The honest headline number.** Take every dimension at its deflated 19px value,
+with no dimension allowed its full parameter count:
 
-**The honest headline number.** Rather than claim the full product, take the
-most defensible core — the dimensions that unambiguously separate at 19px —
-and treat the rest as bonus:
+form (10) x A (6) x B (5) x outline (2) x weave (3) x duty (3)
+= 10 x 6 = 60; 60 x 5 = 300; 300 x 2 = 600; 600 x 3 = 1,800;
+1,800 x 3 = **5,400**
 
-form (10) x outline (8) x A (8) x B (7) x weave kind (3) x duty (3)
-= 10 x 8 = 80; 80 x 8 = 640; 640 x 7 = 4,480; 4,480 x 3 = 13,440;
-13,440 x 3 = **40,320**
+and then the angle/pitch texture contributes a factor that is real but
+size-dependent — about **1.64x** at feed size, substantially more at 40px:
 
-and then the angle/pitch texture contributes a further factor that is real but
-size-dependent. Taking a conservative additional **1.64x** (angle and pitch
-together resolving to fewer than 2 clear classes at 19px but substantially more
-at 40px) gives:
+**~8,900 perceptually distinct marks at feed size.**
 
-**~66,000 perceptually distinct marks at feed size.**
+log2(8,900): 2^13 = 8,192, and 8,900 / 8,192 = 1.086, log2(1.086) ≈ 0.12, so this
+is **~13.1 bits**, against 10.75 before.
 
-log2(66,000): 2^16 = 65,536, so this is **~16 bits**, against 10.75 before.
+**A 5.2x improvement.** That is a far smaller claim than the 38x an earlier
+revision of this note made, and the difference is entirely the outline deflation
+plus the honest six-ink palette. It is worth stating plainly: **the headline gain
+is modest.** What the change mostly bought was not raw space but *correctness* —
+removing dimensions that did not exist (the invisible stripe order, the 24 angles
+that were 12), fixing a palette that had one pair indistinguishable to 8% of
+readers, and closing an outline that vanished on one mark in six.
 
-**A 38x improvement**, and the honest framing is that it is 38x, not the 500x
-the raw parameter product would suggest.
+At 40px the number is several times larger, because angle, pitch, outline hue and
+the pentagon/hexagon distinction all come back. **The feed number is the one that
+governs collisions**, so it is the one quoted.
 
 ## Birthday arithmetic
 
@@ -367,35 +434,38 @@ e^-289 is astronomically small. **P > 0.99999...** — effectively 1.
 
 The old mark could not distinguish 100 people.
 
-### After, S = 66,000
+### After, S = 8,900
 
-**k = 100**: 4,950 / 66,000 = 0.075. `1 - e^-0.075`.
-e^-0.075 = 1 - 0.075 + 0.0028 - ... = 0.9277.
-**P = 0.072 — about 7%.**
+**k = 100**: 4,950 / 8,900 = 0.5562. `1 - e^-0.5562`.
+e^-0.5562: e^-0.5 = 0.6065, e^-0.0562 = 0.9454, product = 0.5734.
+**P = 0.427 — about 43%.**
 
-**k = 1,000**: 499,500 / 66,000 = 7.568. e^-7.568:
-e^-7 = 0.000912, e^-0.568 = 0.5667, product = 0.000517.
-**P = 0.9995 — 99.95%.**
+**k = 1,000**: 499,500 / 8,900 = 56.1. e^-56.1 is negligible.
+**P ~ 1.**
 
-**k = 5,000**: 5000 x 4999 / 2 = 12,497,500. / 66,000 = 189.4.
-**P = 1** to any precision worth writing.
+**k = 5,000**: 12,497,500 / 8,900 = 1,404. **P = 1.**
 
 ### What this means honestly
 
-**The mark comfortably beats the name scheme at small scale and both fail at
-large scale.** The name scheme yields 2^25 (~33 million) outcomes; UI-BRIEF
-records ~3% chance of a name collision at 1,000 and better than even at 5,000.
+**The mark alone does not solve collisions at any interesting scale, and the
+earlier revision of this note overstated how close it came.** At 100 identities a
+mark collision is a coin flip; by 1,000 it is a certainty. The improvement over
+1,728 is real (94% → 43% at k=100) but it does not change the character of the
+problem.
 
-The mark at 66,000 is *worse* than the name in raw space — 2^16 against 2^25 —
-and that is the honest statement. **What the mark buys is not a larger space
-than the name; it is an independent one.** The two together, given disjoint
-byte ranges, give 2^25 x 2^16 = **2^41**, and the pair collides only when both
-collide.
+The name scheme yields 2^25 (~33 million) outcomes; UI-BRIEF records ~3% chance
+of a name collision at 1,000 and better than even at 5,000.
 
-At k = 1,000 against S = 2^41 = 2.2 x 10^12:
-499,500 / 2.2e12 = 2.27e-7. **P ~ 0.000023 — about 1 in 44,000.**
+The mark at 8,900 is **far worse than the name in raw space** — 2^13 against 2^25
+— and that is the honest statement. **What the mark buys is not a larger space
+than the name; it is an independent one.** Given disjoint byte ranges the two
+multiply: 2^25 x 8,900 ≈ 2.99 x 10^11 ≈ **2^38**, and the pair collides only when
+both collide.
 
-At k = 5,000: 12,497,500 / 2.2e12 = 5.68e-6. **P ~ 0.0000057** — 1 in 176,000.
+At k = 1,000 against S = 2.99 x 10^11:
+499,500 / 2.99e11 = 1.67e-6. **P ~ 1 in 600,000.**
+
+At k = 5,000: 12,497,500 / 2.99e11 = 4.18e-5. **P ~ 1 in 24,000.**
 
 **That is the number that matters**, and it is the argument for the mark: not
 that the mark is a good identifier, but that a name-plus-mark bundle collides
@@ -414,34 +484,47 @@ prefix-independent. For a 32-byte address (64 hex characters):
 The abbreviation therefore shows **11 of 32 bytes**, and **21 bytes are
 invisible** at feed density: bytes 4..13 and 18..28.
 
-The mark reads **bytes 12..31**. Bytes 0..11 are reserved for the generated-name
-scheme. Two properties follow:
+The mark reads **bytes 12..19** — eight bytes, one per dimension. Bytes 0..11 are
+reserved for the generated-name scheme.
 
-1. **Name and mark are independent.** Grinding for a target's *name* searches
-   bytes 0..11 and yields a random mark; grinding for the *mark* searches
-   12..31 and yields a random name. The costs **multiply rather than add**.
-   With shared bytes, a near-miss on one correlates with a near-miss on the
-   other and the combined difficulty collapses toward the harder of the two.
-2. **The mark covers most of what the abbreviation hides.** Of the 21 invisible
-   bytes, the mark reads 18..28 entirely and 12..13 — so 13 of the 21 hidden
-   bytes now contribute something a reader could in principle notice.
+**Name and mark are independent**, which is the property worth having. Grinding
+for a target's *name* searches bytes 0..11 and yields a random mark; grinding for
+the *mark* searches 12..19 and yields a random name. The costs **multiply rather
+than add**. With shared bytes, a near-miss on one correlates with a near-miss on
+the other and the combined difficulty collapses toward the harder of the two.
 
-The original mark read bytes 0..5, of which **0..3 are already shown in the
-head** — four of its six bytes were spent on ground the abbreviation already
-covered.
+**Why eight bytes and not more.** The mark's *output* is about 13 bits of
+perceptually distinct results. Eight bytes of input is 64 bits, already exceeding
+what the rendering can express by a factor of 2^51. Reading twenty bytes instead
+would change nothing a reader could see. This is the note's own central point
+turned on itself: **the input was never the binding constraint.** An earlier
+revision of this document claimed the mark read bytes 12..31 — twenty bytes — and
+that claim was simply false about the code, which has only ever read eight.
+Widening the read to look thorough would have been the exact confusion this
+document argues against.
 
-### The flaw this does not fix
+### Two flaws this does not fix
+
+**The mark does not cover what the abbreviation hides, as much as intended.** The
+abbreviation shows bytes 0..3, 14..17 and 29..31. Intersecting the mark's actual
+reads with the *hidden* set gives only **{12, 13, 18, 19} — 4 of the 21 hidden
+bytes**, not the 13 an earlier revision claimed. Worse, **bytes 14..17 are half of
+what the mark reads and are already on screen in the middle group**, so half the
+mark's input sits on ground the abbreviation already covers. That is a weaker
+version of the criticism this design makes of the bundle's original mark — reduced
+from four-of-six to four-of-eight, not eliminated.
+
+Moving the read to a fully hidden window would fix it, at the cost of the name
+scheme's reserved range or of a coordination change; it is recorded here as a
+known imperfection rather than silently improved on paper.
 
 **The visible bundle is still not unique, and it is still grindable.** The
 abbreviation shows the *same byte positions for every address*, so an attacker
 grinding for a lookalike grinds only those fixed positions and gets the hidden
-ones free. Covering the complement with the mark raises the cost — they must
-now also land the mark's perceptual bucket — but it does not make the bundle
-unique and it does not make it unforgeable.
+ones free.
 
-**2^41 is still grindable** with unlimited address regeneration. This defeats
-casual impersonation, not a motivated attacker. The address remains the
-identity.
+**2^38 is grindable** with unlimited address regeneration. This defeats casual
+impersonation, not a motivated attacker. The address remains the identity.
 
 ## Which dimensions resist grinding
 
@@ -459,11 +542,12 @@ target.
 - **Weave kind.** Bands, crossed lattice and dot lattice are topologically
   different fills. There is no interpolation between them; missing by one index
   is a completely different texture.
-- **Ink identity.** The palette is discrete and hand-separated with an enforced
-  perceptual floor. Landing an adjacent index gives a colour that is, by
-  construction, at least 0.080 OKLab away — which is the *point* of the floor.
-  This is the strongest dimension against grinding precisely because it is the
-  one that was curated for separation.
+- **Ink identity.** The palette is discrete and hand-separated with a measured
+  floor. Landing an adjacent index gives a colour that is, by construction, at
+  least **0.205 OKLab away in normal vision and 0.109 under dichromacy** — which
+  is the *point* of the floor. This is the strongest dimension against grinding
+  precisely because it is the one curated for separation, and the floor is now
+  wide because the palette was cut to six to achieve it.
 
 **Weak — a near-miss looks close:**
 
@@ -474,8 +558,8 @@ target.
 
 So **three of the seven dimensions are ordinal and hill-climbable, and four are
 categorical and are not.** The categorical ones carry
-10 x 8 x 8 x 7 x 3 = 13,440 of the space; that is the portion an attacker must
-hit exactly rather than approach. This is why the budget went into colour and
+10 x 6 x 5 x 3 = 900 of the space at feed size; that is the portion an attacker
+must hit exactly rather than approach. This is why the budget went into colour and
 form rather than into more angle steps.
 
 ## Why contour-and-weave rather than a symmetric cell grid
@@ -514,8 +598,13 @@ answered by the degradation ladder rather than by adopting the grid.
 
 ## Determinism
 
-The contract is that the same address produces the same pixels on every peer,
-forever. What secures it:
+The contract is **pattern-identity, not pixel-identity**, and the distinction
+matters enough to state precisely. An earlier revision of this note claimed the
+stronger thing.
+
+**What is guaranteed:** the same address selects the same form, the same three
+inks, the same weave kind, angle, pitch and duty on every peer, forever. What
+secures it:
 
 - Every dimension is an **integer** index derived from `parseInt(hex, 16)` and
   a modulus. No floating-point value is compared for equality, accumulated
@@ -524,30 +613,45 @@ forever. What secures it:
   The QML engine is sandboxed with deny-all network access and no filesystem
   access outside the plugin directory, so it could not fetch anything even if
   the design wanted to.
-- The floating-point that remains is per-shape trigonometry computed fresh from
-  integer inputs each time — `Math.cos(rot + i * 2 * Math.PI / n)` — which is
-  the same arithmetic the Canvas would do for any drawn shape. IEEE-754
-  double-precision `sin`/`cos` can differ in the last ulp between libm
-  implementations; that is a sub-nanometre difference in a coordinate that is
-  then rasterised to a pixel grid, so it cannot change a rendered pixel.
 - **Malformed input is handled at the boundary.** Peer-supplied strings reach
   this component. The hex body is stripped of non-hex characters and padded to
   64 characters, so a short, empty or hostile address renders something stable
-  rather than throwing or producing `NaN` indices.
+  rather than throwing or producing `NaN` indices. `tst_identicon.qml` covers
+  the empty, prefix-only, non-hex and truncated cases.
+
+**What is NOT guaranteed, and why it does not matter:** byte-identical
+rasterisation. Three reasons, and the first two were mis-analysed before:
+
+- **Half-integer coordinates, not floating-point ulps, decide edge pixels.** At
+  size 19 with stroke 2 the polygon radius is 7.5, so axis vertices land on exact
+  half-integers where a fill rule picks the boundary pixel. An earlier revision
+  argued about last-ulp `sin`/`cos` differences, which addresses the wrong case
+  entirely — the ambiguity is geometric, not arithmetic.
+- **Every weave rotates by a non-multiple of 90 degrees** for 11 of the 12
+  angles, so edge coverage of any filled shape is an antialiasing detail.
+- **Device pixel ratio changes the sample grid.**
+
+None of these can change *which* shape or *which* inks are drawn. Recognition
+depends on the pattern, so pattern-identity is the contract that matters and the
+only one honestly available.
 
 ## Where the palette lives
 
-The eight inks are named roles in `Theme.qml` — never inline hex, so the look
-can be iterated without touching this component. They are named for their
-**role in the mark**, which is why they carry the `mark` prefix rather than
-extending the `accent` series: the mark's palette has a different job from the
-interface's, and a future change to `accent2` should not silently change what
-every identity looks like.
+The six inks are named roles in `Theme.qml`, in their own block separate from the
+three interface inks. They carry the `mark` prefix rather than extending the
+`accent` series because the mark's palette has a different job, and a change to
+`accent2` must not silently change what every identity looks like.
 
-The eight are declared in `Theme.qml` under a `mark` prefix, in their own block
-separate from the three interface inks. `markInk` and `markRust` duplicate `ink`
-and `accent` by value today; that duplication is deliberate rather than an
-oversight, because the two palettes must be free to diverge.
+**They are frozen wire-visible constants, not theme tokens**, and this is the one
+thing about them most likely to be got wrong later. The mark binds to
+`Theme.mark*`, so editing a value there changes every identity's appearance — and
+two peers on different app versions would then render *different marks for the
+same address*, which is precisely the failure the determinism contract exists to
+prevent. That is far more likely in practice than any renderer difference. An
+earlier revision of this note presented the theme binding as a benefit ("the look
+can be iterated without touching this component"), which is true of interface
+colours and false of these. **Add an ink if the mark needs one; do not retune an
+existing one.** The obligation is recorded beside the values in `Theme.qml`.
 
 ### Removing isPerson touched two call sites
 

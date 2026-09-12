@@ -18,36 +18,42 @@ QtObject {
     readonly property color accent:    "#a33a2b"   // red: caveats, destructive, apparatus rules
     readonly property color accent2:   "#4a6b74"   // teal: second fill ink, secondary marks
 
-    // ---- mark inks: eight, and they are NOT the interface palette --------
+    // ---- mark inks: SIX, and they are NOT the interface palette ----------
     // The identicon's palette has a different job from the interface's, so it
-    // is scoped separately: iterating `accent` must not silently change what
-    // every identity looks like. See docs/IDENTICON.md for the derivation.
+    // is scoped separately. See docs/IDENTICON.md for the derivation.
+    //
+    // THESE ARE FROZEN WIRE-VISIBLE CONSTANTS, NOT THEME TOKENS. Every peer
+    // must render the same address identically, so editing a value here changes
+    // what every identity looks like and makes two peers on different app
+    // versions disagree about the same person. That is the precise failure the
+    // mark's determinism contract exists to prevent. Add a new ink if the mark
+    // ever needs one; do not retune an existing one.
     //
     // Hand-picked, not sliced off a hue wheel — adjacent steps on a wheel land
     // inside a just-noticeable difference and manufacture parameter states
-    // nobody can tell apart. Separated in LIGHTNESS and CHROMA as well as hue,
-    // which is how a categorical palette exceeds what hue rotation alone can
-    // distinguish.
+    // nobody can tell apart.
     //
-    // Minimum pairwise OKLab distance 0.080 (markMoss/markTeal). Every pair was
-    // re-checked under simulated deuteranopia and protanopia, where the
-    // red/green axis collapses: markMoss is DARK and markOchre is LIGHT
-    // precisely so those pairs separate on lightness, the channel dichromats
-    // retain, rather than on hue. Two further candidates were cut for measuring
-    // under the floor — a clay at 0.075 against markRust and an olive at 0.062
-    // against markMoss — which is why there are eight and not ten.
+    // The ordering is a LIGHTNESS LADDER (L 0.219 -> 0.811), and that shape is
+    // forced rather than aesthetic. Under deuteranopia and protanopia the
+    // red/green axis collapses, so two inks separated only by hue become one
+    // colour; what dichromats retain is lightness and the blue/yellow axis.
+    // Spacing the ladder is therefore what makes the palette work for the ~8%
+    // of men with a colour vision deficiency, and it is why the set is six
+    // rather than eight: a usable lightness range on this paper does not hold
+    // eight rungs at the floor below.
     //
-    // markInk and markRust duplicate `ink` and `accent` by value today. That is
-    // deliberate duplication, not an oversight: the two palettes are free to
-    // diverge.
-    readonly property color markInk:    "#26231d"
-    readonly property color markIndigo: "#37407e"
-    readonly property color markMoss:   "#2f5233"
-    readonly property color markPlum:   "#8a4479"
-    readonly property color markRust:   "#a33a2b"
-    readonly property color markTeal:   "#1f7a7a"
-    readonly property color markStone:  "#8f8d84"
-    readonly property color markOchre:  "#c98a2e"
+    // Measured, not estimated. Minimum pairwise OKLab distance 0.205 in normal
+    // vision and 0.109 under simulated dichromacy, both at markRust/markGreen;
+    // no pair falls under 0.10 in either condition. The instrument is
+    // tmp/render/tst_palette.qml, which self-tests against #808080 -> L 0.5998
+    // before reporting, because an earlier hand-computed version of this table
+    // shipped a pair at 0.006 while claiming 0.100.
+    readonly property color markInk:    "#1c1a16"
+    readonly property color markViolet: "#4a2a86"
+    readonly property color markRust:   "#8a3a1c"
+    readonly property color markGreen:  "#2f7f5c"
+    readonly property color markLime:   "#8fb520"
+    readonly property color markSky:    "#8ecbe8"
 
     // ---- rules ----------------------------------------------------------
     readonly property color rule:      "#d8d0bf"
