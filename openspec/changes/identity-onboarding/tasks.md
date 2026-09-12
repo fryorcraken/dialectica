@@ -151,22 +151,57 @@ that never made the claim.
 - [x] 6.2 `cargo fmt --check` exits 0 and `cargo clippy -p dialectica-core
   --all-targets -- -D warnings` exits 0. Clippy caught three lints in the new
   tests (`bool_assert_comparison` twice, `unnecessary_to_owned` once), now fixed.
-- [ ] 6.3 `openspec validate identity-onboarding --strict` — **DOES NOT PASS, and
-  both failures are in the spec rather than in this change.** Left unchecked
-  rather than ticked, because ticking it would be a false claim.
+- [x] 6.3 `openspec validate identity-onboarding --strict` — **passes**, after two
+  defects the implementation pass found were fixed in the delta by `spec-writer`.
+  Recorded rather than ticked silently, because the failures were real and the
+  reason they are gone is a spec edit rather than a code one.
 
-  1. `identity/spec.md`: the MODIFIED requirement renames the live spec's
+  1. `identity/spec.md`: the MODIFIED requirement had **renamed** the live spec's
      scenario "The same root and Stoa always yield the same identity" to "The
      same root, Stoa and path…" instead of keeping it alongside. A MODIFIED block
-     replaces the whole requirement, so `openspec archive` would **drop** the
-     two-input determinism scenario — which is exactly the silent-loss failure
-     the agents README documents.
+     replaces the whole requirement, so `openspec archive` would have **dropped**
+     the two-input determinism scenario. Both scenarios are now present, and the
+     requirement prose now states that the two-input derivation remains, so the
+     retained scenario is in contract rather than orphaned. Confirmed by
+     reverting the fix and watching `validate --strict` name the omission:
+     *"MODIFIED … omits scenario(s) the current spec still has"*.
   2. `identity-onboarding/spec.md`: "A generated name and a mark are not settled
-     by this capability" carries no `#### Scenario:` block.
+     by this capability" carried no `#### Scenario:` block. It now asserts the
+     observable thing — that no reply of this capability carries a name or a mark
+     field, while both still carry the public key and the address such values
+     would be derived from.
 
-  Neither is this change's to fix — a delta is `spec-writer`'s artifact. Both
-  behaviours ARE covered in code: `a_derived_stoa_key_is_deterministic` and
-  `a_path_derived_key_is_deterministic` both exist and pass, so nothing is
-  untested; what is at risk is the contract losing a requirement on archive.
+     **Coverage of the new scenario is partial, and saying so is the point.**
+     `the_whoami_json_is_pinned_to_the_exact_shape_a_view_is_written_against`
+     asserts the whole serialised string, so a name field added to the whoami
+     reply fails it. `the_slate_json_is_pinned_to_the_exact_shape_a_view_is_written_against`
+     checks each expected key is *present*, not that the key set is exactly
+     those — so a `name` field added to a slate candidate would leave it green.
+     The slate half of the scenario is therefore unpinned; a test asserting the
+     candidate's key set exactly is `tester`'s to add.
+
+  Both behaviours were already covered in code —
+  `a_derived_stoa_key_is_deterministic` and `a_path_derived_key_is_deterministic`
+  both exist and pass — so nothing was untested; what was at risk was the
+  contract losing a requirement on archive.
+
+  **A third thing blocks the archive, and it is not in this change.**
+  `openspec archive identity-onboarding` aborts with *"Validation errors in
+  rebuilt spec for identity … Spec must have a Purpose section"* and writes
+  nothing — so this change cannot be archived at all until the live
+  `openspec/specs/identity/spec.md` gains a `## Purpose`. That file has none, an
+  artifact of the specs being hand-merged before the CLI was installed.
+
+  **The fix already exists on the `docs/flow-tooling` branch**, which gives a
+  Purpose to `identity`, `module-wire-contract` and `stoa-metadata` and corrects
+  the flow README's claim that openspec is not installed. It is not on `main`
+  yet. **`docs/flow-tooling` must land before this change is archived**; nothing
+  is duplicated here, because two Purposes for one spec is two answers.
+
+  With that Purpose temporarily in place, the archive applies cleanly and the
+  rebuilt `identity` requirement carries **both** determinism scenarios, all
+  three original scenarios and the three new ones — verified by running the real
+  archive in a throwaway worktree, reading the merged file, then reverting
+  everything the archive wrote.
 - [x] 6.4 The `logos-rust-sdk-src` symlink is removed and absent from the commit
   — confirmed by `git status`.
