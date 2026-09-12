@@ -17,6 +17,7 @@
 mod cursor;
 
 pub mod arrival;
+pub mod authoring;
 pub mod feed;
 pub mod identity;
 pub mod keystore;
@@ -33,5 +34,6 @@ pub mod wire;
 // know which submodule a handler happens to live in.
 pub use wire::{
     callee_error, channel_exists_reply, error_json, get_capabilities, guarded, list_threads,
-    list_threads_from_request, panic_probe, parse_channel_id, ping, version,
+    list_threads_from_request, panic_probe, parse_channel_id, ping, publish_post, publish_reply,
+    publish_vote, version,
 };

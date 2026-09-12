@@ -120,6 +120,54 @@ pub trait DialecticaModule: Send + 'static {
     /// ever collapsed.
     fn list_threads(&mut self, request: String) -> String;
 
+    /// Publish a post into a Stoa.
+    ///
+    /// Takes `{"stoa":"<hex>","body":"…"}` and returns
+    /// `{"opId":"<hex>","wasNew":bool}`, or the error shape.
+    ///
+    /// **The identity is not a parameter and a request naming one is refused.**
+    /// It falls out of the Stoa (PLAN.md §5.2 gives a user one identity per
+    /// Stoa), so no method here can be asked to sign as someone it is not.
+    ///
+    /// **`wasNew` is not decoration.** An op id is the hash of bytes carrying no
+    /// timestamp and no nonce, so publishing the same body into the same Stoa
+    /// twice publishes ONE op and the second call reports the first's id. Both
+    /// arrive as a success, and this field is the only thing that tells a
+    /// deduplicated publish from a first one.
+    ///
+    /// A success says the op exists **locally**. It says nothing about whether
+    /// any peer received it — delivery's outcome arrives later, and a call that
+    /// waited on it would be a call that can hang.
+    fn publish_post(&mut self, request: String) -> String;
+
+    /// Publish a reply.
+    ///
+    /// Takes `{"stoa":"<hex>","parent":"<hex>","body":"…"}`.
+    ///
+    /// **There is no `thread` argument, and one supplied is refused.** The
+    /// thread is derived from the parent, which makes a reply filed under a
+    /// thread its parent does not belong to unrepresentable rather than checked
+    /// at each call site.
+    ///
+    /// The cost is contracted rather than hidden: a reply to a parent this peer
+    /// does not hold is **refused**, because with no parent to read there is no
+    /// thread to derive. The refusal distinguishes "not held" from "held but not
+    /// a post", so a caller can tell a propagation gap from a category mistake.
+    fn publish_reply(&mut self, request: String) -> String;
+
+    /// Publish a vote.
+    ///
+    /// Takes `{"stoa":"<hex>","target":"<hex>","direction":"up"|"down"}`. An
+    /// unrecognised direction is refused naming what was supplied and is never
+    /// mapped onto a recognised one.
+    ///
+    /// **The reply carries an op id and nothing describing an effect.** No
+    /// ordering, count, tally or score in the current contract reads a `Vote`
+    /// op, so there is no position for publishing one to have changed. A
+    /// published vote accumulates history a later scorer reads; whether a scorer
+    /// exists is not a property of publishing one.
+    fn publish_vote(&mut self, request: String) -> String;
+
     /// Framework plumbing, not a contract method — the generator skips
     /// defaulted methods when deriving the `.lidl`.
     fn on_context_ready(&mut self, _ctx: &RustModuleContext) {}
@@ -184,6 +232,113 @@ include!(concat!(
 #[derive(Default)]
 struct Dialectica {
     persistence_path: Option<String>,
+}
+
+// The one piece of assembly this file does, and the reason it is here rather
+// than in `core`.
+//
+// The three publish handlers need FOUR things `core` structurally cannot reach:
+// the keystore (a path derived from what the host supplied), the per-Stoa
+// signing key, a store, and delivery. Each is the adapter's to supply, exactly
+// as `get_capabilities` supplies a lookup and `list_threads` supplies a store
+// opener.
+//
+// It is one function rather than three copies because the assembly is identical
+// for all three and only the handler differs. Three copies is three places to
+// forget the key or to open the store in the wrong order.
+#[cfg(logos_scaffold)]
+impl Dialectica {
+    /// Assemble the keystore, the key, the store and the delivery sink, then run
+    /// one publish handler.
+    ///
+    /// # The Stoa is read twice, and that is not a redundancy to remove
+    ///
+    /// The signing key is per-Stoa (PLAN.md §5.2), so the Stoa has to be known
+    /// before the key can be derived — and the handler parses the request
+    /// properly, refusing forbidden fields and naming its own failures. So this
+    /// reads the Stoa cheaply to derive a key, and the handler re-reads it as
+    /// part of the parse it owns. The alternative, threading a parsed Stoa in
+    /// from here, would put half the request's validation in the one file no
+    /// test can reach.
+    ///
+    /// # Delivery's outcome is discarded, deliberately
+    ///
+    /// The sink returns nothing. A publish is "append and publish", not "send":
+    /// the append has completed before the sink is called, a refused handoff
+    /// leaves the op published, and there is no outcome to wait for — so a call
+    /// that hung on delivery cannot be written here.
+    ///
+    /// **The channel identity is `op-transport`'s to settle, not this file's.**
+    /// Until that capability lands there is nothing to hand an op to, so the
+    /// sink is a no-op that logs. A no-op is honest; inventing a channel-naming
+    /// scheme here would be two peers computing different values and opening
+    /// channels nobody else is in — silently, and permanently.
+    fn publishing<F>(&mut self, request: &str, method: &str, handler: F) -> String
+    where
+        F: FnOnce(
+            &str,
+            &mut core::log::SqliteOpLog,
+            &core::identity::SecretKey,
+            &mut dyn FnMut(&core::op::OpId),
+        ) -> String,
+    {
+        let Some(dir) = self.persistence_path.clone() else {
+            return core::error_json(
+                "the host has not yet told this module where its storage is; \
+                 try again once the module is ready",
+            );
+        };
+        let dir = std::path::PathBuf::from(dir);
+
+        core::guarded(method, || {
+            // The Stoa, read only far enough to derive a key. The handler owns
+            // the real parse and reports every other malformation by name.
+            let parsed: serde_json::Value = match serde_json::from_str(request) {
+                Ok(v) => v,
+                Err(e) => return core::error_json(&format!("invalid JSON: {e}")),
+            };
+            let stoa = match parsed.get("stoa") {
+                Some(serde_json::Value::String(s)) => match core::identity::Address::from_hex(s) {
+                    Ok(a) => a,
+                    Err(e) => return core::error_json(&format!("stoa: {e}")),
+                },
+                Some(_) => return core::error_json("stoa must be a string"),
+                None => return core::error_json("missing field: stoa"),
+            };
+
+            // A publish requires a usable identity and NEVER creates one. This
+            // opens an existing keystore; nothing here calls `generate` or
+            // `create`, so no key material can appear as a side effect of a
+            // publish being attempted.
+            let keystore_path = core::keystore::default_path_in(&dir);
+            let keystore = match core::keystore::open_from_env(&keystore_path) {
+                Ok(k) => k,
+                Err(e) => {
+                    return core::error_json(&format!(
+                        "no identity is available to sign with: {e}; nothing was \
+                         published and no key was created"
+                    ))
+                }
+            };
+            let key = keystore.stoa_key(&stoa);
+
+            let mut log = match core::log::SqliteOpLog::open(&dir.join("ops.sqlite")) {
+                Ok(l) => l,
+                Err(e) => return core::error_json(&e.to_string()),
+            };
+
+            handler(request, &mut log, &key, &mut |id| {
+                // `op-transport` owns what happens here. Logged rather than
+                // silent, so "the op was published and went nowhere" is visible
+                // in a daemon log rather than inferred from a peer never seeing
+                // it.
+                eprintln!(
+                    "dialectica published {} — delivery is not wired yet (op-transport)",
+                    id.to_hex()
+                );
+            })
+        })
+    }
 }
 
 // A thin adapter and nothing more. Every method forwards straight into `core`,
@@ -268,6 +423,18 @@ impl DialecticaModule for Dialectica {
         core::list_threads_from_request(&request, || {
             core::log::SqliteOpLog::open(&std::path::Path::new(&dir).join("ops.sqlite"))
         })
+    }
+
+    fn publish_post(&mut self, request: String) -> String {
+        self.publishing(&request, "publish_post", core::publish_post)
+    }
+
+    fn publish_reply(&mut self, request: String) -> String {
+        self.publishing(&request, "publish_reply", core::publish_reply)
+    }
+
+    fn publish_vote(&mut self, request: String) -> String {
+        self.publishing(&request, "publish_vote", core::publish_vote)
     }
 
     fn on_context_ready(&mut self, ctx: &RustModuleContext) {
