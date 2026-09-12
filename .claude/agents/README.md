@@ -88,50 +88,28 @@ honours it.
 
 ### One writer at a time; reviewers in parallel
 
-**A piece has at most one `spec-writer`, `dev-writer` or `tester` running at any
-moment** — not one of each, **one in total**. All three commit to `piece/<name>`
-directly, and each has its own reason why a second agent alongside it is unsafe:
+**A piece has at most one `spec-writer`, `dev-writer` or `tester` running** — not
+one of each, **one in total**. They share the piece's single worktree, which they
+can do precisely because they never overlap. Two reasons, and neither surfaces as a
+git conflict:
 
-**`tester` mutates implementation code it does not own.** It breaks a line, checks
-a test notices, restores it. A `dev-writer` editing that file concurrently either
-inherits the mutation as its own broken state or overwrites the restore — and
-neither shows up as a conflict, because the two never touch git at the same moment.
-A silently reverted fix is worse than a merge conflict.
+- **A spec must not move while code is written against it.** Run the pair together
+  and the implementation answers a contract that changed underneath it, with
+  neither agent knowing. This session did it — a scope reworded while four
+  reviewers read the code implementing it. It holds on the way back too: when
+  review routes a spec gap, stop the fixer, land the spec, restart the fixer
+  against the new text.
+- **`tester` mutates implementation code it does not own**, restoring after each
+  mutation. A concurrent writer inherits the broken state or overwrites the
+  restore, and neither is touching git when it happens.
 
-**A spec must not move while code is being written against it.** That pair is about
-the contract rather than the files: run them together and the implementation is
-built against a contract that changed underneath it, with neither agent knowing.
-This session did exactly that — a `spec-writer` reworded the envelope rule's scope
-while four reviewers read the code implementing it, so their findings were against a
-contract that had already moved.
+**Reviewers run in parallel, up to six**, each writing only its own findings file.
+They get a worktree each because a reviewer running `cargo mutants` breaks dozens
+of lines to see whether a test notices — two sharing a tree read each other's
+breakage as the author's, which has happened here — and each **deletes its
+worktree** when done rather than restoring, since deleting cannot half-succeed.
 
-That holds on the way back too. When review routes a spec gap to `spec-writer`,
-**stop the fixer, let the spec land, then restart it against the new text** — a
-`dev-writer` fixing code while the requirement it answers is being rewritten is the
-same failure, just later in the flow.
-
-**Reviewers run in parallel, up to six**, because each writes only its own findings
-file and no two write the same path.
-
-The exception that makes worktrees non-negotiable: a reviewer that runs `cargo
-test` or `cargo mutants` **does** mutate the tree, breaking the code deliberately
-to see whether a test notices. Two sharing a tree see each other's broken code and
-report it as the author's; this has happened here.
-
-**A reviewer deletes its worktree when done** — `git worktree remove <abs-path>
---force` — rather than restoring what it mutated. Restoring depends on having
-tracked every edit, and `cargo mutants` breaks dozens of lines; one missed restore
-ships a deliberately broken line into the piece. Deleting is unconditional and
-cannot half-succeed, and the findings file is already committed elsewhere.
-
-A `tester` has nothing to delete — it works in the piece's shared tree and its
-tests are the deliverable. It proves the implementation is untouched with
-`git diff --stat` instead, which should show test files only. **A missed restore
-will not fail its own suite**, because the code was mutated precisely so a test
-would catch it and the test's expectation was then restored to match.
-
-Every branch rule below follows from that asymmetry, so read it that way rather
-than as bookkeeping.
+Every branch rule below follows from that asymmetry.
 
 ### Branch names say which kind of branch it is
 
@@ -149,12 +127,14 @@ Named for the role and not the stage, because `dev/x` invites a `test/x` beside
 it — which is the shape this section exists to stop.
 
 **Open the PR on `piece/<name>` from the first commit. It cannot be corrected
-later.** A PR's head ref is immutable: `PATCH /pulls/<n> -f head=…` returns **200
-and silently ignores the field**, GraphQL has no `headRefName`, and `--base`
-changes the target rather than the source. GitHub's branch-rename endpoint
-retargets PRs whose *base* was renamed and **auto-closes** one whose *head*
-vanished. Recovering means recreating the old branch at the same SHA and
-reopening — which works, but only if you notice.
+later, and every workaround loses something.** A PR's head ref is immutable:
+`PATCH /pulls/<n> -f head=…` returns **200 and silently ignores the field**, and
+`--base` changes the target, not the source. The rename endpoint
+(`POST /branches/<old>/rename`) does follow open PRs — but it **auto-closes** one
+whose *head* vanished, and if the target name already exists you must delete that
+ref first, at which point the rename recreates it **at the old branch's tip and
+silently drops anything the deleted ref held**. Six reviewers' findings went that
+way here and were recovered only because the commit was still in a local reflog.
 
 **Consolidating branches is not finished until the orphaned PRs are closed.**
 Folding a branch into the piece leaves its PR open, describing work that now
@@ -258,23 +238,28 @@ scaffolding; the reasoning is not.
 
 ### Handing over between agents
 
-No agent can read another's report — everything passes through the runner, so
-every hop is a chance to lose the evidence. Three rules:
+No agent reads another's report — it all passes through the runner, so every hop
+can lose the evidence.
 
-**Continue an agent rather than starting one.** A message to the agent that did
-the work keeps its worktree, its measurements and its reasoning. A fresh agent
-gets a brief, which is a summary of those.
+**A brief points at the work; it does not contain it.** A dispatch is which piece,
+which worktree, which file:
 
-**Write the dead end down, not just the conclusion.** A reviewer that spends an
-afternoon establishing why a trait-driven sweep is impossible here — the trait
-lives in the crate that depends on core, not the reverse, and is behind a `cfg`
-`cargo test` never sets — has produced a result worth as much as the review.
-Unwritten, the next agent spends the same afternoon. It goes in `design.md`
-beside the decision it rules out.
+> Act on the findings for `dev-writer` in
+> `openspec/changes/wire-request-envelope/findings/`. Piece branch
+> `piece/wire-request`, worktree `.claude/worktrees/piece-wire`.
 
-**State a claim's provenance when relaying one.** "A reviewer measured X" and "I
-believe X" license different actions, and an agent given the second as the first
-will not re-check it.
+**If you are writing out what a finding says, you have the wrong shape.** The
+reviewer already wrote it with the measurement behind it; a restatement puts a
+paraphrase in front of the evidence, which is how a wrong claim reached two agents
+here in one day. Reports work the same way in reverse: path, count, who each entry
+is for.
+
+Two corollaries. **Continue an agent rather than starting one** — it still holds
+its worktree and its measurements, where a new one gets your summary of them. And
+**write the dead end down**: a reviewer that spends an afternoon proving an
+approach impossible has produced a result worth as much as the review, and
+unwritten the next agent spends the same afternoon. It goes in `design.md`, beside
+the decision it rules out.
 
 **The runner owns the last two stage rows, plus dispatching and pushing.**
 `tasks.md`'s stage block is the list — read it to see what is left, because an
@@ -301,31 +286,17 @@ agents.
 code judges tests by what the code does — exactly the failure a spec exists to
 catch: a test that faithfully pins the wrong behaviour.
 
-**Give each reviewer that mutates code its own worktree**, in
-`.claude/worktrees/`. Two sharing a tree see each other's broken code and cannot
-tell it from the author's; this has happened.
-
 ## What experience has taught this flow
 
-**A quantity in a comment is a claim, and this repo fabricates them.** One sweep
-found six comments in one file arguing from premises the code disproves. The worst
-were numbers, because a number reads as though someone measured it:
-
-- *"the reason this was wrong for two years"* — the repo is **five days old**, and
-  `git log -S` dates both commits to the same day. Worse, it was written **in the
-  commit titled "stop three comments from saying the wrong thing"**.
-- *"three orders of magnitude below 64 MiB"* — a factor of **16**, and
-  self-contradicting: three orders below 64 MiB is ~67 KiB, which would refuse the
-  legitimate 1.6 MB request the same comment defends.
-- *"five call sites"* for a constant with **one** production use — the argument for
-  the design this change had rejected.
-
-Before writing a duration, a magnitude or a count, **get it from a command**:
-`git log -S <string>` for when something appeared, `grep -c` for how many. A
-plausible number nobody checks is the same failure as a fabricated citation, and it
-is harder to spot because it looks like evidence.
-
 Each of these is in the agent files because it cost something here.
+
+**A number in a comment is a claim, and this repo fabricates them.** One sweep
+found six comments in a single file arguing from premises the code disproves, and
+the worst were quantities, because a quantity reads as though someone measured it:
+*"wrong for two years"* in a repo five days old — written, no less, in the commit
+titled "stop three comments from saying the wrong thing". Get a duration or a count
+from a command (`git log -S`, `grep -c`) before writing it. A plausible number
+nobody checks is a fabricated citation that looks like evidence.
 
 **A test must assert against something the implementation did not produce.**
 Three tests have shipped that could not fail for the reason they named:

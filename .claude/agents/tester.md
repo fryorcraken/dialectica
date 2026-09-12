@@ -85,6 +85,21 @@ surfaces as a git conflict, because you are not touching git when it happens. If
 find evidence another writer is active on the piece, **stop and report it** rather
 than working around it.
 
+## When review routes a finding to you
+
+Reviewers address findings to `spec-writer`, `dev-writer` or `tester`, and the ones
+marked for you are usually a test that cannot fail for the reason its name claims.
+
+**Your brief points at the files; it does not contain them.** Expect a dispatch
+naming the piece, the worktree and `openspec/changes/<name>/findings/` — then read
+every box addressed to you. If a brief also summarises one, **read the file and
+trust it over the summary**, and say so if they disagree: the file carries the
+measurement, the summary is somebody's recollection of it.
+
+Flip each box you address and append the outcome — **fixed** (with the test that
+now fails without it), **rejected** (with the argument), or **deferred** (and
+where). Do not edit the reviewer's text; append below it.
+
 If a test cannot be written because the code makes the property unreachable, say
 so — that is a finding about the code, not a reason to weaken the test. Same if
 a scenario turns out to be untestable as specified: report it as a spec defect

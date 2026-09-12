@@ -122,9 +122,14 @@ symlink, and sweeping up a reviewer's findings file makes its commit yours.
 
 ## When you are acting on review findings
 
-Read them from `openspec/changes/<name>/findings/*.md`, not from a brief that
-summarises them — a paraphrase arrives without the evidence that backed it, and
-this repo has shipped a wrong claim that way.
+**Your brief points at the files; it does not contain the findings.** Expect a
+dispatch naming the piece, the worktree and
+`openspec/changes/<name>/findings/` — then go read every box addressed to you.
+A brief that summarises the findings would put the runner's paraphrase in front of
+the reviewer's evidence, and this repo has shipped a wrong claim exactly that way.
+
+If a brief does summarise a finding, **read the file anyway and trust it over the
+summary**. Say in your report if the two disagree — that is worth knowing.
 
 The reviewer left each finding as an unticked checkbox. **Flip the box and append
 the outcome, in the commit that addresses it**, so the claim and the change are one
