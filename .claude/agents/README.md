@@ -73,8 +73,12 @@ Leave it. It shrinks by attrition as changes touch each area.
 ## One piece of work is one branch and one PR
 
 Every stage — spec, design, code, tests, review fixes — lands as **commits on one
-branch, under one PR**. Agents keep their own worktrees and local branches; a
-*stage* never gets its own branch and PR.
+remote branch, under one PR**.
+
+Local branches are fine and a reviewer needs one. What never happens is a *stage*
+reaching the remote on its own: only `piece/<name>` is ever pushed, so
+`origin/<anything-else>` is a mistake, and a second PR on one piece is the failure
+this section exists to stop.
 
 **The unit of review is a behaviour change with its contract and its tests
 attached.** A reviewer must be able to see they belong together, not be told so
@@ -131,12 +135,10 @@ than as bookkeeping.
 
 ### Branch names say which kind of branch it is
 
-| Name | Whose | Holds |
-|---|---|---|
 | Branch | Worktree | Whose | Holds |
 |---|---|---|---|
-| `piece/<name>` | one, shared | the three writers, in turn | **the** task branch — the one the PR is open on. Spec, code, tests and findings-fixes all commit here directly |
-| `review/<name>/<dimension>` | one each | one reviewer | its findings file, nothing else — cherry-picked onto the piece, never pushed |
+| `piece/<name>` | one, shared | the three writers, in turn | **the** task branch, and **the only one pushed**. Spec, code, tests and findings-fixes all commit here directly |
+| `review/<name>/<dimension>` | one each | one reviewer | **local only** — its findings file, nothing else, cherry-picked onto the piece and never pushed |
 
 **`spec-writer`, `dev-writer` and `tester` share one worktree, checked out on
 `piece/<name>`.** They can share it precisely because they never run at the same
