@@ -87,30 +87,35 @@ honours it.
 | Name | Whose | Holds |
 |---|---|---|
 | `piece/<name>` | the piece | **the** task branch — the one the PR is open on |
-| `review/<name>/<dimension>` | one reviewer | optional — its findings file, nothing else |
+| `review/<name>/<dimension>` | one reviewer | its findings file, nothing else — cherry-picked onto the piece, never pushed |
 | `fix/<name>/<what>` | one fixer | the change, plus its ticks |
 
 Named for the role and not the stage, because `dev/x` invites a `test/x` beside
 it — which is the shape this section exists to stop.
 
-**A reviewer's findings file must reach `piece/<name>`.** A review nobody can read
-from the task branch did not happen. Either route is fine, because a reviewer owns
-its findings file exclusively and no other agent writes that path:
+**A reviewer does not push.** It commits its findings file on its own
+`review/…` branch, then **cherry-picks that one commit onto the local
+`piece/<name>`** and stops. The runner pushes — it is already the role that checks
+the ticks and deletes the directory.
 
-- commit it straight to the task branch, or
-- commit on a `review/…` branch and merge that in.
+Cherry-pick, not merge: one commit lands on the task branch, so its history reads
+as a flat sequence of findings and fixes rather than six merge commits carrying
+six branches. And with nobody but the runner pushing, there is no race to lose and
+no rebase to retry.
 
-**Commit only your own findings file.** Never `git add -A` — worktrees collect
+**Commit only your own findings file** — never `git add -A`. Worktrees collect
 build output and a gitignored SDK symlink, and a reviewer that sweeps up a fixer's
 half-finished edit has corrupted the branch it was reviewing.
 
-**Expect a rejected push and rebase.** Several agents push to one task branch, so
-the loser of a race pulls, rebases and retries. That is normal; never force-push
-to resolve it.
-
-**Check `git branch -vv` before pushing** — a worktree created from a branch
+**Check `git branch -vv` before any git write** — a worktree created from a branch
 inherits that branch's upstream, and a bare `git push` has landed commits directly
 on `main` here more than once.
+
+**A fixer works the same way, and for a stronger reason.** Commit on
+`fix/<name>/<what>`, cherry-pick onto the local `piece/<name>`, do not push. Two
+reviewers never write the same path; two fixers on one piece routinely write the
+same file, so the runner serialising the cherry-picks is what keeps the conflict
+resolvable by someone who can see both changes.
 
 ## Findings go in `openspec/changes/<name>/findings/`
 
