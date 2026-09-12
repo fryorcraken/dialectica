@@ -2864,10 +2864,33 @@ thing (§2.3).
   for filing. Dialectica's own conclusion is unaffected: the values do not
   reach us either way.
 
-  One caveat kept rather than hidden: nim-sds's `Message` type had no realised
-  copy to read, so "the Lamport timestamp is available on `msg` and not copied"
-  is inferred from the persistency sort key. **An upstream filing should quote
-  the declaration**, not this entry.
+  **The declaration, read directly — this is no longer inferred.**
+  `nim-sds/sds/types/sds_message.nim` declares:
+
+  ```nim
+  type SdsMessage* {.requiresInit.} = object
+    messageId*: SdsMessageID
+    lamportTimestamp*: int64
+    causalHistory*: seq[HistoryEntry]
+    channelId*: SdsChannelID
+    content*: seq[byte]
+    bloomFilter*: seq[byte]
+    senderId*: SdsParticipantID
+    repairRequest*: seq[HistoryEntry]
+  ```
+
+  Both values §5.7 needs are **first-class fields on the message**. They are
+  not absent, not optional and not derived — they exist on every message SDS
+  handles, and are dropped on the way to the application. That is what makes
+  this a forwarding gap rather than a protocol limitation, and it is the
+  sentence an upstream filing should lead with.
+
+  **One thing the source moved:** `SdsDeliverable` does not appear anywhere in
+  nim-sds. The truncation therefore happens in the **delivery layer above SDS**,
+  not inside SDS itself — so the earlier "one layer lower, in SDS" is half
+  right (the values survive further up than §13 first claimed) and half wrong
+  about which component discards them. Confirm against the delivery module's
+  own source before filing; it is not cloned here.
 
   Two findings worth carrying forward. **The `timestamp` we do receive is
   unusable for ordering** — it is the receiving peer's own `CLOCK_REALTIME`
