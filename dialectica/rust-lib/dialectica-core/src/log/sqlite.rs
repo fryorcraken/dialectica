@@ -54,7 +54,7 @@
 //! `#[cfg(test)]`; every `rusqlite` failure becomes an
 //! [`OpLogError`](super::OpLogError).
 
-use super::{Appended, Entry, OpLog, OpLogError};
+use super::{Appended, Entry, JoinedStoa, OpLog, OpLogError, Relation, StoaRegistry};
 use crate::arrival::{Arrival, MessageId};
 use crate::identity::Address;
 use crate::op::{OpId, SignedOp};
@@ -71,7 +71,26 @@ use std::path::Path;
 /// constants. `cargo mutants` mutates functions and not `const`s, so a wrong
 /// version here is invisible to it; this project has already shipped a
 /// `VERSION_1` defect that left the whole suite green.
-pub const LAYOUT_VERSION: i32 = 1;
+///
+/// # Version 2 added the `stoas` table, and the bump is not optional
+///
+/// The write path needs to know which Stoas this peer created or joined, and to
+/// hold each one's **genesis record** — because `wire::list_threads` takes a
+/// genesis record and `moderation::Moderators::of` cannot be built without one.
+/// A version-1 store has no such table.
+///
+/// **Bumping is what keeps that legible.** Left at 1, a version-1 file would
+/// open `Ok` (the pragma matches) and then fail `check_layout`, reported as
+/// `LayoutDoesNotMatchItsVersion` — an error whose whole meaning is "this file
+/// was not written by this build and is lying about its layout". A store written
+/// by the previous build is not lying; it is an older layout, honestly stamped,
+/// and `UnknownLayoutVersion` is the variant that says so. Collapsing the two
+/// would make a truthful old store indistinguishable from a tampered one, which
+/// is the distinction `OpLogError` spends two variants preserving.
+///
+/// There is still **no migration**, by design: a version-1 store is refused
+/// rather than upgraded. What changed is only which refusal it gets.
+pub const LAYOUT_VERSION: i32 = 2;
 
 /// Map a Lamport timestamp onto an ascending sort key that reverses it.
 ///
@@ -328,27 +347,47 @@ impl SqliteOpLog {
     /// be one — written against a layout nobody has described, over a file this
     /// build did not write.
     fn check_layout(conn: &Connection) -> Result<(), OpLogError> {
-        conn.query_row(
+        // BOTH tables, because the layout is both. A file with `ops` and no
+        // `stoas` is exactly the half-created or hand-edited store this refuses,
+        // and checking only `ops` would let it open and then fail at the first
+        // `list_stoas` as `Storage("no such table: stoas")` — the disk-blaming
+        // error this whole function exists to replace.
+        Self::check_table(
+            conn,
             &format!(
                 "SELECT {SELECT_COLUMNS}, op_id, stoa, target, author, score_epoch,
                         sort_ordered, sort_lamport, sort_msg_present, sort_msg
                  FROM ops LIMIT 0"
             ),
-            [],
-            |_| Ok(()),
+        )?;
+        Self::check_table(
+            conn,
+            "SELECT stoa, genesis_bytes, relation FROM stoas LIMIT 0",
         )
-        // `LIMIT 0` returns no row, so `QueryReturnedNoRows` is the SUCCESS
-        // case and every other error is the layout being wrong. Matching on it
-        // rather than using `optional()` keeps that reading explicit: the
-        // question asked is "could this statement be prepared and run", not
-        // "did it find anything".
-        .or_else(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => Ok(()),
-            other => Err(OpLogError::LayoutDoesNotMatchItsVersion {
-                version: LAYOUT_VERSION,
-                why: other.to_string(),
-            }),
-        })
+    }
+
+    /// Prepare and run one `LIMIT 0` statement, mapping any failure to the
+    /// mislabelled-layout error.
+    ///
+    /// Split out so the two tables cannot be checked by two slightly different
+    /// pieces of error mapping — CLAUDE.md's "a second call site spelling its own
+    /// X is how one of them eventually spells it differently", applied to the
+    /// `QueryReturnedNoRows`-is-success subtlety below, which is the easiest half
+    /// of this to get wrong twice.
+    fn check_table(conn: &Connection, sql: &str) -> Result<(), OpLogError> {
+        conn.query_row(sql, [], |_| Ok(()))
+            // `LIMIT 0` returns no row, so `QueryReturnedNoRows` is the SUCCESS
+            // case and every other error is the layout being wrong. Matching on
+            // it rather than using `optional()` keeps that reading explicit: the
+            // question asked is "could this statement be prepared and run", not
+            // "did it find anything".
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(()),
+                other => Err(OpLogError::LayoutDoesNotMatchItsVersion {
+                    version: LAYOUT_VERSION,
+                    why: other.to_string(),
+                }),
+            })
     }
 
     /// The whole schema, in one place, with every column's reason beside it.
@@ -581,6 +620,53 @@ impl SqliteOpLog {
              -- and because an index nothing uses costs writes and nothing else
              -- — which is the right side of rule 5's trade.
              CREATE INDEX ops_by_target_author ON ops (target, author);
+
+             -- ── The Stoas this peer created or joined ─────────────────────
+             --
+             -- NOT derived from the ops table, and that is the point. A Stoa is
+             -- a genesis record its creator publishes (§1) and its address is
+             -- the hash of that record — so holding ops addressed to a Stoa
+             -- says nothing about whether this peer READS it, and holding no
+             -- ops says nothing about whether it does. `iter_stoa` answers
+             -- 'what have I seen addressed here', which is a different question
+             -- from 'which Stoas am I in'. A peer that joined a quiet Stoa must
+             -- still list it, and a peer that received a gossiped op for a Stoa
+             -- it never joined must not.
+             CREATE TABLE stoas (
+                 -- The 32-byte Stoa address. The identity, and the primary key,
+                 -- so joining twice is idempotent for the same reason appending
+                 -- one op twice is: there is one slot.
+                 stoa          BLOB PRIMARY KEY NOT NULL,
+
+                 -- THE GENESIS RECORD, verbatim canonical bytes.
+                 --
+                 -- Stored rather than reconstructed because it CANNOT be
+                 -- reconstructed: the address is a one-way hash of it, so a peer
+                 -- holding only an address cannot recover the creator key or the
+                 -- title. And it must be held because every read needs it —
+                 -- `Moderators::of` takes a genesis record and there is no other
+                 -- way to build one, so a Stoa whose record this peer lost is a
+                 -- Stoa whose feed cannot be moderated and therefore must not be
+                 -- served (`wire.rs` makes that structural).
+                 --
+                 -- Self-authenticating, so storage is safe: the address is the
+                 -- hash of these bytes, and `Genesis::matches` re-derives it.
+                 -- Nothing trusts this column — every read re-checks it.
+                 genesis_bytes BLOB NOT NULL,
+
+                 -- 'created' or 'joined'. One column with two values rather
+                 -- than two tables, because they are the same fact about one
+                 -- Stoa and every read wants both.
+                 --
+                 -- Recorded rather than inferred from the creator key. Inferring
+                 -- looks equivalent and is not: it would say 'created' for a
+                 -- Stoa somebody else made and this peer joined while HOLDING
+                 -- the creator key, which is not a state that can arise today
+                 -- but is also not a question this column has to leave open. It
+                 -- is also the honest answer to 'did I make this' — which is
+                 -- what a user asked, not 'do I hold a key that could have'.
+                 relation      TEXT NOT NULL
+             ) STRICT;
 
              -- LAST, DELIBERATELY. See this function's documentation: this is
              -- the layout CLAIM, and everything it claims must already be true
@@ -845,6 +931,112 @@ impl OpLog for SqliteOpLog {
     }
 }
 
+impl StoaRegistry for SqliteOpLog {
+    /// `INSERT OR IGNORE`, never `REPLACE` — first-wins, for the reason
+    /// [`OpLog::append`] gives.
+    ///
+    /// Here it is additionally near-vacuous and worth saying so: the address is
+    /// the hash of `genesis_bytes`, so two rows competing for one address carry
+    /// byte-identical records. What the rule actually preserves is `relation`,
+    /// which is NOT a function of the record — a peer that created a Stoa and
+    /// later pastes its own address must not have "created" rewritten to
+    /// "joined".
+    fn remember_stoa(
+        &mut self,
+        genesis: &crate::stoa::Genesis,
+        relation: Relation,
+    ) -> Result<Appended, OpLogError> {
+        // Encode once, and let the failure be reported. `canonical_bytes` refuses
+        // an over-long title, so this is the encoder and the decoder agreeing
+        // about what is storable — the symmetry `stoa.rs` enforces on both sides.
+        let bytes = genesis
+            .canonical_bytes()
+            .map_err(|e| OpLogError::CorruptEntry(format!("genesis record: {e}")))?;
+        // From the bytes just encoded rather than from a second call to
+        // `address()`, so the stored key and the stored record cannot disagree.
+        let address = crate::identity::stoa_address(&bytes);
+
+        let changed = self
+            .conn
+            .execute(
+                "INSERT OR IGNORE INTO stoas (stoa, genesis_bytes, relation)
+                 VALUES (?1, ?2, ?3)",
+                rusqlite::params![
+                    address.as_bytes().as_slice(),
+                    bytes,
+                    relation.as_str(),
+                ],
+            )
+            .map_err(storage)?;
+
+        Ok(if changed == 0 {
+            Appended::AlreadyPresent
+        } else {
+            Appended::Stored
+        })
+    }
+
+    fn get_stoa(&self, stoa: &Address) -> Result<Option<JoinedStoa>, OpLogError> {
+        let row = self
+            .conn
+            .query_row(
+                "SELECT genesis_bytes, relation FROM stoas WHERE stoa = ?1",
+                rusqlite::params![stoa.as_bytes().as_slice()],
+                |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()
+            .map_err(storage)?;
+
+        row.map(|(bytes, relation)| decode_stoa(&bytes, &relation))
+            .transpose()
+    }
+
+    fn list_stoas(&self) -> Result<Vec<JoinedStoa>, OpLogError> {
+        // `ORDER BY stoa` is the promised address order, served by the primary
+        // key's own index. The trait states the order; this is where it is kept.
+        let mut stmt = self
+            .conn
+            .prepare("SELECT genesis_bytes, relation FROM stoas ORDER BY stoa ASC")
+            .map_err(storage)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(storage)?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            let (bytes, relation) = row.map_err(storage)?;
+            out.push(decode_stoa(&bytes, &relation)?);
+        }
+        Ok(out)
+    }
+}
+
+/// Rebuild a [`JoinedStoa`] from what a row holds.
+///
+/// Both columns are decoded strictly, and a failure is [`OpLogError::CorruptEntry`]
+/// rather than [`OpLogError::Storage`] for the reason [`decode_entry`] gives: the
+/// store worked and what it handed back did not, which points at the file rather
+/// than at the disk.
+///
+/// **The genesis record is re-decoded rather than trusted.** It is a blob in a
+/// file that another process may have edited, so it goes through
+/// `Genesis::decode` — the same strict decoder a record arriving from a peer
+/// meets. Nothing about being on our own disk makes these bytes trustworthy;
+/// `keystore.rs` makes the same argument about the keystore file.
+fn decode_stoa(bytes: &[u8], relation: &str) -> Result<JoinedStoa, OpLogError> {
+    let genesis = crate::stoa::Genesis::decode(bytes).map_err(|e| {
+        OpLogError::CorruptEntry(format!("the stored genesis record did not decode: {e}"))
+    })?;
+    let relation = Relation::parse_str(relation).ok_or_else(|| {
+        OpLogError::CorruptEntry(format!(
+            "the stored Stoa relation {relation:?} is neither \"created\" nor \"joined\""
+        ))
+    })?;
+    Ok(JoinedStoa { genesis, relation })
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::fixtures::*;
@@ -896,7 +1088,18 @@ mod tests {
         //
         // Changing this number is changing the on-disk format every peer holds.
         // If this assertion fails, that is the question being asked.
-        assert_eq!(LAYOUT_VERSION, 1);
+        //
+        // IT HAS FAILED ONCE, AND THE ANSWER IS RECORDED RATHER THAN THE NUMBER
+        // QUIETLY EDITED. Version 2 added the `stoas` table, which the write path
+        // needs because a feed cannot be served without the Stoa's genesis record
+        // and a version-1 store has nowhere to keep one. The bump is what makes an
+        // old store report `UnknownLayoutVersion` — "an older layout, honestly
+        // stamped" — rather than `LayoutDoesNotMatchItsVersion`, which means "this
+        // file is lying about its layout". A version-1 store is not lying, and
+        // telling its owner that it is would send them looking for tampering.
+        //
+        // There is still no migration: a version-1 store is refused, not upgraded.
+        assert_eq!(LAYOUT_VERSION, 2);
     }
 
     #[test]
@@ -921,8 +1124,15 @@ mod tests {
                 // Hardcoded on both sides: a test asserting `found == 9999`
                 // only would pass for an implementation that reported the same
                 // number twice.
+                //
+                // `expected` stays a LITERAL rather than becoming
+                // `LAYOUT_VERSION`, which is the tempting edit when a bump makes
+                // this fail. Substituting the constant would make both sides of
+                // the comparison come from the implementation, and the test would
+                // then agree with any version the code happened to report —
+                // including a wrong one. A literal is what keeps this a check.
                 assert_eq!(found, 9999);
-                assert_eq!(expected, 1);
+                assert_eq!(expected, 2);
             }
             other => panic!("an unknown layout version must be refused, got {other:?}"),
         }
@@ -1060,6 +1270,69 @@ mod tests {
             }
             other => panic!(
                 "a table named `ops` that is not our `ops` must be refused, got {other:?}"
+            ),
+        }
+    }
+
+    #[test]
+    fn a_store_with_ops_but_no_stoas_table_is_refused_too() {
+        // THE TEST WITHOUT WHICH THE `stoas` HALF OF `check_layout` IS FREE TO
+        // DELETE. Every other layout test builds a file with no `ops` table or a
+        // wrong one, so all of them are decided by the FIRST of the two checks —
+        // measured, not assumed: with the `stoas` check commented out, every one
+        // of them stays green.
+        //
+        // The file this constructs is the one that distinguishes them: a complete,
+        // correct `ops` table stamped with this build's version, and no `stoas`.
+        // It is exactly what a version-1 store hand-stamped to 2 looks like, and
+        // what a partially-restored backup looks like. Without the second check it
+        // opens `Ok` and fails at the first `list_stoas` as
+        // `Storage("no such table: stoas")` — the disk-blaming error the whole
+        // function exists to replace.
+        //
+        // The `ops` DDL is copied from `create_schema` rather than produced by it,
+        // because producing it would also produce `stoas` and there would be
+        // nothing to test. That duplication is the point of the fixture: it is the
+        // only way to express "the half-built store".
+        let dir = TempDir::new("ops-without-stoas");
+        let path = dir.file("log.sqlite");
+
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(&format!(
+            "CREATE TABLE ops (
+                 op_id             BLOB PRIMARY KEY NOT NULL,
+                 op_bytes          BLOB NOT NULL,
+                 stoa              BLOB NOT NULL,
+                 target            BLOB,
+                 arrival_lamport   INTEGER,
+                 arrival_msg       BLOB,
+                 sort_ordered      INTEGER NOT NULL,
+                 sort_lamport      INTEGER NOT NULL,
+                 sort_msg_present  INTEGER NOT NULL,
+                 sort_msg          BLOB,
+                 author            BLOB NOT NULL,
+                 score_epoch       INTEGER
+             ) STRICT;
+             PRAGMA user_version = {LAYOUT_VERSION};"
+        ))
+        .unwrap();
+        drop(conn);
+
+        match SqliteOpLog::open(&path) {
+            Err(OpLogError::LayoutDoesNotMatchItsVersion { version, why }) => {
+                assert_eq!(version, LAYOUT_VERSION);
+                // It must name the MISSING table, not the one that was fine.
+                // Without this the assertion would pass for a check that refused
+                // the file while reporting `ops` — sending a reader to the one
+                // table that is correct.
+                assert!(
+                    why.contains("stoas"),
+                    "the refusal must name the missing table, got {why:?}"
+                );
+            }
+            other => panic!(
+                "a store with a correct `ops` and no `stoas` must be refused at \
+                 open, got {other:?}"
             ),
         }
     }

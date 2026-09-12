@@ -395,6 +395,125 @@ pub trait OpLog {
     }
 }
 
+/// Whether this peer made a Stoa or joined one somebody else made.
+///
+/// Two values rather than a `bool` named `created`, because a boolean at a call
+/// site reads as `true` with nothing saying true-of-what — and this value is
+/// rendered to a user, who is being told which of two things happened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Relation {
+    /// This peer published the genesis record.
+    Created,
+    /// This peer was given the address and verified the record against it.
+    Joined,
+}
+
+impl Relation {
+    /// The stored spelling. Explicit, and on disk, so it is part of the layout
+    /// and must not follow declaration order — the same rule every wire
+    /// discriminant in this crate follows.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Relation::Created => "created",
+            Relation::Joined => "joined",
+        }
+    }
+
+    /// Parse the stored spelling.
+    ///
+    /// **An unknown value is refused, never defaulted.** Defaulting to `Joined`
+    /// would tell a user they joined a Stoa they created, and defaulting to
+    /// `Created` would claim they authored one they did not — this is a string in
+    /// a file that another build, or a hand edit, may have written.
+    ///
+    /// Named `parse_str` rather than `from_str`, which clippy flags for shadowing
+    /// [`std::str::FromStr`]. Implementing that trait instead was the other
+    /// option and is worse here: its `Err` type would have to be a public error
+    /// enum for a one-of-two-strings parse that only this crate's storage layer
+    /// performs, which is surface widened for a lint.
+    pub fn parse_str(s: &str) -> Option<Self> {
+        match s {
+            "created" => Some(Relation::Created),
+            "joined" => Some(Relation::Joined),
+            _ => None,
+        }
+    }
+}
+
+/// A Stoa this peer reads, and the record that identifies it.
+///
+/// The genesis record travels with the address because every read needs it:
+/// [`crate::moderation::Moderators::of`] takes one and there is no other way to
+/// build a moderator set, so an address alone is not enough to serve a feed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JoinedStoa {
+    pub genesis: crate::stoa::Genesis,
+    pub relation: Relation,
+}
+
+impl JoinedStoa {
+    /// This Stoa's address, re-derived from the record rather than stored beside
+    /// it.
+    ///
+    /// Recomputed for the same reason [`Entry::id`] is: it is a hash of bytes
+    /// this value already holds, so caching it would buy an allocation and cost
+    /// the invariant that the two agree.
+    pub fn address(&self) -> Result<Address, crate::stoa::GenesisError> {
+        self.genesis.address()
+    }
+}
+
+/// Which Stoas this peer reads — the half of the store that is not ops.
+///
+/// # Why this is a second trait rather than more methods on `OpLog`
+///
+/// An op log is append-only, idempotent by op id, and orders by `cmp_ops`. None
+/// of that is true of this: a Stoa registry is a set keyed by address, has no
+/// ordering rule of its own, and holds records rather than signed ops. Widening
+/// [`OpLog`] with them would mean every implementor of an *op log* had to answer
+/// questions about Stoa membership, and [`MemoryOpLog`] would grow a field that
+/// has nothing to do with the map it is built around.
+///
+/// Splitting them keeps each trait one job, and lets a caller that only reads a
+/// feed take the narrower bound.
+pub trait StoaRegistry {
+    /// Record that this peer reads this Stoa.
+    ///
+    /// **Idempotent by address**, like [`OpLog::append`] is by op id: joining a
+    /// Stoa twice is ordinary traffic (a user pastes the same address again) and
+    /// not an error. The first record wins, for the same reason the first arrival
+    /// does — and here it matters less, because the address is a hash of the
+    /// record, so two records under one address are byte-identical anyway.
+    ///
+    /// **This does not verify.** The caller verifies, because the caller is the
+    /// one holding the address a user supplied — see
+    /// [`crate::wire::join_stoa`], where the check is. A registry that verified
+    /// would be re-deriving an address it was about to key by, which says nothing
+    /// about the address a *user* typed.
+    fn remember_stoa(
+        &mut self,
+        genesis: &crate::stoa::Genesis,
+        relation: Relation,
+    ) -> Result<Appended, OpLogError>;
+
+    /// One Stoa by address, or absence.
+    ///
+    /// Nests `Result<Option<..>>` for the reason [`OpLog::get`] does: "could the
+    /// store be consulted" and "did it hold this" are different questions, and a
+    /// Stoa this peer has not joined is a defined answer rather than a failure.
+    fn get_stoa(&self, stoa: &Address) -> Result<Option<JoinedStoa>, OpLogError>;
+
+    /// Every Stoa this peer reads.
+    ///
+    /// **Ordered by address**, which is arbitrary and convergent — the same
+    /// property and the same honesty as `cmp_ops`'s degraded branch. An address
+    /// is a hash, so this carries no recency and is not a ranking; what it buys
+    /// is that two reads return the same sequence, which is what pagination
+    /// needs to be stable. Join order was rejected for the reason
+    /// [`crate::arrival`] rejects arrival order: it is per-peer.
+    fn list_stoas(&self) -> Result<Vec<JoinedStoa>, OpLogError>;
+}
+
 /// The op log in memory.
 ///
 /// **The Phase 1 implementation and the Phase 1 fake, which are the same thing.**
@@ -425,6 +544,16 @@ pub struct MemoryOpLog {
     /// the alternative was a vector plus a contains-check before each push, which
     /// is a guard that has to be right at every insertion site.
     entries: HashMap<OpId, Entry>,
+    /// The Stoas this peer reads, keyed by address for the same reason `entries`
+    /// is keyed by op id: joining twice cannot produce two rows, because there is
+    /// one slot.
+    ///
+    /// A `BTreeMap`, not a `HashMap`, and that is the ordering requirement made
+    /// structural rather than a `sort` on read: [`StoaRegistry::list_stoas`]
+    /// promises address order, and a `BTreeMap` iterates in key order by
+    /// construction. The op map can be a `HashMap` because its order comes from
+    /// `cmp_ops` over a different key entirely; here the key *is* the order.
+    stoas: std::collections::BTreeMap<Address, JoinedStoa>,
 }
 
 impl MemoryOpLog {
@@ -494,6 +623,46 @@ impl OpLog for MemoryOpLog {
 
     fn len(&self) -> Result<usize, OpLogError> {
         Ok(self.entries.len())
+    }
+}
+
+/// Nothing here can fail either — see [`OpLogError`] on why the trait is
+/// fallible regardless.
+impl StoaRegistry for MemoryOpLog {
+    fn remember_stoa(
+        &mut self,
+        genesis: &crate::stoa::Genesis,
+        relation: Relation,
+    ) -> Result<Appended, OpLogError> {
+        // The address comes from the record, which is the only thing that can
+        // produce it. A record too long to encode has no address and so cannot be
+        // remembered — reported rather than silently skipped.
+        let address = genesis
+            .address()
+            .map_err(|e| OpLogError::CorruptEntry(format!("genesis record: {e}")))?;
+        // `entry().or_insert()` rather than a contains-then-insert, so first-wins
+        // is structural and no path here overwrites an existing row.
+        Ok(match self.stoas.entry(address) {
+            std::collections::btree_map::Entry::Occupied(_) => Appended::AlreadyPresent,
+            std::collections::btree_map::Entry::Vacant(slot) => {
+                slot.insert(JoinedStoa {
+                    genesis: genesis.clone(),
+                    relation,
+                });
+                Appended::Stored
+            }
+        })
+    }
+
+    fn get_stoa(&self, stoa: &Address) -> Result<Option<JoinedStoa>, OpLogError> {
+        Ok(self.stoas.get(stoa).cloned())
+    }
+
+    fn list_stoas(&self) -> Result<Vec<JoinedStoa>, OpLogError> {
+        // `values()` on a `BTreeMap` is already address order. No `sort` here,
+        // deliberately: a second expression of the order is a second thing that
+        // can disagree with the first.
+        Ok(self.stoas.values().cloned().collect())
     }
 }
 

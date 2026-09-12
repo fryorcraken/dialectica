@@ -220,6 +220,19 @@ impl std::fmt::Display for GenesisError {
     }
 }
 
+/// `std::error::Error`, so this composes with `?` and `Box<dyn Error>`.
+///
+/// Added when a consumer outside this crate first needed it: `OpLogError` already
+/// implemented it and this did not, so a caller could propagate a storage failure
+/// and not a malformed record, for no reason they could act on.
+///
+/// No `source`: every variant is a leaf. The two that carry data —
+/// [`GenesisError::InvalidCreator`] and [`GenesisError::TitleTooLong`] — carry a
+/// `KeyError` and a length, and `KeyError`'s message is already interpolated into
+/// this type's `Display`, so forwarding it would print the same text twice to any
+/// consumer that walks the chain.
+impl std::error::Error for GenesisError {}
+
 impl From<OutOfBounds> for GenesisError {
     /// The shared read head reports only *that* it ran out; this says what
     /// running out means for a genesis record.

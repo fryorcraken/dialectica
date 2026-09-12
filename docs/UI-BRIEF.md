@@ -172,6 +172,17 @@ title is fixed forever, while its *current* title can be changed by moderators �
 so two Stoas can share a display name and still be entirely different Stoas.
 **A title is not an identifier.** The address is.
 
+**Every title you can currently render is the founding one.** Core reports a flag
+saying so on each Stoa, because the two are different epistemic states: a founding
+title may be years out of date, and nothing yet resolves the moderator-signed
+message that would carry the current one. A list that presents a founding title as
+current is making a claim core did not. Whether you surface that distinction and how
+is yours; silently presenting one as the other is not.
+
+Core also reports whether the user **created** a Stoa or **joined** it. Worth
+showing — "did I make this" is a question people ask of their own list, and it is
+also the only hint available that they may be its moderator.
+
 ### Joining a Stoa — a security surface, not a form
 
 An address is a copyable string that is **self-authenticating**: pasting it is
@@ -236,10 +247,23 @@ interface has to say which without being tedious about it.
 
 ### Thread — a post and its replies
 
-A reply is just a post that names a parent, so threads nest naturally.
+A reply is just a post that names a parent, so threads nest naturally. Each reply
+carries its parent, so the tree is reconstructable, and the root post comes first.
 
 Each post shows: author identity, body, attachments, whether it was edited, the
 up/down control, and a report action.
+
+**The replies are not in chronological order, and there is no way to put them in
+one.** This is the feed's ordering problem again, in a place where the assumption
+is much easier to make: a thread *looks* like a conversation, so a reader will read
+top-to-bottom as "in the order they were said". It is not. Replies come back in the
+same convergent-but-recency-free order the feed uses — every peer agrees on it, and
+it carries no time information at all.
+
+So **do not label reply order, and do not render anything time-like beside a reply**
+— no "3rd reply", no ordinal, no implied sequence. It resolves when the feed's does,
+via the same author-asserted timestamp, and a thread view designed around implied
+chronology will need rebuilding rather than relabelling.
 
 ### Composition
 
@@ -474,6 +498,29 @@ anything that reads "score = ups minus downs" as a visual primitive.
 **One more ordering property worth knowing:** a post's score is **floored at
 zero**. Downvoting can order a post last; it can never remove it. Hiding is
 moderation, and moderation is a separate, binding thing.
+
+### The control works; the number behind it does not exist yet
+
+**This is the one thing in this section that will surprise you, so it is stated
+plainly rather than left to be discovered.** A vote can now be cast and is stored
+permanently — the write path is real. **Nothing reads votes.** There is no score,
+no tally, and no ordering that consults them; core returns no vote count on any
+post, in the feed or in a thread, and will return none until relevance scoring
+lands.
+
+So: **do not design a score readout, a vote count, or a net number, because there
+is no value to put in one.** A control that renders "0" beside every post, or
+shows a count that never moves, is worse than one that shows nothing — it tells
+the reader the mechanism is working and broken rather than not yet arrived.
+
+What the control may legitimately show is **the viewer's own vote**: whether this
+reader voted, and which way. That is a local fact the interface knows because the
+reader just performed it, and it does not depend on anything core resolves.
+
+This is temporary in the same way obligation 2 is, and it resolves in the same
+direction: when scoring lands, a count appears in the read shapes and the control
+gains a number without changing shape. Until then the honest affordance is a
+button that registers a choice, not a scoreboard.
 
 ### Still genuinely unsettled
 

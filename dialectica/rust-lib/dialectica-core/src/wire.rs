@@ -21,6 +21,66 @@ pub fn error_json(message: &str) -> String {
     serde_json::json!({ "error": message }).to_string()
 }
 
+/// Parse a request into the JSON **object** every method's contract specifies.
+///
+/// # The defect this exists to close, found by a test and not by review
+///
+/// Every handler used to open with `serde_json::from_str::<Value>` and then reach
+/// for its fields with `.get(..)`. That is correct for an object and **silently
+/// wrong for every other JSON value**: `serde_json::Value::get` returns `None` on
+/// an array, a number, a string or `null`, which is indistinguishable from an
+/// object that simply lacks the field.
+///
+/// For a handler whose fields are all required the consequence was merely a
+/// confusing message — `list_stoas("[]")` reported nothing wrong at all and
+/// **served a successful page**, because `page` and `perPage` are optional and
+/// both defaulted. A caller sending an array got a reply that looked like an
+/// answer to a question it never asked.
+///
+/// **Why no existing test caught it, which is the part worth recording.** Every
+/// hostile-input fixture in this file used either `"not json"` — unparseable, so
+/// it dies at `from_str` — or `{}`, an object missing its fields. Both are refused
+/// whether or not the request is checked for being an object, so the two
+/// explanations produce the same answer on every fixture. That is this project's
+/// one test-defect family verbatim, and the integration suite's blanket sweep
+/// found it by including `[]`, `7` and `null`.
+///
+/// # `null` is refused rather than treated as an empty object
+///
+/// A caller sending `null` has not sent an empty request; they have sent a value
+/// meaning "nothing", and answering as though they had sent `{}` is guessing. The
+/// handlers whose every field is optional are exactly the ones where that guess
+/// would be invisible, which is why it is refused here rather than per handler.
+/// Returns the whole [`serde_json::Value`] rather than the inner
+/// [`serde_json::Map`], so that the existing field parsers — which take a
+/// `&Value` and call `.get` — need no signature change. What the caller gains is
+/// the guarantee that `.get` now means what it reads as.
+fn parse_request(request: &str) -> Result<serde_json::Value, String> {
+    match serde_json::from_str::<serde_json::Value>(request) {
+        Ok(v @ serde_json::Value::Object(_)) => Ok(v),
+        // Named by what arrived, so a caller sending an array is told they sent an
+        // array rather than being told a field is missing from it.
+        //
+        // The object arm is spelled rather than left to an `unreachable!`, even
+        // though the arm above has already taken it: an `unreachable!` is a panic,
+        // a panic aborts the module process (PHASE0-FINDINGS §3), and a
+        // "cannot happen" that happens is precisely when that matters. It costs one
+        // line and removes a panic from the boundary every request crosses.
+        Ok(other) => Err(error_json(&format!(
+            "a request must be a JSON object, got {}",
+            match other {
+                serde_json::Value::Null => "null",
+                serde_json::Value::Bool(_) => "a boolean",
+                serde_json::Value::Number(_) => "a number",
+                serde_json::Value::String(_) => "a string",
+                serde_json::Value::Array(_) => "an array",
+                serde_json::Value::Object(_) => "an object",
+            }
+        ))),
+        Err(e) => Err(error_json(&format!("invalid JSON: {e}"))),
+    }
+}
+
 /// The panic guard. No handler may unwind.
 ///
 /// The SDK ships no `catch_unwind` — verified at the builder's pinned rev and
@@ -79,9 +139,9 @@ pub fn version(crate_version: &str) -> String {
 /// rejected here rather than deeper in.
 pub fn ping(request: &str) -> String {
     guarded("ping", || {
-        let parsed: serde_json::Value = match serde_json::from_str(request) {
+        let parsed = match parse_request(request) {
             Ok(v) => v,
-            Err(e) => return error_json(&format!("invalid JSON: {}", e)),
+            Err(e) => return e,
         };
         let Some(payload) = parsed.get("payload") else {
             return error_json("missing field: payload");
@@ -203,9 +263,9 @@ pub fn get_capabilities(
     lookup: impl Fn(&crate::identity::Address) -> Result<String, crate::keystore::KeystoreError>,
 ) -> String {
     guarded("get_capabilities", || {
-        let parsed: serde_json::Value = match serde_json::from_str(request) {
+        let parsed = match parse_request(request) {
             Ok(v) => v,
-            Err(e) => return error_json(&format!("invalid JSON: {e}")),
+            Err(e) => return e,
         };
         let stoa = match parsed.get("stoa") {
             Some(serde_json::Value::String(s)) => match crate::identity::Address::from_hex(s) {
@@ -337,9 +397,9 @@ fn list_threads_inner<L: crate::log::OpLog>(
     genesis: &crate::stoa::Genesis,
 ) -> String {
     guarded("list_threads", || {
-        let parsed: serde_json::Value = match serde_json::from_str(request) {
+        let parsed = match parse_request(request) {
             Ok(v) => v,
-            Err(e) => return error_json(&format!("invalid JSON: {e}")),
+            Err(e) => return e,
         };
 
         let stoa = match parsed.get("stoa") {
@@ -416,9 +476,9 @@ pub fn list_threads_from_request<L: crate::log::OpLog>(
     store: impl FnOnce() -> Result<L, crate::log::OpLogError>,
 ) -> String {
     guarded("list_threads", || {
-        let parsed: serde_json::Value = match serde_json::from_str(request) {
+        let parsed = match parse_request(request) {
             Ok(v) => v,
-            Err(e) => return error_json(&format!("invalid JSON: {e}")),
+            Err(e) => return e,
         };
         let stoa = match parsed.get("stoa") {
             Some(serde_json::Value::String(s)) => match crate::identity::Address::from_hex(s) {
@@ -519,10 +579,10 @@ fn feed_page_json(page: &crate::feed::FeedPage) -> String {
 /// the wire reply, so a caller cannot accidentally invent a second error shape
 /// while converting one.
 pub fn parse_channel_id(request: &str) -> Result<String, String> {
-    let parsed: serde_json::Value = match serde_json::from_str(request) {
-        Ok(v) => v,
-        Err(e) => return Err(error_json(&format!("invalid JSON: {e}"))),
-    };
+    // `?` rather than a match: `parse_request`'s error arm is already the wire
+    // reply, which is the whole reason this function's `Result` is `String` on both
+    // sides.
+    let parsed = parse_request(request)?;
     match parsed.get("channelId") {
         Some(serde_json::Value::String(s)) => Ok(s.clone()),
         // A present-but-wrong-typed field is a different mistake from a missing
@@ -597,6 +657,571 @@ pub fn channel_exists_reply(reply: &serde_json::Value) -> String {
         }
     };
     serde_json::json!({ "exists": exists }).to_string()
+}
+
+// ─── The write path ───────────────────────────────────────────────────────
+//
+// PLAN.md §9.1 Stage B and Stage D, plus the identity and Stoa creation the MVP
+// needs before either. Every handler follows §2.5 without exception: JSON in,
+// JSON out, `{"error":"..."}` as the only failure, never a partial success.
+//
+// THE SHARED SHAPE OF A PUBLISH REPLY is `{"op":"<hex op id>"}`, which is what
+// §9.1 specifies (`createPost(...) -> {op}`). It is an op ID and not a success
+// flag, because a caller genuinely needs it: a reply names its parent by op id,
+// and a view that had to re-read the feed to discover what it just posted would
+// be doing a second call to learn something the first one knew.
+//
+// WHAT NO HANDLER HERE DOES IS SEND. Every one stores locally and returns. See
+// `publish.rs` on why that seam is the right way round, and on what a transport
+// layer would add.
+
+/// A required hex field, parsed into an [`crate::identity::Address`].
+///
+/// Its own function because five handlers need it and `list_threads` already
+/// spelled it inline once. A present-but-wrong-typed field, an absent one, and an
+/// unparseable one are three different mistakes reported by name — the rule
+/// `parse_channel_id` set and every field parser here follows.
+fn parse_address(
+    parsed: &serde_json::Value,
+    field: &str,
+) -> Result<crate::identity::Address, String> {
+    match parsed.get(field) {
+        Some(serde_json::Value::String(s)) => crate::identity::Address::from_hex(s)
+            .map_err(|e| error_json(&format!("{field}: {e}"))),
+        Some(_) => Err(error_json(&format!("{field} must be a string"))),
+        None => Err(error_json(&format!("missing field: {field}"))),
+    }
+}
+
+/// A required hex field, parsed into an [`crate::op::OpId`].
+///
+/// Separate from [`parse_address`] rather than generic over the two, because they
+/// are different types with different error vocabularies and an op id being
+/// mistaken for an address is exactly what the domain separation in `op.rs`
+/// exists to prevent. A shared generic would be one function that could return
+/// either, which is the confusion, not the fix.
+fn parse_op_id(parsed: &serde_json::Value, field: &str) -> Result<crate::op::OpId, String> {
+    match parsed.get(field) {
+        Some(serde_json::Value::String(s)) => {
+            crate::op::OpId::from_hex(s).map_err(|e| error_json(&format!("{field}: {e}")))
+        }
+        Some(_) => Err(error_json(&format!("{field} must be a string"))),
+        None => Err(error_json(&format!("missing field: {field}"))),
+    }
+}
+
+/// A required string field.
+///
+/// **Absent and empty are different**, and this distinguishes them: a missing
+/// `body` is a caller bug, while an empty one is a post someone may legitimately
+/// have written (`op.rs` round-trips an empty body deliberately). So this refuses
+/// the first and returns the second.
+fn parse_string(parsed: &serde_json::Value, field: &str) -> Result<String, String> {
+    match parsed.get(field) {
+        Some(serde_json::Value::String(s)) => Ok(s.clone()),
+        Some(_) => Err(error_json(&format!("{field} must be a string"))),
+        None => Err(error_json(&format!("missing field: {field}"))),
+    }
+}
+
+/// An optional list of strings, defaulting to empty.
+///
+/// Optional because most posts have none, and §4.6 makes attachments structurally
+/// optional. **A non-array, or an array holding a non-string, is refused rather
+/// than filtered** — silently dropping a malformed element would publish a post
+/// missing an attachment the author attached, which they would discover only by
+/// looking.
+fn parse_string_list(parsed: &serde_json::Value, field: &str) -> Result<Vec<String>, String> {
+    match parsed.get(field) {
+        None | Some(serde_json::Value::Null) => Ok(Vec::new()),
+        Some(serde_json::Value::Array(items)) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                match item {
+                    serde_json::Value::String(s) => out.push(s.clone()),
+                    _ => {
+                        return Err(error_json(&format!(
+                            "every entry in {field} must be a string"
+                        )))
+                    }
+                }
+            }
+            Ok(out)
+        }
+        Some(_) => Err(error_json(&format!("{field} must be an array of strings"))),
+    }
+}
+
+/// The one publish reply shape, built in one place.
+fn published_json(op: &crate::op::SignedOp) -> String {
+    serde_json::json!({ "op": op.op.id().to_hex() }).to_string()
+}
+
+// ─── Where the signing identity comes from, and why it is not here ────────
+//
+// EVERY HANDLER BELOW TAKES A KEY AND NEVER GOES LOOKING FOR ONE. `create_stoa`
+// takes a `&PublicKey` (it signs nothing — see `publish::create_stoa`); each
+// publishing handler takes a `&SecretKey`.
+//
+// That is a seam rather than an omission. **There is deliberately no
+// `create_identity` here**: minting a secret, writing the keystore, and deciding
+// what key material may leave core are separately owned, and they are the root of
+// the dependency tree rather than a leaf of this one. This half of the write path
+// depends only on the narrowest thing it actually needs — "a key that can sign" —
+// which `identity.rs` already supplies as a merged, stable type.
+//
+// What that costs a caller is one argument. What it buys is that this file has no
+// opinion about where a key lives, so a keystore-backed provider, an agent-backed
+// one, or a test's `SecretKey::generate()` are all the same to it, and none of them
+// is a change to any function here.
+//
+// **One identity per user for this MVP**: the key passed in is the root key, and
+// `identity::derive_stoa_key` is deliberately NOT called anywhere in the write
+// path. The cost is §5.2's cross-Stoa unlinkability — one author address appears in
+// every Stoa the user posts in, so a reader holding ops from two Stoas can link the
+// same person across both. That is a privacy property deferred on purpose. Restoring
+// it is a change to what the CALLER passes, not to this file.
+
+/// `{"title":"…"}` -> `{"stoa":"<hex>","title":"…","genesis":"<hex>"}`.
+///
+/// # The genesis record is returned, and it has to be
+///
+/// A Stoa's address is a one-way hash of its record, so a peer given only the
+/// address cannot recover the record — and every read needs the record, because
+/// [`crate::moderation::Moderators::of`] takes one. So a creator sharing their
+/// Stoa must share both, and a reply that returned only the address would have
+/// handed them half of what a joiner needs.
+///
+/// This is the same pairing `list_threads` already requires in its request, and
+/// it is why [`crate::publish::join_stoa`] takes a record: the address
+/// authenticates the record, and the record is the thing with the content.
+pub fn create_stoa<S: crate::log::StoaRegistry>(
+    request: &str,
+    store: &mut S,
+    creator: &crate::identity::PublicKey,
+) -> String {
+    guarded("create_stoa", || {
+        let parsed = match parse_request(request) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        let title = match parse_string(&parsed, "title") {
+            Ok(t) => t,
+            Err(e) => return e,
+        };
+        match crate::publish::create_stoa(store, creator, &title) {
+            Ok(joined) => joined_stoa_json(&joined),
+            Err(e) => error_json(&e.to_string()),
+        }
+    })
+}
+
+/// `{"stoa":"<hex>","genesis":"<hex>"}` -> the joined Stoa.
+///
+/// # Verifies rather than trusts, and the check is not local to this function
+///
+/// §4.8's self-authenticating property: the address is the hash of the record, so
+/// a tampered record cannot pass for the Stoa an address names.
+/// [`crate::publish::join_stoa`] makes the check, and it is there rather than here
+/// so that a second caller of the write path cannot reach a join that skipped it.
+///
+/// **In-post addresses are attacker-supplied content** (§4.8), which is what makes
+/// this a security surface rather than a form. What core can enforce is that the
+/// record matches; what it cannot enforce is that the user meant to join — nothing
+/// auto-joins, and the UI brief's obligation 2b owns the rest, because a
+/// confirmation showing only a title has shown the forgeable half.
+pub fn join_stoa<S: crate::log::StoaRegistry>(request: &str, store: &mut S) -> String {
+    guarded("join_stoa", || {
+        let parsed = match parse_request(request) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        let stoa = match parse_address(&parsed, "stoa") {
+            Ok(a) => a,
+            Err(e) => return e,
+        };
+        // `genesis_for` decodes AND checks the record against the address, which
+        // is the same function `list_threads` uses. One decoder, one check.
+        let genesis = match genesis_for(&parsed, &stoa) {
+            Ok(g) => g,
+            Err(e) => return e,
+        };
+        match crate::publish::join_stoa(store, &stoa, &genesis) {
+            Ok(joined) => joined_stoa_json(&joined),
+            Err(e) => error_json(&e.to_string()),
+        }
+    })
+}
+
+/// One Stoa as the view receives it.
+///
+/// # `title` is the GENESIS title, and `isGenesisFallback` says so
+///
+/// §5.7 makes a reader prefer the latest valid `StoaMetadata` op and fall back to
+/// the genesis title. **Nothing resolves that op** — PLAN.md §9.1 names it as a
+/// core gap and it is still open — so every title here is the founding one, and
+/// `isGenesisFallback` is unconditionally `true`.
+///
+/// Reported rather than omitted, because §9.1 is explicit that the two are
+/// "different epistemic states": a founding title may be years stale, and a view
+/// that cannot tell presents it as current. A field that is always `true` today
+/// becomes meaningful the moment metadata resolution lands, and a view written
+/// against it needs no change then.
+///
+/// `description` is absent rather than empty, and that is not an oversight: a
+/// description lives ONLY in a metadata op (the genesis record deliberately has no
+/// such field, so that re-wording does not mint a new Stoa). With nothing
+/// resolving those ops there is no description to report, and an empty string
+/// would be a claim that one exists and is blank.
+fn joined_stoa_json(joined: &crate::log::JoinedStoa) -> String {
+    let address = match joined.address() {
+        Ok(a) => a,
+        // A record in the store that cannot be encoded is a corrupt store, not a
+        // Stoa with no address. Reported rather than rendered.
+        Err(e) => return error_json(&format!("genesis record: {e}")),
+    };
+    serde_json::json!({
+        "stoa": address.to_hex(),
+        "title": joined.genesis.title,
+        // The record itself, hex, so a creator can share what a joiner needs.
+        "genesis": hex::encode(match joined.genesis.canonical_bytes() {
+            Ok(b) => b,
+            Err(e) => return error_json(&format!("genesis record: {e}")),
+        }),
+        "relation": joined.relation.as_str(),
+        "isGenesisFallback": true,
+    })
+    .to_string()
+}
+
+/// `{"page":N,"perPage":N}` -> the Stoas this peer created or joined.
+///
+/// The ecosystem's pagination shape, over a set that is small by nature — a user
+/// joins a handful of forums. Paginated anyway, because §2.5 makes it the shape
+/// for a list and a method that returned a bare array would be the one exception a
+/// view had to special-case.
+///
+/// **Not derived from the op log.** A Stoa this peer joined and nobody has posted
+/// in must still appear, and an op gossiped for a Stoa this peer never joined must
+/// not — see the `stoas` table's own comment. `iter_stoa` answers a different
+/// question.
+pub fn list_stoas<S: crate::log::StoaRegistry>(request: &str, store: &S) -> String {
+    guarded("list_stoas", || {
+        let parsed = match parse_request(request) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        let page = match parse_index(&parsed, "page") {
+            Ok(v) => v.unwrap_or(0),
+            Err(e) => return e,
+        };
+        let per_page = match parse_index(&parsed, "perPage") {
+            Ok(v) => crate::feed::clamp_per_page(v),
+            Err(e) => return e,
+        };
+
+        let all = match store.list_stoas() {
+            Ok(v) => v,
+            // §11.1 obligation 5, at a second boundary: a storage failure is the
+            // error shape and NEVER an empty list. "You are in no Stoas" and "I
+            // could not read the store" render identically and mean opposite
+            // things — and this is the FIRST screen a user sees, so collapsing
+            // them here presents a broken peer as a new one.
+            Err(e) => return error_json(&e.to_string()),
+        };
+
+        let start = page.saturating_mul(per_page).min(all.len());
+        let end = start.saturating_add(per_page).min(all.len());
+        let has_more = end < all.len();
+
+        // Each row is built by the same function the single-Stoa replies use, so
+        // a list row and a join reply cannot describe one Stoa differently.
+        // Re-parsed from its JSON string because that function returns the wire
+        // form; the alternative is a second builder returning a `Value`, which is
+        // the duplication this avoids.
+        let mut items = Vec::with_capacity(end.saturating_sub(start));
+        for joined in &all[start..end] {
+            let row: serde_json::Value = match serde_json::from_str(&joined_stoa_json(joined)) {
+                Ok(v) => v,
+                Err(e) => return error_json(&format!("a stored Stoa could not be rendered: {e}")),
+            };
+            // A row that came back as an error is a corrupt record, and it must
+            // not be paged over silently — §2.5 forbids a reply that is partly a
+            // success, and a list with one error object inside it is exactly that.
+            if row.get("error").is_some() {
+                return row.to_string();
+            }
+            items.push(row);
+        }
+
+        serde_json::json!({ "items": items, "page": page, "hasMore": has_more }).to_string()
+    })
+}
+
+/// `{"stoa":"…","body":"…","attachments":[…]}` -> `{"op":"<hex>"}`.
+pub fn create_post<S: crate::log::OpLog + crate::log::StoaRegistry>(
+    request: &str,
+    store: &mut S,
+    key: &crate::identity::SecretKey,
+) -> String {
+    guarded("create_post", || {
+        let parsed = match parse_request(request) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        let stoa = match parse_address(&parsed, "stoa") {
+            Ok(a) => a,
+            Err(e) => return e,
+        };
+        let body = match parse_string(&parsed, "body") {
+            Ok(b) => b,
+            Err(e) => return e,
+        };
+        let attachments = match parse_string_list(&parsed, "attachments") {
+            Ok(a) => a,
+            Err(e) => return e,
+        };
+        match crate::publish::create_post(store, key, &stoa, &body, &attachments) {
+            Ok(op) => published_json(&op),
+            Err(e) => error_json(&e.to_string()),
+        }
+    })
+}
+
+/// `{"stoa":"…","parent":"…","body":"…","attachments":[…]}` -> `{"op":"<hex>"}`.
+///
+/// **There is no `thread` argument**, and §9.1's sketch has one. It is omitted
+/// deliberately: the thread is a function of the parent, so accepting it would let
+/// a caller file a reply under a thread it does not belong to — see
+/// [`crate::publish::create_reply`], which derives it. An argument that must always
+/// equal something core can compute is an argument core should compute.
+pub fn create_reply<S: crate::log::OpLog + crate::log::StoaRegistry>(
+    request: &str,
+    store: &mut S,
+    key: &crate::identity::SecretKey,
+) -> String {
+    guarded("create_reply", || {
+        let parsed = match parse_request(request) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        let stoa = match parse_address(&parsed, "stoa") {
+            Ok(a) => a,
+            Err(e) => return e,
+        };
+        let parent = match parse_op_id(&parsed, "parent") {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+        let body = match parse_string(&parsed, "body") {
+            Ok(b) => b,
+            Err(e) => return e,
+        };
+        let attachments = match parse_string_list(&parsed, "attachments") {
+            Ok(a) => a,
+            Err(e) => return e,
+        };
+        match crate::publish::create_reply(store, key, &stoa, &parent, &body, &attachments) {
+            Ok(op) => published_json(&op),
+            Err(e) => error_json(&e.to_string()),
+        }
+    })
+}
+
+/// `{"stoa":"…","target":"…","direction":"up"|"down"}` -> `{"op":"<hex>"}`.
+///
+/// # The direction is a NAME, not a number
+///
+/// `"up"` and `"down"`, refused if anything else. The wire format's discriminants
+/// are 0 and 1 (`op.rs`), and exposing those at the JSON boundary would couple a
+/// view to a byte value whose whole point is that it is internal — and would make
+/// a caller's off-by-one a silent downvote rather than an error.
+///
+/// **Never defaulted.** An unrecognised direction is refused, for the reason
+/// `stoa.rs` refuses an unknown policy: guessing which the caller meant is how a
+/// downvote is recorded as an upvote, and a vote is attributed to a person.
+///
+/// # A vote today changes nothing a reader can see
+///
+/// §7.2 rule 2 ships no score and nothing reads `Vote` ops. This method stores
+/// history for when scoring lands — see [`crate::publish::create_vote`] for the
+/// argument and for PLAN.md's recorded objection to the method existing at all.
+/// A view offering a vote control must not imply an effect that is not there.
+pub fn create_vote<S: crate::log::OpLog + crate::log::StoaRegistry>(
+    request: &str,
+    store: &mut S,
+    key: &crate::identity::SecretKey,
+) -> String {
+    guarded("create_vote", || {
+        let parsed = match parse_request(request) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        let stoa = match parse_address(&parsed, "stoa") {
+            Ok(a) => a,
+            Err(e) => return e,
+        };
+        let target = match parse_op_id(&parsed, "target") {
+            Ok(t) => t,
+            Err(e) => return e,
+        };
+        let direction = match parsed.get("direction") {
+            Some(serde_json::Value::String(s)) if s == "up" => crate::op::VoteDirection::Up,
+            Some(serde_json::Value::String(s)) if s == "down" => crate::op::VoteDirection::Down,
+            Some(serde_json::Value::String(_)) => {
+                return error_json("direction must be \"up\" or \"down\"")
+            }
+            Some(_) => return error_json("direction must be a string"),
+            None => return error_json("missing field: direction"),
+        };
+        match crate::publish::create_vote(store, key, &stoa, &target, direction) {
+            Ok(op) => published_json(&op),
+            Err(e) => error_json(&e.to_string()),
+        }
+    })
+}
+
+/// `{"stoa":"…","genesis":"…","thread":"…","page":N,"perPage":N,"includeHidden":b}`
+/// -> one page of a thread.
+///
+/// The pagination shape, like the feed. The genesis record is a parameter for the
+/// same reason it is there — [`crate::moderation::Moderators::of`] needs one and
+/// there is nowhere else to get it, and a caller without one must not get a thread
+/// with moderation silently not applied.
+///
+/// A storage failure is the error shape and never an empty thread, which is
+/// §11.1 obligation 5 at a third boundary. An empty thread is a real answer — a
+/// thread whose root has not reached this peer — and it must not be reachable by
+/// a read that failed.
+pub fn get_thread<L: crate::log::OpLog>(
+    request: &str,
+    log: &L,
+    genesis: &crate::stoa::Genesis,
+) -> String {
+    guarded("get_thread", || {
+        let parsed = match parse_request(request) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        let stoa = match parse_address(&parsed, "stoa") {
+            Ok(a) => a,
+            Err(e) => return e,
+        };
+        // The genesis record must describe the Stoa asked for, or the moderator
+        // set being applied governs a different forum than the posts being
+        // filtered. `list_threads` makes the same check for the same reason.
+        let genesis_address = match genesis.address() {
+            Ok(a) => a,
+            Err(e) => return error_json(&format!("genesis: {e}")),
+        };
+        if genesis_address != stoa {
+            return error_json(
+                "the genesis record does not describe the Stoa this thread was asked for",
+            );
+        }
+        let thread = match parse_op_id(&parsed, "thread") {
+            Ok(t) => t,
+            Err(e) => return e,
+        };
+        let moderators = match crate::moderation::Moderators::of(genesis) {
+            Ok(m) => m,
+            Err(e) => return error_json(&format!("genesis: {e}")),
+        };
+        let page = match parse_index(&parsed, "page") {
+            Ok(v) => v.unwrap_or(0),
+            Err(e) => return e,
+        };
+        let per_page = match parse_index(&parsed, "perPage") {
+            Ok(v) => crate::feed::clamp_per_page(v),
+            Err(e) => return e,
+        };
+        let include_hidden = match parsed.get("includeHidden") {
+            None | Some(serde_json::Value::Null) => false,
+            Some(serde_json::Value::Bool(b)) => *b,
+            Some(_) => return error_json("includeHidden must be a boolean"),
+        };
+
+        match crate::publish::read_thread(
+            log,
+            &moderators,
+            &stoa,
+            &thread,
+            page,
+            per_page,
+            include_hidden,
+        ) {
+            Ok(page) => thread_page_json(&page),
+            Err(e) => error_json(&e.to_string()),
+        }
+    })
+}
+
+/// The thread handler as the module actually calls it: genesis record as hex.
+///
+/// [`get_thread`] takes a decoded [`Genesis`](crate::stoa::Genesis) because that is
+/// the shape worth testing directly — threading a hex string through every fixture
+/// would be asserting on decoding at the same time. This is the form the adapter
+/// forwards to, and it is thin on purpose: parse, verify, delegate.
+///
+/// **It exists because the adapter must stay one line per method.** The module
+/// crate's own rule is that "if a body here ever grows past one line, that logic
+/// belongs in `core` — otherwise it is logic no test can reach", and the adapter
+/// cannot be compiled by `cargo test` at all. Doing this parse there would have put
+/// eighteen untestable lines in the one file no test reaches;
+/// [`list_threads_from_request`] exists for exactly the same reason and this is its
+/// counterpart.
+pub fn get_thread_from_request<L: crate::log::OpLog>(request: &str, log: &L) -> String {
+    guarded("get_thread", || {
+        let parsed = match parse_request(request) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        let stoa = match parse_address(&parsed, "stoa") {
+            Ok(a) => a,
+            Err(e) => return e,
+        };
+        // Decodes the record AND checks it against the address — the same
+        // self-authenticating check `list_threads_from_request` makes, through the
+        // same function, so the two cannot disagree about what a valid pairing is.
+        let genesis = match genesis_for(&parsed, &stoa) {
+            Ok(g) => g,
+            Err(e) => return e,
+        };
+        get_thread(request, log, &genesis)
+    })
+}
+
+/// The thread pagination shape, built in one place.
+fn thread_page_json(page: &crate::publish::ThreadPage) -> String {
+    let items: Vec<serde_json::Value> = page
+        .items
+        .iter()
+        .map(|row| {
+            let mut obj = serde_json::json!({
+                "post": row.post,
+                "currentVersion": row.current_version,
+                "author": row.author,
+                "body": sanitised_json(&row.body),
+                "attachments": row.attachments.iter().map(sanitised_json).collect::<Vec<_>>(),
+                "isRevised": row.is_revised,
+                "isHidden": row.is_hidden,
+            });
+            // ABSENT, not null-and-present, for the thread root. §9.1 is explicit
+            // about the analogous `decidedBy`: "a field that is sometimes
+            // meaningless is [a partly-successful shape] in miniature." A root has
+            // no parent, so the key is not there.
+            if let Some(parent) = &row.parent {
+                obj["parent"] = serde_json::json!(parent);
+            }
+            obj
+        })
+        .collect();
+    serde_json::json!({
+        "items": items,
+        "page": page.page,
+        "hasMore": page.has_more,
+    })
+    .to_string()
 }
 
 #[cfg(test)]
@@ -1544,6 +2169,57 @@ mod tests {
                 .unwrap()
                 .contains("unable to open database file"),
             "the reason must reach the view so it can be named, got {out}"
+        );
+    }
+
+    #[test]
+    fn a_request_that_is_valid_json_but_not_an_object_is_refused() {
+        // THE REGRESSION TEST FOR A DEFECT THE INTEGRATION SUITE FOUND, and it is
+        // worth stating exactly why nothing here caught it before.
+        //
+        // Every hostile-input fixture in this file used `"not json"` — which dies
+        // at the parse — or `{}`, an object missing its fields. Both are refused
+        // whether or not a handler checks that the request IS an object, so the two
+        // explanations produced the same answer on every fixture. That is this
+        // project's one test-defect family, and `[]` is the input that separates
+        // them.
+        //
+        // The consequence was not cosmetic. `serde_json::Value::get` returns `None`
+        // on an array, which is indistinguishable from a missing field — so for a
+        // handler whose every field is OPTIONAL, an array parsed as an empty
+        // request and was SERVED. `list_stoas("[]")` returned a successful page.
+        //
+        // `null` is included deliberately: it is the value most likely to be
+        // "helpfully" treated as an empty object by a later edit.
+        for bad in ["[]", "null", "7", r#""a string""#, "true", "[1,2,3]"] {
+            let out = parse_request(bad)
+                .expect_err(&format!("{bad} must be refused as not an object"));
+            let v: serde_json::Value = serde_json::from_str(&out)
+                .unwrap_or_else(|e| panic!("the refusal must be valid JSON ({e}): {out}"));
+            assert!(v.get("error").is_some(), "for {bad}, got {out}");
+            // The message must name what arrived rather than claiming a field is
+            // missing — which is what sent a caller looking in the wrong place.
+            assert!(
+                v["error"].as_str().unwrap().contains("must be a JSON object"),
+                "for {bad}, got {out}"
+            );
+        }
+
+        // An object is accepted, so the check is not refuse-everything. Both the
+        // empty object and a populated one, because the empty one is the case a
+        // over-eager check would catch.
+        for good in [r#"{}"#, r#"{"stoa":"ab"}"#] {
+            assert!(parse_request(good).is_ok(), "{good} must be accepted");
+        }
+
+        // And through a real handler, which is where it mattered: the one whose
+        // fields are all optional and which therefore served an answer.
+        let out = list_stoas("[]", &MemoryOpLog::new());
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_some(), "got {out}");
+        assert!(
+            v.get("items").is_none(),
+            "a failure must never also carry a result — §2.5: {out}"
         );
     }
 

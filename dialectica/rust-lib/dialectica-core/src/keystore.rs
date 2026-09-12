@@ -637,6 +637,11 @@ impl Keystore {
     /// root is the one value that, if leaked, yields every Stoa identity a user
     /// has, and nothing outside this type needs it. Callers need keys that
     /// *sign*, which is what this hands back.
+    ///
+    /// **The MVP ships one identity per user, so no publishing path calls this**
+    /// — the root key signs everything, and whatever hands that key out is the
+    /// identity owner's to design. This derivation stays because §5.2's per-Stoa
+    /// identity is the destination and this is the mechanism that reaches it.
     pub fn stoa_key(&self, stoa: &Address) -> SecretKey {
         crate::identity::derive_stoa_key(&self.root, stoa)
     }
