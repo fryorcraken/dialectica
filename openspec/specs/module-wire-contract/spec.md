@@ -1,5 +1,9 @@
 # module-wire-contract Specification
 
+## Purpose
+
+Defines the shape of every call across the module's surface — what a reply looks like, what a failure looks like, and what happens to a handler that panics or to a reply from another module — so that a view has exactly one error branch and no failure on this path can take the module down or be read as a value.
+
 ## Requirements
 
 ### Requirement: Every method takes JSON and returns JSON
