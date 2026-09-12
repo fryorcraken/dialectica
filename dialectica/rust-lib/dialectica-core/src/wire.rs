@@ -2671,6 +2671,428 @@ mod tests {
         assert!(v.get("hasIdentity").is_none());
     }
 
+    // ─── Onboarding: the tester's independent coverage ─────────────────────
+    //
+    // Written from the `identity-onboarding` spec rather than from the code, and
+    // each one was watched to fail under a named mutation before it was kept.
+    // Where a test overlaps one above, the reason is stated.
+
+    #[test]
+    fn a_keep_whose_path_record_fails_reports_failure_and_names_no_identity() {
+        // THE OTHER HALF OF THE WRITE ORDER, and nothing in this file covered it.
+        // `a_keep_whose_keystore_write_fails_records_no_path` pins the direction
+        // where the FIRST write fails, which is the clean case: nothing was
+        // written anywhere. It cannot see the case `design.md` calls "the one
+        // partial state" — the keystore succeeded and the record did not.
+        //
+        // That case is what the spec's "A failed keep records nothing" actually
+        // costs, and the spec is checkable on it: "no identity is reported as
+        // kept, AND a subsequent load finds no identity that was not there
+        // before". Both halves are asserted here.
+        //
+        // The record write is made to fail by handing the keep a store whose
+        // TABLE has been dropped out from under it — the connection is live, so
+        // `record_path` reaches SQLite and SQLite refuses. Putting a directory
+        // where the file goes would fail at `open`, which is a different arm and
+        // would never reach `record_path` at all.
+        let dir = OnboardingDir::new("record-write-fails");
+        let paths = dir.paths();
+        {
+            // A second connection to the same file, dropping the table. The
+            // keep's own store keeps its handle, so the failure happens at the
+            // write rather than at the open.
+            let saboteur = rusqlite::Connection::open(IdentityStore::default_path_in(&dir.0))
+                .expect("the record file opens");
+            saboteur
+                .execute_batch("DROP TABLE chosen_paths;")
+                .expect("the table is droppable");
+        }
+
+        let keystore = a_master_key();
+        let nonce = SlateNonce::generate().unwrap();
+        let request = format!(
+            r#"{{"stoa":"{}","slate":"{}","index":0}}"#,
+            a_stoa().to_hex(),
+            nonce.to_hex()
+        );
+        let out = keep_identity(
+            &request,
+            Some(nonce),
+            KeepTargets {
+                keystore: &keystore,
+                keystore_path: &dir.keystore_path(),
+                unlock: &Unlock::Unencrypted,
+                paths: &paths,
+            },
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+
+        // The fixture must actually fail the RECORD write and not something
+        // earlier, or this test proves nothing. The keystore file existing is
+        // what says the first write got through.
+        assert!(
+            dir.keystore_path().exists(),
+            "the fixture failed before the keystore write, so it does not \
+             exercise the partial state: {out}"
+        );
+
+        // The spec: "no identity is reported as kept".
+        assert_eq!(
+            v["kept"], false,
+            "a keep whose record write failed reported success: {out}"
+        );
+        assert!(v.get("address").is_none(), "got {out}");
+        assert!(v.get("path").is_none(), "got {out}");
+
+        // The spec: "a subsequent load finds no identity that was not there
+        // before". `whoAmI` must not name one — which is only true because it
+        // reads the RECORD, not the keystore.
+        //
+        // The store is opened here rather than through `OnboardingDir::paths`,
+        // because the sabotaged file no longer opens and `paths` panics on that.
+        // A load that CANNOT read the record is still a load that must not name
+        // an identity, so the failure is handed to the handler as the answer it
+        // is — which is the state a real user would be in.
+        let record_path = IdentityStore::default_path_in(&dir.0);
+        let who: serde_json::Value = serde_json::from_str(&who_am_i(
+            &slate_request(),
+            || Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted),
+            || IdentityStore::open(&record_path),
+        ))
+        .unwrap();
+        assert_eq!(
+            who["hasIdentity"], false,
+            "a keep that did not complete left an identity reportable: {who}"
+        );
+        assert!(who.get("address").is_none(), "got {who}");
+    }
+
+    #[test]
+    fn each_keep_refusal_reason_is_pinned_to_its_own_situation() {
+        // `the_second_keep_refusal_is_distinguishable_from_other_failures`
+        // asserts that two reasons DIFFER without pinning either, and its
+        // storage-failure reason is built outside the handler — so it never
+        // observes what a keep actually says about a storage failure. Both
+        // reasons could become unhelpful in different ways and it would pass.
+        //
+        // This pins each reason to a substring chosen from the SPEC's own
+        // vocabulary for the situation, so a message that stopped naming its
+        // situation fails even while remaining distinct from the others.
+        //
+        // Three situations, one table — CLAUDE.md's rule, and it is also what
+        // makes the pairwise-distinctness check below free.
+        let dir = OnboardingDir::new("pinned-refusals");
+        let nonce = SlateNonce::generate().unwrap();
+        let other = SlateNonce::generate().unwrap();
+        assert_ne!(nonce, other);
+
+        // First keep succeeds, so the second reaches the already-exists arm.
+        let first = keep_through_the_wire(&dir, nonce, Some(nonce), 0, &Unlock::Unencrypted);
+        assert_eq!(first["kept"], true, "got {first}");
+
+        // A storage failure reached THROUGH the handler: the record's table is
+        // dropped, in a directory with no keystore yet, so the keystore write
+        // succeeds and the record write fails. That is the only way to observe
+        // what a keep says about a storage failure.
+        let broken = OnboardingDir::new("pinned-refusals-storage");
+        let broken_paths = broken.paths();
+        {
+            let saboteur =
+                rusqlite::Connection::open(IdentityStore::default_path_in(&broken.0)).unwrap();
+            saboteur.execute_batch("DROP TABLE chosen_paths;").unwrap();
+        }
+        let broken_keystore = a_master_key();
+        let storage_out = keep_identity(
+            &format!(
+                r#"{{"stoa":"{}","slate":"{}","index":0}}"#,
+                a_stoa().to_hex(),
+                nonce.to_hex()
+            ),
+            Some(nonce),
+            KeepTargets {
+                keystore: &broken_keystore,
+                keystore_path: &broken.keystore_path(),
+                unlock: &Unlock::Unencrypted,
+                paths: &broken_paths,
+            },
+        );
+        let storage: serde_json::Value = serde_json::from_str(&storage_out).unwrap();
+        assert_eq!(storage["kept"], false, "got {storage_out}");
+
+        // (situation, reply, a word the reason must carry)
+        //
+        // Each expected word is hardcoded from what the SITUATION is, not read
+        // back from the message: an existing identity is about a keystore that
+        // already exists, a superseded slate is about generating a fresh one, an
+        // out-of-range selection is about choosing from the set, and a storage
+        // failure is about the record being unreadable.
+        let cases = [
+            (
+                "an identity already exists",
+                keep_through_the_wire(&dir, nonce, Some(nonce), 1, &Unlock::Unencrypted),
+                "already exists",
+            ),
+            (
+                "the slate was superseded",
+                keep_through_the_wire(&dir, other, Some(nonce), 0, &Unlock::Unencrypted),
+                "no longer the current one",
+            ),
+            (
+                "the selection names no candidate",
+                keep_through_the_wire(&dir, nonce, Some(nonce), 99, &Unlock::Unencrypted),
+                "there is no candidate 99",
+            ),
+            (
+                "the record could not be written",
+                storage,
+                "read or written",
+            ),
+        ];
+
+        let mut reasons: Vec<String> = Vec::new();
+        for (situation, reply, must_contain) in &cases {
+            assert_eq!(reply["kept"], false, "{situation}: {reply}");
+            let reason = reply["reason"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{situation} carried no reason: {reply}"))
+                .to_string();
+            assert!(
+                reason.contains(must_contain),
+                "{situation}: the reason does not name the situation. Expected a \
+                 reason containing {must_contain:?}, got {reason:?}"
+            );
+            reasons.push(reason);
+        }
+
+        // And still pairwise distinct, which pinning each one already implies but
+        // which is the spec's own wording ("distinguishable from").
+        for (i, a) in reasons.iter().enumerate() {
+            for b in reasons.iter().skip(i + 1) {
+                assert_ne!(a, b, "two situations produced the same reason");
+            }
+        }
+    }
+
+    #[test]
+    fn a_failed_keep_leaves_the_record_no_fuller_than_it_found_it() {
+        // The spec's "A failed keep records nothing" has a second clause the
+        // tests above read past: "a subsequent load finds no identity THAT WAS
+        // NOT THERE BEFORE". That is a statement about the record as a whole, not
+        // about the Stoa being kept — so it is checkable by counting rows across
+        // a failure, which nothing else here does.
+        //
+        // The fixture puts a pre-existing choice for a DIFFERENT Stoa in the
+        // record, so a handler that cleared or rewrote the record on failure
+        // would be caught, and so would one that recorded the failed Stoa.
+        let dir = OnboardingDir::new("failed-keep-leaves-record");
+        let paths = dir.paths();
+        let elsewhere = stoa_address(b"a stoa kept earlier");
+        paths.record_path(&elsewhere, 11).unwrap();
+
+        // The expected content is hardcoded, not read back from the store.
+        let before = vec![crate::identity_store::ChosenPath {
+            stoa: elsewhere,
+            path: 11,
+        }];
+        assert_eq!(paths.all_paths().unwrap(), before);
+
+        let keystore = a_master_key();
+        let nonce = SlateNonce::generate().unwrap();
+        let stale = SlateNonce::generate().unwrap();
+        assert_ne!(nonce, stale);
+
+        // Three ways to fail a keep for `a_stoa()`, none of which may touch the
+        // record: a superseded nonce, no live slate, and an out-of-range index.
+        for (situation, live, index) in [
+            ("a superseded slate", Some(stale), 0i64),
+            ("no live slate", None, 0),
+            ("an index outside the set", Some(nonce), 77),
+        ] {
+            let out = keep_identity(
+                &format!(
+                    r#"{{"stoa":"{}","slate":"{}","index":{index}}}"#,
+                    a_stoa().to_hex(),
+                    nonce.to_hex()
+                ),
+                live,
+                KeepTargets {
+                    keystore: &keystore,
+                    keystore_path: &dir.keystore_path(),
+                    unlock: &Unlock::Unencrypted,
+                    paths: &paths,
+                },
+            );
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert_eq!(v["kept"], false, "{situation}: {out}");
+            assert_eq!(
+                paths.all_paths().unwrap(),
+                before,
+                "{situation} changed the record"
+            );
+        }
+    }
+
+    #[test]
+    fn a_slate_is_offered_for_the_stoa_it_was_asked_about() {
+        // The spec makes identity per-Stoa, and a slate is generated for one
+        // Stoa. Nothing in this file checks that the handler uses the `stoa`
+        // field it parsed rather than some other value — the existing slate tests
+        // all ask about one Stoa, so a handler that hardcoded a Stoa would pass
+        // every one of them.
+        //
+        // Asserted against candidates derived HERE from the fixed master key and
+        // the paths the reply named, so the expectation does not come from the
+        // reply's own address field.
+        let here = a_stoa();
+        let elsewhere = stoa_address(b"a different stoa entirely");
+        assert_ne!(here, elsewhere);
+
+        for stoa in [here, elsewhere] {
+            let request = format!(r#"{{"stoa":"{}"}}"#, stoa.to_hex());
+            let out = generate_identity_slate(&request, || Ok(a_master_key()), |_| {});
+            let v: serde_json::Value = serde_json::from_str(&out)
+                .unwrap_or_else(|e| panic!("the reply must be JSON ({e}): {out}"));
+            for candidate in v["candidates"].as_array().unwrap() {
+                let path = candidate["path"].as_u64().unwrap() as u32;
+                let expected =
+                    crate::identity::derive_stoa_key_at_path(&[7u8; 32], &stoa, path).public_key();
+                assert_eq!(
+                    candidate["publicKey"],
+                    expected.to_hex(),
+                    "a candidate is not derived for the Stoa that was asked about: {v}"
+                );
+                assert_eq!(candidate["address"], expected.address().to_hex(), "got {v}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_kept_identity_is_the_candidate_the_slate_offered_at_that_index() {
+        // The spec's keep scenarios say the identity kept is the one that was
+        // chosen, and the selection is BY INDEX. Every keep test above derives
+        // its expectation from the path the REPLY named — which cannot see a keep
+        // that stored index 3's path while reporting it as the kept one, because
+        // reply and record would agree with each other.
+        //
+        // This instead generates the slate, reads candidate `n`'s public key from
+        // the SLATE reply, and requires the keep at index `n` to report exactly
+        // that. The two replies come from two calls, so agreeing is a property of
+        // the code rather than of one value being copied.
+        for index in 0..SLATE_SIZE {
+            let dir = OnboardingDir::new(&format!("keep-is-the-offered-one-{index}"));
+            let remembered = std::cell::Cell::new(None);
+            let slate_out = generate_identity_slate(
+                &slate_request(),
+                || Ok(a_master_key()),
+                |n| remembered.set(Some(n)),
+            );
+            let slate: serde_json::Value = serde_json::from_str(&slate_out).unwrap();
+            let nonce = remembered.into_inner().expect("a slate was remembered");
+            let offered = slate["candidates"][index].clone();
+
+            let kept =
+                keep_through_the_wire(&dir, nonce, Some(nonce), index as i64, &Unlock::Unencrypted);
+            assert_eq!(kept["kept"], true, "index {index}: {kept}");
+            assert_eq!(
+                kept["publicKey"], offered["publicKey"],
+                "index {index}: the keep stored a candidate the slate did not \
+                 offer at that index. Offered {offered}, kept {kept}"
+            );
+            assert_eq!(kept["address"], offered["address"], "index {index}");
+            assert_eq!(kept["path"], offered["path"], "index {index}");
+        }
+    }
+
+    #[test]
+    fn a_record_restored_beside_a_master_key_names_the_identities_in_use() {
+        // The spec's "A restore targets the device holding the master key": "the
+        // identities in use are those the record names, AND no other device's
+        // record participates". Nothing in this change covered it — the restore
+        // path is not a code path, it is the property that a record and a master
+        // key which never met each other in one process still agree.
+        //
+        // The fixture is a restore in the only sense that is checkable now: a
+        // record file written by one store, COPIED to a fresh directory, and read
+        // beside a keystore file also copied there. Neither handle nor connection
+        // is shared, which is what makes it a restore rather than a reuse.
+        let origin = OnboardingDir::new("restore-origin");
+        let nonce = SlateNonce::generate().unwrap();
+        let kept = keep_through_the_wire(&origin, nonce, Some(nonce), 3, &Unlock::Unencrypted);
+        assert_eq!(kept["kept"], true, "got {kept}");
+        let kept_address = kept["address"].as_str().unwrap().to_string();
+        let kept_path = kept["path"].as_u64().unwrap() as u32;
+
+        // The expected identity, derived HERE from the fixed master key and the
+        // path — not read back from either file.
+        let expected = crate::identity::derive_stoa_key_at_path(&[7u8; 32], &a_stoa(), kept_path)
+            .public_key()
+            .address()
+            .to_hex();
+        assert_eq!(kept_address, expected, "got {kept}");
+
+        let restored = OnboardingDir::new("restore-target");
+        // The target starts empty, or the "restore" would be reading what was
+        // already there.
+        assert!(
+            std::fs::read_dir(&restored.0).unwrap().next().is_none(),
+            "the restore target must start empty"
+        );
+        std::fs::copy(origin.keystore_path(), restored.keystore_path()).unwrap();
+        std::fs::copy(
+            IdentityStore::default_path_in(&origin.0),
+            IdentityStore::default_path_in(&restored.0),
+        )
+        .unwrap();
+
+        let v: serde_json::Value = serde_json::from_str(&who_am_i(
+            &slate_request(),
+            || Keystore::open(&restored.keystore_path(), &Unlock::Unencrypted),
+            || Ok(restored.paths()),
+        ))
+        .unwrap();
+        assert_eq!(v["hasIdentity"], true, "got {v}");
+        assert_eq!(
+            v["path"], kept_path,
+            "the restored record names a different path: {v}"
+        );
+        assert_eq!(
+            v["address"], expected,
+            "the restored identity is not the one the record names: {v}"
+        );
+
+        // "No other device's record participates": a SECOND restore target given
+        // the same master key but a record naming a DIFFERENT path must report
+        // that path's identity, not the first's. Without this, a handler ignoring
+        // the record entirely would satisfy everything above.
+        let other = OnboardingDir::new("restore-other-device");
+        std::fs::copy(origin.keystore_path(), other.keystore_path()).unwrap();
+        let other_path = kept_path.wrapping_add(1);
+        other.paths().record_path(&a_stoa(), other_path).unwrap();
+
+        let w: serde_json::Value = serde_json::from_str(&who_am_i(
+            &slate_request(),
+            || Keystore::open(&other.keystore_path(), &Unlock::Unencrypted),
+            || Ok(other.paths()),
+        ))
+        .unwrap();
+        assert_eq!(w["hasIdentity"], true, "got {w}");
+        assert_eq!(w["path"], other_path, "got {w}");
+        assert_ne!(
+            w["address"], v["address"],
+            "two records naming different paths reported one identity, so the \
+             record is not being read: {w}"
+        );
+        // And the expectation for it is also derived here.
+        assert_eq!(
+            w["address"],
+            crate::identity::derive_stoa_key_at_path(&[7u8; 32], &a_stoa(), other_path)
+                .public_key()
+                .address()
+                .to_hex(),
+            "got {w}"
+        );
+    }
+
     // ─── The feed handler ─────────────────────────────────────────────────
 
     use crate::arrival::Arrival;
