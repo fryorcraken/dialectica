@@ -2747,7 +2747,10 @@ thing (§2.3).
   the answer sets when §4.5 stops being optional. With SDS now the *only* sync
   layer, there is no CRDT fallback if a channel degrades.
 - How far back does SDS-Repair realistically reach in a live Stoa? That number
-  decides how urgent snapshots are.
+  decides how urgent snapshots are — **and it is less load-bearing than it
+  looks**, because §13 establishes that thread completeness is computable from
+  the parent pointers we already hold. A thread-scoped, demand-driven repair
+  is ours to build whatever SDS-R reaches.
 - **How is the moderator set ordered when two moderators edit it
   concurrently?** The one genuine merge question in the design (§5.7), and it
   does not arise while the creator is the sole moderator — so it is answered
@@ -2936,16 +2939,39 @@ thing (§2.3).
   The error was conflating the counter with the wall clock, and attributing
   the wall clock's weakness to both.
 
-  **What SDS's `causalHistory` adds is not causality but *gap detection*.** It
-  is an explicit list of message ids the sender held, so a receiver can notice
-  "this references X and I do not have X" and request repair. A scalar counter
-  cannot: N+1 says she had seen *something* at N, never *which*. That is
-  reliability machinery rather than ordering, and it is SDS's job — so losing
-  it costs us repair, not order.
+  **What SDS's `causalHistory` adds is not causality but *gap detection*** —
+  an explicit list of message ids the sender held, so a receiver can notice
+  "this references X and I do not have X". A scalar counter cannot: N+1 says
+  she had seen *something* at N, never *which*.
 
-  **So nothing about ordering requires the upstream gap to close.** Recency,
-  total order and happened-before are all buildable here; the gap is a reason
-  to build them rather than a reason to wait.
+  **But we already have that edge, and at the granularity we actually want.**
+  A reply names its parent op id inside the signed preimage — it must, that is
+  what makes it a reply — so "I hold a reply to X and no X" is detectable with
+  no `causalHistory` at all. **The parent pointer is the causal edge the forum
+  cares about.**
+
+  And the scopes differ in a way that matters more than the mechanism:
+
+  - **SDS repairs per Stoa.** One channel per Stoa (§4.1), so its machinery
+    chases gaps across every thread at once — most of which a given reader
+    will never open.
+  - **Dialectica needs repair per thread.** Someone opening a thread wants
+    *that* thread complete. Ops missing from threads nobody is reading are not
+    urgent and may never be worth fetching.
+
+  A thread is a tree walkable from its root, so the set of ops needed to
+  render it completely is computable from the ops we hold. That is a better
+  repair trigger than a filter over the whole Stoa, because it is
+  **demand-driven**: repair what someone is looking at.
+
+  **So SDS's reliability machinery is both more than we need and differently
+  shaped** — global where we want local, a message graph where we have a post
+  tree. Losing `causalHistory` costs less than it appears to.
+
+  **Nothing about ordering requires the upstream gap to close**, and nothing
+  about thread completeness does either. Recency, total order and
+  happened-before are all buildable here; the gap is a reason to build them
+  rather than a reason to wait.
 
   Not designed here; §5.7 keeps its rule and `Arrival` its shape until one is.
 
