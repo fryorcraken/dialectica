@@ -537,13 +537,28 @@ fn parse_index(parsed: &Request, field: &str) -> Result<Option<usize>, String> {
         // what the caller may see.
         None | Some(serde_json::Value::Null) => Ok(None),
         Some(serde_json::Value::Number(n)) => match n.as_u64() {
-            // `as_u64` refuses a negative and a fractional number, which is
-            // exactly the set that should be refused: a page of -1 is not a
-            // page, and silently clamping it to 0 would serve the first page to
-            // a caller who asked for something impossible.
+            // `as_u64` refuses a negative and a fractional number — a page of -1
+            // is not a page, and silently clamping it to 0 would serve the first
+            // page to a caller who asked for something impossible.
+            //
+            // **It refuses by SPELLING rather than by value, and the message says
+            // so.** `1e2` is JSON for exactly 100 and `0.0` for exactly 0 — both
+            // non-negative, both whole — and `as_u64` returns `None` for each,
+            // because serde parses any number carrying a `.` or an `e` as `f64`.
+            // Several JSON serialisers emit `1e2` for 100, so this is a spelling a
+            // legitimate caller can send.
+            //
+            // The message was "must be a non-negative whole number", which told
+            // such a caller its 100 was not whole. Corrected to name the spelling,
+            // which is what is actually being refused. The ACCEPTANCE is
+            // deliberately unchanged: widening it to accept an exactly-integral
+            // float is a contract question the spec does not answer, and it does
+            // not belong in a commit about the envelope. Filed rather than fixed —
+            // a caller told the truth can restring its number today.
             Some(v) => Ok(Some(v as usize)),
             None => Err(error_json(&format!(
-                "{field} must be a non-negative whole number"
+                "{field} must be a non-negative integer written without a decimal \
+                 point or exponent"
             ))),
         },
         Some(_) => Err(error_json(&format!("{field} must be a number"))),
@@ -1805,7 +1820,9 @@ mod tests {
             list_threads(r, &log_with_body("hello"), &feed_genesis())
         }
         fn feed_req_m(r: &str) -> String {
-            list_threads_from_request(r, || Ok::<_, crate::log::OpLogError>(log_with_body("hello")))
+            list_threads_from_request(r, || {
+                Ok::<_, crate::log::OpLogError>(log_with_body("hello"))
+            })
         }
         fn channel_m(r: &str) -> String {
             // `parse_channel_id` returns the wire shape on both arms, so an
@@ -1859,8 +1876,14 @@ mod tests {
         // it fails again if the constant is ever reworded without the spec
         // being revisited.
         for (name, method) in every_request_taking_method() {
-            for not_an_object in ["[]", r#"[{"stoa":"00"}]"#, "7", r#""a string""#, "true", "null"]
-            {
+            for not_an_object in [
+                "[]",
+                r#"[{"stoa":"00"}]"#,
+                "7",
+                r#""a string""#,
+                "true",
+                "null",
+            ] {
                 let out = method(not_an_object);
                 assert_eq!(
                     error_message(&out),
@@ -1912,10 +1935,7 @@ mod tests {
                 message, REQUEST_NOT_AN_OBJECT,
                 "{name} refused `{{}}` for its shape rather than its missing field"
             );
-            assert!(
-                message.contains("missing field"),
-                "{name}: got {message:?}"
-            );
+            assert!(message.contains("missing field"), "{name}: got {message:?}");
         }
     }
 
@@ -1990,8 +2010,10 @@ mod tests {
             // The fixture must still be the request it was, plus one key —
             // otherwise a broken construction is what the assertion below
             // reports. This is the check the spliced spelling could not make.
-            let round_trip: serde_json::Value = serde_json::from_str(&with_extra)
-                .unwrap_or_else(|e| panic!("{name}: fixture is not valid JSON ({e}): {with_extra}"));
+            let round_trip: serde_json::Value =
+                serde_json::from_str(&with_extra).unwrap_or_else(|e| {
+                    panic!("{name}: fixture is not valid JSON ({e}): {with_extra}")
+                });
             let original: serde_json::Value = serde_json::from_str(&served).unwrap();
             for (field, want) in original.as_object().unwrap() {
                 assert_eq!(
@@ -2399,6 +2421,42 @@ mod tests {
     }
 
     #[test]
+    fn the_index_refusal_says_what_it_actually_refuses() {
+        // The message was factually wrong and is now factually narrow. `as_u64`
+        // refuses by SPELLING, not by value: `1e2` and `0.0` are both exactly
+        // whole non-negative numbers, and both are refused because serde parses
+        // them as `f64`. A message saying "must be a non-negative whole number"
+        // told such a caller its 100 was not a whole number.
+        //
+        // What is asserted here is the message for each of the four spellings
+        // that earn it, against a hardcoded literal — because the reason this
+        // was wrong for two years is that nothing read the message beside the
+        // input that produced it.
+        let log = log_with_body("hello");
+        let refused = "page must be a non-negative integer written without a \
+                       decimal point or exponent";
+        for form in [
+            // The two the old message described correctly.
+            r#""page":-1"#,
+            r#""page":1.5"#,
+            // The two it described wrongly: exactly 100, and exactly 0.
+            r#""page":1e2"#,
+            r#""page":0.0"#,
+        ] {
+            let out = list_threads(&feed_request(form), &log, &feed_genesis());
+            assert_eq!(error_message(&out), refused, "for {form}, got {out}");
+        }
+
+        // And the acceptance is UNCHANGED — the fix is the message, not the set.
+        // `100` is served, so this test cannot be satisfied by a function that
+        // refuses every number.
+        let served = list_threads(&feed_request(r#""page":100"#), &log, &feed_genesis());
+        let v: serde_json::Value = serde_json::from_str(&served).unwrap();
+        assert!(v.get("error").is_none(), "got {served}");
+        assert_eq!(v["page"], 100);
+    }
+
+    #[test]
     fn the_bypass_this_module_boundary_closes() {
         // NOT A TEST OF BEHAVIOUR, and said so plainly: this is the honest half
         // of the guarantee, because what it asserts cannot be asserted at
@@ -2471,7 +2529,9 @@ mod tests {
         // the refusal is one `_` arm, so an implementation that enumerated the
         // variants and forgot one would be caught here rather than only through
         // whichever handler happened to be swept.
-        for not_an_object in ["[]", "[1,2]", "7", "-1", "1.5", r#""s""#, "true", "false", "null"] {
+        for not_an_object in [
+            "[]", "[1,2]", "7", "-1", "1.5", r#""s""#, "true", "false", "null",
+        ] {
             assert_eq!(
                 err_of(Request::parse(not_an_object)),
                 Some(error_json(REQUEST_NOT_AN_OBJECT)),
@@ -2508,17 +2568,34 @@ mod tests {
         // rather than this test's inference: "A field holding an explicit `null`
         // is present, not absent", with three readings keyed to the field's
         // declared type and optionality. The envelope must therefore preserve the
-        // distinction and decide none of it — a `parse` that dropped nulls while
-        // building the map would take the choice away from all three readings at
-        // once, and `ping`'s `<any>` payload would lose the value it is
-        // documented to carry.
+        // distinction and decide none of it.
         //
-        // A mutation making `get` drop nulls (`.filter(|v| !v.is_null())`) passed
-        // 486 of 487 tests when this change was first written; the three readings
-        // are now pinned individually as well, in
-        // `pings_payload_carries_an_explicit_null_through_as_a_value`,
-        // `a_null_optional_field_takes_the_restrictive_default` and
-        // `a_null_required_field_is_refused_as_a_wrong_type_and_not_as_missing`.
+        // WHICH READERS ACTUALLY OBSERVE IT, corrected — an earlier version of
+        // this comment named `parse_index` and `includeHidden` as the two that
+        // "both distinguish them", and that is exactly backwards. Those two are
+        // the only readers that DON'T: reading 2 collapses a null into absent on
+        // purpose. Four of the seven production field reads in this file do
+        // distinguish, measured on both sides of a `get` mutated to drop nulls
+        // (`.filter(|v| !v.is_null())`):
+        //
+        //   {"payload":null}   {"pong":null}                -> missing field: payload
+        //   {"channelId":null} channelId must be a string    -> missing field: channelId
+        //   {"stoa":null}      stoa must be a string         -> missing field: stoa
+        //   {"genesis":null}   genesis must be a string      -> missing field: genesis
+        //
+        // `ping` flips from SUCCESS to error, which is a behaviour change and not
+        // a reworded message; the other three collapse the wrong-type-against-
+        // missing distinction this very contract requires. So the mutation
+        // surviving 486 of 487 tests was a gap in the handler sweeps, never
+        // evidence that nothing observes the difference — the inference this
+        // comment used to draw.
+        //
+        // All four are now pinned at handler level, one fixture each, in
+        // `pings_payload_carries_an_explicit_null_through_as_a_value` and
+        // `a_null_required_field_is_refused_as_a_wrong_type_and_not_as_missing`,
+        // with the collapsing pair in
+        // `a_null_optional_field_takes_the_restrictive_default`. Four independent
+        // kills rather than one test's word.
         assert_eq!(parsed.get("z"), Some(&serde_json::json!(null)));
         assert_eq!(parsed.get("o"), Some(&serde_json::json!({"k": [1]})));
 
