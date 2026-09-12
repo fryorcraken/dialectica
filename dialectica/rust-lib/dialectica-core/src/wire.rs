@@ -1803,6 +1803,27 @@ mod tests {
         }
     }
 
+    /// A served request with one extra key added, built through `serde_json`.
+    ///
+    /// The earlier spelling of this spliced text — `trim_end_matches('}')` then
+    /// append — was fragile to how a neighbouring fixture happened to be
+    /// written, and silently tested something else when it broke. Respelling
+    /// `a_served_request("ping")` from `{"payload":1}` to the equally valid
+    /// `{"payload":{"n":1}}` made `trim_end_matches` strip BOTH closing braces,
+    /// and the test then failed with `invalid JSON: EOF while parsing an object`
+    /// — reporting a refusal of the extra field that never happened. Parsing
+    /// into a `Map` and inserting cannot produce malformed JSON at all, so the
+    /// assertion is about the extra field and only about the extra field.
+    fn with_extra_field(served: &str, key: &str, value: serde_json::Value) -> String {
+        let mut map: serde_json::Map<String, serde_json::Value> = serde_json::from_str(served)
+            .unwrap_or_else(|e| panic!("a served fixture must be a JSON object ({e}): {served}"));
+        assert!(
+            map.insert(key.to_string(), value).is_none(),
+            "{key} is already a field of {served}, so adding it tests nothing"
+        );
+        serde_json::to_string(&map).expect("a Map always serialises")
+    }
+
     #[test]
     fn an_unrecognised_field_does_not_refuse_the_request() {
         // Out of scope by decision, not by omission — the proposal argues that
@@ -1810,10 +1831,25 @@ mod tests {
         // so tightening it later is a deliberate act that breaks a test.
         for (name, method) in every_request_taking_method() {
             let served = a_served_request(name);
-            let with_extra = format!(
-                r#"{}, "somethingNoMethodReads": {{"nested": [1,2,3]}}}}"#,
-                served.trim_end_matches('}')
+            let with_extra = with_extra_field(
+                &served,
+                "somethingNoMethodReads",
+                serde_json::json!({"nested": [1, 2, 3]}),
             );
+            // The fixture must still be the request it was, plus one key —
+            // otherwise a broken construction is what the assertion below
+            // reports. This is the check the spliced spelling could not make.
+            let round_trip: serde_json::Value = serde_json::from_str(&with_extra)
+                .unwrap_or_else(|e| panic!("{name}: fixture is not valid JSON ({e}): {with_extra}"));
+            let original: serde_json::Value = serde_json::from_str(&served).unwrap();
+            for (field, want) in original.as_object().unwrap() {
+                assert_eq!(
+                    round_trip.get(field),
+                    Some(want),
+                    "{name}: adding a field altered {field}"
+                );
+            }
+
             let out = method(&with_extra);
             let v: serde_json::Value = serde_json::from_str(&out).unwrap();
             assert!(
@@ -1857,15 +1893,54 @@ mod tests {
         fn err_of(r: Result<Request, String>) -> Option<String> {
             r.err()
         }
-        assert_eq!(
-            err_of(Request::parse("[]")),
-            Some(error_json(REQUEST_NOT_AN_OBJECT))
-        );
+        // Every non-object variant `serde_json::Value` has, not just the array:
+        // the refusal is one `_` arm, so an implementation that enumerated the
+        // variants and forgot one would be caught here rather than only through
+        // whichever handler happened to be swept.
+        for not_an_object in ["[]", "[1,2]", "7", "-1", "1.5", r#""s""#, "true", "false", "null"] {
+            assert_eq!(
+                err_of(Request::parse(not_an_object)),
+                Some(error_json(REQUEST_NOT_AN_OBJECT)),
+                "Request::parse accepted {not_an_object}"
+            );
+        }
         assert!(err_of(Request::parse("{}")).is_none());
         let unparseable = err_of(Request::parse("not json")).expect("must be refused");
         assert!(unparseable.contains("invalid JSON"), "got {unparseable}");
         // And the two failures are not the same failure.
         assert_ne!(unparseable, error_json(REQUEST_NOT_AN_OBJECT));
+    }
+
+    #[test]
+    fn a_parsed_request_hands_back_the_fields_it_was_given_and_only_those() {
+        // The OTHER way "read as an object in which every field is absent" can
+        // come back, and the one no handler test can see: `parse` accepting an
+        // object and then handing on an EMPTY map. Every envelope test above
+        // asserts on refusals, and `an_object_supplying_only_its_required_fields_is_served`
+        // asserts only that no error came back — so a `parse` that discarded the
+        // map would be caught by the feed's own content tests, but nothing would
+        // say the envelope was where it went wrong.
+        //
+        // The expected values are literals written here, not values read back
+        // out of the parse and compared with themselves.
+        let parsed = match Request::parse(r#"{"s":"x","n":7,"b":true,"z":null,"o":{"k":[1]}}"#) {
+            Ok(r) => r,
+            Err(e) => panic!("an object must parse: {e}"),
+        };
+        assert_eq!(parsed.get("s"), Some(&serde_json::json!("x")));
+        assert_eq!(parsed.get("n"), Some(&serde_json::json!(7)));
+        assert_eq!(parsed.get("b"), Some(&serde_json::json!(true)));
+        // An explicit `null` is PRESENT, and that is not the same as absent —
+        // `parse_index` and `includeHidden` both distinguish them, so a `parse`
+        // that dropped nulls while building the map would change their meaning.
+        assert_eq!(parsed.get("z"), Some(&serde_json::json!(null)));
+        assert_eq!(parsed.get("o"), Some(&serde_json::json!({"k": [1]})));
+
+        // And `None` means exactly one thing: this object has no such key. That
+        // is the ambiguity the type exists to remove, so it is asserted rather
+        // than assumed.
+        assert_eq!(parsed.get("neverSupplied"), None);
+        assert_eq!(Request::parse("{}").ok().unwrap().get("s"), None);
     }
 
     #[test]
@@ -1922,6 +1997,50 @@ mod tests {
                 "a refused request must not also carry a page of results: {out}"
             );
         }
+    }
+
+    #[test]
+    fn the_non_object_message_does_not_read_as_either_refusal_it_must_be_told_from() {
+        // Why this exists BESIDE the pin below, and is not the same test.
+        //
+        // `the_three_refusals_a_caller_can_earn_are_three_different_messages`
+        // compares whole strings with `assert_ne!`, and that is not the
+        // requirement. The spec says a caller must not be "told its array
+        // failed to parse" — and a message reading
+        // `"invalid JSON: the request must be a JSON object"` tells it exactly
+        // that while comparing unequal to the parse failure's own text. Checked
+        // by mutation: reworded to that, and to
+        // `"missing field: the request must be a JSON object"`, the three-refusals
+        // test stayed GREEN both times. Only the literal pin went red — and a
+        // pin fails for "the string changed", which is not the reason this
+        // requirement names.
+        //
+        // So the property is asserted directly: the non-object message must not
+        // BEGIN with the phrase either neighbour opens on. The two prefixes are
+        // written out here rather than read from the code, because reading them
+        // from the code is how a reword makes both sides agree and the check
+        // evaporate.
+        for neighbour in ["invalid JSON", "missing field"] {
+            assert!(
+                !REQUEST_NOT_AN_OBJECT.starts_with(neighbour),
+                "the non-object refusal opens on {neighbour:?}, which is how a \
+                 caller reads a different mistake: {REQUEST_NOT_AN_OBJECT:?}"
+            );
+        }
+
+        // And the two prefixes are the right ones to have written down: each is
+        // what the neighbouring refusal actually says. Without this the test
+        // above could be guarding against phrases no message uses.
+        assert!(
+            error_message(&ping("not json")).starts_with("invalid JSON"),
+            "the unparseable refusal no longer opens on \"invalid JSON\", so the \
+             prefix this test guards against is the wrong one"
+        );
+        assert!(
+            error_message(&ping("{}")).starts_with("missing field"),
+            "the missing-field refusal no longer opens on \"missing field\", so \
+             the prefix this test guards against is the wrong one"
+        );
     }
 
     #[test]
