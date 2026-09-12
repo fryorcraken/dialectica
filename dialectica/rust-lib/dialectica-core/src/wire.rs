@@ -315,7 +315,13 @@ pub fn list_threads<L: crate::log::OpLog>(
     log: &L,
     genesis: &crate::stoa::Genesis,
 ) -> String {
-    list_threads_inner(request, log, genesis)
+    guarded("list_threads", || {
+        let parsed = match Request::parse(request) {
+            Ok(r) => r,
+            Err(e) => return e,
+        };
+        list_threads_inner(&parsed, log, genesis)
+    })
 }
 
 /// Decode a genesis record from its hex form and check it names this Stoa.
@@ -376,83 +382,95 @@ pub fn genesis_for(
     Ok(genesis)
 }
 
+/// The feed read, from a request that is already parsed.
+///
+/// **Takes a `&Request` rather than a `&str`, and that is the fix to a double
+/// parse rather than a tidy-up.** `list_threads_from_request` parsed the request
+/// to read `stoa` and `genesis`, then handed the raw `&str` on to
+/// [`list_threads`], which parsed it again — two `Value` trees live at once, two
+/// nested `guarded` frames, one call. Harmless in output and not harmless in
+/// cost: it doubled the price of the very request-size lever
+/// [`MAX_REQUEST_BYTES`] exists to close, on the one path that already holds the
+/// larger of the two payloads.
+///
+/// The shape that prevents it recurring is the signature. A `&str` here is an
+/// invitation to parse; a `&Request` can only have come from a parse that already
+/// happened, so the second one is not merely discouraged but unspellable without
+/// widening this signature on purpose.
+///
+/// **No `guarded` frame of its own**, for the same reason: the two public entry
+/// points each carry one, and a third nested inside them would catch nothing
+/// either of them does not. `guarded` is idempotent, so the old nesting was
+/// harmless — but "two frames for one call" is the kind of thing that reads as
+/// intent and gets copied.
 fn list_threads_inner<L: crate::log::OpLog>(
-    request: &str,
+    parsed: &Request,
     log: &L,
     genesis: &crate::stoa::Genesis,
 ) -> String {
-    guarded("list_threads", || {
-        let parsed = match Request::parse(request) {
-            Ok(r) => r,
-            Err(e) => return e,
-        };
-
-        let stoa = match parsed.get("stoa") {
-            Some(serde_json::Value::String(s)) => match crate::identity::Address::from_hex(s) {
-                Ok(a) => a,
-                Err(e) => return error_json(&format!("stoa: {e}")),
-            },
-            Some(_) => return error_json("stoa must be a string"),
-            None => return error_json("missing field: stoa"),
-        };
-
-        // The Stoa asked for must be the one the genesis record names, or the
-        // moderator set being applied governs a different Stoa than the posts
-        // being filtered. That is check 3 of `moderation.rs`'s three, at the
-        // one place a caller could otherwise pair them wrongly.
-        let genesis_address = match genesis.address() {
+    let stoa = match parsed.get("stoa") {
+        Some(serde_json::Value::String(s)) => match crate::identity::Address::from_hex(s) {
             Ok(a) => a,
-            Err(e) => return error_json(&format!("genesis: {e}")),
-        };
-        if genesis_address != stoa {
-            return error_json(
-                "the genesis record does not describe the Stoa this feed was asked for",
-            );
-        }
+            Err(e) => return error_json(&format!("stoa: {e}")),
+        },
+        Some(_) => return error_json("stoa must be a string"),
+        None => return error_json("missing field: stoa"),
+    };
 
-        let moderators = match crate::moderation::Moderators::of(genesis) {
-            Ok(m) => m,
-            Err(e) => return error_json(&format!("genesis: {e}")),
-        };
+    // The Stoa asked for must be the one the genesis record names, or the
+    // moderator set being applied governs a different Stoa than the posts
+    // being filtered. That is check 3 of `moderation.rs`'s three, at the
+    // one place a caller could otherwise pair them wrongly.
+    let genesis_address = match genesis.address() {
+        Ok(a) => a,
+        Err(e) => return error_json(&format!("genesis: {e}")),
+    };
+    if genesis_address != stoa {
+        return error_json("the genesis record does not describe the Stoa this feed was asked for");
+    }
 
-        // A present-but-wrong-typed field is a different mistake from an absent
-        // one, and a negative or fractional page is neither — each is refused by
-        // name rather than coerced, because coercing would answer a question the
-        // caller did not ask.
-        let page = match parse_index(&parsed, "page") {
-            Ok(v) => v.unwrap_or(0),
-            Err(e) => return e,
-        };
-        let per_page = match parse_index(&parsed, "perPage") {
-            Ok(v) => crate::feed::clamp_per_page(v),
-            Err(e) => return e,
-        };
+    let moderators = match crate::moderation::Moderators::of(genesis) {
+        Ok(m) => m,
+        Err(e) => return error_json(&format!("genesis: {e}")),
+    };
 
-        // The contract's reading 2 again, and this is the field the contract
-        // names as its worked example: an optional flag whose `null` reads as
-        // absent BECAUSE `false` is the restrictive default. Hidden content stays
-        // excluded, so no caller reaches a wider answer by naming the field with
-        // no value.
-        //
-        // Flip the default to `true` and this arm becomes the authorisation
-        // bypass the contract's `SHALL NOT` forbids — the `null` would have to be
-        // refused as a wrong type instead. See `parse_index`'s doc for the full
-        // statement of the limit; it is one rule with two instances, not two
-        // local habits.
-        let include_hidden = match parsed.get("includeHidden") {
-            None | Some(serde_json::Value::Null) => false,
-            Some(serde_json::Value::Bool(b)) => *b,
-            Some(_) => return error_json("includeHidden must be a boolean"),
-        };
+    // A present-but-wrong-typed field is a different mistake from an absent
+    // one, and a negative or fractional page is neither — each is refused by
+    // name rather than coerced, because coercing would answer a question the
+    // caller did not ask.
+    let page = match parse_index(parsed, "page") {
+        Ok(v) => v.unwrap_or(0),
+        Err(e) => return e,
+    };
+    let per_page = match parse_index(parsed, "perPage") {
+        Ok(v) => crate::feed::clamp_per_page(v),
+        Err(e) => return e,
+    };
 
-        match crate::feed::list_threads(log, &moderators, &stoa, page, per_page, include_hidden) {
-            Ok(page) => feed_page_json(&page),
-            // §11.1 obligation 5: a storage failure is the error shape and NEVER
-            // an empty feed. The two mean opposite things and render identically
-            // if this arm is ever softened.
-            Err(e) => error_json(&e.to_string()),
-        }
-    })
+    // The contract's reading 2 again, and this is the field the contract
+    // names as its worked example: an optional flag whose `null` reads as
+    // absent BECAUSE `false` is the restrictive default. Hidden content stays
+    // excluded, so no caller reaches a wider answer by naming the field with
+    // no value.
+    //
+    // Flip the default to `true` and this arm becomes the authorisation
+    // bypass the contract's `SHALL NOT` forbids — the `null` would have to be
+    // refused as a wrong type instead. See `parse_index`'s doc for the full
+    // statement of the limit; it is one rule with two instances, not two
+    // local habits.
+    let include_hidden = match parsed.get("includeHidden") {
+        None | Some(serde_json::Value::Null) => false,
+        Some(serde_json::Value::Bool(b)) => *b,
+        Some(_) => return error_json("includeHidden must be a boolean"),
+    };
+
+    match crate::feed::list_threads(log, &moderators, &stoa, page, per_page, include_hidden) {
+        Ok(page) => feed_page_json(&page),
+        // §11.1 obligation 5: a storage failure is the error shape and NEVER
+        // an empty feed. The two mean opposite things and render identically
+        // if this arm is ever softened.
+        Err(e) => error_json(&e.to_string()),
+    }
 }
 
 /// The feed handler as the module actually calls it: genesis record included.
@@ -496,7 +514,12 @@ pub fn list_threads_from_request<L: crate::log::OpLog>(
             Ok(l) => l,
             Err(e) => return error_json(&e.to_string()),
         };
-        list_threads(request, &log, &genesis)
+        // The request this already holds, not the raw `&str` again. Handing the
+        // string to `list_threads` parsed it a second time — two `Value` trees
+        // live at once, two nested `guarded` frames, one call. The `&Request`
+        // signature on `list_threads_inner` is what makes the mistake
+        // unspellable rather than merely fixed.
+        list_threads_inner(&parsed, &log, &genesis)
     })
 }
 
@@ -2454,6 +2477,74 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&served).unwrap();
         assert!(v.get("error").is_none(), "got {served}");
         assert_eq!(v["page"], 100);
+    }
+
+    #[test]
+    fn the_feed_path_parses_its_request_once() {
+        // WHAT IS AND IS NOT ASSERTABLE HERE, said plainly.
+        //
+        // The double parse was: `list_threads_from_request` parsed the request to
+        // read `stoa` and `genesis`, then handed the raw `&str` to `list_threads`,
+        // which parsed it again. Both replies were identical, so NO assertion on
+        // output can see the difference — which is why it survived on main.
+        //
+        // What CAN be asserted is the type, and it is asserted by the compiler
+        // rather than by this test: `list_threads_inner` takes `&Request`, so
+        // there is no `&str` in scope for a second parse to consume. Reverting the
+        // signature to `&str` is what would let the bug back in, and that is a
+        // compile-visible change to a private function rather than something this
+        // test could catch.
+        //
+        // So this test's job is the narrower one the fix DID have to preserve:
+        // that moving the parse and removing a nested `guarded` frame changed no
+        // reply. Two entry points, three request shapes each, compared against
+        // each other — because the refactor's whole claim is that these agree.
+        let log = log_with_body("hello");
+        let genesis = feed_genesis();
+
+        for request in [
+            full_request(),
+            "[]".to_string(),
+            "not json".to_string(),
+            "{}".to_string(),
+            feed_request(r#""page":1"#),
+        ] {
+            let through_the_decoded_form = list_threads(&request, &log, &genesis);
+            let through_the_hex_form = list_threads_from_request(&request, || {
+                Ok::<_, crate::log::OpLogError>(log_with_body("hello"))
+            });
+
+            // Both must be JSON objects, and neither may be a doubled-up envelope
+            // — a nested `guarded` that caught something would show as an error
+            // naming `list_threads` twice.
+            for (which, out) in [
+                ("list_threads", &through_the_decoded_form),
+                ("list_threads_from_request", &through_the_hex_form),
+            ] {
+                let v: serde_json::Value = serde_json::from_str(out)
+                    .unwrap_or_else(|e| panic!("{which} for {request}: not JSON ({e}): {out}"));
+                assert!(v.is_object(), "{which} for {request}: {out}");
+                if let Some(message) = v.get("error").and_then(|e| e.as_str()) {
+                    assert_eq!(
+                        message.matches("panic in list_threads").count(),
+                        0,
+                        "{which} for {request}: a guard fired, so the frames are \
+                         not equivalent: {out}"
+                    );
+                }
+            }
+        }
+
+        // And the one case where the two entry points must agree exactly: a
+        // well-formed request. They read the same fields from the same request, so
+        // a divergence here means the parse that was removed was doing something.
+        assert_eq!(
+            list_threads(&full_request(), &log, &genesis),
+            list_threads_from_request(&full_request(), || Ok::<_, crate::log::OpLogError>(
+                log_with_body("hello")
+            )),
+            "the two entry points must serve the same request identically"
+        );
     }
 
     #[test]
