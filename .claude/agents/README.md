@@ -158,6 +158,42 @@ Leave it. It shrinks by attrition as changes touch each area.
 | `design-reviewer` | code, `design.md`, PLAN.md | findings |
 | `code-reviewer` | code | findings |
 
+## One piece of work is one branch and one PR
+
+Every stage of a change — spec, design, code, tests, and the fixes that come out
+of review — lands as **commits on one branch, under one pull request**. The PR
+accumulates: the spec commit, then the implementation, then the tests, then each
+routed fix.
+
+Agents may use their own worktrees and their own local branches; that is
+encouraged, and each reviewer that mutates code needs its own tree. What must
+not happen is a *stage* getting its own branch and its own PR.
+
+**Why: a reviewer must be able to see that the spec, the code and the tests in
+front of it belong together.** Stage-per-PR was tried here and produced a stack
+four deep — `spec/x` → `dev/x` → `test/x` → a spec-fix PR targeting the test
+branch — with a further fix branch beside it. Two consequences, both real:
+
+- Reviewers on the stoa change had to be *told* "the implementation is
+  byte-identical between these two branches, so review the union." That
+  assertion is the orchestrator's word. A reviewer cannot check it, and checking
+  exactly this is what a reviewer is for.
+- A spec reworded in the top PR of a stack changes what the tests three PRs down
+  ought to assert, and nobody reading either PR can see the other.
+
+**And `openspec archive` runs once, on merge.** Archive promotes the delta into
+`openspec/specs/`, so it must run against a spec and an implementation that
+provably shipped together. Split across four merges, the contract lands at a
+different time from the code that honours it — and a delta whose `MODIFIED`
+heading matches nothing applies nothing, **silently**, so there is no error to
+notice when they drift.
+
+The failure mode that produced the stack is worth naming, because it feels
+responsible: each stage looked like a reviewable unit, so each got a PR. But a
+stage is not a unit of *review* — the unit of review is a behaviour change with
+its contract and its tests attached. Splitting by stage optimises for the
+author's convenience at the reviewer's expense.
+
 **Two steps belong to whoever is running the change, not to any agent:**
 
 - **Acting on findings.** Every reviewer ends "findings only, do not fix". A
