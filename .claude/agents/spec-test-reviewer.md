@@ -116,6 +116,15 @@ Reasoning left in PLAN.md is the `design-reviewer`'s check, not yours.
 
 ## Output
 
-Findings only, do not fix. For each: file, line, what is wrong, a concrete
-failure scenario, and severity. Say plainly which areas were clean rather than
-padding the list. If you ran mutations, report which ones and what happened.
+**Findings only, do not fix.** Write them to
+`openspec/changes/<name>/findings/spec-test.md`. For each: file, line, what is
+wrong, a concrete failure scenario, and severity. Say plainly which areas were
+clean rather than padding the list. If you ran mutations, report which ones and
+what happened — a mutation that survived is the strongest finding you can write.
+
+**Then commit that one file** on `review/<name>/spec-test`, **tick your own row**
+in `tasks.md`'s stage block in the same commit, and **cherry-pick that commit onto
+the local `piece/<name>`**. Do not push — the runner does. Never `git add -A`.
+
+**Your final report is a pointer, not a copy** — the path, the entry count, and who
+each is for.

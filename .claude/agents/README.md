@@ -108,88 +108,77 @@ rather than merged shows here even though its content is in, so read the commits
 rather than the count. Say in the closing comment where the work went, and keep
 the branch.
 
-**A reviewer does not push.** It commits its findings file on its own
-`review/…` branch, then **cherry-picks that one commit onto the local
-`piece/<name>`** and stops. The runner pushes — it is already the role that checks
-the ticks and deletes the directory.
+**Only the runner pushes.** Every other agent commits on its own branch,
+cherry-picks that commit onto the local `piece/<name>`, and stops.
 
-Cherry-pick, not merge: one commit lands on the task branch, so its history reads
-as a flat sequence of findings and fixes rather than six merge commits carrying
-six branches. And with nobody but the runner pushing, there is no race to lose and
-no rebase to retry.
+Cherry-pick rather than merge, so the task branch reads as a flat sequence of
+findings and fixes rather than six merge commits carrying six branches. And with
+one pusher there is no race to lose, no rebase to retry, and no force-push to be
+tempted by. It also serialises the conflicts: two reviewers never write the same
+path, but two fixers on one piece routinely write the same file, and the runner is
+the one who can see both changes.
 
-**Commit only your own findings file** — never `git add -A`. Worktrees collect
-build output and a gitignored SDK symlink, and a reviewer that sweeps up a fixer's
-half-finished edit has corrupted the branch it was reviewing.
+**Never `git add -A`** — commit named paths. Worktrees collect build output and a
+gitignored SDK symlink, and sweeping up another agent's half-finished edit
+corrupts the branch you were working on.
 
 **Check `git branch -vv` before any git write** — a worktree created from a branch
 inherits that branch's upstream, and a bare `git push` has landed commits directly
 on `main` here more than once.
 
-**A fixer works the same way, and for a stronger reason.** Commit on
-`fix/<name>/<what>`, cherry-pick onto the local `piece/<name>`, do not push. Two
-reviewers never write the same path; two fixers on one piece routinely write the
-same file, so the runner serialising the cherry-picks is what keeps the conflict
-resolvable by someone who can see both changes.
+## Two files carry the state of a change
 
-## Findings go in `openspec/changes/<name>/findings/`
+Each agent's own file says what it writes. These are the shapes everyone needs to
+recognise, because everyone reads both.
 
-Written by the reviewer, ticked by the fixer, deleted before merge.
+**`tasks.md` opens with a stage block**, written once by `spec-writer` and unticked:
 
-**A reviewer's final report is a pointer, not a copy.** Write the findings to the
-file, then report only: the path, how many entries, and who each is for. The
-fixer reads the file; the runner reads the pointer and dispatches.
-
-Two reasons, and the second is why this is a rule rather than a preference:
-
-- A paraphrase arrives without the evidence that backed it. **Never relay a
-  finding through a brief** — name the file.
-- A report copied into the runner's context, then rewritten into the next brief,
-  occupies it twice. That is what crowds out the state a runner needs to keep,
-  and it is how a piece of work ends up with no agent on it.
-
-**One file per reviewer, named for what it reviewed.** Reviewers run in parallel
-in separate worktrees, so a shared file would be six writers on one path — which
-git resolves as a conflict, not a merge:
-
-```
-openspec/changes/<name>/findings/
-    correctness.md  security.md  readability.md  architecture.md
-    spec-test.md    design-review.md
+```markdown
+## Stages
+- [ ] spec — `spec-writer`
+- [ ] design + code — `dev-writer`
+- [ ] tests — `tester`
+- [ ] review: correctness — `code-reviewer`
+- [ ] review: security — `code-reviewer`
+- [ ] review: readability — `code-reviewer`
+- [ ] review: architecture — `code-reviewer`
+- [ ] review: spec-test — `spec-test-reviewer`
+- [ ] review: design — `design-reviewer`
+- [ ] findings all ticked, `findings/` deleted — runner
+- [ ] `openspec validate --strict`, then `archive` — runner
 ```
 
-(`design-review.md`, not `design.md` — the change already has one of those.)
+**One row per agent instance, not per role** — `code-reviewer` runs four times, so
+it gets four rows, each ticked by the instance that did it. Do not collapse them
+onto one line to save space: a shared checkbox is one nobody can tick truthfully,
+and all four instances would then edit the same line, which is the conflict
+one-row-per-agent exists to prevent.
 
-Each reviewer writes and commits its own file without coordinating. **Findings
-stay attributable**, which is what a rejection needs: a fixer that disagrees
-knows which reviewer to argue with, and the runner can send it back to that agent
-while it still holds its measurements.
+Each agent flips its own row and adds none, so concurrent cherry-picks never
+touch the same line. **An unticked row with no agent running is a stage nobody is
+doing** — that is the whole point, and without it this session took a piece to the
+edge of merge with zero reviewers and another missing four, neither visible until
+someone asked.
 
-Each entry carries: who it is for (`spec-writer`, `dev-writer` or `tester`), the
-defect, a failure scenario concrete enough to reproduce (inputs → wrong output,
-or the mutation that survives), `file:line`, and the measurement where there is
-one.
+**`findings/<dimension>.md`**, one file per reviewer — `correctness`, `security`,
+`readability`, `architecture`, `spec-test`, `design-review`. Written by the
+reviewer, ticked by whoever acts on each entry (**fixed** / **rejected, with the
+argument** / **deferred, and where to**), and deleted by the runner before merge
+once every entry is ticked.
 
-**The fixer ticks in the commit that addresses it**, so the claim and the change
-are one diff. Record one of three outcomes:
+Three consequences worth knowing whatever your role:
 
-- **Fixed** — the commit, and the test that fails without it.
-- **Rejected** — with the argument. Reviewers are wrong sometimes; a rejection is
-  a legitimate outcome, but argue it rather than closing it silently.
-- **Deferred** — and where it now lives. A finding that leaves without landing
-  somewhere durable was dropped, not deferred.
+- **An unticked entry blocks the merge.** A file, not a convention, so a forgotten
+  finding stops a PR instead of evaporating.
+- **Findings stay attributable**, which is what a rejection needs: a fixer that
+  disagrees knows which reviewer to argue with.
+- **Never relay a finding through a brief.** Name the file. A paraphrase arrives
+  without the evidence that backed it, and a report copied into the runner's
+  context and then rewritten into the next brief occupies it twice — which is what
+  crowds out the state the runner needs to keep.
 
-**An unticked entry blocks the merge.** That is why this is a file and not a
-convention — a forgotten finding now stops a PR instead of evaporating.
-
-**The runner deletes the directory**, as the last commit before merge, having
-checked every entry is ticked. Not the fixer: with several fixers across six
-files, "whoever finishes last" is an owner nobody is, and that is how a gate gets
-skipped. The runner is the one role that sees all six.
-
-**Move durable reasoning into `design.md` first.** "The creator key cannot
-moderate the Stoa it creates" is a recorded decision, not a task; the tracker is
-scaffolding, the reasoning is not.
+Durable reasoning moves into `design.md` before the tracker goes. The tracker is
+scaffolding; the reasoning is not.
 
 ### Handing over between agents
 
@@ -211,16 +200,11 @@ beside the decision it rules out.
 believe X" license different actions, and an agent given the second as the first
 will not re-check it.
 
-**Three steps belong to whoever is running the change, not to any agent:**
-
-- **Routing findings and launching the fixer.** Name the files in the brief and
-  let the agent read the reviewers' own words; the runner dispatches rather than
-  carries content. Re-run only the reviewers whose findings led to changes.
-- **Checking every entry is ticked, then deleting `findings/`** as the last
-  commit before merge.
-- **`openspec validate` and `openspec archive`.** Skip archive, or decline its
-  sync prompt, and the change ships with its spec never promoted. Do it once the
-  change is otherwise done, and take the sync.
+**The runner owns the last two stage rows, plus dispatching and pushing.**
+`tasks.md`'s stage block is the list — read it to see what is left, because an
+unticked row with no agent running is a stage nobody is doing. Dispatch by naming
+the findings files rather than carrying their content, and re-run only the
+reviewers whose findings led to changes.
 
 The reviewers run in parallel and ask different questions:
 

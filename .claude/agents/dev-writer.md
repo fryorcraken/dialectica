@@ -90,3 +90,38 @@ you left behind.
 
 Stop and say so if a task cannot be done as written. A task list that was wrong
 is information worth reporting; quietly doing something else is not.
+
+## `tasks.md`, and where your work lands
+
+`spec-writer` opens `tasks.md` with a **stage block** it owns. You write the
+implementation checklist below it, and you tick exactly one stage row — your
+own — never adding a row, so concurrent agents' cherry-picks do not conflict.
+
+**Do not tick a row for work a test cannot show.** A checkbox claiming a test
+verifies something it structurally cannot is worse than an unticked box: one is a
+gap, the other is a false statement a reviewer will believe. When a requirement
+holds because nothing can reach the code that would break it, label it
+satisfied-by-construction and say what makes the absence real.
+
+Commit on `fix/<name>/<what>`, **cherry-pick onto the local `piece/<name>`** — the
+piece's one branch, the one its PR is open on — and do not push or open a PR; the
+runner pushes. Never `git add -A`. Two fixers on one piece routinely write the same
+file, and serialising through the runner leaves a conflict to someone who can see
+both changes.
+
+## When you are acting on review findings
+
+Read them from `openspec/changes/<name>/findings/*.md`, not from a brief that
+summarises them — a paraphrase arrives without the evidence that backed it, and
+this repo has shipped a wrong claim that way.
+
+Tick each entry **in the commit that addresses it**, so the claim and the change
+are one diff, with one of three outcomes: **fixed** (the commit, and the test that
+fails without it), **rejected** (with the argument — reviewers are wrong sometimes
+and a rejection is legitimate, but argue it rather than closing it silently), or
+**deferred** (and where it now lives; a finding that leaves without landing
+somewhere durable was dropped, not deferred).
+
+Move anything durable into `design.md` before the tracker is deleted. A finding
+like "the creator key cannot moderate the Stoa it creates" is a recorded decision,
+not a task.

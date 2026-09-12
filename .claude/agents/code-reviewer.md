@@ -91,7 +91,33 @@ Judge against CLAUDE.md's own principles rather than generic taste:
 
 ## Output
 
-Findings only, do not fix. For each: file, line, what is wrong, a concrete
-failure scenario, and severity. Separate genuine defects from stylistic
-preferences and say which is which. Say plainly which areas were clean rather
-than padding the list. If you mutated the tree, restore it and confirm you did.
+**Findings only, do not fix.** You are launched once per dimension — correctness,
+security, readability or architecture — and the prompt names which. Stay in that
+lane; another instance holds each of the others.
+
+If the prompt gives you **more than one** dimension (a small change can take one
+instance for all four), write one findings file per dimension you were given and
+tick each of those rows. Say in your report which dimensions you covered, so an
+unticked row still means nobody has done it.
+
+Write your findings to
+`openspec/changes/<name>/findings/<your-dimension>.md`. For each: file, line, what
+is wrong, a concrete failure scenario, severity, and the measurement where you
+have one — "486 of 487 tests pass under this mutation" is checkable, "this looks
+under-tested" is not. Separate genuine defects from stylistic preferences and say
+which is which. Say plainly which areas were clean rather than padding the list.
+
+**Then commit that one file** on `review/<name>/<your-dimension>`, and in the same
+commit **tick the one stage row that names your dimension** — `tasks.md` carries
+four `code-reviewer` rows, one per dimension, and yours is the only one you may
+touch. Then **cherry-pick that commit onto the local `piece/<name>`**. Do not
+push — the runner does. Never `git add -A`: a worktree collects build output and a
+gitignored SDK symlink, and sweeping up a fixer's half-finished edit corrupts the
+branch you were reviewing.
+
+**Your final report is a pointer, not a copy** — the file path, how many entries,
+and who each is for. The fixer reads the file; copying the findings into your
+report puts them in the runner's context twice and crowds out what it needs to
+track.
+
+If you mutated the tree, restore it and confirm you did.

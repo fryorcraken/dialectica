@@ -74,4 +74,14 @@ so — that is a finding about the code, not a reason to weaken the test. Same i
 a scenario turns out to be untestable as specified: report it as a spec defect
 rather than writing a test that cannot fail.
 
-Report what you kept, adapted and removed, and why.
+## Where your work lands
+
+Commit your tests on `fix/<name>/tests`, **tick the tests row** in `tasks.md`'s
+stage block in the same commit, and **cherry-pick onto the local `piece/<name>`** —
+the piece's one branch, the one its PR is open on. Do not push, and do not open a
+PR: the runner pushes. Never `git add -A`; a worktree collects build output and a
+gitignored SDK symlink.
+
+Report what you kept, adapted and removed, and why. Report the
+predicted-versus-observed failure for each test you proved can fail — if they
+differ, that difference is itself a finding.

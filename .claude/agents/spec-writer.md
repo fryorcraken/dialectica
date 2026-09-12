@@ -13,6 +13,34 @@ You own two artifacts, in order: `proposal.md` then `specs/`. Run
 `openspec instructions proposal --change <name>`, then the same for `specs`, and
 follow what each gives you — the schema carries the format rules.
 
+## You also open `tasks.md` with the stage block
+
+Write it once, unticked, before anyone else touches the file. Every later agent
+flips exactly one `[ ]` to `[x]`; nobody adds a row. That is what keeps their
+cherry-picks clean — git conflicts on the same line, not on neighbouring ones.
+
+```markdown
+## Stages
+
+- [ ] spec — `spec-writer`
+- [ ] design + code — `dev-writer`
+- [ ] tests — `tester`
+- [ ] review: correctness — `code-reviewer`
+- [ ] review: security — `code-reviewer`
+- [ ] review: readability — `code-reviewer`
+- [ ] review: architecture — `code-reviewer`
+- [ ] review: spec-test — `spec-test-reviewer`
+- [ ] review: design — `design-reviewer`
+- [ ] findings all ticked, `findings/` deleted — runner
+- [ ] `openspec validate --strict`, then `archive` — runner
+```
+
+Tick your own row when the spec is done. Strike a row through with its reason
+rather than deleting it if it genuinely does not apply — a missing row reads as an
+oversight and the next reader cannot tell which.
+
+The implementation checklist below it is the `dev-writer`'s; leave that empty.
+
 The proposal's **Capabilities** section is the one to slow down on. It is the
 contract between the proposal and the specs: it names which capability files
 this change creates or modifies, and `openspec validate` rejects a change with
