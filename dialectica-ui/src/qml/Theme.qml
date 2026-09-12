@@ -9,7 +9,7 @@ QtObject {
     readonly property color field:     "#f7f3ea"   // inset panels, inputs
 
     // ---- interface inks: three, and only three --------------------------
-    // Three for the INTERFACE. The mark has its own eight-ink palette below,
+    // Three for the INTERFACE. The mark has its own seven-ink palette below,
     // and the two are deliberately separate scopes.
     readonly property color ink:       "#26231d"
     readonly property color inkSoft:   "#3a362e"
@@ -18,7 +18,7 @@ QtObject {
     readonly property color accent:    "#a33a2b"   // red: caveats, destructive, apparatus rules
     readonly property color accent2:   "#4a6b74"   // teal: second fill ink, secondary marks
 
-    // ---- mark inks: SIX, and they are NOT the interface palette ----------
+    // ---- mark inks: SEVEN, and they are NOT the interface palette --------
     // The identicon's palette has a different job from the interface's, so it
     // is scoped separately. See docs/IDENTICON.md for the derivation.
     //
@@ -33,14 +33,18 @@ QtObject {
     // inside a just-noticeable difference and manufacture parameter states
     // nobody can tell apart.
     //
-    // The ordering is a LIGHTNESS LADDER (L 0.219 -> 0.811), and that shape is
-    // forced rather than aesthetic. Under deuteranopia and protanopia the
-    // red/green axis collapses, so two inks separated only by hue become one
-    // colour; what dichromats retain is lightness and the blue/yellow axis.
-    // Spacing the ladder is therefore what makes the palette work for the ~8%
-    // of men with a colour vision deficiency, and it is why the set is six
-    // rather than eight: a usable lightness range on this paper does not hold
-    // eight rungs at the floor below.
+    // Under deuteranopia and protanopia the red/green axis collapses, so two
+    // inks separated only by hue become one colour. What dichromats retain is
+    // LIGHTNESS and the BLUE/YELLOW axis, and both are load-bearing here — an
+    // earlier version of this comment claimed lightness alone was, and that was
+    // wrong in a way that cost an ink. markIndigo/markRust separate at delta-L of
+    // just 0.025 and still clear the floor, entirely on surviving blue/yellow
+    // chroma. So the binding constraint is not a lightness budget; it is how much
+    // separation the blue/yellow axis still has left once hue is gone.
+    //
+    // The ordering is still roughly a lightness ladder because that is the
+    // easiest separation to reason about, but do not treat it as a rule that
+    // caps the count.
     //
     // LIGHTNESS DOES THE SEPARATING, CHROMA DOES THE DAMAGE. These are
     // different axes, and holding L while cutting C is what lets the palette be
@@ -55,22 +59,33 @@ QtObject {
     // fluorescence: the C 0.169 rung was far from every other ink and still
     // wrong on the page.
     //
-    //   pair separation  >= 0.10   worst 0.151 normal, 0.108 simulated
-    //   contrast v paper >= 0.20   worst 0.205 (markSky)
+    //   pair separation  >= 0.10   worst 0.147 normal, 0.108 simulated
+    //   contrast v paper >= 0.20   worst 0.205 (markSage)
     //   chroma at high L <  0.09   worst 0.094 (markRust, at L 0.40)
     //
-    // The three together are a tight squeeze and that is worth knowing before
-    // retuning: paper contrast caps ink lightness near 0.74, so the usable band
-    // is about 0.17-0.74, and six inks need five gaps of ~0.10 inside it. There
-    // is very little slack. Adding a seventh ink is not a free change.
+    // markSteel carries C 0.111, above that third threshold's number but at
+    // L 0.480 — the fluorescence case is high chroma at HIGH lightness, so the
+    // check is conditional on L and this is not an exception to it.
     //
-    // The instrument is tmp/render/tst_palette.qml, which self-tests against
-    // #808080 -> L 0.5998 before reporting, because an earlier hand-computed
-    // version of this table shipped a pair at 0.006 while claiming 0.100.
+    // SEVEN, and eight does not fit. An eighth ink was measured (#8c4a72) and
+    // gave 0.045 and 0.066 against two existing rungs; an independent reviewer
+    // searching separately found no passing eight either. Seven is not a budget
+    // ceiling, though: markSteel was added without moving any other ink, and the
+    // simulated floor did not change, because the binding pair was never the
+    // new one.
+    //
+    // The instrument is tmp/render/tst_palette.qml. It ASSERTS #808080 -> L
+    // 0.5998 (and black -> 0, white -> 1) in its own test function, so a broken
+    // transfer function fails the run rather than printing a wrong number
+    // quietly. That matters because an earlier hand-computed version of this
+    // table shipped a pair at 0.006 while claiming 0.100 — and because the first
+    // version of the self-test only PRINTED the value and asserted nothing,
+    // which made it exactly as silent on a mismatch as on a match.
     readonly property color markInk:     "#100f0c"   // L 0.17
     readonly property color markIndigo:  "#2b3062"   // L 0.33
     readonly property color markRust:    "#71321f"   // L 0.40
     readonly property color markGreen:   "#42744f"   // L 0.51
+    readonly property color markSteel:   "#2a5f9a"   // L 0.48
     readonly property color markLavender: "#7c80a0"  // L 0.61
     readonly property color markSage:    "#aeab84"   // L 0.73
 

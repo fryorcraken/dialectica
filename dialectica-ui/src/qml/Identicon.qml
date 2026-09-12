@@ -57,17 +57,23 @@ Canvas {
     // deficiency: under deuteranopia and protanopia the red/green axis
     // collapses, so inks separated only by hue become one colour.
     //
-    // Measured minimum pairwise OKLab distance is 0.151 in normal vision and
+    // Measured minimum pairwise OKLab distance is 0.147 in normal vision and
     // 0.108 under simulated dichromacy, with every ink also held above 0.20
-    // contrast against the paper and below 0.09 chroma so none reads as
-    // fluorescent. Six rather than eight is the honest consequence of holding
-    // all three at once — see docs/IDENTICON.md.
+    // contrast against the paper and clear of the fluorescence case (high chroma
+    // at high lightness). Seven, because an eighth measured 0.045 against an
+    // existing rung — see docs/IDENTICON.md.
     //
-    // The values are frozen constants in Theme, not tunable tokens: editing one
-    // changes every identity's mark and makes two app versions disagree.
+    // ORDER IS PART OF THE CONTRACT. These indices decide what every identity
+    // looks like, so inserting, removing or reordering an entry changes every
+    // mark in the system and makes two app versions disagree about the same
+    // person. tst_identicon.qml pins the indexing for exactly this reason: a
+    // rotation applied consistently across all three selectors is otherwise
+    // invisible to a distinctness test.
+    //
+    // The values are frozen constants in Theme, not tunable tokens.
     readonly property var inks: [
-        Theme.markInk, Theme.markIndigo, Theme.markRust,
-        Theme.markGreen, Theme.markLavender, Theme.markSage
+        Theme.markInk, Theme.markIndigo, Theme.markRust, Theme.markGreen,
+        Theme.markSteel, Theme.markLavender, Theme.markSage
     ]
 
     // ---- address bytes --------------------------------------------------
@@ -106,25 +112,25 @@ Canvas {
     // Each is derived by an OFFSET from the previous rather than an independent
     // draw, which is what guarantees distinctness by construction instead of by
     // a guard that has to be right at every call site. An earlier version drew
-    // the outline independently, so 1 mark in 8 had ring and ground the same
-    // colour and no visible contour at all — the outline silently vanished on
-    // 12% of identities.
-    function _inkA() { return inks[_byte(14) % 6]; }
+    // the outline independently, so one mark in seven had ring and ground the
+    // same colour and no visible contour at all — the outline silently vanished
+    // on ~14% of identities.
+    function _inkA() { return inks[_byte(14) % 7]; }
     function _inkB() {
-        var i = _byte(14) % 6;
-        var j = _byte(15) % 5;          // 0..4, so the offset is never 0 mod 6
-        return inks[(i + 1 + j) % 6];   // never equal to A
+        var i = _byte(14) % 7;
+        var j = _byte(15) % 6;          // 0..5, so the offset is never 0 mod 7
+        return inks[(i + 1 + j) % 7];   // never equal to A
     }
     function _outlineInk() {
-        var i = _byte(14) % 6;
-        var j = _byte(15) % 5;
-        var b = (i + 1 + j) % 6;        // B's index
+        var i = _byte(14) % 7;
+        var j = _byte(15) % 6;
+        var b = (i + 1 + j) % 7;        // B's index
         // Walk forward from B by an offset that skips A, so all three differ.
-        var k = _byte(13) % 4;          // 0..3
+        var k = _byte(13) % 5;          // 0..4
         var c = b;
         for (var step = 0; step <= k; step++) {
-            c = (c + 1) % 6;
-            if (c === i) c = (c + 1) % 6;   // never A
+            c = (c + 1) % 7;
+            if (c === i) c = (c + 1) % 7;   // never A
         }
         return inks[c];
     }

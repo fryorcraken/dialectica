@@ -30,19 +30,30 @@ These get conflated, so they are separated here deliberately.
 | | before | after |
 |---|---|---|
 | **bytes consumed** | 6 (bytes 0..5) | 8 (bytes 12..19) |
-| **perceptually distinct marks** | ~1,700 | ~8,900 |
-| **combined with the generated name** | ~2^36 | ~2^38 |
+| **perceptually distinct marks** | ~1,700 | ~12,400 |
+| **combined with the generated name** | ~2^36 | ~2^38.6 |
 
-> **These numbers were wrong in an earlier revision of this note and the
-> corrections are recorded in place rather than quietly replaced.** The claimed
-> figures were 20 bytes, ~66,000 marks and a 0.080 colour floor. All three were
-> wrong: the code reads 8 bytes not 20, the outline factor was counted at full
-> cardinality after being described as barely legible, and the colour floor was
-> hand-computed with a gamma error that hid a pair measuring **0.006** under
-> simulated protanopia — a pair that would have shipped as one colour for ~8% of
-> male readers. Every figure below is now computed in the target engine by
-> `dialectica-ui/tests/tst_identicon.qml` and `tmp/render/tst_palette.qml`
-> rather than by hand.
+> **Several figures in earlier revisions of this note were wrong, and the
+> corrections are recorded in place rather than quietly replaced.** Two rounds of
+> independent review found:
+>
+> - **20 bytes** claimed, **8** actually read (12..19) — the code never read more.
+> - **~66,000 marks** claimed, from counting the outline at full cardinality after
+>   describing the same ring as barely legible at feed size.
+> - **a 0.080 colour floor** claimed, hand-computed with a gamma error that hid a
+>   pair measuring **0.006** under simulated protanopia — one colour for ~8% of
+>   male readers.
+> - **"six inks is forced"** claimed, from a lightness-budget argument that this
+>   palette violates twice and still clears the floor. **Seven fits**, and the
+>   wrong argument cost an ink.
+> - **a self-test that asserted nothing**, printing its value into a report while
+>   the code claimed it gated one.
+>
+> Every figure below is now computed in the target engine by
+> `dialectica-ui/tests/tst_identicon.qml` and `tmp/render/tst_palette.qml`, and the
+> palette instrument asserts a known reference value before its numbers are used.
+> **The pattern in every one of these errors is the same: a plausible argument
+> standing in for a measurement.**
 
 **Only the middle row is what a human collides on.** Reading more bytes into
 unchanged dimensions yields exactly as many distinguishable marks as reading
@@ -117,7 +128,7 @@ The rule applied throughout: **a dimension earns its place only if a reader can
 separate its values at 19px.** Two additions were tried and rejected on that
 test; they are recorded below rather than quietly dropped.
 
-### 1. Six inks, hand-picked and measured (3 → 6)
+### 1. Seven inks, hand-picked and measured (3 → 7)
 
 The largest win, and the right place to spend the budget: colour is the dimension
 the eye separates fastest and the one that survives shrinking, where fine
@@ -146,23 +157,29 @@ choice; it is what makes the set work at all:
 | `markInk` | `#100f0c` | 0.168 | 0.006 | 0.767 |
 | `markIndigo` | `#2b3062` | 0.333 | 0.087 | 0.612 |
 | `markRust` | `#71321f` | 0.399 | 0.094 | 0.543 |
+| `markSteel` | `#2a5f9a` | 0.480 | 0.111 | 0.473 |
 | `markGreen` | `#42744f` | 0.513 | 0.080 | 0.429 |
 | `markLavender` | `#7c80a0` | 0.608 | 0.049 | 0.334 |
 | `markSage` | `#aeab84` | 0.734 | 0.054 | 0.205 |
 
-**Three constraints, all measured, all satisfied:**
+**Constraints, all measured, all satisfied:**
 
 | constraint | threshold | worst | where |
 |---|---|---|---|
-| pair separation, normal | ≥ 0.10 | **0.151** | Green/Lavender |
+| pair separation, normal | ≥ 0.10 | **0.147** | Lavender/Steel |
 | pair separation, simulated | ≥ 0.10 | **0.108** | Indigo/Rust |
 | contrast against paper | ≥ 0.20 | **0.205** | Sage |
-| chroma (fluorescence) | < 0.09 at high L | **0.094** | Rust, at L 0.40 |
+| chroma at high lightness | < 0.09 above L 0.60 | **0.054** | Sage |
+
+`markSteel` carries C 0.111, which is above the bare number in the last row but
+sits at **L 0.480**. The fluorescent case is high chroma at *high lightness*, so
+the check is conditional on L and this is not an exception being waved through —
+the two rungs above L 0.60 measure 0.049 and 0.054.
 
 #### The instrument had a gap, and it is closed
 
 **A palette measured only against itself can be fluorescent and still pass.** The
-first six-ink set cleared every ink-to-ink distance comfortably and still looked
+first muted set cleared every ink-to-ink distance comfortably and still looked
 wrong on the page: one rung sat at C 0.169 / L 0.720 and read as a highlighter
 against the warm off-white ground. The matrix could not see it, because
 fluorescence is a relationship between an ink and the *paper*, not between two
@@ -194,43 +211,80 @@ axis doing the work, pulls pairs back under the floor, and re-creates the defect
 the ladder exists to prevent. Two intermediate attempts did exactly this and are
 recorded below.
 
-#### The three constraints are a tight squeeze
+#### What actually constrains the count
 
-Worth knowing before anyone retunes. Paper contrast caps ink lightness at about
-**0.74**; the darkest usable rung is about **0.17**. That is a band of ~0.57, and
-six inks need five gaps of ~0.10 inside it — so there is very little slack, and
-the final set only fits because the lower four rungs were darkened to buy headroom
-at the top.
+Paper contrast does cap ink lightness at about **0.74**, and the darkest usable
+rung is about **0.17**. But as the previous section shows, that band is *not* a
+budget that divides by 0.10 to give a maximum ink count — two shipped pairs sit far
+inside it and separate on blue/yellow chroma instead.
 
-**Adding a seventh ink is therefore not a free change.** It would need either a
-lower floor, a darker ground, or an accepted fluorescent rung.
+So the honest statement is narrower than the one this note used to make:
 
-#### Why six and not eight
+- **Lightness is the easiest separation to reason about**, which is why the set is
+  ordered as a ladder and why darkening the lower rungs bought room at the top.
+- **It is not the only one available**, and assuming it was cost an ink.
+- **The count is bounded by something harder to characterise** — the remaining
+  separation on the blue/yellow axis after red/green collapses. That is why the
+  boundary between seven and eight had to be found by measurement rather than
+  derived.
 
-**Because eight could not hold the floor.** Every candidate eight-ink set left at
-least one pair under 0.10 simulated, and the mechanism is arithmetic rather than
-bad luck: after hue collapse, separation is dominated by ΔL, so eight rungs need
-ΔL ≈ 0.10 between neighbours — about 0.70 of lightness range. Pushing the top
-rung that high puts it near white, where it stops reading as an *ink* on
-`#efe9dc` paper. Six rungs fit; eight do not.
+**The practical rule for anyone retuning: measure, do not reason from a budget.**
+`tst_palette.qml` is fast, and the argument that felt airtight here was wrong.
 
-Candidates tried and rejected, with their worst simulated pair:
+#### Why seven, and what the real constraint is
 
-| set | worst simulated pair | verdict |
-|---|---|---|
-| the original eight | **0.006** Moss/Rust (protanopia) | two colours for 92% of readers, one for the rest |
-| 8, saturated ladder | 0.047 Indigo/Plum | under floor |
-| 8, even L spacing | 0.087 Stone/Ochre | under floor, and top rung near white |
-| 7 | 0.098 Plum/Rust | at the line, not over it |
-| 6, saturated | 0.109 Rust/Green | above floor, but **fluorescent** at C 0.169 |
-| 6, desaturated in place | 0.084 Lime/Sky | fixed the tone, **collapsed the ΔL gap** |
-| 6, reordered | 0.069 Green/Lime | worse — moved the wrong rung |
-| **6, low chroma + darkened base** | **0.108** Indigo/Rust | **ships** — all three constraints clear |
+An earlier revision of this note said **six**, and justified it with a lightness
+budget: *after hue collapse separation is dominated by ΔL, so N inks need N−1 gaps
+of ~0.10 L, and eight rungs need ~0.70 of range which pushes the top rung near
+white.* **That argument is false, and it is false on this very palette.**
 
-The two middle failures are the instructive ones: desaturating *and* letting the
-lightness drift is what breaks it. Chroma is close to free; **lightness is not.**
+Measured against lightness-only components under protanopia:
 
-**An honest six beats a claimed eight where two are the same colour.**
+| pair | full distance | ΔL alone | ratio |
+|---|---|---|---|
+| Indigo/Rust | 0.108 | 0.025 | **4.3** |
+| Lavender/Steel | 0.157 | 0.037 | **4.2** |
+
+Two shipped pairs separate almost entirely on **surviving blue/yellow chroma**, at
+ΔL far below the supposed requirement, and they clear the floor comfortably. So a
+lightness budget is not the operative constraint — the palette violates it twice
+and works. The real constraint is **how much separation the blue/yellow axis still
+has available** once red/green is gone, which is a much less tractable quantity and
+does not reduce to counting rungs.
+
+Acting on that: **a seventh ink fits, added without moving any other rung.**
+`markSteel #2a5f9a` slots in at L 0.480 and the simulated floor does not change at
+all (0.108, still Indigo/Rust) — the new ink was never the binding pair. That is a
+seventh of the ink space recovered for one added colour, and it was available the
+whole time behind a wrong argument.
+
+**Eight still does not fit**, but now as a measured result rather than a derived
+one: `#8c4a72` gave Green/Plum **0.045** and Steel/Plum **0.066**. An independent
+reviewer searching separately also found no passing eight, their best being 0.037.
+So the conclusion "eight is out" survives; the reasoning that produced it did not.
+
+Candidates tried and rejected, **with hexes**, so anyone can re-derive these:
+
+| set | added / changed | worst simulated | verdict |
+|---|---|---|---|
+| original 8 | `#2f5233` + `#a33a2b` | **0.006** Moss/Rust | one colour for ~8% of readers |
+| 8, saturated ladder | `#37407e` + `#8a4479` | 0.047 Indigo/Plum | under floor |
+| 8, even L spacing | `#8f8d84` + `#c98a2e` | 0.087 Stone/Ochre | under floor, top rung near white |
+| 7, first attempt | `#8a4479` + `#8a3a1c` | 0.098 Plum/Rust | at the line, not over — **one unlucky candidate, not a bound** |
+| 6, saturated | `#8fb520` at C 0.169 | 0.109 Rust/Green | above floor but **fluorescent** |
+| 6, desaturated in place | `#96a86e`, `#6f9fb8` | 0.084 Lime/Sky | fixed the tone, **collapsed the ΔL gap** |
+| 6, reordered | `#5d7f96`, `#adb98c` | 0.069 Green/Lime | worse — moved the wrong rung |
+| 6, low chroma + dark base | `#100f0c`…`#aeab84` | 0.108 Indigo/Rust | clears, but leaves an ink on the table |
+| **7, + Steel** | `#2a5f9a` | **0.108** Indigo/Rust | **ships** |
+| 8, + Plum | `#8c4a72` | 0.045 Green/Plum | under floor |
+
+Two lessons worth keeping. The middle failures show that desaturating *and*
+letting lightness drift is what breaks a set — chroma is close to free, lightness
+is not. And the "7, first attempt" row shows how a single failed candidate became
+a false general claim: **one measurement is not a bound.**
+
+**An honest seven beats a claimed eight where two are the same colour** — and it
+also beats an over-cautious six, which is the other half of the lesson.
 
 #### How the earlier figures went wrong
 
@@ -253,13 +307,18 @@ Two further hand-computed claims were also wrong and are withdrawn:
   judgement that two greens at similar lightness read as one green, but that is a
   judgement and is now stated as one rather than dressed as a measurement.
 
-The lesson is recorded in the instrument rather than in prose: the palette is now
-measured by `tmp/render/tst_palette.qml`, which **self-tests against
-`#808080` → L 0.5998 before reporting anything.** A pipeline that cannot
+The lesson is recorded in the instrument rather than in prose: the palette is
+measured by `tmp/render/tst_palette.qml`, which **asserts** `#808080` → L 0.5998
+(plus black → 0 and white → 1) in its own test function. A pipeline that cannot
 reproduce a known value is not trusted to produce unknown ones.
 
-**An honest 6 beats a claimed 8 where two are the same colour**, so the number
-reported is 6.
+**That assertion was itself a false green for one revision**, which is worth
+recording because it is the same shape as everything else in this section: the
+check concatenated the measured value into a printed report and asserted *nothing*,
+so a mismatch would have been exactly as silent as a match — while `Theme.qml`
+claimed it "self-tests before reporting". A guard that cannot fail is not a guard,
+and this one was holding up the credibility of every number here. It is now a real
+`fuzzyCompare` that fails the run.
 
 #### All three inks are now distinct by construction
 
@@ -278,7 +337,7 @@ that has to be right at every call site. `tst_identicon.qml` asserts it across a
 sweep of byte values, and that test was watched failing against the old
 independent draw before the fix went in.
 
-With six inks: A has 6 choices, B has 5 (never A), the outline has 4 (never A or
+With seven inks: A has 7 choices, B has 6 (never A), the outline has 5 (never A or
 B). That is the ink contribution, before the deflation the next section applies to
 the outline.
 
@@ -355,9 +414,15 @@ family, which is why it is perceptually independent of both angle and pitch.
 
 The dot lattice is a staggered grid — every other row offset by half a period,
 so it reads as a texture rather than as two crossed band families. Its dots are
-**square, not round**, deliberately: at 19px a radius-1 arc rasterises to an
-ambiguous 2x2 smudge, whereas a `fillRect` is exactly two pixels wide on every
-renderer, which is also what keeps it pixel-identical across peers.
+**square, not round**, because at 19px a radius-1 arc rasterises to an ambiguous
+smudge while a small `fillRect` keeps a legible edge.
+
+That is a **legibility** choice, not a determinism one. The lattice is rotated by
+a non-multiple of 90 degrees for 11 of the 12 angles, so a rect's boundary
+coverage is as much an antialiasing detail as an arc's would be. (An earlier
+revision of this note claimed the square dot kept the mark "pixel-identical
+across peers", which contradicts the determinism section below and the code's own
+comment. The demotion landed in the code and was missed here.)
 
 #### A concentric-ring variant was tried here and removed
 
@@ -402,13 +467,18 @@ ink B regardless of where the mark's centre falls.
 | dimension | parameter values | counted at 19px | why deflated |
 |---|---|---|---|
 | form | 11 | **10** | pentagon/hexagon merge |
-| ink A | 6 | **6** | the ground fills the face; fully legible |
-| ink B | 5 | **5** | never A; covers 30–62% of the face |
-| outline ink | 4 | **2** | see below — a 2px ring is barely legible at 19px |
+| ink A | 7 | **7** | the ground fills the face; fully legible |
+| ink B | 6 | **6** | never A; covers 30–62% of the face |
+| outline ink | 5 | **2** | see below — a 2px ring is barely legible at 19px |
 | weave kind | 3 | **3** | topologically different fills |
 | duty | 3 | **3** | thin-B vs thick-B is a clear read |
-| angle | 12 | ~2 | see below |
-| pitch | 4 | ~2 | see below |
+| angle | 12 | — | folded into the 1.64x factor below |
+| pitch | 4 | — | folded into the 1.64x factor below |
+
+**Angle and pitch are not given separate counted values**, because an earlier
+revision listed them as ~2 each (product 4) while the narrative applied a combined
+factor of 1.64, so the table did not derive the headline. The 1.64 is the figure
+used; the table now says so rather than implying a different one.
 
 **The outline is deflated, and this corrects an inconsistency review caught.**
 The "before" count in this note rates the outline ring "legible at 40px and
@@ -423,7 +493,7 @@ ladder reads as roughly *dark ring* versus *light ring*, so it is counted as **2
 is about 15px. Twelve 15-degree steps do not give twelve readable orientations on
 a field that narrow — near 0 and 90 degrees they read as "horizontal" or
 "vertical" with a pixel of stair-stepping — and pitch 4 versus 6 is about one
-pixel of bar width. Together they contribute perhaps a factor of **4** at feed
+pixel of bar width. Together they contribute a factor of about **1.64** at feed
 size, not 48. They earn their place at 40px, where they separate properly.
 
 All three weave kinds are now rotatable periodic fields, so angle and pitch apply
@@ -432,15 +502,15 @@ rings variant existed, which needed per-kind arithmetic — another small argume
 for having removed it.)
 
 **Raw parameter product:** form x A x B x outline x weave x duty x angle x pitch
-= 11 x 6 x 5 x 4 x 3 x 3 x 12 x 4
+= 11 x 7 x 6 x 5 x 3 x 3 x 12 x 4
 
-11 x 6 = 66
-66 x 5 = 330
-330 x 4 = 1,320
-1,320 x 3 = 3,960
-3,960 x 3 = 11,880
-11,880 x 12 = 142,560
-142,560 x 4 = **570,240**
+11 x 7 = 77
+77 x 6 = 462
+462 x 5 = 2,310
+2,310 x 3 = 6,930
+6,930 x 3 = 20,790
+20,790 x 12 = 249,480
+249,480 x 4 = **997,920**
 
 **That number must not be quoted as the perceptual space.** It is the parameter
 count, and the whole point of this note is that the two differ by nearly two
@@ -449,25 +519,25 @@ orders of magnitude.
 **The honest headline number.** Take every dimension at its deflated 19px value,
 with no dimension allowed its full parameter count:
 
-form (10) x A (6) x B (5) x outline (2) x weave (3) x duty (3)
-= 10 x 6 = 60; 60 x 5 = 300; 300 x 2 = 600; 600 x 3 = 1,800;
-1,800 x 3 = **5,400**
+form (10) x A (7) x B (6) x outline (2) x weave (3) x duty (3)
+= 10 x 7 = 70; 70 x 6 = 420; 420 x 2 = 840; 840 x 3 = 2,520;
+2,520 x 3 = **7,560**
 
 and then the angle/pitch texture contributes a factor that is real but
 size-dependent — about **1.64x** at feed size, substantially more at 40px:
 
-**~8,900 perceptually distinct marks at feed size.**
+7,560 x 1.64 = 12,398, so **~12,400 perceptually distinct marks at feed size.**
 
-log2(8,900): 2^13 = 8,192, and 8,900 / 8,192 = 1.086, log2(1.086) ≈ 0.12, so this
-is **~13.1 bits**, against 10.75 before.
+log2(12,400): 2^13 = 8,192 and 2^14 = 16,384; 12,400 / 8,192 = 1.514, and
+log2(1.514) ≈ 0.60, so this is **~13.6 bits**, against 10.75 before.
 
-**A 5.2x improvement.** That is a far smaller claim than the 38x an earlier
-revision of this note made, and the difference is entirely the outline deflation
-plus the honest six-ink palette. It is worth stating plainly: **the headline gain
-is modest.** What the change mostly bought was not raw space but *correctness* —
+**A 7.2x improvement** (12,400 / 1,728 = 7.18). That is far smaller than the 38x
+an earlier revision of this note claimed, and the gap is the outline deflation
+plus an honest palette count. It is worth stating plainly: **the headline gain is
+modest.** What the change mostly bought was not raw space but *correctness* —
 removing dimensions that did not exist (the invisible stripe order, the 24 angles
-that were 12), fixing a palette that had one pair indistinguishable to 8% of
-readers, and closing an outline that vanished on one mark in six.
+that were really 12), fixing a palette with a pair indistinguishable to ~8% of
+readers, and closing an outline that vanished on one mark in seven.
 
 At 40px the number is several times larger, because angle, pitch, outline hue and
 the pentagon/hexagon distinction all come back. **The feed number is the one that
@@ -491,38 +561,38 @@ e^-289 is astronomically small. **P > 0.99999...** — effectively 1.
 
 The old mark could not distinguish 100 people.
 
-### After, S = 8,900
+### After, S = 12,400
 
-**k = 100**: 4,950 / 8,900 = 0.5562. `1 - e^-0.5562`.
-e^-0.5562: e^-0.5 = 0.6065, e^-0.0562 = 0.9454, product = 0.5734.
-**P = 0.427 — about 43%.**
+**k = 100**: 4,950 / 12,400 = 0.3992. `1 - e^-0.3992`.
+e^-0.3992: e^-0.4 = 0.6703, and e^0.0008 ≈ 1.0008, so e^-0.3992 = 0.6708.
+**P = 0.329 — about 33%.**
 
-**k = 1,000**: 499,500 / 8,900 = 56.1. e^-56.1 is negligible.
+**k = 1,000**: 499,500 / 12,400 = 40.3. e^-40.3 is negligible.
 **P ~ 1.**
 
-**k = 5,000**: 12,497,500 / 8,900 = 1,404. **P = 1.**
+**k = 5,000**: 12,497,500 / 12,400 = 1,008. **P = 1.**
 
 ### What this means honestly
 
-**The mark alone does not solve collisions at any interesting scale, and the
-earlier revision of this note overstated how close it came.** At 100 identities a
-mark collision is a coin flip; by 1,000 it is a certainty. The improvement over
-1,728 is real (94% → 43% at k=100) but it does not change the character of the
-problem.
+**The mark alone does not solve collisions at any interesting scale.** At 100
+identities a mark collision is about one in three; by 1,000 it is a certainty. The
+improvement over 1,728 is real (94% → 33% at k=100) but it does not change the
+character of the problem, and an earlier revision of this note overstated how close
+it came.
 
 The name scheme yields 2^25 (~33 million) outcomes; UI-BRIEF records ~3% chance
 of a name collision at 1,000 and better than even at 5,000.
 
-The mark at 8,900 is **far worse than the name in raw space** — 2^13 against 2^25
-— and that is the honest statement. **What the mark buys is not a larger space
+The mark at 12,400 is **far worse than the name in raw space** — 2^13.6 against
+2^25 — and that is the honest statement. **What the mark buys is not a larger space
 than the name; it is an independent one.** Given disjoint byte ranges the two
-multiply: 2^25 x 8,900 ≈ 2.99 x 10^11 ≈ **2^38**, and the pair collides only when
-both collide.
+multiply: 2^25 x 12,400 ≈ 4.16 x 10^11 ≈ **2^38.6**, and the pair collides only
+when both collide.
 
-At k = 1,000 against S = 2.99 x 10^11:
-499,500 / 2.99e11 = 1.67e-6. **P ~ 1 in 600,000.**
+At k = 1,000 against S = 4.16 x 10^11:
+499,500 / 4.16e11 = 1.20e-6. **P ~ 1 in 833,000.**
 
-At k = 5,000: 12,497,500 / 2.99e11 = 4.18e-5. **P ~ 1 in 24,000.**
+At k = 5,000: 12,497,500 / 4.16e11 = 3.00e-5. **P ~ 1 in 33,000.**
 
 **That is the number that matters**, and it is the argument for the mark: not
 that the mark is a good identifier, but that a name-plus-mark bundle collides
@@ -580,7 +650,7 @@ abbreviation shows the *same byte positions for every address*, so an attacker
 grinding for a lookalike grinds only those fixed positions and gets the hidden
 ones free.
 
-**2^38 is grindable** with unlimited address regeneration. This defeats casual
+**2^38.6 is grindable** with unlimited address regeneration. This defeats casual
 impersonation, not a motivated attacker. The address remains the identity.
 
 ## Which dimensions resist grinding
@@ -601,7 +671,7 @@ target.
   is a completely different texture.
 - **Ink identity.** The palette is discrete and hand-separated with a measured
   floor. Landing an adjacent index gives a colour that is, by construction, at
-  least **0.151 OKLab away in normal vision and 0.108 under dichromacy** — which
+  least **0.147 OKLab away in normal vision and 0.108 under dichromacy** — which
   is the *point* of the floor. This is the strongest dimension against grinding
   precisely because it is the one curated for separation, and the floor is now
   wide because the palette was cut to six to achieve it.
@@ -694,7 +764,7 @@ only one honestly available.
 
 ## Where the palette lives
 
-The six inks are named roles in `Theme.qml`, in their own block separate from the
+The seven inks are named roles in `Theme.qml`, in their own block separate from the
 three interface inks. They carry the `mark` prefix rather than extending the
 `accent` series because the mark's palette has a different job, and a change to
 `accent2` must not silently change what every identity looks like.

@@ -50,6 +50,19 @@ TestCase {
     // Pins the actual derived values. If a modulus, a byte offset or the ink
     // ordering changes, this fails — which is the point: every identity's mark
     // would have changed, and that is a decision to take deliberately.
+    //
+    // THE INK ASSERTIONS ARE THE IMPORTANT HALF and were missing in the first
+    // version of this file. Without them, rotating every ink assignment by a
+    // constant — `_byte(14) % 6` becoming `(_byte(14) + 3) % 6` applied
+    // consistently across all three selectors — passed every test green while
+    // changing what every identity in the system looks like. The distinctness
+    // sweep below cannot catch it, because a rotation preserves distinctness;
+    // and the other selectors here do not touch inks at all. Two explanations,
+    // one answer: the classic shape of a test that proves nothing.
+    //
+    // So these pin the ladder's INDEXING against the named Theme roles, not
+    // merely that the three inks differ. The rotation mutation was watched
+    // failing here before this was called done.
     function test_a_fixed_address_selects_fixed_values() {
         var m = mark(fixed);
         compare(m._form(), 0x0c % 11, "form");
@@ -57,6 +70,14 @@ TestCase {
         compare(m._pitch(), [2, 3, 4, 6][0x11 % 4], "pitch");
         compare(m._duty(), [0.30, 0.45, 0.62][0x12 % 3], "duty");
         compare(m._weave(), 0x13 % 3, "weave");
+
+        // byte 14 = 0x0e = 14; 14 % 7 = 0 -> the first ink in the ladder.
+        compare(String(m._inkA()), String(Theme.markInk), "ink A indexing");
+        // byte 15 = 0x0f = 15; 15 % 6 = 3, so B = (0 + 1 + 3) % 7 = 4.
+        compare(String(m._inkB()), String(Theme.markSteel), "ink B indexing");
+        // byte 13 = 0x0d = 13; 13 % 5 = 3, so the outline walks four steps on
+        // from B, skipping A's index 0: 5, 6, then 0 is skipped to 1, then 2.
+        compare(String(m._outlineInk()), String(Theme.markRust), "outline indexing");
         m.destroy();
     }
 
