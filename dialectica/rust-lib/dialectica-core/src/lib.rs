@@ -19,9 +19,11 @@ mod cursor;
 pub mod arrival;
 pub mod feed;
 pub mod identity;
+pub mod identity_store;
 pub mod keystore;
 pub mod log;
 pub mod moderation;
+pub mod onboarding;
 pub mod op;
 pub mod revision;
 pub mod sanitise;
@@ -32,6 +34,7 @@ pub mod wire;
 // contract — the adapter calls these by name, and a caller should not have to
 // know which submodule a handler happens to live in.
 pub use wire::{
-    callee_error, channel_exists_reply, error_json, get_capabilities, guarded, list_threads,
-    list_threads_from_request, panic_probe, parse_channel_id, ping, version,
+    callee_error, channel_exists_reply, error_json, generate_identity_slate, get_capabilities,
+    guarded, keep_identity, list_threads, list_threads_from_request, panic_probe, parse_channel_id,
+    ping, version, who_am_i, KeepTargets,
 };

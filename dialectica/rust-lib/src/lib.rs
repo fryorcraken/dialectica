@@ -120,6 +120,61 @@ pub trait DialecticaModule: Send + 'static {
     /// ever collapsed.
     fn list_threads(&mut self, request: String) -> String;
 
+    /// A slate of candidate identities for a Stoa.
+    ///
+    /// Takes `{"stoa":"<hex>"}` and returns
+    /// `{"slate":"<hex>","count":N,"candidates":[…]}` or the error shape.
+    ///
+    /// **There is no count parameter**, and the omission is the `identity-onboarding`
+    /// spec's requirement rather than a simplification: a caller-supplied count is
+    /// a number that decides how much key derivation this module performs. The
+    /// count is reported so a view need not hardcode it.
+    ///
+    /// Each candidate carries an address and a public key and **no secret** — the
+    /// view cannot sign, and a secret that has crossed this boundary cannot be
+    /// recalled.
+    ///
+    /// Nothing is written. A slate that persisted would record a choice the user
+    /// has not made.
+    fn generate_identity_slate(&mut self, request: String) -> String;
+
+    /// Keep one candidate from the slate, making it this user's identity.
+    ///
+    /// Takes `{"stoa":"<hex>","slate":"<hex>","index":N}` and returns
+    /// `{"kept":true,"address":"…","publicKey":"…","path":N,"encrypted":bool}` or
+    /// `{"kept":false,"reason":"…"}` — the two are exclusive.
+    ///
+    /// The `slate` field is the identifier the slate was returned with, and a
+    /// selection against a slate that is no longer the current one is **refused**
+    /// rather than satisfied by the current one's candidate at that index.
+    ///
+    /// `encrypted` reports whether the master key was encrypted at rest, so that an
+    /// unencrypted keystore is a state a view can name rather than a silent
+    /// default.
+    ///
+    /// Keeping is refused where an identity already exists. Replacing one discards
+    /// every identity derived from it while the ops they signed remain published,
+    /// so it is a separate operation this contract does not provide.
+    fn keep_identity(&mut self, request: String) -> String;
+
+    /// Who the user is in a Stoa, or why there is nobody.
+    ///
+    /// Takes `{"stoa":"<hex>"}` and returns
+    /// `{"hasIdentity":true,"address":"…","publicKey":"…","path":N,"recoveryNeedsTheRecord":bool}`
+    /// or `{"hasIdentity":false,"reason":"…"}` — the two are exclusive.
+    ///
+    /// **A different question from `getCapabilities`**, and the two can honestly
+    /// disagree: a stored identity whose keystore permissions are too open is a
+    /// real identity that cannot currently be used. A view with only the posting
+    /// probe would have to render "you are nobody" to a user who has an identity
+    /// and a fixable problem.
+    ///
+    /// `recoveryNeedsTheRecord` is how a view learns that an exported master key is
+    /// not by itself a complete backup — the chosen derivation paths live only in
+    /// local storage, and the view has no filesystem access to discover that for
+    /// itself.
+    fn who_am_i(&mut self, request: String) -> String;
+
     /// Framework plumbing, not a contract method — the generator skips
     /// defaulted methods when deriving the `.lidl`.
     fn on_context_ready(&mut self, _ctx: &RustModuleContext) {}
@@ -180,10 +235,86 @@ include!(concat!(
 /// yet" is a real state a call can arrive in — the dispatch table is live before
 /// the callback in principle — and it must produce an honest error rather than a
 /// read against an empty path.
+///
+/// # The second field, and why it is here rather than in `core`
+///
+/// `live_slate` is the identifier of the slate `generateIdentitySlate` last
+/// returned, and it is what makes a selection against a **superseded** slate
+/// refusable: a keep quotes the slate it was made against, and only something
+/// spanning two calls can say which one is current. `core` is a pure crate with
+/// no ambient state by design, so the one value that has to outlive a call lives
+/// here.
+///
+/// **It holds 32 bytes of public randomness, not key material.** A slate
+/// identifier names which derivation paths were offered, and a path is not secret
+/// — `identity-onboarding` says so outright. That is what makes this field cheap:
+/// it is not a secret held across calls, and there is no clearing obligation on
+/// it. The master key stays in the keystore, which is opened per call.
+///
+/// `Default` still supplies the one genuinely parameterless constructor
+/// `interface: "universal"` requires — `Option` defaults to `None`, so adding
+/// this field adds no constructor parameter.
 #[cfg(logos_scaffold)]
 #[derive(Default)]
 struct Dialectica {
     persistence_path: Option<String>,
+    live_slate: Option<core::onboarding::SlateNonce>,
+}
+
+#[cfg(logos_scaffold)]
+impl Dialectica {
+    /// The directory the host gave this instance, or the error to return.
+    ///
+    /// Factored out at the point CLAUDE.md names: this was the same four lines in
+    /// two handlers and would have been in five. A `Result` whose `Err` arm is
+    /// already the wire reply, following `core::parse_channel_id`, so a caller
+    /// cannot invent a second error shape while converting one.
+    ///
+    /// It is not in `core` because `core` has no notion of a host handing it a
+    /// path — that is the whole reason this adapter exists.
+    fn storage_dir(&self) -> Result<std::path::PathBuf, String> {
+        match &self.persistence_path {
+            Some(dir) => Ok(std::path::PathBuf::from(dir)),
+            None => Err(core::error_json(
+                "the host has not yet told this module where its storage is; \
+                 try again once the module is ready",
+            )),
+        }
+    }
+
+    /// The master key, opened from disk or minted fresh in memory.
+    ///
+    /// **The minting is the reason this function exists, and it writes nothing.**
+    /// A slate has to be available on a fresh install, before any identity is
+    /// kept, and that needs a master key. So where no keystore exists this hands
+    /// back one that has never touched a disk; `keepIdentity` is what writes it,
+    /// and until then the user is choosing among candidates of a key that will
+    /// only exist if they keep one.
+    ///
+    /// **The fresh key is deterministic across neither calls nor slates**, which
+    /// is a real consequence worth naming: two `generateIdentitySlate` calls on a
+    /// fresh install offer candidates of two *different* master keys, so a slate's
+    /// identifier is only meaningful alongside the key that produced it. The
+    /// `live_slate` check does not catch that, because both slates are equally
+    /// live. What makes it harmless is that the keep mints its own key too and
+    /// writes THAT one, so the identity kept is always one of the candidates of
+    /// the key that was stored — never a candidate of a key that was discarded.
+    ///
+    /// Any error other than "no keystore" is propagated: a keystore that exists
+    /// and cannot be opened must not be silently replaced by a fresh key, which is
+    /// how every identity a user has gets discarded with no error saying so.
+    fn master_key(
+        dir: &std::path::Path,
+    ) -> Result<core::keystore::Keystore, core::keystore::KeystoreError> {
+        let path = core::keystore::default_path_in(dir);
+        match core::keystore::open_from_env(&path) {
+            Ok(ks) => Ok(ks),
+            Err(core::keystore::KeystoreError::NotFound) => {
+                Ok(core::keystore::Keystore::generate())
+            }
+            Err(e) => Err(e),
+        }
+    }
 }
 
 // A thin adapter and nothing more. Every method forwards straight into `core`,
@@ -268,6 +399,83 @@ impl DialecticaModule for Dialectica {
         core::list_threads_from_request(&request, || {
             core::log::SqliteOpLog::open(&std::path::Path::new(&dir).join("ops.sqlite"))
         })
+    }
+
+    fn generate_identity_slate(&mut self, request: String) -> String {
+        let dir = match self.storage_dir() {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
+        // `remembered` rather than writing `self.live_slate` from inside the
+        // closure: the closure would need `&mut self` while `core` holds it, and
+        // taking a `Cell` out afterwards keeps the borrow local. The nonce is
+        // recorded only if a slate was actually produced, so a refused request
+        // does not supersede a slate the user is still looking at.
+        let remembered = std::cell::Cell::new(None);
+        let reply = core::generate_identity_slate(
+            &request,
+            || Self::master_key(&dir),
+            |nonce| remembered.set(Some(nonce)),
+        );
+        if let Some(nonce) = remembered.into_inner() {
+            self.live_slate = Some(nonce);
+        }
+        reply
+    }
+
+    fn keep_identity(&mut self, request: String) -> String {
+        let dir = match self.storage_dir() {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
+        // The keystore to WRITE, minted or opened. On the expected path — a fresh
+        // install — this is a new key, and `create` is what refuses to replace an
+        // existing one.
+        let keystore = match Self::master_key(&dir) {
+            Ok(k) => k,
+            Err(e) => return core::error_json(&e.to_string()),
+        };
+        let paths = match core::identity_store::IdentityStore::open(
+            &core::identity_store::IdentityStore::default_path_in(&dir),
+        ) {
+            Ok(p) => p,
+            Err(e) => return core::error_json(&e.to_string()),
+        };
+        // The keystore's own decision about protection at create time, not a copy
+        // of it here — `protection_from_env` owns the byte handling and the reason
+        // there is no fallback constant. Whichever it returns is recorded in the
+        // file and reported in the reply, so an unencrypted keystore is a state a
+        // view can name rather than a silent default.
+        let unlock = core::keystore::protection_from_env();
+        core::keep_identity(
+            &request,
+            self.live_slate,
+            core::KeepTargets {
+                keystore: &keystore,
+                keystore_path: &core::keystore::default_path_in(&dir),
+                unlock: &unlock,
+                paths: &paths,
+            },
+        )
+    }
+
+    fn who_am_i(&mut self, request: String) -> String {
+        let dir = match self.storage_dir() {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
+        // `open_from_env` rather than `master_key`: this method REPORTS, so a
+        // missing keystore is "there is nobody" and must not mint one. Minting
+        // here would report an identity for a key that does not exist.
+        core::who_am_i(
+            &request,
+            || core::keystore::open_from_env(&core::keystore::default_path_in(&dir)),
+            || {
+                core::identity_store::IdentityStore::open(
+                    &core::identity_store::IdentityStore::default_path_in(&dir),
+                )
+            },
+        )
     }
 
     fn on_context_ready(&mut self, ctx: &RustModuleContext) {

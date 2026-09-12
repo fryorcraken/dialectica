@@ -242,6 +242,472 @@ pub fn capability_for(
     }
 }
 
+// ─── Onboarding: the slate, keeping one, and who the user is ──────────────
+//
+// The contract is the `identity-onboarding` spec; the reasoning behind these
+// shapes is in that change's `design.md`. What is repeated here is only what a
+// reader of THIS code needs in order not to undo it.
+
+/// The `stoa` field, parsed. One job, because three handlers below need it and a
+/// fourth copy would eventually disagree with the first three about whether a
+/// missing field and a wrong-typed one are the same mistake.
+///
+/// The `Err` arm is already the wire reply, following `parse_channel_id`: a caller
+/// cannot accidentally invent a second error shape while converting one.
+fn parse_stoa(parsed: &serde_json::Value) -> Result<crate::identity::Address, String> {
+    match parsed.get("stoa") {
+        Some(serde_json::Value::String(s)) => crate::identity::Address::from_hex(s)
+            .map_err(|e| error_json(&format!("stoa: {e}"))),
+        Some(_) => Err(error_json("stoa must be a string")),
+        None => Err(error_json("missing field: stoa")),
+    }
+}
+
+/// `{"stoa":"<hex>"}` -> a slate of candidate identities.
+///
+/// # The count is not a parameter, and that is a security property
+///
+/// The spec requires the number of candidates be *"fixed by the implementation
+/// and reported with the set, rather than requested by the caller"*, because a
+/// caller-supplied count is *"a number that decides how much key derivation this
+/// module performs"*. So there is no `count` field to pass, which is the strongest
+/// form of that: the request has nowhere to put one.
+///
+/// It is still **reported**, as `count`, so a view rendering a slate does not
+/// hardcode five.
+///
+/// # Nothing is written
+///
+/// The spec: *"Generating a slate SHALL NOT write to storage."* This handler takes
+/// the master key and returns JSON; there is no store parameter for it to write
+/// to, so the requirement holds by the signature rather than by a line somebody
+/// has to not add.
+///
+/// # The master key is supplied, not discovered
+///
+/// A closure, for the reason [`get_capabilities`]' lookup is one: this crate
+/// cannot read the environment or know the host's persistence path, and a handler
+/// that went looking would be doing discovery at a moment its caller does not
+/// control.
+///
+/// The closure hands back the keystore rather than the raw root, so that the root
+/// is never a value this function names. Where no keystore exists yet, the
+/// adapter mints one in memory and does not write it — which is why a slate is
+/// available before an identity is kept.
+pub fn generate_identity_slate(
+    request: &str,
+    master: impl Fn() -> Result<crate::keystore::Keystore, crate::keystore::KeystoreError>,
+    remember: impl FnOnce(crate::onboarding::SlateNonce),
+) -> String {
+    guarded("generate_identity_slate", || {
+        let parsed: serde_json::Value = match serde_json::from_str(request) {
+            Ok(v) => v,
+            Err(e) => return error_json(&format!("invalid JSON: {e}")),
+        };
+        let stoa = match parse_stoa(&parsed) {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
+        let keystore = match master() {
+            Ok(k) => k,
+            Err(e) => return error_json(&e.to_string()),
+        };
+        let slate = match keystore.slate_for(&stoa) {
+            Ok(s) => s,
+            Err(e) => return error_json(&e.to_string()),
+        };
+        // The nonce is handed to the adapter to hold, which is what makes a
+        // selection against a superseded slate refusable. It is recorded AFTER
+        // the slate is built, so a derivation failure does not supersede a
+        // perfectly good live slate.
+        remember(slate.nonce);
+        slate_json(&slate)
+    })
+}
+
+/// A slate as the view receives it.
+///
+/// Pinned by a test against hardcoded key names, for the reason
+/// `the_capability_json_is_pinned_to_the_exact_shape_the_plan_specifies` gives: a
+/// view is written against these exact names and renaming one is a breaking change
+/// no type checker would catch.
+///
+/// **`path` is present**, and its presence is a decision rather than an oversight.
+/// It is not secret — the spec says the record *"reveals nothing that a published
+/// identity does not already reveal"* — and a view that can show the user which
+/// path they are about to keep is a view that can render the recovery warning
+/// truthfully. What is NOT here is any secret, which the spec requires by name.
+fn slate_json(slate: &crate::onboarding::Slate) -> String {
+    let candidates: Vec<serde_json::Value> = slate
+        .candidates
+        .iter()
+        .map(|c| {
+            serde_json::json!({
+                "index": c.index,
+                "path": c.path,
+                "address": c.address.to_hex(),
+                "publicKey": c.public_key.to_hex(),
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "slate": slate.nonce.to_hex(),
+        "count": candidates.len(),
+        "candidates": candidates,
+    })
+    .to_string()
+}
+
+/// What keeping a candidate needed from storage, and what it produced.
+///
+/// **An enum with one payload each rather than a struct of `Option`s**, following
+/// [`Capability`] and for the identical reason: the contract has exactly two
+/// shapes, and a struct could express states it does not have — a success with no
+/// identity, or a failure with one.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Kept {
+    /// The identity is stored. Carries what it is, and whether the master key was
+    /// encrypted at rest.
+    Stored {
+        address: String,
+        public_key: String,
+        path: u32,
+        encrypted: bool,
+    },
+    /// Nothing was stored. The reason names the fix.
+    Refused { reason: String },
+}
+
+impl Kept {
+    /// The wire form. Exactly one of the two shapes, by construction.
+    pub fn to_json(&self) -> String {
+        match self {
+            Kept::Stored {
+                address,
+                public_key,
+                path,
+                encrypted,
+            } => serde_json::json!({
+                "kept": true,
+                "address": address,
+                "publicKey": public_key,
+                "path": path,
+                "encrypted": encrypted,
+            })
+            .to_string(),
+            Kept::Refused { reason } => {
+                serde_json::json!({ "kept": false, "reason": reason }).to_string()
+            }
+        }
+    }
+}
+
+/// What a keep needs from the world, gathered so the decision below has one
+/// argument rather than five.
+///
+/// A struct rather than five parameters because `keep_identity_with` would
+/// otherwise be a function whose call sites differ only in argument order — and
+/// the two stores plus the unlock are a unit: they are the state a keep acts on.
+pub struct KeepTargets<'a> {
+    /// The keystore to write, already minted. Not created here, because whether a
+    /// master key exists is a question the caller has already had to answer in
+    /// order to generate the slate.
+    pub keystore: &'a crate::keystore::Keystore,
+    /// Where the master key goes.
+    pub keystore_path: &'a std::path::Path,
+    /// How it is protected. The spec deliberately does not settle where this
+    /// comes from; what it requires is that whichever protection applies be
+    /// recorded in the file and reportable, which [`Kept::Stored`]'s `encrypted`
+    /// discharges.
+    pub unlock: &'a crate::keystore::Unlock,
+    /// The record of chosen paths.
+    pub paths: &'a crate::identity_store::IdentityStore,
+}
+
+/// `{"stoa":"…","slate":"…","index":N}` -> the identity that was kept.
+///
+/// # The selection is checked against the slate it was made against
+///
+/// The request carries the slate's nonce, and it must equal the live one. That is
+/// how the spec's *"A selection made against a superseded set is refused"* is met,
+/// and the superseded case is the **same code path** as a nonce that never
+/// existed — so there is no second path to get wrong. See
+/// [`crate::onboarding`]'s module documentation for why the slate is a nonce.
+///
+/// # Nothing is coerced
+///
+/// An out-of-range index is refused, never clamped. The spec is explicit that
+/// coercing *"would store an identity the user did not choose — which is
+/// unrecoverable, because the choice cannot be recomputed"*.
+///
+/// # The write order is the atomicity story
+///
+/// Keystore first, path record second. `Keystore::create` refuses to overwrite and
+/// writes atomically, so a failure there leaves nothing anywhere. The reverse
+/// order would leave a recorded path naming a master key that does not exist, and
+/// the *next* keep — with a different master key — would silently inherit it.
+/// `design.md` records what this does and does not claim.
+pub fn keep_identity(
+    request: &str,
+    live_nonce: Option<crate::onboarding::SlateNonce>,
+    targets: KeepTargets<'_>,
+) -> String {
+    guarded("keep_identity", || {
+        let parsed: serde_json::Value = match serde_json::from_str(request) {
+            Ok(v) => v,
+            Err(e) => return error_json(&format!("invalid JSON: {e}")),
+        };
+        let stoa = match parse_stoa(&parsed) {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
+        let nonce = match parsed.get("slate") {
+            Some(serde_json::Value::String(s)) => match crate::onboarding::SlateNonce::from_hex(s) {
+                Ok(n) => n,
+                // A malformed nonce is a malformed REQUEST, so it is §2.5's error
+                // shape rather than a `Kept::Refused` — the same line
+                // `get_capabilities` draws between a caller bug and a user state.
+                Err(e) => return error_json(&format!("slate: {e}")),
+            },
+            Some(_) => return error_json("slate must be a string"),
+            None => return error_json("missing field: slate"),
+        };
+        let index = match parse_index(&parsed, "index") {
+            Ok(Some(i)) => i,
+            // Absent rather than defaulted to 0. A default here would keep the
+            // first candidate for a caller who named none, which is storing an
+            // identity nobody chose.
+            Ok(None) => return error_json("missing field: index"),
+            Err(e) => return e,
+        };
+
+        keep_selection(&stoa, nonce, index, live_nonce, targets).to_json()
+    })
+}
+
+/// The keep's decision, separated from its JSON and its guard.
+///
+/// Split out for the reason [`capability_for`] is: the mapping from "what the
+/// stores said" to "what a view is told" is where the requirements actually live,
+/// and asserting on it through a JSON string would be asserting on serialisation
+/// at the same time.
+pub fn keep_selection(
+    stoa: &crate::identity::Address,
+    nonce: crate::onboarding::SlateNonce,
+    index: usize,
+    live_nonce: Option<crate::onboarding::SlateNonce>,
+    targets: KeepTargets<'_>,
+) -> Kept {
+    use crate::onboarding::OnboardingError;
+
+    let refused = |e: OnboardingError| Kept::Refused {
+        reason: e.to_string(),
+    };
+
+    // The nonce check comes FIRST, before anything is derived or written. A
+    // selection against a slate that is not live must cost nothing.
+    match live_nonce {
+        None => return refused(OnboardingError::NoLiveSlate),
+        Some(live) if live != nonce => return refused(OnboardingError::NonceIsNotTheLiveSlate),
+        Some(_) => {}
+    }
+
+    // Reproduced from the nonce rather than looked up — see `crate::onboarding`.
+    let slate = match targets.keystore.slate_from_nonce(stoa, nonce) {
+        Ok(s) => s,
+        Err(e) => return refused(e),
+    };
+    let candidate = match slate.candidate(index) {
+        Ok(c) => c,
+        Err(e) => return refused(e),
+    };
+
+    // THE ORDER. The keystore is the irreversible half and `create` refuses to
+    // overwrite, so this is also where a second keep is caught: a master key
+    // already on disk means `AlreadyExists`, which is distinguishable from a
+    // malformed request (that never reaches here) and from a storage failure
+    // (a different `KeystoreError` arm).
+    if let Err(e) = targets
+        .keystore
+        .create(targets.keystore_path, targets.unlock)
+    {
+        return Kept::Refused {
+            reason: e.to_string(),
+        };
+    }
+    if let Err(e) = targets.paths.record_path(stoa, candidate.path) {
+        return Kept::Refused {
+            reason: e.to_string(),
+        };
+    }
+
+    Kept::Stored {
+        address: candidate.address.to_hex(),
+        public_key: candidate.public_key.to_hex(),
+        path: candidate.path,
+        // Taken from the unlock this keep USED, not from re-reading the file.
+        // Re-reading would report the protection of whatever is at the path now,
+        // which on a directory an attacker can write to is not necessarily the
+        // file just written. The value that is true is the one this code used.
+        encrypted: matches!(targets.unlock, crate::keystore::Unlock::Passphrase(_)),
+    }
+}
+
+/// Who the user is in a Stoa, or why there is nobody.
+///
+/// **An enum with one payload each**, following [`Capability`]. The spec requires
+/// the reply carry *"an identity or a reason, never both and never neither —
+/// matching the posting probe's shape rather than introducing a second convention
+/// for the same job"*.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Whoami {
+    /// There is an identity.
+    Identity {
+        address: String,
+        public_key: String,
+        path: u32,
+        /// Whether recovering this identity needs more than the master key.
+        ///
+        /// **Always `true` in this change**, because no export or remote backup
+        /// exists — so the recorded path lives only in local storage and losing
+        /// that store loses the identity even with the master key preserved. The
+        /// spec confines the requirement to *"what is checkable now: that the
+        /// module reports the unbacked state"*.
+        ///
+        /// A boolean rather than only prose, so the change that implements backup
+        /// flips a value rather than changing a shape.
+        recovery_needs_the_record: bool,
+    },
+    /// There is nobody. The reason names the fix.
+    Nobody { reason: String },
+}
+
+impl Whoami {
+    /// The wire form. Exactly one of the two shapes, by construction.
+    pub fn to_json(&self) -> String {
+        match self {
+            Whoami::Identity {
+                address,
+                public_key,
+                path,
+                recovery_needs_the_record,
+            } => serde_json::json!({
+                "hasIdentity": true,
+                "address": address,
+                "publicKey": public_key,
+                "path": path,
+                "recoveryNeedsTheRecord": recovery_needs_the_record,
+            })
+            .to_string(),
+            Whoami::Nobody { reason } => {
+                serde_json::json!({ "hasIdentity": false, "reason": reason }).to_string()
+            }
+        }
+    }
+}
+
+/// `{"stoa":"<hex>"}` -> who the user is there.
+///
+/// # This is a different question from whether posting is possible
+///
+/// The spec is explicit, and the two *"can honestly disagree: a stored identity
+/// whose keystore permissions are too open is a real identity that cannot
+/// currently be used."* A caller with only the posting probe would have to render
+/// "you are nobody" to a user who has an identity and a fixable problem.
+///
+/// This handler therefore reports the identity where one is recorded and the
+/// keystore opens, and a **distinguishable reason** in each of the three ways that
+/// can fail. The fourth state — a master key with no recorded path for this Stoa —
+/// is the one the two-store split creates, and its reason names the record so it
+/// does not read as "you are nobody".
+pub fn who_am_i(
+    request: &str,
+    master: impl Fn() -> Result<crate::keystore::Keystore, crate::keystore::KeystoreError>,
+    paths: impl Fn() -> Result<crate::identity_store::IdentityStore, crate::identity_store::IdentityStoreError>,
+) -> String {
+    guarded("who_am_i", || {
+        let parsed: serde_json::Value = match serde_json::from_str(request) {
+            Ok(v) => v,
+            Err(e) => return error_json(&format!("invalid JSON: {e}")),
+        };
+        let stoa = match parse_stoa(&parsed) {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
+        whoami_for(&stoa, master, paths).to_json()
+    })
+}
+
+/// The identity question's decision, separated from its JSON and its guard.
+///
+/// Split out for the reason [`capability_for`] is.
+///
+/// **Every state is an answer, never the error shape**, following the posting
+/// probe: a caller handling both "you are nobody, because X" and "I could not
+/// determine who you are" has two negative branches and the second has no
+/// sensible rendering. §2.5's error shape stays reachable for the one failure that
+/// is not about identity — a request this code could not interpret — which is
+/// [`who_am_i`]'s job rather than this one's.
+pub fn whoami_for(
+    stoa: &crate::identity::Address,
+    master: impl Fn() -> Result<crate::keystore::Keystore, crate::keystore::KeystoreError>,
+    paths: impl Fn() -> Result<crate::identity_store::IdentityStore, crate::identity_store::IdentityStoreError>,
+) -> Whoami {
+    // The keystore is asked first, because "there is no master key" is the state a
+    // fresh install is in and it needs no record consulted to establish. Asking
+    // the record first would report a missing record for a user who has no
+    // identity at all, which sends them to fix the wrong thing.
+    let keystore = match master() {
+        Ok(k) => k,
+        // The reason IS the error's message. `KeystoreError::Display` already
+        // names the fix for each case with a test holding it to that, so
+        // paraphrasing here would maintain the same guidance twice and watch the
+        // two drift — the argument `capability_for` records.
+        Err(e) => {
+            return Whoami::Nobody {
+                reason: e.to_string(),
+            }
+        }
+    };
+    let store = match paths() {
+        Ok(s) => s,
+        Err(e) => {
+            return Whoami::Nobody {
+                reason: e.to_string(),
+            }
+        }
+    };
+    let path = match store.path_for(stoa) {
+        Ok(Some(p)) => p,
+        // The state the two-store split creates: a master key exists and this Stoa
+        // has no choice recorded. Named as such rather than reported as "no
+        // identity", because the fix is different — choose one here, not create a
+        // key.
+        Ok(None) => {
+            return Whoami::Nobody {
+                reason: "a master key exists but no identity has been chosen for this Stoa; \
+                         generate a slate and keep one of its candidates"
+                    .to_string(),
+            }
+        }
+        Err(e) => {
+            return Whoami::Nobody {
+                reason: e.to_string(),
+            }
+        }
+    };
+
+    let public_key = keystore.stoa_public_key_at_path(stoa, path);
+    Whoami::Identity {
+        address: public_key.address().to_hex(),
+        public_key: public_key.to_hex(),
+        path,
+        // Always true in this change: no export or remote backup exists, so the
+        // record lives only here. See the field's own documentation.
+        recovery_needs_the_record: true,
+    }
+}
+
 // ─── The feed ─────────────────────────────────────────────────────────────
 
 /// `{"stoa":"…", "page":N, "perPage":N, "includeHidden":bool}` -> one page.
@@ -1138,6 +1604,1071 @@ mod tests {
         .to_json();
         let v: serde_json::Value = serde_json::from_str(&out).expect("must stay valid JSON");
         assert_eq!(v["reason"], r#"at "C:\keys" — he said "no""#);
+    }
+
+    // ─── Onboarding ───────────────────────────────────────────────────────
+
+    use crate::identity_store::IdentityStore;
+    use crate::keystore::{Keystore, Passphrase, Unlock};
+    use crate::onboarding::{SlateNonce, SLATE_SIZE};
+
+    /// A fresh temporary directory, and its guard.
+    ///
+    /// Same shape as `keystore.rs`'s and `log/sqlite.rs`'s, for the reason they
+    /// record: one need, in tests, is not worth a `tempfile` dependency. The guard
+    /// must be held for the test's lifetime.
+    struct OnboardingDir(std::path::PathBuf);
+
+    impl OnboardingDir {
+        fn new(name: &str) -> Self {
+            let mut path = std::env::temp_dir();
+            path.push(format!("dialectica-onboard-{}-{name}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir_all(&path).expect("a temporary directory is creatable");
+            OnboardingDir(path)
+        }
+
+        fn keystore_path(&self) -> std::path::PathBuf {
+            crate::keystore::default_path_in(&self.0)
+        }
+
+        fn paths(&self) -> IdentityStore {
+            IdentityStore::open(&IdentityStore::default_path_in(&self.0))
+                .expect("a fresh identity record opens")
+        }
+    }
+
+    impl Drop for OnboardingDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// A keystore with a FIXED root, so expectations can be derived independently
+    /// of what the code under test produced.
+    fn a_master_key() -> Keystore {
+        Keystore::from_root_for_test([7u8; 32])
+    }
+
+    fn slate_request() -> String {
+        format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex())
+    }
+
+    /// Generate a slate through the wire handler, returning the reply and the
+    /// nonce the handler chose to remember.
+    fn slate_through_the_wire() -> (serde_json::Value, Option<SlateNonce>) {
+        let remembered = std::cell::Cell::new(None);
+        let out = generate_identity_slate(
+            &slate_request(),
+            || Ok(a_master_key()),
+            |n| remembered.set(Some(n)),
+        );
+        let v = serde_json::from_str(&out)
+            .unwrap_or_else(|e| panic!("the slate reply must be valid JSON ({e}): {out}"));
+        (v, remembered.into_inner())
+    }
+
+    #[test]
+    fn a_slate_reply_carries_the_fixed_count_and_that_many_candidates() {
+        // The spec: "the reply carries the fixed number of candidates, AND states
+        // that number alongside them". Both halves, and the count is checked
+        // against the hardcoded 5 rather than against the array's own length —
+        // otherwise the assertion is the reply agreeing with itself.
+        let (v, _) = slate_through_the_wire();
+        assert_eq!(v["count"], 5, "got {v}");
+        assert_eq!(v["candidates"].as_array().unwrap().len(), 5, "got {v}");
+        assert_eq!(SLATE_SIZE, 5, "the fixed count and the constant must agree");
+    }
+
+    #[test]
+    fn a_slate_reply_takes_no_count_from_the_caller() {
+        // The spec's reason is a security one: a caller-supplied count is "a
+        // number that decides how much key derivation this module performs". There
+        // is no field to pass, so the check is that offering one changes nothing.
+        let ignored = format!(r#"{{"stoa":"{}","count":500}}"#, a_stoa().to_hex());
+        let out = generate_identity_slate(&ignored, || Ok(a_master_key()), |_| {});
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["count"], 5, "a caller-supplied count was honoured: {out}");
+        assert_eq!(v["candidates"].as_array().unwrap().len(), 5);
+    }
+
+    #[test]
+    fn the_slate_json_is_pinned_to_the_exact_shape_a_view_is_written_against() {
+        // Hardcoded key names, following
+        // `the_capability_json_is_pinned_to_the_exact_shape_the_plan_specifies`:
+        // a view reads these exact names and renaming one is a breaking change no
+        // type checker would catch.
+        let (v, _) = slate_through_the_wire();
+        for field in ["slate", "count", "candidates"] {
+            assert!(v.get(field).is_some(), "the reply is missing {field}: {v}");
+        }
+        for candidate in v["candidates"].as_array().unwrap() {
+            for field in ["index", "path", "address", "publicKey"] {
+                assert!(
+                    candidate.get(field).is_some(),
+                    "a candidate is missing {field}: {v}"
+                );
+            }
+        }
+        // And the candidates are indexed 0..5 in order, because a caller selects
+        // by index and an index that did not match the position would select the
+        // wrong candidate.
+        for (position, candidate) in v["candidates"].as_array().unwrap().iter().enumerate() {
+            assert_eq!(candidate["index"], position);
+        }
+    }
+
+    #[test]
+    fn a_slate_reply_carries_an_address_and_a_public_key_for_every_candidate() {
+        // The spec requires both, with a reason for each: the address "is the only
+        // unforgeable way to tell two candidates apart", and the public key
+        // because "the generated display name is derived from the public key
+        // rather than from the address".
+        //
+        // Checked as PARSEABLE values of the right length, not merely present — a
+        // field holding the empty string would satisfy a presence check and be
+        // useless to a view.
+        let (v, _) = slate_through_the_wire();
+        for candidate in v["candidates"].as_array().unwrap() {
+            let address = candidate["address"].as_str().unwrap();
+            assert!(
+                crate::identity::Address::from_hex(address).is_ok(),
+                "a candidate's address does not parse: {address}"
+            );
+            let key = hex::decode(candidate["publicKey"].as_str().unwrap()).unwrap();
+            assert!(
+                crate::identity::PublicKey::from_bytes(&key).is_ok(),
+                "a candidate's public key does not parse"
+            );
+        }
+    }
+
+    #[test]
+    fn no_secret_appears_anywhere_in_a_slate_reply() {
+        // The spec, at the boundary the view actually reads from rather than only
+        // in the slate type's own tests. Searched over the raw REPLY STRING, which
+        // is stronger than checking fields by name because it catches a field
+        // somebody adds later.
+        //
+        // The master key is `[7; 32]`, so the hex it would appear as is `07` x 32.
+        // Checked in both cases, because a reply is lowercase hex and a future one
+        // might not be.
+        let out = generate_identity_slate(&slate_request(), || Ok(a_master_key()), |_| {});
+        let master_hex = "07".repeat(32);
+        assert!(
+            !out.contains(&master_hex) && !out.contains(&master_hex.to_uppercase()),
+            "the master key's hex appears in the slate reply: {out}"
+        );
+
+        // And every candidate's secret key, derived independently here.
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        for candidate in v["candidates"].as_array().unwrap() {
+            let path = candidate["path"].as_u64().unwrap() as u32;
+            let secret = hex::encode(
+                crate::identity::derive_stoa_key_at_path(&[7u8; 32], &a_stoa(), path).to_bytes(),
+            );
+            assert!(
+                !out.contains(&secret),
+                "a candidate's secret key hex appears in the slate reply: {out}"
+            );
+        }
+
+        // The detection must work, or the assertions above prove nothing: a value
+        // that IS in the reply must be found.
+        let present = v["candidates"][0]["address"].as_str().unwrap();
+        assert!(
+            out.contains(present),
+            "the search is broken, so the assertions above prove nothing"
+        );
+    }
+
+    #[test]
+    fn generating_a_slate_writes_nothing() {
+        // The spec: "Generating a slate SHALL NOT write to storage", and
+        // "a caller asking who the user is still finds none".
+        //
+        // Checked by generating several slates against a real directory and then
+        // asserting the directory is still EMPTY — which is stronger than
+        // asserting a particular file is absent, because it catches a write to a
+        // name this test did not think of.
+        let dir = OnboardingDir::new("slate-writes-nothing");
+        for _ in 0..3 {
+            let out = generate_identity_slate(&slate_request(), || Ok(a_master_key()), |_| {});
+            assert!(
+                serde_json::from_str::<serde_json::Value>(&out)
+                    .unwrap()
+                    .get("candidates")
+                    .is_some(),
+                "got {out}"
+            );
+        }
+        let entries: Vec<_> = std::fs::read_dir(&dir.0).unwrap().collect();
+        assert!(
+            entries.is_empty(),
+            "generating a slate wrote {} entries",
+            entries.len()
+        );
+
+        // And who-am-i still finds nobody, which is the half a view would notice.
+        let v: serde_json::Value = serde_json::from_str(&who_am_i(
+            &slate_request(),
+            || Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted),
+            || Ok(dir.paths()),
+        ))
+        .unwrap();
+        assert_eq!(v["hasIdentity"], false, "got {v}");
+    }
+
+    #[test]
+    fn two_slates_in_a_row_offer_different_candidates() {
+        // The spec: "no candidate in the second set has a public key from the
+        // first". Through the wire rather than only through the slate type,
+        // because a handler that cached its reply would satisfy the type's test
+        // and fail this one.
+        let (first, _) = slate_through_the_wire();
+        let (second, _) = slate_through_the_wire();
+        let keys = |v: &serde_json::Value| {
+            v["candidates"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| c["publicKey"].as_str().unwrap().to_string())
+                .collect::<Vec<_>>()
+        };
+        for key in keys(&first) {
+            assert!(
+                !keys(&second).contains(&key),
+                "the second slate reoffered {key}"
+            );
+        }
+        assert_ne!(first["slate"], second["slate"], "the nonce must be fresh");
+    }
+
+    #[test]
+    fn a_malformed_slate_request_is_the_error_shape_and_carries_no_candidates() {
+        // §2.5: never a partial success. A reply carrying both an error and an
+        // empty `candidates` list would render as "no identities available" in any
+        // view that checked `candidates` first.
+        for bad in [
+            "not json",
+            r#"{}"#,
+            r#"{"stoa":7}"#,
+            r#"{"stoa":"nothex"}"#,
+            r#"{"stoa":"00ff"}"#,
+            r#"{"stoa":null}"#,
+        ] {
+            let out = generate_identity_slate(bad, || Ok(a_master_key()), |_| {});
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(v.get("error").is_some(), "for {bad:?}, got {out}");
+            assert!(
+                v.get("candidates").is_none() && v.get("count").is_none(),
+                "a failure must never also carry a result — §2.5, got {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_malformed_slate_request_does_not_supersede_the_live_slate() {
+        // The subtle half of the above: a refused request must not have called
+        // `remember`, or a malformed call would invalidate a slate the user is
+        // still looking at — and their next selection would be refused for a
+        // reason that had nothing to do with them.
+        let remembered = std::cell::Cell::new(None);
+        for bad in ["not json", r#"{}"#, r#"{"stoa":"nothex"}"#] {
+            let _ = generate_identity_slate(bad, || Ok(a_master_key()), |n| remembered.set(Some(n)));
+        }
+        assert_eq!(
+            remembered.into_inner(),
+            None,
+            "a refused request superseded the live slate"
+        );
+    }
+
+    #[test]
+    fn a_keystore_that_cannot_be_opened_is_the_error_shape_rather_than_an_empty_slate() {
+        // A slate needs the master key, so a keystore failure is a failure to
+        // answer rather than a slate with nothing in it. The reason must reach the
+        // view, since `KeystoreError::Display` is what names the fix.
+        let out = generate_identity_slate(
+            &slate_request(),
+            || Err(crate::keystore::KeystoreError::PermissionsTooOpen { mode: 0o644 }),
+            |_| {},
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_some(), "got {out}");
+        assert!(v.get("candidates").is_none());
+        assert!(
+            v["error"].as_str().unwrap().contains("chmod 600"),
+            "the fix must reach the view, got {out}"
+        );
+    }
+
+    // ─── Keeping a candidate ──────────────────────────────────────────────
+
+    /// Keep a candidate through the wire, against a real keystore path and record.
+    fn keep_through_the_wire(
+        dir: &OnboardingDir,
+        nonce: SlateNonce,
+        live: Option<SlateNonce>,
+        index: i64,
+        unlock: &Unlock,
+    ) -> serde_json::Value {
+        let keystore = a_master_key();
+        let paths = dir.paths();
+        let request = format!(
+            r#"{{"stoa":"{}","slate":"{}","index":{index}}}"#,
+            a_stoa().to_hex(),
+            nonce.to_hex()
+        );
+        let out = keep_identity(
+            &request,
+            live,
+            KeepTargets {
+                keystore: &keystore,
+                keystore_path: &dir.keystore_path(),
+                unlock,
+                paths: &paths,
+            },
+        );
+        serde_json::from_str(&out)
+            .unwrap_or_else(|e| panic!("the keep reply must be valid JSON ({e}): {out}"))
+    }
+
+    #[test]
+    fn keeping_a_candidate_stores_it_and_reports_what_was_kept() {
+        let dir = OnboardingDir::new("keep-stores");
+        let nonce = SlateNonce::generate().unwrap();
+        let v = keep_through_the_wire(&dir, nonce, Some(nonce), 2, &Unlock::Unencrypted);
+        assert_eq!(v["kept"], true, "got {v}");
+
+        // The expected address is derived HERE, independently, from the fixed
+        // master key and the path the reply named — not read back from the reply's
+        // own address field.
+        let path = v["path"].as_u64().unwrap() as u32;
+        let expected = crate::identity::derive_stoa_key_at_path(&[7u8; 32], &a_stoa(), path)
+            .public_key()
+            .address()
+            .to_hex();
+        assert_eq!(v["address"], expected, "got {v}");
+        assert!(v.get("reason").is_none(), "got {v}");
+
+        // And the path that reached the record is the one reported, checked
+        // through the store rather than through the reply.
+        assert_eq!(dir.paths().path_for(&a_stoa()).unwrap(), Some(path));
+    }
+
+    #[test]
+    fn a_kept_identity_survives_a_restart_and_is_the_one_reported() {
+        // The spec: "the identity reported is the one that was kept", after "the
+        // stored state is then loaded afresh" — and twice, because the spec
+        // requires it survive more than one restart and a store that consumed its
+        // content on read would pass a single reload.
+        let dir = OnboardingDir::new("keep-survives");
+        let nonce = SlateNonce::generate().unwrap();
+        let kept = keep_through_the_wire(&dir, nonce, Some(nonce), 1, &Unlock::Unencrypted);
+        let kept_address = kept["address"].as_str().unwrap().to_string();
+
+        for reload in 0..2 {
+            let v: serde_json::Value = serde_json::from_str(&who_am_i(
+                &slate_request(),
+                || Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted),
+                || Ok(dir.paths()),
+            ))
+            .unwrap();
+            assert_eq!(v["hasIdentity"], true, "reload {reload}: {v}");
+            assert_eq!(
+                v["address"], kept_address,
+                "reload {reload} reported a different identity than was kept"
+            );
+        }
+    }
+
+    #[test]
+    fn a_kept_identity_can_sign_as_the_identity_it_reported() {
+        // The spec: "an op signed by the identity it yields has as its author the
+        // identity that keeping it reported". END TO END through a real keystore
+        // on disk and a real signature — every other keep test compares addresses,
+        // so none of them could see a keep that reported one identity while the
+        // user posted under another.
+        use crate::identity::{sign_op_bytes, verify_authored_op, Address};
+
+        let dir = OnboardingDir::new("keep-signs");
+        let nonce = SlateNonce::generate().unwrap();
+        let kept = keep_through_the_wire(&dir, nonce, Some(nonce), 0, &Unlock::Unencrypted);
+        let reported =
+            Address::from_hex(kept["address"].as_str().unwrap()).expect("a parseable address");
+        let path = kept["path"].as_u64().unwrap() as u32;
+
+        // Reopened from disk, not the in-memory keystore the keep used — the
+        // question is whether what was PERSISTED signs as what was reported.
+        let reloaded = Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted).unwrap();
+        let key = reloaded.stoa_key_at_path(&a_stoa(), path);
+        let sig = sign_op_bytes(&key, b"a post");
+        assert!(
+            verify_authored_op(
+                &reported,
+                &key.public_key().to_bytes(),
+                b"a post",
+                &sig.to_bytes()
+            ),
+            "an op signed by the kept identity is not attributed to the reported address"
+        );
+
+        // The negative: another path's key must not verify, or the assertion
+        // above would hold for any key.
+        let other = reloaded.stoa_key_at_path(&a_stoa(), path.wrapping_add(1));
+        assert!(!verify_authored_op(
+            &reported,
+            &other.public_key().to_bytes(),
+            b"a post",
+            &sign_op_bytes(&other, b"a post").to_bytes()
+        ));
+    }
+
+    #[test]
+    fn a_selection_against_a_superseded_slate_is_refused_rather_than_satisfied() {
+        // The spec's sharpest requirement on this path: the attempt "is refused
+        // rather than storing a candidate from the second" set.
+        //
+        // So the assertion is not merely that an error came back — it is that
+        // NOTHING was stored. A handler that refused and wrote anyway would pass a
+        // weaker version of this test.
+        let dir = OnboardingDir::new("superseded");
+        let first = SlateNonce::generate().unwrap();
+        let second = SlateNonce::generate().unwrap();
+        assert_ne!(first, second);
+
+        let v = keep_through_the_wire(&dir, first, Some(second), 0, &Unlock::Unencrypted);
+        assert_eq!(v["kept"], false, "got {v}");
+        assert!(v.get("address").is_none(), "got {v}");
+        assert_eq!(
+            dir.paths().path_for(&a_stoa()).unwrap(),
+            None,
+            "a superseded selection recorded a path"
+        );
+        assert!(
+            !dir.keystore_path().exists(),
+            "a superseded selection wrote a keystore"
+        );
+    }
+
+    #[test]
+    fn a_selection_with_no_live_slate_at_all_is_refused() {
+        // Distinct from the superseded case in how a user reaches it — a restart
+        // between generating and keeping — and the same refusal, because there is
+        // one useful answer to both: generate a slate and choose from it.
+        let dir = OnboardingDir::new("no-live-slate");
+        let nonce = SlateNonce::generate().unwrap();
+        let v = keep_through_the_wire(&dir, nonce, None, 0, &Unlock::Unencrypted);
+        assert_eq!(v["kept"], false, "got {v}");
+        assert!(
+            v["reason"].as_str().unwrap().contains("generate"),
+            "the reason must name the fix, got {v}"
+        );
+        assert!(!dir.keystore_path().exists());
+    }
+
+    #[test]
+    fn a_selection_outside_the_set_is_refused_and_stores_nothing() {
+        // The spec: "the attempt is refused, AND no identity is stored". Coercing
+        // an out-of-range selection would store an identity the user did not
+        // choose, which the spec calls unrecoverable.
+        let dir = OnboardingDir::new("out-of-range");
+        let nonce = SlateNonce::generate().unwrap();
+        for index in [SLATE_SIZE as i64, SLATE_SIZE as i64 + 1, 99, 100_000] {
+            let v = keep_through_the_wire(&dir, nonce, Some(nonce), index, &Unlock::Unencrypted);
+            assert_eq!(v["kept"], false, "index {index}: {v}");
+            assert!(v.get("address").is_none(), "index {index}: {v}");
+            assert!(
+                !dir.keystore_path().exists(),
+                "index {index} wrote a keystore"
+            );
+            assert_eq!(dir.paths().path_for(&a_stoa()).unwrap(), None);
+        }
+        // And every in-range index IS accepted, or the refusals above could be
+        // unconditional and these assertions would still pass.
+        let ok = keep_through_the_wire(&dir, nonce, Some(nonce), 4, &Unlock::Unencrypted);
+        assert_eq!(ok["kept"], true, "got {ok}");
+    }
+
+    #[test]
+    fn a_second_keep_is_refused_and_leaves_the_stored_identity_unchanged() {
+        // The spec: "the attempt is refused, AND the stored identity is
+        // unchanged". The second assertion is the load-bearing one — a refusal
+        // that replaced the master key anyway would satisfy the first and destroy
+        // every identity derived from the old one, with no error saying so.
+        let dir = OnboardingDir::new("second-keep");
+        let nonce = SlateNonce::generate().unwrap();
+        let first = keep_through_the_wire(&dir, nonce, Some(nonce), 0, &Unlock::Unencrypted);
+        assert_eq!(first["kept"], true, "got {first}");
+        let before = std::fs::read(dir.keystore_path()).unwrap();
+
+        let second = keep_through_the_wire(&dir, nonce, Some(nonce), 3, &Unlock::Unencrypted);
+        assert_eq!(second["kept"], false, "got {second}");
+        assert_eq!(
+            std::fs::read(dir.keystore_path()).unwrap(),
+            before,
+            "a refused second keep rewrote the keystore"
+        );
+        assert_eq!(
+            dir.paths().path_for(&a_stoa()).unwrap(),
+            Some(first["path"].as_u64().unwrap() as u32),
+            "a refused second keep changed the recorded path"
+        );
+    }
+
+    #[test]
+    fn a_keep_whose_keystore_write_fails_records_no_path() {
+        // THE WRITE ORDER, and nothing else in this file pins it. Reversing the
+        // two writes left the whole suite green until this test existed —
+        // measured, not assumed.
+        //
+        // The observable difference is exactly the bad state `design.md` names: a
+        // recorded path naming a master key that does not exist, which the NEXT
+        // keep — with a different master key — would silently inherit.
+        //
+        // The keystore write is made to fail by putting a DIRECTORY where the
+        // keystore file goes, so `create` cannot write there. That is a failure of
+        // the keystore write specifically, with the path record perfectly healthy,
+        // which is the only fixture that separates the two orders.
+        let dir = OnboardingDir::new("keystore-write-fails");
+        std::fs::create_dir_all(dir.keystore_path()).unwrap();
+        let paths = dir.paths();
+        let keystore = a_master_key();
+        let nonce = SlateNonce::generate().unwrap();
+        let request = format!(
+            r#"{{"stoa":"{}","slate":"{}","index":0}}"#,
+            a_stoa().to_hex(),
+            nonce.to_hex()
+        );
+
+        let out = keep_identity(
+            &request,
+            Some(nonce),
+            KeepTargets {
+                keystore: &keystore,
+                keystore_path: &dir.keystore_path(),
+                unlock: &Unlock::Unencrypted,
+                paths: &paths,
+            },
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["kept"], false, "the fixture must fail the keystore write, got {out}");
+
+        // The assertion the ordering exists for: nothing reached the record.
+        assert_eq!(
+            paths.path_for(&a_stoa()).unwrap(),
+            None,
+            "a failed keystore write left a recorded path behind — the writes are \
+             in the wrong order"
+        );
+
+        // And the spec's "a subsequent load finds no identity that was not there
+        // before": who-am-i must still find nobody.
+        let who: serde_json::Value = serde_json::from_str(&whoami_for(
+            &a_stoa(),
+            || Ok(a_master_key()),
+            || Ok(dir.paths()),
+        )
+        .to_json())
+        .unwrap();
+        assert_eq!(who["hasIdentity"], false, "got {who}");
+    }
+
+    #[test]
+    fn the_second_keep_refusal_is_distinguishable_from_other_failures() {
+        // The spec: the reason must be "distinguishable from a malformed request
+        // and from a storage failure". Three states, three distinct outcomes —
+        // and the malformed one is the ERROR shape rather than a refusal, which is
+        // the strongest form of distinguishable.
+        let dir = OnboardingDir::new("refusal-kinds");
+        let nonce = SlateNonce::generate().unwrap();
+        keep_through_the_wire(&dir, nonce, Some(nonce), 0, &Unlock::Unencrypted);
+
+        let already = keep_through_the_wire(&dir, nonce, Some(nonce), 1, &Unlock::Unencrypted);
+        let already_reason = already["reason"].as_str().unwrap();
+
+        // A storage failure: the record's own file replaced by a directory, so
+        // opening it fails. Reached through a different `OnboardingDir` so the
+        // already-exists case is not also in play.
+        let broken = OnboardingDir::new("refusal-storage");
+        let keystore = a_master_key();
+        let record_path = IdentityStore::default_path_in(&broken.0);
+        std::fs::create_dir_all(&record_path).unwrap();
+        let storage_failure = IdentityStore::open(&record_path);
+        assert!(
+            storage_failure.is_err(),
+            "the fixture must actually fail, or this test proves nothing"
+        );
+        let storage_reason = storage_failure.unwrap_err().to_string();
+
+        assert_ne!(
+            already_reason, storage_reason,
+            "an existing identity and a storage failure must not read alike"
+        );
+
+        // And a malformed request is §2.5's error shape, not a refusal at all.
+        let malformed = keep_identity(
+            r#"{"stoa":"nothex"}"#,
+            Some(nonce),
+            KeepTargets {
+                keystore: &keystore,
+                keystore_path: &broken.keystore_path(),
+                unlock: &Unlock::Unencrypted,
+                paths: &dir.paths(),
+            },
+        );
+        let v: serde_json::Value = serde_json::from_str(&malformed).unwrap();
+        assert!(v.get("error").is_some(), "got {malformed}");
+        assert!(v.get("kept").is_none(), "got {malformed}");
+    }
+
+    #[test]
+    fn the_keep_reply_reports_whether_the_master_key_was_encrypted() {
+        // The spec: an encrypted store reports encrypted, an unencrypted one
+        // reports unencrypted. Both directions, because a field hardcoded to
+        // either value would satisfy one of them.
+        let plain = OnboardingDir::new("report-plain");
+        let nonce = SlateNonce::generate().unwrap();
+        let v = keep_through_the_wire(&plain, nonce, Some(nonce), 0, &Unlock::Unencrypted);
+        assert_eq!(v["kept"], true, "got {v}");
+        assert_eq!(
+            v["encrypted"], false,
+            "an unencrypted store must report unencrypted: {v}"
+        );
+
+        let encrypted = OnboardingDir::new("report-encrypted");
+        let unlock = Unlock::Passphrase(Passphrase::new(b"a real passphrase"));
+        let v = keep_through_the_wire(&encrypted, nonce, Some(nonce), 0, &unlock);
+        assert_eq!(v["kept"], true, "got {v}");
+        assert_eq!(
+            v["encrypted"], true,
+            "an encrypted store must report encrypted: {v}"
+        );
+
+        // And the report agrees with the FILE, not merely with the argument: the
+        // keystore's own inspection must say the same thing. This is what would
+        // catch a reply whose boolean had drifted from what was written.
+        assert!(Keystore::is_encrypted(&encrypted.keystore_path()).unwrap());
+        assert!(!Keystore::is_encrypted(&plain.keystore_path()).unwrap());
+    }
+
+    #[test]
+    fn the_keep_json_is_pinned_to_the_exact_shape_a_view_is_written_against() {
+        // Hardcoded strings, both shapes, following the capability probe's
+        // precedent.
+        assert_eq!(
+            Kept::Stored {
+                address: "aa".into(),
+                public_key: "bb".into(),
+                path: 7,
+                encrypted: true,
+            }
+            .to_json(),
+            r#"{"address":"aa","encrypted":true,"kept":true,"path":7,"publicKey":"bb"}"#
+        );
+        assert_eq!(
+            Kept::Refused {
+                reason: "no slate".into()
+            }
+            .to_json(),
+            r#"{"kept":false,"reason":"no slate"}"#
+        );
+    }
+
+    #[test]
+    fn a_malformed_keep_request_is_the_error_shape_and_carries_no_result() {
+        // §2.5, on the method where a partial success would be worst: a reply
+        // carrying an error and a `kept:true` beside it would tell a view an
+        // identity exists that was never written.
+        let dir = OnboardingDir::new("keep-malformed");
+        let nonce = SlateNonce::generate().unwrap();
+        let keystore = a_master_key();
+        let paths = dir.paths();
+        let stoa = a_stoa().to_hex();
+        for bad in [
+            "not json".to_string(),
+            r#"{}"#.to_string(),
+            format!(r#"{{"stoa":"{stoa}"}}"#),
+            format!(r#"{{"stoa":"{stoa}","slate":7}}"#),
+            format!(r#"{{"stoa":"{stoa}","slate":"nothex"}}"#),
+            format!(r#"{{"stoa":"{stoa}","slate":"00ff"}}"#),
+            format!(r#"{{"stoa":"{stoa}","slate":"{}"}}"#, nonce.to_hex()),
+            format!(
+                r#"{{"stoa":"{stoa}","slate":"{}","index":-1}}"#,
+                nonce.to_hex()
+            ),
+            format!(
+                r#"{{"stoa":"{stoa}","slate":"{}","index":1.5}}"#,
+                nonce.to_hex()
+            ),
+            format!(
+                r#"{{"stoa":"{stoa}","slate":"{}","index":"two"}}"#,
+                nonce.to_hex()
+            ),
+        ] {
+            let out = keep_identity(
+                &bad,
+                Some(nonce),
+                KeepTargets {
+                    keystore: &keystore,
+                    keystore_path: &dir.keystore_path(),
+                    unlock: &Unlock::Unencrypted,
+                    paths: &paths,
+                },
+            );
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(v.get("error").is_some(), "for {bad:?}, got {out}");
+            assert!(
+                v.get("kept").is_none() && v.get("address").is_none(),
+                "a failure must never also carry a result — §2.5, got {out}"
+            );
+            assert!(
+                !dir.keystore_path().exists(),
+                "a malformed request for {bad:?} wrote a keystore"
+            );
+        }
+    }
+
+    // ─── Who the user is ──────────────────────────────────────────────────
+
+    #[test]
+    fn who_am_i_reports_an_identity_with_its_address_and_public_key() {
+        // The spec: "the reply states that there is an identity, AND carries its
+        // address and its public key, AND carries no reason". All three.
+        let dir = OnboardingDir::new("whoami-yes");
+        let nonce = SlateNonce::generate().unwrap();
+        let kept = keep_through_the_wire(&dir, nonce, Some(nonce), 2, &Unlock::Unencrypted);
+
+        let v: serde_json::Value = serde_json::from_str(&who_am_i(
+            &slate_request(),
+            || Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted),
+            || Ok(dir.paths()),
+        ))
+        .unwrap();
+        assert_eq!(v["hasIdentity"], true, "got {v}");
+        assert_eq!(v["address"], kept["address"], "got {v}");
+        assert!(v.get("reason").is_none(), "got {v}");
+        // The public key must be present AND must be the one the address derives
+        // from, which is the only way the "display name is derived from the public
+        // key" requirement is useful.
+        let key = hex::decode(v["publicKey"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            crate::identity::PublicKey::from_bytes(&key)
+                .unwrap()
+                .address()
+                .to_hex(),
+            v["address"].as_str().unwrap(),
+            "the reported public key does not derive the reported address: {v}"
+        );
+    }
+
+    #[test]
+    fn who_am_i_reports_nobody_with_a_reason_when_no_identity_is_stored() {
+        // The spec: "the reply states that there is none, AND carries a reason,
+        // AND carries no identity".
+        let dir = OnboardingDir::new("whoami-none");
+        let v: serde_json::Value = serde_json::from_str(&who_am_i(
+            &slate_request(),
+            || Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted),
+            || Ok(dir.paths()),
+        ))
+        .unwrap();
+        assert_eq!(v["hasIdentity"], false, "got {v}");
+        assert!(v.get("address").is_none(), "got {v}");
+        assert!(v.get("publicKey").is_none(), "got {v}");
+        assert!(!v["reason"].as_str().unwrap().is_empty(), "got {v}");
+    }
+
+    #[test]
+    fn an_unusable_identity_is_distinguishable_from_an_absent_one() {
+        // The spec's requirement, and the reason the method exists separately from
+        // the posting probe: "a stored identity whose keystore permissions are too
+        // open is a real identity that cannot currently be used", and a caller
+        // told "you are nobody" would render the wrong thing.
+        //
+        // Four states, and all four reasons must differ.
+        let absent = whoami_for(
+            &a_stoa(),
+            || Err(crate::keystore::KeystoreError::NotFound),
+            || Ok(IdentityStore::in_memory().unwrap()),
+        );
+        let unusable = whoami_for(
+            &a_stoa(),
+            || Err(crate::keystore::KeystoreError::PermissionsTooOpen { mode: 0o644 }),
+            || Ok(IdentityStore::in_memory().unwrap()),
+        );
+        let locked = whoami_for(
+            &a_stoa(),
+            || Err(crate::keystore::KeystoreError::Locked),
+            || Ok(IdentityStore::in_memory().unwrap()),
+        );
+        // The state the two-store split creates: a master key with no recorded
+        // path for this Stoa.
+        let unchosen = whoami_for(
+            &a_stoa(),
+            || Ok(a_master_key()),
+            || Ok(IdentityStore::in_memory().unwrap()),
+        );
+
+        let reason = |w: &Whoami| match w {
+            Whoami::Nobody { reason } => reason.clone(),
+            Whoami::Identity { .. } => panic!("expected nobody, got an identity"),
+        };
+        let reasons = [
+            reason(&absent),
+            reason(&unusable),
+            reason(&locked),
+            reason(&unchosen),
+        ];
+        for (i, a) in reasons.iter().enumerate() {
+            for b in reasons.iter().skip(i + 1) {
+                assert_ne!(a, b, "two states produced the same reason");
+            }
+        }
+        // And the unchosen state's reason names the record rather than reading as
+        // "you have no identity", which is the whole point of listing it.
+        assert!(
+            reason(&unchosen).contains("chosen") || reason(&unchosen).contains("slate"),
+            "the unchosen reason must name what is missing, got {}",
+            reason(&unchosen)
+        );
+    }
+
+    #[test]
+    fn who_am_i_reports_that_recovery_needs_more_than_the_master_key() {
+        // The spec: "a caller asking whether recovery needs more than the master
+        // key is told that it does", while paths are recorded and no export
+        // exists. A user who believes their exported master key is a complete
+        // backup "has been misled by omission", and the caller has no filesystem
+        // access to discover it for itself.
+        let dir = OnboardingDir::new("whoami-recovery");
+        let nonce = SlateNonce::generate().unwrap();
+        keep_through_the_wire(&dir, nonce, Some(nonce), 0, &Unlock::Unencrypted);
+
+        let v: serde_json::Value = serde_json::from_str(&who_am_i(
+            &slate_request(),
+            || Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted),
+            || Ok(dir.paths()),
+        ))
+        .unwrap();
+        assert_eq!(
+            v["recoveryNeedsTheRecord"], true,
+            "the unbacked state must be reported, got {v}"
+        );
+    }
+
+    #[test]
+    fn distinct_stoas_report_distinct_identities() {
+        // §5.2 gives a user one identity PER STOA, and the path record is keyed by
+        // Stoa. A handler that ignored the field would report one Stoa's identity
+        // while the user posted under another's.
+        let dir = OnboardingDir::new("whoami-per-stoa");
+        let store = dir.paths();
+        let here = a_stoa();
+        let elsewhere = stoa_address(b"another stoa");
+        store.record_path(&here, 1).unwrap();
+        store.record_path(&elsewhere, 2).unwrap();
+
+        let ask = |stoa: &Address| {
+            whoami_for(stoa, || Ok(a_master_key()), || Ok(dir.paths()))
+        };
+        let (a, b) = (ask(&here), ask(&elsewhere));
+        match (&a, &b) {
+            (
+                Whoami::Identity {
+                    address: addr_a,
+                    path: path_a,
+                    ..
+                },
+                Whoami::Identity {
+                    address: addr_b,
+                    path: path_b,
+                    ..
+                },
+            ) => {
+                assert_eq!(*path_a, 1);
+                assert_eq!(*path_b, 2);
+                assert_ne!(addr_a, addr_b, "two Stoas reported one address");
+                // And each address is the one the recorded path derives, computed
+                // here rather than read from the reply.
+                for (stoa, path, addr) in [(&here, 1u32, addr_a), (&elsewhere, 2, addr_b)] {
+                    assert_eq!(
+                        addr,
+                        &crate::identity::derive_stoa_key_at_path(&[7u8; 32], stoa, path)
+                            .public_key()
+                            .address()
+                            .to_hex()
+                    );
+                }
+            }
+            other => panic!("expected two identities, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_whoami_json_is_pinned_to_the_exact_shape_a_view_is_written_against() {
+        assert_eq!(
+            Whoami::Identity {
+                address: "aa".into(),
+                public_key: "bb".into(),
+                path: 7,
+                recovery_needs_the_record: true,
+            }
+            .to_json(),
+            r#"{"address":"aa","hasIdentity":true,"path":7,"publicKey":"bb","recoveryNeedsTheRecord":true}"#
+        );
+        assert_eq!(
+            Whoami::Nobody {
+                reason: "no keystore".into()
+            }
+            .to_json(),
+            r#"{"hasIdentity":false,"reason":"no keystore"}"#
+        );
+    }
+
+    #[test]
+    fn a_malformed_whoami_request_is_the_error_shape_and_carries_no_identity() {
+        for bad in [
+            "not json",
+            r#"{}"#,
+            r#"{"stoa":7}"#,
+            r#"{"stoa":"nothex"}"#,
+            r#"{"stoa":"00ff"}"#,
+        ] {
+            let out = who_am_i(
+                bad,
+                || Ok(a_master_key()),
+                || Ok(IdentityStore::in_memory().unwrap()),
+            );
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(v.get("error").is_some(), "for {bad:?}, got {out}");
+            assert!(
+                v.get("hasIdentity").is_none() && v.get("address").is_none(),
+                "a failure must never also carry a result — §2.5, got {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn who_am_i_is_an_answer_and_not_an_error_for_every_storage_state() {
+        // The posting probe's posture, applied here: a state that prevents naming
+        // an identity is reported as "nobody, because X" rather than as the call
+        // failing. A view handling both would have two negative branches and the
+        // second has no sensible rendering.
+        let makers: [fn() -> crate::keystore::KeystoreError; 5] = [
+            || crate::keystore::KeystoreError::NotFound,
+            || crate::keystore::KeystoreError::Io("disk on fire".into()),
+            || crate::keystore::KeystoreError::NotAKeystore,
+            || crate::keystore::KeystoreError::WrongPassphrase,
+            || crate::keystore::KeystoreError::Truncated,
+        ];
+        for make in makers {
+            let out = who_am_i(
+                &slate_request(),
+                || Err(make()),
+                || Ok(IdentityStore::in_memory().unwrap()),
+            );
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(
+                v.get("error").is_none(),
+                "a storage state became the error shape: {out}"
+            );
+            assert_eq!(v["hasIdentity"], false, "got {out}");
+        }
+
+        // And a failure of the RECORD, not only of the keystore.
+        let out = who_am_i(
+            &slate_request(),
+            || Ok(a_master_key()),
+            || {
+                Err(crate::identity_store::IdentityStoreError::Storage(
+                    "unable to open database file".into(),
+                ))
+            },
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_none(), "got {out}");
+        assert_eq!(v["hasIdentity"], false);
+        assert!(
+            v["reason"]
+                .as_str()
+                .unwrap()
+                .contains("unable to open database file"),
+            "the reason must reach the view, got {out}"
+        );
+    }
+
+    #[test]
+    fn no_onboarding_handler_panics_whatever_it_is_given_or_whatever_fails() {
+        // The guard, on three methods a view calls during onboarding. A panic here
+        // does not make one button unavailable — it aborts the module process
+        // (PHASE0-FINDINGS §3) and the entire interface is unrenderable.
+        //
+        // Two axes: arbitrary INPUT, and a dependency that panics. The second is
+        // the one a request-shaped sweep would miss.
+        let dir = OnboardingDir::new("no-panics");
+        let keystore = a_master_key();
+        let paths = dir.paths();
+        let stoa = a_stoa().to_hex();
+        let nonce = SlateNonce::generate().unwrap();
+
+        for input in [
+            "",
+            "not json",
+            "null",
+            "[]",
+            "0",
+            r#""a string""#,
+            r#"{}"#,
+            r#"{"stoa":null,"slate":null,"index":null}"#,
+            r#"{"stoa":[],"slate":{},"index":[]}"#,
+            &format!(r#"{{"stoa":"{stoa}","slate":"{}","index":18446744073709551616}}"#, nonce.to_hex()),
+            "\u{0}\u{1}\u{2}",
+        ] {
+            for out in [
+                generate_identity_slate(input, || Ok(a_master_key()), |_| {}),
+                keep_identity(
+                    input,
+                    Some(nonce),
+                    KeepTargets {
+                        keystore: &keystore,
+                        keystore_path: &dir.keystore_path(),
+                        unlock: &Unlock::Unencrypted,
+                        paths: &paths,
+                    },
+                ),
+                who_am_i(
+                    input,
+                    || Ok(a_master_key()),
+                    || Ok(IdentityStore::in_memory().unwrap()),
+                ),
+            ] {
+                serde_json::from_str::<serde_json::Value>(&out).unwrap_or_else(|e| {
+                    panic!("a handler emitted invalid JSON for {input:?} ({e}): {out}")
+                });
+            }
+        }
+
+        // A panicking dependency, which the guard has to convert rather than let
+        // through.
+        let out = generate_identity_slate(
+            &slate_request(),
+            || panic!("the keystore layer exploded"),
+            |_| {},
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_some(), "got {out}");
+        assert!(v.get("candidates").is_none());
+
+        let out = who_am_i(
+            &slate_request(),
+            || Ok(a_master_key()),
+            || panic!("the record layer exploded"),
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_some(), "got {out}");
+        assert!(v.get("hasIdentity").is_none());
     }
 
     // ─── The feed handler ─────────────────────────────────────────────────
