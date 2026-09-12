@@ -2988,8 +2988,31 @@ mod tests {
         // record, so no record anyone can construct hashes to all-zero. A creator
         // key colliding with some Stoa's posting identity would link the two.
         //
-        // Checked against a spread of real records rather than one, because a
-        // single comparison would pass for a domain that happened to miss that one.
+        // # WHAT THIS TEST CAN AND CANNOT ESTABLISH
+        //
+        // **It cannot establish the general claim, and no test can.** "No real
+        // Stoa address is the creator domain" rests on SHA-256 preimage
+        // resistance, which is not checkable by enumeration: the four cases below
+        // are four points out of 2^256, so a domain colliding with any Stoa they
+        // do not name passes them.
+        //
+        // Measured, so the limit is stated rather than assumed: with the domain set
+        // to `stoa_address(b"Agora")` — a value this list DOES contain — the loop
+        // fails; with it set to 32 arbitrary non-zero bytes, the loop PASSES and
+        // only `the_creator_key_domain_is_pinned_to_a_known_answer` catches the
+        // change. So the pinning test is the one doing the load-bearing work, and
+        // this one is a spot check beneath it.
+        //
+        // What it does establish is narrower and still worth having: the derivation
+        // is **injective over its context** — the same root under two different
+        // contexts gives two different keys — so the creator key is not a value
+        // every Stoa's posting identity also happens to be. `assert_ne` over four
+        // contexts would fail for a `stoa_public_key` that ignored its argument, or
+        // a `creator_public_key` that returned the root key some other path also
+        // returns.
+        //
+        // The structural argument, which is what actually makes the domain safe,
+        // lives on `CREATOR_KEY_DOMAIN` and is not a test's to make.
         let ks = a_keystore(7);
         let creator = ks.creator_public_key().to_hex();
         for name in [
@@ -2999,6 +3022,14 @@ mod tests {
             &[0u8; 32],
         ] {
             let stoa = crate::identity::stoa_address(name);
+            // The fixture must not be the domain itself, or the assertion below
+            // would be asserting a collision must exist rather than must not.
+            assert_ne!(
+                stoa.as_bytes(),
+                CREATOR_KEY_DOMAIN.as_bytes(),
+                "a fixture Stoa address hashed to the creator domain, which would \
+                 be a SHA-256 preimage — the fixture is wrong, not the code"
+            );
             assert_ne!(
                 ks.stoa_public_key(&stoa).to_hex(),
                 creator,

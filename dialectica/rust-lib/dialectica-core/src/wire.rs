@@ -2743,6 +2743,17 @@ mod tests {
         // flattening this would invite the user to re-paste every address they hold.
         //
         // Reached with a path that cannot be a SQLite database: a DIRECTORY.
+        //
+        // **The REASON is asserted, not merely that something failed.** Without
+        // that, this test passes for a handler that refused for any reason at all
+        // — including one unrelated to the store being unopenable — and it would
+        // stay green if SQLite's behaviour on a directory changed from "unable to
+        // open" to something else entirely. It would also stay green for a
+        // `with_membership_store` that returned a fixed error and never tried. The
+        // literal is the message SQLite gives and this code passes through; it is
+        // the same obligation `a_store_that_cannot_be_opened_is_the_error_shape_
+        // and_not_an_empty_feed` carries for the feed, where the reason can be
+        // injected because that handler takes a closure and this one takes a path.
         let dir = std::env::temp_dir();
         let out = with_membership_store("list_stoas", &dir, |store| list_stoas("{}", store));
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
@@ -2750,6 +2761,19 @@ mod tests {
         assert!(
             v.get("items").is_none(),
             "a failure must never also carry a result — §2.5"
+        );
+        let reason = v["error"].as_str().unwrap();
+        assert!(
+            reason.contains("unable to open database file"),
+            "the reason the store could not be opened must reach the view so it \
+             can be named, got {out}"
+        );
+        // And the failure is the STORE's, reported in the membership store's own
+        // vocabulary rather than as a bare SQLite string — which is what makes
+        // this the error shape a view renders and not a leaked backend message.
+        assert!(
+            reason.contains("membership store"),
+            "the refusal must say which store could not be used, got {out}"
         );
     }
 
@@ -2808,5 +2832,530 @@ mod tests {
             &mut other,
         );
         assert_eq!(plain, extra, "an unknown field must not change the answer");
+    }
+
+    // ─── An existing op store stays readable, and membership survives ─────
+    //
+    // Two requirements that only a REAL op store on a REAL disk can pin, which is
+    // why they live here rather than beside the in-memory handler tests above:
+    //
+    // - "Adding membership does not make an existing store unreadable" is a claim
+    //   about two files in one directory. Every test above uses
+    //   `MembershipStore::in_memory`, which has no file at all — so none of them
+    //   can see a membership store that clobbered, relocated or re-versioned the
+    //   op log's file, and the requirement's own scenarios name an op store that
+    //   holds ops.
+    // - "Membership survives a restart" is a claim about what `MembershipStore`
+    //   leaves on disk, reached through the handlers a view calls, which
+    //   `with_membership_store` is the only entry point to.
+
+    /// A temporary directory, and the guard that removes it.
+    ///
+    /// Built with `std::fs` rather than a `tempfile` dependency, following
+    /// `log/sqlite.rs`'s and `membership.rs`'s own fixtures. The guard must be held
+    /// for the test's lifetime: dropping it removes the directory.
+    struct WireTempDir(std::path::PathBuf);
+
+    impl WireTempDir {
+        fn new(name: &str) -> Self {
+            let mut path = std::env::temp_dir();
+            path.push(format!(
+                "dialectica-wire-stoa-{}-{name}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir_all(&path).expect("a temporary directory is creatable");
+            WireTempDir(path)
+        }
+
+        fn path(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    impl Drop for WireTempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// One signed op in `stoa`, with a body that identifies it.
+    fn an_op_in(stoa: crate::identity::Address, body: &str) -> crate::op::SignedOp {
+        let key = feed_key(4);
+        Op {
+            stoa,
+            author: key.public_key(),
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: body.to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&key)
+    }
+
+    /// The bodies of every `Post` a real on-disk op log holds, sorted.
+    ///
+    /// Reads the ops back out of the STORE rather than out of the `SignedOp`
+    /// values the test still holds, because "its ops are readable" is a claim
+    /// about the file and not about the test's own memory.
+    fn bodies_on_disk(dir: &std::path::Path) -> Vec<String> {
+        let log = crate::log::SqliteOpLog::open(&dir.join("ops.sqlite"))
+            .expect("the op store must still open");
+        let mut out: Vec<String> = log
+            .iter()
+            .expect("the op store's ops must still be readable")
+            .iter()
+            .filter_map(|entry| match &entry.op.op.kind {
+                OpKind::Post { body, .. } => Some(body.clone()),
+                _ => None,
+            })
+            .collect();
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn a_store_holding_ops_and_no_memberships_opens_and_keeps_its_ops() {
+        // THE REQUIREMENT THE WHOLE DESIGN PIVOTS ON, and the one with no test
+        // before this. `design.md` picks a separate `stoas.sqlite` over three
+        // alternatives precisely so that "a store already holding ops stays
+        // readable, and a membership is recordable into it" holds by construction
+        // — and until this test existed, the construction was unchecked.
+        //
+        // The op store is written FIRST and by `SqliteOpLog` alone, so it is a
+        // store that genuinely predates membership rather than one this change
+        // helped create. Then membership is exercised in the same directory, and
+        // the ops are read back OUT OF THE FILE.
+        //
+        // The expected bodies are HARDCODED literals rather than read back from
+        // the log before the membership work and compared with itself afterwards:
+        // that comparison would pass for a membership store that truncated both
+        // reads equally.
+        let dir = WireTempDir::new("coexist-opens");
+        let genesis = a_joinable_record("A Stoa with ops");
+        let stoa = genesis.address().unwrap();
+
+        {
+            let mut log = crate::log::SqliteOpLog::open(&dir.path().join("ops.sqlite"))
+                .expect("a fresh op store is creatable");
+            log.append(an_op_in(stoa, "first"), Arrival::unordered())
+                .unwrap();
+            log.append(an_op_in(stoa, "second"), Arrival::unordered())
+                .unwrap();
+            assert_eq!(
+                log.len().unwrap(),
+                2,
+                "the fixture must reach the assertion"
+            );
+        }
+
+        // Opening the membership store beside it succeeds and is NOT refused on
+        // the grounds that the directory predates membership.
+        let listing =
+            with_membership_store("list_stoas", &membership_path_in(dir.path()), |store| {
+                list_stoas("{}", store)
+            });
+        let v: serde_json::Value = serde_json::from_str(&listing).unwrap();
+        assert!(
+            v.get("error").is_none(),
+            "opening beside an existing op store must not be refused: {listing}"
+        );
+        // The peer is reported as being in no Stoa — not as an error, and not as
+        // a Stoa invented from the ops that are sitting right there.
+        assert_eq!(v["items"].as_array().unwrap().len(), 0);
+
+        // And the ops the store already held are still readable, by body.
+        assert_eq!(bodies_on_disk(dir.path()), vec!["first", "second"]);
+    }
+
+    #[test]
+    fn a_membership_is_recordable_into_a_store_that_previously_held_none() {
+        // The half `design.md`'s own table says the rejected alternatives fail:
+        // "opening succeeds and ops are readable" holds for a `memberships` table
+        // added to `create_schema`, and "a membership is recordable" does not —
+        // the first write dies as `no such table`. So the join must be exercised,
+        // not only the open.
+        let dir = WireTempDir::new("coexist-records");
+        let with_ops = a_joinable_record("A Stoa with ops");
+        let ops_stoa = with_ops.address().unwrap();
+
+        {
+            let mut log = crate::log::SqliteOpLog::open(&dir.path().join("ops.sqlite"))
+                .expect("a fresh op store is creatable");
+            log.append(an_op_in(ops_stoa, "already here"), Arrival::unordered())
+                .unwrap();
+        }
+
+        let joining = a_joinable_record("The Stoa being joined");
+        let joined_address = joining.address().unwrap();
+        let out = with_membership_store("join_stoa", &membership_path_in(dir.path()), |store| {
+            join_stoa(&join_request(&joining, &joined_address), store)
+        });
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(
+            v.get("error").is_none(),
+            "a membership must be recordable into a store that held none: {out}"
+        );
+        assert_eq!(v["stoa"].as_str().unwrap(), joined_address.to_hex());
+
+        // The ops the store already held are still readable afterwards.
+        assert_eq!(bodies_on_disk(dir.path()), vec!["already here"]);
+
+        // And membership did not invent a Stoa out of the op that was there: the
+        // listing is exactly the one Stoa that was joined. This is the half that
+        // fails for an implementation deriving membership from the log — which is
+        // reachable here and nowhere above, because no test above has both an op
+        // store and a membership store in one place.
+        let listing =
+            with_membership_store("list_stoas", &membership_path_in(dir.path()), |store| {
+                list_stoas("{}", store)
+            });
+        let lv: serde_json::Value = serde_json::from_str(&listing).unwrap();
+        let addresses: Vec<&str> = lv["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["stoa"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            addresses,
+            vec![joined_address.to_hex().as_str()],
+            "the listing must be what membership records and nothing from the ops"
+        );
+        assert_ne!(
+            joined_address, ops_stoa,
+            "the fixture's two Stoas must differ, or the assertion above proves nothing"
+        );
+    }
+
+    #[test]
+    fn the_membership_store_does_not_write_into_the_op_logs_file() {
+        // The file boundary as a property of the BYTES rather than of the path
+        // name. `the_membership_path_is_a_file_of_its_own_beside_the_op_logs`
+        // asserts two `PathBuf`s differ, which is a statement about
+        // `membership_path_in` and says nothing about what the store then does.
+        //
+        // A membership store that opened the op log's file anyway — a hardcoded
+        // name inside `MembershipStore::open`, say — would pass that test and
+        // fail this one, because the op log's file would change under it.
+        //
+        // The op store's bytes are hashed BEFORE and AFTER, and the ops are read
+        // back by body against hardcoded literals, so "unchanged" is checked two
+        // independent ways.
+        let dir = WireTempDir::new("separate-files");
+        let stoa = a_joinable_record("A Stoa with ops").address().unwrap();
+        let ops_path = dir.path().join("ops.sqlite");
+
+        {
+            let mut log =
+                crate::log::SqliteOpLog::open(&ops_path).expect("a fresh op store is creatable");
+            log.append(an_op_in(stoa, "untouched"), Arrival::unordered())
+                .unwrap();
+        }
+        let before = std::fs::read(&ops_path).expect("the op store's file is readable");
+        assert!(
+            !before.is_empty(),
+            "the fixture must have written something"
+        );
+
+        let joining = a_joinable_record("Somewhere new");
+        let address = joining.address().unwrap();
+        let out = with_membership_store("join_stoa", &membership_path_in(dir.path()), |store| {
+            join_stoa(&join_request(&joining, &address), store)
+        });
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&out)
+                .unwrap()
+                .get("error")
+                .is_none(),
+            "the join must succeed for this to be about the file: {out}"
+        );
+
+        let after = std::fs::read(&ops_path).expect("the op store's file is still readable");
+        assert_eq!(
+            before, after,
+            "recording a membership must not write a byte into the op log's file"
+        );
+        assert_eq!(bodies_on_disk(dir.path()), vec!["untouched"]);
+
+        // And the membership store left a file of its OWN, so the assertion above
+        // is not passing because nothing was written anywhere at all.
+        assert!(
+            membership_path_in(dir.path()).exists(),
+            "the membership store must have its own file"
+        );
+    }
+
+    #[test]
+    fn a_created_and_a_joined_stoa_both_survive_a_restart_with_their_founding_values() {
+        // "Membership survives a restart", through the handlers a view calls. The
+        // store-level test in `membership.rs` uses `MembershipStore` directly and
+        // so cannot see a `create_stoa` that built its record from something it
+        // did not retain, nor a `with_membership_store` that opened a different
+        // file on the second call.
+        //
+        // "Restart" is modelled as every store object being dropped and the path
+        // reopened, which is exactly what the adapter does — it opens per call.
+        // Each founding title is asserted against a HARDCODED literal rather than
+        // against the create reply, so a store that retained an empty title for
+        // both would fail.
+        let dir = WireTempDir::new("restart");
+        let path = membership_path_in(dir.path());
+
+        let created = with_membership_store("create_stoa", &path, |store| {
+            create_stoa(r#"{"title":"The one I made"}"#, || Ok(creator_key()), store)
+        });
+        let cv: serde_json::Value = serde_json::from_str(&created).unwrap();
+        assert!(cv.get("error").is_none(), "got {created}");
+        let created_address = cv["stoa"].as_str().unwrap().to_string();
+
+        let joining = a_joinable_record("The one I joined");
+        let joined_address = joining.address().unwrap();
+        let joined = with_membership_store("join_stoa", &path, |store| {
+            join_stoa(&join_request(&joining, &joined_address), store)
+        });
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&joined)
+                .unwrap()
+                .get("error")
+                .is_none(),
+            "got {joined}"
+        );
+
+        // Every store object is gone by now — `with_membership_store` opens and
+        // drops one per call. Reopen from the path, as a restarted process does.
+        let listing = with_membership_store("list_stoas", &path, |store| {
+            list_stoas(r#"{"page":0,"perPage":20}"#, store)
+        });
+        let lv: serde_json::Value = serde_json::from_str(&listing).unwrap();
+        assert!(lv.get("error").is_none(), "got {listing}");
+
+        let mut rows: Vec<(String, String)> = lv["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| {
+                (
+                    row["stoa"].as_str().unwrap().to_string(),
+                    row[FOUNDING_TITLE].as_str().unwrap().to_string(),
+                )
+            })
+            .collect();
+        rows.sort();
+
+        let mut expected = vec![
+            (created_address, "The one I made".to_string()),
+            (joined_address.to_hex(), "The one I joined".to_string()),
+        ];
+        expected.sort();
+        assert_eq!(
+            rows, expected,
+            "both Stoas must survive the restart and still answer their founding titles"
+        );
+
+        // And the retained record still verifies against the address it is held
+        // under, after the restart — the half a store that kept only titles and
+        // addresses would fail.
+        let store = crate::membership::MembershipStore::open(&path).unwrap();
+        for (hex, _) in &expected {
+            let address = crate::identity::Address::from_hex(hex).unwrap();
+            let held = store
+                .get(&address)
+                .unwrap()
+                .expect("the Stoa is still retained");
+            assert!(
+                held.genesis.matches(&address),
+                "the retained record must still hash to its address after a restart"
+            );
+        }
+    }
+
+    #[test]
+    fn a_join_refused_at_the_wire_leaves_nothing_behind_a_restart() {
+        // A refused join must leave no trace that a later process could read as a
+        // membership. Reached through the wire handler and checked after a reopen,
+        // because "nothing was recorded" and "nothing was COMMITTED" are different
+        // claims and only the second survives a restart.
+        //
+        // BOTH addresses are checked: the one the caller claimed, and the one the
+        // supplied record actually names. A handler that "helpfully" filed the
+        // record under its own address would leave exactly that behind.
+        //
+        // **A SECOND, LEGITIMATE Stoa is joined in the same store, and it must
+        // survive.** Measured: without it, this test passes for a store that
+        // persists NOTHING AT ALL — "the refused join left nothing" and "the store
+        // forgets everything" produce the same empty listing, which is this
+        // project's recurring defect family. The surviving Stoa is what tells the
+        // two explanations apart.
+        let dir = WireTempDir::new("refused-restart");
+        let path = membership_path_in(dir.path());
+        let real = a_joinable_record("Agora");
+        let claimed = real.address().unwrap();
+        let impostor = crate::stoa::Genesis {
+            creator: feed_key(9).public_key(),
+            ..real.clone()
+        };
+
+        let survivor = a_joinable_record("The one that is really joined");
+        let survivor_address = survivor.address().unwrap();
+        let ok = with_membership_store("join_stoa", &path, |store| {
+            join_stoa(&join_request(&survivor, &survivor_address), store)
+        });
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&ok)
+                .unwrap()
+                .get("error")
+                .is_none(),
+            "the legitimate join must succeed, or this test cannot tell a refused \
+             join from a store that persists nothing: {ok}"
+        );
+
+        let out = with_membership_store("join_stoa", &path, |store| {
+            join_stoa(&join_request(&impostor, &claimed), store)
+        });
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_some(), "the join must be refused: {out}");
+
+        let listing = with_membership_store("list_stoas", &path, |store| list_stoas("{}", store));
+        let lv: serde_json::Value = serde_json::from_str(&listing).unwrap();
+        let addresses: Vec<&str> = lv["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["stoa"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            addresses,
+            vec![survivor_address.to_hex().as_str()],
+            "after the restart the listing must hold exactly the Stoa that was \
+             really joined — the refused one left nothing, and the real one survived: {listing}"
+        );
+
+        let store = crate::membership::MembershipStore::open(&path).unwrap();
+        assert!(
+            !store.contains(&claimed).unwrap(),
+            "not in the Stoa that was claimed"
+        );
+        assert!(
+            !store.contains(&impostor.address().unwrap()).unwrap(),
+            "and not in the Stoa the supplied record names either"
+        );
+    }
+
+    #[test]
+    fn a_listing_page_that_is_not_the_last_says_so_on_the_wire() {
+        // `hasMore` at the wire, both halves, with a population that fills exactly
+        // two pages — the case where "look one row past the end" and "compare
+        // against a count" disagree.
+        //
+        // `every_stoa_is_reachable_by_paging_and_appears_once` pages through with
+        // the `listed` helper, which STOPS when `hasMore` is not true: a `hasMore`
+        // stuck at `false` makes that helper return the first page and the
+        // assertion there fails on the count, but a `hasMore` stuck at `true`
+        // makes it loop to its 1000-page guard and panic on the fixture rather
+        // than on the requirement. Neither reading pins the boundary itself, and
+        // the counts are HARDCODED here rather than derived from `items.len()`.
+        let mut store = a_membership_store();
+        for n in 0..4 {
+            create(&mut store, &format!("Stoa {n}"));
+        }
+
+        let first: serde_json::Value =
+            serde_json::from_str(&list_stoas(r#"{"page":0,"perPage":2}"#, &store)).unwrap();
+        assert_eq!(first["items"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            first["hasMore"], true,
+            "a further page exists and the reply must say so: {first}"
+        );
+        assert_eq!(first["page"], 0);
+
+        let second: serde_json::Value =
+            serde_json::from_str(&list_stoas(r#"{"page":1,"perPage":2}"#, &store)).unwrap();
+        assert_eq!(second["items"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            second["hasMore"], false,
+            "an exactly-full last page must not claim a further one: {second}"
+        );
+        assert_eq!(second["page"], 1);
+
+        // The two pages are disjoint, which is what makes `hasMore` above about
+        // paging rather than about a number the handler made up.
+        let a = first["items"][0]["stoa"].as_str().unwrap();
+        let b = second["items"][0]["stoa"].as_str().unwrap();
+        assert_ne!(a, b, "the second page must not repeat the first");
+    }
+
+    #[test]
+    fn a_join_verified_at_the_wire_needs_no_op_log_and_no_prior_membership() {
+        // "Verification consults nothing but the two inputs", at the wire. Shown by
+        // making the SAME decision in three states that differ in everything a
+        // verifier could have consulted: an empty store, a store already holding
+        // that exact Stoa, and a store holding a different Stoa plus a real op log
+        // full of ops for the Stoa being verified.
+        //
+        // A verifier that consulted any of those would have different material
+        // available in the three cases. The three replies are compared to each
+        // other AND to a hardcoded expectation of what the refusal says, so three
+        // identical *wrong* answers would not pass.
+        let dir = WireTempDir::new("verification-inputs");
+        let real = a_joinable_record("Agora");
+        let claimed = real.address().unwrap();
+        let impostor = crate::stoa::Genesis {
+            title: "Not Agora".to_string(),
+            ..real.clone()
+        };
+        let request = join_request(&impostor, &claimed);
+
+        let mut empty = a_membership_store();
+        let from_empty = join_stoa(&request, &mut empty);
+
+        let mut holding_it = a_membership_store();
+        join_stoa(&join_request(&real, &claimed), &mut holding_it);
+        let from_holding_it = join_stoa(&request, &mut holding_it);
+
+        let mut with_ops = a_membership_store();
+        let elsewhere = a_joinable_record("Elsewhere");
+        join_stoa(
+            &join_request(&elsewhere, &elsewhere.address().unwrap()),
+            &mut with_ops,
+        );
+        {
+            // A real op log, on a real disk, holding ops for the very Stoa being
+            // verified — the material a verifier tempted to "look it up" would
+            // reach for.
+            let mut log = crate::log::SqliteOpLog::open(&dir.path().join("ops.sqlite"))
+                .expect("a fresh op store is creatable");
+            for n in 0..3 {
+                log.append(an_op_in(claimed, &format!("op {n}")), Arrival::unordered())
+                    .unwrap();
+            }
+            assert_eq!(
+                log.len().unwrap(),
+                3,
+                "the fixture must reach the assertion"
+            );
+        }
+        let from_with_ops = join_stoa(&request, &mut with_ops);
+
+        assert_eq!(
+            from_empty, from_holding_it,
+            "the verification's answer must not depend on what membership holds"
+        );
+        assert_eq!(
+            from_empty, from_with_ops,
+            "the verification's answer must not depend on what ops exist"
+        );
+        // And the answer is the refusal, spelled out — not three agreeing joins.
+        // The expected message is a hardcoded literal, so a handler that agreed
+        // three times about something else does not pass.
+        let v: serde_json::Value = serde_json::from_str(&from_empty).unwrap();
+        assert_eq!(
+            v.get("error").and_then(|e| e.as_str()),
+            Some("the genesis record does not hash to the Stoa address it was given with"),
+            "a mismatched record must be refused, got {from_empty}"
+        );
+        assert!(v.get("stoa").is_none());
     }
 }
