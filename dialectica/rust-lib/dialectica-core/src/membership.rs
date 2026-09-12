@@ -100,7 +100,7 @@ pub struct Membership {
 /// place.
 ///
 /// **Not `Clone`**, unlike [`crate::log::OpLogError`], and the asymmetry is
-/// deliberate rather than an omission: [`MembershipError::UndecodableRecord`]
+/// deliberate rather than an omission: [`MembershipError::UnencodableRecord`]
 /// carries a [`GenesisError`], which carries a `KeyError`, and neither is `Clone`.
 /// Deriving it up the chain would widen two other modules' surfaces so that this
 /// type could gain a trait nothing needs.
@@ -131,14 +131,28 @@ pub enum MembershipError {
     /// nothing: no registry, no peer, no index. A wrong or tampered record fails
     /// to match, and the failure needs no one's cooperation to detect.
     RecordDoesNotMatchAddress,
-    /// The supplied bytes are not a genesis record at all.
+    /// The supplied record has no canonical encoding, so it names no Stoa.
+    ///
+    /// **The ENCODE side, and the name says so because the message a caller sees
+    /// is the whole of what it learns.** This was once called
+    /// `UndecodableRecord` and rendered "the genesis record could not be read",
+    /// which is the opposite operation: the only way to reach it is
+    /// [`Genesis::canonical_bytes`] refusing a record — a title over the genesis
+    /// cap — so nothing was ever read. A caller passing a 2000-byte title was
+    /// told its record "could not be read: title is 2000 bytes".
     ///
     /// Distinct from [`MembershipError::RecordDoesNotMatchAddress`] because they
-    /// are different mistakes: this one is material that does not decode, that
-    /// one is material that decodes and describes a different Stoa. A caller
-    /// telling a user "that is not a Stoa record" versus "that record is not the
-    /// Stoa you pasted" needs the two apart.
-    UndecodableRecord(GenesisError),
+    /// are different mistakes: this one is a record with no address at all, that
+    /// one is a record whose address is not the one claimed. A caller telling a
+    /// user "that record cannot be a Stoa" versus "that record is not the Stoa
+    /// you pasted" needs the two apart.
+    ///
+    /// There is no decode-side sibling here, and that is not an omission: a
+    /// membership is joined from a `Genesis` this crate already decoded — `wire.rs`
+    /// owns that decode and reports it — and a row read back that does not decode
+    /// is [`MembershipError::CorruptEntry`], which points at the file rather than
+    /// at the caller.
+    UnencodableRecord(GenesisError),
     /// A retained row could not be read back as a membership.
     ///
     /// Distinct from [`MembershipError::Storage`] because the store worked
@@ -174,8 +188,11 @@ impl fmt::Display for MembershipError {
                 f,
                 "the genesis record does not hash to the Stoa address it was given with"
             ),
-            MembershipError::UndecodableRecord(e) => {
-                write!(f, "the genesis record could not be read: {e}")
+            MembershipError::UnencodableRecord(e) => {
+                write!(
+                    f,
+                    "that genesis record cannot be encoded, so it names no Stoa: {e}"
+                )
             }
             MembershipError::CorruptEntry(why) => write!(
                 f,
@@ -372,7 +389,7 @@ impl MembershipStore {
         // makes a refused join leave nothing behind.
         let bytes = genesis
             .canonical_bytes()
-            .map_err(MembershipError::UndecodableRecord)?;
+            .map_err(MembershipError::UnencodableRecord)?;
 
         // The self-authenticating check. `Genesis::matches` re-derives the address
         // from the record and compares; a tampered record cannot survive it.
@@ -453,10 +470,45 @@ impl MembershipStore {
     /// The order is over 32 bytes of hash and therefore **means nothing** — do not
     /// read it as ranking anything, exactly as `Address`'s own `Ord` says.
     pub fn list(&self, page: usize, per_page: usize) -> Result<MembershipPage, MembershipError> {
-        // One row past the page, which is how `has_more` is answered without a
-        // count: the same reason `feed.rs` looks past the end of its slice rather
-        // than comparing against a total.
-        let limit = per_page.saturating_add(1);
+        // # A page of zero rows is the last page, and that is the whole of the
+        // zero case
+        //
+        // `has_more` means "paging further reaches a Stoa this page did not show".
+        // At `per_page == 0` paging further reaches nothing — every later page is
+        // also empty — so the answer is `false` however many Stoas the store holds.
+        // Returning early says that once, rather than leaving the arithmetic below
+        // to arrive at it: the look-ahead read `LIMIT 0+1` fetched a row, `has_more`
+        // was `1 > 0`, and the page was then emptied, so every page came back both
+        // empty and not-the-last and paging to exhaustion never terminated.
+        //
+        // This is a guard, and it is one because the alternative is worse: an
+        // arithmetic shape that handles zero is an arithmetic shape whose zero case
+        // nobody can read. One function, one job — the zero page is a different
+        // question from where a page boundary falls.
+        //
+        // NO SPEC: the spec does not say what a `per_page` of zero lists, and the
+        // wire never produces one (`clamp_per_page` turns 0 into the default). This
+        // is the answer that cannot hang a caller.
+        if per_page == 0 {
+            return Ok(MembershipPage {
+                items: Vec::new(),
+                page,
+                has_more: false,
+            });
+        }
+
+        // # The two facts about the page boundary are ONE operation
+        //
+        // A page has to answer both "which rows" and "is there another page", and
+        // the look-ahead read is what supplies both without a second `COUNT(*)`
+        // that could disagree with it. Computing them separately — `has_more` from
+        // what was fetched, the items from a `truncate` — is how a page that shows
+        // nothing came to claim a page after it.
+        //
+        // `split_off` is that boundary as a single cut: what is kept is the page,
+        // what comes off is the evidence, and there is no arrangement of the two
+        // that contradicts the other. CLAUDE.md's rule — prefer a shape that
+        // cannot express the mistake over a guard that checks for it.
         let offset = page.saturating_mul(per_page);
 
         let mut stmt = self
@@ -468,15 +520,26 @@ impl MembershipStore {
             )
             .map_err(storage)?;
 
-        // `i64` because SQLite's parameters are `i64`. A `usize` past `i64::MAX`
-        // cannot come from a clamped `per_page` and could come from a `page`, so
-        // it is converted rather than cast: a page that large is answered as empty
-        // rather than wrapping to a negative offset, which SQLite would treat as
-        // no offset at all and serve the FIRST page to a caller who asked for an
-        // impossible one.
-        let (limit, offset) = match (i64::try_from(limit), i64::try_from(offset)) {
-            (Ok(l), Ok(o)) => (l, o),
-            _ => {
+        // # Why `per_page` saturates and `page` refuses
+        //
+        // SQLite's parameters are `i64`, so both have to cross that boundary, and
+        // the right answer differs for each:
+        //
+        // - An **over-large `per_page`** is a caller asking for more rows than
+        //   exist, which is answerable: saturating the limit at `i64::MAX` serves
+        //   every row there is. Converting `per_page + 1` and giving up on failure
+        //   was the bug — the guard tested the INCREMENTED limit, so a `per_page`
+        //   the un-incremented one handled fine answered "you are in no Stoa",
+        //   indistinguishably from an empty store and with an `Ok`.
+        // - An **over-large `page`** is a caller asking for a page that cannot
+        //   exist, which is not answerable: a `usize` offset past `i64::MAX` cast
+        //   rather than converted becomes negative, and SQLite treats a negative
+        //   OFFSET as none at all — serving the FIRST page to a caller who asked
+        //   for an impossible one. Empty is the honest reply, so that one refuses.
+        let limit = per_page.saturating_add(1).min(i64::MAX as usize) as i64;
+        let offset = match i64::try_from(offset) {
+            Ok(o) => o,
+            Err(_) => {
                 return Ok(MembershipPage {
                     items: Vec::new(),
                     page,
@@ -503,14 +566,15 @@ impl MembershipStore {
             items.push(decode_row(stoa, &bytes)?);
         }
 
-        // The extra row is evidence of a further page and is not part of this one.
-        let has_more = items.len() > per_page;
-        items.truncate(per_page);
+        // One cut. `split_off` cannot be asked for an index past the length, so the
+        // `min` is what makes the call total rather than a panic on a short page —
+        // and what comes off is by construction whatever this page does not hold.
+        let beyond = items.split_off(per_page.min(items.len()));
 
         Ok(MembershipPage {
             items,
             page,
-            has_more,
+            has_more: !beyond.is_empty(),
         })
     }
 
@@ -874,7 +938,7 @@ mod tests {
                     why: "no such table: stoas".into(),
                 },
                 MembershipError::RecordDoesNotMatchAddress,
-                MembershipError::UndecodableRecord(GenesisError::Truncated),
+                MembershipError::UnencodableRecord(GenesisError::Truncated),
                 MembershipError::CorruptEntry("a stored record did not decode".into()),
             ];
             if let Some(e) = all.first() {
@@ -883,7 +947,7 @@ mod tests {
                     | MembershipError::UnknownLayoutVersion { .. }
                     | MembershipError::LayoutDoesNotMatchItsVersion { .. }
                     | MembershipError::RecordDoesNotMatchAddress
-                    | MembershipError::UndecodableRecord(_)
+                    | MembershipError::UnencodableRecord(_)
                     | MembershipError::CorruptEntry(_) => {}
                 }
             }
@@ -978,11 +1042,47 @@ mod tests {
         let some_address = a_record("Agora").address().unwrap();
 
         match store.join(&some_address, &too_long) {
-            Err(MembershipError::UndecodableRecord(_)) => {}
+            Err(MembershipError::UnencodableRecord(_)) => {}
             other => panic!("an unencodable record must be refused, got {other:?}"),
         }
         assert_eq!(store.len().unwrap(), 0);
         assert!(!store.contains(&some_address).unwrap());
+    }
+
+    #[test]
+    fn an_encode_failure_does_not_report_itself_as_a_failure_to_read() {
+        // REGRESSION on the message, not on the control flow. The variant was
+        // called `UndecodableRecord` and rendered "the genesis record could not be
+        // read", while the ONLY way to reach it is `canonical_bytes()` — the encode
+        // side — failing. A caller passing a 2000-byte title was told "could not be
+        // read: title is 2000 bytes, the maximum is 1024"; nothing was read.
+        //
+        // This reaches `{"error":"..."}`, so the sentence is the whole of what a
+        // user sees. Asserted on the rendered string because that is the contract;
+        // asserting only on the variant would have passed the wrong wording.
+        let mut store = MembershipStore::in_memory().unwrap();
+        let too_long = Genesis {
+            title: "x".repeat(2000),
+            ..a_record("Agora")
+        };
+        let rendered = store
+            .join(&a_record("Agora").address().unwrap(), &too_long)
+            .expect_err("an unencodable record must be refused")
+            .to_string();
+        assert!(
+            !rendered.contains("could not be read"),
+            "an encode failure must not be reported as a failure to read: {rendered}"
+        );
+        assert!(
+            rendered.contains("cannot be encoded"),
+            "the message must say what actually failed: {rendered}"
+        );
+        // And the underlying reason survives, which is what makes the message
+        // actionable rather than merely accurate.
+        assert!(
+            rendered.contains("2000"),
+            "the genesis error's own reason must reach the caller: {rendered}"
+        );
     }
 
     #[test]
@@ -1358,6 +1458,100 @@ mod tests {
         );
         assert!(!page.has_more);
         assert_eq!(page.page, usize::MAX, "the page asked for is reported back");
+    }
+
+    #[test]
+    fn a_per_page_at_the_conversion_boundary_still_lists_the_whole_store() {
+        // REGRESSION. `limit = per_page + 1` was converted to `i64` and a failed
+        // conversion answered empty — so a `per_page` the un-incremented limit
+        // would have handled fine fell into the failure window, and page 0 of a
+        // store holding three Stoas reported "you are in no Stoa".
+        //
+        // The pair is the whole test: one below the boundary listed all three, one
+        // at it listed none, and nothing distinguishes that reply from an empty
+        // store. `list_stoas` states the obligation for its own `Err` arm — "a
+        // storage failure is the error shape and NEVER an empty listing" — and this
+        // path broke it while returning `Ok`.
+        let mut store = MembershipStore::in_memory().unwrap();
+        for n in 0..3 {
+            let g = a_record(&format!("S{n}"));
+            store.join(&g.address().unwrap(), &g).unwrap();
+        }
+
+        let below = store.list(0, (i64::MAX as usize) - 1).unwrap();
+        assert_eq!(
+            below.items.len(),
+            3,
+            "the fixture must reach the comparison"
+        );
+
+        let at = store.list(0, i64::MAX as usize).unwrap();
+        assert_eq!(
+            at.items.len(),
+            3,
+            "a per_page one larger must not turn three memberships into none"
+        );
+        assert!(
+            !at.has_more,
+            "a page holding everything has no page after it"
+        );
+    }
+
+    #[test]
+    fn a_per_page_of_zero_terminates_rather_than_paging_forever() {
+        // REGRESSION. `limit = 0 + 1 = 1` fetched a row, `has_more = 1 > 0` was
+        // true, and `truncate(0)` then emptied the page — so every page was both
+        // empty and not-the-last, and `every_stoa` ran to its own 1000-page guard
+        // and would have blamed the fixture.
+        //
+        // The two facts about one boundary disagreed: `has_more` was computed from
+        // what was FETCHED and the page from what was KEPT. Asserting only
+        // `items.is_empty()` would pass the broken code, so the assertion that
+        // matters is on `has_more`.
+        let mut store = MembershipStore::in_memory().unwrap();
+        for n in 0..3 {
+            let g = a_record(&format!("S{n}"));
+            store.join(&g.address().unwrap(), &g).unwrap();
+        }
+
+        // NO SPEC: the spec does not say what a `per_page` of zero lists. The wire
+        // never produces one — `clamp_per_page` turns 0 into the default — so this
+        // is a decision about the crate's own API, and it is the one that cannot
+        // hang a caller: an empty page with nothing after it.
+        for page in [0, 1, 5] {
+            let p = store.list(page, 0).unwrap();
+            assert_eq!(p.items, vec![], "a page of zero holds nothing");
+            assert!(
+                !p.has_more,
+                "a page of zero must not promise a further page, or paging to \
+                 exhaustion never terminates"
+            );
+        }
+
+        // And paging actually terminates, which is the consequence the assertion
+        // above exists for rather than a restatement of it.
+        assert_eq!(every_stoa(&store, 0), vec![]);
+    }
+
+    #[test]
+    fn an_empty_store_and_a_populated_one_disagree_about_being_empty() {
+        // `is_empty` survived `cargo mutants` replaced by `Ok(true)`: the only
+        // assertion on it was against a FRESH store, so nothing ever asked for the
+        // `false` case. A permanent `true` renders every user as having joined
+        // nothing, and its own docstring says a first-run view asks this.
+        let mut store = MembershipStore::in_memory().unwrap();
+        assert!(store.is_empty().unwrap(), "a fresh store is empty");
+
+        let g = a_record("Agora");
+        store.join(&g.address().unwrap(), &g).unwrap();
+        assert!(
+            !store.is_empty().unwrap(),
+            "a store holding a membership is not empty"
+        );
+        // And it agrees with `len`, which is the drift the two exist as a pair to
+        // avoid — `is_empty` reporting the opposite of a non-zero `len` is the
+        // shape the mutation produced.
+        assert_eq!(store.len().unwrap(), 1);
     }
 
     #[test]
