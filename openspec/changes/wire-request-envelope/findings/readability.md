@@ -36,7 +36,7 @@ pinned by a known-answer test
 (`the_non_object_message_is_pinned_to_a_known_answer`). That reason survives the
 number of call sites changing.
 
-**Fixed** in this pass. `design.md` §3's parenthetical "(one string, not five)"
+**Fixed** in `4606f8d`. `design.md` §3's parenthetical "(one string, not five)"
 carried the same false premise in milder form and is fixed with it — one instance
 left standing is the template the next author copies (see the project's recorded
 "unfixed test patterns get copied").
@@ -70,7 +70,7 @@ which is what it checks and is worth checking: the reply half must hold for a
 refused request too, and a refusal built by hand rather than through `error_json`
 is how it breaks.
 
-**Fixed** in this pass. Neither rename changes an assertion, so the suite count
+**Fixed** in `4606f8d`. Neither rename changes an assertion, so the suite count
 is unmoved.
 
 ## R3. A comment stated its own premise backwards — **Fixed**
@@ -97,9 +97,9 @@ For: `dev-writer`
 
 R1 was the third instance of this defect in this file, which made "is there a
 fourth?" a question worth asking rather than a courtesy. A dedicated sweep of
-both files ran in this pass, checking every numeric claim, every "X is the only
-Y", every claim about which items are in a set, and every test or function name
-cited by a comment (each verified to exist).
+both files ran before `4606f8d`, checking every numeric claim, every "X is the
+only Y", every claim about which items are in a set, and every test or function
+name cited by a comment (each verified to exist).
 
 **It found three more, bringing the total to six.** Each was independently
 re-verified before being fixed, because a confidently-argued finding is exactly
