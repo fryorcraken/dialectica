@@ -48,12 +48,27 @@ These get conflated, so they are separated here deliberately.
 >   wrong argument cost an ink.
 > - **a self-test that asserted nothing**, printing its value into a report while
 >   the code claimed it gated one.
+> - **a byte reservation that reserved nothing.** This note said bytes 0..11 were
+>   held for the name scheme and derived name/mark independence from the split.
+>   **The two schemes do not share a digest** — the name hashes the public key
+>   under its own prefix, the mark reads the address — so there was never
+>   anything to divide. Found only because the name design invented the *same*
+>   false mechanism separately, and reviewing the two together made the
+>   contradiction visible.
+> - **a combined space of 2^38.6**, multiplied against a name scheme that had
+>   already been superseded. Stale on the day it merged.
 >
 > Every figure below is now computed in the target engine by
 > `dialectica-ui/tests/tst_identicon.qml` and `tmp/render/tst_palette.qml`, and the
 > palette instrument asserts a known reference value before its numbers are used.
 > **The pattern in every one of these errors is the same: a plausible argument
 > standing in for a measurement.**
+>
+> The last two add a second pattern worth naming separately, because no amount
+> of measuring catches it: **a number owned by another document, copied into
+> this one.** Both went stale at the moment the other document changed, and
+> neither could be caught by re-running anything here. Cite the owner and show
+> the method; do not pin the value.
 
 **Only the middle row is what a human collides on.** Reading more bytes into
 unchanged dimensions yields exactly as many distinguishable marks as reading
@@ -580,19 +595,28 @@ improvement over 1,728 is real (94% → 33% at k=100) but it does not change the
 character of the problem, and an earlier revision of this note overstated how close
 it came.
 
-The name scheme yields 2^25 (~33 million) outcomes; UI-BRIEF records ~3% chance
-of a name collision at 1,000 and better than even at 5,000.
-
 The mark at 12,400 is **far worse than the name in raw space** — 2^13.6 against
-2^25 — and that is the honest statement. **What the mark buys is not a larger space
-than the name; it is an independent one.** Given disjoint byte ranges the two
-multiply: 2^25 x 12,400 ≈ 4.16 x 10^11 ≈ **2^38.6**, and the pair collides only
-when both collide.
+whatever the name scheme currently yields — and that is the honest statement.
+**What the mark buys is not a larger space than the name; it is an independent
+one.** The two multiply, and the pair collides only when both collide.
 
-At k = 1,000 against S = 4.16 x 10^11:
-499,500 / 4.16e11 = 1.20e-6. **P ~ 1 in 833,000.**
+**The name's own space is not recorded here on purpose.** An earlier revision
+of this note multiplied against 2^25 and quoted a combined 2^38.6 — but that
+was the *superseded three-word* scheme, and the figure was already stale when
+it merged. A number owned by another document does not belong pinned in this
+one; **read the current space from PLAN.md §5.2.1 and multiply by 2^13.6.**
 
-At k = 5,000: 12,497,500 / 4.16e11 = 3.00e-5. **P ~ 1 in 33,000.**
+Worked for the four-word scheme at the time of writing (2^34), so the method is
+checkable rather than merely asserted:
+
+    2^34 x 12,400 ≈ 2.13 x 10^14 ≈ 2^47.6
+
+    k = 1,000:  499,500 / 2.13e14    = 2.3e-9   → P ~ 1 in 430 million
+    k = 5,000:  12,497,500 / 2.13e14 = 5.9e-8   → P ~ 1 in 17 million
+
+**If those figures disagree with PLAN.md, PLAN.md is right and this worked
+example is stale** — which is the point of stating the method rather than only
+the result.
 
 **That is the number that matters**, and it is the argument for the mark: not
 that the mark is a good identifier, but that a name-plus-mark bundle collides
@@ -611,14 +635,27 @@ prefix-independent. For a 32-byte address (64 hex characters):
 The abbreviation therefore shows **11 of 32 bytes**, and **21 bytes are
 invisible** at feed density: bytes 4..13 and 18..28.
 
-The mark reads **bytes 12..19** — eight bytes, one per dimension. Bytes 0..11 are
-reserved for the generated-name scheme.
+The mark reads **bytes 12..19** — eight bytes, one per dimension.
 
-**Name and mark are independent**, which is the property worth having. Grinding
-for a target's *name* searches bytes 0..11 and yields a random mark; grinding for
-the *mark* searches 12..19 and yields a random name. The costs **multiply rather
-than add**. With shared bytes, a near-miss on one correlates with a near-miss on
-the other and the combined difficulty collapses toward the harder of the two.
+**Name and mark are independent, and the reason is domain separation rather
+than a byte reservation.** An earlier version of this passage said bytes 0..11
+were "reserved for the generated-name scheme" and derived independence from
+that split. **That was wrong, and the error is recorded here rather than
+quietly removed**, because both this note and the name design invented the same
+false mechanism separately — which is the more interesting fact.
+
+**The two schemes do not share a digest at all.** The name derives from
+`H(NAME_PREFIX || public_key)`; the mark reads the *address*, which is
+`SHA256(AUTHOR_ADDRESS_PREFIX || 0x01 || public_key)`. Two distinct prefixes
+over the same key give two independent functions of it, so **a reservation
+between them does no work** — and the hazard the old text warned about, where
+"a near-miss on one correlates with a near-miss on the other", **cannot arise,
+because there are no shared bytes to overlap in.**
+
+**The conclusion survives intact and is stronger than the argument it had.**
+Grinding for a target's *name* yields a random mark; grinding for the *mark*
+yields a random name; the costs **multiply rather than add**. That holds
+whichever bytes each side reads, and it would still hold if both read byte 0.
 
 **Why eight bytes and not more.** The mark's *output* is about 13 bits of
 perceptually distinct results. Eight bytes of input is 64 bits, already exceeding
