@@ -1185,6 +1185,21 @@ mod tests {
         // Nothing reads a `Vote` op, so voting must change nothing a reader
         // sees. Byte-identical on the op, and identical on the resolved feed
         // row — which is where a score would show up if one existed.
+        //
+        // **The two halves are not equally strong, and the weaker one is kept
+        // deliberately.** The byte-identical assertion discriminates: an
+        // implementation that rewrote the target on a vote would fail it. The feed
+        // row assertion currently cannot fail, because `feed::list_threads`
+        // resolves `Post` ops and a `Vote` cannot appear in a row under any
+        // implementation of this capability — so "the feed never read votes" is
+        // both the thing asserted and the reason it passes (found by review,
+        // findings/spec-test.md entry 5).
+        //
+        // Kept rather than deleted because it becomes a real test the moment
+        // `relevance-ordering` lands and a scorer starts reading votes, which is
+        // exactly when someone would otherwise add a score to a row without
+        // noticing this requirement. The `items.len() == 1` guard below is what
+        // stops it degrading into comparing two empty feeds.
         let genesis = Genesis {
             creator: crate::identity::SecretKey::from_bytes(&[1u8; 32])
                 .unwrap()
@@ -1242,6 +1257,16 @@ mod tests {
 
         let none = Refusal::NoIdentity("the keystore is locked".to_string()).to_string();
         assert!(none.contains("the keystore is locked"), "got {none}");
+        // NO SPEC: the spec's scenario "A refused publish creates no key material"
+        // is a STRUCTURAL claim — that no keystore or key exists which did not
+        // exist before — and it does not ask the refusal to say so. Stating it in
+        // the message is chosen here, because the caller's next move ("is my
+        // keystore now in some half-made state?") is a question the refusal can
+        // answer for free.
+        //
+        // Asserting that a refusal SAYS no key was created is not asserting that
+        // none was; the structural claim is discharged by core having no way to
+        // create key material at all (tasks.md §11). This pins the sentence only.
         assert!(
             none.contains("no key was created"),
             "the refusal must say no key material was created, got {none}"
@@ -1324,31 +1349,48 @@ mod tests {
     #[test]
     fn a_published_op_is_verified_on_read_like_any_other() {
         // Verification is over the op's own bytes and signature, and the result
-        // does not depend on this peer having been the publisher. Shown by
-        // tampering with a published op: it must stop verifying.
+        // does not depend on this peer having been the publisher.
+        //
+        // The scenario's second clause is a COMPARISON — "the result does not
+        // depend on this peer having been the publisher" — so the test is a
+        // comparison. This used to tamper with a published op and assert it stopped
+        // verifying, which is a property of Ed25519 rather than of this capability:
+        // any `verify()` checking any signature over any encoding passes that,
+        // including one that ignored the publish path entirely (found by review,
+        // findings/spec-test.md entry 4).
         let stoa = a_stoa("Agora");
         let key = a_key(A_ROOT, &stoa);
         let mut log = a_log();
 
+        // One op this peer published, through the publish path.
         let published = post(&mut log, &key, stoa, "mine".to_string()).unwrap();
         let ours = stored(&log, &published.id);
-        assert!(ours.verify());
 
-        let tampered = SignedOp {
-            op: Op {
-                kind: OpKind::Post {
-                    thread: None,
-                    parent: None,
-                    body: "not what was signed".to_string(),
-                    attachments: vec![],
-                },
-                ..ours.op.clone()
+        // The same op built and signed by hand, as an arriving one would be —
+        // never through `post`, and appended the way an inbound op is.
+        let theirs = Op {
+            stoa,
+            author: key.public_key(),
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: "mine".to_string(),
+                attachments: vec![],
             },
-            signature: ours.signature.clone(),
-        };
-        assert!(
-            !tampered.verify(),
-            "having been published here buys an op nothing on read"
+        }
+        .sign(&key);
+
+        assert_eq!(
+            ours.verify(),
+            theirs.verify(),
+            "verification must not depend on which side of the publish path an op came from"
+        );
+        assert!(ours.verify(), "both must actually verify, not both fail");
+        assert_eq!(
+            ours.to_bytes(),
+            theirs.to_bytes(),
+            "the published op and the hand-built one must be the same op, or the \
+             comparison above compares two different things"
         );
     }
 

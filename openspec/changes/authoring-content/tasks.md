@@ -469,3 +469,17 @@ was. The requirement text is explicit: "No publish operation SHALL accept an
 author, an identity, a key, **or an address** as a parameter" (`spec.md:86`). The
 scenario one screen down names only the first three, which is what the wrong
 claim was read off — but the requirement is the contract, and it names four.
+
+**A third marker, added by review** (`findings/spec-test.md` entry 7).
+`a_refusal_names_the_id_or_stoa_it_is_about` in `authoring.rs` and
+`the_no_identity_refusal_is_the_error_shape_and_has_one_source_of_its_text` in
+`wire.rs` both assert the refusal text contains `"no key was created"`. The spec's
+scenario "A refused publish creates no key material" is a **structural** claim —
+that no keystore or key exists which did not before — and does not ask the refusal
+to *say* so. Saying it is a choice, and a good one, so both sites now carry the
+marker.
+
+Worth keeping the distinction the reviewer drew: this is not a coverage gap like the
+other two in §11. It is an *unmarked choice*, and it is both testable and tested —
+asserting that a refusal says no key was created is simply a different claim from
+asserting none was.

@@ -2916,6 +2916,11 @@ mod tests {
         // `no_identity` that discarded its argument passes the equality above.
         let message = v["error"].as_str().unwrap();
         assert!(message.contains(why), "the reason must survive, got {out}");
+        // NO SPEC: the spec's "A refused publish creates no key material" scenario
+        // is structural — no keystore or key exists that did not before — and does
+        // not require the refusal to say so. Saying it is chosen; see the matching
+        // marker on `a_refusal_names_the_id_or_stoa_it_is_about` in `authoring.rs`,
+        // and note this pins the sentence rather than the structural claim.
         assert!(
             message.contains("no key was created"),
             "the refusal must say no key material was created, got {out}"

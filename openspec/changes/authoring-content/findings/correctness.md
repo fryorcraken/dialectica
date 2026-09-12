@@ -138,7 +138,22 @@ contract that `op-format`'s cap is the publish path's cap — because at present
 "Hostile input is never a panic" is the only requirement in the area and it is
 satisfied by the defective behaviour.
 
-**Outcome:**
+**Outcome of the `spec-writer` note: routed, still open.** The code now refuses at
+`op-format`'s cap, so the spec has a behaviour to ratify rather than a blank — but the
+choice between your two options ("refuse at the boundary" versus "contract that
+`op-format`'s cap is the publish path's cap") is unmade, and the second is the one the
+code implements. Until the spec says so, this is unspecified behaviour a caller can
+already depend on.
+
+Your last sentence is the one for the spec-writer to read first: *"Hostile input is
+never a panic" is the only requirement in the area and it is satisfied by the defective
+behaviour.* The over-cap publish was never a panic. That is why no requirement was
+violated while a store was being corrupted, and it is a good argument that the
+requirement is the wrong shape.
+
+The same gap is raised from the spec side by `findings/spec-test.md` entry 3, which
+found it from the spec's asymmetry alone — the empty end of the body is argued at
+length and the other end is silent.
 
 ---
 

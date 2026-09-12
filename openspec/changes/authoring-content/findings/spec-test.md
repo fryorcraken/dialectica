@@ -67,7 +67,27 @@ since nothing in this API distinguishes the two) or the handler must catch the
 sink's failure and still answer with the op id. The test as written cannot tell
 the reader which, because it asserts neither.
 
-**Outcome:**
+**Outcome: the test's false name fixed; the contradiction routed to the
+`spec-writer`, undecided.** The design reviewer reached this independently (F6), and
+two reviewers converging — one of them blind to the implementation — is what makes it
+the most serious finding of the pass.
+
+The test is now `a_publish_whose_delivery_panics_leaves_the_op_in_the_log`, which is
+what it pins. Your observation that its name "asserts in English exactly the thing it
+does not assert in code" is the defect; renaming removes the false claim rather than
+pretending to add coverage the spec has not yet decided the shape of. Its comment
+states the contradiction outright and points here.
+
+`tasks.md` §11 carries it as a third undischarged requirement, with your measurement
+(530 passed / 1 failed on adding the two assertions), the three routes, and the
+user-visible cost — the view shows "posting failed", the user retypes, and the op is
+already in the log and will be handed to delivery again.
+
+Your sharpest point, and the reason I did not simply move `deliver` outside
+`guarded`: **nothing in this API distinguishes "declined" from "panicked."** A sink
+returns `()`. So route (i) is not merely a spec edit for tidiness — the spec cannot
+say "a decline" without the API gaining a way to express one, which makes this a
+contract question rather than a bug to patch.
 
 ---
 
@@ -101,7 +121,25 @@ is invoked, exactly once" — is already pinned properly by
 (see Properly pinned, below). Recommend either dropping this scenario or
 restating it in terms the API can exhibit.
 
-**Outcome:**
+**Outcome: routed to the `spec-writer`, no change here.** Accepted as a spec defect
+rather than a coverage gap, which is the distinction that matters: there is no test
+to write, because the two states the scenario contrasts are not states this API can
+be in.
+
+Your "second explanation that also passes it: **every possible implementation**" is
+the cleanest statement of a vacuous test I have seen in this project, and it belongs
+in the spec-writer's hands with that phrasing intact. The existing test's comment is
+already honest that the sink returns nothing, so it is not misleading — it is just
+pinning nothing.
+
+Recorded alongside entry 1 as the same underlying gap seen from the other end: the
+sink's `()` return makes "outstanding versus prompt" inexpressible (this entry) and
+"declined versus panicked" indistinguishable (entry 1). One API decision resolves
+both, which is worth the spec-writer knowing before they pick a route for either.
+
+Not folded into `tasks.md` §11, because §11 lists requirements this change does not
+discharge and this scenario is one no implementation could — that is a different
+claim and belongs in the spec's own revision rather than in a change's tracker.
 
 ---
 
@@ -150,7 +188,33 @@ one. Once decided, it needs a test — and note that the tests hardcode
 `150 * 1024` rather than referring to `MAX_FIELD_LEN` (which is private to
 `op.rs`), so they will not move with the cap.
 
-**Outcome:**
+**Outcome: fixed in code, and the spec gap routed to the `spec-writer`.**
+
+You found this while **blind to the implementation**, from the spec's asymmetry
+alone — it argues the empty end of the body at length and is silent on the other —
+and the security and correctness reviewers found the same defect from the code. Three
+independent routes to one bug is the strongest signal this review produced, and your
+route is the one that says the spec caused it.
+
+The code fix is in `findings/security.md` S1. Answering your framing specifically:
+
+- The body is now refused at publish with `Refusal::BodyTooLong { len, cap }`, which
+  is your "refused at publish with the cap named in the message" option. I chose it
+  over silent acceptance because silent acceptance is the behaviour that just
+  demonstrated it corrupts a store.
+- **Your closing note was the one that made the fix clean**: the tests hardcoded
+  `150 * 1024` because `MAX_FIELD_LEN` was private. It is now `pub`,
+  `authoring::MAX_BODY_LEN` is defined as it, `the_publish_body_cap_is_the_format_field_cap`
+  pins them as one number, and the at-the-cap test builds its body from the constant.
+  So the boundary pair moves with the cap instead of drifting off it.
+- Your 10 MiB probe is worth keeping in the record: the defect was not near-boundary
+  only. Any size above the cap behaved identically, which is what made it easy to hit
+  by accident with a pasted log.
+
+**Still the spec-writer's:** no requirement bounds a body from above. The code now
+refuses at `op-format`'s cap, so the spec has a behaviour to ratify rather than a
+blank — but until it does, this is chosen rather than contracted, and the refusal is
+observable behaviour a caller can depend on.
 
 ---
 
@@ -185,7 +249,27 @@ Low severity: recommend the tamper assertion either be dropped (it duplicates
 op, receive an identical one built by hand, and assert the two `verify()` calls
 agree.
 
-**Outcome:**
+**Outcome: fixed**, taking your second option, because it makes the test assert the
+scenario's actual clause rather than merely stop asserting a tautology.
+
+The tamper half is gone. The test now publishes one op through `post`, builds and
+signs an identical one by hand as an arriving op would be, and asserts
+`ours.verify() == theirs.verify()` — the comparison the scenario's "does not depend
+on this peer having been the publisher" actually describes. Two supporting
+assertions keep it honest: that both genuinely verify (so the equality is not
+`false == false`), and that the two ops are byte-identical (so the comparison is not
+between two different ops).
+
+**Proven to discriminate**, which the old form could not be: mutating `post` to
+append `"MUTATION"` to the body fails it on the byte comparison. The old tamper
+assertion passed under any `verify()` over any encoding, as you said — including one
+that ignored the publish path entirely.
+
+Your note that the clause *is* jointly covered by
+`an_op_a_publish_would_refuse_is_stored_anyway_when_it_arrives` is right and is why
+this was low severity rather than a hole. The value was in the named test's
+sharp-looking assertion not being sharp — a reader takes the named test as the
+evidence, and now it is.
 
 ---
 
@@ -211,7 +295,26 @@ test the moment `relevance-ordering` lands and a scorer starts reading votes —
 which the proposal's own closing note flags. Keeping it, with a comment saying
 it is currently vacuous and why it is kept, is a defensible answer.
 
-**Outcome:**
+**Outcome: fixed as you prescribed — kept, with the comment.** You proposed the
+answer and I am taking it rather than improving on it.
+
+The test's comment now says the two halves are not equally strong and which is which:
+the byte-identical assertion discriminates (an implementation rewriting the target on
+a vote fails it), the feed-row assertion currently cannot fail because
+`feed::list_threads` resolves `Post` ops so a `Vote` cannot appear in a row under any
+implementation — "the feed never read votes" being both the thing asserted and the
+reason it passes. It records why it is kept anyway: it becomes real the moment a
+scorer reads votes, which is exactly when someone would otherwise add a score to a
+row without noticing this requirement.
+
+Your note that both tests already guard the empty-feed trap with `items.len() == 1`
+is preserved in the comment as what stops it degrading further — a vacuous assertion
+that compares two empty feeds is worse than one that compares two real rows for a
+difference that cannot exist.
+
+Same treatment not applied to `wire.rs:2369`'s twin: one honest comment at the layer
+where the reasoning lives is enough, and duplicating it invites the two copies to
+drift — the failure mode this review caught three times elsewhere.
 
 ---
 
@@ -235,7 +338,25 @@ does not check, and the comment should say that rather than imply otherwise.
 Recording it so nobody later "strengthens" the keystore's lookup into a second
 implementation and finds this test green.
 
-**Outcome:**
+**Outcome: fixed** (comment only), in `4324364`. The readability reviewer reached the
+same overstatement independently (entry 6), from the code side.
+
+The comment now says what the test reaches and what it does not: it pins that the
+publish path agrees with `stoa_address`'s composition from the same root — so it would
+catch a publish signing with a different key — and that it would **not** catch
+`Keystore::stoa_address` itself being changed to compose differently, because the
+fixture re-implements that composition rather than calling it. The reason is stated
+too: this layer deliberately takes no `Keystore`.
+
+Your closing sentence is the one I made sure survived into the code: this is recorded
+so nobody later turns the keystore's lookup into a second implementation and finds the
+test still green. That is a future-defect warning, and it is worth more than the
+correction itself.
+
+Left as a comment rather than closed with a test, and deliberately: reaching a real
+`Keystore` from here would mean `authoring` taking a keystore-shaped dependency, which
+is the same trade `findings/design-review.md` F2 is about. Both are the
+resolved-key-versus-lookup-closure question, and it should be answered once.
 
 ---
 
@@ -263,7 +384,23 @@ test` (no keystore in core) and that "creates no key material" is satisfied
 structurally rather than covered. This one is different: it is not a coverage
 gap, it is an *unmarked* choice, and it is testable and tested.
 
-**Outcome:**
+**Outcome: fixed** — both sites now carry the marker, and `tasks.md` §9 records it as
+the third `NO SPEC:` in this change.
+
+`authoring.rs`'s marker states the distinction you drew: the spec's scenario is a
+**structural** claim (no keystore or key exists that did not before) and does not ask
+the refusal to *say* so; saying it is chosen, because "is my keystore now half-made?"
+is a question the refusal can answer for free. It also says plainly that asserting a
+refusal says no key was created is not asserting none was, and points at §11 for where
+the structural claim is actually discharged. `wire.rs`'s marker is shorter and
+cross-references it rather than restating the reasoning.
+
+**You were right that this is a different species, and I kept that framing in
+`tasks.md`**: §9 now says it is an unmarked choice rather than a coverage gap, and is
+both testable and tested — which distinguishes it from §11's two. My brief told you
+two items in this family were already routed and not to re-litigate them; finding a
+third that is not a coverage gap at all is exactly the "say if you find a third" case,
+and it needed the marker rather than the routing.
 
 ---
 
