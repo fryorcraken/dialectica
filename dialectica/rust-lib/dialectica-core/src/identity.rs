@@ -66,6 +66,26 @@ const OP_SIGNING_PREFIX: &[u8; 32] = b"/dialectica/1/Signed/Op\0\0\0\0\0\0\0\0\0
 /// same root rather than silently colliding with this one.
 const STOA_KEY_SALT: &[u8] = b"/dialectica/1/Identity/Stoa";
 
+/// HKDF salt for per-Stoa derivation that also takes a **user-chosen path**
+/// ([`derive_stoa_key_at_path`]).
+///
+/// **Version 2, and the bump is the requirement rather than housekeeping.** The
+/// `identity` capability requires that where a scheme taking a path and one
+/// taking only the root and the Stoa both exist, they be distinguishable, "so
+/// that one scheme's identities cannot be silently reproduced by the other".
+///
+/// Without the bump, path 0 would append four zero bytes to the info and HKDF
+/// would produce a *different* key anyway — so the separation would hold, but by
+/// an accident of the info encoding rather than by a decision. Making path 0
+/// equal the two-input scheme may well be wanted one day, since it would keep
+/// existing identities valid; the point of the bump is that such a change has to
+/// be somebody's decision and not a collision nobody noticed.
+///
+/// The cost of the bump is zero today because nothing has been derived under the
+/// old scheme in the field: `identity-onboarding` is the change that mints the
+/// first keystore. It would not be zero later, which is why this comment exists.
+const STOA_KEY_SALT_WITH_PATH: &[u8] = b"/dialectica/2/Identity/Stoa";
+
 /// A 32-byte address: an author's, or a Stoa's.
 ///
 /// One type for both because they are the same construction over different
@@ -354,6 +374,60 @@ pub fn derive_stoa_key(root: &[u8; 32], stoa: &Address) -> SecretKey {
     let hk = hkdf::Hkdf::<sha2::Sha512>::new(Some(STOA_KEY_SALT), root);
     let mut seed = [0u8; 32];
     hk.expand(stoa.as_bytes(), &mut seed)
+        .expect("32 bytes is far below HKDF-SHA512's output limit");
+    SecretKey(ed25519_dalek::SigningKey::from_bytes(&seed))
+}
+
+/// Derive a signing key for one Stoa from a root secret **and a chosen path**.
+///
+/// This is [`derive_stoa_key`] with the third input the `identity` capability
+/// now admits, and the one `identity-onboarding` selects between: a user is
+/// offered several candidates for a Stoa and they differ by this value alone.
+///
+/// # This is the same scheme with one more input, not a second scheme
+///
+/// One HKDF-SHA512 expansion, the same infallible `from_bytes`, the same refusal
+/// of public derivation. `identity-onboarding` requires that derivation "remain
+/// that of the `identity` capability" and forbids introducing a second scheme,
+/// so everything [`derive_stoa_key`]'s doc comment argues applies here unchanged
+/// — including why Ed25519 was chosen for exactly this operation.
+///
+/// **The salt differs**, and that is the one deliberate divergence. See
+/// [`STOA_KEY_SALT_WITH_PATH`]: it is what keeps this scheme's path-0 identity
+/// distinct from the two-input scheme's, which the spec requires.
+///
+/// # The recomputability guarantee is narrower, and this is where it narrows
+///
+/// [`derive_stoa_key`] makes an identity reproducible from the root and the Stoa
+/// address alone, so nothing needs backing up beyond the root and the list of
+/// Stoas joined. **A user-chosen path is a third input that no value on the
+/// network carries**, so an unrecorded path is an identity that cannot be
+/// reproduced from any surviving material. `identity-onboarding` moves the
+/// guarantee onto the recorded path and requires the record be stored; see
+/// [`crate::identity_store`].
+///
+/// That is a real cost, accepted in exchange for the user getting a choice. It is
+/// stated here rather than only in the spec because this function is where a
+/// reader meets the third argument and asks what it costs.
+///
+/// # The path's encoding
+///
+/// `info = stoa || path.to_be_bytes()`. Unambiguous without a length prefix
+/// because an [`Address`] is a fixed 32 bytes — there is no variable-length
+/// concatenation here, which is the hazard the fixed-width prefixes elsewhere in
+/// this file exist to avoid. Big-endian so the bytes read in the order the
+/// number is written, which matters only for a human comparing a test vector.
+///
+/// A `u32` rather than a BIP-32 path string: what onboarding offers is an index,
+/// and a string would be a parser meeting caller input for no present gain.
+/// Accepting a string later is additive.
+pub fn derive_stoa_key_at_path(root: &[u8; 32], stoa: &Address, path: u32) -> SecretKey {
+    let hk = hkdf::Hkdf::<sha2::Sha512>::new(Some(STOA_KEY_SALT_WITH_PATH), root);
+    let mut info = [0u8; 36];
+    info[..32].copy_from_slice(stoa.as_bytes());
+    info[32..].copy_from_slice(&path.to_be_bytes());
+    let mut seed = [0u8; 32];
+    hk.expand(&info, &mut seed)
         .expect("32 bytes is far below HKDF-SHA512's output limit");
     SecretKey(ed25519_dalek::SigningKey::from_bytes(&seed))
 }
@@ -654,6 +728,37 @@ mod tests {
             ),
             "b62b6b592aeb0779541bbe8beac60d8f505342c37c6a9bc990920d93e68026cf",
             "per-Stoa key derivation changed"
+        );
+
+        // The path-taking scheme, pinned the same way and for the same reason.
+        //
+        // Both values below were computed with OpenSSL's own HKDF rather than by
+        // reading back what this code produced:
+        //
+        //   openssl kdf -keylen 32 -kdfopt digest:SHA512 \
+        //     -kdfopt hexkey:<root> -kdfopt hexsalt:<salt> \
+        //     -kdfopt hexinfo:<stoa||path> HKDF
+        //
+        // That invocation was FIRST validated by reproducing the version-1 value
+        // above exactly, which is what makes these two trustworthy rather than
+        // merely plausible. A value read back from this implementation would be
+        // the implementation agreeing with itself — the defect this whole test
+        // exists to avoid.
+        //
+        // Path 1 and path 0 are both pinned. Path 0 is the interesting one: it is
+        // where the version-1 and version-2 schemes would collide if the salt
+        // bump were ever reverted, and `the_path_taking_scheme_does_not_collide_
+        // with_the_scheme_without_one` is the test that notices.
+        let pinned_stoa = stoa_address(b"a genesis record");
+        assert_eq!(
+            hex::encode(derive_stoa_key_at_path(&[7u8; 32], &pinned_stoa, 1).to_bytes()),
+            "b10513080c36903e20a08c3e4f114603dc9cd6fb57d247776312ada32322d5ef",
+            "path-taking per-Stoa key derivation changed"
+        );
+        assert_eq!(
+            hex::encode(derive_stoa_key_at_path(&[7u8; 32], &pinned_stoa, 0).to_bytes()),
+            "45bf5b4ecdb032428e71e9079b09c3c793663813940d87555bad1ed3072f2fe8",
+            "path-taking per-Stoa key derivation at path 0 changed"
         );
     }
 
@@ -1034,6 +1139,128 @@ mod tests {
         }
         for bad_sig in [vec![], vec![0u8; 63], vec![0u8; 65], vec![9u8; 32]] {
             assert!(!verify_authored_op(&addr, &pk.to_bytes(), b"a post", &bad_sig));
+        }
+    }
+
+    #[test]
+    fn a_path_derived_key_is_deterministic() {
+        // The same property `a_derived_stoa_key_is_deterministic` pins for the
+        // two-input scheme, and it matters MORE here: under the path-taking
+        // scheme the path is the value that has to be recorded, so instability
+        // would mean a recorded path naming an identity that no longer exists.
+        let root = [7u8; 32];
+        let stoa = stoa_address(b"a genesis record");
+        assert_eq!(
+            derive_stoa_key_at_path(&root, &stoa, 42).public_key(),
+            derive_stoa_key_at_path(&root, &stoa, 42).public_key()
+        );
+    }
+
+    #[test]
+    fn different_paths_give_different_identities_in_one_stoa() {
+        // The property the whole slate rests on: five candidates for ONE Stoa
+        // differ by path alone, so if paths did not separate keys there would be
+        // nothing to choose between.
+        let root = [7u8; 32];
+        let stoa = stoa_address(b"a genesis record");
+        let mut seen = Vec::new();
+        for path in [0u32, 1, 2, 7, 1000, u32::MAX] {
+            let pk = derive_stoa_key_at_path(&root, &stoa, path).public_key();
+            assert!(
+                !seen.contains(&pk),
+                "path {path} produced a key another path already produced"
+            );
+            seen.push(pk);
+        }
+    }
+
+    #[test]
+    fn the_path_taking_scheme_does_not_collide_with_the_scheme_without_one() {
+        // THE requirement the salt bump exists for. `identity` requires that
+        // where both schemes exist they be distinguishable, "so that one
+        // scheme's identities cannot be silently reproduced by the other".
+        //
+        // Path 0 is the only value where a reader would expect them to agree, so
+        // it is the value that has to be checked. Revert
+        // `STOA_KEY_SALT_WITH_PATH` to version 1 and this still fails — the four
+        // appended zero bytes change the info — which is precisely why the bump
+        // is argued as a decision rather than relied on as a mechanism.
+        let root = [7u8; 32];
+        let stoa = stoa_address(b"a genesis record");
+        assert_ne!(
+            derive_stoa_key(&root, &stoa).public_key(),
+            derive_stoa_key_at_path(&root, &stoa, 0).public_key(),
+            "the two derivation schemes must not produce one identity at path 0"
+        );
+
+        // And no path at all reproduces the two-input scheme's key. A handful
+        // rather than exhaustively: the point is that path 0 is not special-cased
+        // into equivalence, not a proof over 2^32.
+        let without = derive_stoa_key(&root, &stoa).public_key();
+        for path in [0u32, 1, 2, 3, 4, 5, u32::MAX] {
+            assert_ne!(
+                derive_stoa_key_at_path(&root, &stoa, path).public_key(),
+                without,
+                "path {path} reproduced the pathless scheme's identity"
+            );
+        }
+    }
+
+    #[test]
+    fn a_path_derived_key_signs_and_verifies_like_any_other() {
+        // Derivation must produce a USABLE identity, not merely a distinct one —
+        // the same thing `a_derived_key_signs_and_verifies_like_any_other` pins,
+        // and the reason it is repeated is that a new derivation is a new place
+        // for a seed to be mangled into something that signs but verifies
+        // against a different key.
+        let key = derive_stoa_key_at_path(&[7u8; 32], &stoa_address(b"a genesis record"), 3);
+        let sig = sign_op_bytes(&key, b"a post");
+        assert!(verify_op_bytes(&key.public_key(), b"a post", &sig));
+        // Through the wire-level entry point too, which is where the address
+        // binding lives: a path-derived key must be attributable to its own
+        // address like any other.
+        assert!(verify_authored_op(
+            &key.public_key().address(),
+            &key.public_key().to_bytes(),
+            b"a post",
+            &sig.to_bytes()
+        ));
+    }
+
+    #[test]
+    fn the_path_taking_scheme_keeps_cross_stoa_unlinkability() {
+        // The path is a new input and must not have become the ONLY input.
+        // One root, one path, two Stoas: the keys must still differ, or a
+        // user who chose path 3 everywhere would carry one key across Stoas.
+        let root = [7u8; 32];
+        assert_ne!(
+            derive_stoa_key_at_path(&root, &stoa_address(b"stoa one"), 3).public_key(),
+            derive_stoa_key_at_path(&root, &stoa_address(b"stoa two"), 3).public_key()
+        );
+        // And two roots at one path and one Stoa must differ, or two users who
+        // both chose path 3 would collide.
+        let stoa = stoa_address(b"a genesis record");
+        assert_ne!(
+            derive_stoa_key_at_path(&[1u8; 32], &stoa, 3).public_key(),
+            derive_stoa_key_at_path(&[2u8; 32], &stoa, 3).public_key()
+        );
+    }
+
+    #[test]
+    fn a_path_derived_key_is_not_the_root_key() {
+        // The root must never itself be the identity — it is the one value that,
+        // if leaked, yields every identity the user has. Pinned for the new
+        // scheme as well as the old, because a new derivation is a new place for
+        // the root to be passed through unchanged.
+        let root = [7u8; 32];
+        let stoa = stoa_address(b"a genesis record");
+        let root_as_key = SecretKey::from_bytes(&root).unwrap();
+        for path in [0u32, 1, 2] {
+            assert_ne!(
+                derive_stoa_key_at_path(&root, &stoa, path).public_key(),
+                root_as_key.public_key(),
+                "path {path} derived the root key itself"
+            );
         }
     }
 
