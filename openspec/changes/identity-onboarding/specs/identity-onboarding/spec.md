@@ -445,3 +445,16 @@ either a change to this one.
 What this capability does require is that the values a name and a mark are derived
 from — the public key and the address — are present in a slate reply, which the
 requirement on reply contents states.
+
+A reply of this capability SHALL therefore carry no display name and no visual
+mark, for any candidate and for the identity in use. Carrying one would settle
+here what a separate contract is to settle, and a caller written against it would
+be written against a name this capability never defined.
+
+#### Scenario: No reply carries a name or a mark
+
+- **WHEN** a slate is generated, and separately the identity in use is asked for
+- **THEN** no candidate in the slate reply carries a display name or a visual mark
+- **AND** the reply describing the identity in use carries neither
+- **AND** both replies still carry the public key and the address a name and a
+  mark would be derived from
