@@ -36,19 +36,30 @@ stops being a property anyone has to remember.
 
 ### The request is parsed into a typed intent before anything is signed
 
-Each handler parses its request into one of three small structs (`PostRequest`,
-`ReplyRequest`, `VoteRequest`) and only then calls into `authoring.rs`. The
-alternative — validate-as-you-go, building the `Op` incrementally — was rejected
-because of the requirement that a refused publish appends nothing and does not
-invoke delivery. Under incremental construction that is a property of the order
-the statements happen to be in; under parse-then-act it is structural, because
-there is nothing to append until every field has been read.
+Each handler reads every field it needs out of the request — `stoa` and `body`
+for a post, plus `parent` for a reply, `target` and `direction` for a vote — and
+only then calls into `authoring.rs`. The alternative — validate-as-you-go,
+building the `Op` incrementally — was rejected because of the requirement that a
+refused publish appends nothing and does not invoke delivery. Under incremental
+construction that is a property of the order the statements happen to be in;
+under parse-then-act it is a property of where the `authoring` call sits.
+
+**What was planned here and not built**, because a reader will otherwise look for
+it: three named request structs (`PostRequest`, `ReplyRequest`, `VoteRequest`),
+so that holding a value of the type would be *evidence* every field had parsed.
+What shipped is the same statement sequence written out in each of the three
+handlers. The requirement still holds, but it holds three times over rather than
+by construction, and a fourth operation would copy the sequence — including
+`reject_forbidden_fields`. The reshape is recorded as a live option rather than
+as done.
 
 ### The three operations share one `publish` and differ only in what they build
 
 `publish(log, key, op) -> Published` signs, appends, and reports
-`Published { id, was_new }`. The per-kind work — deriving a thread, checking a
-parent's Stoa, refusing an unknown direction — happens *before* it, in
+`Published { id, appended }`, where `appended` is `op-log`'s own `Appended` value
+rather than a `bool` — see "passed through rather than recomputed" below, which
+is the reason it is not flattened here. The per-kind work — deriving a thread,
+checking a parent's Stoa, refusing an unknown direction — happens *before* it, in
 `post`/`reply`/`vote`, each of which returns an `Op` or a `Refusal`.
 
 This is the "one function, one job" rule with a specific payoff: the ordering
@@ -62,16 +73,36 @@ three near-copies.
 `publish` has returned, and ignores its answer:
 
 ```rust
-let published = authoring::post(log, key, req)?;   // appended by here
-let _ = deliver(&published.id);                     // outcome discarded
-reply_json(&published)
+match authoring::post(log, key, stoa, body) {   // appended by the Ok arm
+    Ok(published) => {
+        deliver(&published.id);                 // returns (), nothing to discard
+        published_json(&published)
+    }
+    Err(refusal) => error_json(&refusal.to_string()),
+}
 ```
 
 Three requirements land on that shape at once. "The append completes before
-delivery is invoked" is the statement order. "A declined handoff leaves the op
-published" is the `let _`. "A publish returns while delivery is still
-outstanding" is that `deliver` is a `FnOnce(&OpId)` returning `()` — there is no
-outcome to wait for, so a call that waited on one cannot be written.
+delivery is invoked" is the statement order inside the `Ok` arm. "Delivery is not
+invoked on a refusal" is that `deliver` is named only on the `Ok` arm, so no
+refusal path can reach it. "A publish returns while delivery is still
+outstanding" is the sink's `()` return type — there is no outcome to wait for, so
+a call that waited on one cannot be written.
+
+**The sink is `&mut dyn FnMut(&OpId)`, and the dead end that made it so.**
+`impl FnOnce(&OpId)` was written first, because at-most-once is the honest bound.
+It cannot coexist with pinning all three handlers as one function-pointer type: a
+generic monomorphises per call site, so the three become three types with no
+shared pointer, and coercion fails on a higher-ranked lifetime. That pin is
+`the_three_handlers_share_one_signature_the_adapter_can_dispatch_over`'s, and it
+is worth its cost because the adapter lives behind `cfg(logos_scaffold)`, which no
+`cargo test` sets — so a drifted signature would otherwise surface only in the
+builder's build.
+
+Note precisely what does *not* force it, because a first draft of this reasoning
+got it wrong: the adapter itself is generic over the handler and would accept a
+generic sink. Recovering `FnOnce` therefore costs one test's `Handler` type, not a
+redesign.
 
 The alternative — `publish` taking the delivery sink itself — was rejected
 because it would put a network-shaped parameter on the function whose tests are

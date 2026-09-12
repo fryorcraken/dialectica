@@ -537,12 +537,15 @@ it.** The design is:
 > app is broken"* — and the owner decided votes ship anyway.
 >
 > So the obligation lands here. **The control must not imply a ranking it does not
-> produce.** Two things are safe and one is not:
+> produce.** One thing is safe, one is not available yet, and one is never safe:
 >
 > - **Safe:** showing the reader their own vote back, as state on the button. That
 >   is real, immediate and true — they voted, and the interface remembers.
-> - **Safe:** a plain count of votes on a post, if you show one, presented as a
->   count and never as a position, a rank, or a reason this post appears where it
+> - **Not available yet, though it would be safe:** a plain count of votes on a
+>   post. No call returns one — there is no thread read at all, and the publish
+>   reply carries only an op id — so a count cannot be rendered today. Design for
+>   its absence. If a later change exposes one, it is safe only presented as a
+>   count, never as a position, a rank, or a reason this post appears where it
 >   does.
 > - **Not safe:** anything suggesting the vote moved the post, changed what anyone
 >   else sees, or fed an ordering. It did not. No "trending", no arrow, no implied

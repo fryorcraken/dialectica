@@ -265,6 +265,17 @@ covered by the marker above.
   construction; they are kept because "64 characters" and "64 *hex* characters"
   are different acceptances, and the valid-Stoa variants are what test the
   second.
+- **An encode/decode asymmetry, because the publish path is never run against
+  `SqliteOpLog`.** `grep -c Sqlite` is **0** in both `authoring.rs` and
+  `wire.rs`: every publish test uses `MemoryOpLog`, which stores the live
+  `SignedOp` and never round-trips it through bytes. So no test here can see a
+  publish that produces bytes the decoder would refuse — the store that would
+  notice is the one the tests do not use.
+
+  This is not hypothetical; it is how the over-cap body defect survived three
+  gates (see `findings/security.md` S1 and `findings/correctness.md` C1). A test
+  against the production store is what closes the class, not another fixture
+  against the in-memory one.
 - **`cargo fmt` does not reach `dialectica-core`.** The manifest is
   `[workspace]` with no members, so the CI gate's `cargo fmt --check` over
   `rust-lib/Cargo.toml` format-checks `rust-lib/src` only — and every line of
@@ -308,34 +319,59 @@ These are **not** ticked as tested, because ticking them would be the failure
 `.claude/agents/README.md` names: a scenario that cannot be tested, satisfied on
 paper.
 
-### "A publish requires a usable identity and says so when there is none" — untestable as specified
+### "A publish requires a usable identity and says so when there is none" — not discharged here, and the reason is this change's design rather than the spec
 
-Both scenarios. The requirement's subject is *the absence of an identity*, and
-discovering that absence means reaching a keystore. `dialectica-core`
-structurally cannot — that is the design's whole point, argued in
-`authoring.rs`'s module docs and in `design.md` — so the refusal can only be
-raised in the adapter, which no `cargo test` compiles. There is no test in this
-repo, as the spec is worded, that can discharge it.
+Both scenarios. **An earlier version of this section said the requirement was
+"untestable as specified" because `dialectica-core` structurally cannot reach a
+keystore. That reason is wrong**, and it is the same shape as the §10 claim this
+change already had to retract — a statement that something is impossible, which
+stops anyone looking.
+
+The counter-example is in the same file, fifteen hundred lines up:
+`get_capabilities` takes `lookup: impl Fn(&Address) -> Result<String,
+KeystoreError>`, and `capability_for` is tested directly against a lookup that
+*fails*. Core does not reach a keystore there either — the adapter passes a
+closure that does. So a capability can be handed a fallible key-supplier and
+tested on its failure path, in core, today.
+
+The honest statement is narrower: **because `authoring` takes an already-resolved
+`&SecretKey`, the keystore open happens above core, in the adapter no
+`cargo test` compiles — so the refusal's trigger is unreachable from any test
+here.** That is a consequence of a design choice, and the choice has a real
+benefit: taking a resolved key is what makes "a publish creates no key material
+as a side effect" structural rather than asserted. The cost is this gap, and
+`design.md` records the benefit without it.
+
+The alternative not taken: give the handlers the same `lookup`-closure shape
+`get_capabilities` uses, which would move the keystore open into core's testable
+surface and discharge both scenarios — at the price of the structural
+no-key-material property. Worth deciding deliberately rather than inheriting.
 
 What the work on Finding 1 did get is narrower and worth stating precisely: the
 refusal's **wording and wire shape** are now testable and tested; its
 **trigger** is not. A keystore that cannot be opened still produces the error
 shape only when the builder's build has compiled the adapter.
 
-**For the spec-writer.** Two candidate rewordings, and they route differently:
+**For the spec-writer.** Three routes, and they are not equivalent now that the
+"impossible" framing is gone:
 
-1. Scope the requirement to what the wire contract can be held to — "a publish
+1. **Keep the requirement and close the gap in code** — the handlers take a
+   fallible key-supplier, as `get_capabilities` already does, and both scenarios
+   become testable in core. This is the only route that discharges the
+   requirement as written, and it trades away the structural no-key-material
+   property. A `dev-writer` call as much as a spec one.
+2. Scope the requirement to what the wire contract can be held to — "a publish
    that cannot obtain a signing identity SHALL answer with the error shape
-   naming what is missing" — and let the adapter's own gate (the module build)
-   be the thing that checks the trigger. This is testable here and says less.
-2. Move the requirement to whichever capability owns the keystore, since "what
+   naming what is missing" — and let the module build check the trigger. Testable
+   here, says less.
+3. Move the requirement to whichever capability owns the keystore, since "what
    happens when there is no identity" is a fact about identity availability
    rather than about publishing. `keystore` and `posting-capability` both have a
    claim; `posting-capability`'s probe already answers "can this Stoa be posted
    to", which is the same question asked earlier.
 
-The second looks right and is not this change's call. Either way the spec should
-stop asking a capability to contract a condition it cannot observe.
+What the spec should **not** be told is that it asks for something unobservable.
+It does not; this change chose a shape that cannot observe it.
 
 ### "A refused publish creates no key material" — satisfied structurally, not covered
 
@@ -354,7 +390,13 @@ something core can be made to prove.
 ### Both `NO SPEC:` markers stay
 
 `wire.rs` on `FORBIDDEN_FIELDS`, and on
-`a_forbidden_field_is_refused_on_every_operation`. Refusing `thread` on a post
-and a vote, and including `address` alongside `author`/`identity`/`key`, are
-choices the spec does not make. They are for the spec-writer to ratify or
-overturn; §9 records what was chosen and why.
+`a_forbidden_field_is_refused_on_every_operation`. **One choice, not two.**
+Refusing `thread` on a post and a vote is the unspecified one — the spec requires
+it on a *reply* only — and is for the spec-writer to ratify or overturn; §9
+records what was chosen and why.
+
+`address` is **not** unspecified, and an earlier version of this section said it
+was. The requirement text is explicit: "No publish operation SHALL accept an
+author, an identity, a key, **or an address** as a parameter" (`spec.md:86`). The
+scenario one screen down names only the first three, which is what the wrong
+claim was read off — but the requirement is the contract, and it names four.

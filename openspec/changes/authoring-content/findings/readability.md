@@ -51,7 +51,12 @@ not go looking for the journal.
 Severity: **high** for a readability defect. The retraction was written into
 `tasks.md` and not into the code the retraction is about.
 
-Outcome:
+Outcome: **fixed.** The comment now says the ordering *is* observable, names
+`the_append_completes_before_delivery_is_invoked_on_all_three_handlers` as the
+test that observes it, and records that the old claim was load-bearing while it
+stood. No test asserts on a comment, so nothing fails without this; the
+correctness reviewer reached the same finding independently (C4), which is the
+corroboration standing in for a test here.
 
 ---
 
@@ -79,7 +84,13 @@ property does hold, by the statement order in each handler, and `wire.rs:670-676
 records that correctly. design.md describes a shape that was planned and not
 built.
 
-Outcome:
+Outcome: **fixed.** The entry now describes what each handler actually reads, and
+says explicitly that the three named structs were planned and not built, what
+holding one would have bought (evidence every field parsed), and that the
+requirement consequently holds three times over rather than by construction. The
+architecture reviewer independently reached the same place from the other
+direction (A3), and the reshape is now recorded as a live option there rather
+than as done.
 
 ---
 
@@ -111,7 +122,13 @@ published" is the sink's `()` return plus the append having already completed �
 which `wire.rs:683-696` states correctly. A reader who acts on design.md would
 "restore" a `let _` believing a requirement depends on it.
 
-Outcome:
+Outcome: **fixed.** The snippet now shows the real `match` with a bare
+`deliver(&published.id);` and the comment "returns (), nothing to discard", and
+the three requirements are re-assigned to the mechanisms that actually carry
+them: statement order inside the `Ok` arm, `deliver` being named only on the `Ok`
+arm, and the sink's `()` return. The `FnOnce` → `&mut dyn FnMut` dead end is now
+recorded in Decisions beside it, which is where design-review F1 said it belonged
+— including the correction that the adapter does *not* force the erasure.
 
 ---
 
@@ -144,7 +161,23 @@ sound against the code and against `build.rs`'s stated constraint.
 Severity: **medium**, stylistic-to-structural boundary. Flagged, not asserted as
 a must-fix.
 
-Outcome:
+Outcome: **rejected**, and the reviewer's own framing is why. "Assemble X, then
+run one handler" is the shape of a fixture, and a fixture's job *is* the
+assembly — the alternative is three copies of it, which the comment at
+`lib.rs:246-248` rejects for the reason that three copies are three places to
+forget the key or open the store in the wrong order. Splitting the assembly into
+five functions would spread the key/store ordering across more of the one file no
+gate compiles, which trades a reading cost for a correctness risk in the worst
+possible place.
+
+The genuine reader cost the finding identifies — that "missing field: stoa" can
+come from either of two parsers — is real and is not fixed by splitting the
+function; it is a consequence of the deliberate double-read, which the finding
+itself agrees earns its place. Recorded instead as design-review F4(d), where the
+double-read is now a named decision rather than only a code comment.
+
+Flagged rather than asserted, and declined on that basis. If the adapter grows a
+sixth assembly step this should be revisited.
 
 ---
 
@@ -174,7 +207,10 @@ Only the first clause misdescribes the value.
 
 Severity: **low**. One clause.
 
-Outcome:
+Outcome: **fixed.** The clause "it belongs to no thread" is gone; the comment now
+says answering with `id` treats the op as its own thread root, which is the same
+answer a root post gets and so introduces no shape a caller has not already seen.
+The unreachability half, which the reviewer verified as sound, is kept unchanged.
 
 ---
 
@@ -207,7 +243,13 @@ a different key. Only the "two real functions" sentence overstates.
 Severity: **low-medium** — a claim about coverage, in a comment, that the
 assertions do not reach.
 
-Outcome:
+Outcome: **fixed** (comment only; the test is the `tester`'s and is unchanged).
+The comment now states what the test does reach — that the publish path agrees
+with `stoa_address`'s composition from the same root, which would catch a publish
+signing with a different key — and what it does not: `Keystore::stoa_address`
+itself being changed to compose differently, since this layer deliberately takes
+no `Keystore`. Whether to close that gap is the `tester`'s call and is not
+claimed here either way.
 
 ---
 
@@ -232,9 +274,13 @@ matches the word "both", and stops. Whether the third shape is worth adding is
 the tester's call; the word is the finding either way — say "two of the three" or
 add the third.
 
-Severity: **low-medium**. A word, with an exhaustiveness implication.
+Outcome: **fixed** the word, as the reviewer's first option. The comment now says
+"two of the three shapes this module refuses", names which two (the orphan and the
+cross-Stoa reply) and which is omitted (a non-post parent), and says the point is
+the direction rather than an enumeration. Whether to add the third case is left to
+the `tester`, unclaimed.
 
-Outcome:
+Severity: **low-medium**. A word, with an exhaustiveness implication.
 
 ---
 

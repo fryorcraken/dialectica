@@ -239,9 +239,11 @@ pub fn post<L: OpLog>(
 fn thread_of(op: &Op, id: OpId) -> OpId {
     match &op.kind {
         OpKind::Post { thread, .. } => thread.unwrap_or(id),
-        // Not a post, so it belongs to no thread. Unreachable from `reply`,
-        // which refuses a non-post parent before it gets here — but an answer
-        // rather than a panic, because a panic aborts the module process.
+        // Not a post. Unreachable from `reply`, which refuses a non-post parent
+        // before it gets here — but an answer rather than a panic, because a
+        // panic aborts the module process. Answering with `id` treats the op as
+        // its own thread root, which is the same answer a root post gets and so
+        // introduces no shape a caller has not already seen.
         _ => id,
     }
 }
@@ -504,8 +506,14 @@ mod tests {
         // after submit. If they disagreed, a user would be told one pseudonym
         // and post under another — and nothing would error.
         //
-        // The probe's own lookup is the keystore's `stoa_address`, so both sides
-        // are computed here from the same root through the two real functions.
+        // What this does and does not reach: the closure below re-implements the
+        // composition `Keystore::stoa_address` performs (`stoa_public_key` then
+        // `.address()`), rather than calling it. So this pins that the PUBLISH
+        // path agrees with that composition from the same root — it would catch a
+        // publish signing with a different key — but it would not catch
+        // `Keystore::stoa_address` itself being changed to compose differently.
+        // Closing that would mean reaching a real `Keystore`, which this layer
+        // deliberately does not take.
         let stoa = a_stoa("Agora");
         let probe_reported = crate::wire::capability_for(&stoa, |s| {
             Ok(derive_stoa_key(&A_ROOT, s).public_key().address().to_hex())
@@ -1192,8 +1200,11 @@ mod tests {
         // having established anything about a stored op would have been given
         // nothing.
         //
-        // Both shapes this module refuses are built by hand, appended, and must
-        // be readable — indistinguishable from an op this peer published.
+        // Two of the three shapes this module refuses are built by hand,
+        // appended, and must be readable — indistinguishable from an op this peer
+        // published. The two are the orphan (an absent parent) and the cross-Stoa
+        // reply; the third, a non-post parent, is not built here. The point is the
+        // direction rather than an enumeration, so two suffice to make it.
         let agora = a_stoa("Agora");
         let lyceum = a_stoa("Lyceum");
         let key = a_key(A_ROOT, &agora);

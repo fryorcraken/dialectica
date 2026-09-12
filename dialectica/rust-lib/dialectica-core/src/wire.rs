@@ -699,20 +699,27 @@ fn parsed_object(request: &str) -> Result<serde_json::Value, String> {
 /// error nothing else could see
 ///
 /// `impl FnOnce(&OpId)` was written first, because "called at most once" is the
-/// honest bound on what a sink is for. It does not survive the adapter.
+/// honest bound on what a sink is for.
 ///
-/// The module adapter assembles the keystore, the key, the store and the sink
-/// once and dispatches over the three handlers through one function-pointer
-/// type. A generic `impl FnOnce` monomorphises per call site, so the three are
-/// three types and cannot share one pointer — and coercing them fails on a
-/// higher-ranked lifetime, because a `&mut dyn FnMut(&OpId)` argument is not the
-/// `for<'d> fn(…, &'d mut dyn …)` pointer the dispatch needs.
+/// What rules it out is the requirement that all three handlers be usable
+/// through **one** function-pointer type, which
+/// `the_three_handlers_share_one_signature_the_adapter_can_dispatch_over` pins
+/// with a `type Handler = fn(…)`. A generic `impl FnOnce` monomorphises per call
+/// site, so the three would be three types with no shared pointer, and coercing
+/// them fails on a higher-ranked lifetime.
 ///
-/// **That failure is invisible to every gate that can be run here.** The adapter
-/// is behind `cfg(logos_scaffold)`, which no `cargo test` sets, so the error
-/// surfaces in the builder's build — the one that runs last and reports worst.
-/// `the_three_handlers_share_one_signature_the_adapter_can_dispatch_over` is what
-/// catches it in this crate instead, and it found this.
+/// **Be precise about where that constraint comes from, because an earlier
+/// version of this comment was not.** It said the *adapter* needs one pointer
+/// type. It does not: `Dialectica::publishing` is generic over the handler
+/// (`F: FnOnce(…)`), so it monomorphises per call site and would accept a
+/// generic sink. The single-pointer requirement is the test's, deliberately —
+/// the adapter is behind `cfg(logos_scaffold)`, which no `cargo test` sets, so
+/// pinning the three signatures as interchangeable in *this* crate is what stops
+/// a signature drifting into an error that would surface only in the builder's
+/// build, the one that runs last and reports worst.
+///
+/// So recovering `FnOnce` is a live option, not a closed one: it costs changing
+/// that test's `Handler` type, and buys back the at-most-once bound.
 ///
 /// Nothing is lost that a requirement rests on. The return type `()` is what
 /// makes a delivery outcome unwaitable; `FnOnce` only added that the sink could
@@ -2076,10 +2083,14 @@ mod tests {
 
     #[test]
     fn a_forbidden_field_is_refused_on_every_operation() {
-        // NO SPEC: the spec requires `author`/`identity`/`key` to be refused on
-        // any publish, and `thread` on a REPLY. Refusing every name on all three
-        // operations is chosen — a caller who sent one has the same wrong model
-        // whichever operation it reached — and is what this test pins.
+        // NO SPEC: the spec's requirement names `author`, `identity`, `key` AND
+        // `address` as never-a-parameter on any publish, so four of the five are
+        // specified. (Its scenario one screen down names only the first three;
+        // the requirement is the contract.) `thread` is the unspecified one — the
+        // spec requires it refused on a REPLY only, and refusing it on a post and
+        // a vote too is chosen here, because a caller who sent one has the same
+        // wrong model whichever operation it reached. That choice is what this
+        // test pins.
         //
         // The trap avoided: a guard called from one handler and forgotten in the
         // other two. That is invisible without checking all three.
@@ -2403,14 +2414,20 @@ mod tests {
         // Two requirements: the sink receives the op that was published, and a
         // refusal never reaches it at all.
         //
-        // What this test **cannot** see, and saying so is the point: that the
-        // append happened BEFORE the sink was called. The sink cannot read the
-        // log to check, because the handler holds it mutably for the duration —
-        // so no test through this API can observe the ordering directly. What
-        // pins it instead is that `crate::authoring::publish` returns a
-        // `Published` only after its `append` has returned `Ok`, and the sink
-        // sits after that call. The structural argument is the evidence; this is
-        // the observable half.
+        // What this test does not see is the ORDERING — that the append
+        // happened before the sink was called. This test observes only that the
+        // sink got the right id, and that a refusal never reaches it.
+        //
+        // The ordering IS observable, and
+        // `the_append_completes_before_delivery_is_invoked_on_all_three_handlers`
+        // below observes it: a journal shared by a wrapping `OpLog` and the sink
+        // records a hardcoded `["append", "deliver"]`. An earlier version of
+        // this comment claimed no test through this API could see it, on the
+        // grounds that the sink cannot read the log the handler holds mutably.
+        // That is true of the log and false of the ordering — two clones of one
+        // `Rc<RefCell<Vec<_>>>` borrow nothing from each other. The claim was
+        // load-bearing while it stood, because it was the stated reason this
+        // weaker test was accepted as sufficient.
         let mut log = MemoryOpLog::new();
         let key = publish_key();
 
@@ -3096,16 +3113,20 @@ mod tests {
 
     #[test]
     fn the_three_handlers_share_one_signature_the_adapter_can_dispatch_over() {
-        // The adapter assembles a keystore, a key, a store and a delivery sink
-        // once and dispatches over the three handlers — so all three must be
-        // usable through ONE function pointer type, with the sink as a
-        // `&mut dyn FnMut`.
+        // All three handlers must be interchangeable: same shape, same sink
+        // type, so one can be substituted for another without a signature
+        // change. This test pins that by naming ONE function-pointer type and
+        // requiring all three to coerce into it.
         //
-        // This is the only gate that can check that. The adapter lives in the
-        // module crate behind `cfg(logos_scaffold)`, which no `cargo test` ever
-        // sets (`lib.rs` explains why at length), so a coercion that failed
-        // there would fail in the BUILDER's build — the one that runs last and
-        // reports worst.
+        // The single pointer type is THIS TEST'S choice, not a constraint the
+        // adapter imposes — `Dialectica::publishing` is generic over the handler
+        // and would accept three distinct types. The reason to pin it here is
+        // that the adapter lives behind `cfg(logos_scaffold)`, which no
+        // `cargo test` ever sets (`lib.rs` explains why at length), so a
+        // signature that drifted out of line would fail in the BUILDER's build —
+        // the one that runs last and reports worst. This is the only gate that
+        // can catch that drift early, which is why the erased `&mut dyn FnMut`
+        // is worth its cost.
         type Handler = fn(
             &str,
             &mut MemoryOpLog,
