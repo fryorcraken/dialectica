@@ -1081,10 +1081,11 @@ the op that decided. `Moderate` carries `Hide` or `Unhide`, ordered by §5.7's
 rule. Not built: applying it in a materialised view, and everything below that
 depends on a mutable moderator set.
 
-**"A hide binds" is conditional on an ordering the transport does not yet
-supply, and that is the sharpest limitation in this section.** §5.7 orders
-competing moderations by Lamport timestamp; no Lamport value reaches us
-(§13), so every op is unordered and the fallback is ascending op id. A
+**"A hide binds" is conditional on an ordering we have not built yet, and that
+is the sharpest limitation in this section.** §5.7 orders competing moderations
+by Lamport timestamp; no Lamport value reaches us and — per §13 — **none is
+coming, because ordering at forum scope was never the transport's to supply.**
+So every op is currently unordered and the fallback is ascending op id. A
 `Moderate` op carries no nonce and no timestamp, so for one Stoa, one moderator
 and one target there are **exactly two possible ops** — and an unordered
 comparison between them resolves the same way forever. Last-write-wins has no
@@ -1096,8 +1097,12 @@ moderation. What that does **not** restore is the ability to *reverse* a hide:
 until Lamport values arrive, an `Unhide` competing with a `Hide` of the same
 target loses regardless of when it was published. A moderator who hides
 something by mistake cannot currently un-hide it by publishing an `Unhide`
-alone. That is deliberate — the alternative was the veto — and it resolves
-itself when §13's upstream gap closes, with no change to this code.
+alone. That is deliberate — the alternative was the veto.
+
+**What closes it is dialectica's own Lamport counter (§13), not an upstream
+fix.** This is a change of owner rather than of mechanism: the resolver code
+needs no change either way, but the work is ours and schedulable rather than
+somebody else's and indefinite. **Nobody should be waiting for it.**
 
 **This becomes a UI requirement the moment a hide button exists**, and there is
 no user-facing surface yet to carry it, so it is recorded here for whoever
@@ -1105,9 +1110,9 @@ builds one. A moderator pressing "hide" is currently taking an action that
 cannot be undone on the peers that matter, and nothing in the core will warn
 them — `moderation::resolve` answers what is hidden, not what a future reversal
 would do. The honest interface says so at the point of action rather than
-offering an "unhide" that silently fails to bind. When the transport supplies
-Lamport values the warning is removed along with the tie-break, and the two
-should be removed together.
+offering an "unhide" that silently fails to bind. **When dialectica's Lamport
+counter lands, the warning is removed along with the tie-break, and the two
+should be removed together.**
 
 The record carries **no per-peer value** — no epoch, no session counter. Every
 peer hashes it to obtain the Stoa's address, so a value varying with one peer's
@@ -2160,10 +2165,12 @@ discriminant, and for the same reason: a view asking for `top` and silently
 getting `new` has been told a falsehood no test will catch.
 
 **Both of those orderings are currently degraded, and that is unresolved** —
-§7.2 defines each in terms of a Lamport timestamp that §13 says does not reach
-us, so both fall back to ascending op id today. Section 8 below carries the
-question of what they may honestly be called until that changes; it is named
-here so that nobody reads this paragraph as saying the orderings work.
+§7.2 defines each in terms of a Lamport timestamp no op carries yet, so both
+fall back to ascending op id today. Per §13 the fix is **ours** (a `createdAt`
+and a Lamport counter in the signed preimage), not an upstream one, so this is
+work that can be scheduled rather than waited on. Section 8 below carries the
+question of what they may honestly be called until then; it is named here so
+that nobody reads this paragraph as saying the orderings work.
 
 **Hidden threads are omitted by default**, and the parameter that includes them
 is explicit (§7.2 rule 4, §11.1). Worth stating precisely because "hidden
@@ -2492,9 +2499,17 @@ being asked for rather than discovering it from a stalled view.
   two names and have the interface state that ordering is currently degraded.
   **This plan does not choose**, and it is a genuine open question rather than a
   deferred detail — a first-run forum whose ordering is arbitrary is a different
-  product from one whose ordering is chronological. What would decide it: §13's
-  upstream gap closing, which removes the question entirely and is why nobody
-  should build elaborate machinery around it in the meantime.
+  product from one whose ordering is chronological.
+
+  **What would decide it has changed, and the earlier answer was wrong.** This
+  bullet used to say the question was removed by §13's upstream gap closing,
+  and that nobody should build machinery around it meanwhile. §13 now
+  establishes that recency is **ours** — an author-asserted `createdAt` in the
+  signed preimage, cheap and needing nothing from upstream. So the question is
+  not waiting on anyone: **it is decided by whether we add that field**, and
+  the advice to sit still was advice to wait for something that was never
+  coming. The scope of "elaborate machinery" is narrower than it looked — a
+  timestamp field is not elaborate.
 
 - **Whether `listThreads`'s `replyCount` is worth its cost before then.** It is
   a fold over moderation-resolved replies per row, and under the degraded order
@@ -2997,6 +3012,22 @@ thing (§2.3).
   rather than a reason to wait.
 
   Not designed here; §5.7 keeps its rule and `Arrival` its shape until one is.
+
+  **Two adversarial cases the design must answer, named now so they are not
+  discovered later.** Both fields sit in a signed op, so a *relay* cannot
+  forge them — but the **author** controls both completely, and an author is
+  not trusted:
+
+  - **A far-future `createdAt`** pins a post to the top of a recency ordering
+    permanently. Appendix A measures exactly this failure in the nearest kin
+    project. The clamp is the whole defence and it is not specified here.
+  - **An arbitrarily high Lamport counter** does the same to the total order,
+    and is the attack the `createdAt` clamp does not cover. A counter is only
+    meaningful relative to ops a peer has seen, so the bound is different in
+    kind from a wall-clock clamp.
+
+  Neither is hard, and neither is optional. **A field a malicious peer sets
+  freely is not an ordering until it has a bound.**
 
   Until the fields arrive, ops are recorded as unordered and fall back to a
   defined degraded order (ascending op id, always below any op the transport did

@@ -12,12 +12,12 @@ argument between positions.
 > with it as changes land — it is a live document, not a snapshot. If something
 > here disagrees with PLAN.md, PLAN.md wins and this file has a bug. Last
 > reconciled against **PLAN.md §7.2-§7.3** (votes and vouching) and **§9.1**
-> (the Phase 3 API), both merged.
+> (the Phase 3 API).
 >
-> **The generated-name scheme described below is not yet merged** — it is in
-> review and its wordlist is changing. Treat the *shape* (adjectives plus a
-> noun, derived from the key, never typed) as settled and the specific
-> vocabulary as provisional.
+> **The generated name's vocabulary is the one part still moving** — treat the
+> *shape* (adjectives plus a noun, derived from the key, never typed) as
+> settled and the specific wordlist as provisional. `git log docs/PLAN.md`
+> answers what has landed; this block does not try to.
 
 ---
 
@@ -296,11 +296,11 @@ attributed to**, which is a far larger surface than Stoa titles: a feed renders
 an attribution on every row.
 
 *(One thing to know about where the name comes from: the core returns the
-author as an **address**, not a name — PLAN §9.1 is explicit that it never
-returns a name, "because there are no names". The name is computed from that
-address for display. So the address is not something the interface has to go
-and fetch in order to show it: it is the thing it was given, and the name is
-the derived half.)*
+author as an **address**, not a name. PLAN §9.1 lists the feed's author field
+as "the author, as the per-Stoa address (§5.2) — never a name, because there
+are no names". The name is computed from that address for display, so the
+address is not something the interface must go and fetch in order to show it:
+it is the thing it was given, and the name is the derived half.)*
 
 **Uniqueness is not merely unbuilt — it is unavailable.** A uniqueness check
 needs agreement about who holds which name, and there is no authority to hold
