@@ -11,8 +11,13 @@ argument between positions.
 > **Provenance.** This brief is derived from `docs/PLAN.md` and is kept in step
 > with it as changes land — it is a live document, not a snapshot. If something
 > here disagrees with PLAN.md, PLAN.md wins and this file has a bug. Last
-> reconciled against: the vote-and-vouching design (PR #17), the Phase 3 forum
-> section (PR #19), and the generated-usernames design.
+> reconciled against **PLAN.md §7.2-§7.3** (votes and vouching) and **§9.1**
+> (the Phase 3 API), both merged.
+>
+> **The generated-name scheme described below is not yet merged** — it is in
+> review and its wordlist is changing. Treat the *shape* (adjectives plus a
+> noun, derived from the key, never typed) as settled and the specific
+> vocabulary as provisional.
 
 ---
 
@@ -149,22 +154,35 @@ Paginated. Hidden posts are omitted by default.
 **Orderings, and an honesty problem worth designing around.**
 
 The intended orderings are **new** (most recent first), **active** (threads by
-their most recent reply), and **top** (vote-ordered, weighted — a moderator's
-vote and a vouched person's vote count for more than a stranger's, and a score
-never goes below zero).
+their most recent reply), and **top** (vote-ordered, weighted).
 
-**`top` is explicitly temporary and may be withdrawn or restricted before
-release.** There is no sybil resistance yet, so vote-ordering is a dial the
-cheapest attacker turns; the plan names the conditions that retire it, one of
-which is simply "the first sybil attempt is observed". **Design the ordering
-control so an option can disappear** — which is the same requirement the labels
-below already impose, from a different direction.
+**`top` does not ship in the first UI.** Phase 3 refuses it outright rather
+than shipping it provisionally: with no sybil resistance there is no score
+worth ordering by. **Design the ordering control so it can carry fewer options
+than three**, and so an option can appear later without the layout changing.
 
-**But "most recent" is not currently available.** Both `new` and `active` are
-defined in terms of a timestamp that the transport layer does not yet deliver,
-so today both fall back to an order derived from content hashes. That order is
-*convergent* — every peer computes the same sequence, which matters — but it
-carries **no recency information at all.**
+**"Most recent" is not available *yet*, and the reason is worth knowing because
+it is about to change.** Both `new` and `active` were defined against a
+timestamp the transport layer does not deliver, so today both fall back to an
+order derived from op ids — *convergent*, in that every peer computes the same
+sequence, but carrying **no recency information at all.**
+
+**That is a gap dialectica can close by itself**, by putting an author-asserted
+timestamp inside the signed post, and the plan now says so. So treat a genuine
+"new" as **coming, not impossible** — design the ordering control as though a
+real recency option will arrive, rather than around its permanent absence. What
+does not change is the rule below: do not label an ordering "new" **until it
+is one**.
+
+**Do not generalise that convergence to the feed as a whole.** It is a property
+of *this fallback*, not of Dialectica. Once vote-weighting exists, two readers
+will legitimately see different orders, because **vouching is private to each
+reader**: Alice vouches for Bob, Carole does not, and they compute different
+weights over the identical set of posts. Neither is stale and neither is wrong.
+So a label like "the same order for everyone" is true only of the fallback and
+must not become the interface's general promise — and nothing in the design
+should read as though divergence between two peers' feeds is a fault to be
+repaired.
 
 So a feed labelled "new" would currently be ordered by hash. It is temporary
 and it resolves when an upstream gap closes, but until then:
@@ -275,17 +293,30 @@ could not read the store" look identical and mean opposite things.
 **6. A generated name is never unique and never an identifier — the address is.**
 This is obligation 2b again, now applying to the thing **every post is
 attributed to**, which is a far larger surface than Stoa titles: a feed renders
-a name on every row.
+an attribution on every row.
 
-**Uniqueness is not merely unbuilt — it is unavailable, and asking for it asks
-for something worse.** Checking a name against every other name needs a registry,
-which is the central service this project does not have; and the check would have
-to span Stoas, which is exactly the cross-Stoa correlation constraint 2 exists to
-prevent. **Uniqueness and unlinkability are in direct conflict, and unlinkability
-wins.** Nor does a bigger wordlist help: it lengthens the odds of an *accidental*
-collision while costing a deliberate impersonator only a constant factor, and
-refresh is unlimited. Treat "two identities can present the same name" as
-permanent.
+*(One thing to know about where the name comes from: the core returns the
+author as an **address**, not a name — PLAN §9.1 is explicit that it never
+returns a name, "because there are no names". The name is computed from that
+address for display. So the address is not something the interface has to go
+and fetch in order to show it: it is the thing it was given, and the name is
+the derived half.)*
+
+**Uniqueness is not merely unbuilt — it is unavailable.** A uniqueness check
+needs agreement about who holds which name, and there is no authority to hold
+that: a Stoa has no membership list, peers join and leave without announcing
+it, and each peer knows only what has reached it. Two peers can each believe a
+name is free. **Whatever the design, uniqueness is not enforceable**, so the
+interface must be correct when two identities present the same name.
+
+*(Within one Stoa that is the whole argument. Names are derived per-key and
+never cross Stoas, so the privacy property in constraint 2 is not what rules
+this out — do not reach for it here.)*
+
+And a bigger wordlist is not the lever it appears to be: it lengthens the odds
+of an *accidental* collision while costing a deliberate impersonator only a
+constant factor, because refresh is unlimited. Treat "two identities can
+present the same name" as permanent.
 
 Two people in one Stoa can hold the same name by chance, and a name resembling
 anyone else's can be obtained **by pressing refresh** — there is no cost to

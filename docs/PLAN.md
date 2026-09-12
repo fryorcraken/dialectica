@@ -370,7 +370,8 @@ long as it holds that channel open. With one channel per Stoa and one permanent
 identity per user per Stoa (§5.2), these agree by construction — a user's
 `senderId` is stable exactly where SDS wants it stable, and no rotation
 machinery is needed. Changing it would mean closing and re-opening the channel,
-which §4.3 makes a crash risk.
+which §5.2 rules out for a different reason: the identity is permanent, so
+there is nothing to rotate to.
 
 **What a reliable channel discloses.** Every receiving peer is handed the sender
 id with every message — `event channelMessageReceived(channelId, senderId,
@@ -546,11 +547,14 @@ Does not promise:
 - **No delivery to absent peers.** ACK means "some participants received it".
 - **No ordering metadata reaching the application.** The Lamport total order and
   the message-id tie-break above are real and are what SDS orders its own log
-  by — but they stop below us. A received-message event reaches us with
-  `channelId`, `senderId`, `payload` and a `timestamp` that is the *receiving
-  peer's own clock read* — so nothing in it orders anything. **Read the promises
-  above as internal to SDS, not as an interface.** §13 has the finding, the
-  layer the values are actually dropped at, and what each upstream layer would
+  by — but they stop below us. What dialectica receives from the delivery
+  module is `channelMessageReceived(channelId, senderId, payload, timestamp)`,
+  and that `timestamp` is the *receiving peer's own clock read*, not a wire
+  value — so nothing in it orders anything. (Do not read those four fields as
+  contradicting §13's "one field": that is the Reliable Channel event one layer
+  further down, and the delivery module adds the three it can supply locally.)
+  **Read the promises above as internal to SDS, not as an interface.** §13 has
+  the finding, the layers the values are dropped at, and what each would
   have to add.
 - **150 KiB max message size**, hard cap — a network-wide gossipsub validation
   limit, not unilaterally raisable. See §4.6.
@@ -2848,49 +2852,47 @@ thing (§2.3).
   SDS's rule — insert by Lamport timestamp, ties by ascending message id — is
   already §5.7's.
 
-  The investigation moved where the gap is, **twice**, and the second move
-  matters for anyone filing upstream. It is **not** that
-  `delivery_module.lidl` forgot to forward the fields. Nor — as this entry
-  previously claimed — is it that the Reliable Channel API's received-message
-  event carries the payload alone: **reading the pinned revisions, that event
-  carries three fields**, and the values are dropped **one layer lower still**,
-  in SDS. `SdsDeliverable` is built with only `content` and `senderId`, and
-  `msg.messageId` is used as a stash key and discarded as a value in a single
-  statement.
+  The gap is **two layers**, both documented with quoted source in
+  `openspec/changes/archive/2026-09-11-op-ordering/design.md`:
 
-  **So three types must change, not two** — a fix at the two layers named
-  before would forward a value that never arrived.
-  `openspec/changes/op-ordering/design.md` records the field names and types
-  for filing. Dialectica's own conclusion is unaffected: the values do not
-  reach us either way.
+  1. **The Reliable Channel API's `MessageReceivedEvent` carries one field** —
+     the reassembled payload (LIP text quoted at design.md:40-54). The spec
+     knows which value orders: it says elsewhere that the timestamp it wraps
+     "acts only as a uniqueness salt; ordering is provided by the SDS Lamport
+     timestamp", and then does not pass that timestamp on.
+  2. **The delivery module drops even the timestamp it forwards**
+     (`delivery_module_plugin.cpp` at tag `v0.2.1`, quoted at design.md:56-69).
 
-  **The declaration, read directly — this is no longer inferred.**
-  `nim-sds/sds/types/sds_message.nim` declares:
+  **The values exist at the bottom and are real.** `nim-sds` declares them as
+  first-class fields on every message — `sds/types/sds_message.nim`:
 
   ```nim
   type SdsMessage* {.requiresInit.} = object
     messageId*: SdsMessageID
     lamportTimestamp*: int64
-    causalHistory*: seq[HistoryEntry]
-    channelId*: SdsChannelID
-    content*: seq[byte]
-    bloomFilter*: seq[byte]
-    senderId*: SdsParticipantID
-    repairRequest*: seq[HistoryEntry]
+    ...
   ```
 
-  Both values §5.7 needs are **first-class fields on the message**. They are
-  not absent, not optional and not derived — they exist on every message SDS
-  handles, and are dropped on the way to the application. That is what makes
-  this a forwarding gap rather than a protocol limitation, and it is the
-  sentence an upstream filing should lead with.
+  So this is a **forwarding gap, not a protocol limitation**: the data SDS
+  needs for §5.7's rule is present on the wire and is discarded on the way up.
+  That is the sentence an upstream filing should lead with.
 
-  **One thing the source moved:** `SdsDeliverable` does not appear anywhere in
-  nim-sds. The truncation therefore happens in the **delivery layer above SDS**,
-  not inside SDS itself — so the earlier "one layer lower, in SDS" is half
-  right (the values survive further up than §13 first claimed) and half wrong
-  about which component discards them. Confirm against the delivery module's
-  own source before filing; it is not cloned here.
+  > **A correction, recorded because of how it happened.** This entry briefly
+  > claimed the event carries *three* fields and that the values were dropped
+  > lower still, inside SDS, in a type called `SdsDeliverable` — presented in
+  > bold as a correction of the sourced two-layer finding above. **That was
+  > wrong and the type does not exist**: a sweep of every upstream checkout on
+  > this machine found `SdsDeliverable` nowhere outside dialectica's own prose.
+  > It came from an agent report that was written into this document without
+  > being checked against source, and it cited as its evidence the very design
+  > document that says "One field."
+  >
+  > **The lesson is about direction of travel.** A claim that *removes*
+  > sourcing — replacing a quoted line number with a summary — should be held
+  > to a higher standard than the claim it replaces, not a lower one. The
+  > caveat it carried ("no realised copy to read") read as a narrow sourcing
+  > gap about one field; it should have been read as a signal that nobody had
+  > opened the file.
 
   Two findings worth carrying forward. **The `timestamp` we do receive is
   unusable for ordering** — it is the receiving peer's own `CLOCK_REALTIME`
@@ -2901,11 +2903,37 @@ thing (§2.3).
   shows §11's units divergence — the two traps are one divergence seen from
   both ends.
 
-  And **a dialectica-side Lamport clock is the one thing not to build**: SDS's
-  clock advances on traffic no application sees and is initialised from epoch-ms,
-  so a clock advanced on op arrivals could not be made to agree with it — and two
-  orders that disagree produce no error, only two peers rendering a thread
-  differently.
+  ~~And **a dialectica-side Lamport clock is the one thing not to build**~~
+  — **withdrawn, 2026-09-12.** The argument was that SDS's clock advances on
+  traffic no application sees and is initialised from epoch-ms, so a
+  dialectica clock could never be made to agree with it.
+
+  **That is true and it is not a reason.** It assumes our clock must agree
+  with SDS's, and it does not: **a dialectica-level clock needs to agree with
+  other peers' dialectica clocks**, and every peer sees the same ops. Stop
+  trying to reconcile with a clock we cannot read and the objection
+  disappears. The mistake was letting "we cannot match SDS" stand in for "we
+  cannot order".
+
+  **What we may build at our own layer**, carried inside the signed op
+  preimage so a relay cannot forge or strip it:
+
+  - **An author-asserted wall-clock `createdAt`.** Cheap, needs nothing from
+    upstream, and gives a real recency ordering today. It is *asserted*, so it
+    **must be clamped** and must never feed a security decision — Appendix A
+    records the nearest kin project reading an unclamped author timestamp for
+    decay, which lets a post pin itself to the top permanently.
+  - **A dialectica Lamport counter**, advanced on the ops we receive.
+    Self-consistent across peers without reference to SDS.
+
+  **What is genuinely not recoverable at our layer** is SDS's *causal*
+  ordering: `causalHistory` encodes which messages a sender had actually seen
+  when they sent, and no application-level bookkeeping reconstructs that after
+  the fact. **So the dependency on SDS is for causality, and for nothing
+  else** — recency and ordering are ours to build, and the upstream gap is a
+  reason to build them rather than a reason to wait.
+
+  Not designed here; §5.7 keeps its rule and `Arrival` its shape until one is.
 
   Until the fields arrive, ops are recorded as unordered and fall back to a
   defined degraded order (ascending op id, always below any op the transport did
