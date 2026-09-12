@@ -135,4 +135,23 @@ and who each is for. The fixer reads the file; copying the findings into your
 report puts them in the runner's context twice and crowds out what it needs to
 track.
 
-If you mutated the tree, restore it and confirm you did.
+## Your worktree, and deleting it when you are done
+
+You are given a worktree of your own under `.claude/worktrees/` and a branch named
+`review/<name>/<dimension>`. **Mutate it freely** — breaking the code to see
+whether a test notices is the job, and `cargo mutants` will break dozens of lines.
+
+**When you are done, remove the worktree rather than restoring it**:
+
+```
+git worktree remove <absolute-path> --force
+```
+
+Do not try to undo your mutations one by one. That depends on your having tracked
+every edit you made, and a single missed restore ships a deliberately broken line
+into the piece. Removing the tree needs no bookkeeping and cannot half-succeed —
+your findings file is already committed and cherry-picked, so nothing you want
+lives there any more.
+
+Verify the piece branch is clean afterwards, and say in your report that you
+removed the tree.

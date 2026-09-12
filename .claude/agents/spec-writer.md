@@ -9,6 +9,11 @@ You write the behaviour contract for one change, derived from `docs/PLAN.md`.
 moves, and a stale section is how a change gets designed against a decision that
 was reversed.
 
+**You work in the piece's worktree, on `piece/<name>`** — the branch its PR is open
+on, and the same tree the `dev-writer` and `tester` use. You share it because you
+never overlap: at most one of the three runs at a time. Commit there directly; do
+not push or open a PR, the runner does both.
+
 You own two artifacts, in order: `proposal.md` then `specs/`. Run
 `openspec instructions proposal --change <name>`, then the same for `specs`, and
 follow what each gives you — the schema carries the format rules.

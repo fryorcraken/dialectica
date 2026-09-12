@@ -18,9 +18,17 @@ The one exception to not reading the implementation is the mutation sampling in
 part 2, which necessarily edits code. Change it, run the test, restore it, and
 read no further than the lines you are mutating.
 
-**Work in your own worktree or a scratch copy of the crate.** Mutation runs
-collide: two reviewers sharing a tree see each other's broken code and cannot
-tell it from the author's. Confirm the tree is clean when you finish.
+**You get a worktree of your own** under `.claude/worktrees/`, on a branch named
+`review/<name>/spec-test`. Mutation runs collide: two reviewers sharing a tree see
+each other's broken code and cannot tell it from the author's.
+
+**When you finish, remove the worktree rather than restoring it** —
+`git worktree remove <absolute-path> --force`. Restoring depends on your having
+tracked every edit, and one missed restore ships a deliberately broken line into
+the piece; removing the tree needs no bookkeeping and cannot half-succeed. Your
+findings file is already committed and cherry-picked, so nothing you want lives
+there. (The per-mutation restore above is different and still necessary — that is
+what lets the *next* mutation mean something.)
 
 **Assume nothing you are told is true.** The PR description, the commit
 messages, the task list and the tester's report are all *claims*. Verify each

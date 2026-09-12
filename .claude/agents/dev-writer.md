@@ -105,11 +105,16 @@ satisfied-by-construction and say what makes the absence real.
 
 ## Where your commits go
 
-**Commit straight to `piece/<name>`** — the piece's one branch, the one its PR is
-open on. Both on the first pass and when you come back to act on findings: you are
-the only agent writing code on the piece at either point, so a side branch and a
-cherry-pick buy nothing and add a step to get wrong. Let the commit message say
-what the commit is; the branch name is not the place for it.
+**You work in the piece's worktree, on `piece/<name>`** — the branch its PR is open
+on, and the same tree the `spec-writer` and `tester` use. You share it because you
+never overlap: at most one of the three runs at a time. Reviewers get separate
+trees because they are concurrent; you do not need one.
+
+**Commit straight to that branch.** Both on the first pass and when you come back
+to act on findings: you are the only agent writing code on the piece at either
+point, so a side branch and a cherry-pick buy nothing and add a step to get wrong.
+Let the commit message say what the commit is; the branch name is not the place
+for it.
 
 **Do not push and do not open a PR** — the runner pushes. Never `git add -A`;
 commit named paths, because a worktree collects build output and a gitignored SDK

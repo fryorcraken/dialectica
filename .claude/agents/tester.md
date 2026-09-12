@@ -64,10 +64,26 @@ asserting three unrelated things reports the first failure and hides the rest.
 ## Scope
 
 Test code is yours, including what the dev wrote. Implementation code is not:
-change it only to mutate and restore, and restore it before you finish.
+change it only to mutate, and restore it after each mutation.
 
-If reviewers are running concurrently, mutate in a scratch copy rather than the
-shared tree — otherwise they see your broken code and report it as the author's.
+**Prove the implementation is untouched before you commit, with a diff rather than
+from memory** — `git diff --stat` against the piece branch should show test files
+only. You cannot delete your tree the way a reviewer does, because your tests are
+the deliverable, so the diff is what stands in for that. One missed restore ships a
+deliberately broken line, and it will not fail your own suite: you mutated the code
+precisely so a test would catch it, then restored the test's expectation to match.
+
+**You work in the piece's own worktree, on `piece/<name>`** — the same tree the
+`spec-writer` and `dev-writer` use. You share it because you never overlap: at most
+one of the three runs at a time. Reviewers get separate trees because they are
+concurrent; you do not need one.
+
+**Nothing else writes the piece while you run.** No `spec-writer`, no `dev-writer`:
+you mutate implementation code you do not own, and a concurrent writer either
+inherits your mutation as its own broken state or overwrites your restore. Neither
+surfaces as a git conflict, because you are not touching git when it happens. If you
+find evidence another writer is active on the piece, **stop and report it** rather
+than working around it.
 
 If a test cannot be written because the code makes the property unreachable, say
 so — that is a finding about the code, not a reason to weaken the test. Same if

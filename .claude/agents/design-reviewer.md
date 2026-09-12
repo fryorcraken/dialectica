@@ -101,5 +101,10 @@ accident, which is the thing you exist to catch.
 `tasks.md`'s stage block in the same commit, and **cherry-pick that commit onto the
 local `piece/<name>`**. Do not push — the runner does. Never `git add -A`.
 
+**Remove your worktree when you finish** — `git worktree remove <absolute-path>
+--force`. Your findings file is already committed and cherry-picked, so nothing you
+want lives there, and deleting is unconditional where restoring depends on having
+tracked every edit you made.
+
 **Your final report is a pointer, not a copy** — the path, the entry count, and who
 each is for.

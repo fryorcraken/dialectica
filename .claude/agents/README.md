@@ -85,15 +85,21 @@ honours it.
 ### One writer at a time; reviewers in parallel
 
 **A piece has at most one `spec-writer`, `dev-writer` or `tester` running at any
-moment** — not one of each, one in total. Two at once is two agents editing the
-same files with no way to resolve it, but the sharper reason is the contract:
+moment** — not one of each, **one in total**. All three commit to `piece/<name>`
+directly, and each has its own reason why a second agent alongside it is unsafe:
 
-**A spec must not move while code is being written against it.** `spec-writer` and
-`dev-writer` are sequential jobs, and running them together means the
-implementation is built against a contract that changed underneath it, with neither
-agent knowing. This session did exactly that — a `spec-writer` reworded the envelope
-rule's scope while four reviewers read the code implementing it, so their findings
-were against a contract that had already moved.
+**`tester` mutates implementation code it does not own.** It breaks a line, checks
+a test notices, restores it. A `dev-writer` editing that file concurrently either
+inherits the mutation as its own broken state or overwrites the restore — and
+neither shows up as a conflict, because the two never touch git at the same moment.
+A silently reverted fix is worse than a merge conflict.
+
+**A spec must not move while code is being written against it.** That pair is about
+the contract rather than the files: run them together and the implementation is
+built against a contract that changed underneath it, with neither agent knowing.
+This session did exactly that — a `spec-writer` reworded the envelope rule's scope
+while four reviewers read the code implementing it, so their findings were against a
+contract that had already moved.
 
 That holds on the way back too. When review routes a spec gap to `spec-writer`,
 **stop the fixer, let the spec land, then restart it against the new text** — a
@@ -108,6 +114,18 @@ test` or `cargo mutants` **does** mutate the tree, breaking the code deliberatel
 to see whether a test notices. Two sharing a tree see each other's broken code and
 report it as the author's; this has happened here.
 
+**A reviewer deletes its worktree when done** — `git worktree remove <abs-path>
+--force` — rather than restoring what it mutated. Restoring depends on having
+tracked every edit, and `cargo mutants` breaks dozens of lines; one missed restore
+ships a deliberately broken line into the piece. Deleting is unconditional and
+cannot half-succeed, and the findings file is already committed elsewhere.
+
+A `tester` has nothing to delete — it works in the piece's shared tree and its
+tests are the deliverable. It proves the implementation is untouched with
+`git diff --stat` instead, which should show test files only. **A missed restore
+will not fail its own suite**, because the code was mutated precisely so a test
+would catch it and the test's expectation was then restored to match.
+
 Every branch rule below follows from that asymmetry, so read it that way rather
 than as bookkeeping.
 
@@ -115,11 +133,26 @@ than as bookkeeping.
 
 | Name | Whose | Holds |
 |---|---|---|
-| `piece/<name>` | the piece | **the** task branch — the one the PR is open on. Spec, code, tests and findings-fixes all commit here directly |
-| `review/<name>/<dimension>` | one reviewer | its findings file, nothing else — cherry-picked onto the piece, never pushed |
+| Branch | Worktree | Whose | Holds |
+|---|---|---|---|
+| `piece/<name>` | one, shared | the three writers, in turn | **the** task branch — the one the PR is open on. Spec, code, tests and findings-fixes all commit here directly |
+| `review/<name>/<dimension>` | one each | one reviewer | its findings file, nothing else — cherry-picked onto the piece, never pushed |
+
+**`spec-writer`, `dev-writer` and `tester` share one worktree, checked out on
+`piece/<name>`.** They can share it precisely because they never run at the same
+time; handing each its own tree would buy nothing and add a cherry-pick to get
+wrong. Reviewers get a tree each because they are the only agents that overlap.
 
 Named for the role and not the stage, because `dev/x` invites a `test/x` beside
 it — which is the shape this section exists to stop.
+
+**Open the PR on `piece/<name>` from the first commit. It cannot be corrected
+later.** A PR's head ref is immutable: `PATCH /pulls/<n> -f head=…` returns **200
+and silently ignores the field**, GraphQL has no `headRefName`, and `--base`
+changes the target rather than the source. GitHub's branch-rename endpoint
+retargets PRs whose *base* was renamed and **auto-closes** one whose *head*
+vanished. Recovering means recreating the old branch at the same SHA and
+reopening — which works, but only if you notice.
 
 **Consolidating branches is not finished until the orphaned PRs are closed.**
 Folding a branch into the piece leaves its PR open, describing work that now
@@ -271,6 +304,24 @@ catch: a test that faithfully pins the wrong behaviour.
 tell it from the author's; this has happened.
 
 ## What experience has taught this flow
+
+**A quantity in a comment is a claim, and this repo fabricates them.** One sweep
+found six comments in one file arguing from premises the code disproves. The worst
+were numbers, because a number reads as though someone measured it:
+
+- *"the reason this was wrong for two years"* — the repo is **five days old**, and
+  `git log -S` dates both commits to the same day. Worse, it was written **in the
+  commit titled "stop three comments from saying the wrong thing"**.
+- *"three orders of magnitude below 64 MiB"* — a factor of **16**, and
+  self-contradicting: three orders below 64 MiB is ~67 KiB, which would refuse the
+  legitimate 1.6 MB request the same comment defends.
+- *"five call sites"* for a constant with **one** production use — the argument for
+  the design this change had rejected.
+
+Before writing a duration, a magnitude or a count, **get it from a command**:
+`git log -S <string>` for when something appeared, `grep -c` for how many. A
+plausible number nobody checks is the same failure as a fabricated citation, and it
+is harder to spot because it looks like evidence.
 
 Each of these is in the agent files because it cost something here.
 
