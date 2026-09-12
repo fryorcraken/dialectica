@@ -64,13 +64,64 @@ Verified collectively by the §1 tests, which sweep every method in
 - [x] 4.5 A refusal carries no result field —
   `a_non_object_refusal_carries_no_result_field`.
 
-## 5. Gates
+## 5. Close the envelope's structural and cost gaps
 
-- [x] 5.1 `cargo test -p dialectica -p dialectica-core` — 485 pass, 0 fail.
-- [x] 5.2 `cargo fmt --check` (no `-p`) — exit 0.
-- [x] 5.3 `cargo clippy -p dialectica-core --all-targets -- -D warnings` — clean
-  (needed a `NamedMethod` type alias for `type_complexity`).
-- [x] 5.4 `cargo build -p dialectica-core --all-targets` — clean.
-- [x] 5.5 `openspec validate wire-request-envelope --strict` — valid.
-- [x] 5.6 Remove the SDK symlink before committing; verify `git status` shows no
-  `logos-rust-sdk-src`.
+Raised by the design reviewer and the security reviewer after §1-4 landed. Each
+is a hole the sweeps above could not see.
+
+- [x] 5.1 **Move `Request` to `wire::request`**, a file with no handler in it. The
+  private field was private to `wire.rs`, where every handler lives, so
+  `Request(serde_json::Map::new())` compiled there and the type's documented
+  guarantee was false for exactly the population it named. Verify the bypass now
+  fails to compile (E0423) and that the same line compiles *inside* the new module,
+  which is what makes the failure attributable to the boundary.
+- [x] 5.2 **Add `MAX_REQUEST_BYTES`, checked before `from_str`.** A 64 MiB request
+  was accepted and served. Verify from both sides of the boundary, and verify the
+  ORDERING with a fixture that is oversized *and* unparseable — a "refused: yes"
+  assertion cannot see a check that runs after the parse. `NO SPEC`.
+- [x] 5.3 Bound `Address::from_hex` and `genesis_for` on length before
+  `hex::decode`, which allocated half an attacker-chosen length first. Verify with
+  over-long *and* invalid input, so only a length-first implementation can produce
+  the asserted refusal. Keep `from_hex`'s error taxonomy unchanged for inputs at or
+  under 64 characters.
+- [x] 5.4 **Pin all three null readings at handler level**, one fixture per
+  differing reader: `payload` (carried as a value), `stoa` / `genesis` /
+  `channelId` (wrong type, never missing), `page` / `perPage` / `includeHidden`
+  (absent → restrictive). Verify each against the mutation it names. Four of the
+  seven readers observe the difference, so the earlier one-test pin was a coverage
+  gap.
+- [x] 5.5 Fix the double parse: `list_threads_inner` takes `&Request`, so the
+  second parse is unspellable rather than merely removed.
+- [x] 5.6 Correct `parse_index`'s refusal message, which said `1e2` was not a whole
+  number. Acceptance deliberately unchanged (design.md — Non-Goals).
+- [x] 5.7 Record in `design.md`: the size cap coupled to the unknown-field
+  leniency; the null decision and why PLAN §9.1 does not bind it; duplicate keys
+  accepted last-wins; serde's recursion bound being relied on; the rejected
+  `include_str!` sweep test; and the UI-BRIEF judgement.
+
+## 6. Gates
+
+Counts are what the command reported at the time, and they move as the tester and
+the parallel branches land. Run the command rather than trusting the number.
+
+- [x] 6.1 `cargo test --manifest-path <abs>/dialectica/rust-lib/Cargo.toml -p
+  dialectica -p dialectica-core`. **The `-p` flags are load-bearing** — without
+  them cargo tests almost nothing and still reports `ok`. 506 pass, 0 fail; 487 at
+  the branch point.
+- [x] 6.2 **`cargo fmt --check` cannot see `dialectica-core` and never could** —
+  the workspace manifest has no `members`, so the gate exits 0 without reaching the
+  crate holding all the logic. An earlier version of this line recorded that exit 0
+  as a passed gate, which is true and vacuous. Use `rustfmt --check` per file
+  instead: `wire.rs` carries **8** pre-existing hunks, the same count `main` has, and
+  this change introduces none of its own. Do not reformat the eight — a diff that
+  reformats a file it also edits cannot be reviewed for either.
+- [x] 6.3 `cargo clippy -p dialectica-core --all-targets -- -D warnings` — clean
+  (needed `NamedMethod` and `NullReadingCase` type aliases for `type_complexity`).
+- [x] 6.4 `cargo build -p dialectica -p dialectica-core --all-targets` — clean.
+  Anything behind `cfg(logos_scaffold)` is not built by `cargo test`, so the
+  adapter in `dialectica/rust-lib/src/lib.rs` was checked separately: it references
+  none of the signatures this change touched.
+- [x] 6.5 `openspec validate wire-request-envelope --strict` — valid.
+- [x] 6.6 Remove the SDK symlink before committing; verify `git status` shows no
+  `logos-rust-sdk-src`. It is gitignored, so the risk is a stale absolute store
+  path rather than a stray commit.
