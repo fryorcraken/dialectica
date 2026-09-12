@@ -93,6 +93,21 @@ honours it.
 Named for the role and not the stage, because `dev/x` invites a `test/x` beside
 it — which is the shape this section exists to stop.
 
+**Consolidating branches is not finished until the orphaned PRs are closed.**
+Folding a branch into the piece leaves its PR open, describing work that now
+lives somewhere else — so the PR list stops being a count of work in progress,
+which is the only thing that makes a work-in-progress limit checkable. Before
+closing one, prove it is redundant:
+
+```
+git log --oneline origin/<orphan> --not origin/piece/<name>
+```
+
+Empty means contained. **Non-empty means fold it first** — a commit cherry-picked
+rather than merged shows here even though its content is in, so read the commits
+rather than the count. Say in the closing comment where the work went, and keep
+the branch.
+
 **A reviewer does not push.** It commits its findings file on its own
 `review/…` branch, then **cherry-picks that one commit onto the local
 `piece/<name>`** and stops. The runner pushes — it is already the role that checks
