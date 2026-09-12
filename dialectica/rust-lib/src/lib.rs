@@ -310,15 +310,17 @@ impl Dialectica {
             // opens an existing keystore; nothing here calls `generate` or
             // `create`, so no key material can appear as a side effect of a
             // publish being attempted.
+            //
+            // `core::no_identity` rather than a `format!` here: this file is
+            // behind `cfg(logos_scaffold)` and no `cargo test` compiles it, so a
+            // message worded here is a message no gate can see. The wording lives
+            // in `Refusal::NoIdentity`'s `Display`, which is compiled and
+            // asserted on. Raising the refusal is the adapter's job because only
+            // the adapter can open a keystore; wording it is not.
             let keystore_path = core::keystore::default_path_in(&dir);
             let keystore = match core::keystore::open_from_env(&keystore_path) {
                 Ok(k) => k,
-                Err(e) => {
-                    return core::error_json(&format!(
-                        "no identity is available to sign with: {e}; nothing was \
-                         published and no key was created"
-                    ))
-                }
+                Err(e) => return core::no_identity(&e.to_string()),
             };
             let key = keystore.stoa_key(&stoa);
 

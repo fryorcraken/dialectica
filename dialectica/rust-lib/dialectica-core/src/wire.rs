@@ -542,6 +542,32 @@ fn published_json(published: &crate::authoring::Published) -> String {
     .to_string()
 }
 
+/// The wire reply for a publish that never reached a handler, because no identity
+/// was available to sign with.
+///
+/// # Why this exists rather than the adapter formatting its own message
+///
+/// The adapter is the only caller — it is the only code that can open a keystore,
+/// which is the only way to discover that there is no usable identity, and
+/// `dialectica-core` structurally cannot reach one. So the refusal can only be
+/// *raised* there.
+///
+/// It must not also be *worded* there. The adapter is behind
+/// `cfg(logos_scaffold)`, which no `cargo test` sets, so a message written in
+/// that file is a message no gate in this repo compiles, let alone asserts on.
+/// The first version of this change had exactly that: [`crate::authoring::Refusal::NoIdentity`]
+/// carried the text and nothing constructed the variant, while a hand-written
+/// `format!` in the adapter carried a second copy of the same sentence. Two
+/// copies of one message with no test tying them, and the copy that shipped was
+/// the one no test could see.
+///
+/// One line here fixes it in the direction that gains coverage rather than losing
+/// it: the text has one home, in `Refusal`'s `Display`, which `cargo test` does
+/// compile and `a_refusal_names_the_id_or_stoa_it_is_about` does assert on.
+pub fn no_identity(why: &str) -> String {
+    error_json(&crate::authoring::Refusal::NoIdentity(why.to_string()).to_string())
+}
+
 /// Field names no publish request may carry, and the reason each is refused.
 ///
 /// **Refused rather than ignored**, which is the opposite of what
@@ -2769,6 +2795,50 @@ mod tests {
         assert!(
             !kind_msg.contains("does not hold"),
             "a held op must not be reported as absent, got {kind_msg}"
+        );
+    }
+
+    #[test]
+    fn the_no_identity_refusal_is_the_error_shape_and_has_one_source_of_its_text() {
+        // The refusal that only the adapter can RAISE, worded in the one place a
+        // gate can read.
+        //
+        // Before this existed, `Refusal::NoIdentity` was constructed by nothing
+        // outside its own `Display` test while the adapter hand-wrote a second
+        // copy of the same sentence — and the adapter is behind
+        // `cfg(logos_scaffold)`, which no `cargo test` sets. So there were two
+        // copies of one message, no test tying them, and the copy that shipped
+        // was the one nothing compiled.
+        //
+        // This asserts the two are ONE string rather than two that happen to
+        // agree: the expected value is built from the variant, so the only way
+        // both sides can pass is by `no_identity` going through it. A
+        // `no_identity` that formatted its own text — even the same text — fails
+        // the moment the variant's wording moves, which is exactly the drift the
+        // old arrangement could not detect.
+        let why = "the keystore file is not there";
+        let out = no_identity(why);
+        let v = as_json(&out);
+        assert_eq!(
+            v["error"]
+                .as_str()
+                .expect("the error shape carries a string"),
+            crate::authoring::Refusal::NoIdentity(why.to_string()).to_string(),
+            "the wire reply must be the VARIANT's wording, not a second copy of it"
+        );
+        assert!(
+            v.get("opId").is_none() && v.get("wasNew").is_none(),
+            "a refusal is never a partial success — §2.5, got {out}"
+        );
+
+        // And the reason it was handed survives into the reply, so a reader is
+        // told what is missing rather than only that something is. A
+        // `no_identity` that discarded its argument passes the equality above.
+        let message = v["error"].as_str().unwrap();
+        assert!(message.contains(why), "the reason must survive, got {out}");
+        assert!(
+            message.contains("no key was created"),
+            "the refusal must say no key material was created, got {out}"
         );
     }
 
