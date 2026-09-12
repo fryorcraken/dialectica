@@ -25,15 +25,25 @@ survive the field becoming optional; a method whose fields are all optional has
 no such side effect and serves the request. The rule is therefore stated once,
 for the envelope, rather than left to each method's fields to imply.
 
-**The scope is the field read, not the parameter.** Reading one field is enough to
-be inside this rule, and requiring none is not enough to be outside it. A method
-is outside it only by treating its request as **opaque text** — never reading a
-field, so there is no field whose absence could be misread — and the surface
-carries exactly one such method: the panic probe, whose contract under "A panic in
-a handler becomes the error shape and the module keeps serving" is to reach its
-panic on whatever it is given. A request the probe cannot refuse is that
-requirement's obligation rather than a hole in this one, and any other method
-claiming the exception SHALL be one that reads no field either.
+**The scope is the field read, not the parameter**, and the three cases are stated
+rather than left to be inferred:
+
+- A method that **reads a field** of its request is inside this rule. Reading one
+  field is enough; how many of its fields are required changes nothing, and a
+  method requiring none is inside it.
+- A method that **takes no request at all** is outside it, there being nothing to
+  check. Such a method still returns JSON, which "A method with no input still
+  answers in JSON" requires of it.
+- A method that **takes a request and reads no field of it** — passing it through
+  as opaque text — is outside it, because the harm this rule prevents is a field's
+  absence being misread, and a method that reads no field has no such absence to
+  misread.
+
+The surface carries exactly one method in that third case: the panic probe, whose
+contract under "A panic in a handler becomes the error shape and the module keeps
+serving" is to reach its panic on whatever it is given. A request the probe cannot
+refuse is that requirement's obligation rather than a hole in this one, and any
+other method claiming this exception SHALL be one that reads no field either.
 
 The refusal's message SHALL say that the request is not an object, so that it is
 distinguishable from the two refusals it otherwise resembles: a request that is
@@ -54,6 +64,45 @@ A request that is an object carrying a field no method reads SHALL be accepted.
 Whether an unrecognised field is a caller's typo or a newer view talking to an
 older core is a compatibility question this contract does not settle, and
 refusing one here would answer it by accident.
+
+**A field holding an explicit `null` is present, not absent.** This is a different
+question from the envelope's outer type and is settled separately: `null` at the
+top level is a request that named nothing and is refused, while `null` as a field
+value is a caller who named the field and supplied no value for it. There is no
+blanket equivalence between such a field and an omitted one.
+
+What happens to it SHALL follow from the field's **declared type and optionality**,
+so that it is decided once where the field is specified rather than per method or
+per call site. Every field the surface reads SHALL have exactly one of these three
+readings, and a field SHALL NOT have two:
+
+1. A field whose declared type **admits `null` as a value** — one documented as
+   carrying any JSON value — SHALL carry the `null` through as that value. This
+   reading takes precedence over the other two, because for such a field a `null`
+   is not a malformed parameter but the parameter.
+2. An **optional** field SHALL treat a `null` as absent, and SHALL then act on its
+   **restrictive** default — the value that grants the caller no more than omitting
+   the field would.
+3. A **required** field whose type does not admit `null` SHALL refuse a `null` as
+   the wrong type rather than report it as missing, because the caller did name
+   it. That is the distinction "Failure is always the error shape, and never a
+   partial success" already requires between a wrong-typed field and an absent
+   one.
+
+**Reading 2 is licensed only in the restrictive direction, and that limit is the
+point of stating it.** A field SHALL NOT read `null` as absent where the resulting
+default is the permissive choice; such a field SHALL refuse a `null` under reading
+3 instead. A blanket "null means absent" would lose the direction and be inherited
+by a future optional field whose default widens what a caller may see or do —
+hidden content, removed content, a moderator's view, a policy bypass — letting a
+caller reach the permissive branch by naming a field with no value. Refused as a
+wrong type, that same request gets nothing. So the equivalence holds only where it
+cannot become an authorisation bypass.
+
+This settles the request half only. The reply half's rule — a field that would be
+meaningless is **omitted** rather than sent as `null`, because a reply carrying a
+meaningless field is the partly-successful shape this contract forbids — is a
+separate obligation in the opposite direction, and nothing here relaxes it.
 
 Widening this surface SHALL be a deliberate act. The contract outlives any
 particular view, and it is what keeps dependency churn behind a wall.
@@ -131,6 +180,45 @@ particular view, and it is what keeps dependency churn behind a wall.
 - **AND** the message is not the not-an-object refusal, so the probe reached its
   panic rather than being refused before it
 - **AND** every other method on the surface refuses that same array
+
+#### Scenario: An explicit null is present rather than absent
+
+- **WHEN** a request supplies a field holding `null`
+- **THEN** the method distinguishes it from a request omitting that field
+  entirely, rather than treating the two as the same request
+
+#### Scenario: A null optional field defaults to the restrictive value
+
+- **WHEN** an optional field is supplied as `null` — the flag that includes hidden
+  content, and the page index
+- **THEN** the reply is the one the caller would have received by omitting the
+  field
+- **AND** it is the restrictive reply: hidden content stays excluded, so no caller
+  reaches a wider answer by naming a field without a value
+
+#### Scenario: A null required field is refused as a wrong type
+
+- **WHEN** a required field whose type does not admit `null` is supplied as `null`
+- **THEN** the reply carries an error saying that field is the wrong type
+- **AND** the message does not say the field is missing, which the caller would
+  read as a request it did not make
+
+#### Scenario: A field that carries an arbitrary value carries a null too
+
+- **WHEN** a field documented as carrying any JSON value is supplied as `null`
+- **THEN** that `null` is carried through as the value it is, rather than refused
+  or defaulted
+- **AND** this holds even though the field is required, the value-carrying reading
+  taking precedence over the wrong-type one
+
+#### Scenario: One field has one null reading
+
+- **WHEN** each field the surface reads is supplied as `null` in turn
+- **THEN** each produces exactly one of the three outcomes — carried as a value,
+  defaulted restrictively, or refused as a wrong type — and never two for one
+  field
+- **AND** which outcome a field produces is predictable from its declared type and
+  whether it is required, rather than from which method reads it
 
 ### Requirement: A panic in a handler becomes the error shape and the module keeps serving
 

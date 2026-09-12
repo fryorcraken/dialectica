@@ -42,7 +42,10 @@ boundary, and it currently has no stated shape.
 - The rule applies to **every method that reads a field of its request**,
   including ones whose fields are all optional. Those are precisely the methods
   where the check has no side effect visible to a correct caller, and precisely
-  the methods where its absence is invisible.
+  the methods where its absence is invisible. A method taking **no request at
+  all** is outside it, there being nothing to check — `version` is the one on
+  today's surface — and so is a method that takes a request and reads no field of
+  it.
 - **The scope is stated as the field read rather than the parameter**, because
   "every method that accepts a request" had two readings that disagreed about the
   panic probe — which takes a request string and never decodes it. The probe is
@@ -50,6 +53,19 @@ boundary, and it currently has no stated shape.
   positively: the probe's request is opaque text, it reaches its panic for every
   request shape, and it refuses none. An excluded method with no rule of its own
   would be a gap rather than a decision.
+
+  The requirement now enumerates all three cases — reads a field, takes no
+  request, takes one and reads no field — rather than stating one and leaving the
+  others to be inferred from the harm it names.
+- **An explicit `null` as a field value is now specified, and not as a blanket
+  equivalence.** A `null` field is present rather than absent; where a method
+  reads it as absent, the default it then acts on MUST be the **restrictive** one.
+  A blanket "null means absent" would be inherited by a future optional field
+  whose default is permissive — a moderator's view, removed content, a policy
+  bypass — and would let a caller reach the permissive branch by naming a field
+  with no value. Where a field is required, a `null` is the wrong type rather than
+  a missing field; where a field carries an arbitrary JSON value, the `null` is
+  that value.
 - **An empty object `{}` stays valid** for a method with no required fields. The
   contract refuses non-objects, not empty ones — stated explicitly so the new
   requirement cannot be read as forbidding the request shape a
@@ -109,6 +125,39 @@ already paid for once.
 - **No behaviour change for any correct caller.** Every request the surface
   serves today is an object; this refuses inputs that are currently served only
   by accident, and on today's surface not even that.
+- **The null-field rule is satisfied by every site on today's surface, which is
+  why it is stated now rather than argued later.** Read from the code, not
+  inferred:
+
+  | site | field | `{"f":null}` today | under the rule |
+  |---|---|---|---|
+  | `parse_index` (`page`, `perPage`) | optional | absent → `0` | restrictive default; permitted |
+  | `includeHidden` | optional | absent → `false` | restrictive default; permitted |
+  | `genesis_for` (`genesis`) | required | `Err` wrong type | required-field reading; permitted |
+  | `parse_channel_id` (`channelId`) | required | `Err` wrong type | required-field reading; permitted |
+  | `ping` (`payload`) | required | `{"pong":null}` | a field carrying any JSON value; permitted |
+
+  So the rule is a **pin on existing behaviour**, not a request for a change. It
+  was worth writing because the pattern is currently visible only by reading five
+  call sites, and the one shape it forbids — `null` as absent where the default is
+  permissive — has no instance to argue against it today and would be written the
+  wrong way by a contributor generalising from `includeHidden`.
+
+  `ping`'s `payload` is the case that looks like a third reading and is not: the
+  field is documented as carrying any value, so `null` is a value rather than an
+  omission. The rule says a method must not hold both readings for one field,
+  which is the property that keeps that case from spreading.
+
+  The **code** consistency work — making the readers state which of the three
+  cases each is, and recording it in `design.md` — belongs to the `dev-writer` on
+  `fix/wire-newtype`. This change states the contract only, and edits no code.
+- **Left unspecified on purpose: that `Request::parse`'s failure is already the
+  serialised wire shape.** The test at `wire.rs` asserting it is over-pinning
+  rather than a gap — `Request::parse` is internal, its `Err` being returnable
+  verbatim is a convenience handlers exploit, and no caller outside the crate can
+  observe the difference. A spec is a contract on observable behaviour, so
+  promoting an internal constructor's error representation into one would freeze a
+  convenience as an obligation. Noted for the tester rather than specified.
 - **Out of scope: unknown fields.** A request that is an object but carries a
   field no method reads is a different question — it is about forward
   compatibility and typo detection, not about the envelope's type, and the two
