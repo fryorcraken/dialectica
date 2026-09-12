@@ -238,8 +238,9 @@ scaffolding; the reasoning is not.
 
 ### Handing over between agents
 
-No agent reads another's report — it all passes through the runner, so every hop
-can lose the evidence.
+**Read the files another agent wrote** — findings, `design.md`, `tasks.md`. What
+does not reach you is its *report*, which returns to the runner; so anything an
+agent needs passed on must be in a file, not in a report.
 
 **A brief points at the work; it does not contain it.** A dispatch is which piece,
 which worktree, which file:
