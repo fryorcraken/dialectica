@@ -41,11 +41,28 @@ use super::error_json;
 
 /// The refusal for a request that is not a JSON object.
 ///
-/// A `const` rather than a literal at five call sites, because the spec's
-/// obligation is about what the message *says*: it must be distinguishable from
-/// "invalid JSON" and from "missing field", so that three caller mistakes
-/// produce three messages. Five copies would drift and one would eventually
-/// collide with a neighbour.
+/// # Why a `const` for a string used in exactly one place
+///
+/// There is **one** production use of this, in [`Request::parse`] below — which
+/// is the whole point of the type, so a "many call sites would drift" argument
+/// does not apply and never did. (An earlier version of this comment made that
+/// argument, citing five call sites. Five was the count under the per-handler
+/// `if !parsed.is_object()` design this change **rejected**; see `design.md` §1.
+/// An argument for a structure that does not exist is worse than no comment,
+/// because it reads as a justification and a reader who checks it finds the code
+/// disagreeing.)
+///
+/// The reason is that the string is **contract surface a view may render**. The
+/// spec's obligation is about what the message *says*: it must be told apart from
+/// "invalid JSON" and from "missing field", so that three caller mistakes produce
+/// three messages. Naming it makes rewording it a deliberate act rather than an
+/// edit to a literal, and
+/// `super::tests::the_non_object_message_is_pinned_to_a_known_answer` pins it to
+/// a hardcoded answer so the reword cannot pass unnoticed.
+///
+/// The test assertions referring to this constant are not call sites in the
+/// drift sense — a test asserting the literal is the mechanism that *catches*
+/// drift, not a copy that suffers it.
 pub const REQUEST_NOT_AN_OBJECT: &str = "the request must be a JSON object";
 
 /// The largest request this module will parse, in bytes.
@@ -93,8 +110,16 @@ pub const REQUEST_NOT_AN_OBJECT: &str = "the request must be a JSON object";
 /// that a `Post` with attachments decodes to **768,076 bytes** at those bounds —
 /// measured there, not estimated. A request carrying that as JSON, with a
 /// hex-encoded genesis record beside it (hex doubles), lands near 1.6 MB. 4 MiB
-/// clears that with room for a field the future adds, and still refuses three
-/// orders of magnitude below the 64 MiB that was served.
+/// clears that with room for a field the future adds, and is **a factor of 16
+/// below the 64 MiB that was served** (67,108,864 / 4,194,304 = 16).
+///
+/// That factor is the honest one and it is smaller than it sounds, which is why
+/// it is written as arithmetic. An earlier version of this comment claimed
+/// "three orders of magnitude below", which is wrong by ~60x and also
+/// self-contradicting: three orders below 64 MiB is about 67 KiB, a cap that
+/// would refuse the 1.6 MB legitimate request the paragraph above says must be
+/// cleared. **The cap is bounded from both sides**, and the gap between the
+/// largest legitimate request and the cap is the only headroom there is.
 ///
 /// **It is deliberately one number rather than a per-method table.** A per-method
 /// cap would be a second thing each new handler has to declare, which is the

@@ -2452,9 +2452,19 @@ mod tests {
         // told such a caller its 100 was not a whole number.
         //
         // What is asserted here is the message for each of the four spellings
-        // that earn it, against a hardcoded literal — because the reason this
-        // was wrong for two years is that nothing read the message beside the
-        // input that produced it.
+        // that earn it, against a hardcoded literal — because what let this
+        // through is that nothing read the message beside the input that
+        // produced it. A test asserting `error.is_some()` for `{"page":1e2}`
+        // is satisfied by a message saying anything at all.
+        //
+        // An earlier version of this comment said the message "was wrong for
+        // two years". It was wrong for hours: `git log -S` finds it introduced
+        // in `0538c0d` and fixed in `134240b`, both 2026-09-12, and this
+        // repository's first commit is five days older than that. The duration
+        // was doing the persuading and it was invented — which is this
+        // project's recorded "persuasive citations get fabricated" trap wearing
+        // a number instead of a reference. The structural reason above is the
+        // real one and needs no duration.
         let log = log_with_body("hello");
         let refused = "page must be a non-negative integer written without a \
                        decimal point or exponent";
@@ -2480,25 +2490,37 @@ mod tests {
     }
 
     #[test]
-    fn the_feed_path_parses_its_request_once() {
-        // WHAT IS AND IS NOT ASSERTABLE HERE, said plainly.
+    fn the_two_feed_entry_points_agree_after_the_parse_moved() {
+        // NAMED FOR WHAT IT ASSERTS, which is NOT what its old name
+        // (`the_feed_path_parses_its_request_once`) claimed. Nothing below
+        // counts parses, and nothing below could.
         //
         // The double parse was: `list_threads_from_request` parsed the request to
         // read `stoa` and `genesis`, then handed the raw `&str` to `list_threads`,
         // which parsed it again. Both replies were identical, so NO assertion on
         // output can see the difference — which is why it survived on main.
         //
-        // What CAN be asserted is the type, and it is asserted by the compiler
-        // rather than by this test: `list_threads_inner` takes `&Request`, so
-        // there is no `&str` in scope for a second parse to consume. Reverting the
-        // signature to `&str` is what would let the bug back in, and that is a
-        // compile-visible change to a private function rather than something this
-        // test could catch.
+        // THE SINGLE PARSE IS ENFORCED BY THE COMPILER, NOT BY THIS TEST.
+        // `list_threads_inner` takes `&Request`, so there is no `&str` in scope
+        // for a second parse to consume. Reverting that signature to `&str` is
+        // what would let the bug back in, and it is a compile-visible change to a
+        // private function that this test would stay green through. If you are
+        // looking for the thing that guards the fix, it is the signature.
         //
-        // So this test's job is the narrower one the fix DID have to preserve:
-        // that moving the parse and removing a nested `guarded` frame changed no
-        // reply. Two entry points, three request shapes each, compared against
-        // each other — because the refactor's whole claim is that these agree.
+        // So this test's job is the narrower one the refactor DID have to
+        // preserve: that moving the parse and dropping a nested `guarded` frame
+        // changed no reply. It is a refactor-safety net, and worth keeping as
+        // one — it is what would have caught the move going wrong — but it
+        // proves nothing about how many times anything is parsed.
+        //
+        // What the sweep below actually does, since the old comment said "three
+        // request shapes each, compared against each other" and both halves were
+        // wrong: FIVE shapes, and within the loop the two entry points are NOT
+        // compared to each other. Each is only checked to be a JSON object with
+        // no doubled guard frame — because for a malformed request the two are
+        // not obliged to agree (only one of them consults the genesis). The
+        // cross-entry-point equality is asserted once, after the loop, for the
+        // well-formed request alone, which is the one case where they must.
         let log = log_with_body("hello");
         let genesis = feed_genesis();
 
@@ -2589,7 +2611,7 @@ mod tests {
         //
         // And the runtime half of the guarantee — that the only constructor
         // reachable from here refuses a non-object — is
-        // `request_parse_is_the_only_way_to_reach_a_field_read`, below.
+        // `request_parse_refuses_every_non_object_json_value`, below.
         //
         // What this does NOT buy:
         // `the_sixth_method_the_boundary_does_not_stop`, above, builds a handler
@@ -2604,12 +2626,21 @@ mod tests {
     }
 
     #[test]
-    fn request_parse_is_the_only_way_to_reach_a_field_read() {
-        // The structural half of the fix, asserted as behaviour: a `Request`
-        // cannot be built from a non-object, so a handler holding one cannot
-        // have skipped the check. This is what makes the guard inherited by a
-        // method nobody has written yet rather than something each author must
-        // remember.
+    fn request_parse_refuses_every_non_object_json_value() {
+        // NAMED FOR WHAT THE BODY FALSIFIES, and it was not always. This test
+        // was called `request_parse_is_the_only_way_to_reach_a_field_read`,
+        // which asserted exclusivity that the body does not check and that is
+        // FALSE in the sense the name implies —
+        // `the_sixth_method_the_boundary_does_not_stop`, in this same file,
+        // reaches a field read without `Request::parse` at all. A name that
+        // contradicts a neighbouring passing test is worse than a vague one.
+        //
+        // What is true and is asserted: a `Request` cannot be built from a
+        // non-object, so a handler holding one cannot have skipped the check.
+        // That is what makes the guard inherited by a method nobody has written
+        // yet rather than something each author must remember — for handlers
+        // that hold a `Request`. See `wire::request`'s module doc for the
+        // boundary's exact scope.
         // `err_of` rather than `unwrap_err`, which would require `Debug` on
         // `Request` — widening the library's surface for a test's convenience,
         // the same trade this file already declines for `KeystoreError: Clone`.
@@ -2806,7 +2837,14 @@ mod tests {
     }
 
     #[test]
-    fn every_handler_answers_with_an_object_carrying_exactly_one_top_level_shape() {
+    fn every_handler_answers_with_a_json_object_for_any_request_shape() {
+        // NAMED FOR WHAT IS ASSERTED. The old name claimed the reply carries
+        // "exactly one top-level shape", which nothing here checks: the body
+        // asserts `is_object()`, and asserting "exactly one shape" would mean
+        // asserting the key set — which these sweeps deliberately do not, since
+        // the success shapes differ per method (`pong`, `channelId`,
+        // `items`/`page`/`hasMore`).
+        //
         // The wire contract is only useful if it holds for EVERY method, so
         // check the property rather than each method's happy path again.
         for out in [

@@ -142,6 +142,13 @@ stands against a handler that skips the type is the sweep in
 `every_request_taking_method`, whose doc now states the obligation in those words,
 and review. Both are human, and that is the residual.
 
+**Read that residual with the two rejected alternatives beside it**, or it reads
+as an assumption nobody tested. It is not: reviewer attention is the mitigation
+that was *measured* to fail — the sixth method passed a 487-test suite — and both
+mechanical replacements are ruled out, the source-scanning one on false positives
+and the trait-driven one because the crate that holds the trait cannot run a test
+over it. See Rejected alternatives.
+
 ### 2. Parse to `Value` first, rather than deserialising straight into a `Map`
 
 **Rejected:** `serde_json::from_str::<Map<String, Value>>(request)`, which would
@@ -159,8 +166,21 @@ non-object by name — is what makes three caller mistakes produce three message
 The spec's obligation is about what the refusal *says*. A message that differs
 from its neighbours only by accident satisfies a test but not the requirement —
 reword the missing-field message tomorrow and the distinction can vanish
-silently. So the text is `const REQUEST_NOT_AN_OBJECT` (one string, not five)
-and tests compare against the literal, not against `!= other_message`.
+silently. So the text is `const REQUEST_NOT_AN_OBJECT` and tests compare against
+the literal, not against `!= other_message`.
+
+**The `const` is not there to avoid duplication.** There is exactly one
+production use, inside `Request::parse`, and the type exists precisely so there
+is only one. It is named because the string is **contract surface a view may
+render**: naming it makes rewording it a deliberate act, and
+`the_non_object_message_is_pinned_to_a_known_answer` pins it to a hardcoded
+answer so the reword cannot pass unnoticed. That reason survives the number of
+uses changing, which a duplication argument would not.
+
+(Worth stating because the first version of this decision — and the constant's
+own doc comment — argued from "five call sites". Five was the count under the
+per-handler design Decision 1 rejects. It was the third comment on this change
+found arguing from a false premise; see the Risks section.)
 
 Hardcoded expectations are this project's recorded fix for tests that ask the
 implementation what it did and then agree with it.
@@ -359,6 +379,56 @@ add it: `every_request_taking_method`'s doc comment now says **ADD YOUR METHOD
 HERE**, states that nothing checks it, and names the measured sixth-method result
 as the reason. Recorded here so that the next author who reaches for the
 source-scanning test finds the objection stated rather than re-litigating it.
+
+### A trait-driven sweep over the real dispatch surface
+
+**The right way to do this, and it cannot be done here.** The principled version
+of the test above is not source-scanning at all: enumerate the wire surface from
+the dispatch trait — the one thing that definitionally *is* the surface — and
+assert that every method taking a request appears in
+`every_request_taking_method`. No string matching, no false positives, and it
+fails for exactly the reason it names.
+
+It is impossible in this repository for two independent reasons, both checked
+against the code rather than reasoned about:
+
+1. **The dependency points the wrong way.** The trait (`DialecticaModule`) lives
+   in the `dialectica` crate, and `dialectica` *depends on* `dialectica-core`
+   (`rust-lib/Cargo.toml`: `dialectica-core = { path = "dialectica-core" }`).
+   `dialectica-core`, where the sweep and every handler live, cannot see the
+   trait. So the sweep would have to live in `dialectica`.
+
+2. **And `dialectica` cannot run it.** The trait and its impl are behind
+   `#[cfg(logos_scaffold)]`, a cfg `build.rs` sets only when the builder has
+   staged `generated/provider_gen.rs`. A plain `cargo test` never sets it — and
+   per the comment in `rust-lib/src/lib.rs`, "no arrangement makes it able to":
+   committing a copy of the generated file would recreate exactly the
+   contract/code drift `codegen.rust.trait` exists to prevent.
+
+**A trait-driven sweep would therefore live in the one crate that cannot run
+it.** That is not a gap waiting for effort; it is a property of the module
+build, and it will stay true until the SDK offers a surface `cargo test` can
+reach.
+
+**Why this is recorded rather than left as silence.** Without it, this document
+says the residual is "the sweep and review. Both are human" — which a reader
+reasonably takes to mean nobody tried to mechanise it. Two things make that
+reading actively misleading:
+
+- The mechanical alternative was investigated and is **structurally
+  unavailable**, per the two reasons above. The next agent that reaches for it
+  would spend the same afternoon reaching the same conclusion.
+- **Reviewer attention is the mitigation that was measured not to work.** The
+  sixth method — a handler parsing `Value` directly with all-optional fields —
+  was built, and the whole suite passed with it in place at **487 tests**. It was
+  rebuilt after the module move and still served `[]`. So "the sweep and review"
+  is not an untested assumption being relied on; it is the thing that demonstrably
+  failed to catch a handler built specifically to evade it, and it is what remains
+  only because the two alternatives above are ruled out.
+
+That is the honest state: the residual is human attention, human attention has
+been measured to miss this, and the mechanisation that would replace it is
+blocked by the crate graph rather than by anyone's effort.
 
 ## Risks / Trade-offs
 
