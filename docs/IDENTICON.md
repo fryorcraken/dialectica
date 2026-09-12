@@ -141,18 +141,69 @@ categorical palette for those readers is to space it in **lightness**.
 Ordering the palette as a monotonic L ladder is therefore not an aesthetic
 choice; it is what makes the set work at all:
 
-| role | hex | L | C | hue |
+| role | hex | L | C | contrast v paper |
 |---|---|---|---|---|
-| `markInk` | `#1c1a16` | 0.219 | 0.008 | — |
-| `markViolet` | `#4a2a86` | 0.380 | 0.146 | 294 |
-| `markRust` | `#8a3a1c` | 0.452 | 0.117 | 40 |
-| `markGreen` | `#2f7f5c` | 0.537 | 0.096 | 161 |
-| `markLime` | `#8fb520` | 0.720 | 0.169 | 124 |
-| `markSky` | `#8ecbe8` | 0.811 | 0.075 | 229 |
+| `markInk` | `#100f0c` | 0.168 | 0.006 | 0.767 |
+| `markIndigo` | `#2b3062` | 0.333 | 0.087 | 0.612 |
+| `markRust` | `#71321f` | 0.399 | 0.094 | 0.543 |
+| `markGreen` | `#42744f` | 0.513 | 0.080 | 0.429 |
+| `markLavender` | `#7c80a0` | 0.608 | 0.049 | 0.334 |
+| `markSage` | `#aeab84` | 0.734 | 0.054 | 0.205 |
 
-**Measured floor: 0.205 OKLab in normal vision, 0.109 under simulated
-dichromacy**, both at `markRust`/`markGreen`. **No pair falls under 0.10 in
-either condition.**
+**Three constraints, all measured, all satisfied:**
+
+| constraint | threshold | worst | where |
+|---|---|---|---|
+| pair separation, normal | ≥ 0.10 | **0.151** | Green/Lavender |
+| pair separation, simulated | ≥ 0.10 | **0.108** | Indigo/Rust |
+| contrast against paper | ≥ 0.20 | **0.205** | Sage |
+| chroma (fluorescence) | < 0.09 at high L | **0.094** | Rust, at L 0.40 |
+
+#### The instrument had a gap, and it is closed
+
+**A palette measured only against itself can be fluorescent and still pass.** The
+first six-ink set cleared every ink-to-ink distance comfortably and still looked
+wrong on the page: one rung sat at C 0.169 / L 0.720 and read as a highlighter
+against the warm off-white ground. The matrix could not see it, because
+fluorescence is a relationship between an ink and the *paper*, not between two
+inks.
+
+`tst_palette.qml` now measures the paper as well, and reports two things the
+pair matrix cannot:
+
+- **contrast against `#efe9dc`** — too little and the mark dissolves into the row
+- **chroma at high lightness** — the actual definition of the fluorescent case
+
+Both defects in that first set were caught by the new rows on the first run: the
+bright rung flagged `FLUORESCENT`, and a second rung nobody had complained about
+flagged `LOW-CONTRAST` at 0.154. A tonal complaint is now a measurable constraint
+rather than a matter of taste.
+
+#### Lightness separates; chroma is what looked wrong
+
+These are **different axes**, and that is what made the fix available rather than
+forced. The accessibility work needs **lightness**. What reads as fluorescent is
+**chroma**. So holding each ink's L and cutting its C preserved every distance
+doing the separating: the offending rung went from C 0.169 to C 0.049 at
+essentially the same lightness, and the simulated floor did not move, because
+after dichromat collapse the surviving separation is almost entirely lightness
+anyway.
+
+**The trap to avoid is fixing a tonal complaint by darkening.** That changes the
+axis doing the work, pulls pairs back under the floor, and re-creates the defect
+the ladder exists to prevent. Two intermediate attempts did exactly this and are
+recorded below.
+
+#### The three constraints are a tight squeeze
+
+Worth knowing before anyone retunes. Paper contrast caps ink lightness at about
+**0.74**; the darkest usable rung is about **0.17**. That is a band of ~0.57, and
+six inks need five gaps of ~0.10 inside it — so there is very little slack, and
+the final set only fits because the lower four rungs were darkened to buy headroom
+at the top.
+
+**Adding a seventh ink is therefore not a free change.** It would need either a
+lower floor, a darker ground, or an accepted fluorescent rung.
 
 #### Why six and not eight
 
@@ -167,11 +218,17 @@ Candidates tried and rejected, with their worst simulated pair:
 
 | set | worst simulated pair | verdict |
 |---|---|---|
-| the shipped eight | **0.006** Moss/Rust (protanopia) | two colours for 92% of readers, one for the rest |
+| the original eight | **0.006** Moss/Rust (protanopia) | two colours for 92% of readers, one for the rest |
 | 8, saturated ladder | 0.047 Indigo/Plum | under floor |
-| 8, even L spacing | 0.087 Stone/Ochre | under floor, and Ochre near white |
+| 8, even L spacing | 0.087 Stone/Ochre | under floor, and top rung near white |
 | 7 | 0.098 Plum/Rust | at the line, not over it |
-| **6** | **0.109** Rust/Green | **ships** |
+| 6, saturated | 0.109 Rust/Green | above floor, but **fluorescent** at C 0.169 |
+| 6, desaturated in place | 0.084 Lime/Sky | fixed the tone, **collapsed the ΔL gap** |
+| 6, reordered | 0.069 Green/Lime | worse — moved the wrong rung |
+| **6, low chroma + darkened base** | **0.108** Indigo/Rust | **ships** — all three constraints clear |
+
+The two middle failures are the instructive ones: desaturating *and* letting the
+lightness drift is what breaks it. Chroma is close to free; **lightness is not.**
 
 **An honest six beats a claimed eight where two are the same colour.**
 
@@ -544,7 +601,7 @@ target.
   is a completely different texture.
 - **Ink identity.** The palette is discrete and hand-separated with a measured
   floor. Landing an adjacent index gives a colour that is, by construction, at
-  least **0.205 OKLab away in normal vision and 0.109 under dichromacy** — which
+  least **0.151 OKLab away in normal vision and 0.108 under dichromacy** — which
   is the *point* of the floor. This is the strongest dimension against grinding
   precisely because it is the one curated for separation, and the floor is now
   wide because the palette was cut to six to achieve it.

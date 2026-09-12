@@ -42,18 +42,37 @@ QtObject {
     // rather than eight: a usable lightness range on this paper does not hold
     // eight rungs at the floor below.
     //
-    // Measured, not estimated. Minimum pairwise OKLab distance 0.205 in normal
-    // vision and 0.109 under simulated dichromacy, both at markRust/markGreen;
-    // no pair falls under 0.10 in either condition. The instrument is
-    // tmp/render/tst_palette.qml, which self-tests against #808080 -> L 0.5998
-    // before reporting, because an earlier hand-computed version of this table
-    // shipped a pair at 0.006 while claiming 0.100.
-    readonly property color markInk:    "#1c1a16"
-    readonly property color markViolet: "#4a2a86"
-    readonly property color markRust:   "#8a3a1c"
-    readonly property color markGreen:  "#2f7f5c"
-    readonly property color markLime:   "#8fb520"
-    readonly property color markSky:    "#8ecbe8"
+    // LIGHTNESS DOES THE SEPARATING, CHROMA DOES THE DAMAGE. These are
+    // different axes, and holding L while cutting C is what lets the palette be
+    // both accessible and tonally right. An earlier version put a C 0.169 rung
+    // at L 0.72 and it read as a highlighter against this paper; desaturating it
+    // to C 0.049 at the same lightness cost nothing measurable, because after
+    // dichromat collapse the surviving separation is almost entirely lightness.
+    // Do not "fix" a tonal complaint by darkening a rung — that pulls pairs back
+    // under the floor and re-creates the defect the ladder exists to prevent.
+    //
+    // Measured on THREE constraints, not one. An ink-to-ink matrix cannot see
+    // fluorescence: the C 0.169 rung was far from every other ink and still
+    // wrong on the page.
+    //
+    //   pair separation  >= 0.10   worst 0.151 normal, 0.108 simulated
+    //   contrast v paper >= 0.20   worst 0.205 (markSky)
+    //   chroma at high L <  0.09   worst 0.094 (markRust, at L 0.40)
+    //
+    // The three together are a tight squeeze and that is worth knowing before
+    // retuning: paper contrast caps ink lightness near 0.74, so the usable band
+    // is about 0.17-0.74, and six inks need five gaps of ~0.10 inside it. There
+    // is very little slack. Adding a seventh ink is not a free change.
+    //
+    // The instrument is tmp/render/tst_palette.qml, which self-tests against
+    // #808080 -> L 0.5998 before reporting, because an earlier hand-computed
+    // version of this table shipped a pair at 0.006 while claiming 0.100.
+    readonly property color markInk:     "#100f0c"   // L 0.17
+    readonly property color markIndigo:  "#2b3062"   // L 0.33
+    readonly property color markRust:    "#71321f"   // L 0.40
+    readonly property color markGreen:   "#42744f"   // L 0.51
+    readonly property color markLavender: "#7c80a0"  // L 0.61
+    readonly property color markSage:    "#aeab84"   // L 0.73
 
     // ---- rules ----------------------------------------------------------
     readonly property color rule:      "#d8d0bf"

@@ -57,15 +57,17 @@ Canvas {
     // deficiency: under deuteranopia and protanopia the red/green axis
     // collapses, so inks separated only by hue become one colour.
     //
-    // Measured minimum pairwise OKLab distance is 0.205 in normal vision and
-    // 0.109 under simulated dichromacy. Six rather than eight is the honest
-    // consequence of holding that floor — see docs/IDENTICON.md.
+    // Measured minimum pairwise OKLab distance is 0.151 in normal vision and
+    // 0.108 under simulated dichromacy, with every ink also held above 0.20
+    // contrast against the paper and below 0.09 chroma so none reads as
+    // fluorescent. Six rather than eight is the honest consequence of holding
+    // all three at once — see docs/IDENTICON.md.
     //
     // The values are frozen constants in Theme, not tunable tokens: editing one
     // changes every identity's mark and makes two app versions disagree.
     readonly property var inks: [
-        Theme.markInk, Theme.markViolet, Theme.markRust,
-        Theme.markGreen, Theme.markLime, Theme.markSky
+        Theme.markInk, Theme.markIndigo, Theme.markRust,
+        Theme.markGreen, Theme.markLavender, Theme.markSage
     ]
 
     // ---- address bytes --------------------------------------------------
