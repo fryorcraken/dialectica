@@ -87,26 +87,30 @@ honours it.
 | Name | Whose | Holds |
 |---|---|---|
 | `piece/<name>` | the piece | **the** task branch — the one the PR is open on |
-| `review/<name>/<dimension>` | one reviewer | its own findings file, nothing else |
+| `review/<name>/<dimension>` | one reviewer | optional — its findings file, nothing else |
 | `fix/<name>/<what>` | one fixer | the change, plus its ticks |
 
 Named for the role and not the stage, because `dev/x` invites a `test/x` beside
 it — which is the shape this section exists to stop.
 
-**A reviewer never commits to `piece/<name>`.** It works in its own worktree on
-its own `review/…` branch, commits **only** its findings file, then merges that
-branch into the task branch. Two reasons:
+**A reviewer's findings file must reach `piece/<name>`.** A review nobody can read
+from the task branch did not happen. Either route is fine, because a reviewer owns
+its findings file exclusively and no other agent writes that path:
 
-- A reviewer reads code a fixer may still be pushing to. A reviewer that cannot
-  commit to the task branch cannot corrupt it, and four reviewers have already
-  read one file while a `dev-writer` was mid-change on it.
-- No two reviewers write the same path, so merging one file is always trivial.
+- commit it straight to the task branch, or
+- commit on a `review/…` branch and merge that in.
 
-**Check which branch you are on before committing** — `git branch -vv`, every
-time, and confirm the upstream too. A worktree created from a branch inherits its
-upstream, and a bare `git push` has landed commits directly on `main` here more
-than once. Commit named paths, never `git add -A`: worktrees collect untracked
-build output and a gitignored SDK symlink.
+**Commit only your own findings file.** Never `git add -A` — worktrees collect
+build output and a gitignored SDK symlink, and a reviewer that sweeps up a fixer's
+half-finished edit has corrupted the branch it was reviewing.
+
+**Expect a rejected push and rebase.** Several agents push to one task branch, so
+the loser of a race pulls, rebases and retries. That is normal; never force-push
+to resolve it.
+
+**Check `git branch -vv` before pushing** — a worktree created from a branch
+inherits that branch's upstream, and a bare `git push` has landed commits directly
+on `main` here more than once.
 
 ## Findings go in `openspec/changes/<name>/findings/`
 
