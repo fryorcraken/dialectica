@@ -1,10 +1,8 @@
 # The spec-driven flow
 
 Role agents around [OpenSpec](https://openspec.dev)'s built-in `spec-driven`
-schema. OpenSpec supplies the artifacts and their ordering; Claude Code supplies
-the agents. Nothing here is custom tooling — a survey of the alternatives (Spec
-Kit, Kiro, Tessl, BMAD, AgentOS) found per-role agents unserved everywhere and
-declined outright by one, while subagents already give isolated context windows,
+schema: OpenSpec supplies the artifacts and their ordering, Claude Code the
+agents. No custom tooling — subagents already give isolated context windows,
 per-role models and tool limits.
 
 ## The documents, and what each is for
@@ -16,104 +14,18 @@ per-role models and tool limits.
 | `openspec/specs/` | **What** the system does — the behaviour contract | `openspec/specs/`, current |
 | `design.md` | **How**, and **why this approach** (Decisions) | `changes/archive/<date>-<name>/` |
 | `tasks.md` | The ordered checklist | `changes/archive/<date>-<name>/` |
+| `findings.md` | What review found, and what was done about each | **Deleted before merge** — durable reasoning moves to `design.md` first |
 
-### What "archived" means concretely
+A change in flight lives in `openspec/changes/<name>/`, and its `specs/` holds a
+**delta**. `openspec archive` merges the delta into `openspec/specs/` and moves
+the folder to `changes/archive/<date>-<name>/` — moved, not deleted, so finding a
+past decision means grepping the archive.
 
-This is OpenSpec's own behaviour, not a convention of ours.
-
-While a change is in flight it lives in `openspec/changes/<name>/`, and its
-`specs/` holds a **delta** (`## ADDED Requirements`). `openspec archive` then:
-
-1. **offers to merge the delta into `openspec/specs/`** — the live, current
-   contract. It is a prompt, and declining it archives without promoting the
-   spec, so take the sync;
-2. **moves the folder** to `openspec/changes/archive/<date>-<name>/`, dated
-   today unless the name already carries a date, which is never stacked.
-
-So the change's `proposal.md`, `design.md` and `tasks.md` are moved, not
-deleted: they stay in version control and stay greppable. Finding a past
-decision means grepping the archive, which is what it is for.
-
-One exception worth knowing: a change that declares `retire_capabilities` can
-make archive **delete** a spec rather than merge into it. Nothing here does
-that, and it takes an explicit marker.
-
-#### Ask `openspec --version` before concluding anything about the CLI
-
-`openspec archive` is the tool to reach for, and `openspec validate` alongside
-it. This file previously recorded that the CLI was absent and the merge was
-therefore done by hand; the absence was real once, the sentence outlived it, and
-"openspec is not installed" was relayed to five agents in one day on that
-basis. One command settles it — so run the command, and do not take a document's
-word for what is on the machine.
-
-#### What `openspec archive` does to a delta, and what to check because it will not tell you
-
-The transformation, for a capability `openspec/specs/` does not yet hold, is
-exactly two edits:
-
-1. prepend `# <capability> Specification` and a blank line;
-2. rename `## ADDED Requirements` to `## Requirements`.
-
-Everything else is carried across byte-for-byte. That is the check, whoever
-performs it: diff the promoted file against the delta and confirm those are the
-only hunks. The CLI does not report what it changed, so a merge nobody diffed is
-a merge nobody verified.
-
-Four things about that rule cost time to establish, none is visible from the
-files themselves, and none of them is about whether a CLI is available:
-
-- **`stoa-genesis` is NOT a valid reference example.** Its live spec differs
-  from its delta by whole added paragraphs and `SHALL` → `MUST` rewrites. Both
-  landed in the *same commit* (`3dddf03`), so the live file was hand-edited
-  after the delta was written and no diff ever showed it. Deriving the
-  transformation from that pair yields a rule that is simply wrong. Derive it
-  from `2026-09-11-op-model` → `op-format`, which matches exactly.
-- **Deltas vary in shape.** Some carry a `## Purpose`; `stoa-metadata`'s
-  carries a title line and no Purpose; `spec-backfill`'s two carry **neither**
-  and open directly on `## ADDED Requirements`. The transformation still
-  applies — but "prepend a title before the Purpose" is not the rule, and a
-  merge that assumes a Purpose is present will mangle the ones without.
-- **A `MODIFIED` requirement replaces the WHOLE block, scenarios included** —
-  not just its prose. A merge that swapped the paragraphs and left the old
-  scenarios underneath produces a requirement whose scenarios contradict it,
-  with no error. When `stoa-metadata-op` renamed the field cap's boundary pair,
-  taking only the prose would have left two scenarios describing a limit the
-  requirement no longer words that way.
-- **A `MODIFIED` heading that matches no requirement must stop the merge.**
-  This is the failure the whole discipline exists to catch: `openspec archive`
-  finds nothing to modify and **silently applies nothing**, losing a
-  requirement with no error. Check every MODIFIED heading against the target's
-  actual `### Requirement:` lines before merging, and report a miss rather than
-  guessing at what was meant.
-
-**Archive in merge order**, oldest first — a later change's `MODIFIED` delta
-must apply to the text an earlier change's `ADDED` delta produced. Derive the
-order from `git log --name-status --diff-filter=A -- openspec/changes`, which
-maps each change folder to the commit that introduced it; do not guess it from
-folder names. The archive date is the **merge** date, from that commit, not the
-date you are doing the sweep.
-
-#### `openspec` resolves its root from the cwd, and has no directory flag
-
-Every command reports the root it chose — `openspec list --json` ends with
-`"root": {"path": …, "source": "nearest"}` — and "nearest" is literal: it walks
-up from the **current directory** to the first `openspec/` it finds. There is no
-`--directory`, `-C` or `--root`. `--store` exists but takes a *registered store
-id*, kebab-case, and rejects anything containing a path separator, so it is not
-a directory flag.
-
-Every spec-writer here works in a worktree, so this bites immediately: run from
-the main checkout, a change living in a worktree's `openspec/changes/` is simply
-not listed, and `openspec validate <change>` cannot see it. Confirmed by
-running the same command from both — the main checkout reported two changes, the
-worktree three, each rooted at its own path.
-
-So validating or archiving a worktree's change means running from inside that
-worktree, which is the `cd` shape `CLAUDE.md` says costs a permission prompt.
-Run it from a shell already in the worktree, or accept the one prompt. **Do not
-conclude the change is missing or the CLI is broken** — check the reported root
-first; it is the one line that tells you which tree you are looking at.
+**Archiving has enough traps to be worth its own page:
+[`docs/OPENSPEC-ARCHIVE.md`](../../docs/OPENSPEC-ARCHIVE.md). Read it before you
+archive, not before you start.** `openspec` is installed; run
+`openspec --version` rather than believing any document about it, this one
+included.
 
 ### A spec must never cite a PLAN section number
 
@@ -160,76 +72,107 @@ Leave it. It shrinks by attrition as changes touch each area.
 
 ## One piece of work is one branch and one PR
 
-Every stage of a change — spec, design, code, tests, and the fixes that come out
-of review — lands as **commits on one branch, under one pull request**. The PR
-accumulates: the spec commit, then the implementation, then the tests, then each
-routed fix.
+Every stage — spec, design, code, tests, review fixes — lands as **commits on one
+branch, under one PR**. Agents keep their own worktrees and local branches; a
+*stage* never gets its own branch and PR.
 
-Agents may use their own worktrees and their own local branches; that is
-encouraged, and each reviewer that mutates code needs its own tree. What must
-not happen is a *stage* getting its own branch and its own PR.
+**The unit of review is a behaviour change with its contract and its tests
+attached.** A reviewer must be able to see they belong together, not be told so
+by whoever is orchestrating. And `openspec archive` runs once, on merge — split
+across several merges, the contract lands at a different time from the code that
+honours it.
 
-**Why: a reviewer must be able to see that the spec, the code and the tests in
-front of it belong together.** Stage-per-PR was tried here and produced a stack
-four deep — `spec/x` → `dev/x` → `test/x` → a spec-fix PR targeting the test
-branch — with a further fix branch beside it. Two consequences, both real:
+## Findings go in `openspec/changes/<name>/findings.md`
 
-- Reviewers on the stoa change had to be *told* "the implementation is
-  byte-identical between these two branches, so review the union." That
-  assertion is the orchestrator's word. A reviewer cannot check it, and checking
-  exactly this is what a reviewer is for.
-- A spec reworded in the top PR of a stack changes what the tests three PRs down
-  ought to assert, and nobody reading either PR can see the other.
+Written by the reviewer, ticked by the fixer, deleted before merge.
 
-**And `openspec archive` runs once, on merge.** Archive promotes the delta into
-`openspec/specs/`, so it must run against a spec and an implementation that
-provably shipped together. Split across four merges, the contract lands at a
-different time from the code that honours it — and a delta whose `MODIFIED`
-heading matches nothing applies nothing, **silently**, so there is no error to
-notice when they drift.
+**A reviewer's final report is a pointer, not a copy.** Write the findings to the
+file, then report only: the path, how many entries, and who each is for. The
+fixer reads the file; the runner reads the pointer and dispatches.
 
-The failure mode that produced the stack is worth naming, because it feels
-responsible: each stage looked like a reviewable unit, so each got a PR. But a
-stage is not a unit of *review* — the unit of review is a behaviour change with
-its contract and its tests attached. Splitting by stage optimises for the
-author's convenience at the reviewer's expense.
+Two reasons, and the second is why this is a rule rather than a preference:
+
+- A paraphrase arrives without the evidence that backed it. **Never relay a
+  finding through a brief** — name the file.
+- A report copied into the runner's context, then rewritten into the next brief,
+  occupies it twice. That is what crowds out the state a runner needs to keep,
+  and it is how a piece of work ends up with no agent on it.
+
+**Reviewers append, never rewrite another entry.** Each one carries: who it is
+for (`spec-writer`, `dev-writer` or `tester`), the defect, a failure scenario
+concrete enough to reproduce (inputs → wrong output, or the mutation that
+survives), `file:line`, and the measurement where there is one.
+
+**The fixer ticks in the commit that addresses it**, so the claim and the change
+are one diff. Record one of three outcomes:
+
+- **Fixed** — the commit, and the test that fails without it.
+- **Rejected** — with the argument. Reviewers are wrong sometimes; a rejection is
+  a legitimate outcome, but argue it rather than closing it silently.
+- **Deferred** — and where it now lives. A finding that leaves this file without
+  landing somewhere durable was dropped, not deferred.
+
+**An outstanding entry blocks the merge.** That is why this is a file and not a
+convention — a forgotten finding now stops a PR instead of evaporating.
+
+**Move durable reasoning into `design.md` before deleting.** "The creator key
+cannot moderate the Stoa it creates" is a recorded decision, not a task; the
+tracker is scaffolding, the reasoning is not. Deleting the file is the last
+commit.
+
+### Handing over between agents
+
+No agent can read another's report — everything passes through the runner, so
+every hop is a chance to lose the evidence. Three rules:
+
+**Continue an agent rather than starting one.** A message to the agent that did
+the work keeps its worktree, its measurements and its reasoning. A fresh agent
+gets a brief, which is a summary of those.
+
+**Write the dead end down, not just the conclusion.** A reviewer that spends an
+afternoon establishing why a trait-driven sweep is impossible here — the trait
+lives in the crate that depends on core, not the reverse, and is behind a `cfg`
+`cargo test` never sets — has produced a result worth as much as the review.
+Unwritten, the next agent spends the same afternoon. It goes in `design.md`
+beside the decision it rules out.
+
+**State a claim's provenance when relaying one.** "A reviewer measured X" and "I
+believe X" license different actions, and an agent given the second as the first
+will not re-check it.
 
 **Two steps belong to whoever is running the change, not to any agent:**
 
-- **Acting on findings.** Every reviewer ends "findings only, do not fix". A
-  finding about behaviour goes back to `spec-writer`; about the code, to
-  `dev-writer`; about a test, to `tester`. Re-run only the reviewers whose
-  findings led to changes.
+- **Routing findings and launching the fixer.** The reviewer writes to
+  `findings.md` and the fixer ticks there, so the runner's job is to dispatch,
+  not to carry the content: name the file in the brief and let the agent read the
+  reviewer's own words. Re-run only the reviewers whose findings led to changes.
 - **`openspec validate` and `openspec archive`.** Archive is where the delta is
   merged into `openspec/specs/` — skip the step, or decline its sync prompt, and
   the change ships with its spec never promoted. Do it once the change is
   otherwise done, and take the sync.
 
-The three reviewers split deliberately, and run in parallel:
+The reviewers run in parallel and ask different questions:
 
-- `code-reviewer` asks **is this code correct, safe and well-shaped?**
-- `spec-test-reviewer` asks **do the tests pin what the spec requires, and can
-  they fail?**
-- `design-reviewer` asks **did the code take the decisions that were recorded,
-  and were the decisions worth recording recorded?**
+- `code-reviewer` — **is this code correct, safe and well-shaped?**
+- `spec-test-reviewer` — **do the tests pin what the spec requires, and can they
+  fail?**
+- `design-reviewer` — **did the code take the decisions that were recorded, and
+  were the decisions worth recording recorded?**
 
-**`code-reviewer` is launched once per dimension** — correctness, security,
-readability, architecture — with the prompt naming which. One agent holding all
-four does each worse: scanning for a reachable panic is a different reading of
-the same file from scanning for a function doing two jobs, and a single pass
-becomes whichever the reviewer started with. A small change can take one
-instance covering all four.
+**Launch `code-reviewer` once per dimension** — correctness, security,
+readability, architecture — naming which in the prompt. Scanning for a reachable
+panic is a different reading of a file from scanning for a function doing two
+jobs, and one agent holding both becomes whichever it started with. A small
+change can take one instance covering all four; a full review is typically six
+agents.
 
-So a full review is typically six agents: four `code-reviewer`, plus
-`spec-test-reviewer` and `design-reviewer`.
+**`spec-test-reviewer` is blind to the implementation.** Someone who has read the
+code judges tests by what the code does — exactly the failure a spec exists to
+catch: a test that faithfully pins the wrong behaviour.
 
-`spec-test-reviewer` is deliberately blind to the implementation. Someone who
-has read the code judges tests by what the code does, which is exactly the
-failure a spec exists to catch: a test that faithfully pins the wrong behaviour.
-
-**Give each reviewer that mutates code its own worktree.** Two sharing a tree
-see each other's broken code and cannot tell it from the author's; this has
-happened.
+**Give each reviewer that mutates code its own worktree**, in
+`.claude/worktrees/`. Two sharing a tree see each other's broken code and cannot
+tell it from the author's; this has happened.
 
 ## What experience has taught this flow
 
@@ -264,35 +207,12 @@ covered. Describe what is checkable, or say it is out of scope.
 **Read PLAN.md from `origin/main`.** A change was once designed against a §4.3
 that had been rewritten to say the opposite.
 
-**Specs get reorganised as concepts generalise.** When a second instance shows
-that requirements written for one capability are really about a general one,
-they move — `REMOVED` from the old spec and `ADDED` to the new, verbatim, in one
-change. OpenSpec has no capability move or rename, so the extraction is composed
-from those primitives. Do it when the generality is demonstrated, not predicted.
+**A green gate can be structurally blind.** `cargo fmt --check` does not follow
+path dependencies, so it never reaches `dialectica-core` — where nearly all the
+logic lives. Anything behind `cfg(logos_scaffold)` is not compiled by
+`cargo test` at all. Say what a gate cannot see rather than reporting it as
+passed; "exit 0" on a gate that measured nothing is worse than no gate.
 
-**Two capabilities asserting one rule is the failure that reorganisation
-prevents, and it is already here.** `identity` and `op-format` both carry an
-authenticity-is-not-authority requirement, both pin derivation constants, and
-`identity` restates the key-to-author binding `op-format` covers. Two copies
-drift, and the reader who finds the stale one has no way to tell. Which
-capability owns each rule is a design call, not a sweep's to make; it is
-recorded here so whoever next touches either finds it stated rather than
-rediscovers it.
-
-The contrast is the evidence that the discipline works when applied:
-`op-ordering` faced exactly this against `op-format`'s "An op carries no
-ordering field", **declined to restate it, and said so in its Purpose** —
-naming the other capability's requirement and the boundary between them.
-`spec-backfill` did not, and produced the duplication above. The cost of
-writing that sentence is one paragraph; the cost of not writing it is a
-contract with two answers.
-
-**A contradiction between two capabilities is invisible until they are merged.**
-`keystore` and `posting-capability` shipped in one change, each internally
-consistent, jointly demanding a distinction the design deliberately does not
-provide: a wrong passphrase told apart from a tampered ciphertext, which the
-AEAD tag structurally cannot do. Nothing caught it, because each delta was
-reviewed alone and neither had ever been read beside the other. Archiving is
-the first moment they sit in one contract — so it is the moment to read them
-together, and a sweep that finds such a pair should resolve it rather than
-leave the next reader to inherit a contract that contradicts itself.
+**Specs get reorganised as concepts generalise**, and two capabilities asserting
+one rule is the failure that prevents — both already live here. See
+[`docs/OPENSPEC-ARCHIVE.md`](../../docs/OPENSPEC-ARCHIVE.md).
