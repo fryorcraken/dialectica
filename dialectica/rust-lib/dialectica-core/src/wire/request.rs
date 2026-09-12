@@ -15,17 +15,23 @@
 //! recorded — "a second parse is visible in review as an anomaly" — did not
 //! apply to it either. The fix is the module boundary: the field is private to
 //! this file, this file holds no handler, and the compiler now refuses the
-//! bypass from `wire.rs`. See `request_cannot_be_constructed_outside_this_module`
-//! at the bottom of this file for the proof, and `wire.rs`'s
+//! bypass from `wire.rs`. See
+//! `tests::request_is_constructible_here_because_this_module_defines_it` at the
+//! bottom of this file for the positive half of the proof, and `wire.rs`'s
 //! `the_bypass_this_module_boundary_closes` for the negative half.
 //!
 //! # What the residual actually is
 //!
-//! Two things remain, and both are honest:
+//! Two things remain, both honest, and the first is larger than it looks:
 //!
-//! - **A handler could call `serde_json::from_str` itself** and never build a
-//!   `Request` at all. That is a new parse of a request, and it is what
-//!   `no_request_parse_lives_outside_the_request_module` sweeps for.
+//! - **A handler need not hold a `Request` at all.** It can call
+//!   `serde_json::from_str` itself and read fields off a bare `Value`, and
+//!   nothing in the type system objects — the boundary makes it impossible to
+//!   hold a `Request` without the check, not impossible to skip the type.
+//!   `wire.rs`'s `the_sixth_method_the_boundary_does_not_stop` builds exactly
+//!   that method and demonstrates it serving an array. What stands against it is
+//!   the sweep in `every_request_taking_method`, whose doc states the obligation,
+//!   and review.
 //! - **Code added to THIS file** can construct a `Request` freely, because that
 //!   is what a private field means. The boundary is only as good as the rule
 //!   that this file holds no handler — which is why that rule is stated in the
@@ -41,6 +47,64 @@ use super::error_json;
 /// produce three messages. Five copies would drift and one would eventually
 /// collide with a neighbour.
 pub const REQUEST_NOT_AN_OBJECT: &str = "the request must be a JSON object";
+
+/// The largest request this module will parse, in bytes.
+///
+/// # Why there is a cap at all
+///
+/// Measured, release build, against a valid feed request padded with one ignored
+/// string field: **64 MiB in was accepted and served**, at 92.6 ms of CPU and
+/// roughly 2N bytes of transient heap, for a 373-byte reply. The amplification is
+/// *inverted* — the reply carries no signal that the request cost anything — so
+/// nothing downstream can notice, rate-limit or log it. `ping` is sharper still,
+/// because it echoes `payload`: 32 MiB in produced a 33,554,443-byte reply.
+///
+/// And the failure mode is not a slow reply. `docs/PHASE0-FINDINGS.md` §3
+/// measured what a panic in a dispatch handler does: the module process
+/// **aborts**, the caller waits out its 20-second timeout, and every later call
+/// reports `MODULE_NOT_LOADED`. An allocation failure here is that, not an error
+/// reply.
+///
+/// # Why this is the one place the check belongs
+///
+/// [`Request::parse`] is the only way a handler can reach a field, so one
+/// comparison here bounds every request-taking method — including methods nobody
+/// has written yet. That is the same argument the type itself is built on, one
+/// step further along: put the invariant where the data is shaped, not in a
+/// guard each handler has to remember.
+///
+/// # THE CAP IS WHAT BUYS THE LENIENCY, and the two decisions are one
+///
+/// Unknown fields are deliberately **ignored** rather than refused, because a
+/// strict envelope means a newer view cannot talk to an older core — the worse
+/// failure for two modules that update independently. But ignoring unknown
+/// fields is exactly what made the 64 MiB padded request *valid* rather than
+/// refused: every byte of that payload sat in a field no method reads.
+///
+/// So these are not two independent decisions. **Dropping this cap also costs
+/// the leniency**, and anyone tempted to raise it a long way should price it as
+/// a change to both.
+///
+/// # Why 4 MiB
+///
+/// Derived from what a legitimate request can carry, not picked for roundness.
+/// The largest request this contract will ever hold is a composed op: §4.4's SDS
+/// message cap gives [`crate::op`] a 150 KiB per-field bound, and `op.rs` records
+/// that a `Post` with attachments decodes to **768,076 bytes** at those bounds —
+/// measured there, not estimated. A request carrying that as JSON, with a
+/// hex-encoded genesis record beside it (hex doubles), lands near 1.6 MB. 4 MiB
+/// clears that with room for a field the future adds, and still refuses three
+/// orders of magnitude below the 64 MiB that was served.
+///
+/// **It is deliberately one number rather than a per-method table.** A per-method
+/// cap would be a second thing each new handler has to declare, which is the
+/// guard-at-every-call-site shape this file exists to avoid; the tighter bounds
+/// that actually matter are per *field*, and they live with the field.
+///
+/// Pinned by `the_request_cap_is_pinned_to_a_known_answer`, because a cap that
+/// drifted upward would still refuse an absurd request and still pass every test
+/// that probes only absurd values.
+pub const MAX_REQUEST_BYTES: usize = 4 * 1024 * 1024;
 
 /// A request that is known to be a JSON object, because it cannot be built from
 /// anything else.
@@ -99,6 +163,19 @@ impl Request {
     /// `disable_recursion_limit()` or a `from_reader` variant, so neither is to
     /// be introduced here without putting a depth check in its place.
     pub fn parse(request: &str) -> Result<Self, String> {
+        // BEFORE the parse, and the ordering is the whole check. `from_str`
+        // allocates roughly 2N bytes on the way to a `Value`, so a check that ran
+        // afterwards would refuse the request having already paid for it — and
+        // per PHASE0-FINDINGS §3 the price of failing to pay is an abort, not an
+        // error reply. `an_oversized_request_is_refused_before_it_is_parsed`
+        // pins the ordering by feeding in something that is both oversized and
+        // unparseable and asserting which refusal comes back.
+        if request.len() > MAX_REQUEST_BYTES {
+            return Err(error_json(&format!(
+                "the request is {} bytes, over the {MAX_REQUEST_BYTES} byte limit",
+                request.len()
+            )));
+        }
         let parsed: serde_json::Value = match serde_json::from_str(request) {
             Ok(v) => v,
             Err(e) => return Err(error_json(&format!("invalid JSON: {e}"))),
@@ -117,12 +194,20 @@ impl Request {
     /// Unlike `Value::get`, a `None` here means exactly one thing: this object
     /// has no such key. That is the ambiguity the type removes.
     ///
-    /// **An explicit `null` is `Some(Value::Null)` and never `None`**, so a
-    /// reader that wants to treat `{"f":null}` as absent has to say so, and one
-    /// that wants to tell them apart still can. Which a reader should do is
-    /// recorded in the `wire-request-envelope` change's `design.md`; the
-    /// envelope does not decide it, because deciding it here would take the
-    /// choice away from every reader at once.
+    /// **An explicit `null` is `Some(Value::Null)` and never `None`**, and that
+    /// is the contract's requirement rather than a convenience: a field holding
+    /// an explicit `null` is present, not absent, and what happens to it follows
+    /// from the field's declared type and optionality in one of three readings —
+    /// carried through as a value, defaulted restrictively, or refused as a wrong
+    /// type.
+    ///
+    /// **So the envelope preserves the distinction and decides none of it.**
+    /// Collapsing a null here would take the choice away from all three readings
+    /// at once — `ping`'s `<any>` payload would lose the value it is documented to
+    /// carry, and a future field's reading would be fixed before anyone chose it.
+    /// The readers say which reading applies; see `super::parse_index`'s doc for
+    /// the limit on the defaulting one, which is the half that can become an
+    /// authorisation bypass.
     pub fn get(&self, field: &str) -> Option<&serde_json::Value> {
         self.0.get(field)
     }
@@ -145,6 +230,106 @@ mod tests {
         // hole this module exists to close.
         let built_directly = Request(serde_json::Map::new());
         assert_eq!(built_directly.get("anything"), None);
+    }
+
+    /// A valid request of exactly `bytes` total length, padded with a field no
+    /// method reads.
+    ///
+    /// The padding is a field rather than a giant key or a deep structure on
+    /// purpose: an ignored field is the shape the measurement used, and it is the
+    /// shape the leniency decision makes *valid*. If the cap were somehow
+    /// checked after parsing, this would still be accepted.
+    fn a_request_of_exactly(bytes: usize) -> String {
+        let skeleton = r#"{"junk":""}"#;
+        assert!(
+            bytes >= skeleton.len(),
+            "cannot build a request smaller than its own skeleton"
+        );
+        let padding = "x".repeat(bytes - skeleton.len());
+        let built = format!(r#"{{"junk":"{padding}"}}"#);
+        assert_eq!(built.len(), bytes, "the fixture must be the size it claims");
+        built
+    }
+
+    #[test]
+    fn a_request_at_the_cap_is_accepted_and_one_byte_over_is_refused() {
+        // The boundary from BOTH sides, which is the only way a `>` that should
+        // have been `>=` (or the reverse) is caught. `op.rs`'s field cap is
+        // tested exactly this way, for the reason recorded there: a test that
+        // probes only an absurd value passes against a cap that has silently
+        // drifted, and against a cap off by one.
+        let at_the_cap = a_request_of_exactly(MAX_REQUEST_BYTES);
+        assert!(
+            Request::parse(&at_the_cap).is_ok(),
+            "a request of exactly the cap must be accepted"
+        );
+
+        let one_over = a_request_of_exactly(MAX_REQUEST_BYTES + 1);
+        assert_eq!(
+            Request::parse(&one_over).err(),
+            Some(error_json(&format!(
+                "the request is {} bytes, over the {MAX_REQUEST_BYTES} byte limit",
+                MAX_REQUEST_BYTES + 1
+            ))),
+            "one byte over the cap must be refused, and say by how much"
+        );
+    }
+
+    #[test]
+    fn an_oversized_request_is_refused_before_it_is_parsed() {
+        // The cap's whole job is bounding ALLOCATION, so "refused" is not
+        // enough — it must be refused without the ~2N transient heap a parse
+        // costs. That is not observable from a return value, so the assertion
+        // is the one thing that IS: a request far over the cap that is ALSO
+        // unparseable comes back with the size refusal and not with
+        // `invalid JSON`. Only an implementation that checks length before
+        // calling `from_str` can answer that way.
+        //
+        // Reversing the two checks in `parse` turns this red, which is the
+        // mutation it exists to catch and the one a "refused: yes" assertion
+        // cannot see.
+        let oversized_and_unparseable = "{".repeat(MAX_REQUEST_BYTES + 1);
+        let refused = Request::parse(&oversized_and_unparseable)
+            .err()
+            .expect("must be refused");
+        assert!(
+            refused.contains("over the"),
+            "an oversized request must be refused for its size, got {refused}"
+        );
+        assert!(
+            !refused.contains("invalid JSON"),
+            "the size check must run BEFORE the parse, got {refused}"
+        );
+    }
+
+    #[test]
+    fn the_request_cap_is_pinned_to_a_known_answer() {
+        // Hardcoded, not `assert_eq!(MAX_REQUEST_BYTES, 4 * 1024 * 1024)` read
+        // back from the definition it is checking. A cap that drifted upward
+        // would still refuse a 64 MiB request and still pass every test that
+        // probes only absurd values — the defect family this project has
+        // recorded three times.
+        assert_eq!(MAX_REQUEST_BYTES, 4_194_304);
+    }
+
+    #[test]
+    fn the_size_refusal_is_not_either_refusal_it_must_be_told_from() {
+        // A fourth caller mistake joins the three the spec enumerates, so it
+        // earns the same obligation: it must not read as one of the others.
+        // Checked on the prefix rather than by `assert_ne!` on whole strings,
+        // for the reason
+        // `the_non_object_message_does_not_read_as_either_refusal_it_must_be_told_from`
+        // records — a message spelled "invalid JSON: too big" compares unequal
+        // and still tells the caller the wrong thing.
+        let over = Request::parse(&a_request_of_exactly(MAX_REQUEST_BYTES + 1))
+            .err()
+            .expect("must be refused");
+        for neighbour in ["invalid JSON", "missing field", REQUEST_NOT_AN_OBJECT] {
+            assert!(
+                !over.contains(neighbour),
+                "the size refusal reads as {neighbour:?}: {over}"
+            );
+        }
     }
 
     #[test]
