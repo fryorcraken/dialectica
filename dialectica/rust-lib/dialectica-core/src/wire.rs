@@ -21,6 +21,83 @@ pub fn error_json(message: &str) -> String {
     serde_json::json!({ "error": message }).to_string()
 }
 
+/// The refusal for a request that is not a JSON object.
+///
+/// A `const` rather than a literal at five call sites, because the spec's
+/// obligation is about what the message *says*: it must be distinguishable from
+/// "invalid JSON" and from "missing field", so that three caller mistakes
+/// produce three messages. Five copies would drift and one would eventually
+/// collide with a neighbour.
+pub const REQUEST_NOT_AN_OBJECT: &str = "the request must be a JSON object";
+
+/// A request that is known to be a JSON object, because it cannot be built from
+/// anything else.
+///
+/// # Why this is a type and not a branch
+///
+/// `serde_json::Value::get` answers `None` for **every** non-object. So with a
+/// bare `Value` in hand, `parsed.get("stoa")` cannot tell an array from an
+/// object missing its `stoa` — and a handler whose fields are all optional
+/// serves an array as a request that named nothing. That is the defect this
+/// exists to close, and it is latent rather than reachable only because every
+/// method on today's surface happens to require a field.
+///
+/// The fix could have been one `if !parsed.is_object()` per handler. It was not,
+/// for a reason that outlives style: **a branch has to be got right at every
+/// call site, and "is it checked everywhere?" is then a question you answer by
+/// reading every handler.** A new method that forgets the branch compiles,
+/// passes clippy, and silently reintroduces the defect.
+///
+/// With this type the question is answered by the compiler. The inner map is
+/// private and [`Request::parse`] is the only constructor, so a handler holding
+/// a `Request` provably went through the check — and a handler written next
+/// month inherits it without its author knowing this change happened.
+///
+/// # What it does NOT constrain
+///
+/// The envelope, not the fields. [`Request::get`] hands back a `&Value` and each
+/// handler still decides what type it wanted; a wrong-typed field is that
+/// handler's error to report, with its own message. An **unknown** field is
+/// carried and ignored, which the contract states deliberately — strictness is a
+/// forward-compatibility policy and not an envelope rule.
+pub struct Request(serde_json::Map<String, serde_json::Value>);
+
+impl Request {
+    /// Parse a request string, refusing anything that is not a JSON object.
+    ///
+    /// The `Err` arm is already the wire reply, so a caller cannot invent a
+    /// second error shape while converting one — the same convention
+    /// [`parse_channel_id`] follows.
+    ///
+    /// **Two steps rather than one, on purpose.** Deserialising straight into a
+    /// `Map` would let serde refuse an array for free, but its message
+    /// (`invalid type: sequence, expected a map`) arrives through the same `Err`
+    /// arm as a genuine parse failure and would be reported as `invalid JSON`.
+    /// The spec requires those two be told apart, so the parse stays untyped and
+    /// the type check is ours.
+    pub fn parse(request: &str) -> Result<Self, String> {
+        let parsed: serde_json::Value = match serde_json::from_str(request) {
+            Ok(v) => v,
+            Err(e) => return Err(error_json(&format!("invalid JSON: {e}"))),
+        };
+        match parsed {
+            serde_json::Value::Object(map) => Ok(Request(map)),
+            // Every other variant, named by the `_` rather than enumerated:
+            // an array, a number, a string, a boolean, `null`. All of them
+            // answer `None` to every field read, which is the whole defect.
+            _ => Err(error_json(REQUEST_NOT_AN_OBJECT)),
+        }
+    }
+
+    /// A field, or `None` because the request genuinely lacks it.
+    ///
+    /// Unlike `Value::get`, a `None` here means exactly one thing: this object
+    /// has no such key. That is the ambiguity the type removes.
+    pub fn get(&self, field: &str) -> Option<&serde_json::Value> {
+        self.0.get(field)
+    }
+}
+
 /// The panic guard. No handler may unwind.
 ///
 /// The SDK ships no `catch_unwind` — verified at the builder's pinned rev and
@@ -79,9 +156,9 @@ pub fn version(crate_version: &str) -> String {
 /// rejected here rather than deeper in.
 pub fn ping(request: &str) -> String {
     guarded("ping", || {
-        let parsed: serde_json::Value = match serde_json::from_str(request) {
-            Ok(v) => v,
-            Err(e) => return error_json(&format!("invalid JSON: {}", e)),
+        let parsed = match Request::parse(request) {
+            Ok(r) => r,
+            Err(e) => return e,
         };
         let Some(payload) = parsed.get("payload") else {
             return error_json("missing field: payload");
@@ -203,9 +280,9 @@ pub fn get_capabilities(
     lookup: impl Fn(&crate::identity::Address) -> Result<String, crate::keystore::KeystoreError>,
 ) -> String {
     guarded("get_capabilities", || {
-        let parsed: serde_json::Value = match serde_json::from_str(request) {
-            Ok(v) => v,
-            Err(e) => return error_json(&format!("invalid JSON: {e}")),
+        let parsed = match Request::parse(request) {
+            Ok(r) => r,
+            Err(e) => return e,
         };
         let stoa = match parsed.get("stoa") {
             Some(serde_json::Value::String(s)) => match crate::identity::Address::from_hex(s) {
@@ -304,7 +381,7 @@ pub fn list_threads<L: crate::log::OpLog>(
 /// changing the creator changes the record, which changes the address, which no
 /// longer matches the Stoa whose posts are being read.
 pub fn genesis_for(
-    parsed: &serde_json::Value,
+    parsed: &Request,
     stoa: &crate::identity::Address,
 ) -> Result<crate::stoa::Genesis, String> {
     let hex_str = match parsed.get("genesis") {
@@ -337,9 +414,9 @@ fn list_threads_inner<L: crate::log::OpLog>(
     genesis: &crate::stoa::Genesis,
 ) -> String {
     guarded("list_threads", || {
-        let parsed: serde_json::Value = match serde_json::from_str(request) {
-            Ok(v) => v,
-            Err(e) => return error_json(&format!("invalid JSON: {e}")),
+        let parsed = match Request::parse(request) {
+            Ok(r) => r,
+            Err(e) => return e,
         };
 
         let stoa = match parsed.get("stoa") {
@@ -416,9 +493,9 @@ pub fn list_threads_from_request<L: crate::log::OpLog>(
     store: impl FnOnce() -> Result<L, crate::log::OpLogError>,
 ) -> String {
     guarded("list_threads", || {
-        let parsed: serde_json::Value = match serde_json::from_str(request) {
-            Ok(v) => v,
-            Err(e) => return error_json(&format!("invalid JSON: {e}")),
+        let parsed = match Request::parse(request) {
+            Ok(r) => r,
+            Err(e) => return e,
         };
         let stoa = match parsed.get("stoa") {
             Some(serde_json::Value::String(s)) => match crate::identity::Address::from_hex(s) {
@@ -449,7 +526,7 @@ pub fn list_threads_from_request<L: crate::log::OpLog>(
 /// Separated out because `page` and `perPage` are the same parsing job with the
 /// same three failure modes, and a second copy would eventually disagree with
 /// the first about whether `-1` is an error or a zero.
-fn parse_index(parsed: &serde_json::Value, field: &str) -> Result<Option<usize>, String> {
+fn parse_index(parsed: &Request, field: &str) -> Result<Option<usize>, String> {
     match parsed.get(field) {
         None | Some(serde_json::Value::Null) => Ok(None),
         Some(serde_json::Value::Number(n)) => match n.as_u64() {
@@ -519,10 +596,7 @@ fn feed_page_json(page: &crate::feed::FeedPage) -> String {
 /// the wire reply, so a caller cannot accidentally invent a second error shape
 /// while converting one.
 pub fn parse_channel_id(request: &str) -> Result<String, String> {
-    let parsed: serde_json::Value = match serde_json::from_str(request) {
-        Ok(v) => v,
-        Err(e) => return Err(error_json(&format!("invalid JSON: {e}"))),
-    };
+    let parsed = Request::parse(request)?;
     match parsed.get("channelId") {
         Some(serde_json::Value::String(s)) => Ok(s.clone()),
         // A present-but-wrong-typed field is a different mistake from a missing
@@ -1547,6 +1621,317 @@ mod tests {
         );
     }
 
+    // ─── The request envelope ─────────────────────────────────────────────
+    //
+    // WHY THESE TESTS LOOK OVERBUILT. Every hostile-input fixture already in
+    // this file is refused *whether or not* the envelope is checked:
+    // `"not json"` dies at the parse, and `{}` is refused for its missing
+    // field. Two explanations, one answer — so a test asserting only
+    // `error.is_some()` for `[]` passes against the unfixed code, because
+    // `parsed.get("stoa")` returns `None` for an array exactly as it does for
+    // an object without the field.
+    //
+    // The distinguishing assertion is therefore on the MESSAGE, and against a
+    // hardcoded expectation rather than "differs from the other one".
+
+    /// A method named, and callable with a raw request string.
+    type NamedMethod = (&'static str, fn(&str) -> String);
+
+    /// Every method that accepts a request, behind one uniform call, so a new
+    /// method is added to the sweep in one place rather than to each test.
+    ///
+    /// `panic_probe` is absent on purpose: it takes a request and never decodes
+    /// it, so it has no field read for the envelope to protect (design.md §4).
+    /// `version` is absent because it takes no request at all.
+    fn every_request_taking_method() -> Vec<NamedMethod> {
+        fn ping_m(r: &str) -> String {
+            ping(r)
+        }
+        fn caps_m(r: &str) -> String {
+            get_capabilities(r, |_| Ok("abcd".to_string()))
+        }
+        fn feed_m(r: &str) -> String {
+            list_threads(r, &log_with_body("hello"), &feed_genesis())
+        }
+        fn feed_req_m(r: &str) -> String {
+            list_threads_from_request(r, || Ok::<_, crate::log::OpLogError>(log_with_body("hello")))
+        }
+        fn channel_m(r: &str) -> String {
+            // `parse_channel_id` returns the wire shape on both arms, so an
+            // `Ok` is folded into a reply in order to be swept uniformly. The
+            // sweep asserts on refusals, so the success arm's exact shape does
+            // not matter — only that it is not an error.
+            match parse_channel_id(r) {
+                Ok(id) => serde_json::json!({ "channelId": id }).to_string(),
+                Err(e) => e,
+            }
+        }
+        vec![
+            ("ping", ping_m),
+            ("get_capabilities", caps_m),
+            ("list_threads", feed_m),
+            ("list_threads_from_request", feed_req_m),
+            ("parse_channel_id", channel_m),
+        ]
+    }
+
+    /// A request each method would serve, so a refusal in the sweeps below is
+    /// attributable to the thing being varied and not to a missing field.
+    fn a_served_request(method: &str) -> String {
+        match method {
+            "ping" => r#"{"payload":1}"#.to_string(),
+            "get_capabilities" => format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex()),
+            "list_threads" => feed_request(""),
+            "list_threads_from_request" => full_request(),
+            "parse_channel_id" => r#"{"channelId":"stoa-abc/e7"}"#.to_string(),
+            other => panic!("no served request known for {other}"),
+        }
+    }
+
+    fn error_message(out: &str) -> String {
+        let v: serde_json::Value = serde_json::from_str(out)
+            .unwrap_or_else(|e| panic!("reply must be valid JSON ({e}): {out}"));
+        v.get("error")
+            .unwrap_or_else(|| panic!("expected the error shape, got {out}"))
+            .as_str()
+            .unwrap_or_else(|| panic!("an error message must be a string, got {out}"))
+            .to_string()
+    }
+
+    #[test]
+    fn a_request_that_is_not_an_object_is_refused_for_its_shape() {
+        // THE test this change exists for. Note what it does NOT assert:
+        // `error.is_some()`, which is already true of `[]` on every method,
+        // because a required field is absent from an array just as it is from
+        // `{}`. What it asserts is the message, against the literal constant —
+        // so it fails on the unfixed code with the missing-field message, and
+        // it fails again if the constant is ever reworded without the spec
+        // being revisited.
+        for (name, method) in every_request_taking_method() {
+            for not_an_object in ["[]", r#"[{"stoa":"00"}]"#, "7", r#""a string""#, "true", "null"]
+            {
+                let out = method(not_an_object);
+                assert_eq!(
+                    error_message(&out),
+                    REQUEST_NOT_AN_OBJECT,
+                    "{name} must refuse {not_an_object} for its shape, got {out}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_three_refusals_a_caller_can_earn_are_three_different_messages() {
+        // The spec's crux: three caller mistakes, three messages. Asserting
+        // only that they differ would be satisfied by any accident; each is
+        // pinned to what it must SAY, so a reword that collapses two is caught.
+        for (name, method) in every_request_taking_method() {
+            let not_an_object = error_message(&method("[]"));
+            let unparseable = error_message(&method("not json at all"));
+            let missing_field = error_message(&method("{}"));
+
+            assert_eq!(not_an_object, REQUEST_NOT_AN_OBJECT, "for {name}");
+            assert!(
+                unparseable.starts_with("invalid JSON"),
+                "{name}: an unparseable request must say so, got {unparseable:?}"
+            );
+            assert!(
+                missing_field.contains("missing field"),
+                "{name}: an object omitting a required field must name it, got \
+                 {missing_field:?}"
+            );
+
+            // And the pairwise statement, so the requirement is asserted as
+            // well as each message being pinned.
+            assert_ne!(not_an_object, unparseable, "for {name}");
+            assert_ne!(not_an_object, missing_field, "for {name}");
+            assert_ne!(unparseable, missing_field, "for {name}");
+        }
+    }
+
+    #[test]
+    fn an_empty_object_is_refused_for_its_missing_field_and_never_for_its_shape() {
+        // `{}` is an object, so the envelope check must pass it through to the
+        // method's own field checks. A check written as "refuse anything that
+        // is not a non-empty object" would break exactly here, and every other
+        // test in this file would stay green.
+        for (name, method) in every_request_taking_method() {
+            let message = error_message(&method("{}"));
+            assert_ne!(
+                message, REQUEST_NOT_AN_OBJECT,
+                "{name} refused `{{}}` for its shape rather than its missing field"
+            );
+            assert!(
+                message.contains("missing field"),
+                "{name}: got {message:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_non_object_refusal_carries_no_result_field() {
+        // §2.5: never a partial success. A reply carrying both the refusal and
+        // an empty `items` renders as an empty feed in any view that checks
+        // `items` first.
+        for (name, method) in every_request_taking_method() {
+            for not_an_object in ["[]", "7", "null"] {
+                let out = method(not_an_object);
+                let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+                for result_field in ["items", "pong", "canPost", "identity", "channelId"] {
+                    assert!(
+                        v.get(result_field).is_none(),
+                        "{name} carried both an error and {result_field} for \
+                         {not_an_object}: {out}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn an_object_supplying_only_its_required_fields_is_served() {
+        // The other half of the check: it must refuse a wrong TYPE and not an
+        // absent optional field. Without this, a check that refused every
+        // request lacking `page` would satisfy every test above.
+        for (name, method) in every_request_taking_method() {
+            let out = method(&a_served_request(name));
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(
+                v.get("error").is_none(),
+                "{name} refused a request it must serve: {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unrecognised_field_does_not_refuse_the_request() {
+        // Out of scope by decision, not by omission — the proposal argues that
+        // strictness is a compatibility policy and not an envelope rule. Pinned
+        // so tightening it later is a deliberate act that breaks a test.
+        for (name, method) in every_request_taking_method() {
+            let served = a_served_request(name);
+            let with_extra = format!(
+                r#"{}, "somethingNoMethodReads": {{"nested": [1,2,3]}}}}"#,
+                served.trim_end_matches('}')
+            );
+            let out = method(&with_extra);
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(
+                v.get("error").is_none(),
+                "{name} refused an unrecognised field: {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn panic_probe_still_panics_on_a_non_object_rather_than_refusing_it() {
+        // NO SPEC: the spec scopes the rule to methods that "accept a request",
+        // and says nothing about a method that takes a request string it never
+        // decodes. `panic_probe` is that method — it formats the raw string
+        // into a panic message and reads no field, so there is nothing for the
+        // envelope to protect. Envelope-checking it would make
+        // `panic_probe("[]")` a refusal instead of an exercise of the guard,
+        // which is the only reason the method exists.
+        //
+        // Pinned so the choice is visible: if the spec later says every method
+        // taking a string must envelope-check it, this test is what fails.
+        let out = panic_probe("[]");
+        let message = error_message(&out);
+        assert!(
+            message.contains("panic in panic_probe"),
+            "panic_probe must still reach its panic, got {message:?}"
+        );
+        assert_ne!(message, REQUEST_NOT_AN_OBJECT);
+    }
+
+    #[test]
+    fn request_parse_is_the_only_way_to_reach_a_field_read() {
+        // The structural half of the fix, asserted as behaviour: a `Request`
+        // cannot be built from a non-object, so a handler holding one cannot
+        // have skipped the check. This is what makes the guard inherited by a
+        // method nobody has written yet rather than something each author must
+        // remember.
+        // `err_of` rather than `unwrap_err`, which would require `Debug` on
+        // `Request` — widening the library's surface for a test's convenience,
+        // the same trade this file already declines for `KeystoreError: Clone`.
+        fn err_of(r: Result<Request, String>) -> Option<String> {
+            r.err()
+        }
+        assert_eq!(
+            err_of(Request::parse("[]")),
+            Some(error_json(REQUEST_NOT_AN_OBJECT))
+        );
+        assert!(err_of(Request::parse("{}")).is_none());
+        let unparseable = err_of(Request::parse("not json")).expect("must be refused");
+        assert!(unparseable.contains("invalid JSON"), "got {unparseable}");
+        // And the two failures are not the same failure.
+        assert_ne!(unparseable, error_json(REQUEST_NOT_AN_OBJECT));
+    }
+
+    #[test]
+    fn a_handler_whose_fields_are_all_optional_refuses_a_non_object() {
+        // THE reachable form of the defect, which no method on today's surface
+        // exhibits — every one requires `stoa`, `payload` or `channelId`, so
+        // every one refuses an array as a side effect of that field being
+        // absent from it. That side effect is not this rule and does not
+        // survive the field becoming optional, which is exactly what the spec
+        // says.
+        //
+        // So the case is built here: a handler shaped like the ones the
+        // parallel branches are adding, whose fields are ALL optional. Written
+        // against `Request::parse` — the same constructor every real handler
+        // uses — so it demonstrates the property the type provides rather than
+        // a property of a test double.
+        fn all_fields_optional(request: &str) -> String {
+            let parsed = match Request::parse(request) {
+                Ok(r) => r,
+                Err(e) => return e,
+            };
+            // Every field defaulted. Under the unfixed code this body served
+            // `[]`, `7` and `null` as "a request that named nothing" — a
+            // successful reply to a request the caller never made.
+            let page = match parse_index(&parsed, "page") {
+                Ok(v) => v.unwrap_or(0),
+                Err(e) => return e,
+            };
+            serde_json::json!({ "items": [], "page": page, "hasMore": false }).to_string()
+        }
+
+        // The served cases first, so the refusals below are attributable to the
+        // envelope and not to this double refusing everything.
+        for served in ["{}", r#"{"page":3}"#, r#"{"unknown":true}"#] {
+            let out = all_fields_optional(served);
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(
+                v.get("error").is_none(),
+                "a request with no required field must be served: {served} -> {out}"
+            );
+        }
+
+        // And now the thing that was silently served.
+        for not_an_object in ["[]", "7", r#""s""#, "true", "null"] {
+            let out = all_fields_optional(not_an_object);
+            assert_eq!(
+                error_message(&out),
+                REQUEST_NOT_AN_OBJECT,
+                "for {not_an_object}, got {out}"
+            );
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(
+                v.get("items").is_none(),
+                "a refused request must not also carry a page of results: {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_non_object_message_is_pinned_to_a_known_answer() {
+        // Hardcoded, because a test that reads the constant and compares it to
+        // itself is the defect family this project has recorded three times. A
+        // view may render this string; changing it is a contract change.
+        assert_eq!(REQUEST_NOT_AN_OBJECT, "the request must be a JSON object");
+    }
+
     #[test]
     fn every_handler_answers_with_an_object_carrying_exactly_one_top_level_shape() {
         // The wire contract is only useful if it holds for EVERY method, so
@@ -1566,6 +1951,23 @@ mod tests {
             let v: serde_json::Value = serde_json::from_str(&out)
                 .unwrap_or_else(|e| panic!("handler emitted invalid JSON ({e}): {out}"));
             assert!(v.is_object(), "every reply is a JSON object, got {out}");
+        }
+
+        // The reply half must hold for a REFUSED request too, and the scenario
+        // says so: "with a well-formed or a malformed request". A refusal built
+        // by hand rather than through `error_json` is the way this breaks — an
+        // array in, an array out.
+        for (name, method) in every_request_taking_method() {
+            for request in ["[]", "7", "null", "garbage", "{}"] {
+                let out = method(request);
+                let v: serde_json::Value = serde_json::from_str(&out).unwrap_or_else(|e| {
+                    panic!("{name} emitted invalid JSON for {request} ({e}): {out}")
+                });
+                assert!(
+                    v.is_object(),
+                    "{name} answered {request} with a non-object: {out}"
+                );
+            }
         }
     }
 }
