@@ -171,7 +171,7 @@ cycle below. With P inks, an ordered distinct pair plus an outline gives
 only 9 were real once the invisible order is removed. **A ~50x gain on the most
 perceptible dimension.**
 
-### 2. Twelve pooled forms, no angular/curved split (4 or 5 → 10)
+### 2. Eleven pooled forms, no angular/curved split (4 or 5 → 10)
 
 The `isPerson` split meant each address reached only *half* the vocabulary, and
 it was restating what position already said — a Stoa's mark renders in the Stoa
@@ -184,16 +184,28 @@ change that renders a mark somewhere the surrounding context does not
 disambiguate must label it; that is the one thing the split was providing and it
 should not be lost silently.
 
-Twelve forms are in the array. **Ten survive the 19px test**, and that is the
+Eleven forms are in the array. **Ten survive the 19px test**, and that is the
 number used in the arithmetic:
 
-circle, rounded square, leaf, teardrop, triangle, inverted triangle, diamond,
-pentagon, hexagon, four-point star, six-point star, cut-corner.
+rounded square, leaf, teardrop, triangle, inverted triangle, diamond, pentagon,
+hexagon, four-point star, six-point star, cut-corner.
+
+Every one separates on a feature that survives shrinking: flat ends, vertex
+orientation, concave points, or one cut corner.
 
 - **Pentagon and hexagon are one class at 19px** by the `cos(pi/n)` argument
   above (0.809 vs 0.866, ~0.4px of silhouette on a 7.5px radius). Counted as
   one. They are kept in the array because they *do* separate at 40px, but the
-  honest feed-size count is what the collision arithmetic uses.
+  honest feed-size count is what the collision arithmetic uses. **This is the
+  only merge in the list.**
+- **THE CIRCLE WAS REMOVED**, and it is worth recording why rather than just
+  that it happened. A circle is *the absence of corners* — which is precisely
+  what every polygon degrades toward as it shrinks. So it was at once the least
+  informative form (no silhouette to name) and the form its neighbours collapse
+  into at feed size: it cost its neighbours distinctness, not only its own.
+  The bundle's "capsule" was the same shape in disguise — a `_roundRect` with
+  every corner at `h/2` on a square box **is** a circle — so it is absent for
+  the same reason rather than as a separate judgement.
 - Side-counts 7 and 8 are **deliberately absent**. They would have inflated the
   array without widening what a reader can see, which is the failure this
   change exists to fix.
@@ -202,8 +214,16 @@ pentagon, hexagon, four-point star, six-point star, cut-corner.
   that survives shrinking where vertex *count* does not.
 - Triangle and inverted triangle are distinct: orientation of a 3-gon is the
   most legible orientation cue there is.
+- Leaf and teardrop were **deepened** (corner radii 0.16 and 0.10 rather than
+  0.20 and 0.18) once the circle was gone. They had been sitting in its
+  neighbourhood; with nothing round to compete against, a sharper contrast
+  between their round and square corners is free.
 
 So: **10 perceptual forms**, up from 4 (person) or 5 (Stoa).
+
+Note the honest bookkeeping: removing the circle did **not** lower the surviving
+count, because the circle was one of the forms that merged. The cut removed a
+dead entry from the array, not a live one from the count.
 
 ### 3. Duty cycle (new, 3 values)
 
@@ -218,16 +238,33 @@ the ordering.
 
 ### 4. Weave kind (new, 3 values)
 
-Parallel bands / crossed lattice / concentric rings. This changes the
+Parallel bands / crossed lattice / **dot lattice**. This changes the
 **topology** of the fill rather than the orientation or spacing of one band
-family, which is why it is perceptually independent of both angle and pitch —
-those two are properties *of* a band family, and rings have neither in the same
-sense.
+family, which is why it is perceptually independent of both angle and pitch.
 
-The rings case is also the one dimension that is anchored: rings are centred,
-so unlike a stripe lattice they carry no invisible phase. The angle byte is
-spent there on **offsetting the ring centre**, which is visible, instead of on
-a rotation that would do nothing to a rotationally symmetric figure.
+The dot lattice is a staggered grid — every other row offset by half a period,
+so it reads as a texture rather than as two crossed band families. Its dots are
+**square, not round**, deliberately: at 19px a radius-1 arc rasterises to an
+ambiguous 2x2 smudge, whereas a `fillRect` is exactly two pixels wide on every
+renderer, which is also what keeps it pixel-identical across peers.
+
+#### A concentric-ring variant was tried here and removed
+
+It is worth recording because it failed in two ways that *looked* like two
+separate bugs, and fixing only the visible one would have left the other.
+
+Ring radii step by `period`, which is 4 to 12px. On a 19px mark, **at most one
+band is ever visible** — so whether the outermost disc landed on ink A or ink B
+decided whether the mark read as a **bullseye** (a different visual idiom from
+the rest of the family, looking like it came from another design) or as a **flat
+disc carrying no pattern at all**. Both outcomes are a mark that has stopped
+distinguishing anything, and which one you got depended on the parity of a
+radius count.
+
+**A pattern whose legibility depends on the parity of a radius count is not a
+dimension.** The replacement covers the whole face at constant density, so it
+cannot degenerate that way: every cell of the lattice carries the same amount of
+ink B regardless of where the mark's centre falls.
 
 ### 5. Angle and pitch, corrected downward
 
@@ -253,47 +290,44 @@ a rotation that would do nothing to a rotationally symmetric figure.
 
 | dimension | values | note |
 |---|---|---|
-| form | 10 | 12 in the array; pentagon/hexagon merge at 19px |
+| form | 10 | 11 in the array; pentagon/hexagon merge at 19px |
 | outline ink | 8 | |
 | ink A | 8 | |
 | ink B | 7 | always different from A |
-| weave kind | 3 | bands / lattice / rings |
+| weave kind | 3 | bands / crossed lattice / dot lattice |
 | angle | 12 | 15-degree steps over a half turn |
 | pitch | 4 | 2, 3, 4, 6 |
 | duty | 3 | 0.30 / 0.45 / 0.62 |
 
-The angle and pitch dimensions do not apply to the rings weave in the same way
-— rings have no stripe angle, and the angle byte instead offsets the centre —
-so the product is computed per weave kind rather than as a flat multiplication.
+All three weave kinds are now rotatable periodic fields, so angle and pitch
+apply uniformly to each and the product is a flat multiplication. (That was not
+true while the rings variant existed, which needed its own per-kind arithmetic —
+another small argument for having removed it.)
 
-**Bands and lattice** (2 of the 3 weave kinds): form x outline x A x B x angle
-x pitch x duty
-= 10 x 8 x 8 x 7 x 12 x 4 x 3
+**Raw parameter product:** form x outline x A x B x weave x angle x pitch x duty
+= 10 x 8 x 8 x 7 x 3 x 12 x 4 x 3
 
 10 x 8 = 80
 80 x 8 = 640
 640 x 7 = 4,480
-4,480 x 12 = 53,760
-53,760 x 4 = 215,040
-215,040 x 3 = 645,120
-x 2 weave kinds = **1,290,240**
+4,480 x 3 = 13,440
+13,440 x 12 = 161,280
+161,280 x 4 = 645,120
+645,120 x 3 = **1,935,360**
 
-That number is *parameter* count for those two kinds. Deflating it honestly:
-the lattice at pitch 2 and duty 0.62 is a nearly solid B field regardless of
-angle, and several (angle, pitch) combinations at 19px alias into each other.
-A conservative deflation is to treat angle as effectively **8** rather than 12
-at feed size (the 15-degree steps near 0 and 90 degrees read as "horizontal" or
-"vertical" with one pixel of stair-stepping), and to drop one duty value at the
-finest pitch. That gives:
+**That number must not be quoted as the perceptual space.** It is the parameter
+count, and the whole point of this note is that the two differ by more than an
+order of magnitude. Deflating it honestly:
 
-10 x 8 x 8 x 7 x 8 x 4 x 3 = 430,080 for bands,
-and the lattice contributes materially fewer distinct looks because crossing
-two band families at pitch 2 saturates.
-
-**Rings**: form x outline x A x B x offset-direction x pitch x duty
-= 10 x 8 x 8 x 7 x 12 x 4 x 3, with the same angle deflation to 8 — but ring
-eccentricity at 19px is only legible in about **4** directions, not 8.
-= 10 x 8 x 8 x 7 x 4 x 4 x 3 = 215,040.
+- **Angle: 12 → ~8 effective at 19px.** The 15-degree steps near 0 and 90
+  degrees read as "horizontal" or "vertical" with a pixel of stair-stepping
+  rather than as distinct orientations.
+- **Pitch and duty interact.** At pitch 2 with duty 0.62 the field is nearly
+  solid ink B whichever weave kind is chosen, so several (pitch, duty)
+  combinations converge on the same near-solid look.
+- **Crossed lattice saturates at fine pitch.** Crossing two band families at
+  pitch 2 leaves little ink A visible, so that corner of the space carries fewer
+  distinct looks than the parameter count suggests.
 
 **The honest headline number.** Rather than claim the full product, take the
 most defensible core — the dimensions that unambiguously separate at 19px —
@@ -422,9 +456,9 @@ target.
   (inverted triangle) are adjacent in the array and maximally different on
   screen. There is no gradient to climb. An attacker either lands the exact
   index or produces a visibly different shape.
-- **Weave kind.** Bands, lattice and rings are topologically different fills.
-  There is no interpolation between them; missing by one index is a completely
-  different texture.
+- **Weave kind.** Bands, crossed lattice and dot lattice are topologically
+  different fills. There is no interpolation between them; missing by one index
+  is a completely different texture.
 - **Ink identity.** The palette is discrete and hand-separated with an enforced
   perceptual floor. Landing an adjacent index gives a colour that is, by
   construction, at least 0.080 OKLab away — which is the *point* of the floor.

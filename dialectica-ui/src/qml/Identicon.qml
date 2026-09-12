@@ -66,14 +66,14 @@ Canvas {
     // them: the bundle's original mark drove side-count, cut-corner and
     // curved-form all from byte 0, so two of those three were always dead.
 
-    // Contour. One pooled family of twelve forms available to EVERY address.
+    // Contour. One pooled family of eleven forms available to EVERY address.
     // The angular/curved split the first draft used halved the vocabulary any
     // one address could reach, and it was restating what position already
     // said: a Stoa's mark renders in the Stoa header, a person's beside their
     // name in a post. That distinction is now carried by POSITION ALONE — if
     // a mark is ever rendered somewhere the context does not disambiguate,
     // that placement must label it.
-    function _form() { return _byte(12) % 12; }
+    function _form() { return _byte(12) % 11; }
 
     // Two inks for the weave and one for the outline. The pair is ORDERED and
     // the two are always different, so (rust, teal) and (teal, rust) are
@@ -109,10 +109,20 @@ Canvas {
     function _duty() { return [0.30, 0.45, 0.62][_byte(18) % 3]; }
 
     // Weave kind. Perceptually independent of angle and pitch: it changes the
-    // TOPOLOGY of the fill (parallel bands / crossed lattice / concentric
-    // rings) rather than the orientation or spacing of one band family. A
-    // grinder who matches a target's angle and pitch still has to match this,
-    // and no small change to it looks like a small change.
+    // TOPOLOGY of the fill (parallel bands / crossed lattice / dot lattice)
+    // rather than the orientation or spacing of one band family. A grinder who
+    // matches a target's angle and pitch still has to match this, and no small
+    // change to it looks like a small change.
+    //
+    // A CONCENTRIC-RING variant was tried here and removed. It failed the 19px
+    // test in two different ways at once, which is why it looked like two
+    // separate bugs: ring radii step by `period` (4..12px), so on a 19px mark
+    // at most one band is ever visible, and whether the outermost disc lands
+    // on ink A or ink B decides whether the mark reads as a BULLSEYE (a
+    // different visual idiom from the rest of the family) or as a FLAT DISC
+    // carrying no pattern at all. Both are a mark that has stopped
+    // distinguishing anything. A pattern whose legibility depends on the
+    // parity of a radius count is not a dimension.
     function _weave() { return _byte(19) % 3; }
 
     // ---- contours ---------------------------------------------------------
@@ -148,11 +158,24 @@ Canvas {
         ctx.closePath();
     }
 
-    // Twelve pooled forms. Chosen so that each is distinguishable from every
-    // other at 19px — the feed size, which is where recognition actually
-    // happens. Side-counts above 6 are deliberately absent: a heptagon and an
-    // octagon differ by about a sixth of a pixel of silhouette at feed size,
-    // so they would inflate the array without widening what a reader can see.
+    // Ten pooled forms, every one of which must have a silhouette a reader can
+    // name at 19px. Two rules produced this list, and both are exclusions:
+    //
+    // NO CIRCLE. A circle is the absence of corners, which is exactly what
+    // every polygon degrades toward as it shrinks — so it is at once the least
+    // informative shape and the shape its neighbours collapse into at feed
+    // size. It cost its neighbours distinctness, not only its own. (The
+    // bundle's "capsule" was already a circle in disguise: a roundRect with
+    // every corner at h/2 on a square box IS a circle, so that form is absent
+    // for the same reason rather than as a separate judgement.)
+    //
+    // NO SIDE-COUNTS ABOVE 6. A heptagon and an octagon differ by about a
+    // sixth of a pixel of silhouette at 19px. They would inflate the array
+    // without widening what a reader can see, which is the defect this whole
+    // change exists to repair.
+    //
+    // What remains all separates on a feature that survives shrinking: flat
+    // ends, vertex orientation, concave points, or one cut corner.
     function _tracePath(ctx, x, y, w, h) {
         ctx.beginPath();
         var cx = x + w / 2, cy = y + h / 2;
@@ -160,20 +183,19 @@ Canvas {
         var rr = Math.min(w, h);
         var up = -Math.PI / 2;
         switch (_form()) {
-        case 0:  ctx.ellipse(x, y, w, h); break;                                   // circle
-        case 1:  _roundRect(ctx, x, y, w, h, rr * 0.28, rr * 0.28,
+        case 0:  _roundRect(ctx, x, y, w, h, rr * 0.28, rr * 0.28,
                             rr * 0.28, rr * 0.28); break;                          // rounded square
-        case 2:  _roundRect(ctx, x, y, w, h, rr * 0.50, rr * 0.20,
-                            rr * 0.50, rr * 0.20); break;                          // leaf
-        case 3:  _roundRect(ctx, x, y, w, h, rr * 0.50, rr * 0.50,
-                            rr * 0.18, rr * 0.50); break;                          // teardrop
-        case 4:  _polygon(ctx, cx, cy, r, 3, up); break;                           // triangle
-        case 5:  _polygon(ctx, cx, cy, r, 3, -up); break;                          // inverted triangle
-        case 6:  _polygon(ctx, cx, cy, r, 4, up); break;                           // diamond
-        case 7:  _polygon(ctx, cx, cy, r, 5, up); break;                           // pentagon
-        case 8:  _polygon(ctx, cx, cy, r, 6, up); break;                           // hexagon
-        case 9:  _star(ctx, cx, cy, r, 4, 0.46, up); break;                        // four-point star
-        case 10: _star(ctx, cx, cy, r, 6, 0.55, up); break;                        // six-point star
+        case 1:  _roundRect(ctx, x, y, w, h, rr * 0.50, rr * 0.16,
+                            rr * 0.50, rr * 0.16); break;                          // leaf
+        case 2:  _roundRect(ctx, x, y, w, h, rr * 0.50, rr * 0.50,
+                            rr * 0.10, rr * 0.50); break;                          // teardrop
+        case 3:  _polygon(ctx, cx, cy, r, 3, up); break;                           // triangle
+        case 4:  _polygon(ctx, cx, cy, r, 3, -up); break;                          // inverted triangle
+        case 5:  _polygon(ctx, cx, cy, r, 4, up); break;                           // diamond
+        case 6:  _polygon(ctx, cx, cy, r, 5, up); break;                           // pentagon
+        case 7:  _polygon(ctx, cx, cy, r, 6, up); break;                           // hexagon
+        case 8:  _star(ctx, cx, cy, r, 4, 0.42, up); break;                        // four-point star
+        case 9:  _star(ctx, cx, cy, r, 6, 0.50, up); break;                        // six-point star
         default:                                                                   // cut corner
             var c = w * 0.30;
             ctx.moveTo(x, y);
@@ -217,21 +239,29 @@ Canvas {
                 ctx.fillRect(-size, q, span, bar);
             ctx.restore();
             break;
-        default:                                  // concentric rings
-            // Rings are anchored at the centre rather than being an unanchored
-            // periodic field, so unlike stripes they carry no invisible phase.
-            // The angle is spent instead on an offset of the ring centre,
-            // which IS visible: it makes the rings eccentric.
-            var a = _angleDeg() * Math.PI / 180;
-            var ox = size / 2 + Math.cos(a) * size * 0.12;
-            var oy = size / 2 + Math.sin(a) * size * 0.12;
-            for (var k = Math.ceil(size / period); k >= 0; k--) {
-                var rad = k * period;
-                ctx.beginPath();
-                ctx.arc(ox, oy, rad, 0, 2 * Math.PI);
-                ctx.fillStyle = (k % 2 === 0) ? _inkB() : _inkA();
-                ctx.fill();
+        default:                                  // dot lattice
+            // A staggered grid of dots. Like the two band cases this covers
+            // the WHOLE face at a constant density, so it cannot degenerate
+            // into a flat fill the way the rings variant did — every cell of
+            // the lattice carries the same amount of ink B regardless of where
+            // the mark's centre falls.
+            //
+            // The dots are square rather than round, deliberately: at 19px a
+            // radius-1 arc rasterises to an ambiguous 2x2 smudge, whereas a
+            // 2x2 fillRect is exactly two pixels wide on every renderer. That
+            // is also what keeps this pixel-identical across peers.
+            ctx.save();
+            ctx.translate(size / 2, size / 2);
+            ctx.rotate(_angleDeg() * Math.PI / 180);
+            var dot = Math.max(1, Math.round(pitch * _duty() * 1.6));
+            for (var ry = -size, row = 0; ry < size; ry += period, row++) {
+                // Every other row is offset by half a period, so the lattice
+                // reads as a texture rather than as two crossed band families.
+                var shift = (row % 2 === 0) ? 0 : period / 2;
+                for (var rx = -size; rx < size; rx += period)
+                    ctx.fillRect(rx + shift, ry, dot, dot);
             }
+            ctx.restore();
             break;
         }
     }
