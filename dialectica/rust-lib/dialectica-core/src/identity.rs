@@ -1265,6 +1265,46 @@ mod tests {
     }
 
     #[test]
+    fn the_whole_path_reaches_derivation_and_not_only_its_low_byte() {
+        // The pinned constants use paths 0 and 1, which differ in the LAST byte
+        // alone — so an encoding that fed only the low byte, or only the low two,
+        // would reproduce both pinned values exactly. That is the shape this
+        // project's defect family takes: two explanations, one answer.
+        //
+        // A third pinned value fixes it, at a path whose low bytes are zero so
+        // that only the HIGH bytes distinguish it from path 0. Computed with
+        // OpenSSL, not read back from this code:
+        //
+        //   openssl kdf -keylen 32 -kdfopt digest:SHA512 \
+        //     -kdfopt hexkey:<07 x32> \
+        //     -kdfopt hexsalt:2f6469616c6563746963612f322f4964656e746974792f53746f61 \
+        //     -kdfopt hexinfo:<stoa>01000000 HKDF
+        //
+        // and that invocation was validated by reproducing the version-1 value
+        // `b62b6b59…` exactly first. Path 0x01000000 = 16,777,216: every byte but
+        // the third-from-top is zero, so a derivation reading only the low byte,
+        // the low two bytes, or the low three would all produce path 0's key.
+        let stoa = stoa_address(b"a genesis record");
+        assert_eq!(
+            hex::encode(derive_stoa_key_at_path(&[7u8; 32], &stoa, 0x0100_0000).to_bytes()),
+            "f1e32c8f4601cb1651be57d58e39f28cc1a6e4ef8a69b9bdd2155ef953a7572b",
+            "the high bytes of a path do not reach derivation"
+        );
+
+        // And the byte ORDER, which the pinned values also cannot see: 0x00000001
+        // and 0x01000000 are each other's byte-reversal, so a little-endian
+        // encoding would swap the two keys rather than producing a wrong one.
+        // Asserted as an inequality against the path-1 pinned value, so a swap is
+        // caught even if the hex above were ever regenerated.
+        assert_ne!(
+            derive_stoa_key_at_path(&[7u8; 32], &stoa, 0x0100_0000).public_key(),
+            derive_stoa_key_at_path(&[7u8; 32], &stoa, 1).public_key(),
+            "a path and its byte-reversal derive one key, so the encoding is \
+             order-blind"
+        );
+    }
+
+    #[test]
     fn a_derived_key_is_not_the_root_key() {
         // The root secret must never itself sign anything: it is the one value
         // that, if leaked, yields every Stoa identity a user has. Deriving is
