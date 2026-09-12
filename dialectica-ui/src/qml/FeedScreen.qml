@@ -122,7 +122,6 @@ ScreenFrame {
 
         Identicon {
             address: screen.stoaAddress
-            isPerson: false
             size: 34
             visible: screen.stoaAddress !== ""
         }
