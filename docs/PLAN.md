@@ -1098,96 +1098,109 @@ Three consequences, each subtle enough to be worth naming:
   is **open** (§13) — but it is a decision, not a bug, and it must not be
   discovered by the first person it happens to.
 
-#### Composability: two levels, and the constraint the first one carries
+#### Composability: two levels, and why the interesting one works
 
-The requirement is that credentials be **composable**, at two levels: a Stoa
-adopting an identity system its participants install, and a fork adding a
-credential type of its own. **The first is preferred and unproven; the second is
-the fallback if it proves infeasible.** They are recorded in that relationship
-rather than as two options of equal standing.
+Credentials are to be **composable**, at two levels: a Stoa adopting an identity
+system its participants install, and a fork adding a credential type of its own.
+**The first is preferred; the second is the fallback.**
 
-**Level 2 — a fork adds its own credential type — is nearly free**, and it is the
-fallback. A fork controls its own op format, so it allocates a `Credential` kind,
-ships, and diverges from upstream by one discriminant. Nothing in this design has
-to anticipate it. The single thing that would prevent it is door-closer 2 above:
-if credential checking were welded into op verification, a fork could not add a
+**Level 2 — a fork adds its own credential type — is nearly free.** A fork
+controls its own op format, so it allocates a `Credential` kind, ships, and
+diverges from upstream by one discriminant. Nothing in this design has to
+anticipate it. The single thing that would prevent it is door-closer 2 above: if
+credential checking were welded into op verification, a fork could not add a
 credential without forking the verification path, and every peer running upstream
 code would reject its ops rather than ignoring them. Keeping that seam clean is
 what makes level 2 free, which is a second reason to hold the line there.
 
 **Level 1 — a Stoa adopts an identity system its participants install — is the
-preferred direction, and whether it is technically feasible is open** (§13). "This
-Stoa supports Base NFTs; install `dialectica-nft-eth` to read proof of ownership"
-means **peers within one Stoa run different module sets**. A peer without the
-module cannot verify the proof at all — not "verifies it as invalid", but cannot
-evaluate it. What follows describes the only form of level 1 that appears to work
-at all; it does not establish that the form is worth having.
+preferred direction, and it works.** "This Stoa supports Base NFT series 123;
+click here to install `dialectica-nft-eth`" means **peers within one Stoa run
+different module sets**, and a peer without the module cannot evaluate the proof
+at all.
 
-That collides directly with `moderation-resolution`'s requirement that two
-readers resolving from the same ops reach the same outcome while consulting
-nothing outside those ops. A Stoa where half the peers can check a credential and
-half cannot is a Stoa whose readers legitimately disagree about who has standing.
-**This is the convergence requirement arriving from a fourth direction** — after
-moderation authority (§6), revision ordering (§5.7), and the proof-versus-lookup
-split above — which is why it is the spine of this whole section rather than an
-aside. A verdict computed from anything other than the ops a peer holds is a
-verdict two peers can disagree about, and this design has no tolerance for that
-anywhere it has looked.
+**That is fine, and the reason is that a proof does strictly two things, both
+local:**
 
-**It does not kill level 1, but it bounds it severely.** Two things follow:
+1. **It changes the relevance score of messages** — a local fold, exactly like a
+   vouch.
+2. **It may display extra information** — a local rendering decision.
 
-- **An unverifiable credential must be distinguishable from an absent one.** The
-  peer reports "I cannot check this", never "this person does not hold it".
-  §6 already supplies the pattern: a reader lacking a Stoa's genesis record
-  "cannot report that Stoa's targets as either hidden or not hidden" — it declines
-  to answer rather than answering "not hidden". A missing verifier module wants
-  the same shape. Not copying it yields a **false negative** — the direction that
-  silently strips standing from people who have it, and the harder one to notice,
-  because nothing appears broken.
+So a reader who has not installed the module scores those authors as holding
+nothing. **This is not a degraded mode, and that is the whole point: "module not
+installed" and "holds nothing" are the same local answer, and neither reader is
+wrong.** There is no convergence problem here because there is nothing to
+converge on.
 
-  **The consequence, stated plainly because it bounds what level 1 can ever
-  mean: a credential can only ever *add* weight, never gate participation.**
-  Gating on something half the peers cannot evaluate partitions the Stoa — some
-  peers render a post, others refuse it, and §6.1's honest ceiling ("moderation
-  can only change what conforming peers render") becomes a disagreement about who
-  is conforming. Adding weight degrades gracefully: a peer lacking the module
-  ranks that credential's holder lower than a peer that has it, which is §7.2
-  rule 1's blessed divergence rather than a partition. This also means §7.1's
-  token-gated Stoas are **not** an instance of level 1 — they gate, so they
-  require a credential every peer can check, which is what makes LP-0005's
-  local verifiability load-bearing there rather than incidental.
+It is tempting to reach for `moderation-resolution`'s requirement that two readers
+resolving from the same ops reach the same outcome, and conclude that divergent
+module sets break it. **That applies the wrong section's rule.** That requirement
+governs *moderation*, which must converge because a hide is a binding judgement
+about what everyone sees. **Scoring never had that requirement and could not
+have**: §7.3's vouching is per-reader and never published, so two readers already
+compute different scores from identical ops — Alice vouches for Bob, Carole does
+not, and their feeds differ correctly. §7.2 rule 1 says the same, and §7.3 puts it
+exactly: rule 1 "already says two peers rank differently and that is correct; a
+vouch makes that divergence *intentional* rather than merely tolerated." **A
+missing credential module is one more such reason, in a class the design already
+treats as correct rather than broken.**
 
-- **Where a Stoa declares which credentials it honours is an open question**
-  (§13), with two candidates and a real tension. The **genesis record** is the
-  one artefact every peer holds and hashes, so putting the declaration there
-  makes "which credentials does this Stoa honour" itself verifiable rather than
-  one more piece of unverifiable state — the same argument that put `policy`
-  there. But a genesis record is immutable and address-determining, so a Stoa
-  could never adopt a new credential type afterwards. A **metadata op** (§5.7's
-  `StoaMetadata`) is mutable and carries its own moderator-authority question,
-  and §13 already records why `policy` was kept out of it: a peer that missed a
-  tightening falls back to the looser founding value. Both options are recorded
-  and **neither is chosen**; choosing needs a credential that exists.
+**The boundary, which is the rule a future reader must not cross:**
 
-**Whether the constrained form is worth having is the open question, and it is
-not rhetorical.** A credential that can only add weight to a ranking is a much
-smaller thing than "this Stoa supports Base NFTs" sounds like: it cannot keep
-anyone out, it cannot mark anyone as verified in a way every reader sees, and the
-peers that lack the module experience the Stoa as though the credential were not
-there. A reader should meet that gap here rather than discover it after building
-the module. **What would settle it is an attempt** — someone running a
-module-set-divergent Stoa and finding out whether the abstention surface is
-tolerable in practice, or whether it reads as a forum that cannot make up its
-mind about who is who. That is the deciding experiment; it is named rather than
-run, and until it is run level 1 is a direction rather than a plan.
+> **A proof may influence what a reader sees and how they rank it. It may never
+> determine what binds.**
 
-**A forward note on the interface**, recorded here because there is no surface to
-put it on yet and `docs/UI-BRIEF.md` describes only what exists. If level 1 ever
-ships, the view must distinguish **unverified** from **not a holder** — the
-abstention above is worthless if the UI collapses it into a negative — and must
-never present "install this module" as though the Stoa were broken without it. A
-Stoa is fully readable without any credential module; the module only adds
-resolution the reader would otherwise lack.
+Moderation authority stays convergent, decided from the ops and the moderator set
+alone; relevance and display stay local. **This is the axis §7.3 already drew**
+between a vouch and a moderation — a reader may privately weight whose judgement
+they trust, and that never touches what a moderator's hide does. Credentials land
+on the vouching side of it. The axis is not new; it is newly applied.
+
+**A moderator decides what the Stoa honours, and that half does converge.** Which
+NFT series on which chain, which token on which LEZ — that is a judgement about the
+Stoa, so it belongs to whoever moderates it. The separation is the organising idea
+and it is clean:
+
+| | Converges? | Why |
+|---|---|---|
+| **What the Stoa honours** — which series, chain, token | **Yes** | A moderator decision, so a moderation fact like any other: decided from the ops and the moderator set |
+| **Whether a given reader can evaluate it** | **No, and need not** | Local module set, local score, local display — the two strictly-local effects above |
+
+So the declaration travels the **existing moderator-authority path** and only the
+evaluation is local. **The likely home is a `StoaMetadata` op** (§5.7), because
+this is mutable moderator-authored Stoa state and that is what `StoaMetadata`
+already is: a moderator publishes it, every peer verifies authority on read, and a
+Stoa can change what it honours without minting a new Stoa. The genesis record is
+the **wrong** home for exactly the reason it was right for `policy` — it is
+immutable and address-determining, and a Stoa's accepted proofs will change. **No
+field is designed here and none should be**; this records the shape, not the
+encoding.
+
+**A forged declaration must not be able to make a reader install anything or
+weight anyone**, and the answer needs no new mechanism:
+
+- The declaration is an op, so it is forgeable only by a current moderator — §6's
+  read-time authority check already covers it. A non-moderator's declaration is
+  authentic and is not a declaration, which is the distinction §6 exists to draw.
+- **Acting on it is always the reader's choice.** A Stoa saying "install
+  `dialectica-nft-eth`" is a recommendation rendered to a human, never an
+  instruction a client follows. A module name arriving over the network is
+  attacker-influenced content in the same class as a Stoa address embedded in a
+  post — and `docs/UI-BRIEF.md` already settles that class: "render it as an
+  affordance the reader chooses to act on. **Never auto-join.**" Same rule, new
+  surface.
+
+**Two interface notes**, recorded here because no surface exists yet and
+`docs/UI-BRIEF.md` describes only what does:
+
+1. A Stoa recommending a module must not present its absence as **brokenness**. A
+   reader without it sees a *correct* view of the Stoa, not a partial one. There is
+   no "unverified versus not a holder" distinction to render, because there is no
+   abstention — a reader either has the module and sees ownership, or does not and
+   sees nothing.
+2. A module recommendation is **attacker-influenced content**. Never auto-install
+   and never auto-fetch; show what is being suggested and let the reader decide,
+   exactly as the join-a-Stoa flow does with an address.
 
 #### The substrate goal, and why it is not now
 
@@ -3288,39 +3301,17 @@ thing (§2.3).
   vouch decay) — and it cannot be answered before a credential exists to expire.
   **Recorded so it is a decision rather than a surprise**, per §5.5.
 
-- **Is a Stoa-adopted identity module (§5.5 level 1) technically feasible, and is
-  the form that works worth having?** Two questions, and the second is the harder
-  one. Peers running different module sets cannot all evaluate the same
-  credential, which bounds level 1 to credentials that **add weight and never
-  gate** — anything stronger partitions the Stoa. The open part is whether that
-  constrained form is worth building: it keeps nobody out and is invisible to
-  peers lacking the module. **Settled by an attempt**, not by more analysis — run
-  a module-set-divergent Stoa and find out whether the abstention surface is
-  tolerable. Level 2 (a fork adds the credential) is the fallback if it is not.
-
-- **Where does a Stoa declare which credentials it honours?** §5.5's level-1
-  composability needs the declaration somewhere, and the two candidates trade off
-  against each other: the **genesis record** makes the declaration verifiable to
-  every peer (the argument that put `policy` there) but is immutable, so a Stoa
-  could never adopt a credential type later; a **`StoaMetadata` op** is mutable
-  but reintroduces the fallback hazard §13 records for `policy` — a peer that
-  missed a tightening falls back to the looser founding value — and carries the
-  moderator-authority question of any mutable Stoa state. **Not answerable before
-  a credential type exists**, because the choice turns on whether adoption is
-  expected to change over a Stoa's life.
-
-- **What does a peer do when the verifier module is absent or unreachable?** An
-  external credential is checked by a sibling module — `lez_core` for a LEZ
-  holding proof, an Ethereum module for an ENS name — and that module may not be
-  installed or may not answer. §6 supplies the shape of the answer rather than the
-  answer: `moderation-resolution` already refuses to report a Stoa's targets as
-  either hidden or not hidden when the reader lacks the genesis record, which is
-  **abstention, not a false verdict in either direction**. The open part is
-  whether an unverifiable credential should abstain the same way — conferring no
-  standing while claiming nothing about its validity — and whether that is
-  distinguishable to a reader from a credential that was checked and failed. Note
-  this interacts with the grace-period question above: both make standing depend
-  on something other than the ops a peer holds.
+- **What does a peer do when a verifier module is present but cannot answer?**
+  §5.5 settles the *absent* case and it needs no machinery: a reader without the
+  module scores the author as holding nothing, which is the same local answer, and
+  no peer is wrong. The residue is narrower — a module that is installed but fails
+  a particular check, because the RPC it fronts is down or the chain is
+  unreachable. Scoring the author as holding nothing is the obvious answer and is
+  probably right, since it is what a reader lacking the module already does. What
+  is unexamined is whether a *transient* failure should be distinguishable from a
+  settled one to whoever is looking at the screen, and whether retry belongs in
+  the module or above it. **Not answerable before a credential module exists**,
+  and low stakes either way, because the effects stay local (§5.5).
 
 ---
 
