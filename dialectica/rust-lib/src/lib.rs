@@ -186,6 +186,34 @@ struct Dialectica {
     persistence_path: Option<String>,
 }
 
+#[cfg(logos_scaffold)]
+impl Dialectica {
+    /// The host's storage directory, or the error shape saying it has not arrived.
+    ///
+    /// **One place, because it is a guard.** CLAUDE.md: "A guard is a job. Keep it
+    /// separate, so 'is it called everywhere?' stays a question with an answer."
+    /// It was two inline copies with identical wording, and every handler that
+    /// reaches storage needs it — so each new one was another copy to keep in
+    /// step, and two of them disagreeing about one state is a user being told
+    /// different things about the same fact.
+    ///
+    /// `Result<PathBuf, String>` with the error arm already being the wire reply,
+    /// following `parse_channel_id`: a caller cannot accidentally invent a second
+    /// error shape while converting one.
+    ///
+    /// A `PathBuf` rather than the `String` the callers used to clone, so that
+    /// each one stops spelling `std::path::Path::new(&dir)` for itself.
+    fn storage_dir(&self) -> Result<std::path::PathBuf, String> {
+        match &self.persistence_path {
+            Some(dir) => Ok(std::path::PathBuf::from(dir)),
+            None => Err(core::error_json(
+                "the host has not yet told this module where its storage is; \
+                 try again once the module is ready",
+            )),
+        }
+    }
+}
+
 // A thin adapter and nothing more. Every method forwards straight into `core`,
 // which is where the guard and the decisions live. If a body here ever grows
 // past one line, that logic belongs in `core` — otherwise it is logic no test
@@ -240,24 +268,20 @@ impl DialecticaModule for Dialectica {
         // us, which is why this is not a bare forward: `core` cannot read the
         // environment or know the host's layout (PLAN.md §2.3), so the adapter
         // supplies the lookup and `core` decides what its result means.
-        let Some(dir) = self.persistence_path.clone() else {
-            return core::error_json(
-                "the host has not yet told this module where its storage is; \
-                 try again once the module is ready",
-            );
+        let dir = match self.storage_dir() {
+            Ok(d) => d,
+            Err(e) => return e,
         };
         core::get_capabilities(&request, |stoa| {
-            let path = core::keystore::default_path_in(std::path::Path::new(&dir));
+            let path = core::keystore::default_path_in(&dir);
             core::keystore::open_from_env(&path).map(|ks| ks.stoa_address(stoa).to_hex())
         })
     }
 
     fn list_threads(&mut self, request: String) -> String {
-        let Some(dir) = self.persistence_path.clone() else {
-            return core::error_json(
-                "the host has not yet told this module where its storage is; \
-                 try again once the module is ready",
-            );
+        let dir = match self.storage_dir() {
+            Ok(d) => d,
+            Err(e) => return e,
         };
         // The store is opened per call rather than held open, which is the
         // simple thing and the correct one today: the host may hand the same
@@ -266,7 +290,7 @@ impl DialecticaModule for Dialectica {
         // and its failure is exactly the "unreadable store" the view renders as
         // screen 07's failed state.
         core::list_threads_from_request(&request, || {
-            core::log::SqliteOpLog::open(&std::path::Path::new(&dir).join("ops.sqlite"))
+            core::log::SqliteOpLog::open(&dir.join("ops.sqlite"))
         })
     }
 
