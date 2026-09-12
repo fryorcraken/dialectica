@@ -678,12 +678,28 @@ jobs:
           # actually live. `dialectica-core/` sits INSIDE `rust-lib/`, so a
           # single rglob from `rust-lib/` would cover it — but it would also
           # walk `target/`, and it would keep passing if the inner crate were
-          # moved out. Listing the two source roots explicitly means a missing
+          # moved out. Listing the source roots explicitly means a missing
           # one is a loud failure rather than a silently smaller count.
+          #
+          # `dialectica-core/tests` IS A ROOT, and leaving it out is what breaks
+          # this gate the moment an integration target exists. Cargo runs an
+          # integration test's `#[test]` functions and reports them in `ran`, so a
+          # `tests/` directory absent from THIS list makes `declared` smaller than
+          # `ran` — and the job fails with a message about cfg-gating, which is the
+          # one explanation that is NOT the problem. The two numbers have to
+          # measure the same set of files. Measured when `tests/end_to_end.rs`
+          # landed: cargo ran 495 where these roots declared 475, the difference
+          # being that file's 20 tests exactly.
+          #
+          # `examples/` is deliberately NOT a root: an example is a binary, cargo
+          # does not run `#[test]` functions in one under `cargo test`, and nothing
+          # there should declare any. If an example ever grows a `#[test]`, this
+          # gate fails — correctly, because that test would never be run.
           import pathlib
           roots = [
               pathlib.Path("dialectica/rust-lib/src"),
               pathlib.Path("dialectica/rust-lib/dialectica-core/src"),
+              pathlib.Path("dialectica/rust-lib/dialectica-core/tests"),
           ]
           declared = 0
           for root in roots:
