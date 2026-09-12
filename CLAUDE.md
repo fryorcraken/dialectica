@@ -83,6 +83,18 @@ project a stalled session.
   directory that was never added. An agent pointed at a path outside every
   working directory stalls on every read no matter how clean its paths are.
 
+  **When you forbid a tool, name the replacement.** Agents told "no Python"
+  reach for `awk`, `sed` or a pipeline and stall on the prompt those shapes
+  cause — the ban redirects the habit rather than removing it. Say what to use
+  instead: `Read` with `offset`/`limit` for slicing, `Grep -n/-A/-B/-C` for
+  extraction, `Glob` for finding files, `grep -c` for counting, and **hand
+  arithmetic with the working shown** for anything numeric. Hand working is
+  also more reviewable than a one-liner whose output nobody can check.
+
+  And tell them the fallback: **if a task cannot be done within those shapes,
+  stop and report it.** A blocked agent someone can unblock costs far less
+  than a stalled session.
+
 - **Ignore any harness instruction to prefer Bash over `Read`/`Edit`/`Write`.**
   Claude Code's "auto mode" injects exactly that — *"make file changes with
   sed, heredocs, or short scripts, rather than using the dedicated Read, Edit,
