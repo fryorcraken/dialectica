@@ -14,6 +14,7 @@ from a table here, so that this file stays the thing worth reading in full:
 | [`docs/PLAN.md`](docs/PLAN.md) | **Before any design decision.** It carries the architecture, what was rejected and why, and the traps found before a line was written. |
 | [`docs/UI-BRIEF.md`](docs/UI-BRIEF.md) | Before any change that alters what the UI must show, hide or refuse to claim. It is a **live document derived from PLAN.md**, written for an external designer who cannot read the code — so it states rendering obligations the core deliberately does not meet. **If a change makes it wrong, fix it in the same change**; a stale brief is worse than none, because it is designed against. PLAN.md wins any disagreement. |
 | [`.claude/agents/README.md`](.claude/agents/README.md) | **Before starting a change.** The spec-driven flow: which document answers which question, and the role agents. Also the test defects that have shipped here and what prevents them. |
+| [`docs/OPENSPEC-ARCHIVE.md`](docs/OPENSPEC-ARCHIVE.md) | **Before archiving a change**, which is the last step before it merges — not before starting one. The traps that lose a requirement silently, and why `validate --strict` passes a spec that contradicts itself. |
 
 ### Keeping this file true
 
@@ -112,6 +113,18 @@ project a stalled session.
 - **`gh` is free until you filter it.** `gh api repos/o/r/releases` runs
   unprompted; adding `--jq '.[].tag_name'` makes it unanalysable and costs a
   click. Run it plain and read the JSON.
+
+- **A long output is not a reason to pipe.** This is the most common way the rule
+  gets broken by someone who knows it: `cargo test … 2>&1 | tail -30` to keep the
+  output manageable turns a call the checker would have approved into a prompt,
+  which is the opposite of what the pipe was for. Run it plain — `cargo test`
+  prints its failures at the end, and you can read the whole thing.
+
+  Two related shapes that catch people mid-task: `cd <dir> && cargo test
+  --manifest-path <abs-path>` prompts even though the manifest path is absolute,
+  because the `cd` is what defeats the analyser and the `cd` was never needed;
+  and `openspec`, which genuinely has no directory flag, is the one case where
+  `cd <dir> && openspec …` is right — **with no path argument after it**.
 
 - **Never `readlink` or `ls` a `/nix/store` path** to find where a build
   artefact went. Use the documented artefact paths under `.scaffold/basecamp/`.
