@@ -85,6 +85,38 @@ reply. This is the one place where *not* normalising is the correct choice, and
 it is why these two fields are copied across raw rather than coerced with
 `=== true` the way `hasMore` is in `FeedScreen`.
 
+**The two fields come from different replies, and that asymmetry is a choice.**
+`encrypted` is read from the **keep** reply, in `keepSelected()`, alongside the
+address. `recoveryNeedsTheRecord` is read from the **who-am-I** reply, in
+`Main`, and reaches the kept card as a property passed down.
+
+The alternative — reading both from the keep reply, so the kept card's two
+lines have one source — was available and rejected, but the reason is the wire
+contract rather than taste: **`keep_identity`'s reply does not carry
+`recoveryNeedsTheRecord`.** Its field set is closed
+(`{kept,address,publicKey,path,encrypted}`), and widening it is a change to
+`identity-onboarding`, not to this view. `who_am_i` is the only reply that
+carries the field, `Main` is the only party that calls it, so passing it down
+is the only route that does not add a second call answering a question already
+answered.
+
+**The consequence is that the kept card's backup-gap line is near-unreachable
+in production, and that is worth knowing before someone deletes it as dead
+code.** The value in scope on the kept card came from the who-am-I that
+reported `hasIdentity:false` — the one that caused onboarding to be shown at
+all. A keep then fires `identityKept`, `Main` re-asks, the answer flips to
+`"present"`, and the whole screen is hidden. So the line renders only where an
+`hasIdentity:false` reply carried `recoveryNeedsTheRecord:true`, which is why
+both tests that cover it construct that reply explicitly rather than reaching
+it through the flow.
+
+That is a real gap and it is **the launch branch's fault rather than this
+field's**: the screen is hidden before the user reads what it says. The honest
+fix is for the kept state to be shown by whatever renders after onboarding, not
+for this view to hold a value the module did not give it. Recorded rather than
+fixed, because changing where the kept card lives is a question about the
+post-onboarding screen, which this change does not own.
+
 ### The launch branch is a `who_am_i` call in `Main.qml`, re-asked on demand
 
 `Main.qml` holds `identityState` (`"unknown"` / `"present"` / `"absent"` /
@@ -188,6 +220,47 @@ So the policy across all three sites is **treat a non-string as absent**:
   is the value a later keep sends back to core to say which set the selection
   was made against. There is no honest default for it.
 
+### The empty-`stoaAddress` guard is now the third copy, and stays one more time
+
+`Main.askWhoAmI()`, `OnboardingScreen.requestSlate()` and the pre-existing
+`FeedScreen.reload()` each check `stoaAddress === ""` and each produce the
+identical string *"No Stoa address was given to this view."* That is a
+duplicated guard, and CLAUDE.md names the **fourth** slightly-different copy as
+the signal to reshape. This is the third, so the conversation is recorded here
+rather than had again silently at four.
+
+Two alternatives were available:
+
+- **One helper** returning the message. It removes the string duplication and
+  not the check — each caller still has to remember to call it, which is the
+  half that actually goes wrong — and it couples three screens to a shared
+  function for one literal.
+- **`Main` declining to instantiate children** until it has a Stoa. This is the
+  structural fix and it is the right one, but it belongs to the change that
+  settles where a Stoa comes from. `piece/ui-stoa-list` is that change, it
+  removes `stoaAddress` from `Main` entirely, and the architecture finding
+  already records the collision. Reshaping now would be reshaping around a
+  design that is being replaced.
+
+So: kept as three copies, deliberately, and **whoever reconciles this piece
+with `ui-stoa-list` should collapse them** — at that point `Main` has a
+navigator and "no Stoa chosen yet" becomes a state rather than an error string
+three files repeat.
+
+**A product-visible consequence, decided by this guard and worth stating
+plainly:** `Main.stoaAddress` defaults to `""`, so a **fresh launch with no
+Stoa supplied shows the failed card, not onboarding.** That is `"failed"`
+rather than `"absent"` on purpose. The view has not asked the module anything —
+it cannot, without a Stoa — so it does not know whether an identity exists, and
+`"absent"` would be a claim about the keystore that no reply supports. Showing
+onboarding would invite a user to generate a slate for a Stoa that was never
+named, and the keep would then fail at core.
+
+The cost is real and is paid by developers rather than users: a build with no
+Stoa wired shows a failure card before it shows anything else. That is the same
+trade `FeedScreen` already makes for the same reason — a view given nothing
+says so rather than looking empty.
+
 ### A spec'd obligation never rests only on the apparatus column
 
 The uniqueness statement — names are not unique, are not identifiers, the
@@ -201,13 +274,29 @@ deleted a requirement as a side effect.
 So the statement is now in the **body** as well, where the permanence warning
 already was for the same reason. The margin note stays — same text, in the place
 a reader of the mockup expects it, and duplication is cheap because neither copy
-is computed. `test_the_uniqueness_obligation_survives_without_the_apparatus_column`
-requires two elements to carry it, so the body copy cannot be dropped silently.
+is computed.
 
 The general rule this is an instance of: **apparatus may repeat an obligation,
 never carry it alone.** Anything the spec requires the screen to state belongs
 in the body, because the column is removable by a change that has no reason to
-read this spec.
+read this spec. Repetition is *permitted, not required* — a note that only
+explains, like this screen's "ON THE MARK", is free to be margin-only.
+
+**The rule now lives beside `ScreenFrame.qml`'s `apparatus` alias**, which is
+the file that owns the column and the file `piece/drop-apparatus` edits. It is
+stated here too, but `design.md` is archived when this change closes, and a
+rule that exists only in an archived document is a rule the person who needs it
+will not find. The durable copy is the one in the code.
+
+**What the enforcing test must assert** — recorded because getting this
+backwards is the easy mistake: that **at least one carrier is outside
+`apparatus`**, not that there are exactly two. An exact-count assertion fails
+when the column is removed, which is the scenario the rule is designed to
+survive, and its cheapest green is to edit the count — a count-pin on
+decoration being deleted, which is the same failure mode this change's own
+word-count decision argues against. The property is "the body carries it",
+and that passes today, passes after the column goes, and fails only if the body
+copy is dropped.
 
 ### Every `Text` is `Text.PlainText`, explicitly
 
