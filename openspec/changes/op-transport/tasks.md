@@ -9,7 +9,7 @@
 - [ ] review: security — `code-reviewer`
 - [ ] review: readability — `code-reviewer`
 - [ ] review: architecture — `code-reviewer`
-- [ ] review: spec-test — `spec-test-reviewer`
+- [x] review: spec-test — `spec-test-reviewer`
 - [ ] review: design — `design-reviewer`
 - [ ] findings all ticked, `findings/` deleted — runner
 - [ ] `openspec validate --strict`, then `archive` — runner
