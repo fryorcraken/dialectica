@@ -36,8 +36,9 @@ cherry-picks clean — git conflicts on the same line, not on neighbouring ones.
 - [ ] review: architecture — `code-reviewer`
 - [ ] review: spec-test — `spec-test-reviewer`
 - [ ] review: design — `design-reviewer`
-- [ ] findings all ticked, `findings/` deleted — runner
-- [ ] `openspec validate --strict`, then `archive` — runner
+- [ ] findings all ticked, `findings/` deleted — `closer`
+- [ ] CI green, PR merged — `closer`
+- [ ] `openspec validate --strict`, then `archive` — `closer`
 ```
 
 Tick your own row when the spec is done. Strike a row through with its reason

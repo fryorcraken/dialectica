@@ -303,6 +303,95 @@ jobs:
           print(f"ok: scaffold.toml has {len(comments)} comment lines")
           PY
 
+      # WHY A GREP AND NOT A TEST. `cargo test` does not compile
+      # dialectica/rust-lib/src/lib.rs at all: the scaffold include needs
+      # generated/provider_gen.rs, which the builder writes and nobody commits
+      # (build.rs explains why a stub would be worse). `cargo mutants` reports
+      # every mutant on the keystore accessors unviable, and the Rust job's
+      # clippy and fmt never reach the file either. So this is the ONE file in
+      # the repo where a wrong-but-well-typed edit reaches a release with every
+      # gate green -- and it already did once: creation named a derived key while
+      # the probe reported another, so `Moderators::of(genesis)` was false for a
+      # Stoa's own creator, fixed in 4313cf6.
+      #
+      # WHAT THIS CANNOT SEE, stated because a green gate that measured nothing
+      # is worse than none: it reads text, so it cannot tell whether the
+      # functions it finds are correct. That half IS tested --
+      # `the_creator_a_creation_names_is_the_identity_the_probe_reports` in
+      # dialectica-core/src/wire.rs drives both wire handlers through
+      # `creator_and_poster_in` and fails if the two halves diverge. This gate
+      # covers only the part no test can reach: that the adapter still routes
+      # through that one derivation instead of picking an accessor itself.
+      - name: the adapter derives the creator and the poster in one place
+        run: |
+          python3 - <<'PY'
+          import re, sys
+          path = "dialectica/rust-lib/src/lib.rs"
+          src = open(path).read()
+
+          # Each half must be reached through core, which is where a test can call
+          # it. The creator comes from `creator_key_in`, which funnels into
+          # `creator_and_poster_in`.
+          #
+          # THE PROBE'S HALF MOVED, and this gate names where. It was
+          # `core::keystore::poster_address_in`, called from the adapter's
+          # `get_capabilities` closure. `identity-onboarding` replaced that with
+          # `core::wire::get_capabilities_from_stores`, whose lookup is
+          # `core::wire::posting_identity` — a path-derived per-Stoa address read out
+          # of the identity record. That is a STRONGER position for this gate's own
+          # purpose: the choice is inside `core`, so `cargo test` compiles it and
+          # `the_probe_and_whoami_report_the_same_identity_for_one_user_and_stoa`
+          # asserts on it. What the gate still checks is that the adapter did not take
+          # the choice back.
+          for want in ("core::keystore::creator_key_in",
+                       "core::wire::get_capabilities_from_stores"):
+              if want not in src:
+                  print(f"::error file={path}::{want} is gone from the adapter — "
+                        "which key the creator is, and which the poster is, are "
+                        "decisions that must live in core where a test can reach "
+                        "them. Deriving either here restores the bug 4313cf6 fixed, "
+                        "with every other gate green.")
+                  sys.exit(1)
+
+          # And it must NOT reach a per-Stoa accessor, which is what the bug did.
+          # `identity_*` is banned here too: calling it directly is how the two
+          # call sites that had to agree came back.
+          #
+          # COMMENTS ARE STRIPPED FIRST. The ban is about calls, and the paragraph
+          # above this one in lib.rs quotes `ks.stoa_address(stoa)` in prose to say
+          # the derivation is no longer there — which the regex read as the call it
+          # forbids. A gate that fires on its own explanation is a gate someone
+          # weakens rather than obeys.
+          code = re.sub(r"^\s*//.*$", "", src, flags=re.M)
+
+          # ONE EXEMPTION, NAMED, AND IT IS A KNOWN GAP RATHER THAN AN ALLOWANCE.
+          # `with_publish_identity` calls `keystore.stoa_key(&stoa)` — the PATHLESS
+          # per-Stoa scheme — while `getCapabilities` reports
+          # `stoa_address_at_path` and `createStoa` names `identity_public_key`.
+          # That is three derivations for one user, and `stoa-lifecycle`'s merge of
+          # `main` is what made all three visible at once; see its design.md,
+          # "Three derivations after the merge". It is exempted rather than fixed
+          # because WHICH key a publish signs with is a spec question this gate
+          # cannot answer, and failing CI on it would block a merge on a question
+          # nobody has decided. Delete this exemption when the spec decides.
+          code = code.replace("keystore.stoa_key(&stoa)", "<exempt: publish path>")
+
+          banned = re.findall(
+              r"\.\s*(stoa_key|stoa_public_key|stoa_address|identity_key|"
+              r"identity_public_key|identity_address)\s*\(",
+              code,
+          )
+          if banned:
+              print(f"::error file={path}::the adapter calls a Keystore accessor "
+                    f"directly ({', '.join(sorted(set(banned)))}) — which key the "
+                    "creator is, is a decision, and this file is compiled by no test "
+                    "and read by no other gate. Call core::keystore::creator_key_in "
+                    "or core::wire::get_capabilities_from_stores instead.")
+              sys.exit(1)
+          print("ok: the adapter routes both halves through core::keystore, "
+                "and names no Keystore accessor itself")
+          PY
+
   # ─── qml ─────────────────────────────────────────────────────────────────
   # WHAT THIS JOB CANNOT SEE, stated up front because PLAN.md §10 asks for it:
   #

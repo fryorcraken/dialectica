@@ -120,6 +120,67 @@ pub trait DialecticaModule: Send + 'static {
     /// ever collapsed.
     fn list_threads(&mut self, request: String) -> String;
 
+    /// Create a Stoa this peer is in, and return its address.
+    ///
+    /// Takes `{"title":"…"}` and returns
+    /// `{"stoa":"<hex>","foundingTitle":"…","policy":"open"}`.
+    ///
+    /// **There is no creator argument, and there cannot be.** The creator key is
+    /// what makes the creator the Stoa's sole moderator and it is fixed inside
+    /// the address preimage forever, so a call accepting one would be a call
+    /// that can be asked to create a Stoa the caller cannot moderate and whose
+    /// address cannot be un-minted. The key comes from this peer's keystore.
+    ///
+    /// **The address is returned rather than only success**, because a creation
+    /// reporting `{"ok":true}` leaves the view unable to name, share or read
+    /// what it just made.
+    ///
+    /// Creation fails when the peer has no usable signing key and never mints
+    /// one for the occasion; the reason is the keystore's own, the same one
+    /// `getCapabilities` reports.
+    ///
+    /// **The same title twice is the same Stoa.** A genesis record carries no
+    /// nonce and no timestamp, so the same creator and title *is* the same
+    /// record and the same address. A user who wants two Stoas gives them two
+    /// titles.
+    fn create_stoa(&mut self, request: String) -> String;
+
+    /// Join a Stoa somebody else created.
+    ///
+    /// Takes `{"stoa":"<hex>","genesis":"<hex>"}` and returns the same reply
+    /// shape `createStoa` does.
+    ///
+    /// **It takes the genesis record as well as the address, and that is a
+    /// property of the address rather than a limitation of this call.** An
+    /// address is a one-way hash of the record: enough to *verify* a record
+    /// somebody hands over, and not enough to *reconstruct* one. Since
+    /// moderation cannot be resolved for a Stoa whose record this peer does not
+    /// hold, the record has to arrive with the address — there is nowhere else
+    /// for it to come from. A bare address is not joinable.
+    ///
+    /// The record is verified against the address before anything is recorded,
+    /// and a mismatch is an error rather than a join of something close enough.
+    /// Joining a Stoa this peer is already in succeeds and changes nothing.
+    fn join_stoa(&mut self, request: String) -> String;
+
+    /// One page of the Stoas this peer is in — those it created and those it
+    /// joined.
+    ///
+    /// Takes `{"page":N,"perPage":N}` and returns
+    /// `{"items":[{"stoa":"<hex>","foundingTitle":"…"}],"page":N,"hasMore":bool}`.
+    ///
+    /// **The contents are what membership records and nothing derived from the
+    /// ops this peer holds.** A Stoa joined and still quiet has no ops at all,
+    /// so an op-derived answer would omit precisely the Stoas a user has just
+    /// acted on; and an op addressed to a Stoa nobody joined must never enrol
+    /// this peer in it.
+    ///
+    /// **`foundingTitle`, never `title`.** What a Stoa is called *today* comes
+    /// from a moderator-signed metadata op, and nothing resolves those yet —
+    /// so presenting this as a current title would assert something no peer has
+    /// checked.
+    fn list_stoas(&mut self, request: String) -> String;
+
     /// A slate of candidate identities for a Stoa.
     ///
     /// Takes `{"stoa":"<hex>"}` and returns
@@ -321,15 +382,33 @@ struct Dialectica {
 
 #[cfg(logos_scaffold)]
 impl Dialectica {
-    /// The directory the host gave this instance, or the error to return.
+    /// The host's storage directory, or the error shape saying it has not arrived.
     ///
-    /// Factored out at the point CLAUDE.md names: this was the same four lines in
-    /// two handlers and would have been in five. A `Result` whose `Err` arm is
-    /// already the wire reply, following `core::parse_channel_id`, so a caller
-    /// cannot invent a second error shape while converting one.
+    /// **One place, because it is a guard.** CLAUDE.md: "A guard is a job. Keep it
+    /// separate, so 'is it called everywhere?' stays a question with an answer."
+    /// It was two inline copies with identical wording, and every handler that
+    /// reaches storage needs it — so each new one was another copy to keep in
+    /// step, and two of them disagreeing about one state is a user being told
+    /// different things about the same fact.
+    ///
+    /// `Result<PathBuf, String>` with the error arm already being the wire reply,
+    /// following `core::parse_channel_id`: a caller cannot accidentally invent a
+    /// second error shape while converting one.
+    ///
+    /// A `PathBuf` rather than the `String` the callers used to clone, so that
+    /// each one stops spelling `std::path::Path::new(&dir)` for itself.
     ///
     /// It is not in `core` because `core` has no notion of a host handing it a
     /// path — that is the whole reason this adapter exists.
+    ///
+    /// **There were two identical copies of this method** after `stoa-lifecycle`
+    /// merged `main`: this piece factored the guard out into its own
+    /// `impl Dialectica` block at the same time `main` factored it into the block
+    /// above, and a textual merge kept both because they landed at different
+    /// offsets. Both are `cfg(logos_scaffold)`, so `cargo test` and clippy compile
+    /// neither and both gates stayed green — the duplicate only surfaced as E0592
+    /// and E0034 in CI's Build LGX step. It is the same failure mode this file's
+    /// header comment warns about, and it is why the guard lives here, once.
     fn storage_dir(&self) -> Result<std::path::PathBuf, String> {
         match &self.persistence_path {
             Some(dir) => Ok(std::path::PathBuf::from(dir)),
@@ -478,10 +557,29 @@ impl Dialectica {
     }
 }
 
-// A thin adapter and nothing more. Every method forwards straight into `core`,
-// which is where the guard and the decisions live. If a body here ever grows
-// past one line, that logic belongs in `core` — otherwise it is logic no test
-// can reach.
+// A thin adapter and nothing more. Every method forwards into `core`, which is
+// where the guard and the decisions live, because nothing in this file is reached
+// by `cargo test`, by clippy, by fmt, or by `cargo mutants` — a wrong line here
+// ships with every gate green, and one already did (see
+// `core::keystore::creator_and_poster_in`).
+//
+// THE RULE, stated as what it actually permits. A body here may derive a host path
+// and pass it in; it may not make a decision. `storage_dir()` plus one `core` call
+// is the shape.
+//
+// Counted rather than asserted, because the claim this replaces was a miscount.
+// Of the ten methods below, three — `version`, `ping`, `panic_probe` — are
+// single-line forwards, because they need no path. The other seven are multi-line:
+// five are `storage_dir()` plus a `core` call, `delivery_channel_exists` also
+// because `modules()` calls `lp_*` symbols undefined in a test binary (PLAN.md
+// §2.3), and `on_context_ready` because it is the one setter.
+//
+// This used to say "if a body here ever grows past one line, that logic belongs in
+// `core`", with `delivery_channel_exists` excused as "the one place in this file
+// with more than a forwarding line". Both were false of the file by the time they
+// were read, and three of the multi-line bodies were added by the change that left
+// the claims standing (`findings/readability.md` entry 4). A line count was the
+// wrong test; what a body is allowed to CONTAIN is the right one.
 #[cfg(logos_scaffold)]
 impl DialecticaModule for Dialectica {
     fn version(&mut self) -> String {
@@ -497,11 +595,15 @@ impl DialecticaModule for Dialectica {
     }
 
     fn delivery_channel_exists(&mut self, request: String) -> String {
-        // The one place in this file with more than a forwarding line, and the
-        // only reason is that `modules()` cannot exist in `core` — it calls
-        // `lp_*` symbols undefined in a test binary (PLAN.md §2.3). So the
-        // parts that CAN be tested live in `core` on either side of the call,
-        // and only the call itself is here.
+        // The one body here that is multi-line for a reason other than deriving a
+        // host path: `modules()` cannot exist in `core` — it calls `lp_*` symbols
+        // undefined in a test binary (PLAN.md §2.3). So the parts that CAN be
+        // tested live in `core` on either side of the call, and only the call
+        // itself is here.
+        //
+        // It used to claim to be "the one place in this file with more than a
+        // forwarding line", which was true when written and false by the time it
+        // was read (`findings/readability.md` entry 4).
         //
         // The guard still wraps everything, including the cross-module call: a
         // panic raised while decoding a reply is a panic in a dispatch handler
@@ -562,6 +664,45 @@ impl DialecticaModule for Dialectica {
         // screen 07's failed state.
         core::list_threads_from_request(&request, || {
             core::log::SqliteOpLog::open(&dir.join("ops.sqlite"))
+        })
+    }
+
+    fn create_stoa(&mut self, request: String) -> String {
+        let dir = match self.storage_dir() {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
+        // Two host-derived paths, and they are DIFFERENT FILES on purpose: the
+        // keystore holds the key that becomes the creator, and the membership
+        // store holds what was created. `core` cannot know either layout, so the
+        // adapter supplies both and `core` decides what their failures mean.
+        core::with_membership_store(&core::membership_path_in(&dir), |store| {
+            // The SAME derivation `get_capabilities` above reports — one
+            // expression in `core`, not two call sites here agreeing. See
+            // `core::keystore::creator_and_poster_in` for why that distinction is
+            // the whole point.
+            core::create_stoa(&request, || core::keystore::creator_key_in(&dir), store)
+        })
+    }
+
+    fn join_stoa(&mut self, request: String) -> String {
+        let dir = match self.storage_dir() {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
+        core::with_membership_store(&core::membership_path_in(&dir), |store| {
+            core::join_stoa(&request, store)
+        })
+    }
+
+    fn list_stoas(&mut self, request: String) -> String {
+        let dir = match self.storage_dir() {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
+        // The READ half, so this handler's read-only-ness survives the seam.
+        core::with_membership_store_read(&core::membership_path_in(&dir), |store| {
+            core::list_stoas(&request, store)
         })
     }
 

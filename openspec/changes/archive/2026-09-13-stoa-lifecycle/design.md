@@ -1,0 +1,827 @@
+## Context
+
+See `proposal.md` — Why. The constraints this design has to fit between are all
+already in the tree, and three of them decide most of it:
+
+- **`SqliteOpLog` refuses any store whose `PRAGMA user_version` is not exactly
+  `LAYOUT_VERSION`**, in both directions, and `check_layout` additionally names
+  every column of `ops` that a read touches. That refusal is deliberate and
+  documented at length; `sqlite.rs`'s own comments state there is no migration
+  path by design.
+- **`create_schema` runs only when `user_version` reads `0`** — the never-stamped
+  value. There is no `CREATE TABLE IF NOT EXISTS` anywhere in the crate, so a
+  table added to that batch reaches fresh stores only and never an existing one.
+- **`Moderators::of` takes a `&Genesis`, and it is the only constructor.** The
+  `moderation-resolution` capability's "A Stoa's moderator set is derived from
+  its genesis record" is what makes that the fail-closed shape. It is also why
+  membership must retain the record: an address is a one-way hash, so a peer
+  holding only addresses holds a list of Stoas it can store content for and
+  cannot judge.
+
+The core crate holds no opinion about where storage lives. `SqliteOpLog::open`
+takes a path, `keystore::default_path_in` takes a directory, and the adapter in
+`dialectica/rust-lib/src/lib.rs` is the one thing holding the host's
+`instance_persistence_path`. This design follows that convention rather than
+introducing a second one.
+
+## Goals / Non-Goals
+
+**Goals:**
+
+- Membership as state beside the op log, readable and writable without the op
+  log being consulted at all.
+- Retain the complete genesis record per Stoa, in a form that still verifies
+  against the address it is filed under after a restart.
+- Three wire handlers — create, join, list — in `wire.rs`, each inside the panic
+  guard and each answering the one failure shape.
+- A signing key taken as an input, never minted.
+
+**Non-Goals:**
+
+- **No metadata resolution.** `stoa-metadata` owns current-versus-founding, and
+  nothing resolves those ops. Every title this change reports is a founding
+  title and says so on the wire.
+- **No moderation call, no feed change, no compose.** Creation leaves the peer
+  holding what a moderator set would later be derived from; it does not derive
+  one.
+- **No change to the op log**: not its schema, not its version, not its refusals.
+- **No `getStoa`.** PLAN.md §9.1 names it, and it is the metadata-resolution
+  call. Out of scope with metadata.
+
+## Decisions
+
+### Membership lives in its own SQLite file, not in a second table beside `ops`
+
+**Chosen:** a separate store, `stoas.sqlite`, with its own
+`PRAGMA user_version` and its own open path. `MembershipStore::open` never
+touches the op log's file.
+
+The spec requires that a store already holding ops stay readable, that opening
+it not be refused for predating membership, and that a membership be
+**recordable into such a store**. Put the table beside `ops` and each of the
+three ways to get there is worse:
+
+| Alternative | Why it loses |
+|---|---|
+| Add `memberships` to `create_schema` | That batch runs only at `user_version == 0`. An existing v1 store never gets the table; `check_layout` passes it (it names only `ops` columns), and the first membership read fails as `Storage("no such table: memberships")`. "Opening succeeds and ops are readable" holds; "a membership is recordable" does not. |
+| Bump `LAYOUT_VERSION` to 2 | The spec forbids it in as many words, and `sqlite.rs` refuses an older layout on purpose — a v1 store would become permanently unopenable, discarding the user's ops to avoid a migration that is not needed. |
+| `CREATE TABLE IF NOT EXISTS` on every open | Silently repairs a file that `check_layout` exists to refuse, and makes "what layout does version 1 mean" have two answers depending on when the file was opened. `sqlite.rs`'s documentation names a later "add a migration" refactor as the change its warning is addressed to; this would be that change, done by accident. |
+
+The separate file makes the requirement hold **by construction rather than by a
+check**, which is CLAUDE.md's standing instruction applied to a file boundary: a
+store predating membership has no membership file, `MembershipStore::open`
+creates one, and there is no version of the op log's layout that has to mean two
+things. Nothing in `SqliteOpLog` is edited by this change — which is also what
+makes the spec's requirement testable as written, by opening an op store that
+this change cannot have touched and reading its ops back afterwards.
+
+**What actually holds the boundary between the two stores is `check_layout`
+naming columns, not the two version numbers.** This was originally written the
+other way round in three places and was wrong: `MEMBERSHIP_LAYOUT_VERSION` and
+`log::sqlite::LAYOUT_VERSION` are **both `1`**, so handing
+`MembershipStore::open` an op-log file gives `found == 1 == expected` and it
+takes the already-stamped branch. The refusal comes entirely from `check_layout`
+failing to prepare `SELECT stoa, genesis_bytes FROM stoas` against an `ops`
+table. The two versions are independent in the sense that neither is read from
+the other — a property the independence test asserts, since comparing two
+constants that are both `1` would pass an implementation that read one from the
+other — but independence is not distinguishing, and the version check separates
+nothing today.
+
+The cost is two files where one would do, and one more `user_version` to keep
+straight. Both are cheap; the op log's own comments make the case that a version
+number that has to mean two layouts is not.
+
+**What two files foreclose, which the cost above does not state:** no
+transaction can span the membership store and the op log, because they are two
+SQLite connections. So a future "join and backfill" — record the membership and
+import the ops a peer already holds for that Stoa, atomically — is not available
+as one transaction. The recovery asymmetry is worth more than that atomicity
+today (a half-done backfill loses ops the log will receive again; a half-done
+join loses a Stoa the user must re-paste), but the trade is a trade and whoever
+wants that backfill will find it foreclosed here rather than in their own change.
+
+**The convention for where a store's file name is decided: with the store.**
+`membership_path_in` lives in `membership.rs` and `wire` re-exports it, so the
+adapter still reaches `core::membership_path_in`. It was defined in `wire.rs`, whose
+stated job is the wire contract — and a file name on disk is not wire contract, as
+`findings/architecture.md` entry 2 put it; its own docstring claimed to follow
+`keystore::default_path_in` because "the naming convention belongs with the thing
+named" and then did not.
+
+Two of the three stores now follow it (`keystore::default_path_in` → `identity.key`,
+`membership::membership_path_in` → `stoas.sqlite`). **The op log does not**, and that
+is recorded rather than fixed: it names no file at all, and `dir.join("ops.sqlite")`
+is inline in the adapter. Unifying it means adding a function to `log/` and editing a
+`cfg(logos_scaffold)` call site in a module this change does not otherwise touch, so
+it belongs to whoever next works on the op log. The point of writing it down is the
+one the finding makes: a fourth store — the vouching/weight state, or metadata's
+projection — should have a convention to follow rather than a 50/50 choice, and now
+it does, with the single exception named.
+
+### The record is stored as its canonical bytes, and the address is derived on read
+
+**Chosen:** one row per Stoa: `stoa` (the 32-byte address) as `PRIMARY KEY`, and
+`genesis_bytes` — `Genesis::canonical_bytes()` verbatim.
+
+Storing the record as decomposed columns (creator, policy, title) and
+re-encoding on read would make the address depend on this module's re-encoding
+agreeing with `stoa.rs`'s forever. The address **is** the hash of the canonical
+encoding, so re-encoding is the one operation that must not be duplicated. Same
+argument `sqlite.rs` makes for storing `op_bytes` verbatim, and the same test
+shape holds it: the retained record is read back, its address recomputed, and
+compared against the key it was filed under.
+
+`stoa` is the primary key rather than a `UNIQUE` index over the bytes, because
+the address is the identity. Repeated-join idempotence is then **structural**,
+and the load-bearing half of that is the **primary key**: a second join of the
+same Stoa cannot produce a second row, whatever the statement verb. So "MUST NOT
+disturb what was already retained" is a property of the shape rather than a
+branch that must be right at each call site. `INSERT OR IGNORE` is the verb that
+says what is meant — a join is not a way to overwrite what a peer already holds.
+
+**What the suite can and cannot see about the verb, measured, because
+"structural" is doing real work for the shape and none for the verb.** Change
+the statement to `INSERT OR REPLACE` and delete the single
+`assert_eq!(…, Joined::AlreadyIn)` in
+`a_repeated_join_is_idempotent_and_leaves_the_record_untouched`, and **544 tests
+pass with zero failures** — the same as the baseline. That is not a gap in the
+test: a mismatched pair cannot reach `join` at all (see *"Verification is a
+constructor"* below — `Membership::verified` refuses one and `join` takes nothing
+else), so the only record REPLACE could ever write over a row is the
+byte-identical one. The `Joined` value is the sole witness, the test says so in its
+own comment, and nothing else can be.
+
+**And the wire deliberately hides the distinction.** `create_stoa` and
+`join_stoa` both discard `Joined` with `Ok(_)` (`wire.rs`), argued there: the
+spec asks that a second join succeed and change nothing, and a reply rendering
+"already joined" differently would render a distinction the user did not make.
+The consequence, recorded because it is a cost nobody had written down: **nothing
+observable at the module surface tells `OR IGNORE` from `OR REPLACE`**, so the
+spec's non-destructiveness requirement is unfalsifiable from outside core and can
+only be checked against `MembershipStore` directly. That is the right trade for
+the reply shape; it means the store's own test is the only thing holding the
+verb.
+
+### Verification is a constructor, not a guard: `Membership::verified` is the only way to pair an address with a record
+
+**Chosen:** `MembershipStore::join` takes a `&Membership`, and
+`Membership::verified(&Address, &Genesis)` is the only way to build one from a
+caller's pair. `join` has no check of its own, because there is no longer an
+unverified pair it could be handed.
+
+**What this replaced, and why it had to change.** `join` took the address and the
+record separately and verified them, and `wire::genesis_for` verified the same
+predicate one layer up. Both were argued as deliberate — the store's check made
+its invariant hold for every caller, the wire's carried the safety argument for a
+caller-supplied record — and the arguments were sound. **The problem was that no
+test could tell the two apart.** Measured both ways:
+
+| Guard deleted | Result |
+|---|---|
+| `MembershipStore::join`'s | 546 of 550 pass — only the four `membership.rs` tests fail (`findings/spec-test.md` entry 2) |
+| `wire::genesis_for`'s | **550 of 550 pass.** Not one test notices |
+
+So each guard was covered only by the *other* guard still being there. Every
+wire-level test naming verification — including
+`a_record_that_does_not_match_the_address_is_refused_and_joins_neither_stoa` and
+`a_join_verified_at_the_wire_needs_no_op_log_and_no_prior_membership` — read as
+"the wire refuses a mismatched record" and in fact established only that
+*something somewhere* refused it. Two live code paths giving the same answer is
+this project's recurring test defect in its sharpest form.
+
+**Why a constructor and not a third test.** CLAUDE.md: *"prefer reshaping state so
+an invariant holds by construction over adding a branch that checks it… when you
+find yourself writing the fourth slightly-different copy of a guard, that is the
+signal to reshape rather than to add a fourth test."* The reviewer's own suggested
+fix — assert that the refusal carries `genesis_for`'s message rather than the
+store's — **provably cannot work**: the two messages are byte-identical (the same
+sentence was hardcoded in both modules, `findings/readability.md` entry 7), so no
+assertion on the reply can distinguish which guard fired.
+
+`Membership` was *already* the verified pair — `list` hands it back, and its
+doc-comment already claimed "`MembershipStore` guarantees they agree". Making it
+the type `join` accepts turned that comment into the type system's problem. The
+reshape also collapsed `readability.md` entry 7 (one sentence, two modules) to a
+single copy, and let `genesis_for` return the pair so the verification now happens
+**once** per request rather than twice.
+
+**The measurement that shows it worked.** Deleting the one remaining guard now
+fails **8 tests across both layers** — the four in `membership.rs` *and* four at
+the wire, including all three the reviewer named as surviving the old mutation.
+Before: 4 and 0 depending on which copy you deleted. There is now no deletion that
+leaves the property untested.
+
+**What it cost.** 29 test call sites changed. Most became a `join_matching(store,
+&g)` helper (the matching-pair case); the mismatch tests now assert against
+`Membership::verified`, which is the honest place, since that is where the refusal
+lives. Two tests got weaker in a way worth naming rather than hiding:
+`verification_consults_only_the_two_inputs` used to compare the answer from an
+empty store against a populated one, which was a real test while verification had
+a `self` to reach through — it is now satisfied by construction (an associated
+function with no `self` has no store to consult) and the test says so, keeping only
+the refusal assertion that remains observable.
+
+**Alternative considered: keep both guards and pin each.** Ruled out because the
+wire's guard is **not separately pinnable** — both check the same predicate and
+render the same sentence, so a test reaching only the wire's cannot observe
+anything the store's would not also produce. Keeping two guards would have meant
+keeping a guard that no test can hold, which is how this finding arose.
+
+### `joinStoa` takes `{stoa, genesis}`, departing from PLAN §9.1's `{address}`
+
+**This is a deliberate departure from a PLAN signature, argued rather than made
+in passing.** PLAN §9.1 specifies `joinStoa({address})` twice — in its item 5
+("take an address, verify the genesis record hashes to it") and in its Stage D
+API block. The implementation takes both the address and the record.
+
+PLAN is wrong here, and its own sentence shows it: *"take an address, verify the
+genesis record hashes to it"* does not say **which** record, because there is
+none. A Stoa address is a one-way hash of its genesis record — sufficient to
+**verify** a record somebody hands over, insufficient to **reconstruct** one. A
+call given only an address has nothing to verify. It could only join a bare
+address, and then the peer would hold a Stoa whose record it does not have, which
+`moderation-resolution` requires before a reader may decide whether any
+moderation of that Stoa's content binds. So the record has to arrive with the
+address; there is nowhere else for it to come from.
+
+Nothing is lost against what §9.1 wanted the call for. Its argument for the
+signature was that a join reply must show what is being joined before it is
+joined (§4.8), and the reply still carries the founding title for exactly that.
+What §9.1's shape got wrong is the *input*, not the output.
+
+**Why the address is still a parameter, given the record determines it.** This is
+the half that reads as redundant and is not. The spec requires that a record
+differing from the one the address names in **any** field is refused, *and that
+the peer is not in the Stoa the supplied record would name either*. A `join`
+taking only a record could not fail — it would join whatever it was handed, and a
+substituted record names a creator of the attacker's choosing. The address is the
+caller's claim about what it thinks it is joining, the record is the material, and
+the refusal is the two disagreeing. That is `Genesis::matches`, which
+`wire.rs::genesis_for` already uses for the feed path.
+
+`docs/PLAN.md` §9.1 is corrected in this change rather than left to contradict
+the code: its stale signature and its copy of the verification reasoning are
+struck down to a line saying create, join and list exist, because the reasoning
+lives here and two copies drift with no way for a reader to tell which is stale.
+PLAN's copy was the stale one.
+
+### Creation reuses `join`'s write path rather than having one of its own
+
+`create_stoa` builds the record, computes the address, and records the
+membership through the same `join` call a paste goes through. Two consequences
+the spec asks for fall out:
+
+- "Creating the same title twice yields one Stoa" is then the same
+  `INSERT OR IGNORE` idempotence as a repeated join, not a second mechanism that
+  has to agree with it.
+- "Creating and then joining the same Stoa is one membership" is true because
+  there is one write path, not because two were checked against each other.
+
+The title bound is refused **before** the write, and the mechanism is worth naming
+precisely because a code comment here credited the wrong one
+(`findings/readability.md` entry 1, verified by running it): the refusal is
+`create_stoa`'s own `genesis.address()` call, which is
+`stoa_address(&self.canonical_bytes()?)` and fails for an over-cap title before
+the store is touched at all. The reply is `{"error":"title: title is 1025 bytes,
+the maximum is 1024"}` — `create_stoa`'s `"title: {e}"` prefix. It is **not**
+`MembershipStore`'s encode-before-write ordering, which renders a different
+sentence and is never reached on this path. The spec's "the refusal happens first,
+so a failed creation leaves nothing behind" holds either way; the explanation
+mattered because a reader editing the store to preserve it would have been
+preserving the wrong thing.
+
+### The creator key is taken as a `PublicKey`, and the handler takes a closure
+
+`create_stoa_from_request` takes `impl FnOnce() -> Result<PublicKey, KeystoreError>`
+— the same shape `get_capabilities` takes for its identity lookup, and for the
+same reason: this crate cannot read the environment or know the host's layout.
+The adapter has the keystore path and supplies the closure.
+
+**A `PublicKey`, not a `SecretKey` and not a `Keystore`.** A genesis record needs
+the creator's public key and nothing else — no signature is made, because a
+genesis record is not an op and carries none. Taking a secret would be taking
+authority the operation does not use.
+
+**The failure mode is a `KeystoreError`, not a bool.** "Creation MUST fail when
+the peer has no usable signing key, and MUST NOT proceed by generating a key" is
+satisfied by there being no path from this handler to `Keystore::generate()`.
+Whether a key is usable and why not is `posting-capability`'s probe: this
+handler surfaces the error's own message and adds no reason vocabulary of its
+own, exactly as `capability_for` does.
+
+### Which key the creator is: the root identity, used directly
+
+**Chosen:** `Keystore::identity_key` — the root secret used as an Ed25519 seed,
+with no derivation step. The genesis record's `creator` is its public half, and
+the capability probe reports that same key's address. **One derivation position,
+one key.**
+
+**The bug this replaced, because it is the reason this entry exists.** The first
+implementation used `creator_public_key()` = `derive_stoa_key(root,
+CREATOR_KEY_DOMAIN)` where `CREATOR_KEY_DOMAIN` was `[0u8; 32]`, while the probe
+reported `derive_stoa_key(root, stoa_address)`. Those are different keys.
+`Moderators::of(genesis)` names `genesis.creator` as the sole moderator, so
+`contains(posting_key)` was **false for a Stoa's own creator** — every Stoa a
+peer created was a Stoa nobody could moderate, under a key that peer would never
+sign an op with.
+
+That could not be deferred to when moderation lands. The genesis record is
+immutable once published and the address is its hash, so the wrong creator is
+fixed inside the address forever. Deferring meant shipping records that are wrong
+permanently.
+
+**The circularity that produced the synthetic domain is real**, and any fix has
+to respect it: the address is `SHA-256(canonical_bytes)` over a record whose
+`creator` field is the key in question, so there is no per-Stoa key derivable
+before the record exists. A synthetic derivation context was a reasonable answer
+to that. It was not compatible with one-identity-per-user, and it was a fourth
+derivation position no document argued for.
+
+**How this reconciles with PLAN §5.2 — it does not depart from it; the old code
+did.** §5.2's MVP subsection is an owner decision, recorded not argued: *for the
+MVP a user has one identity across every Stoa*, and — quoting it, because this is
+the sentence the fix implements — *"one identity per user means **not calling**
+[`derive_stoa_key`] and signing with the root key directly."* §9.2 lists per-Stoa
+identity (§5.2) as **out of the MVP** and says `derive_stoa_key` "is built and
+simply is not called". The root key is knowable before any record exists, so
+under that rule the circularity **dissolves rather than needing to be worked
+around**. There was never a case for a third derivation position; the code had
+one because it was written against §5.2's destination and not its MVP.
+
+`derive_stoa_key` and `Keystore::stoa_key` stay built and tested. The live
+`identity` spec requires the primitive and its properties (same root and Stoa
+yield the same key; two Stoas yield different keys; no public derivation), and
+those are properties of the function, which the tests exercise directly. Nothing
+in `identity` or `posting-capability` requires a *handler* to call it —
+`posting-capability` asks only that the reported identity be "the one an op
+published now would be attributed to, derived from the key that would actually
+sign it", which the one key satisfies exactly.
+
+**What this costs, and what it does not.** Cross-Stoa unlinkability is
+**suspended, not withdrawn** — §5.2's own words. One key signs in every Stoa, so
+anyone observing two Stoas can link the same participant across them: the public
+key is the join. That cost is §9.2's, accepted knowingly there, and it is
+strictly *smaller* than the cost of the code this replaces, which paid the same
+linkability for creator keys **and** got an unmoderatable Stoa for it. Restoring
+per-Stoa identity is switching the call back on plus the create-or-select flows
+§5.2 says are the deferred part.
+
+**Alternatives, each with what ruled it out.** The first three were recorded only
+in a code comment on the now-deleted `creator_public_key`, which is why they are
+here: the archive is where someone greps.
+
+| Alternative | Ruled out by |
+|---|---|
+| **A synthetic derivation domain** (`derive_stoa_key(root, [0u8; 32])`) — what shipped first | Produces a creator key the peer never signs with, so the creator cannot moderate. Also a fourth derivation position, and **reachable by a caller**: see the security note below. |
+| **Derive from the title** | Two Stoas with the same title share a creator key, and the address becomes a function of the title alone — so a third party could compute a peer's address for any title. Worse than linkability. |
+| **A fresh random key per creation** | The root secret is the only thing backed up, so a key minted outside it is a moderator key that vanishes with the device. A Stoa whose sole moderator's key is unrecoverable can never be moderated again, and the address cannot be un-minted. |
+| **Take the key from the caller** | The spec forbids it in as many words, and for the right reason: a call accepting a creator is a call that can be asked to create a Stoa moderated by somebody else. |
+| **Per-Stoa, resolving the circularity with a two-pass derivation** (derive from a provisional address, re-derive, re-hash) | Does not converge — each re-derivation changes the record and therefore the address. And it would be building §5.2's destination inside the change that §9.2 scopes it out of. |
+
+**The security note, which is the other half of why the synthetic domain is
+deleted rather than retargeted.** Its stated justification was that no genesis
+record hashes to all-zero, so no real Stoa address could collide with the domain
+— *"finding one would be a preimage attack on the hash"*. That is true about
+records and **irrelevant about arguments**. `getCapabilities` takes a
+caller-supplied hex string, decodes it, and hands it to the derivation with no
+plausibility check, so `{"stoa":"00…00"}` returned **exactly** the creator's
+address — measured, not reasoned. Harmless while the probe is a local read-only
+lookup that tells a caller about its own peer, and a live hazard the moment any
+signing path takes a caller-supplied address: a caller passing 64 zeros would
+sign under the moderator key.
+
+The fix closes this **by construction**: `identity_key` takes no address, so
+there is no argument left to choose.
+`no_stoa_address_a_caller_can_name_reaches_the_identity_key` pins the
+consequence. Any future synthetic domain must be
+unreachable through a caller-named address, and must be tested for it — the
+lesson is that "no record hashes here" is the wrong invariant when nothing
+requires the value to have come from a record.
+
+**`CREATOR_KEY_DOMAIN` and its preimage argument are therefore deleted, not
+moved.** Recorded here so the deletion is not re-proposed: the constant was
+`[0u8; 32]`, it was address-determining (changing it silently re-mints the
+creator identity of every Stoa a user has made, because each peer stays
+internally consistent and nothing errors), and it was pinned by a hardcoded
+assertion for exactly that reason. `identity_key` inherits the
+address-determining property and the pinning obligation —
+`the_identity_key_is_pinned_to_a_known_answer` freezes the public key of the
+`[7; 32]` root — but not the preimage argument, which has no purpose once there
+is no synthetic context.
+
+### Where that decision lives: `core::keystore::creator_and_poster_in`, because two agreeing call sites are not one derivation
+
+Found by two reviewers independently — `findings/security.md` entry 3 and
+`findings/architecture.md` entry 1 — and it is about the *shape* of the fix above
+rather than about which key it chose.
+
+**The problem, measured rather than argued.** The fix named
+`identity_public_key()` at `dialectica/rust-lib/src/lib.rs:385` and
+`identity_address()` at `:346`. Those are two independent call sites that have to
+agree, and they sit in the one file no gate reads:
+
+- `cargo test` does not compile it. `build.rs` sets `logos_scaffold` only when
+  `generated/provider_gen.rs` exists, and `git ls-files dialectica/rust-lib/generated`
+  is empty — the builder writes that file and committing a copy would recreate the
+  contract drift `codegen.rust.trait` exists to prevent.
+- `cargo mutants` cannot see the accessors either: run over `keystore.rs` filtered
+  to the six identity/stoa accessors, **all 6 mutants came back unviable** (no
+  `Default` for the key types).
+- The Rust job's clippy and fmt never reach the file, and no Lint-job check read it.
+- **Build LGX** does compile the adapter, so a *type* error would be caught — but
+  `stoa_address` and `identity_address` return the same type, so the wrong *method*
+  compiles green.
+
+So changing `:346` back to `ks.stoa_address(_stoa)` restored the bug this
+Decision exists to prevent, **with every gate green**. A correctness property no
+gate can see is one revert away from being wrong again.
+
+**Chosen:** move the pairing into `core` as a single derivation —
+`keystore::creator_and_poster_in(dir) -> (PublicKey, Address)`, with
+`creator_key_in` and `poster_address_in` as the two thin wrappers the adapter
+calls. Both halves now come out of one expression over one `identity_key()` root,
+so there is no argument to pass differently and no second accessor to reach for:
+the invariant holds **by construction** rather than by two comments agreeing.
+
+**Why it could move at all, which is the load-bearing observation.** Both closure
+bodies contained *no host type*. Each was `core::keystore::default_path_in(&dir)`
+then `core::keystore::open_from_env(&path)` then one accessor — three `core`
+functions over a `&Path`. The stated reason for the closure ("`core` cannot read
+the environment or know the host's layout") applies to **which directory**, not to
+**which accessor**, and the directory is already an ordinary argument everywhere
+else. The closure parameter stays; only the body moved.
+
+**What now pins it.** `wire.rs`'s
+`the_creator_a_creation_names_is_the_identity_the_probe_reports` drives *both wire
+handlers* through the two `core` functions, against a real on-disk keystore, and
+asserts the probe's reported identity is the address of the key the creation
+recorded as creator. Pointing the derivation at `stoa_address` fails that test and
+**only** that test — verified by running the mutation: 550 passed, 1 failed.
+
+That is strictly stronger than what stood before. `keystore.rs`'s
+`the_creator_of_a_stoa_this_keystore_made_can_moderate_it` asserts
+`identity_address() == identity_public_key().address()`, a property of two
+`Keystore` methods that is true whatever the module wires up; its comment claimed
+to be "the pair the adapter wires up, checked here because `cfg(logos_scaffold)`
+is not built by tests", which it structurally could not be. The comment is
+corrected rather than the test deleted — the test is fine, its description was not.
+
+**And a CI grep, for the half no test can reach.** The test proves the derivation
+is *correct*; it cannot prove the adapter still *calls* it. A new Lint step
+(`the adapter derives the creator and the poster in one place`) asserts each half's
+name appears in the adapter and that it names no `Keystore` accessor itself. Both
+halves were verified to fire: removing the creator's wrapper trips the first, and
+calling `ks.stoa_address(...)` while leaving the name in place trips the second.
+Stated as what it cannot see: it reads text, so it says nothing about correctness
+— that half is the test's.
+
+**The probe's half of that gate now names a different function**, because the merge
+of `main` moved where the probe's derivation lives: `core::keystore::poster_address_in`
+→ `core::wire::get_capabilities_from_stores`. See "Three derivations after the
+merge" for what moved and what it exposed.
+
+**Alternative considered: leave it, and rely on review.** Ruled out by the
+evidence in the finding — this exact divergence already shipped once and was
+caught by a human reading code, not by a gate. `.claude/agents/README.md`'s rule
+applies: *"say what a gate cannot see rather than reporting it as passed."* The
+answer here is that the gap was closable, so it was closed.
+
+### Three derivations after the merge, and why only one was fixed here
+
+`main` moved three times while this piece was in review — the wire-request
+envelope, the publish path (#51) and identity onboarding (#58) — and merging it
+made a thing visible that neither branch could see alone: **one user now has three
+different signing identities, depending on which handler is asked.**
+
+| Handler | Key it uses | Scheme |
+|---|---|---|
+| `createStoa` | `identity_public_key()` | the root, used directly |
+| `getCapabilities` / `whoAmI` | `stoa_address_at_path(stoa, path)` | path-derived per-Stoa, path read from the identity record |
+| `publishPost` / `Reply` / `Vote` | `stoa_key(&stoa)` | **pathless** per-Stoa |
+
+Each is internally consistent and each was correct against the contract its own
+change was written to. None of them agree, and **nothing failed** — the merge
+compiled and 733 tests passed, because every test that asserts a pairing injects
+both halves of that pairing itself. This is the same failure shape §"Which key the
+creator is" records, arriving by merge rather than by edit: three call sites that
+have to agree, in code `cargo test` does not compile.
+
+**What was fixed here, and why the boundary is where it is.** Only the piece's own
+half — the envelope bypass (below), and the CI gate that names where each
+derivation lives. The *choice* of which key a publish signs with is a **spec
+question**: `content-authoring` and `identity-onboarding` disagree about whether an
+op's author is the root identity, the pathless per-Stoa key, or the path-derived
+one, and no spec in the set decides between them. Picking one here would be this
+piece silently resolving another change's contract, which is exactly the licence
+`dev-writer`'s brief withholds. Reported as a spec finding instead.
+
+**What stops it going quiet again.** The CI gate
+(`the adapter derives the creator and the poster in one place`) is this piece's,
+and it caught all of this — which is why it is worth saying what it now does. It
+asserts the creator comes from `core::keystore::creator_key_in` and the probe from
+`core::wire::get_capabilities_from_stores`, and it bans every `Keystore` accessor
+called directly in the adapter. The publish path's `stoa_key(&stoa)` is **exempted
+by name, with the reason in the exemption**: a gate that fails on an undecided spec
+question blocks a merge on something nobody has decided, and a gate quietly widened
+to let code through is worse than no gate. The exemption is a line to delete when
+the spec decides, not an allowance.
+
+Two smaller corrections the merge forced, recorded because each was a comment
+asserting something the merged code disproves — this repo's recorded failure mode:
+
+- `the_creator_a_creation_names_is_the_identity_the_probe_reports` said its lookup
+  was passed "exactly as the adapter gives it". True when written; false after #58
+  moved the adapter to `get_capabilities_from_stores`. The comment now says what
+  the test does prove (the pairing) and what it cannot see (the live wiring).
+- The CI gate's regex read its own explanatory comment — which quotes
+  `ks.stoa_address(stoa)` in prose to say the call is gone — as the call it forbids.
+  Comments are stripped before the scan.
+
+### `create_stoa`, `join_stoa` and `list_stoas` reach the envelope through `Request`
+
+`main`'s `Request` envelope wins over this piece's own `serde_json::from_str`, and
+it is not a close call: `Request::parse` refuses a non-object **by name** and caps
+the request at 4 MiB **before allocating**, from a module holding no handler — which
+is what makes the guarantee structural rather than remembered.
+
+**The textual merge compiled and was wrong.** All three handlers kept their own
+`from_str`, and `create_stoa` answered `[]` with `{"error":"missing field: title"}`
+— telling a caller its array failed a field check, the one thing the envelope's
+spec forbids — and **served an oversized request** with no cap at all. A clean
+compile and a green-looking suite.
+
+What found them was retargeting this piece's own field parser. `parse_stoa` took
+`&serde_json::Value` here and `&Request` on `main`; deleting the duplicate left
+`main`'s, and `rustc` then named four call sites across `join_stoa` and
+`list_stoas` at once. `create_stoa` reads `title` rather than `stoa`, so no type
+error reached it — it was found by the sweep instead, which is the other half of
+the answer:
+
+**Three methods were added to `every_request_taking_method`, and that is an
+obligation the doc comment states in capitals because nothing checks it.** Unlisted,
+all five envelope sweeps go green over handlers that bypass the envelope entirely;
+listed, four of them turned red and named `create_stoa`.
+
+**`list_stoas` is the surface's first method with no required field**, so `{}` is a
+*served* request for it rather than the third caller mistake. Two sweeps read `{}`
+as a refusal. The fix is `every_method_with_a_required_field`, a filtered list —
+**not** an `if name != "list_stoas"` inside each sweep, which would be two call
+sites that have to agree about who is exempt and a third sweep getting it wrong.
+The exclusion is paired with a positive assertion that `list_stoas` *serves* `{}`,
+because excluding it from the loop would otherwise exclude it from the claim
+entirely: a `Request::parse` that refused every empty object would pass every sweep
+that remained.
+
+### The reply names its title as founding
+
+`{"stoa":"<hex>","foundingTitle":"…","policy":"open"}` for create and join;
+`{"items":[{"stoa":…,"foundingTitle":…}],"page":N,"hasMore":bool}` for list.
+
+The field is **named** `foundingTitle` rather than carried as `title` beside a
+boolean flag. The spec requires the reply make it distinguishable from a
+resolved current title; a `{"title":…,"isFounding":true}` shape puts a view one
+forgotten branch away from rendering a founding title as current, and `title`
+would then have to mean two things depending on a sibling field. A name that
+cannot be misread costs nothing. When metadata resolution lands it adds `title`
+and `isGenesisFallback` beside this field rather than redefining it — which is
+PLAN.md §9.1's own shape for `getStoa`, and this change does not pre-empt it.
+
+`policy` is included on the create and join replies because the spec requires
+the posting policy be **answerable** from what was retained, and the join reply
+is where a view shows what is being joined. It is deliberately **not** on the
+list items: the spec fixes list items as carrying the address and the founding
+title, and widening the paginated envelope's item shape is a decision for
+whoever needs it.
+
+**The policy's wire NAME is a choice the spec does not make**, and it is a
+lasting one: `policy_name` returns the lowercase literal `"open"`, which a view
+branches on. The spec requires the policy be answerable and says nothing about
+its spelling, so `"open"` versus `"Open"` versus a numeric discriminant was
+this change's to pick — and once a view compares against the string, changing it
+is a breaking change to the module surface. Recorded as unspecified behaviour
+below. The function is deliberately **exhaustive with no wildcard arm**, which is
+a separate decision and not a NO SPEC: a new `Policy` variant must force a
+decision here rather than defaulting to a name describing a different policy.
+`Policy::from_byte` refuses an unknown discriminant rather than treating it as
+`Open`, and a wildcard here would undo that one layer up — telling a view a
+token-gated Stoa is world-postable.
+
+### Listing pages over an ordered read, and the order is the address
+
+`ORDER BY stoa ASC` — the primary key, so it is an index walk. The spec requires
+every Stoa be reachable by paging and none appear twice, which is a property of
+the order being **total and stable**; the address is 32 bytes of hash and
+unique by primary key, so it is both. Insertion order was the alternative and is
+worse for the reason `log/mod.rs` gives about its own reads: it is per-peer, and
+a reader that could reach it would be one refactor away from presenting it as
+meaningful. Nothing in the spec asks for a join order, and a `joined_at`
+timestamp would be a local wall-clock reading — the thing `arrival.rs` refuses.
+
+`page`/`perPage` reuse `wire.rs::parse_index` and `feed::clamp_per_page`
+unchanged, so the envelope's arguments behave identically to the feed's rather
+than acquiring a second interpretation of a negative page.
+
+**`MembershipStore::list` is correct for arguments the wire cannot produce, and
+that is a deliberate cost rather than defensiveness.** `clamp_per_page` caps
+`per_page` at 100 and turns `0` into the default, so the two boundary cases below
+are unreachable through the module surface. They are reachable through the crate,
+which is the deliverable: `list` is `pub` on a `pub` module, and the second caller
+is the one that gets bitten. Both were live bugs when review measured them, and
+both are invisible to `cargo mutants`, which generates no mutant for
+`saturating_add`, `saturating_mul` or `try_from`.
+
+- **An over-large `per_page` saturates; only `page` refuses.** SQLite parameters
+  are `i64`, so both cross that boundary, and the right answer differs: "more rows
+  than exist" is answerable, so the limit saturates at `i64::MAX` and serves
+  everything. An unreachable **page** is not answerable — a `usize` offset past
+  `i64::MAX` cast rather than converted becomes negative, and SQLite treats a
+  negative `OFFSET` as none at all, serving the FIRST page to a caller who asked
+  for an impossible one. Empty is the honest reply there. The bug was converting
+  `per_page + 1` and giving up on failure: the guard tested the *incremented*
+  limit, so `list(0, i64::MAX as usize)` on a store holding three Stoas answered
+  "you are in no Stoa" while `list(0, (i64::MAX as usize) - 1)` answered all three
+  — indistinguishable from an empty store, and returned `Ok`.
+
+- **A page of zero rows is the last page.** `has_more` means "paging further
+  reaches a Stoa this page did not show"; at `per_page == 0` every later page is
+  also empty, so it is `false` however many Stoas the store holds. This is a guard
+  and an early return rather than arithmetic, because arithmetic that also handles
+  zero is arithmetic whose zero case nobody can read — the zero page is a
+  different question from where a page boundary falls. Previously `LIMIT 0+1`
+  fetched a row, `has_more` was `1 > 0`, and the truncate then emptied the page, so
+  every page was both empty and not-the-last and paging to exhaustion never
+  terminated.
+
+- **The remaining boundary is one operation, not two facts.** `split_off` cuts the
+  look-ahead read once: what is kept is the page, what comes off is the evidence of
+  a further one. Computing `has_more` from what was fetched and the page from a
+  separate `truncate` is how the two came to disagree, and CLAUDE.md's rule applies
+  — prefer a shape that cannot express the mistake over a third guard that checks
+  for it. `feed.rs` is structurally immune to the same bug for a related reason (it
+  slices with `min(rows.len())` rather than looking one past), so this was never a
+  shared defect; it was specific to the `LIMIT per_page+1` plus `truncate` shape.
+
+### An op for an unjoined Stoa creates no membership, and that needs no code
+
+The requirement is satisfied by the absence of a call. There is no path from
+`OpLog::append` to `MembershipStore`, the two types share no state, and nothing
+in the receive path this change does not own could reach membership without a
+new call site. **So the tests for this requirement are written against the
+absence**: append ops through the real log, then read the real membership store,
+and assert the listing is untouched. That is the honest shape — a test asserting
+a function was not called would be asserting on an implementation, where this
+asserts on the observable state the spec constrains.
+
+## Risks / Trade-offs
+
+- **Two stores, two `user_version`s** → `MEMBERSHIP_LAYOUT_VERSION` is pinned by
+  a hardcoded assertion, following `identity.rs`'s wire constants and
+  `sqlite.rs`'s own layout version, because `cargo mutants` cannot see a wrong
+  `const`. Neither refusal reads the other's constant, which is what the
+  independence test asserts — and **not** what separates the two stores, since
+  both values are `1`. `check_layout` naming columns does that; see the file
+  decision above.
+
+- **A membership store refuses an unknown layout, and the op log is then still
+  readable** → this is the asymmetry the separate FILE buys and it is worth
+  naming: a peer holding a membership store from a future build cannot list its
+  Stoas and can still read every op it holds. That is the recoverable direction
+  — the alternative, one file, makes an unknown membership layout cost the user
+  their ops. This survives both layout versions being `1`, which is why it is a
+  distinct claim from the one above rather than a restatement of it.
+
+- **A row whose `genesis_bytes` no longer decode** → reported as
+  `MembershipError::CorruptEntry`, never skipped. Skipping would make a
+  corrupted row indistinguishable from a Stoa the user never joined, which is
+  `OpLogError`'s "an empty feed is not an unreadable store" argument applied to a
+  listing.
+
+- **`stoas.sqlite` is a new file in the host's persistence directory** → no
+  migration and nothing to clean up: a peer that never creates or joins a Stoa
+  never gets the file, and a peer that does gets it created on first write.
+
+- **The creator's key is the root identity, and one key signs in every Stoa** →
+  the cost is cross-Stoa linkability: anyone observing two Stoas can link the
+  same participant across them, because the public key is the join. This is
+  §9.2's accepted scope decision and not this change's to make — see the creator
+  key decision above, which also records why the alternative it replaced was
+  worse on the same axis.
+
+- **Two files mean no transaction can span membership and ops** → a future "join
+  and backfill" is foreclosed as one atomic operation. Stated with the file
+  decision above; repeated here because it is a trade-off and not only a
+  rationale.
+
+- **A failed store open puts the host's filesystem path into the `{"error":…}` a
+  view renders** → **known, unfixed, and left as a family rather than an instance.**
+  `storage()` wraps every `rusqlite::Error` as `Storage(e.to_string())`, and
+  rusqlite's message for a failed open embeds the path it was handed — which is the
+  host-stamped `instance_persistence_path`, carrying the instance id.
+  `findings/security.md` entry 1 measured it through the public API.
+
+  **Why this change does not fix it.** `log/sqlite.rs:716` is the byte-identical
+  `OpLogError::Storage(e.to_string())` and predates this change, so `list_threads`
+  leaks the op store's path the same way; this change copied the pattern rather than
+  introducing it. Closing only the membership copy leaves the template that produced
+  it — MEMORY's *"unfixed test patterns get copied"* — and closing both changes a
+  sibling module's inherited error shape, which is a different change from this one.
+
+  **What holds it until then.** A characterisation test,
+  `membership.rs::an_unopenable_store_puts_the_host_path_into_the_error_a_view_renders`,
+  **asserts the leak** against a directory named
+  `an-instance-id-nobody-should-see`, with a comment saying a fix should invert it to
+  `assert_ne`. So the defect is reproducible rather than remembered.
+
+  The shape the fix should take, recorded so it is not re-derived: `keystore.rs`
+  already has the right posture — `KeystoreError::NotFound`,
+  `PermissionsTooOpen { mode }` and `DirectoryWritableByOthers { mode }` carry the
+  *fact* and never the *path*, held by
+  `no_error_message_carries_key_material_or_a_passphrase`. Both storage modules lack
+  that test, and `every_error_renders_without_leaking_rust_syntax` is not it: its
+  fixture is the hand-written string `"disk on fire"`, so it would pass any path.
+
+- **A peer can hold a Stoa it created under a key it no longer has, and nothing can
+  report it** → the third file, the keystore, has no relationship with the membership
+  store at all. `create_stoa` reads `identity.key`, mints a record naming that key's
+  public half, and writes it to `stoas.sqlite`; nothing ever re-checks the two.
+
+  **Scenario, verified against the code.** A peer creates a Stoa; the user later
+  restores `identity.key` from a different backup or re-runs onboarding, so the root
+  secret changes. `list_stoas` still lists the Stoa and still reports its
+  `foundingTitle` truthfully, and `MembershipStore::get` still verifies — `decode_row`
+  checks **record-against-address** and nothing else, so a changed root secret is
+  invisible to it. But `Moderators::of(genesis).contains(identity_public_key())` is now
+  false: the peer holds a Stoa it created and cannot moderate, and every check in this
+  change passes.
+
+  **Not fixed, and not this change's to fix.** No requirement in `stoa-membership` asks
+  for the comparison, and adding one would widen the surface without a contract behind
+  it. `findings/architecture.md` entry 7 routes the open question to `spec-writer`: is
+  this a state the module must be able to report, or one the spec deliberately says
+  nothing about? Either answer is fine; the silence is not, because the state is
+  reachable, invisible, and its only symptom appears when moderation lands.
+
+  **Distinct from the creator/poster pairing above**, and worth not conflating: that
+  was two derivations of the *current* identity disagreeing, now impossible by
+  construction. This is the current identity disagreeing with a record written in the
+  past — the record is immutable and the key can change under it, so no
+  one-derivation-position fix touches it.
+
+- **No layer caps a request before `hex::decode` allocates from its length** → a 2×
+  memory multiplier on an uncapped request, recorded here because `op.rs`'s version
+  of this gap is written down and the Stoa surface's was not
+  (`findings/security.md` entry 2).
+
+  **Measured, through the public API, with a counting `GlobalAlloc`:** a 20 MiB hex
+  `genesis` field on `join_stoa` peaks at 37,750,303 bytes — **1.80×** the request; a
+  20 MiB `title` on `create_stoa` peaks at 41,944,543 — **2.00×**, the extra copy
+  being `serde_json`'s parsed `String` plus the `s.clone()` at the title read. Both
+  are constant factors of an input the process already holds, so this is a multiplier
+  on an uncapped request rather than an unbounded allocation from a small one.
+  `Genesis::decode` is correct once reached: the title cap is checked *before*
+  `cursor.take(len)`, so the decoder allocates nothing from a length prefix.
+
+  **The negative result is the load-bearing part: there is no cap anywhere.** Not in
+  `core` (no `MAX_REQUEST`, no size constant), not in `docs/PHASE0-FINDINGS.md` (which
+  records no IPC payload bound), and `PLAN.md`'s 150 KiB is **SDS's network message
+  cap** — a different boundary that does not govern a local IPC request.
+
+  **Why not fixed at the decoder.** `stoa.rs` already argues where the cap belongs —
+  *"the right home for that check is the transport boundary, where the SDS frame is
+  actually visible"* — and that holds: this decoder cannot know whether its bytes
+  arrived in one message. A cap here would be the wrong layer; a cap at the transport
+  boundary is a transport change.
+
+  **Severity today is low** because the reachable caller is the local sandboxed QML
+  view, so an attacker needs the IPC socket or the view itself first. **Raise it the
+  moment a peer-facing decode path reaches `genesis_for`** — that is the trigger, and
+  it is the sentence to grep for when transport lands. When the pre-check is added it
+  is now one edit: `parse_stoa` is the single place this file parses the `stoa` field.
+
+## Unspecified behaviour, marked in the code
+
+Each of these is a `// NO SPEC:` marker on a test or at the choice, and each is a
+question for the spec-writer rather than a decision this change should own:
+
+1. **What `policy` a created Stoa declares.** `Policy::Open` is the only variant
+   and the spec does not say creation may choose. Creation accepts no policy
+   parameter and always declares `Open`.
+2. **What a posting policy is CALLED on the wire.** `policy_name` returns the
+   lowercase literal `"open"`. The spec requires the policy be answerable and
+   fixes no spelling, so this change chose one — and a view that branches on the
+   string makes changing it a breaking change to the module surface. This is the
+   entry that was missing: there are five NO SPEC subjects in the code and this
+   was the one design.md did not carry.
+3. **Whether an unknown field in a request is refused.** Ignored, matching
+   `list_threads`'s treatment of an offered `order`.
+4. **What an empty listing's `hasMore` is.** `false`.
+5. **What a `per_page` of zero lists.** An empty page with nothing after it.
+   Unreachable through the wire (`clamp_per_page` turns `0` into the default), so
+   this is a decision about the crate's own API; it is the answer that cannot hang
+   a caller paging to exhaustion.
+
+**Which key the creator is used to be on this list and is not any more.** It is
+settled by PLAN §5.2's MVP subsection, which the spec-writer should read rather
+than re-decide: the spec's "the key the caller would sign an op with" and the
+one-identity rule together name exactly one key. See the decision above.

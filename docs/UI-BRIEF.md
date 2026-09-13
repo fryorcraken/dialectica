@@ -36,9 +36,14 @@ naming the subset is so you know which constraints are live now and which are
 waiting, not so you design only the subset.
 
 **In the first release:** create an identity; create a Stoa; post; reply; upvote
-and downvote; share a Stoa by copying its address; join a Stoa by pasting an
-address; receive other people's posts; view a feed and view a thread; and have
-all of it survive closing the app.
+and downvote; share a Stoa; join a Stoa somebody shared; receive other people's
+posts; view a feed and view a thread; and have all of it survive closing the app.
+
+**"Share" and "join" are deliberately not written as "copy the address" and
+"paste the address" any more.** An address alone cannot be joined — see *Joining
+a Stoa* — so whatever a person shares has to carry the Stoa's founding record
+beside its address. What that shareable thing looks like is a design question
+this brief does not answer, and it is the first one to answer for this screen.
 
 **Not in the first release:** moderation, attachments, and per-Stoa identity.
 
@@ -230,13 +235,34 @@ Sketched functionally. Composition and hierarchy are yours.
 
 ### Stoa list — where a person starts
 
-Stoas the user has joined. **There is no directory to browse**; you join by
-pasting an address someone gave you, or by following a link in a post.
+Stoas the user has joined **or created**. **There is no directory to browse**;
+a Stoa reaches the user because somebody shared it, or because an affordance in a
+post carries it. **An address alone is not enough to join** — see *Joining a
+Stoa*, which is the screen where that matters and where it is argued.
 
-Each Stoa shows the title it currently goes by. Note that a Stoa's *founding*
-title is fixed forever, while its *current* title can be changed by moderators —
-so two Stoas can share a display name and still be entirely different Stoas.
-**A title is not an identifier.** The address is.
+A Stoa's *founding* title is fixed forever, while its *current* title can be
+changed by moderators — so two Stoas can share a display name and still be
+entirely different Stoas. **A title is not an identifier.** The address is.
+
+**Today the core returns only the founding title, and the field is named
+`foundingTitle` so that this cannot be missed.** Nothing resolves the
+moderator-signed metadata op that carries a current title, so a screen labelling
+this value as the Stoa's present name asserts something no peer has checked.
+Design for the label you can honestly apply now — and expect a `title` field to
+appear *beside* `foundingTitle` later, with an `isGenesisFallback` flag saying
+whether it was resolved or fell back. **The layout should absorb that without
+being redrawn**, which is the practical reason the distinction is stated here
+rather than left to the day it matters.
+
+Two things follow for this screen:
+
+- A Stoa whose title is **empty** is legal and reachable: the founding record has
+  no minimum length. A row must render without a title rather than collapsing.
+- A founding title carries whatever characters its creator typed, **unnormalised
+  and unsanitised**, bidi overrides and zero-width joiners included. The core
+  preserves it exactly on purpose, because normalising would change the address
+  and split one Stoa into two. Rendering it safely is this screen's job; see the
+  Unicode obligation below.
 
 ### Joining a Stoa — a security surface, not a form
 
@@ -244,11 +270,59 @@ An address is a copyable string that is **self-authenticating**: pasting it is
 enough to verify what you joined, because the address is a hash of the Stoa's
 founding record.
 
+**Pasting an address alone is not enough to join, and that is a property of the
+address rather than a missing feature.** A hash verifies a record somebody hands
+over; it cannot reconstruct one. So the join flow needs the **founding record**
+as well as the address — which means whatever a user shares, and whatever an
+in-post affordance carries, has to carry both. A screen designed around a
+single pasteable field cannot work.
+
 **Requirements:**
 - Show what is being joined **before** joining it.
 - An address appearing inside a post is attacker-supplied. Render it as an
   affordance the reader chooses to act on. **Never auto-join.**
 - Two Stoas may present the same name. Show something that distinguishes them.
+- **Joining a Stoa the user is already in is not an error.** The core reports the
+  same success either way, deliberately: a pasted address is exactly the input
+  someone supplies twice, and it changes nothing about what is already held. Do
+  not design an error state for it.
+
+### Creating a Stoa
+
+A title, and nothing else. The creator's key comes from the user's own keystore
+and **cannot be supplied** — a Stoa created under someone else's key is one the
+creator cannot moderate, and its address cannot be un-minted.
+
+**The key recorded as creator is the same key the user posts under**, which is
+the one identity constraint 2 describes. It matters here because a Stoa's creator
+is its sole moderator: a creator key the user does not sign with would be a Stoa
+nobody can moderate, permanently, since the creator is fixed inside the address.
+Nothing on this screen shows any of that today — moderation is out of the first
+release — but a later "you moderate this Stoa" badge will be answering the same
+question, so do not design as though the creator and the poster could be
+different people.
+
+**Requirements:**
+- **Show the new Stoa's address after creating it.** It is the only way to share
+  the Stoa, and there is no registry to look it up in later.
+- **Creating the same title twice is the same Stoa, not a second one.** The
+  founding record carries no timestamp and no random value, so the same person
+  and the same title produce the same address. The second attempt succeeds and
+  reports the same Stoa. If a screen wants "create another", it has to ask for a
+  different title — do not present this as a name collision to resolve, and do
+  not add a counter to the title on the user's behalf.
+- Creation fails when there is no usable key, with the same reason vocabulary the
+  posting probe uses — so a failure here reads identically to a failure to post,
+  which is deliberate.
+
+  **This screen cannot gate itself on that probe, and an earlier version of this
+  brief asked it to.** The probe is `getCapabilities({stoa})` and takes a Stoa
+  address; at creation there is no Stoa yet, so there is nothing to ask it about.
+  Design the create affordance to be **always offered and able to fail well**:
+  show the core's own reason, and route the user to whatever fixes it (creating or
+  unlocking an identity), rather than hiding the button. Gating on a build flag is
+  still wrong, and so is guessing at key state from anything other than an answer
+  the core gave.
 
 ### Feed — a Stoa's posts
 
@@ -411,12 +485,18 @@ Temporary — it resolves when an upstream gap closes, and the warning and the
 asymmetry go together when it does.
 
 **2b. A join confirmation showing only a title has shown the forgeable half.**
-A Stoa's displayed title comes from a moderator-signed message. It is **not
-unique, not verified against anything, and freely chosen** — two unrelated
-Stoas can present the same name, and one can be named to impersonate another.
-**The address is the identity; the title is decoration.** A confirmation screen
-that shows "Join *Agora*?" and nothing else has shown the reader precisely the
-part an attacker controls.
+A Stoa's title — the founding one the core returns today, and the moderator-signed
+current one that will arrive beside it — is **not unique, not verified against
+anything, and freely chosen** by whoever created or renamed the Stoa. Two
+unrelated Stoas can present the same name, and one can be named to impersonate
+another. **The address is the identity; the title is decoration.** A confirmation
+screen that shows "Join *Agora*?" and nothing else has shown the reader precisely
+the part an attacker controls.
+
+This applies to the Stoa **list** as much as to the confirmation, and for the same
+reason: a row showing only a title cannot be told from a row for a different Stoa
+with the same title. The core returns the address on every list item so that a
+screen always has the distinguishing half available.
 
 **3. Never show anyone's vouching but the viewer's own.**
 Vouching — privately deciding whose votes weigh more in your own feed — is
