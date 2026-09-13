@@ -79,7 +79,7 @@ recording fake bridge; no shipped file was mutated.
       title against itself. A defence that the defect switches off is worse than
       no defence, because its presence is what stops anyone looking.
 
-- [ ] **`tester`** — `tst_stoa_screens.qml:1375` — the address-note assertion
+- [x] **`tester`** — `tst_stoa_screens.qml:1375` — the address-note assertion
       admits a note that claims the Stoa itself is confirmed
       **Scenario:** the test's four checks are satisfied by copy that overreaches
       in exactly the way the spec forbids. Measured against the candidate note
@@ -99,6 +99,40 @@ recording fake bridge; no shipped file was mutated.
       **Severity:** medium-high (test strength). This is the same defect shape
       the prompt records a tester finding once already — three required
       substrings present while the sentence around them says the opposite.
+
+      **Fixed**, and this is the one of my four I am least comfortable about
+      having shipped, because I wrote that test *specifically* to replace a
+      literal-pinning version and then pinned literals in a new arrangement. The
+      candidate note reproduces exactly as measured:
+      `c1=true c2=true c3=true c4a=true c4b=true PASSES=true`.
+
+      **The reviewer's prescription is the right one and I took it unchanged:**
+      assert an explicit **negation of provenance** rather than assembling more
+      substrings. That is the check that cannot be satisfied by accumulation —
+      the hostile note contains every required phrase, so no set of required
+      phrases could have caught it. Only requiring the denial does. Two
+      assertions now:
+        - the note must deny provenance in so many words — `nothing … says |
+          establishes | proves | shows | tells`, or `does not | cannot …
+          establish | prove | show | confirm | mean`;
+        - and the affirmative is refused outright — nothing may say a check
+          `confirms | proves | establishes | means` this is the address the
+          reader `was sent | meant to receive | the right one`.
+
+      **Test that fails without it:** the existing
+      `test_the_address_note_cannot_be_simplified_into_an_unqualified_verified`.
+      Mutation: `addressNote` replaced with the finding's candidate verbatim.
+      Observed failure names the provenance-denial check and prints the note.
+      Both the shipped copy and the earlier `"Verified."` simplification behave
+      as before — the first passes, the second fails.
+
+      **Worth recording for whoever reviews this next:** the dev-writer's
+      `test_the_explanation_claims_a_hash_match_and_names_the_unverified_rest`
+      **passed** against that same mutation, in the same run. Two tests now cover
+      this copy and only one of them holds the line; the weaker one is left in
+      place because it pins the shipped wording against accidental loss, which is
+      a different and still-useful job — but it should not be read as a second
+      opinion on the claim.
 
 - [x] **`dev-writer`** — `StoaReference.qml:45` — a single-pass `stripPrefix`
       lets a `stoa:` prefix reach `join_stoa`, converting a malformed paste into

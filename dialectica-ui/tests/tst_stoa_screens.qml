@@ -52,6 +52,36 @@ import "../src/qml"
 // than half margin note. `bodyText` exists to scan only what ships. Verified by
 // running this file against a hidden apparatus column: all tests pass, because
 // none of them depends on annotation.
+//
+// ---- the second family: a literal where a meaning was required -------------
+//
+// Distinct from the one above and worth keeping separate, because the fix is
+// different. There the assertion read the wrong VALUE; here it reads the right
+// value and asks the wrong QUESTION — matching a phrase where the requirement
+// is about what a sentence claims. Such a test fails on an innocent reword and
+// passes on a fluent lie, which is the worst pair of properties available.
+//
+//   - three refusal messages asserted to be three DIFFERENT strings. A tester
+//     reworded one to actively misinform and both distinguishability tests
+//     stayed green: misinforming strings are still distinct strings.
+//   - the malformed-paste refusal blocking three exact phrasings. A reviewer
+//     measured two equivalents that passed — "could not be confirmed against
+//     its address", "failed the check against the address it names" — each
+//     telling a user who truncated their own paste to blame their sender.
+//   - the address note pinned by three required substrings. A note carrying all
+//     three and reading "…which confirms this is the Stoa you were sent"
+//     passed, asserting the single thing the spec says the copy may never claim.
+//
+// So those assertions now test STRUCTURE — a verb of checking together with the
+// address as its object; an explicit denial of provenance — rather than
+// vocabulary. And two absence assertions that used bare `indexOf` gained word
+// boundaries, because `members` matches `membership` and the honest copy
+// "Your membership was read without error" is one screen-state change from
+// making the count assertion fail for a reason that is not a defect.
+//
+// Both fixes were verified in BOTH directions, which is the part that is easy
+// to skip: a regex that never matches is indistinguishable from a repaired
+// assertion until you plant the thing it must still catch.
 TestCase {
     id: spec
     name: "StoaScreens"
@@ -428,7 +458,19 @@ TestCase {
                "no per-row held-post count is available and none may be substituted")
         verify(shown.indexOf("nothing received yet") < 0,
                "that phrase is a claim about a count nothing computed")
-        verify(shown.indexOf("members") < 0 && shown.indexOf("peers reachable") < 0,
+        // Word-boundary, not a bare substring. `indexOf("members")` also matches
+        // `membership`, and **"Your membership was read without error" is
+        // deliberate honest copy** in the list's empty state
+        // (StoaListScreen.qml) — the sentence that stops a user re-joining Stoas
+        // they are already in. The bare form passes here only because this
+        // fixture puts a row on screen, which hides that panel; add a row to the
+        // empty-state fixture, or move that sentence into a row, and the test
+        // fails for a reason that is not a defect.
+        //
+        // The two words mean opposite things: `members` is a global count no
+        // peer can observe and the spec forbids permanently; `membership` is
+        // what this machine recorded and is the honest thing to say.
+        verify(!/\bmembers\b/.test(shown) && shown.indexOf("peers reachable") < 0,
                "no global count may appear: " + shown)
         // The specific substitution the spec forbids by name: another call's
         // page length rendered as though it were a total.
@@ -934,7 +976,14 @@ TestCase {
         // The claim need not use the bundle's exact words to do the harm, so the
         // word itself is refused anywhere in the body. Nothing this screen
         // legitimately says uses it.
-        verify(shown.indexOf("identity") < 0,
+        // Word-boundary, for the same reason as `\bmembers\b` on the list's count
+        // assertion. `identical` does not in fact contain `identity` — this one
+        // is safe by luck of spelling today — but the words it WOULD catch are
+        // `identities`, `identify` and `identifier`, and the lookalike panel is
+        // one copy edit from saying "the titles are identical" on screen. A
+        // false alarm naming a per-Stoa-identity promise that was never made is
+        // how a real one later gets waved through.
+        verify(!/\bidentity\b/.test(shown),
                "the body must not raise identity at all, however phrased: " + body)
         verify(shown.indexOf("you moderate") < 0, "no moderator status may be asserted")
         verify(shown.indexOf("membership list") < 0 || shown.indexOf("no membership list") >= 0,
@@ -1536,13 +1585,27 @@ TestCase {
         // reader knows to look at what they pasted.
         verify(m.indexOf("pasted") >= 0 || m.indexOf("paste") >= 0,
                "a malformed paste must name what was pasted as the problem: " + malformed)
-        // And it must NOT describe a verification outcome. A malformed paste has
-        // been compared against nothing; saying it failed to verify would send
-        // the reader to blame their sender for a paste they truncated.
-        verify(m.indexOf("does not hash") < 0 && m.indexOf("did not verify") < 0
-               && m.indexOf("does not match") < 0,
-               "nothing was verified here, so nothing may report a verification "
-               + "failure: " + malformed)
+        // And it must NOT describe a comparison against the address. A malformed
+        // paste has been compared against nothing; saying it failed a check would
+        // send a reader who truncated their own paste to blame their sender.
+        //
+        // **Asserted as a structure rather than as a blocklist.** Three literal
+        // phrasings were blocked here before, and a reviewer measured two
+        // equivalents that passed — "could not be confirmed against its address"
+        // and "failed the check against the address it names" — each carrying
+        // exactly the misinformation the blocklist existed to stop. Adding those
+        // two would leave a third.
+        //
+        // A claim of comparison needs both halves: a verb of checking, and the
+        // address as the thing checked against. The shipped copy mentions the
+        // address freely — it explains what a reference is — so neither half
+        // alone can be forbidden. It is the conjunction that is the lie.
+        var checkVerb = /\b(hash(es|ed)?|verif(y|ies|ied|ication)|match(es|ed)?|confirm(s|ed)?|check(s|ed)?|validat(e|es|ed|ion))\b/
+        var againstAddress = /\b(against|to|with)\b[^.]{0,40}\baddress\b/
+        verify(!(checkVerb.test(m) && againstAddress.test(m)),
+               "nothing was compared against the address here, so nothing may "
+               + "report that a comparison failed — a reader who truncated their "
+               + "own paste would be sent to blame their sender: " + malformed)
 
         // 2. A well-formed pair the core refuses because it does not verify.
         var addr = "b02d5e77" + "88".repeat(28)
@@ -1620,6 +1683,35 @@ TestCase {
                || n.indexOf("no registry") >= 0 || n.indexOf("any registry") >= 0,
                "the note must bound what the check consulted — no registry, no "
                + "peer, no third party. Got: " + note)
+
+        // 3b. **Provenance is denied, in so many words.** This is the check the
+        //     four above could not make, and a reviewer proved it: the note
+        //     "The record shown is the one this address names, which confirms
+        //     this is the Stoa you were sent. Nothing more is needed. No registry
+        //     was consulted because none is needed; only the founding title is
+        //     unverified." satisfies every one of them — it carries `this address
+        //     names`, `unverified`, `no registry`, and dodges the three literal
+        //     phrases below — while telling the reader the address is the one
+        //     they were meant to receive.
+        //
+        //     That is THE claim spec.md's "What the address proves is stated
+        //     exactly, and nothing broader" forbids, because it is the whole of
+        //     the residual risk: a reader who pastes a hostile address and is
+        //     shown a verified record has verified the attacker's record against
+        //     the attacker's address, perfectly successfully. Assembling more
+        //     required substrings cannot catch it — the hostile note contains
+        //     every one. Only the negation can, so the negation is required.
+        verify(/\bnothing\b[^.]{0,60}\b(says|establishes|proves|shows|tells)\b/.test(n)
+               || /\bdoes not\b[^.]{0,60}\b(establish|prove|show|confirm|mean)\b/.test(n)
+               || /\bcannot\b[^.]{0,60}\b(establish|prove|show|confirm|tell)\b/.test(n),
+               "the note must explicitly DENY provenance — that nothing here "
+               + "establishes this is the address you were meant to receive — "
+               + "rather than merely omitting the claim. Got: " + note)
+        // And the affirmative form of that claim is refused outright, however
+        // the sentence around it is built.
+        verify(!/\b(confirms|proves|establishes|means)\b[^.]{0,60}\b(you were sent|meant to receive|the right|the one you wanted)\b/.test(n),
+               "nothing may claim this is the address the reader was sent or "
+               + "meant to receive. Got: " + note)
 
         // 4. Nothing anywhere on the screen makes an unqualified claim of
         //    verification. This is the assertion a "Verified." simplification

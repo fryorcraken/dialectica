@@ -146,7 +146,7 @@ appears it was measured, not estimated.
       covers two and three prefixes, interleaved whitespace, and asserts
       end-to-end that nothing carrying a prefix reaches `join_stoa`.
 
-- [ ] **`tester`** — `tst_stoa_screens.qml:1306` — the malformed-paste assertion
+- [x] **`tester`** — `tst_stoa_screens.qml:1306` — the malformed-paste assertion
       blocks three exact phrasings and admits equivalent misinformation
       **Scenario:** the `noVerif` check rejects only `does not hash`,
       `did not verify` and `does not match`. Measured against candidate reasons:
@@ -161,7 +161,27 @@ appears it was measured, not estimated.
       **Severity:** medium (test strength, not a live defect: the shipped string
       is correct today).
 
-- [ ] **`tester`** — `tst_stoa_screens.qml:405` — `indexOf("members")`
+      **Fixed.** Both candidate reasons reproduced before changing anything —
+      scored against the assertion as it stood, both returned
+      `names=true noVerif=true PASSES=true`, exactly as reported.
+
+      **Asserted as a structure rather than a longer blocklist**, per the
+      finding's own prescription. A claim of comparison needs two things: a verb
+      of checking (`hash`, `verify`, `match`, `confirm`, `check`, `validate`,
+      with their inflections) and the address as the thing checked against
+      (`against|to|with` … `address`, within one sentence). Neither half can be
+      forbidden alone — the shipped copy mentions the address freely, because
+      explaining what a reference is *requires* mentioning it. It is the
+      conjunction that is the lie, so the conjunction is what is refused.
+
+      **Test that fails without it:** the existing
+      `test_a_malformed_paste_and_an_unverified_record_say_different_things_to_do`.
+      Mutation: `StoaReference.parse`'s malformed reason replaced with the
+      finding's first candidate, "What was pasted could not be confirmed against
+      its address." Observed failure names the string verbatim. The shipped copy
+      still passes, and so do the other 58 tests.
+
+- [x] **`tester`** — `tst_stoa_screens.qml:405` — `indexOf("members")`
       over-matches `membership`, so the count assertion is one honest copy edit
       from a false failure
       **Scenario:** the list's empty-state body says "Your membership was read
@@ -176,7 +196,25 @@ appears it was measured, not estimated.
       **Severity:** low (fragility). The prompt asked whether this sweep fix
       landed: it did **not** — the bare `indexOf` is still at line 405.
 
-- [ ] **`tester`** — `tst_stoa_screens.qml:717` — `indexOf("identity")`
+      **Fixed** — `!/\bmembers\b/.test(shown)`. The reviewer is right that it had
+      not landed; I had analysed it and then been told to stay out of the
+      worktree while the merge ran, so it sat unapplied. Correct call to raise it
+      rather than assume it was in flight.
+
+      **Verified in both directions**, which matters more here than usual: a
+      regex that never matches would look exactly like a repaired assertion.
+        - *Still catches the real thing.* Mutation: a `Text { text: "412 members" }`
+          in the row. Observed: this assertion fails, and
+          `test_no_digit_is_rendered_that_the_reply_did_not_supply` fails
+          alongside it on `412`.
+        - *No longer fires on honest copy.* Mutation: the empty state's real
+          sentence "Your membership was read without error." moved into a row —
+          the finding's own scenario. Observed: all 59 pass. Reverting just the
+          assertion to the bare `indexOf` with that mutation still in place
+          reproduces the false failure, so the boundary is what removes it and
+          not the fixture.
+
+- [x] **`tester`** — `tst_stoa_screens.qml:717` — `indexOf("identity")`
       over-matches `identical`, the same unlanded fix
       **Scenario:** `"identical".indexOf("identity")` is `-1`, so this one is
       currently safe by luck of spelling — but `JoinScreen.qml:335` already uses
@@ -185,6 +223,25 @@ appears it was measured, not estimated.
       fails on honest copy. It is listed separately from the `members` entry
       because it needs its own boundary fix, not the same one.
       **Severity:** low (fragility).
+
+      **Fixed** — `!/\bidentity\b/.test(shown)`, and the reviewer is right that
+      it needed its own fix rather than riding on the `members` one.
+
+      The measurement confirms the finding's framing exactly: `"identical"
+      .indexOf("identity")` is indeed `-1`, so this was safe by spelling and not
+      by design. The words a boundary actually buys here are `identities`,
+      `identify` and `identifier`. Worth stating plainly that this is a
+      **false-alarm** fix where the `members` one was a false-negative fix — and
+      a false alarm on a security assertion is not the lesser problem, because
+      an assertion that cries wolf about a per-Stoa-identity promise nobody made
+      is how a real one later gets waved through.
+
+      **Verified in both directions.**
+        - *Still catches the real thing.* Mutation: the joined panel's body
+          prefixed with "This gives you an identity for this Stoa." Observed:
+          fails, dumping the body so the offending sentence is visible.
+        - *Tolerates honest copy.* Mutation: "Two Stoas may have identical
+          titles; identifiers differ." Observed: all 59 pass.
 
 ---
 
