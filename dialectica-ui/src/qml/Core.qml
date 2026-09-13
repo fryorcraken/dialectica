@@ -94,4 +94,36 @@ QtObject {
     function getCapabilities(stoa) {
         return root.call("get_capabilities", [JSON.stringify({ stoa: stoa })])
     }
+
+    // Create a Stoa. A title and nothing else, because there is no creator
+    // argument and there cannot be: the creator key is fixed inside the address
+    // preimage forever, so a call accepting one would mint a Stoa nobody can
+    // moderate at an address nobody can withdraw. The key comes from this peer's
+    // keystore, and creation fails — with the keystore's own reason — when there
+    // is no usable one.
+    function createStoa(title) {
+        return root.call("create_stoa", [JSON.stringify({ title: title })])
+    }
+
+    // Join a Stoa somebody else created.
+    //
+    // BOTH halves, and that is a property of the address rather than an
+    // awkwardness of this call: an address is a one-way hash of the record,
+    // enough to verify a record handed over and not enough to reconstruct one.
+    // A bare address is not joinable, which is why the view's paste field and
+    // its share affordance are one decision — see StoaReference.qml, which owns
+    // both `parse` and `shareText` in one file so the two ends cannot drift.
+    function joinStoa(stoa, genesis) {
+        return root.call("join_stoa", [JSON.stringify({ stoa: stoa, genesis: genesis })])
+    }
+
+    // One page of the Stoas this peer is in.
+    //
+    // `perPage` is the caller's rather than defaulted here. This wrapper's job
+    // is to name the method once and shape the request; how many rows a screen
+    // shows is that screen's decision, and a default buried here is a number
+    // two screens would silently share.
+    function listStoas(page, perPage) {
+        return root.call("list_stoas", [JSON.stringify({ page: page, perPage: perPage })])
+    }
 }

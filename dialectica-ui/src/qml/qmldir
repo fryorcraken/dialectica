@@ -1,5 +1,6 @@
 singleton Theme 1.0 Theme.qml
 singleton Core 1.0 Core.qml
+singleton StoaReference 1.0 StoaReference.qml
 Identicon 1.0 Identicon.qml
 AddressLabel 1.0 AddressLabel.qml
 VoteControl 1.0 VoteControl.qml
@@ -10,3 +11,6 @@ FlatButton 1.0 FlatButton.qml
 ScreenFrame 1.0 ScreenFrame.qml
 SanitisedText 1.0 SanitisedText.qml
 FeedScreen 1.0 FeedScreen.qml
+ClipboardSink 1.0 ClipboardSink.qml
+StoaListScreen 1.0 StoaListScreen.qml
+JoinScreen 1.0 JoinScreen.qml
