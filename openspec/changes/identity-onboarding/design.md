@@ -7,10 +7,23 @@ Four properties of the existing code shape every decision below, and each was
 verified rather than assumed.
 
 **`derive_stoa_key` is on the live path, and the chain is three hops.** Verified
-at `dialectica/rust-lib/src/lib.rs:251` → `keystore.rs:651` `stoa_address` →
-`:645` `stoa_public_key` → `:640` `stoa_key` → `:641`
-`derive_stoa_key(&self.root, stoa)`. This change adds a path input to that
-chain; it does not route around it.
+by walking it: the adapter's `getCapabilities` closure → `Keystore::stoa_address`
+→ `stoa_public_key` → `stoa_key` → `identity::derive_stoa_key(&self.root, stoa)`.
+This change adds a path input to that chain; it does not route around it.
+
+Cited **by symbol rather than by line**, and that is a correction rather than a
+style preference. This paragraph gave `lib.rs:251` and `keystore.rs:651/:645/
+:640/:641`, which were the pre-change numbers — by the time the change shipped,
+`lib.rs:251` was a doc comment about the slate nonce. Three reviewers found the
+citations stale independently, and one noted the real hazard: this project's
+recorded failure mode is that the most convincing citation is the unread one, so a
+reader who checks `lib.rs:251`, finds prose about a nonce, and concludes the chain
+claim was fabricated would be drawing the wrong lesson from a correct claim. Line
+numbers in a `design.md` rot inside the same change; symbol chains do not.
+
+Note that `getCapabilities` **no longer uses this chain** — see the decision on
+`posting_identity` below. The paragraph is kept because it is what the change was
+designed against.
 
 **The op log's schema cannot absorb a new table.** `log/sqlite.rs` holds
 `LAYOUT_VERSION` in `PRAGMA user_version`, `check_layout` proves the declared
@@ -21,10 +34,13 @@ states outright that **there is no migration path by design** and that a later
 permanently bricks every store written by a prior build.
 
 **The core crate is pure and the module instance is `Default`-constructed.**
-`dialectica-core` has zero SDK types and no ambient state; the module struct
-`Dialectica` holds exactly one field (`persistence_path`), set only by
-`on_context_ready`. `interface: "universal"` scans the impl header's `public:`
-section, so the constructor must stay genuinely parameterless.
+`dialectica-core` has zero SDK types and no ambient state. When this change
+started, `Dialectica` held exactly one field (`persistence_path`), set only by
+`on_context_ready`; it now holds a second, the `OnboardingSession` that spans a
+slate and a keep. `interface: "universal"` scans the impl header's `public:`
+section, so the constructor must stay genuinely parameterless — which is why the
+new field is a `Default`-constructible `core` type rather than anything needing an
+argument.
 
 **The keystore file has no room for a new field, and that is asserted.**
 `keystore`'s "The file is exactly its declared layout, with no room for a
@@ -223,27 +239,27 @@ recomputes the same walk.
 
 ### A keep writes the keystore and the path record, and the keystore goes first
 
-Keeping is two writes — `Keystore::create` and the path record — and the spec
-requires it "either complete or change nothing".
+Keeping is two writes — the keystore and the path record — and the spec requires
+it "either complete or change nothing".
 
 **The keystore is written first, and this ordering is the whole of the
-atomicity story.** `Keystore::create` already refuses to overwrite
-(`KeystoreError::AlreadyExists`) and already writes atomically through a random
-staging path. So:
+atomicity story.** `Keystore::create` writes atomically through a random staging
+path. So:
 
-- If the keystore write fails, nothing was written anywhere. Clean.
+- If the keystore write fails, **no path was recorded anywhere, and the
+  `identity.sqlite` the adapter opened on the way in carries no row.** Not
+  "nothing was written anywhere", which is what this entry said and which is
+  false: `IdentityStore::open` runs before the keep and stamps a schema onto a
+  fresh file, so a failed keystore write leaves a zero-row store with
+  `user_version = 1` behind. Harmless — `path_for` returns `None` and `whoAmI`
+  takes the no-choice row correctly — but the precise claim is both true and just
+  as strong, and design review caught the overstatement.
 - If the keystore write succeeds and the path record fails, the keystore exists
-  with no recorded path. **That is the one partial state, and it is recoverable
-  rather than silent**: the keystore write is the irreversible half (a fresh
-  master key), the path record is derivable from nothing but the user's next
-  choice, and a keep that failed reports the failure. The identity is not
-  reported as kept, and `whoAmI` will not name one, because it reads the path
-  record — which is the spec's "A failed keep records nothing: no identity is
-  reported as kept".
+  with no recorded path. That is the one partial state; what it costs is below.
 
 The reverse order would be worse in a way worth stating: a recorded path with no
-keystore is a record naming a master key that does not exist, and the *next*
-keep — with a different master key — would silently inherit it.
+keystore is a record naming a master key that does not exist, and a later keep
+would silently inherit it.
 
 **What this does not claim.** It is not a two-phase commit, and a crash between
 the two writes leaves the keystore on disk. The honest statement is that the
@@ -251,6 +267,184 @@ spec's requirement is met at the level of *reported* state: no keep that did not
 complete reports an identity, and a load after a failed keep finds no identity.
 Making the pair genuinely atomic would need the path record inside the keystore
 file, which `keystore`'s spec forbids.
+
+### The second-keep refusal is the path record's, not the keystore's
+
+A keep writes the keystore **only where no file exists**, and the refusal for a
+choice already made comes from `chosen_paths`' primary key.
+
+**This reverses the first implementation, and the reason is the most instructive
+thing in this document.** That version used `Keystore::create`'s `AlreadyExists`
+as the second-keep guard, which reads as elegant — one mechanism, already atomic,
+already refusing. It is one mechanism doing **two jobs**, and the second one was
+wrong:
+
+- The keystore is **one file per the whole install**. The path record is
+  **per Stoa**. So `AlreadyExists` refuses on install-scope while the spec's
+  refusal is Stoa-scope.
+- Consequence, measured by design review: a user who kept an identity in Stoa A
+  and then tried to keep one in Stoa B was refused at `create`, **before
+  `record_path` was ever called**, with a reason naming a keystore they did not
+  know they had. `chosen_paths` could never hold a second row through any wire
+  call, so the spec's "Distinct choices for distinct Stoas are recorded
+  separately" was **unreachable through the API** — and this document's claim that
+  the primary key discharges that scenario was false. It guarded a table that
+  structurally could not receive a second insert.
+
+So the two refusals are separated, each to the thing that knows:
+
+| situation | scope | who refuses |
+|---|---|---|
+| a master key is already on disk | install | nobody — it is reused, and is the expected state for every Stoa after the first |
+| this Stoa already has a chosen path | Stoa | `chosen_paths`' primary key |
+
+**Two things this bought that have to be paid for, both recorded rather than
+discovered later:**
+
+- **The `encrypted` report needed a second source.** Where the keystore already
+  exists this call writes nothing, so "the `Unlock` this keep used" is not the
+  truth about the file — it is the protection a write that did not happen would
+  have applied. That branch reads the file, via `Keystore::is_encrypted`. This is
+  *not* the re-read the decision below rejects: that one is about re-reading a
+  file this call just wrote, where the value this code used is the authority.
+  Here there is no value this code used. An unreadable existing keystore refuses
+  the keep rather than guessing, because a keep that reported an identity while
+  unable to say whether its master key is protected has answered a question it
+  does not know the answer to.
+- **The refusal's message had to become its own error.** The primary key surfaces
+  as SQLite's `UNIQUE constraint failed`, which `IdentityStoreError::Storage`
+  renders as *"check the path and its containing directory"* — the wrong fix for
+  what is now the commonest refusal this store has. `ChoiceAlreadyRecorded` names
+  the existing choice instead. It is matched on SQLite's **error code**, not its
+  message text, so a reworded diagnostic cannot silently send every refusal back
+  to generic storage. `each_keep_refusal_reason_is_pinned_to_its_own_situation`
+  failed on exactly this when the refusal moved, which is what that test was
+  written for.
+
+**The risk this trades into, and why it is accepted.** The one-file guard was
+also, accidentally, what stopped a second keep from minting and writing a *new*
+master key over the old one — which would strand every identity derived from the
+first. That protection now rests on the session reusing the opened keystore and
+on `keeping_an_identity_in_a_second_stoa_succeeds_and_reuses_the_master_key`
+asserting the written file re-derives both Stoas' kept addresses.
+`a_second_keep_for_one_stoa_is_still_refused_after_the_second_stoa_fix` exists
+beside it deliberately: the two constrain each other, because the fix is only
+correct if the refusal it moved is still there.
+
+### The master key a slate was offered under is held with the nonce, not re-minted
+
+`OnboardingSession` holds `(keystore, live_slate)` together for the module's
+lifetime, and the mint-or-open decision is in `core`.
+
+**Recorded because the first implementation was wrong in a way every guard
+passed.** A slate is a **`(master key, nonce)` pair**: the nonce fixes the five
+*paths*, the master key fixes the five *identities* at those paths. The module
+held only the nonce, and the adapter minted a fresh key on each of the two calls.
+So on a fresh install — the only install onboarding exists for — the slate showed
+candidates of key *A*, the keep recomputed the same five paths against key *B*,
+wrote *B*, reported `kept: true`, and named an address the user had never seen.
+
+Three reviewers reached it independently. The spec calls storing an identity the
+user did not choose unrecoverable *"because the choice cannot be recomputed"*, and
+an address *"the only unforgeable way to tell two candidates apart"* — so the one
+value the choice was made on was the value that changed. Every refusal in
+`keep_selection` is about the *selection*; none was about the key the selection
+was made against.
+
+**The alternative considered and rejected**: carry a commitment to the master key
+in the slate reply and refuse the keep when it does not match. That detects the
+divergence and does not fix it — it converts a wrong answer into a refusal the
+user can do nothing about, because the key that produced their slate is already
+gone. Holding it is what makes the right answer available.
+
+**What holding costs**: a root secret in memory for the module's lifetime rather
+than for one call. That is the same lifetime a *kept* keystore's root has, so the
+window widens only on the fresh-install path and only until the user keeps or the
+module stops. Nothing is written — the mint writes no file, which is the spec's
+"Generating a slate SHALL NOT write to storage" — and `Keystore`'s root is
+`Zeroizing`, so the held copy is wiped on drop.
+
+**Two user-visible properties this fixed as a side effect**, both of which
+`docs/UI-BRIEF.md` already promised a designer:
+
+- **"Refresh for more" means more.** Each refresh now offers more candidates of
+  one identity's key rather than candidates of a different key each press.
+- **A second Stoa reuses the master key** the first keep wrote, which is what
+  "one master key per install" has to mean to be worth saying.
+
+**Why it is in `core`.** It was a 12-line helper on the adapter struct, and the
+adapter is `#[cfg(logos_scaffold)]` — `build.rs` sets that cfg only when the
+generated provider exists, which it never does under `cargo test`. The one
+function deciding which master key a slate and a keep each saw was compiled out of
+the only gate that runs any logic, and the adapter's own comment says a body there
+that grows past one line *"is logic no test can reach"*. It was right. What stays
+in the adapter is what genuinely cannot move: the host's directory, and the
+environment the protection is read from.
+
+**On the fixture that hid it.** `a_kept_identity_is_the_candidate_the_slate_offered_at_that_index`
+is the test written for this exact property and it could not fail on it, because
+it hands both calls the same fixed `[7u8; 32]` keystore. A fixture supplying one
+key to both sides cannot distinguish "the slate and the keep agree" from "the
+harness gave them the same one" — this project's recorded defect family, at the
+fixture boundary rather than inside a fixture. The regression test supplies **no**
+key: its opener reports `NotFound`, so minting happens, and its assertion is a
+relationship between two replies rather than a comparison against a constant.
+
+### `getCapabilities` reports the path-derived identity, through `core`
+
+The probe's identity now comes from `posting_identity(stoa, keystore, paths)` —
+the path record consulted, then the path-taking derivation.
+
+**Recorded because leaving it alone is what broke it.** `proposal.md` declares
+`posting-capability` *"not modified, deliberately — the probe's shape, its reasons
+and its derivation are untouched"*. The shape was untouched and the **contract was
+broken**: the salt bump gave the path-taking scheme `/dialectica/2/…` while the
+probe's lookup stayed on the pathless `/dialectica/1/…`, and `identity.rs`'s own
+test asserts the two schemes *must* disagree. So `whoAmI` and `getCapabilities`
+answered "who posts here" with two different addresses for one user in one Stoa,
+with no field in either reply to tell them apart. `posting-capability`'s
+requirement is explicit — the reported identity *"SHALL be the one an op published
+now would be attributed to, derived from the key that would actually sign it"* —
+and names the failure: *"the user sees one handle and posts under another."*
+
+The salt bump was right. It left a caller behind, and the "not modified" paragraph
+is how that went unnoticed: the distinction it exists to draw is exactly the one
+it got backwards.
+
+**Two consequences taken on purpose:**
+
+- **`getCapabilities` now depends on `IdentityStore`.** That is a real widening of
+  what the probe reads, and the alternative — retire the pathless trio from the
+  live path — answers a different question, because the probe would then have no
+  identity to report at all. A master key with no recorded choice for this Stoa is
+  now `canPost: false` with a reason naming the missing choice, which is the same
+  state `whoAmI`'s fourth row names, reported through the same constant so the two
+  methods cannot describe one situation in two vocabularies. Previously the probe
+  answered `canPost: true` here, asserting posting ability for an address with no
+  recorded path that nothing in the signing path would ever use.
+- **The lookup's error widened from `KeystoreError` to `String`.** It said the only
+  thing that can stop a user posting is the keystore, which stopped being true.
+  Adding an `Other(String)` arm to `KeystoreError` was the obvious alternative and
+  is rejected: that enum's arms are documented as distinguishable *so a reason can
+  name a fix*, and a catch-all carrying another module's failure is what the
+  doctrine exists to prevent. `capability_for` reduced the error to a `String` on
+  the next line anyway.
+
+**Why it is in `core`.** Same reason as the session: the derivation was chosen in
+the adapter's closure, every probe test injects a stub returning a literal, so no
+test could compare the probe's identity to `whoAmI`'s and none could be written
+while the choice lived there. Moving it is what made
+`the_probe_and_whoami_report_the_same_identity_for_one_user_and_stoa` possible,
+and that test asserts against a signature verifying — the requirement's own
+wording — rather than against two derivations that could both be wrong.
+
+**Left behind, and flagged rather than fixed here:** `Keystore::stoa_key`,
+`stoa_public_key` and `stoa_address` — the pathless trio — now have **no
+production caller**. They remain because `identity.rs`'s non-collision test needs
+the primitive, and because deleting three public methods from `keystore`'s type
+widens this change into a contract it declares untouched. A later change should
+either retire them or say why they stay; this one has no business doing it
+silently.
 
 ### `whoAmI` reads the path record, and its absence is a distinguishable reason
 
@@ -312,11 +506,29 @@ about the identity being reported, so it belongs beside it.
 ## Risks / Trade-offs
 
 **A crash between the keystore write and the path write leaves a keystore with
-no recorded path** → The state is recoverable and not silent: `whoAmI` names the
-missing record rather than reporting no identity, and a second keep is refused by
-`AlreadyExists` rather than minting a second master key. What is *not* offered is
-an automatic repair, because repairing means choosing a path on the user's behalf
-and the spec forbids coercing a selection.
+no recorded path** → **The user can now repair this by choosing again, and could
+not when this entry first claimed they could.** The correction is worth keeping
+because the wrong version was convincing.
+
+It said the state was *"recoverable rather than silent"* and that the path record
+was *"derivable from nothing but the user's next choice"*. Design review showed
+that choice **could never be made**: the next `keepIdentity` hit `Keystore::create`
+→ `AlreadyExists` and returned before `record_path` was reached. So `whoAmI`'s
+reason told the user to generate a slate and keep a candidate, `getCapabilities`
+agreed, and the keep then refused with a message about a keystore they did not
+know they had — a loop with no exit, through every wire method this change adds,
+repairable only by deleting the keystore file by hand and throwing away the master
+key. The mechanism this entry named was right; the conclusion drawn from it was
+not.
+
+The second-keep fix closes it as a side effect rather than by design: a keep whose
+keystore already exists now reuses it and proceeds to `record_path`, so the next
+choice does land. `whoAmI`'s reason is therefore now a fix that works, which is
+what `KeystoreError::Display`'s name-the-fix obligation requires of it.
+
+What is still *not* offered is an automatic repair, because repairing means
+choosing a path on the user's behalf and the spec forbids coercing a selection.
+That part was always right.
 
 **The salt bump means an identity derived under the old two-input scheme is not
 reachable through the new path-taking one** → Deliberate, and the point of the
@@ -335,10 +547,24 @@ candidates actually need.
 one more file for a backup to remember. Accepted against bricking every existing
 op log, which is the alternative.
 
-**`identity.sqlite` has no `check_layout` equivalent** → The op log's version
-check proves its declared layout against the columns it reads, and this store
-does not. It is a two-column table read by two statements, so the failure the op
-log's check exists to catch — a stamped version over absent tables — surfaces
-here as a named error on the first read rather than as `Storage("no such
-table")`. Recorded as a known asymmetry rather than copied, because copying it
-would be copying 40 lines of machinery for a table with two columns.
+**`identity.sqlite`'s `check_layout` proves its columns exist and nothing about
+their constraints** → This entry previously said the store had **no**
+`check_layout` at all, recorded as "a known asymmetry rather than copied". That
+described a tree that does not exist: `identity_store.rs` has one, it names both
+columns, it is called from `from_connection`, and two tests cover the behaviour the
+entry called absent. The guard was declined in the design and then written during
+implementation, and the reversal was never carried back — readability review caught
+it, and it is the more misleading direction, because a document claiming *less*
+than the code does fails nothing.
+
+What is genuinely asymmetric is narrower and is the real risk. `check_layout` runs
+`SELECT stoa, path FROM chosen_paths LIMIT 0`, which proves the two column *names*
+exist and nothing about keys or constraints. So a replaced file whose
+`chosen_paths` has no `PRIMARY KEY` opens `Ok`, and `path_for`'s
+`query_row(...).optional()` then returns whichever of two rows for one Stoa SQLite
+hands back first — an identity chosen by physical row order. Security review
+measured it. It is not closed here: the fix is a constraint check at open, which is
+its own change, and the disk-content family it belongs to is the same one
+`path_from_row`'s bound belongs to. **Recorded so the next reader knows the
+one-path-per-Stoa invariant is a property of files *this build* wrote, not of every
+file it will open.**

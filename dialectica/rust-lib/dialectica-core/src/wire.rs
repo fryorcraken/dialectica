@@ -198,9 +198,21 @@ impl Capability {
 /// What this does NOT do is make a mutation detectable — reverting to `FnOnce`
 /// leaves the suite green, and the mutation table says so rather than claiming
 /// a kill it does not have.
+///
+/// # The lookup's error is a reason, not a `KeystoreError`
+///
+/// It was `Result<String, KeystoreError>`, which said the only thing that can stop a
+/// user posting is the keystore. That stopped being true when the probe began
+/// consulting the path record: "a master key exists and this Stoa has no choice
+/// recorded" is a real `CannotPost` state and not a keystore failure at all. The
+/// alternative was an `Other(String)` arm on `KeystoreError`, rejected because that
+/// enum's arms are documented as distinguishable *so that a reason can name a fix*,
+/// and a catch-all carrying another module's failure is what that doctrine exists to
+/// prevent. A `String` is what `capability_for` reduced the error to on the very next
+/// line anyway.
 pub fn get_capabilities(
     request: &str,
-    lookup: impl Fn(&crate::identity::Address) -> Result<String, crate::keystore::KeystoreError>,
+    lookup: impl Fn(&crate::identity::Address) -> Result<String, String>,
 ) -> String {
     guarded("get_capabilities", || {
         let parsed: serde_json::Value = match serde_json::from_str(request) {
@@ -227,19 +239,104 @@ pub fn get_capabilities(
 /// string would be asserting on serialisation at the same time.
 pub fn capability_for(
     stoa: &crate::identity::Address,
-    lookup: impl Fn(&crate::identity::Address) -> Result<String, crate::keystore::KeystoreError>,
+    lookup: impl Fn(&crate::identity::Address) -> Result<String, String>,
 ) -> Capability {
     match lookup(stoa) {
         Ok(identity) => Capability::CanPost { identity },
-        // The reason IS the error's message, not a rewording of it.
-        // `KeystoreError::Display` already names the fix for each case — that
-        // is a documented obligation on it, with a test — so paraphrasing here
-        // would mean maintaining the same guidance in two places, and the two
-        // would drift.
-        Err(e) => Capability::CannotPost {
-            reason: e.to_string(),
-        },
+        // The reason IS the lookup's own message, not a rewording of it. Where that
+        // message comes from `KeystoreError::Display` or `IdentityStoreError::Display`,
+        // each already names the fix for its own case — a documented obligation on
+        // both, with tests — so paraphrasing here would mean maintaining the same
+        // guidance in two places and watching the two drift.
+        Err(reason) => Capability::CannotPost { reason },
     }
+}
+
+/// The address an op published now would be attributed to, for the probe to report.
+///
+/// # This exists because two methods were answering "who posts here" differently
+///
+/// `posting-capability`'s spec requires *"the identity reported SHALL be the one an
+/// op published now would be attributed to, derived from the key that would actually
+/// sign it"*, and names the failure it is guarding: *"the user sees one handle and
+/// posts under another."* That was the live state. `whoAmI` used the path-taking
+/// derivation under salt `/dialectica/2/…`; the probe's lookup was still the
+/// pathless one under `/dialectica/1/…`, and `identity.rs`'s own test asserts the
+/// two schemes **must** disagree. So the onboarding flow showed one address and the
+/// posting gate reported another, for one user in one Stoa, with no field in either
+/// reply to tell them apart.
+///
+/// The salt bump was right; what it left behind was this caller. Architecture and
+/// security review found it independently, and `proposal.md`'s claim that
+/// `posting-capability` is *"not modified, deliberately — the probe's … derivation
+/// [is] untouched"* is exactly how it happened: the shape was untouched and the
+/// contract was broken.
+///
+/// # Why it is here rather than in the adapter's closure
+///
+/// The pathless derivation was chosen in `dialectica/rust-lib/src/lib.rs`, which is
+/// `#[cfg(logos_scaffold)]` and therefore never compiled by `cargo test`. Every
+/// probe test injects a stub returning a literal, so no test could compare the
+/// probe's identity to `whoAmI`'s and none could be written while the choice lived
+/// there. Moving the choice into `core` is what makes
+/// `the_probe_and_whoami_report_the_same_identity_for_one_user_and_stoa` possible.
+///
+/// # The record is consulted, and its absence is not an error
+///
+/// A master key with no recorded choice for this Stoa cannot post *as anyone*: there
+/// is no path, so there is no identity, so there is nothing to attribute an op to.
+/// That is reported as `CannotPost` with a reason naming the missing choice — the
+/// same state `whoAmI`'s fourth row names, so the two methods agree about it rather
+/// than one inventing an identity the other does not have.
+pub fn posting_identity(
+    stoa: &crate::identity::Address,
+    keystore: &crate::keystore::Keystore,
+    paths: &crate::identity_store::IdentityStore,
+) -> Result<String, String> {
+    match paths.path_for(stoa) {
+        Ok(Some(path)) => Ok(keystore.stoa_address_at_path(stoa, path).to_hex()),
+        Ok(None) => Err(NO_CHOICE_FOR_THIS_STOA.to_string()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// The reason both `getCapabilities` and `whoAmI` give for "a master key exists and
+/// this Stoa has no choice recorded".
+///
+/// One constant because it is one state, and the two methods reporting it in
+/// different words would be two methods disagreeing about the user's situation in the
+/// one place they are meant to agree. The state itself is what the two-store split
+/// creates, and the wording names the fix rather than the fault, per
+/// `KeystoreError::Display`'s obligation.
+pub const NO_CHOICE_FOR_THIS_STOA: &str =
+    "a master key exists but no identity has been chosen for this Stoa; \
+     generate a slate and keep one of its candidates";
+
+/// `{"stoa":"<hex>"}` -> whether the user can post there, from the two stores.
+///
+/// The shape [`get_capabilities`] has, with the *derivation* moved inside so it can
+/// be tested. See [`posting_identity`] for why that move was necessary and what it
+/// fixed. The openers are closures for the reason every other one in this file is:
+/// this crate cannot read the environment or know the host's layout.
+pub fn get_capabilities_from_stores(
+    request: &str,
+    open_keystore: impl Fn() -> Result<crate::keystore::Keystore, crate::keystore::KeystoreError>,
+    open_paths: impl Fn() -> Result<
+        crate::identity_store::IdentityStore,
+        crate::identity_store::IdentityStoreError,
+    >,
+) -> String {
+    get_capabilities(request, |stoa| {
+        // Each error keeps its OWN type's message rather than being folded into one
+        // of them. Adding an `Other(String)` arm to `KeystoreError` so this could
+        // return that type was the obvious move and is rejected: that enum's arms
+        // are documented as distinguishable so a reason can name a fix, and a
+        // catch-all carrying another module's failure is the collapse the
+        // distinguishability doctrine exists to prevent.
+        let keystore = open_keystore().map_err(|e| e.to_string())?;
+        let paths = open_paths().map_err(|e| e.to_string())?;
+        posting_identity(stoa, &keystore, &paths)
+    })
 }
 
 // ─── Onboarding: the slate, keeping one, and who the user is ──────────────
@@ -264,6 +361,144 @@ fn parse_stoa(parsed: &serde_json::Value) -> Result<crate::identity::Address, St
     }
 }
 
+/// The onboarding state that spans two wire calls, and the decision about which
+/// master key a slate was offered under.
+///
+/// # Why this type exists at all
+///
+/// A slate is not a nonce. It is a **`(master key, nonce)` pair** — the nonce
+/// fixes the five *paths* and the master key fixes the five *identities* at those
+/// paths. `derive_path` takes only the nonce, so two different master keys and one
+/// nonce give the same five paths and five completely different addresses.
+///
+/// The first version of this change held only the nonce, and the adapter minted a
+/// fresh master key on each of the two calls. Every guard fired correctly and the
+/// outcome was still wrong: the slate showed candidates of key *A*, the keep wrote
+/// key *B*, reported `kept: true`, and named an address the user had never seen.
+/// Three reviewers reached it independently. The spec calls storing an identity the
+/// user did not choose unrecoverable *"because the choice cannot be recomputed"*,
+/// and an address is *"the only unforgeable way to tell two candidates apart"* —
+/// so the value the choice was made on was precisely the value that changed.
+///
+/// The nonce check cannot catch it. Both slates are equally live and the nonce is
+/// the same; what differs is a thing the nonce says nothing about.
+///
+/// # Why the key is held rather than committed to
+///
+/// The alternative was to carry a commitment to the master key in the slate reply
+/// and have the keep refuse when the key it is about to write does not match. That
+/// detects the divergence; it does not give the user the identity they chose — it
+/// turns a wrong answer into a refusal the user can do nothing about, because the
+/// key that produced their slate is already gone.
+///
+/// Holding the minted keystore for the module's lifetime is what makes the right
+/// answer available. It also makes two properties true that the per-call mint made
+/// false, and both are user-visible: refreshing a slate now offers **more
+/// candidates of one identity's key** rather than candidates of a different key
+/// each press, which is what `docs/UI-BRIEF.md` tells a designer the flow does; and
+/// keeping a candidate for a *second* Stoa reuses the master key the first keep
+/// wrote, which is what makes one master key per install mean anything.
+///
+/// **The exposure this costs is a root secret in memory for the module's lifetime
+/// rather than for one call.** That is the same lifetime a kept keystore's root
+/// has — `keep` writes it and every later call opens it — so the window widens
+/// only on the fresh-install path, and only until the user keeps or the module
+/// stops. Nothing is written: `mint_or_open` writes no file, which is the spec's
+/// *"Generating a slate SHALL NOT write to storage"*, and `Keystore`'s root is
+/// `Zeroizing`, so the held copy is wiped on drop rather than by a line somebody
+/// has to remember.
+///
+/// # Why it is in `core` and not in the adapter
+///
+/// It was in the adapter, as a 12-line `master_key` helper, and that is where the
+/// defect lived. `dialectica/rust-lib/src/lib.rs` is `#[cfg(logos_scaffold)]` and
+/// `build.rs` sets that cfg only when the generated provider exists, which it never
+/// does under `cargo test` — so the one function deciding which master key a slate
+/// and a keep each saw was compiled out of the only gate that runs any logic. The
+/// adapter's own comment says a body there that grows past one line *"is logic no
+/// test can reach"*, and it was right.
+///
+/// What is left in the adapter is the part that genuinely cannot move: the host's
+/// directory, and the environment the protection is read from.
+#[derive(Default)]
+pub struct OnboardingSession {
+    /// The keystore this module is working with, opened from disk or minted once.
+    ///
+    /// `None` until the first call that needs one. Minted at most once per module
+    /// lifetime, which is the whole point of the field.
+    keystore: Option<crate::keystore::Keystore>,
+    /// The nonce of the slate a keep may quote. `None` when no slate is live.
+    live_slate: Option<crate::onboarding::SlateNonce>,
+}
+
+impl OnboardingSession {
+    /// A session with nothing opened and no slate live.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The keystore to work with: the one on disk, or one minted and remembered.
+    ///
+    /// **Minted at most once.** A second call returns the same key, which is the
+    /// property the two-call onboarding flow rests on and the one a per-call mint
+    /// did not have.
+    ///
+    /// `open` is tried on **every** call rather than only the first, and that is
+    /// deliberate: a keep writes the keystore, so the call after a keep finds a file
+    /// where the call before it found none. Preferring the file over the held copy
+    /// means the identity a later call reports is the one on disk — the authority —
+    /// rather than a minted key that was never written.
+    ///
+    /// Any error other than "no keystore" propagates. A keystore that exists and
+    /// cannot be opened must not be silently replaced by a fresh key, which is how
+    /// every identity a user has gets discarded with no error saying so.
+    fn keystore_for(
+        &mut self,
+        open: impl FnOnce() -> Result<crate::keystore::Keystore, crate::keystore::KeystoreError>,
+    ) -> Result<&crate::keystore::Keystore, crate::keystore::KeystoreError> {
+        match open() {
+            Ok(ks) => {
+                // The file wins over anything held. See above.
+                self.keystore = Some(ks);
+            }
+            Err(crate::keystore::KeystoreError::NotFound) => {
+                if self.keystore.is_none() {
+                    // `Keystore::generate` may not fail, and the fallible shape is
+                    // what this returns anyway, so there is no `expect` added here.
+                    self.keystore = Some(crate::keystore::Keystore::generate());
+                }
+            }
+            Err(e) => return Err(e),
+        }
+        // Not reachable as `None`: every arm above either sets the field or
+        // returns. An error rather than an `expect`, because an `expect` on a
+        // handler path is a panic in a module process.
+        self.keystore
+            .as_ref()
+            .ok_or(crate::keystore::KeystoreError::NotFound)
+    }
+
+    /// Whether a slate is live, and which. For the adapter's own assertions only.
+    pub fn live_slate(&self) -> Option<crate::onboarding::SlateNonce> {
+        self.live_slate
+    }
+
+    /// Put a specific nonce — or none — in the live slot.
+    ///
+    /// `#[cfg(test)]` and `pub(crate)`, both load-bearing, following
+    /// `Keystore::from_root_for_test`. A keep has to be reachable with a nonce that
+    /// is stale, forged or absent, and those states cannot be produced by generating
+    /// a slate, because generating one makes its nonce live by definition.
+    ///
+    /// It is **not** public, and that matters beyond tidiness: a public setter would
+    /// let a caller declare a slate live that was never offered, which is the
+    /// superseded-selection refusal disabled from outside.
+    #[cfg(test)]
+    pub(crate) fn set_live_slate_for_test(&mut self, nonce: Option<crate::onboarding::SlateNonce>) {
+        self.live_slate = nonce;
+    }
+}
+
 /// `{"stoa":"<hex>"}` -> a slate of candidate identities.
 ///
 /// # The count is not a parameter, and that is a security property
@@ -284,21 +519,27 @@ fn parse_stoa(parsed: &serde_json::Value) -> Result<crate::identity::Address, St
 /// to, so the requirement holds by the signature rather than by a line somebody
 /// has to not add.
 ///
-/// # The master key is supplied, not discovered
+/// # The keystore is opened by a closure, and the session decides what to do with it
 ///
-/// A closure, for the reason [`get_capabilities`]' lookup is one: this crate
-/// cannot read the environment or know the host's persistence path, and a handler
-/// that went looking would be doing discovery at a moment its caller does not
-/// control.
+/// `open` is a closure for the reason [`get_capabilities`]' lookup is one: this
+/// crate cannot read the environment or know the host's persistence path, and a
+/// handler that went looking would be doing discovery at a moment its caller does
+/// not control. It hands back the keystore rather than the raw root, so the root is
+/// never a value this function names.
 ///
-/// The closure hands back the keystore rather than the raw root, so that the root
-/// is never a value this function names. Where no keystore exists yet, the
-/// adapter mints one in memory and does not write it — which is why a slate is
-/// available before an identity is kept.
+/// What the closure does **not** decide is what "no keystore yet" means. That is
+/// [`OnboardingSession::keystore_for`]'s, and it lives there rather than in the
+/// adapter because the adapter is not compiled by `cargo test` — see that type's
+/// documentation for what the earlier arrangement cost.
+///
+/// # The live slate is set here, and only on success
+///
+/// Recorded after the slate is built, so a derivation failure does not supersede a
+/// slate the user is still looking at.
 pub fn generate_identity_slate(
+    session: &mut OnboardingSession,
     request: &str,
-    master: impl Fn() -> Result<crate::keystore::Keystore, crate::keystore::KeystoreError>,
-    remember: impl FnOnce(crate::onboarding::SlateNonce),
+    open: impl FnOnce() -> Result<crate::keystore::Keystore, crate::keystore::KeystoreError>,
 ) -> String {
     guarded("generate_identity_slate", || {
         let parsed: serde_json::Value = match serde_json::from_str(request) {
@@ -309,19 +550,17 @@ pub fn generate_identity_slate(
             Ok(s) => s,
             Err(e) => return e,
         };
-        let keystore = match master() {
-            Ok(k) => k,
-            Err(e) => return error_json(&e.to_string()),
+        let slate = {
+            let keystore = match session.keystore_for(open) {
+                Ok(k) => k,
+                Err(e) => return error_json(&e.to_string()),
+            };
+            match keystore.slate_for(&stoa) {
+                Ok(s) => s,
+                Err(e) => return error_json(&e.to_string()),
+            }
         };
-        let slate = match keystore.slate_for(&stoa) {
-            Ok(s) => s,
-            Err(e) => return error_json(&e.to_string()),
-        };
-        // The nonce is handed to the adapter to hold, which is what makes a
-        // selection against a superseded slate refusable. It is recorded AFTER
-        // the slate is built, so a derivation failure does not supersede a
-        // perfectly good live slate.
-        remember(slate.nonce);
+        session.live_slate = Some(slate.nonce);
         slate_json(&slate)
     })
 }
@@ -404,16 +643,18 @@ impl Kept {
 }
 
 /// What a keep needs from the world, gathered so the decision below has one
-/// argument rather than five.
+/// argument rather than four.
 ///
-/// A struct rather than five parameters because `keep_identity_with` would
-/// otherwise be a function whose call sites differ only in argument order — and
-/// the two stores plus the unlock are a unit: they are the state a keep acts on.
+/// A struct rather than four parameters because `keep_selection` would otherwise be
+/// a function whose call sites differ only in argument order — and the path, the
+/// unlock and the record are a unit: they are the state a keep acts on.
+///
+/// **The keystore is not here.** It belongs to [`OnboardingSession`], because the
+/// key a keep writes must be the key the slate was derived from and a caller that
+/// could pass a different one is a caller that can reach the defect this change
+/// fixed. Taking it from the session rather than from the argument is that made
+/// unrepresentable.
 pub struct KeepTargets<'a> {
-    /// The keystore to write, already minted. Not created here, because whether a
-    /// master key exists is a question the caller has already had to answer in
-    /// order to generate the slate.
-    pub keystore: &'a crate::keystore::Keystore,
     /// Where the master key goes.
     pub keystore_path: &'a std::path::Path,
     /// How it is protected. The spec deliberately does not settle where this
@@ -443,14 +684,34 @@ pub struct KeepTargets<'a> {
 ///
 /// # The write order is the atomicity story
 ///
-/// Keystore first, path record second. `Keystore::create` refuses to overwrite and
-/// writes atomically, so a failure there leaves nothing anywhere. The reverse
-/// order would leave a recorded path naming a master key that does not exist, and
-/// the *next* keep — with a different master key — would silently inherit it.
+/// Keystore first, path record second. The keystore write is the irreversible half
+/// and writes atomically, so a failure there leaves nothing anywhere. The reverse
+/// order would leave a recorded path naming a master key that does not exist.
 /// `design.md` records what this does and does not claim.
+///
+/// # The second-keep refusal is the path record's, not the keystore's
+///
+/// The first version of this used `Keystore::create`'s `AlreadyExists` as the
+/// refusal for a second keep. That is one mechanism doing two jobs, and review
+/// measured what the second one broke: the keystore is **one file per install**, so
+/// a user who kept an identity in Stoa A and then tried to keep one in Stoa B was
+/// refused at `create` before `record_path` was ever called — with a reason naming a
+/// keystore they did not know they had. `chosen_paths` could therefore never hold a
+/// second row through any wire call, which made the spec's *"Distinct choices for
+/// distinct Stoas are recorded separately"* unreachable through the API, and made
+/// `design.md`'s claim that the primary key discharges that scenario false.
+///
+/// So the two refusals are separated, each to the thing that actually knows:
+///
+/// - **A master key already on disk** is not an error. It is the expected state for
+///   every Stoa after the first, and the keystore is reused rather than rewritten.
+/// - **A choice already recorded for this Stoa** is the refusal, and it comes from
+///   `chosen_paths`' primary key — the same structural refusal `record_path`'s doc
+///   comment already argued for, now actually load-bearing.
 pub fn keep_identity(
+    session: &mut OnboardingSession,
     request: &str,
-    live_nonce: Option<crate::onboarding::SlateNonce>,
+    open: impl FnOnce() -> Result<crate::keystore::Keystore, crate::keystore::KeystoreError>,
     targets: KeepTargets<'_>,
 ) -> String {
     guarded("keep_identity", || {
@@ -484,7 +745,15 @@ pub fn keep_identity(
             Err(e) => return e,
         };
 
-        keep_selection(&stoa, nonce, index, live_nonce, targets).to_json()
+        // Read before the keystore is taken, because taking it borrows the session
+        // mutably. The value is a `Copy` 32 bytes, so this is a read and not a
+        // second source of truth.
+        let live = session.live_slate;
+        let keystore = match session.keystore_for(open) {
+            Ok(k) => k,
+            Err(e) => return error_json(&e.to_string()),
+        };
+        keep_selection(&stoa, nonce, index, live, keystore, targets).to_json()
     })
 }
 
@@ -494,11 +763,17 @@ pub fn keep_identity(
 /// stores said" to "what a view is told" is where the requirements actually live,
 /// and asserting on it through a JSON string would be asserting on serialisation
 /// at the same time.
+///
+/// The keystore is a parameter here rather than reached through the session,
+/// because this function is the *decision* and the session is state — separating
+/// them is what lets a test hand this one a specific key and assert on what it did
+/// with it.
 pub fn keep_selection(
     stoa: &crate::identity::Address,
     nonce: crate::onboarding::SlateNonce,
     index: usize,
     live_nonce: Option<crate::onboarding::SlateNonce>,
+    keystore: &crate::keystore::Keystore,
     targets: KeepTargets<'_>,
 ) -> Kept {
     use crate::onboarding::OnboardingError;
@@ -516,7 +791,11 @@ pub fn keep_selection(
     }
 
     // Reproduced from the nonce rather than looked up — see `crate::onboarding`.
-    let slate = match targets.keystore.slate_from_nonce(stoa, nonce) {
+    // This is the SAME keystore the slate was derived from, because the session
+    // holds it across the two calls; when it was minted per call, this line
+    // reproduced the five paths against a different key and the candidate it
+    // returned was one the user had never been shown.
+    let slate = match keystore.slate_from_nonce(stoa, nonce) {
         Ok(s) => s,
         Err(e) => return refused(e),
     };
@@ -525,19 +804,53 @@ pub fn keep_selection(
         Err(e) => return refused(e),
     };
 
-    // THE ORDER. The keystore is the irreversible half and `create` refuses to
-    // overwrite, so this is also where a second keep is caught: a master key
-    // already on disk means `AlreadyExists`, which is distinguishable from a
-    // malformed request (that never reaches here) and from a storage failure
-    // (a different `KeystoreError` arm).
-    if let Err(e) = targets
-        .keystore
-        .create(targets.keystore_path, targets.unlock)
-    {
-        return Kept::Refused {
-            reason: e.to_string(),
-        };
-    }
+    // THE ORDER. The keystore is the irreversible half and writes atomically, so a
+    // failure there leaves nothing anywhere.
+    //
+    // `create` where no file exists, and nothing where one does. A master key
+    // already on disk is the expected state for every Stoa after the first, so it
+    // is not a refusal — see this function's caller for why using `AlreadyExists`
+    // as the second-keep guard made a second Stoa unreachable.
+    //
+    // `encrypted` is settled HERE rather than at the end, because the truthful
+    // source differs between the two branches and only this code knows which
+    // branch it took. Deciding it below would mean re-deriving that, which is the
+    // second copy of a fact that CLAUDE.md's guard rule is about.
+    let encrypted = if targets.keystore_path.exists() {
+        // This call wrote nothing, so the protection that is true is the FILE's,
+        // and reading it is the only way to know. Note this is not the re-read the
+        // `design.md` decision rejects: that one is about re-reading a file this
+        // call just wrote, where the value this code used is the authority. Here
+        // there is no value this code used — the file predates the call.
+        match crate::keystore::Keystore::is_encrypted(targets.keystore_path) {
+            Ok(v) => v,
+            // The keystore is on disk and unreadable. Refusing rather than
+            // guessing: a keep that reported an identity while unable to tell
+            // whether its master key is protected has answered a question it does
+            // not know the answer to.
+            Err(e) => {
+                return Kept::Refused {
+                    reason: e.to_string(),
+                }
+            }
+        }
+    } else {
+        if let Err(e) = keystore.create(targets.keystore_path, targets.unlock) {
+            return Kept::Refused {
+                reason: e.to_string(),
+            };
+        }
+        // Taken from the unlock this keep USED, not from re-reading the file.
+        // Re-reading would report the protection of whatever is at the path now,
+        // which on a directory an attacker can write to is not necessarily the
+        // file just written. The value that is true is the one this code used.
+        matches!(targets.unlock, crate::keystore::Unlock::Passphrase(_))
+    };
+
+    // The refusal for a second choice in ONE Stoa. `chosen_paths`' primary key
+    // does the refusing, so it is a property of the schema rather than a branch
+    // here — and it is per-Stoa, which is the scope the spec asks for and the
+    // keystore's one-file-per-install scope could not express.
     if let Err(e) = targets.paths.record_path(stoa, candidate.path) {
         return Kept::Refused {
             reason: e.to_string(),
@@ -548,11 +861,7 @@ pub fn keep_selection(
         address: candidate.address.to_hex(),
         public_key: candidate.public_key.to_hex(),
         path: candidate.path,
-        // Taken from the unlock this keep USED, not from re-reading the file.
-        // Re-reading would report the protection of whatever is at the path now,
-        // which on a directory an attacker can write to is not necessarily the
-        // file just written. The value that is true is the one this code used.
-        encrypted: matches!(targets.unlock, crate::keystore::Unlock::Passphrase(_)),
+        encrypted,
     }
 }
 
@@ -619,10 +928,12 @@ impl Whoami {
 /// "you are nobody" to a user who has an identity and a fixable problem.
 ///
 /// This handler therefore reports the identity where one is recorded and the
-/// keystore opens, and a **distinguishable reason** in each of the three ways that
-/// can fail. The fourth state — a master key with no recorded path for this Stoa —
-/// is the one the two-store split creates, and its reason names the record so it
-/// does not read as "you are nobody".
+/// keystore opens, and a **distinguishable reason** in each of the four ways that
+/// can fail: the keystore does not open, the record does not open, the record read
+/// fails, and — the one the two-store split creates — a master key with no recorded
+/// path for this Stoa. That last one's reason names the record, so it does not read
+/// as "you are nobody", and it is the same string `getCapabilities` gives for the
+/// same state.
 pub fn who_am_i(
     request: &str,
     master: impl Fn() -> Result<crate::keystore::Keystore, crate::keystore::KeystoreError>,
@@ -694,10 +1005,10 @@ pub fn whoami_for(
         // key.
         Ok(None) => {
             return Whoami::Nobody {
-                reason: "a master key exists but no identity has been chosen for this Stoa; \
-                         generate a slate and keep one of its candidates"
-                    .to_string(),
-            }
+                // The same constant `getCapabilities` reports for this state, so
+                // the two methods cannot describe one situation in two ways.
+                reason: NO_CHOICE_FOR_THIS_STOA.to_string(),
+            };
         }
         Err(e) => {
             return Whoami::Nobody {
@@ -1324,8 +1635,14 @@ mod tests {
     /// test helper would be widening the library's surface for the
     /// convenience of testing it — the same trade `err_of` exists to avoid
     /// over `Debug`.
+    ///
+    /// The factory still yields a `KeystoreError` and the message is taken from its
+    /// `Display` here, which keeps these tests asserting on the SAME strings the
+    /// keystore's own "every message names the fix" obligation covers. The lookup's
+    /// error type widened to `String` when the probe began consulting the path
+    /// record; what these tests are about did not change.
     fn probe_err_with(request: &str, make: impl Fn() -> KeystoreError) -> serde_json::Value {
-        serde_json::from_str(&get_capabilities(request, |_| Err(make()))).unwrap()
+        serde_json::from_str(&get_capabilities(request, |_| Err(make().to_string()))).unwrap()
     }
 
     #[test]
@@ -1667,18 +1984,23 @@ mod tests {
         format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex())
     }
 
+    /// A session whose keystore is the FIXED test root, as if one were on disk.
+    ///
+    /// The opener returns `Ok`, so `keystore_for` takes the "a keystore exists"
+    /// branch and never mints — which is what most tests want, because they assert
+    /// against values derived independently from `[7u8; 32]`.
+    fn a_session() -> OnboardingSession {
+        OnboardingSession::new()
+    }
+
     /// Generate a slate through the wire handler, returning the reply and the
     /// nonce the handler chose to remember.
     fn slate_through_the_wire() -> (serde_json::Value, Option<SlateNonce>) {
-        let remembered = std::cell::Cell::new(None);
-        let out = generate_identity_slate(
-            &slate_request(),
-            || Ok(a_master_key()),
-            |n| remembered.set(Some(n)),
-        );
+        let mut session = a_session();
+        let out = generate_identity_slate(&mut session, &slate_request(), || Ok(a_master_key()));
         let v = serde_json::from_str(&out)
             .unwrap_or_else(|e| panic!("the slate reply must be valid JSON ({e}): {out}"));
-        (v, remembered.into_inner())
+        (v, session.live_slate())
     }
 
     #[test]
@@ -1699,7 +2021,7 @@ mod tests {
         // number that decides how much key derivation this module performs". There
         // is no field to pass, so the check is that offering one changes nothing.
         let ignored = format!(r#"{{"stoa":"{}","count":500}}"#, a_stoa().to_hex());
-        let out = generate_identity_slate(&ignored, || Ok(a_master_key()), |_| {});
+        let out = generate_identity_slate(&mut a_session(), &ignored, || Ok(a_master_key()));
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["count"], 5, "a caller-supplied count was honoured: {out}");
         assert_eq!(v["candidates"].as_array().unwrap().len(), 5);
@@ -1766,7 +2088,8 @@ mod tests {
         // The master key is `[7; 32]`, so the hex it would appear as is `07` x 32.
         // Checked in both cases, because a reply is lowercase hex and a future one
         // might not be.
-        let out = generate_identity_slate(&slate_request(), || Ok(a_master_key()), |_| {});
+        let out =
+            generate_identity_slate(&mut a_session(), &slate_request(), || Ok(a_master_key()));
         let master_hex = "07".repeat(32);
         assert!(
             !out.contains(&master_hex) && !out.contains(&master_hex.to_uppercase()),
@@ -1805,8 +2128,14 @@ mod tests {
         // asserting a particular file is absent, because it catches a write to a
         // name this test did not think of.
         let dir = OnboardingDir::new("slate-writes-nothing");
+        // ONE session across the three slates, which is what the module has. A
+        // session per iteration would also pass and would be testing less: the
+        // property is that generating repeatedly writes nothing, and a fresh
+        // session each time hides whether the held key is the thing being written.
+        let mut session = a_session();
         for _ in 0..3 {
-            let out = generate_identity_slate(&slate_request(), || Ok(a_master_key()), |_| {});
+            let out =
+                generate_identity_slate(&mut session, &slate_request(), || Ok(a_master_key()));
             assert!(
                 serde_json::from_str::<serde_json::Value>(&out)
                     .unwrap()
@@ -1870,7 +2199,7 @@ mod tests {
             r#"{"stoa":"00ff"}"#,
             r#"{"stoa":null}"#,
         ] {
-            let out = generate_identity_slate(bad, || Ok(a_master_key()), |_| {});
+            let out = generate_identity_slate(&mut a_session(), bad, || Ok(a_master_key()));
             let v: serde_json::Value = serde_json::from_str(&out).unwrap();
             assert!(v.get("error").is_some(), "for {bad:?}, got {out}");
             assert!(
@@ -1882,20 +2211,36 @@ mod tests {
 
     #[test]
     fn a_malformed_slate_request_does_not_supersede_the_live_slate() {
-        // The subtle half of the above: a refused request must not have called
-        // `remember`, or a malformed call would invalidate a slate the user is
-        // still looking at — and their next selection would be refused for a
-        // reason that had nothing to do with them.
-        let remembered = std::cell::Cell::new(None);
-        for bad in ["not json", r#"{}"#, r#"{"stoa":"nothex"}"#] {
-            let _ =
-                generate_identity_slate(bad, || Ok(a_master_key()), |n| remembered.set(Some(n)));
-        }
-        assert_eq!(
-            remembered.into_inner(),
-            None,
-            "a refused request superseded the live slate"
+        // The subtle half of the above: a refused request must not have set the live
+        // slate, or a malformed call would invalidate a slate the user is still
+        // looking at — and their next selection would be refused for a reason that
+        // had nothing to do with them.
+        //
+        // Asserted against a real, live slate rather than against `None`, which is
+        // the stronger form: a handler that cleared the slot on failure and one that
+        // left it alone both leave `None` behind when nothing was ever live, so
+        // starting from `None` cannot tell them apart.
+        let mut session = a_session();
+        let good = generate_identity_slate(&mut session, &slate_request(), || Ok(a_master_key()));
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&good)
+                .unwrap()
+                .get("candidates")
+                .is_some(),
+            "the setup slate must succeed, got {good}"
         );
+        let live = session
+            .live_slate()
+            .expect("a successful slate makes its nonce live");
+
+        for bad in ["not json", r#"{}"#, r#"{"stoa":"nothex"}"#] {
+            let _ = generate_identity_slate(&mut session, bad, || Ok(a_master_key()));
+            assert_eq!(
+                session.live_slate(),
+                Some(live),
+                "the refused request {bad:?} disturbed the live slate"
+            );
+        }
     }
 
     #[test]
@@ -1903,11 +2248,9 @@ mod tests {
         // A slate needs the master key, so a keystore failure is a failure to
         // answer rather than a slate with nothing in it. The reason must reach the
         // view, since `KeystoreError::Display` is what names the fix.
-        let out = generate_identity_slate(
-            &slate_request(),
-            || Err(crate::keystore::KeystoreError::PermissionsTooOpen { mode: 0o644 }),
-            |_| {},
-        );
+        let out = generate_identity_slate(&mut a_session(), &slate_request(), || {
+            Err(crate::keystore::KeystoreError::PermissionsTooOpen { mode: 0o644 })
+        });
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("error").is_some(), "got {out}");
         assert!(v.get("candidates").is_none());
@@ -1927,7 +2270,11 @@ mod tests {
         index: i64,
         unlock: &Unlock,
     ) -> serde_json::Value {
-        let keystore = a_master_key();
+        let mut session = a_session();
+        // Set the live slate directly rather than by generating one, so a test can
+        // present a nonce that is stale, forged or absent — the cases this helper
+        // exists to reach.
+        session.set_live_slate_for_test(live);
         let paths = dir.paths();
         let request = format!(
             r#"{{"stoa":"{}","slate":"{}","index":{index}}}"#,
@@ -1935,10 +2282,10 @@ mod tests {
             nonce.to_hex()
         );
         let out = keep_identity(
+            &mut session,
             &request,
-            live,
+            || Ok(a_master_key()),
             KeepTargets {
-                keystore: &keystore,
                 keystore_path: &dir.keystore_path(),
                 unlock,
                 paths: &paths,
@@ -2148,7 +2495,6 @@ mod tests {
         let dir = OnboardingDir::new("keystore-write-fails");
         std::fs::create_dir_all(dir.keystore_path()).unwrap();
         let paths = dir.paths();
-        let keystore = a_master_key();
         let nonce = SlateNonce::generate().unwrap();
         let request = format!(
             r#"{{"stoa":"{}","slate":"{}","index":0}}"#,
@@ -2156,11 +2502,13 @@ mod tests {
             nonce.to_hex()
         );
 
+        let mut session = a_session();
+        session.set_live_slate_for_test(Some(nonce));
         let out = keep_identity(
+            &mut session,
             &request,
-            Some(nonce),
+            || Ok(a_master_key()),
             KeepTargets {
-                keystore: &keystore,
                 keystore_path: &dir.keystore_path(),
                 unlock: &Unlock::Unencrypted,
                 paths: &paths,
@@ -2206,7 +2554,6 @@ mod tests {
         // opening it fails. Reached through a different `OnboardingDir` so the
         // already-exists case is not also in play.
         let broken = OnboardingDir::new("refusal-storage");
-        let keystore = a_master_key();
         let record_path = IdentityStore::default_path_in(&broken.0);
         std::fs::create_dir_all(&record_path).unwrap();
         let storage_failure = IdentityStore::open(&record_path);
@@ -2222,11 +2569,13 @@ mod tests {
         );
 
         // And a malformed request is §2.5's error shape, not a refusal at all.
+        let mut session = a_session();
+        session.set_live_slate_for_test(Some(nonce));
         let malformed = keep_identity(
+            &mut session,
             r#"{"stoa":"nothex"}"#,
-            Some(nonce),
+            || Ok(a_master_key()),
             KeepTargets {
-                keystore: &keystore,
                 keystore_path: &broken.keystore_path(),
                 unlock: &Unlock::Unencrypted,
                 paths: &dir.paths(),
@@ -2297,7 +2646,6 @@ mod tests {
         // identity exists that was never written.
         let dir = OnboardingDir::new("keep-malformed");
         let nonce = SlateNonce::generate().unwrap();
-        let keystore = a_master_key();
         let paths = dir.paths();
         let stoa = a_stoa().to_hex();
         for bad in [
@@ -2321,11 +2669,13 @@ mod tests {
                 nonce.to_hex()
             ),
         ] {
+            let mut session = a_session();
+            session.set_live_slate_for_test(Some(nonce));
             let out = keep_identity(
+                &mut session,
                 &bad,
-                Some(nonce),
+                || Ok(a_master_key()),
                 KeepTargets {
-                    keystore: &keystore,
                     keystore_path: &dir.keystore_path(),
                     unlock: &Unlock::Unencrypted,
                     paths: &paths,
@@ -2620,7 +2970,6 @@ mod tests {
         // Two axes: arbitrary INPUT, and a dependency that panics. The second is
         // the one a request-shaped sweep would miss.
         let dir = OnboardingDir::new("no-panics");
-        let keystore = a_master_key();
         let paths = dir.paths();
         let stoa = a_stoa().to_hex();
         let nonce = SlateNonce::generate().unwrap();
@@ -2641,13 +2990,16 @@ mod tests {
             ),
             "\u{0}\u{1}\u{2}",
         ] {
+            let mut slate_session = a_session();
+            let mut keep_session = a_session();
+            keep_session.set_live_slate_for_test(Some(nonce));
             for out in [
-                generate_identity_slate(input, || Ok(a_master_key()), |_| {}),
+                generate_identity_slate(&mut slate_session, input, || Ok(a_master_key())),
                 keep_identity(
+                    &mut keep_session,
                     input,
-                    Some(nonce),
+                    || Ok(a_master_key()),
                     KeepTargets {
-                        keystore: &keystore,
                         keystore_path: &dir.keystore_path(),
                         unlock: &Unlock::Unencrypted,
                         paths: &paths,
@@ -2667,14 +3019,37 @@ mod tests {
 
         // A panicking dependency, which the guard has to convert rather than let
         // through.
-        let out = generate_identity_slate(
-            &slate_request(),
-            || panic!("the keystore layer exploded"),
-            |_| {},
-        );
+        let out = generate_identity_slate(&mut a_session(), &slate_request(), || {
+            panic!("the keystore layer exploded")
+        });
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("error").is_some(), "got {out}");
         assert!(v.get("candidates").is_none());
+
+        // The keep's opener is a dependency too, and it is the one the session
+        // reaches through — so a panic there is inside the session's borrow, which
+        // is the arrangement most likely to be got wrong.
+        let mut panicking = a_session();
+        panicking.set_live_slate_for_test(Some(nonce));
+        let out = keep_identity(
+            &mut panicking,
+            &format!(
+                r#"{{"stoa":"{stoa}","slate":"{}","index":0}}"#,
+                nonce.to_hex()
+            ),
+            || panic!("the keystore layer exploded during a keep"),
+            KeepTargets {
+                keystore_path: &dir.keystore_path(),
+                unlock: &Unlock::Unencrypted,
+                paths: &paths,
+            },
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_some(), "got {out}");
+        assert!(
+            v.get("kept").is_none(),
+            "§2.5: never a partial success, got {out}"
+        );
 
         let out = who_am_i(
             &slate_request(),
@@ -2723,18 +3098,19 @@ mod tests {
                 .expect("the table is droppable");
         }
 
-        let keystore = a_master_key();
         let nonce = SlateNonce::generate().unwrap();
         let request = format!(
             r#"{{"stoa":"{}","slate":"{}","index":0}}"#,
             a_stoa().to_hex(),
             nonce.to_hex()
         );
+        let mut session = a_session();
+        session.set_live_slate_for_test(Some(nonce));
         let out = keep_identity(
+            &mut session,
             &request,
-            Some(nonce),
+            || Ok(a_master_key()),
             KeepTargets {
-                keystore: &keystore,
                 keystore_path: &dir.keystore_path(),
                 unlock: &Unlock::Unencrypted,
                 paths: &paths,
@@ -2816,16 +3192,17 @@ mod tests {
                 rusqlite::Connection::open(IdentityStore::default_path_in(&broken.0)).unwrap();
             saboteur.execute_batch("DROP TABLE chosen_paths;").unwrap();
         }
-        let broken_keystore = a_master_key();
+        let mut broken_session = a_session();
+        broken_session.set_live_slate_for_test(Some(nonce));
         let storage_out = keep_identity(
+            &mut broken_session,
             &format!(
                 r#"{{"stoa":"{}","slate":"{}","index":0}}"#,
                 a_stoa().to_hex(),
                 nonce.to_hex()
             ),
-            Some(nonce),
+            || Ok(a_master_key()),
             KeepTargets {
-                keystore: &broken_keystore,
                 keystore_path: &broken.keystore_path(),
                 unlock: &Unlock::Unencrypted,
                 paths: &broken_paths,
@@ -2911,7 +3288,6 @@ mod tests {
         }];
         assert_eq!(paths.all_paths().unwrap(), before);
 
-        let keystore = a_master_key();
         let nonce = SlateNonce::generate().unwrap();
         let stale = SlateNonce::generate().unwrap();
         assert_ne!(nonce, stale);
@@ -2923,15 +3299,17 @@ mod tests {
             ("no live slate", None, 0),
             ("an index outside the set", Some(nonce), 77),
         ] {
+            let mut session = a_session();
+            session.set_live_slate_for_test(live);
             let out = keep_identity(
+                &mut session,
                 &format!(
                     r#"{{"stoa":"{}","slate":"{}","index":{index}}}"#,
                     a_stoa().to_hex(),
                     nonce.to_hex()
                 ),
-                live,
+                || Ok(a_master_key()),
                 KeepTargets {
-                    keystore: &keystore,
                     keystore_path: &dir.keystore_path(),
                     unlock: &Unlock::Unencrypted,
                     paths: &paths,
@@ -2964,7 +3342,7 @@ mod tests {
 
         for stoa in [here, elsewhere] {
             let request = format!(r#"{{"stoa":"{}"}}"#, stoa.to_hex());
-            let out = generate_identity_slate(&request, || Ok(a_master_key()), |_| {});
+            let out = generate_identity_slate(&mut a_session(), &request, || Ok(a_master_key()));
             let v: serde_json::Value = serde_json::from_str(&out)
                 .unwrap_or_else(|e| panic!("the reply must be JSON ({e}): {out}"));
             for candidate in v["candidates"].as_array().unwrap() {
@@ -2995,14 +3373,11 @@ mod tests {
         // the code rather than of one value being copied.
         for index in 0..SLATE_SIZE {
             let dir = OnboardingDir::new(&format!("keep-is-the-offered-one-{index}"));
-            let remembered = std::cell::Cell::new(None);
-            let slate_out = generate_identity_slate(
-                &slate_request(),
-                || Ok(a_master_key()),
-                |n| remembered.set(Some(n)),
-            );
+            let mut session = a_session();
+            let slate_out =
+                generate_identity_slate(&mut session, &slate_request(), || Ok(a_master_key()));
             let slate: serde_json::Value = serde_json::from_str(&slate_out).unwrap();
-            let nonce = remembered.into_inner().expect("a slate was remembered");
+            let nonce = session.live_slate().expect("a slate was remembered");
             let offered = slate["candidates"][index].clone();
 
             let kept =
@@ -3016,6 +3391,511 @@ mod tests {
             assert_eq!(kept["address"], offered["address"], "index {index}");
             assert_eq!(kept["path"], offered["path"], "index {index}");
         }
+    }
+
+    #[test]
+    fn on_a_fresh_install_the_identity_kept_is_the_candidate_the_slate_showed() {
+        // THE REGRESSION TEST for the defect three reviewers found independently,
+        // and the reason `OnboardingSession` exists.
+        //
+        // `a_kept_identity_is_the_candidate_the_slate_offered_at_that_index` above
+        // is the test written for this property and it could not see the defect,
+        // because it hands BOTH calls the same fixed `[7u8; 32]` keystore. A fixture
+        // that supplies one key to both cannot distinguish "the slate and the keep
+        // agree about the master key" from "the harness gave them the same one" —
+        // this project's recorded defect family, two explanations for one answer,
+        // here at the fixture boundary rather than inside a fixture.
+        //
+        // So this test does the one thing that fixture cannot: the opener reports
+        // NO KEYSTORE, which is the fresh install that onboarding exists for and
+        // the only state where minting happens at all. If the key is minted per
+        // call, the slate shows candidates of key A, the keep writes key B, and
+        // the addresses differ — which is exactly what was measured.
+        //
+        // No fixed root anywhere. The assertion is a relationship between two
+        // replies, not a comparison against a constant, so it holds whatever the
+        // minted key turns out to be — and it cannot be satisfied by the fixture
+        // handing the same value to both sides, because the fixture supplies none.
+        for index in 0..SLATE_SIZE {
+            let dir = OnboardingDir::new(&format!("fresh-install-keep-{index}"));
+            let paths = dir.paths();
+            let mut session = a_session();
+
+            // A fresh install: no keystore file, so the session mints.
+            let slate_out = generate_identity_slate(&mut session, &slate_request(), || {
+                Err(crate::keystore::KeystoreError::NotFound)
+            });
+            let slate: serde_json::Value = serde_json::from_str(&slate_out)
+                .unwrap_or_else(|e| panic!("the slate reply must be JSON ({e}): {slate_out}"));
+            assert!(
+                slate.get("candidates").is_some(),
+                "a slate must be available on a fresh install, got {slate_out}"
+            );
+            let offered = slate["candidates"][index].clone();
+            let nonce = session.live_slate().expect("a slate was remembered");
+
+            // The keep, through the SAME session — which is the whole fix — and with
+            // the keystore still absent from disk, as it is until this call writes
+            // it.
+            let kept_out = keep_identity(
+                &mut session,
+                &format!(
+                    r#"{{"stoa":"{}","slate":"{}","index":{index}}}"#,
+                    a_stoa().to_hex(),
+                    nonce.to_hex()
+                ),
+                || Err(crate::keystore::KeystoreError::NotFound),
+                KeepTargets {
+                    keystore_path: &dir.keystore_path(),
+                    unlock: &Unlock::Unencrypted,
+                    paths: &paths,
+                },
+            );
+            let kept: serde_json::Value = serde_json::from_str(&kept_out)
+                .unwrap_or_else(|e| panic!("the keep reply must be JSON ({e}): {kept_out}"));
+
+            assert_eq!(kept["kept"], true, "index {index}: {kept_out}");
+            assert_eq!(
+                kept["address"], offered["address"],
+                "index {index}: on a fresh install the identity KEPT is not the \
+                 candidate the slate SHOWED. The user chose {offered} and was given \
+                 {kept}. The address is the only unforgeable way to tell two \
+                 candidates apart, so this is the choice being silently replaced."
+            );
+            assert_eq!(kept["publicKey"], offered["publicKey"], "index {index}");
+            assert_eq!(kept["path"], offered["path"], "index {index}");
+
+            // And the identity that is actually ON DISK is that one too, read back
+            // through a keystore opened from the written file rather than from the
+            // session — so a session reporting its held key while writing another
+            // is caught as well.
+            let written = crate::keystore::Keystore::open(
+                &dir.keystore_path(),
+                &crate::keystore::Unlock::Unencrypted,
+            )
+            .expect("the keep wrote an openable keystore");
+            let recorded = paths
+                .path_for(&a_stoa())
+                .expect("the record reads")
+                .expect("the keep recorded a path");
+            assert_eq!(
+                written.stoa_address_at_path(&a_stoa(), recorded).to_hex(),
+                offered["address"].as_str().unwrap(),
+                "index {index}: the keystore on disk does not derive the identity \
+                 the slate showed at the path that was recorded"
+            );
+        }
+    }
+
+    #[test]
+    fn refreshing_a_slate_offers_candidates_of_one_master_key() {
+        // The other half of holding the key: `docs/UI-BRIEF.md` tells a designer the
+        // flow is "five identities, pick one, refresh for more". With a per-call
+        // mint that was false — each refresh offered candidates of a DIFFERENT
+        // master key, so "more" was the wrong word for what the button did.
+        //
+        // Asserted as a relationship rather than against a constant: two slates from
+        // one session must differ in their paths (a fresh nonce each time) and agree
+        // about the key those paths are derived under. The second half is checked by
+        // deriving the first slate's candidate at the SECOND slate's path and
+        // requiring it to match — which is only possible if one key produced both.
+        let mut session = a_session();
+
+        let first_out = generate_identity_slate(&mut session, &slate_request(), || {
+            Err(crate::keystore::KeystoreError::NotFound)
+        });
+        let first: serde_json::Value = serde_json::from_str(&first_out).unwrap();
+        let first_nonce = session.live_slate().expect("a slate is live");
+
+        let second_out = generate_identity_slate(&mut session, &slate_request(), || {
+            Err(crate::keystore::KeystoreError::NotFound)
+        });
+        let second: serde_json::Value = serde_json::from_str(&second_out).unwrap();
+        let second_nonce = session.live_slate().expect("a slate is live");
+
+        assert_ne!(
+            first_nonce, second_nonce,
+            "a refresh must offer a different set, so the nonce must move"
+        );
+
+        // The proof that one key produced both: reproduce the SECOND slate from the
+        // FIRST slate's nonce-independent ingredient — the session's key — by asking
+        // the session to keep a candidate of the second slate and checking the
+        // address it reports is derived from the same root the first slate's
+        // addresses were. The only value both slates share is that root, so a
+        // per-call mint makes this impossible to satisfy.
+        //
+        // Done by elimination rather than by reading the root, which is deliberately
+        // not accessible: for each candidate of the second slate, its address must
+        // NOT appear in the first slate (different paths) while both slates' paths
+        // must derive from one key — established by the keep below, which writes the
+        // held key and lets the written file re-derive the first slate's candidates.
+        let dir = OnboardingDir::new("refresh-one-key");
+        let paths = dir.paths();
+        let kept_out = keep_identity(
+            &mut session,
+            &format!(
+                r#"{{"stoa":"{}","slate":"{}","index":0}}"#,
+                a_stoa().to_hex(),
+                second_nonce.to_hex()
+            ),
+            || Err(crate::keystore::KeystoreError::NotFound),
+            KeepTargets {
+                keystore_path: &dir.keystore_path(),
+                unlock: &Unlock::Unencrypted,
+                paths: &paths,
+            },
+        );
+        let kept: serde_json::Value = serde_json::from_str(&kept_out).unwrap();
+        assert_eq!(kept["kept"], true, "got {kept_out}");
+
+        let written = crate::keystore::Keystore::open(
+            &dir.keystore_path(),
+            &crate::keystore::Unlock::Unencrypted,
+        )
+        .expect("the keep wrote an openable keystore");
+
+        // The written key re-derives EVERY candidate of the FIRST slate. That is the
+        // assertion: the key the second slate was kept under is the key the first
+        // slate was offered under, which is what "refresh for more candidates of one
+        // identity" means.
+        for candidate in first["candidates"].as_array().unwrap() {
+            let path = candidate["path"].as_u64().unwrap() as u32;
+            assert_eq!(
+                written.stoa_address_at_path(&a_stoa(), path).to_hex(),
+                candidate["address"].as_str().unwrap(),
+                "the first slate's candidate at path {path} is not derivable from \
+                 the key the second slate's keep wrote — a refresh minted a new \
+                 master key. First {first}, second {second}"
+            );
+        }
+    }
+
+    #[test]
+    fn keeping_an_identity_in_a_second_stoa_succeeds_and_reuses_the_master_key() {
+        // The regression test for the design review's first finding: `create`'s
+        // `AlreadyExists` was doing double duty as the second-keep guard AND as the
+        // per-Stoa gate, and the keystore is ONE FILE PER INSTALL — so a user who
+        // kept an identity in Stoa A was refused in Stoa B, before `record_path` was
+        // ever called, with a reason naming a keystore they did not know they had.
+        //
+        // `chosen_paths` could therefore never hold a second row through any wire
+        // call, which made the spec's "Distinct choices for distinct Stoas are
+        // recorded separately" unreachable through the API — and made `design.md`'s
+        // claim that the primary key discharges that scenario false.
+        //
+        // Both multi-Stoa tests in this file write the second row with
+        // `store.record_path(...)` directly, bypassing the handler, which is why
+        // nothing saw it. This one goes through the handler twice.
+        let dir = OnboardingDir::new("second-stoa");
+        let paths = dir.paths();
+        let first_stoa = a_stoa();
+        let second_stoa = stoa_address(b"the second stoa");
+        assert_ne!(first_stoa, second_stoa);
+
+        let mut session = a_session();
+        let keep_in = |session: &mut OnboardingSession, stoa: &Address, index: usize| {
+            // The opener reports whatever is actually on disk, which is the honest
+            // fixture: absent for the first keep, present for the second. A stub
+            // that always said `NotFound` would let the second keep mint a fresh
+            // key and hide the very thing this test is about.
+            let slate_out = generate_identity_slate(
+                session,
+                &format!(r#"{{"stoa":"{}"}}"#, stoa.to_hex()),
+                || {
+                    crate::keystore::Keystore::open(
+                        &dir.keystore_path(),
+                        &crate::keystore::Unlock::Unencrypted,
+                    )
+                },
+            );
+            let slate: serde_json::Value = serde_json::from_str(&slate_out)
+                .unwrap_or_else(|e| panic!("slate must be JSON ({e}): {slate_out}"));
+            let offered = slate["candidates"][index].clone();
+            let nonce = session.live_slate().expect("a slate is live");
+            let kept_out = keep_identity(
+                session,
+                &format!(
+                    r#"{{"stoa":"{}","slate":"{}","index":{index}}}"#,
+                    stoa.to_hex(),
+                    nonce.to_hex()
+                ),
+                || {
+                    crate::keystore::Keystore::open(
+                        &dir.keystore_path(),
+                        &crate::keystore::Unlock::Unencrypted,
+                    )
+                },
+                KeepTargets {
+                    keystore_path: &dir.keystore_path(),
+                    unlock: &Unlock::Unencrypted,
+                    paths: &paths,
+                },
+            );
+            let kept: serde_json::Value = serde_json::from_str(&kept_out)
+                .unwrap_or_else(|e| panic!("keep must be JSON ({e}): {kept_out}"));
+            (offered, kept)
+        };
+
+        let (first_offered, first_kept) = keep_in(&mut session, &first_stoa, 0);
+        assert_eq!(
+            first_kept["kept"], true,
+            "the first keep must succeed: {first_kept}"
+        );
+
+        let (second_offered, second_kept) = keep_in(&mut session, &second_stoa, 2);
+        assert_eq!(
+            second_kept["kept"], true,
+            "keeping an identity in a SECOND Stoa was refused — the keystore's \
+             one-file-per-install scope is being used as a per-Stoa gate. Got \
+             {second_kept}"
+        );
+
+        // Each Stoa got the candidate its own slate showed.
+        assert_eq!(second_kept["address"], second_offered["address"]);
+        assert_eq!(first_kept["address"], first_offered["address"]);
+
+        // Two rows, one per Stoa — the scenario the primary key is supposed to
+        // discharge, now actually reachable. Expectations hardcoded from the
+        // replies' own paths would be circular, so the check is on the SET of
+        // Stoas and that the two paths differ.
+        let all = paths.all_paths().expect("the record reads");
+        assert_eq!(
+            all.len(),
+            2,
+            "the record must hold one row per Stoa: {all:?}"
+        );
+        let mut stoas: Vec<_> = all.iter().map(|c| c.stoa.to_hex()).collect();
+        stoas.sort();
+        let mut expected = vec![first_stoa.to_hex(), second_stoa.to_hex()];
+        expected.sort();
+        assert_eq!(stoas, expected);
+
+        // And the two identities are genuinely different, which is what makes
+        // per-Stoa identity mean anything.
+        assert_ne!(
+            first_kept["address"], second_kept["address"],
+            "two Stoas must not report one identity"
+        );
+
+        // One master key, reused rather than replaced: the written keystore
+        // re-derives BOTH kept addresses at their recorded paths. A second keep that
+        // had minted and written a new key would break the first Stoa's identity
+        // silently, which is the failure the old `AlreadyExists` refusal was
+        // (accidentally) preventing — so this is the assertion that has to replace
+        // it.
+        let written = crate::keystore::Keystore::open(
+            &dir.keystore_path(),
+            &crate::keystore::Unlock::Unencrypted,
+        )
+        .expect("the keystore on disk opens");
+        for (stoa, kept) in [(&first_stoa, &first_kept), (&second_stoa, &second_kept)] {
+            let path = paths
+                .path_for(stoa)
+                .expect("the record reads")
+                .expect("a path is recorded");
+            assert_eq!(
+                written.stoa_address_at_path(stoa, path).to_hex(),
+                kept["address"].as_str().unwrap(),
+                "the keystore on disk does not derive the identity kept for Stoa {}",
+                stoa.to_hex()
+            );
+        }
+    }
+
+    #[test]
+    fn a_second_keep_for_one_stoa_is_still_refused_after_the_second_stoa_fix() {
+        // The other side of the change above, and the reason it is not a
+        // weakening. The spec requires that keeping an identity NOT replace an
+        // existing one, because replacing "discards every identity derived from it,
+        // while the ops those identities signed remain published and unreachable".
+        //
+        // That refusal moved from `Keystore::create` to `chosen_paths`' primary key.
+        // If the move had lost it, the second-Stoa fix would have bought a
+        // reachable second Stoa at the price of a silently replaceable identity —
+        // which is far worse than the bug it fixed. So this test exists beside that
+        // one deliberately: they constrain each other.
+        let dir = OnboardingDir::new("second-keep-one-stoa");
+        let paths = dir.paths();
+        let mut session = a_session();
+
+        let open = || {
+            crate::keystore::Keystore::open(
+                &dir.keystore_path(),
+                &crate::keystore::Unlock::Unencrypted,
+            )
+        };
+        let slate_out = generate_identity_slate(&mut session, &slate_request(), open);
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&slate_out)
+                .unwrap()
+                .get("candidates")
+                .is_some(),
+            "got {slate_out}"
+        );
+        let nonce = session.live_slate().expect("a slate is live");
+
+        let keep_at = |session: &mut OnboardingSession, index: usize| -> serde_json::Value {
+            let out = keep_identity(
+                session,
+                &format!(
+                    r#"{{"stoa":"{}","slate":"{}","index":{index}}}"#,
+                    a_stoa().to_hex(),
+                    nonce.to_hex()
+                ),
+                open,
+                KeepTargets {
+                    keystore_path: &dir.keystore_path(),
+                    unlock: &Unlock::Unencrypted,
+                    paths: &paths,
+                },
+            );
+            serde_json::from_str(&out).unwrap_or_else(|e| panic!("JSON ({e}): {out}"))
+        };
+
+        let first = keep_at(&mut session, 0);
+        assert_eq!(first["kept"], true, "got {first}");
+        let stored_path = first["path"].as_u64().unwrap() as u32;
+        let keystore_bytes = std::fs::read(dir.keystore_path()).expect("the keystore is readable");
+
+        // A different index, so a refusal that silently replaced would be visible in
+        // the recorded path.
+        let second = keep_at(&mut session, 3);
+        assert_eq!(
+            second["kept"], false,
+            "a second choice for ONE Stoa must be refused: {second}"
+        );
+        assert!(
+            second["reason"].as_str().unwrap_or_default().len() > 10,
+            "the refusal must carry a reason a user can act on: {second}"
+        );
+
+        // Nothing changed: not the record, and not the master key.
+        assert_eq!(
+            paths.path_for(&a_stoa()).expect("the record reads"),
+            Some(stored_path),
+            "a refused second keep changed the recorded path"
+        );
+        assert_eq!(
+            std::fs::read(dir.keystore_path()).unwrap(),
+            keystore_bytes,
+            "a refused second keep rewrote the master key"
+        );
+    }
+
+    #[test]
+    fn the_probe_and_whoami_report_the_same_identity_for_one_user_and_stoa() {
+        // The regression test for the finding architecture and security review
+        // reached independently: `getCapabilities` derived the reported identity
+        // through the PATHLESS trio under salt `/dialectica/1/…` while `whoAmI` used
+        // the PATH-TAKING one under `/dialectica/2/…`. `identity.rs`'s own test
+        // asserts those two schemes must disagree — so two shipped wire methods
+        // answered "who posts here" with two different addresses for one user in one
+        // Stoa, and no field in either reply told them apart.
+        //
+        // `posting-capability`'s requirement is explicit that the probe's identity
+        // "SHALL be the one an op published now would be attributed to, derived from
+        // the key that would actually sign it", and names the failure: "the user
+        // sees one handle and posts under another."
+        //
+        // No test could see it while the derivation lived in the adapter's closure:
+        // that file is `#[cfg(logos_scaffold)]` and every probe test injects a stub
+        // returning a literal. Moving the choice into `posting_identity` is what
+        // makes this assertable, and the assertion is between two methods rather
+        // than against a constant.
+        let dir = OnboardingDir::new("probe-agrees-with-whoami");
+        let paths = dir.paths();
+        let nonce = SlateNonce::generate().unwrap();
+        let kept = keep_through_the_wire(&dir, nonce, Some(nonce), 2, &Unlock::Unencrypted);
+        assert_eq!(kept["kept"], true, "got {kept}");
+
+        let request = format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex());
+
+        let probe_out =
+            get_capabilities_from_stores(&request, || Ok(a_master_key()), || Ok(dir.paths()));
+        let probe: serde_json::Value = serde_json::from_str(&probe_out)
+            .unwrap_or_else(|e| panic!("the probe reply must be JSON ({e}): {probe_out}"));
+
+        let who_out = who_am_i(&request, || Ok(a_master_key()), || Ok(dir.paths()));
+        let who: serde_json::Value = serde_json::from_str(&who_out)
+            .unwrap_or_else(|e| panic!("the whoami reply must be JSON ({e}): {who_out}"));
+
+        assert_eq!(probe["canPost"], true, "got {probe_out}");
+        assert_eq!(who["hasIdentity"], true, "got {who_out}");
+        assert_eq!(
+            probe["identity"], who["address"],
+            "getCapabilities and whoAmI report DIFFERENT addresses for one user in \
+             one Stoa. The probe says {probe}, whoAmI says {who}. A view rendering \
+             'you are posting as X' from the probe and 'you are X' from whoAmI shows \
+             two identities and has no way to decide which one signs."
+        );
+
+        // And both agree with what was actually kept, so "they agree" cannot be
+        // satisfied by both being wrong in the same way.
+        assert_eq!(
+            probe["identity"], kept["address"],
+            "the probe's identity is not the one the keep stored"
+        );
+
+        // The strongest form: an op signed by the key at the recorded path verifies
+        // against the address the probe reported. That is the requirement's own
+        // wording — "derived from the key that would actually sign it" — rather than
+        // a comparison of two derivations that could both be wrong.
+        let recorded = paths
+            .path_for(&a_stoa())
+            .expect("the record reads")
+            .expect("a path is recorded");
+        let signing = a_master_key().stoa_key_at_path(&a_stoa(), recorded);
+        let sig = crate::identity::sign_op_bytes(&signing, b"a post");
+        let author = Address::from_hex(probe["identity"].as_str().unwrap())
+            .expect("the probe reports a parseable address");
+        assert!(
+            crate::identity::verify_authored_op(
+                &author,
+                &signing.public_key().to_bytes(),
+                b"a post",
+                &sig.to_bytes()
+            ),
+            "an op signed by the key at the recorded path is not attributed to the \
+             address the probe reported"
+        );
+    }
+
+    #[test]
+    fn the_probe_and_whoami_give_one_reason_when_no_choice_is_recorded_for_this_stoa() {
+        // The state the two-store split creates: a master key exists, this Stoa has
+        // no choice recorded. Both methods must name it, and name it the SAME way —
+        // two methods describing one situation in two vocabularies is the split
+        // re-appearing at the wire.
+        //
+        // `canPost:false` here is the substantive half: the probe previously
+        // answered `true` with a pathless address, asserting posting ability for an
+        // identity that has no recorded path and that nothing in the signing path
+        // would ever use.
+        let dir = OnboardingDir::new("probe-no-choice");
+        let request = format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex());
+
+        let probe_out =
+            get_capabilities_from_stores(&request, || Ok(a_master_key()), || Ok(dir.paths()));
+        let probe: serde_json::Value = serde_json::from_str(&probe_out).unwrap();
+        let who_out = who_am_i(&request, || Ok(a_master_key()), || Ok(dir.paths()));
+        let who: serde_json::Value = serde_json::from_str(&who_out).unwrap();
+
+        assert_eq!(
+            probe["canPost"], false,
+            "a master key with no recorded choice for this Stoa cannot post as \
+             anyone: {probe_out}"
+        );
+        assert!(probe.get("identity").is_none(), "got {probe_out}");
+        assert_eq!(who["hasIdentity"], false, "got {who_out}");
+        assert_eq!(
+            probe["reason"], who["reason"],
+            "the two methods describe one state in two ways: probe {probe}, \
+             whoAmI {who}"
+        );
+        // Pinned to the constant, so a message that stopped naming the fix fails
+        // even while the two still agree with each other.
+        assert_eq!(probe["reason"], NO_CHOICE_FOR_THIS_STOA, "got {probe_out}");
     }
 
     #[test]

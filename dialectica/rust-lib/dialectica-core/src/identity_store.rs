@@ -98,6 +98,27 @@ pub enum IdentityStoreError {
     PathOutOfRange { stoa: String, found: i64 },
     /// A stored Stoa address was not 32 bytes.
     StoaNotAnAddress { found: usize },
+    /// This Stoa already has a chosen path, and a choice is never replaced.
+    ///
+    /// # Why this is its own arm and not `Storage`
+    ///
+    /// The refusal arrives as SQLite's `UNIQUE constraint failed`, which
+    /// [`IdentityStoreError::Storage`] would report as *"the identity record could
+    /// not be read or written … check the path and its containing directory"*. That
+    /// message names the wrong fix for the commonest refusal this store has: the
+    /// path and the directory are fine, and there is nothing for the user to check.
+    ///
+    /// It became load-bearing when the second-keep refusal moved here from
+    /// `Keystore::create`'s `AlreadyExists` — before that, the primary key was a
+    /// backstop nothing reached, so its message did not matter. The `wire` test
+    /// `each_keep_refusal_reason_is_pinned_to_its_own_situation` caught exactly this
+    /// on the move, which is what the test was written for.
+    ///
+    /// Carries the Stoa and the path already recorded. Both are public — the spec
+    /// says the record *"reveals nothing that a published identity does not already
+    /// reveal"* — and naming the existing choice is what lets a view tell the user
+    /// which identity they already have here rather than only that they have one.
+    ChoiceAlreadyRecorded { stoa: String, existing: u32 },
 }
 
 impl std::fmt::Display for IdentityStoreError {
@@ -131,6 +152,12 @@ impl std::fmt::Display for IdentityStoreError {
                 f,
                 "the identity record holds a {found}-byte Stoa key where an address \
                  is 32 bytes; restore it from a backup"
+            ),
+            IdentityStoreError::ChoiceAlreadyRecorded { stoa, existing } => write!(
+                f,
+                "an identity already exists for Stoa {stoa}, chosen at derivation \
+                 path {existing}; a chosen identity is never replaced, because \
+                 replacing one strands every op it has already signed"
             ),
         }
     }
@@ -245,16 +272,20 @@ impl IdentityStore {
     /// behaviour; a check that repaired what it found would be a migration written
     /// against a layout nobody has described.
     fn check_layout(conn: &Connection) -> Result<(), IdentityStoreError> {
-        conn.query_row("SELECT stoa, path FROM chosen_paths LIMIT 0", [], |_| Ok(()))
-            // `LIMIT 0` returns no row, so `QueryReturnedNoRows` is the SUCCESS
-            // case and every other error is the layout being wrong.
-            .or_else(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => Ok(()),
-                other => Err(IdentityStoreError::LayoutDoesNotMatchItsVersion {
-                    version: LAYOUT_VERSION,
-                    why: other.to_string(),
-                }),
-            })
+        conn.query_row(
+            "SELECT stoa, path FROM chosen_paths LIMIT 0",
+            [],
+            |_| Ok(()),
+        )
+        // `LIMIT 0` returns no row, so `QueryReturnedNoRows` is the SUCCESS
+        // case and every other error is the layout being wrong.
+        .or_else(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => Ok(()),
+            other => Err(IdentityStoreError::LayoutDoesNotMatchItsVersion {
+                version: LAYOUT_VERSION,
+                why: other.to_string(),
+            }),
+        })
     }
 
     /// The whole schema, in one place.
@@ -307,6 +338,38 @@ impl IdentityStore {
         Ok(())
     }
 
+    /// A failed write: the primary-key refusal if that is what it was, else storage.
+    ///
+    /// Matched on SQLite's **extended error code** rather than on its message text,
+    /// for the reason [`IdentityStore::record_path`] records: a string match would
+    /// break silently on a reworded diagnostic and report every refusal as a generic
+    /// storage failure again, with nothing failing to say so.
+    ///
+    /// Reads the existing path so the message can name it. A read that fails here
+    /// falls back to `Storage` rather than inventing a value — reporting a path the
+    /// store did not give us would be naming an identity nobody chose, in the error
+    /// that exists to stop exactly that.
+    fn violation_or_storage(&self, e: rusqlite::Error, stoa: &Address) -> IdentityStoreError {
+        let is_unique_violation = matches!(
+            &e,
+            rusqlite::Error::SqliteFailure(err, _)
+                if err.code == rusqlite::ErrorCode::ConstraintViolation
+        );
+        if !is_unique_violation {
+            return storage(e);
+        }
+        match self.path_for(stoa) {
+            Ok(Some(existing)) => IdentityStoreError::ChoiceAlreadyRecorded {
+                stoa: stoa.to_hex(),
+                existing,
+            },
+            // A constraint violation with no readable row is not a state this schema
+            // can produce; reported as storage rather than guessed at.
+            Ok(None) => storage(e),
+            Err(read_failure) => read_failure,
+        }
+    }
+
     /// Record the path chosen for a Stoa.
     ///
     /// **Refuses to replace an existing choice**, and the refusal is the point
@@ -320,6 +383,20 @@ impl IdentityStore {
     /// second choice for one Stoa is a constraint violation, not a row this code
     /// decided to keep. That is the refusal being structural rather than a branch
     /// somebody has to remember at every write.
+    ///
+    /// # The constraint violation is translated, not passed through
+    ///
+    /// SQLite reports it as `UNIQUE constraint failed`, which as an
+    /// [`IdentityStoreError::Storage`] reads *"check the path and its containing
+    /// directory"* — the wrong fix for the commonest refusal this store has. It is
+    /// mapped to [`IdentityStoreError::ChoiceAlreadyRecorded`], which names the
+    /// existing choice. This mattered only once the second-keep refusal moved here
+    /// from `Keystore::create`; until then nothing reached the primary key.
+    ///
+    /// The translation is by SQLite's **error code**, not by matching on the message
+    /// string. A string match would silently stop working on a SQLite that reworded
+    /// its diagnostics, and it would report every refusal as generic storage again
+    /// with nothing failing.
     ///
     /// # The range is checked on the way in as well as on the way out
     ///
@@ -342,7 +419,7 @@ impl IdentityStore {
                 "INSERT INTO chosen_paths (stoa, path) VALUES (?1, ?2)",
                 rusqlite::params![&stoa.as_bytes()[..], i64::from(path)],
             )
-            .map_err(storage)?;
+            .map_err(|e| self.violation_or_storage(e, stoa))?;
         // `execute` returning 0 would mean an insert that inserted nothing, which
         // this statement cannot produce — there is no `OR IGNORE` here. Checked
         // anyway rather than assumed, because a caller told a write succeeded when
@@ -415,13 +492,11 @@ impl IdentityStore {
             // wrote it, but the file is not under this module's control — it can
             // be hand-edited or half-restored — and a `try_into` that assumed 32
             // bytes would be an `unwrap` on disk content.
-            let stoa: [u8; 32] =
-                stoa_bytes
-                    .as_slice()
-                    .try_into()
-                    .map_err(|_| IdentityStoreError::StoaNotAnAddress {
-                        found: stoa_bytes.len(),
-                    })?;
+            let stoa: [u8; 32] = stoa_bytes.as_slice().try_into().map_err(|_| {
+                IdentityStoreError::StoaNotAnAddress {
+                    found: stoa_bytes.len(),
+                }
+            })?;
             let stoa = Address::from_bytes(stoa);
             out.push(ChosenPath {
                 path: path_from_row(raw, stoa.to_hex())?,
@@ -737,7 +812,10 @@ mod tests {
             .record_path(&a_stoa(b"one"), 1)
             .unwrap();
         let whole = std::fs::read(&path).unwrap();
-        assert!(whole.len() > 100, "a real store should be more than a header");
+        assert!(
+            whole.len() > 100,
+            "a real store should be more than a header"
+        );
 
         for cut in [1usize, 16, 100, whole.len() / 2, whole.len() - 1] {
             std::fs::write(&path, &whole[..cut]).unwrap();
@@ -769,10 +847,7 @@ mod tests {
         for bad in [-1i64, i64::from(u32::MAX) + 1, i64::MAX, i64::MIN] {
             Connection::open(&path)
                 .unwrap()
-                .execute(
-                    "UPDATE chosen_paths SET path = ?1",
-                    rusqlite::params![bad],
-                )
+                .execute("UPDATE chosen_paths SET path = ?1", rusqlite::params![bad])
                 .unwrap();
             let store = IdentityStore::open(&path).unwrap();
             assert!(

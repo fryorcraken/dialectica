@@ -35,6 +35,7 @@ pub mod wire;
 // know which submodule a handler happens to live in.
 pub use wire::{
     callee_error, channel_exists_reply, error_json, generate_identity_slate, get_capabilities,
-    guarded, keep_identity, list_threads, list_threads_from_request, panic_probe, parse_channel_id,
-    ping, version, who_am_i, KeepTargets,
+    get_capabilities_from_stores, guarded, keep_identity, list_threads, list_threads_from_request,
+    panic_probe, parse_channel_id, ping, posting_identity, version, who_am_i, KeepTargets,
+    OnboardingSession,
 };

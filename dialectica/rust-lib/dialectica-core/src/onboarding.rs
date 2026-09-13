@@ -446,7 +446,11 @@ mod tests {
         //
         // Index 0's digest begins 0x831b85ca — top bit SET — so masking gives
         // 0x031b85ca = 52,135,370.
-        assert_eq!(derive_path(&a_nonce(), 0), 52_135_370, "slate path 0 changed");
+        assert_eq!(
+            derive_path(&a_nonce(), 0),
+            52_135_370,
+            "slate path 0 changed"
+        );
         // Index 1's begins 0xe27a008a, also with the top bit set, giving
         // 0x627a008a = 1,652,162,698. Two masked cases rather than one, because a
         // mask that was accidentally a no-op would need a digest whose top bit
@@ -781,7 +785,8 @@ mod tests {
         // And the control: the real secret DOES sign as its candidate, so the
         // assertions above are about the values being wrong rather than about
         // verification never succeeding.
-        let real = crate::identity::derive_stoa_key_at_path(&master, &stoa, slate.candidates[0].path);
+        let real =
+            crate::identity::derive_stoa_key_at_path(&master, &stoa, slate.candidates[0].path);
         assert!(
             crate::identity::verify_op_bytes(
                 &slate.candidates[0].public_key,
