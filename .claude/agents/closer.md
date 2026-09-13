@@ -83,13 +83,43 @@ git diff origin/main origin/piece/<name> --stat
 
 **The files touched must be the files the PR claims.** Deletions in files
 unrelated to the change are the signal, and they are the only signal. The fix
-is a rebase onto current `main` — which is the runner's call to make, because a
-rebase rewrites a pushed branch and the runner is the one who pushes it.
+is a rebase onto current `main`, and **it is yours** — you have just read the
+diff, which is what a conflict needs to resolve.
 
 `main`'s protection has `strict: true` on its required checks, so GitHub will
 refuse a merge from a branch that is behind — but that refusal is about the
 *head commit*, not about what the diff contains, and it arrives at merge time
 rather than before you have spent a CI run. Check the diff first.
+
+**Rebase the moment you see `BEHIND` — do not wait for the run to finish.**
+`gh pr view <n> --json mergeStateStatus` says so before CI does. A run on a
+branch that is behind is a run whose result cannot be merged: the rebase
+rewrites the head commit and CI starts again from the top, so everything after
+the rebase point was measured against a tree that will not be the one merged.
+Waiting it out spends a full run to learn what one field already said.
+
+From inside the piece's worktree:
+
+```
+git fetch origin
+git rebase origin/main
+git push --force-with-lease origin piece/<name>
+```
+
+**`--force-with-lease`, never `--force`.** It refuses if the remote moved since
+your last fetch, which is the case where someone else's commit is about to be
+destroyed.
+
+**A conflict is yours to resolve, and it is the one thing here that can lose
+work silently.** You have read the diff, which is what resolving needs. Two
+rules while you are in it: take neither side wholesale — a conflict means both
+commits changed the same lines on purpose — and when the conflict is in a file
+your piece does not touch, stop and report rather than guess, because that is
+the signal the branch has picked up something that is not yours. `git rebase
+--abort` returns the branch exactly as it was, and costs nothing.
+
+After the rebase, go back to Step 2's diff check — the tree changed, so the
+answer can have changed with it — then to Step 4 against the new run.
 
 **After the merge the same command gives a false alarm, and it is the loud
 one.** `git diff origin/main HEAD --stat` on a correctly merged branch showed
@@ -138,7 +168,12 @@ though it is removing review evidence.
 
 ## Step 4 — watching CI
 
-Get the run for **your commit**, not for the branch:
+**First, confirm the branch is not behind** — `gh pr view <n> --json
+mergeStateStatus`. `BEHIND` means stop and report now rather than watch a run
+whose result cannot be merged; see Step 2. Watching comes after that field is
+clean.
+
+Then get the run for **your commit**, not for the branch:
 
 ```
 gh run list --branch piece/<name>
@@ -239,9 +274,9 @@ Each of these is here because the cheap version of it is tempting:
   deletes the only evidence.
 - **Re-open or re-argue a finding.** A **rejected** outcome you find
   unconvincing is a sentence in your report, not an edit to a reviewer's file.
-- **Force-push, or rebase the piece branch.** The archive commit is the only
-  thing you push, and it is an ordinary commit on top. A stale branch is a
-  report, not a repair.
+- **Force-push for any reason other than the rebase in Step 2**, which is
+  `--force-with-lease` onto current `main` and nothing else. You never
+  force-push to reshape history, drop a commit, or tidy a branch.
 - **Push to `main`.** Not the archive, not anything. `main` takes commits
   through a PR only.
 - **Merge a PR you did not check the diff of**, however green the run.
