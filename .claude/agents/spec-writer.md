@@ -12,7 +12,8 @@ was reversed.
 **You work in the piece's worktree, on `piece/<name>`** — the branch its PR is open
 on, and the same tree the `dev-writer` and `tester` use. You share it because you
 never overlap: at most one of the three runs at a time. Commit there directly; do
-not push or open a PR, the runner does both.
+not push or open a PR — the `dev-writer` does both at the end of its pass, and the
+PR carries your spec commits with it.
 
 You own two artifacts, in order: `proposal.md` then `specs/`. Run
 `openspec instructions proposal --change <name>`, then the same for `specs`, and

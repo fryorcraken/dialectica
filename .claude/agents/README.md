@@ -66,7 +66,7 @@ Leave it. It shrinks by attrition as changes touch each area.
 | Agent | Reads | Writes |
 |---|---|---|
 | `spec-writer` | PLAN.md (from `origin/main`) | `proposal.md`, `specs/` |
-| `dev-writer` | spec, PLAN.md | `design.md`, `tasks.md`, code, tests-as-it-goes |
+| `dev-writer` | spec, PLAN.md | `design.md`, `tasks.md`, code, tests-as-it-goes, **the PR** |
 | `tester` | spec, inherited tests | the test suite |
 | `spec-test-reviewer` | **spec + tests only** | findings |
 | `design-reviewer` | code, `design.md`, PLAN.md | findings |
@@ -130,8 +130,9 @@ wrong. Reviewers get a tree each because they are the only agents that overlap.
 Named for the role and not the stage, because `dev/x` invites a `test/x` beside
 it — which is the shape this section exists to stop.
 
-**Open the PR on `piece/<name>` from the first commit. It cannot be corrected
-later, and every workaround loses something.** A PR's head ref is immutable:
+**The PR is opened on `piece/<name>` and nothing else. Whichever ref it is opened
+on, it is stuck with — and every workaround loses something.** A PR's head ref is
+immutable:
 `PATCH /pulls/<n> -f head=…` returns **200 and silently ignores the field**, and
 `--base` changes the target, not the source. The rename endpoint
 (`POST /branches/<old>/rename`) does follow open PRs — but it **auto-closes** one
@@ -155,13 +156,17 @@ rather than merged shows here even though its content is in, so read the commits
 rather than the count. Say in the closing comment where the work went, and keep
 the branch.
 
-**Only the runner pushes `piece/<name>`.** With one pusher there is no race to
-lose, no rebase to retry, and no force-push to be tempted by.
+**`piece/<name>` is pushed by whoever holds it, and only one agent ever does.**
+The three writers take the piece's worktree in turn and never overlap, so the one
+holding it is the only one with commits to push — there is no race to lose and no
+force-push to be tempted by. The `dev-writer` pushes at the end of its pass and
+opens the PR there, because reviewers and CI both need one; see
+[`dev-writer.md`](dev-writer.md).
 
-The `closer` is the single exception, and it is not a second pusher of the piece:
-it pushes the **archive commit to `main`**, after the merge, and never touches the
-piece branch. Two agents pushing one branch is the race this rule prevents; one
-agent pushing a branch nobody else is on is not.
+Reviewers never push: their findings are cherry-picked onto the piece by the agent
+that acts on them. And the `closer` pushes the **archive commit to `main`** after
+the merge, never the piece branch. Two agents pushing one branch at once is the
+race this rule prevents; a branch handed from one agent to the next is not.
 
 **Only reviewers get a side branch**, because only reviewers run genuinely in
 parallel — six at once, while a fixer may still be changing the code they are
@@ -285,9 +290,10 @@ approach impossible has produced a result worth as much as the review, and
 unwritten the next agent spends the same afternoon. It goes in `design.md`, beside
 the decision it rules out.
 
-**The runner owns dispatching and pushing; the `closer` owns the last three
-stage rows.** `tasks.md`'s stage block is the list — read it to see what is left,
-because an unticked row with no agent running is a stage nobody is doing.
+**The runner owns dispatching; the `dev-writer` pushes the piece and opens its
+PR; the `closer` owns the last three stage rows.** `tasks.md`'s stage block is
+the list — read it to see what is left, because an unticked row with no agent
+running is a stage nobody is doing.
 Dispatch by naming the findings files rather than carrying their content, and
 re-run only the reviewers whose findings led to changes.
 

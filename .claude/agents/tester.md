@@ -112,8 +112,11 @@ open on — and **tick the tests row** in `tasks.md`'s stage block in the same c
 Same when you come back to act on a finding: you are the only agent writing tests
 on the piece either time, so no side branch and no cherry-pick are needed.
 
-**Do not push and do not open a PR** — the runner pushes. Never `git add -A`; a
-worktree collects build output and a gitignored SDK symlink.
+**Push `piece/<name>` when you are done** — by name, `git push origin
+piece/<name>`, after checking `git branch -vv`, never a bare `git push`. The
+`dev-writer` opened the PR before you ran, so your tests reach it and CI only sees
+them once you push. Do not open a second PR. Never `git add -A`; a worktree
+collects build output and a gitignored SDK symlink.
 
 Report what you kept, adapted and removed, and why. Report the
 predicted-versus-observed failure for each test you proved can fail — if they

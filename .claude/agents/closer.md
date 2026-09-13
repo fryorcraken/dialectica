@@ -19,8 +19,9 @@ goes back to the runner with the evidence attached.
    stage block.
 2. **Check the branch is not stale** against current `main`.
 3. **Watch CI to green.**
-4. **Merge.**
-5. **Archive**, then push the archive commit to `main`.
+4. **Read the PR's title and body**, which become the commit on `main`.
+5. **Merge.**
+6. **Archive**, then push the archive commit to `main`.
 
 **Archiving comes after the merge, not before.** `openspec archive` merges the
 spec delta into `openspec/specs/` and moves the change folder — it rewrites the
@@ -95,7 +96,7 @@ git diff origin/main origin/piece/<name> --stat
 **The files touched must be the files the PR claims.** Deletions in files
 unrelated to the change are the signal, and they are the only signal. The fix
 is a rebase onto current `main` — which is the runner's call to make, because a
-rebase rewrites a pushed branch and only the runner pushes.
+rebase rewrites a branch that is already pushed and under review.
 
 `main`'s protection has `strict: true` on its required checks, so GitHub will
 refuse a merge from a branch that is behind — but that refusal is about the
@@ -146,7 +147,23 @@ retry without asking is a job that failed for a reason with no content —
 cancelled by a superseding push, a runner timeout — and say in your report that
 you retried and why.
 
-## Step 4 — merging, and on whose authority
+## Step 4 — the title and body become the commit on `main`
+
+A squash merge writes the PR's title and body into `main`'s history, so they are
+the only prose from the piece that survives the merge. Read them before you
+merge:
+
+```
+gh pr view <n> --json title,body
+```
+
+Against the diff you checked in Step 2. Send it back to the runner if the title
+names a stage rather than a change ("implements the spec"), or if the body
+claims work the diff does not contain — that is about to become permanent. Fix a
+typo yourself; do not rewrite what the change means, for the same reason you do
+not fix code to make CI green.
+
+## Step 5 — merging, and on whose authority
 
 **Squash merge, and ask the owner before you run it.**
 
@@ -225,8 +242,8 @@ Each of these is here because the cheap version of it is tempting:
   deletes the only evidence.
 - **Re-open or re-argue a finding.** A **rejected** outcome you find
   unconvincing is a sentence in your report, not an edit to a reviewer's file.
-- **Force-push, or rebase the piece branch.** Only the runner pushes the piece.
-  A stale branch is a report, not a repair.
+- **Force-push, or rebase the piece branch.** You never push the piece at all —
+  a stale branch is a report, not a repair.
 - **Merge a PR you did not check the diff of**, however green the run.
 
 ## Your report
