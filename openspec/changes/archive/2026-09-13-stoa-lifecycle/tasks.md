@@ -17,12 +17,24 @@ directory shows it did.**
 - [x] review: architecture — `code-reviewer` (`findings/architecture.md`)
 - [x] review: spec-test — `spec-test-reviewer` (`findings/spec-test.md`)
 - [x] review: design — `design-reviewer` (`findings/design-review.md`)
-- [ ] findings all ticked, `findings/` deleted — runner
-- [ ] `openspec validate --strict`, then `archive` — runner
+- [x] findings all ticked, `findings/` deleted — runner
+- [x] `openspec validate --strict`, then `archive` — runner
 
-**One finding is still open and it is not mine:** `findings/security.md` entry 5
-(`Policy::to_byte` replaced by a constant survives the suite) is `tester`'s. The
-runner's first row above cannot be ticked until it is.
+**The finding that held the first runner row is closed.** `findings/security.md`
+entry 5 (`Policy::to_byte` replaced by a constant survives the suite) was
+`tester`'s, and the paragraph here said the row could not be ticked until it was.
+It was then resolved, and the resolution is the interesting part: the mutant is
+an **equivalent mutant**, unkillable by any test, because `Policy` has one
+variant and the discriminant's real exposure is a `const` that `cargo mutants`
+does not mutate at all. So the fix was not a test — it was correcting the two
+comments (`Policy::ALL`'s doc and the round-trip test's) that claimed the mutant
+was killed. `cargo mutants` reports a permanently-MISSED equivalent mutant
+identically to a genuine coverage gap, which is what made this entry name a fix
+that could not work.
+
+All 41 boxes across the six `findings/` files were ticked at the piece tip; the
+directory was removed from this archived folder, as the flow requires, since it
+is scaffolding and the durable reasoning moved into `design.md`.
 
 ## 1. The membership store
 
