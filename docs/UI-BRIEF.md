@@ -166,10 +166,19 @@ shadow, and identity is permanent — so the name **can never be changed**. Copy
 that says *"pick your username"* promises a settings screen that cannot exist.
 *"Pick your identity"* is true.
 
+**What the user is choosing is a derivation path over one master key**, not one
+of five separate keys. That sounds like an implementation detail and it has a
+consequence you have to render, below: **one saved value backs up every identity
+the person will ever have** — so a backup flow is one secret, not one per Stoa.
+
 Two consequences for you:
 
 - **An onboarding screen exists that did not before**: five identities, pick
   one, refresh for more. It is the first thing a new user sees in a Stoa.
+  **Core now serves this** — a slate call returns five candidates with an address
+  and a public key each, a keep call stores the one chosen, and a "who am I" call
+  answers afterwards. Refreshing is unlimited and is never refused for having
+  been pressed too often.
 - **A name is not unique and not an identifier** — see obligation 6 below.
   Accidental collisions are now rare: in a Stoa of a thousand the chance two
   people share a name is **about 0.003%**, and at five thousand **about 0.07%**.
@@ -390,6 +399,39 @@ to owner-only and replace the key".
 **Never gate on a build flag, and never show a compose box that cannot be
 submitted** — it loses whatever the user typed. Surface the reason instead.
 
+**Two obligations the core creates and cannot meet itself.** Both come from the
+publish contract (`content-authoring`), and neither is visible from a screenshot.
+
+**1. Posting the same thing twice posts once, and the interface has to handle
+it.** A post is named by a hash of its own content, and nothing in that content
+varies between two submissions — so one person posting the same body into the same
+Stoa twice produces **one post**. The second submission succeeds and tells you it
+stored nothing new.
+
+That is exactly right for a double-tapped submit button, and it is wrong for
+someone deliberately writing "agreed" twice in one thread, which is ordinary
+forum behaviour. The core reports which of the two happened; **the interface
+decides what the person sees**, and the failing design is the one that reports
+success and shows nothing new, because the person concludes their post vanished.
+Reasonable answers: say so plainly ("you already posted this"), or scroll to and
+highlight the existing post. **Do not** show a spinner that resolves to nothing,
+and do not show a generic error — nothing failed.
+
+This is a known gap with a known fix (a timestamp or nonce inside the post), and
+it is deliberately not fixed yet. Design for the behaviour that exists.
+
+**2. A reply needs its parent, and a peer does not always have it.** A reply names
+the post it answers, and the core works out which thread that is by reading the
+parent. If the parent has not reached this peer yet — ordinary in a peer-to-peer
+forum where two people legitimately hold different sets of posts — the reply is
+**refused**.
+
+So a reply control can fail for a reason that is nobody's fault and is temporary.
+The message must say that: the post being replied to has not arrived here yet, try
+again shortly. It must not read as an error the person caused, and **the draft must
+survive** — this is the one refusal that is expected to succeed on a retry, so
+discarding what they typed is the worst possible response to it.
+
 ### Moderation
 
 > **Not in the first release** (PLAN.md §9.2). The core's moderation logic is
@@ -567,6 +609,55 @@ present rather than one click away.
 only layer 4 makes a dishonest claim false.** A row showing a name and a glyph
 and no address has given the reader three recognition aids and zero guarantees.
 
+**7. Do not present a saved master key as a complete backup, because right now
+it is not.**
+Which of the five candidates a person kept is **metadata stored only on their own
+machine**. The master key reproduces every candidate; it does not say which one
+they chose. So a person holding an exported master key and nothing else has a
+secret that can derive their identity and **no way to know which identity it
+was**.
+
+Core tells you this rather than leaving you to infer it: the "who am I" reply
+carries a flag saying whether recovery needs more than the master key. **It is
+currently always set**, because export and remote backup are not built. When they
+are, the flag stops being set and the copy should follow it rather than being
+rewritten.
+
+**So a backup screen must not say "save this and you can always get back in."**
+It can truthfully say: this is your master key, keep it; and separately, your
+identity choices live on this device only, for now. The failure to avoid is the
+reassuring version — a person who believes they are covered, loses the machine,
+and discovers otherwise.
+
+**8. An unencrypted master key is a state you have to be able to show.**
+Whether the key on disk is encrypted depends on whether a passphrase was
+available, and **there is currently no passphrase UI**, so on an ordinary install
+it is stored **in the clear**. That is a real configuration, not a bug — a
+machine with an encrypted disk is a reasonable place for it — and core reports
+which of the two happened rather than leaving it to be guessed: the keep reply
+carries an `encrypted` flag.
+
+Two things follow, and the second is the one that is easy to get wrong:
+
+- **Somewhere reachable, a person should be able to see the answer.** "The secret
+  on your disk is in the clear" is not a fact someone should have to read the
+  source to learn.
+- **Do not render a padlock, a shield, or the word "secure" on the strength of
+  this flag being unset.** Protection that *reads* as strong while being absent
+  is worse than visible plaintext, because plaintext is something a person can
+  act on. If the flag says unencrypted, the interface should say so plainly or
+  say nothing — never imply the opposite.
+
+Whether a passphrase gets asked for at all is undecided upstream, so this
+obligation is about reporting the state honestly rather than about a flow.
+
+One detail that matters if you show this per Stoa: **the flag describes the master
+key, which is one file for the whole install, not one per Stoa.** The first keep
+creates that file and reports the protection it wrote; a keep in a second Stoa writes
+no key and reports the protection the existing file *has*. Both answers are true about
+the same single secret, so do not render them as two independent facts — "this
+identity is encrypted, that one is not" is not a state that can occur.
+
 ---
 
 ## The vote control — settled, and smaller than it was
@@ -575,6 +666,31 @@ and no address has given the reader three recognition aids and zero guarantees.
 earlier version of this document described a live three-way choice between one
 axis, two axes, and a one-control/three-gesture shape. **Ignore that if you saw
 it.** The design is:
+
+> **In the first release a vote is recorded and ranks nothing, and this is the
+> hardest honesty problem in the brief.** Pressing up or down publishes a real,
+> signed, permanent record. Nothing reads it yet: there is no score, and neither
+> feed ordering consults votes. The plan was originally to ship no vote control
+> for exactly this reason — *"a control with no visible effect teaches users the
+> app is broken"* — and the owner decided votes ship anyway.
+>
+> So the obligation lands here. **The control must not imply a ranking it does not
+> produce.** One thing is safe, one is not available yet, and one is never safe:
+>
+> - **Safe:** showing the reader their own vote back, as state on the button. That
+>   is real, immediate and true — they voted, and the interface remembers.
+> - **Not available yet, though it would be safe:** a plain count of votes on a
+>   post. No call returns one — there is no thread read at all, and the publish
+>   reply carries only an op id — so a count cannot be rendered today. Design for
+>   its absence. If a later change exposes one, it is safe only presented as a
+>   count, never as a position, a rank, or a reason this post appears where it
+>   does.
+> - **Not safe:** anything suggesting the vote moved the post, changed what anyone
+>   else sees, or fed an ordering. It did not. No "trending", no arrow, no implied
+>   effect on the feed.
+>
+> **Do not let this leak into the ordering controls either.** The feed offers two
+> orderings and neither is vote-based; a "top" or "best" option must not appear.
 
 **One axis — up and down, as on Reddit — plus two things that are not votes.**
 

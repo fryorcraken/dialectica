@@ -102,6 +102,24 @@ const VERSION_1: u8 = 1;
 /// and the record stops round-tripping.
 const MAX_TITLE_BYTES: usize = 1024;
 
+/// The longest a canonical genesis record can be, in bytes.
+///
+/// Every field of the format, summed: version (1) + creator (32) + policy (1) +
+/// title length prefix (4) + a title at [`MAX_TITLE_BYTES`]. Written as that sum
+/// rather than as 1062 so it moves with the format if a field is added — and
+/// `Genesis::encode` is what keeps it honest, because
+/// `the_record_bound_is_the_largest_record_that_encodes` builds a record at the
+/// title cap and compares.
+///
+/// **Exported because a caller decoding a record from untrusted bytes needs it
+/// and cannot derive it.** `wire::genesis_for` is handed a hex string of
+/// caller-chosen length and allocates half of it before [`Genesis::decode`] ever
+/// sees a byte; bounding that needs the format's own maximum, which is knowledge
+/// this module has and `wire.rs` would otherwise have to guess at. The same
+/// argument `op.rs`'s field cap makes about putting a bound where the format is
+/// known.
+pub const MAX_CANONICAL_BYTES: usize = 1 + 32 + 1 + 4 + MAX_TITLE_BYTES;
+
 /// How a Stoa decides who may post.
 ///
 /// One variant today. The field exists now because PLAN.md §13 costs it out:
@@ -698,6 +716,35 @@ mod tests {
             .canonical_bytes()
             .expect("a title of exactly MAX_TITLE_BYTES must encode");
         assert_eq!(Genesis::decode(&bytes).unwrap(), at_limit);
+    }
+
+    #[test]
+    fn the_record_bound_is_the_largest_record_that_encodes() {
+        // `MAX_CANONICAL_BYTES` is a claim about the FORMAT, exported so a
+        // caller decoding untrusted bytes can bound its allocation before
+        // decoding. A constant asserting a sum against itself would prove
+        // nothing, so the assertion is against what the encoder actually
+        // produces at the title cap.
+        //
+        // This is what makes the bound survive a format change: add a field to
+        // `canonical_bytes` without adding its width to the constant, and the
+        // encoded record overflows the bound and this test goes red — rather
+        // than `wire::genesis_for` silently refusing legitimate records.
+        let largest = Genesis {
+            title: "x".repeat(MAX_TITLE_BYTES),
+            ..a_record()
+        };
+        let bytes = largest
+            .canonical_bytes()
+            .expect("a title at the cap must encode");
+        assert_eq!(
+            bytes.len(),
+            MAX_CANONICAL_BYTES,
+            "the exported bound must be the largest record the encoder produces"
+        );
+        // And hardcoded, so a drift in either the cap or the header is visible
+        // as a number rather than as two expressions agreeing with each other.
+        assert_eq!(MAX_CANONICAL_BYTES, 1062);
     }
 
     #[test]

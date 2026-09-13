@@ -469,18 +469,109 @@ corrected rather than the test deleted — the test is fine, its description was
 
 **And a CI grep, for the half no test can reach.** The test proves the derivation
 is *correct*; it cannot prove the adapter still *calls* it. A new Lint step
-(`the adapter derives the creator and the poster in one place`) asserts both
-wrapper names appear in the adapter and that it names no `Keystore` accessor
-itself. Both halves were verified to fire: removing `poster_address_in` trips the
-first, and calling `ks.stoa_address(...)` while leaving the name in place trips the
-second. Stated as what it cannot see: it reads text, so it says nothing about
-correctness — that half is the test's.
+(`the adapter derives the creator and the poster in one place`) asserts each half's
+name appears in the adapter and that it names no `Keystore` accessor itself. Both
+halves were verified to fire: removing the creator's wrapper trips the first, and
+calling `ks.stoa_address(...)` while leaving the name in place trips the second.
+Stated as what it cannot see: it reads text, so it says nothing about correctness
+— that half is the test's.
+
+**The probe's half of that gate now names a different function**, because the merge
+of `main` moved where the probe's derivation lives: `core::keystore::poster_address_in`
+→ `core::wire::get_capabilities_from_stores`. See "Three derivations after the
+merge" for what moved and what it exposed.
 
 **Alternative considered: leave it, and rely on review.** Ruled out by the
 evidence in the finding — this exact divergence already shipped once and was
 caught by a human reading code, not by a gate. `.claude/agents/README.md`'s rule
 applies: *"say what a gate cannot see rather than reporting it as passed."* The
 answer here is that the gap was closable, so it was closed.
+
+### Three derivations after the merge, and why only one was fixed here
+
+`main` moved three times while this piece was in review — the wire-request
+envelope, the publish path (#51) and identity onboarding (#58) — and merging it
+made a thing visible that neither branch could see alone: **one user now has three
+different signing identities, depending on which handler is asked.**
+
+| Handler | Key it uses | Scheme |
+|---|---|---|
+| `createStoa` | `identity_public_key()` | the root, used directly |
+| `getCapabilities` / `whoAmI` | `stoa_address_at_path(stoa, path)` | path-derived per-Stoa, path read from the identity record |
+| `publishPost` / `Reply` / `Vote` | `stoa_key(&stoa)` | **pathless** per-Stoa |
+
+Each is internally consistent and each was correct against the contract its own
+change was written to. None of them agree, and **nothing failed** — the merge
+compiled and 733 tests passed, because every test that asserts a pairing injects
+both halves of that pairing itself. This is the same failure shape §"Which key the
+creator is" records, arriving by merge rather than by edit: three call sites that
+have to agree, in code `cargo test` does not compile.
+
+**What was fixed here, and why the boundary is where it is.** Only the piece's own
+half — the envelope bypass (below), and the CI gate that names where each
+derivation lives. The *choice* of which key a publish signs with is a **spec
+question**: `content-authoring` and `identity-onboarding` disagree about whether an
+op's author is the root identity, the pathless per-Stoa key, or the path-derived
+one, and no spec in the set decides between them. Picking one here would be this
+piece silently resolving another change's contract, which is exactly the licence
+`dev-writer`'s brief withholds. Reported as a spec finding instead.
+
+**What stops it going quiet again.** The CI gate
+(`the adapter derives the creator and the poster in one place`) is this piece's,
+and it caught all of this — which is why it is worth saying what it now does. It
+asserts the creator comes from `core::keystore::creator_key_in` and the probe from
+`core::wire::get_capabilities_from_stores`, and it bans every `Keystore` accessor
+called directly in the adapter. The publish path's `stoa_key(&stoa)` is **exempted
+by name, with the reason in the exemption**: a gate that fails on an undecided spec
+question blocks a merge on something nobody has decided, and a gate quietly widened
+to let code through is worse than no gate. The exemption is a line to delete when
+the spec decides, not an allowance.
+
+Two smaller corrections the merge forced, recorded because each was a comment
+asserting something the merged code disproves — this repo's recorded failure mode:
+
+- `the_creator_a_creation_names_is_the_identity_the_probe_reports` said its lookup
+  was passed "exactly as the adapter gives it". True when written; false after #58
+  moved the adapter to `get_capabilities_from_stores`. The comment now says what
+  the test does prove (the pairing) and what it cannot see (the live wiring).
+- The CI gate's regex read its own explanatory comment — which quotes
+  `ks.stoa_address(stoa)` in prose to say the call is gone — as the call it forbids.
+  Comments are stripped before the scan.
+
+### `create_stoa`, `join_stoa` and `list_stoas` reach the envelope through `Request`
+
+`main`'s `Request` envelope wins over this piece's own `serde_json::from_str`, and
+it is not a close call: `Request::parse` refuses a non-object **by name** and caps
+the request at 4 MiB **before allocating**, from a module holding no handler — which
+is what makes the guarantee structural rather than remembered.
+
+**The textual merge compiled and was wrong.** All three handlers kept their own
+`from_str`, and `create_stoa` answered `[]` with `{"error":"missing field: title"}`
+— telling a caller its array failed a field check, the one thing the envelope's
+spec forbids — and **served an oversized request** with no cap at all. A clean
+compile and a green-looking suite.
+
+What found them was retargeting this piece's own field parser. `parse_stoa` took
+`&serde_json::Value` here and `&Request` on `main`; deleting the duplicate left
+`main`'s, and `rustc` then named four call sites across `join_stoa` and
+`list_stoas` at once. `create_stoa` reads `title` rather than `stoa`, so no type
+error reached it — it was found by the sweep instead, which is the other half of
+the answer:
+
+**Three methods were added to `every_request_taking_method`, and that is an
+obligation the doc comment states in capitals because nothing checks it.** Unlisted,
+all five envelope sweeps go green over handlers that bypass the envelope entirely;
+listed, four of them turned red and named `create_stoa`.
+
+**`list_stoas` is the surface's first method with no required field**, so `{}` is a
+*served* request for it rather than the third caller mistake. Two sweeps read `{}`
+as a refusal. The fix is `every_method_with_a_required_field`, a filtered list —
+**not** an `if name != "list_stoas"` inside each sweep, which would be two call
+sites that have to agree about who is exempt and a third sweep getting it wrong.
+The exclusion is paired with a positive assertion that `list_stoas` *serves* `{}`,
+because excluding it from the loop would otherwise exclude it from the claim
+entirely: a `Request::parse` that refused every empty object would pass every sweep
+that remained.
 
 ### The reply names its title as founding
 

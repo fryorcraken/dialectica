@@ -11,6 +11,19 @@
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
+/// The request envelope, deliberately in a file of its own.
+///
+/// [`Request`]'s guarantee is that a handler holding one went through the
+/// envelope check — and a tuple struct's private field is private to its
+/// **defining module**, not its defining type. While the type lived in this
+/// file, every handler here could write `Request(map)` and skip the check; the
+/// claim in its doc comment was false for exactly the population it named. The
+/// boundary is the fix, and it holds only while **this file contains no
+/// constructor and that file contains no handler**.
+mod request;
+
+pub use request::{Request, MAX_REQUEST_BYTES, REQUEST_NOT_AN_OBJECT};
+
 /// The one failure shape (PLAN.md §2.5). Everything that goes wrong comes back
 /// through here, so a view has exactly one error branch to render — never a
 /// partial success.
@@ -77,12 +90,30 @@ pub fn version(crate_version: &str) -> String {
 /// Trivial by design, but it validates at the boundary, which is the habit the
 /// security posture asks for: inbound JSON is attacker-controlled and is
 /// rejected here rather than deeper in.
+///
+/// # `payload` is the surface's one `<any>` field, and that decides its `null`
+///
+/// The contract keys a field's `null` reading to its declared type and
+/// optionality, and gives three readings. `payload` takes **reading 1**: a field
+/// documented as carrying any JSON value carries a `null` through as that value,
+/// and that reading takes precedence over the required-field one. So
+/// `{"payload":null}` is served as `{"pong":null}` rather than refused —
+/// `payload` is required, but for a field whose type admits `null` the `null` is
+/// not a malformed parameter, it *is* the parameter.
+///
+/// That precedence is the part worth stating here rather than leaving to be
+/// derived: without it, `payload` is reachable by two readings that disagree, and
+/// this method is where they meet. Pinned by
+/// `pings_payload_carries_an_explicit_null_through_as_a_value`.
 pub fn ping(request: &str) -> String {
     guarded("ping", || {
-        let parsed: serde_json::Value = match serde_json::from_str(request) {
-            Ok(v) => v,
-            Err(e) => return error_json(&format!("invalid JSON: {}", e)),
+        let parsed = match Request::parse(request) {
+            Ok(r) => r,
+            Err(e) => return e,
         };
+        // Note what is NOT here: a `Some(Value::Null)` arm collapsing a null into
+        // the missing-field refusal. A `<any>` field's null is a value (reading
+        // 1), so the only absence is a genuine one.
         let Some(payload) = parsed.get("payload") else {
             return error_json("missing field: payload");
         };
@@ -198,17 +229,29 @@ impl Capability {
 /// What this does NOT do is make a mutation detectable — reverting to `FnOnce`
 /// leaves the suite green, and the mutation table says so rather than claiming
 /// a kill it does not have.
+///
+/// # The lookup's error is a reason, not a `KeystoreError`
+///
+/// It was `Result<String, KeystoreError>`, which said the only thing that can stop a
+/// user posting is the keystore. That stopped being true when the probe began
+/// consulting the path record: "a master key exists and this Stoa has no choice
+/// recorded" is a real `CannotPost` state and not a keystore failure at all. The
+/// alternative was an `Other(String)` arm on `KeystoreError`, rejected because that
+/// enum's arms are documented as distinguishable *so that a reason can name a fix*,
+/// and a catch-all carrying another module's failure is what that doctrine exists to
+/// prevent. A `String` is what `capability_for` reduced the error to on the very next
+/// line anyway.
 pub fn get_capabilities(
     request: &str,
-    lookup: impl Fn(&crate::identity::Address) -> Result<String, crate::keystore::KeystoreError>,
+    lookup: impl Fn(&crate::identity::Address) -> Result<String, String>,
 ) -> String {
     guarded("get_capabilities", || {
-        let parsed: serde_json::Value = match serde_json::from_str(request) {
-            Ok(v) => v,
-            Err(e) => return error_json(&format!("invalid JSON: {e}")),
+        let parsed = match Request::parse(request) {
+            Ok(r) => r,
+            Err(e) => return e,
         };
         let stoa = match parse_stoa(&parsed) {
-            Ok(a) => a,
+            Ok(s) => s,
             Err(e) => return e,
         };
         capability_for(&stoa, lookup).to_json()
@@ -223,18 +266,835 @@ pub fn get_capabilities(
 /// string would be asserting on serialisation at the same time.
 pub fn capability_for(
     stoa: &crate::identity::Address,
-    lookup: impl Fn(&crate::identity::Address) -> Result<String, crate::keystore::KeystoreError>,
+    lookup: impl Fn(&crate::identity::Address) -> Result<String, String>,
 ) -> Capability {
     match lookup(stoa) {
         Ok(identity) => Capability::CanPost { identity },
-        // The reason IS the error's message, not a rewording of it.
-        // `KeystoreError::Display` already names the fix for each case — that
-        // is a documented obligation on it, with a test — so paraphrasing here
-        // would mean maintaining the same guidance in two places, and the two
-        // would drift.
-        Err(e) => Capability::CannotPost {
+        // The reason IS the lookup's own message, not a rewording of it. Where that
+        // message comes from `KeystoreError::Display` or `IdentityStoreError::Display`,
+        // each already names the fix for its own case — a documented obligation on
+        // both, with tests — so paraphrasing here would mean maintaining the same
+        // guidance in two places and watching the two drift.
+        Err(reason) => Capability::CannotPost { reason },
+    }
+}
+
+/// The address an op published now would be attributed to, for the probe to report.
+///
+/// # This exists because two methods were answering "who posts here" differently
+///
+/// `posting-capability`'s spec requires *"the identity reported SHALL be the one an
+/// op published now would be attributed to, derived from the key that would actually
+/// sign it"*, and names the failure it is guarding: *"the user sees one handle and
+/// posts under another."* That was the live state. `whoAmI` used the path-taking
+/// derivation under salt `/dialectica/2/…`; the probe's lookup was still the
+/// pathless one under `/dialectica/1/…`, and `identity.rs`'s own test asserts the
+/// two schemes **must** disagree. So the onboarding flow showed one address and the
+/// posting gate reported another, for one user in one Stoa, with no field in either
+/// reply to tell them apart.
+///
+/// The salt bump was right; what it left behind was this caller. Architecture and
+/// security review found it independently, and `proposal.md`'s claim that
+/// `posting-capability` is *"not modified, deliberately — the probe's … derivation
+/// [is] untouched"* is exactly how it happened: the shape was untouched and the
+/// contract was broken.
+///
+/// # Why it is here rather than in the adapter's closure
+///
+/// The pathless derivation was chosen in `dialectica/rust-lib/src/lib.rs`, which is
+/// `#[cfg(logos_scaffold)]` and therefore never compiled by `cargo test`. Every
+/// probe test injects a stub returning a literal, so no test could compare the
+/// probe's identity to `whoAmI`'s and none could be written while the choice lived
+/// there. Moving the choice into `core` is what makes
+/// `the_probe_and_whoami_report_the_same_identity_for_one_user_and_stoa` possible.
+///
+/// # The record is consulted, and its absence is not an error
+///
+/// A master key with no recorded choice for this Stoa cannot post *as anyone*: there
+/// is no path, so there is no identity, so there is nothing to attribute an op to.
+/// That is reported as `CannotPost` with a reason naming the missing choice — the
+/// same state `whoAmI`'s fourth row names, so the two methods agree about it rather
+/// than one inventing an identity the other does not have.
+pub fn posting_identity(
+    stoa: &crate::identity::Address,
+    keystore: &crate::keystore::Keystore,
+    paths: &crate::identity_store::IdentityStore,
+) -> Result<String, String> {
+    match paths.path_for(stoa) {
+        Ok(Some(path)) => Ok(keystore.stoa_address_at_path(stoa, path).to_hex()),
+        Ok(None) => Err(NO_CHOICE_FOR_THIS_STOA.to_string()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// The reason both `getCapabilities` and `whoAmI` give for "a master key exists and
+/// this Stoa has no choice recorded".
+///
+/// One constant because it is one state, and the two methods reporting it in
+/// different words would be two methods disagreeing about the user's situation in the
+/// one place they are meant to agree. The state itself is what the two-store split
+/// creates, and the wording names the fix rather than the fault, per
+/// `KeystoreError::Display`'s obligation.
+pub const NO_CHOICE_FOR_THIS_STOA: &str =
+    "a master key exists but no identity has been chosen for this Stoa; \
+     generate a slate and keep one of its candidates";
+
+/// `{"stoa":"<hex>"}` -> whether the user can post there, from the two stores.
+///
+/// The shape [`get_capabilities`] has, with the *derivation* moved inside so it can
+/// be tested. See [`posting_identity`] for why that move was necessary and what it
+/// fixed. The openers are closures for the reason every other one in this file is:
+/// this crate cannot read the environment or know the host's layout.
+pub fn get_capabilities_from_stores(
+    request: &str,
+    open_keystore: impl Fn() -> Result<crate::keystore::Keystore, crate::keystore::KeystoreError>,
+    open_paths: impl Fn() -> Result<
+        crate::identity_store::IdentityStore,
+        crate::identity_store::IdentityStoreError,
+    >,
+) -> String {
+    get_capabilities(request, |stoa| {
+        // Each error keeps its OWN type's message rather than being folded into one
+        // of them. Adding an `Other(String)` arm to `KeystoreError` so this could
+        // return that type was the obvious move and is rejected: that enum's arms
+        // are documented as distinguishable so a reason can name a fix, and a
+        // catch-all carrying another module's failure is the collapse the
+        // distinguishability doctrine exists to prevent.
+        let keystore = open_keystore().map_err(|e| e.to_string())?;
+        let paths = open_paths().map_err(|e| e.to_string())?;
+        posting_identity(stoa, &keystore, &paths)
+    })
+}
+
+// ─── Onboarding: the slate, keeping one, and who the user is ──────────────
+//
+// The contract is the `identity-onboarding` spec; the reasoning behind these
+// shapes is in that change's `design.md`. What is repeated here is only what a
+// reader of THIS code needs in order not to undo it.
+
+/// The `stoa` field, parsed. One job, because **every** handler that takes a Stoa
+/// needs it and a second copy would eventually disagree with the first about whether
+/// a missing field and a wrong-typed one are the same mistake.
+///
+/// The `Err` arm is already the wire reply, following `parse_channel_id`: a caller
+/// cannot accidentally invent a second error shape while converting one.
+///
+/// # Six call sites, and for a while it was three
+///
+/// This was extracted for the three handlers `identity-onboarding` added, and the
+/// three that already existed — `get_capabilities`, `list_threads_inner`,
+/// `list_threads_from_request` — were left on their own inline copies. Architecture
+/// review named the cost precisely: they were behaviourally identical, so nothing
+/// failed, and the bill arrives on the next change that tightens the parse (a length
+/// bound, a lowercase-hex rule), which would land in one place while three handlers
+/// kept the old behaviour and every one of their tests kept passing.
+///
+/// CLAUDE.md's rule is that the fourth slightly-different copy of a guard is the
+/// signal to reshape. The signal was read — the helper exists — and then the reshape
+/// stopped at the new call sites. All six now use it.
+///
+/// # It takes a `&Request`, not a `&Value`, and that is what carries the envelope
+///
+/// This took a `&serde_json::Value` until `main`'s request envelope merged in. The
+/// change of parameter type is the whole reason the merge is not a textual one: a
+/// `Value` answers `None` to `get("stoa")` for an **array** exactly as it does for
+/// an object with no `stoa`, so this helper could not tell those apart and every
+/// handler behind it inherited that blindness. A `&Request` can only have come from
+/// [`Request::parse`], so by the time this reads a field the non-object refusal and
+/// the size cap have both already happened.
+///
+/// That makes the six call sites a feature rather than a liability. The envelope's
+/// own `design.md` records what its type does **not** buy — "a handler need not hold
+/// a `Request` at all", measured against a sixth method that served `[]` with the
+/// suite green — and a shared field reader taking `&Request` is the one shape that
+/// shrinks that gap: a new Stoa-taking handler cannot reach `stoa` without a
+/// `Request` in hand, because this is the only place that reads the field.
+fn parse_stoa(parsed: &Request) -> Result<crate::identity::Address, String> {
+    match parsed.get("stoa") {
+        Some(serde_json::Value::String(s)) => {
+            crate::identity::Address::from_hex(s).map_err(|e| error_json(&format!("stoa: {e}")))
+        }
+        Some(_) => Err(error_json("stoa must be a string")),
+        None => Err(error_json("missing field: stoa")),
+    }
+}
+
+/// The onboarding state that spans two wire calls, and the decision about which
+/// master key a slate was offered under.
+///
+/// # Why this type exists at all
+///
+/// A slate is not a nonce. It is a **`(master key, nonce)` pair** — the nonce
+/// fixes the five *paths* and the master key fixes the five *identities* at those
+/// paths. `derive_path` takes only the nonce, so two different master keys and one
+/// nonce give the same five paths and five completely different addresses.
+///
+/// The first version of this change held only the nonce, and the adapter minted a
+/// fresh master key on each of the two calls. Every guard fired correctly and the
+/// outcome was still wrong: the slate showed candidates of key *A*, the keep wrote
+/// key *B*, reported `kept: true`, and named an address the user had never seen.
+/// Three reviewers reached it independently. The spec calls storing an identity the
+/// user did not choose unrecoverable *"because the choice cannot be recomputed"*,
+/// and an address is *"the only unforgeable way to tell two candidates apart"* —
+/// so the value the choice was made on was precisely the value that changed.
+///
+/// The nonce check cannot catch it. Both slates are equally live and the nonce is
+/// the same; what differs is a thing the nonce says nothing about.
+///
+/// # Why the key is held rather than committed to
+///
+/// The alternative was to carry a commitment to the master key in the slate reply
+/// and have the keep refuse when the key it is about to write does not match. That
+/// detects the divergence; it does not give the user the identity they chose — it
+/// turns a wrong answer into a refusal the user can do nothing about, because the
+/// key that produced their slate is already gone.
+///
+/// Holding the minted keystore for the module's lifetime is what makes the right
+/// answer available. It also makes two properties true that the per-call mint made
+/// false, and both are user-visible: refreshing a slate now offers **more
+/// candidates of one identity's key** rather than candidates of a different key
+/// each press, which is what `docs/UI-BRIEF.md` tells a designer the flow does; and
+/// keeping a candidate for a *second* Stoa reuses the master key the first keep
+/// wrote, which is what makes one master key per install mean anything.
+///
+/// **The exposure this costs is a root secret in memory for the module's lifetime
+/// rather than for one call.** That is the same lifetime a kept keystore's root
+/// has — `keep` writes it and every later call opens it — so the window widens
+/// only on the fresh-install path, and only until the user keeps or the module
+/// stops. Nothing is written: `mint_or_open` writes no file, which is the spec's
+/// *"Generating a slate SHALL NOT write to storage"*, and `Keystore`'s root is
+/// `Zeroizing`, so the held copy is wiped on drop rather than by a line somebody
+/// has to remember.
+///
+/// # Why it is in `core` and not in the adapter
+///
+/// It was in the adapter, as a 12-line `master_key` helper, and that is where the
+/// defect lived. `dialectica/rust-lib/src/lib.rs` is `#[cfg(logos_scaffold)]` and
+/// `build.rs` sets that cfg only when the generated provider exists, which it never
+/// does under `cargo test` — so the one function deciding which master key a slate
+/// and a keep each saw was compiled out of the only gate that runs any logic. The
+/// adapter's own comment says a body there that grows past one line *"is logic no
+/// test can reach"*, and it was right.
+///
+/// What is left in the adapter is the part that genuinely cannot move: the host's
+/// directory, and the environment the protection is read from.
+#[derive(Default)]
+pub struct OnboardingSession {
+    /// The keystore this module is working with, opened from disk or minted once.
+    ///
+    /// `None` until the first call that needs one. Minted at most once per module
+    /// lifetime, which is the whole point of the field.
+    keystore: Option<crate::keystore::Keystore>,
+    /// The nonce of the slate a keep may quote. `None` when no slate is live.
+    live_slate: Option<crate::onboarding::SlateNonce>,
+}
+
+impl OnboardingSession {
+    /// A session with nothing opened and no slate live.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The keystore to work with: the one on disk, or one minted and remembered.
+    ///
+    /// **Minted at most once.** A second call returns the same key, which is the
+    /// property the two-call onboarding flow rests on and the one a per-call mint
+    /// did not have.
+    ///
+    /// `open` is tried on **every** call rather than only the first, and that is
+    /// deliberate: a keep writes the keystore, so the call after a keep finds a file
+    /// where the call before it found none. Preferring the file over the held copy
+    /// means the identity a later call reports is the one on disk — the authority —
+    /// rather than a minted key that was never written.
+    ///
+    /// Any error other than "no keystore" propagates. A keystore that exists and
+    /// cannot be opened must not be silently replaced by a fresh key, which is how
+    /// every identity a user has gets discarded with no error saying so.
+    fn keystore_for(
+        &mut self,
+        open: impl FnOnce() -> Result<crate::keystore::Keystore, crate::keystore::KeystoreError>,
+    ) -> Result<&crate::keystore::Keystore, crate::keystore::KeystoreError> {
+        match open() {
+            Ok(ks) => {
+                // The file wins over anything held. See above.
+                self.keystore = Some(ks);
+            }
+            Err(crate::keystore::KeystoreError::NotFound) => {
+                if self.keystore.is_none() {
+                    // `?` rather than an `expect`. Minting asks the OS for entropy,
+                    // and this function is reached from a dispatch handler on every
+                    // fresh-install slate and keep — so a panic here aborts the
+                    // module process rather than failing one call. See
+                    // `identity::SecretKey::generate` for what that measured.
+                    self.keystore = Some(crate::keystore::Keystore::generate()?);
+                }
+            }
+            Err(e) => return Err(e),
+        }
+        // Not reachable as `None`: every arm above either sets the field or
+        // returns. An error rather than an `expect`, because an `expect` on a
+        // handler path is a panic in a module process.
+        self.keystore
+            .as_ref()
+            .ok_or(crate::keystore::KeystoreError::NotFound)
+    }
+
+    /// Whether a slate is live, and which. For the adapter's own assertions only.
+    pub fn live_slate(&self) -> Option<crate::onboarding::SlateNonce> {
+        self.live_slate
+    }
+
+    /// Put a specific nonce — or none — in the live slot.
+    ///
+    /// `#[cfg(test)]` and `pub(crate)`, both load-bearing, following
+    /// `Keystore::from_root_for_test`. A keep has to be reachable with a nonce that
+    /// is stale, forged or absent, and those states cannot be produced by generating
+    /// a slate, because generating one makes its nonce live by definition.
+    ///
+    /// It is **not** public, and that matters beyond tidiness: a public setter would
+    /// let a caller declare a slate live that was never offered, which is the
+    /// superseded-selection refusal disabled from outside.
+    #[cfg(test)]
+    pub(crate) fn set_live_slate_for_test(&mut self, nonce: Option<crate::onboarding::SlateNonce>) {
+        self.live_slate = nonce;
+    }
+}
+
+/// `{"stoa":"<hex>"}` -> a slate of candidate identities.
+///
+/// # The count is not a parameter, and that is a security property
+///
+/// The spec requires the number of candidates be *"fixed by the implementation
+/// and reported with the set, rather than requested by the caller"*, because a
+/// caller-supplied count is *"a number that decides how much key derivation this
+/// module performs"*. So there is no `count` field to pass, which is the strongest
+/// form of that: the request has nowhere to put one.
+///
+/// It is still **reported**, as `count`, so a view rendering a slate does not
+/// hardcode five.
+///
+/// # Nothing is written
+///
+/// The spec: *"Generating a slate SHALL NOT write to storage."* This handler takes
+/// the master key and returns JSON; there is no store parameter for it to write
+/// to, so the requirement holds by the signature rather than by a line somebody
+/// has to not add.
+///
+/// # The keystore is opened by a closure, and the session decides what to do with it
+///
+/// `open` is a closure for the reason [`get_capabilities`]' lookup is one: this
+/// crate cannot read the environment or know the host's persistence path, and a
+/// handler that went looking would be doing discovery at a moment its caller does
+/// not control. It hands back the keystore rather than the raw root, so the root is
+/// never a value this function names.
+///
+/// What the closure does **not** decide is what "no keystore yet" means. That is
+/// [`OnboardingSession::keystore_for`]'s, and it lives there rather than in the
+/// adapter because the adapter is not compiled by `cargo test` — see that type's
+/// documentation for what the earlier arrangement cost.
+///
+/// # The live slate is set here, and only on success
+///
+/// Recorded after the slate is built, so a derivation failure does not supersede a
+/// slate the user is still looking at.
+pub fn generate_identity_slate(
+    session: &mut OnboardingSession,
+    request: &str,
+    open: impl FnOnce() -> Result<crate::keystore::Keystore, crate::keystore::KeystoreError>,
+) -> String {
+    guarded("generate_identity_slate", || {
+        let parsed = match Request::parse(request) {
+            Ok(r) => r,
+            Err(e) => return e,
+        };
+        let stoa = match parse_stoa(&parsed) {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
+        let slate = {
+            let keystore = match session.keystore_for(open) {
+                Ok(k) => k,
+                Err(e) => return error_json(&e.to_string()),
+            };
+            match keystore.slate_for(&stoa) {
+                Ok(s) => s,
+                Err(e) => return error_json(&e.to_string()),
+            }
+        };
+        session.live_slate = Some(slate.nonce);
+        slate_json(&slate)
+    })
+}
+
+/// A slate as the view receives it.
+///
+/// Pinned by `the_slate_json_is_pinned_to_the_exact_shape_a_view_is_written_against`
+/// against a hardcoded **key set**, for the reason
+/// `the_capability_json_is_pinned_to_the_exact_shape_the_plan_specifies` gives: a
+/// view is written against these exact names and renaming one is a breaking change
+/// no type checker would catch.
+///
+/// The key *set*, not merely each key's presence — an added field fails that test as
+/// well as a removed one. This comment previously cited the capability test's reason
+/// while the slate test checked only presence, which invited a reader to expect the
+/// sibling's strength; the spec-test reviewer measured the gap by adding a
+/// `displayName` to every candidate and watching the suite stay green. The spec
+/// requires that no candidate carry a display name or a visual mark, so presence-only
+/// could not fail on the one scenario this shape most needs to be held to.
+///
+/// **`path` is present**, and its presence is a decision rather than an oversight.
+/// It is not secret — the spec says the record *"reveals nothing that a published
+/// identity does not already reveal"* — and a view that can show the user which
+/// path they are about to keep is a view that can render the recovery warning
+/// truthfully. What is NOT here is any secret, which the spec requires by name.
+fn slate_json(slate: &crate::onboarding::Slate) -> String {
+    let candidates: Vec<serde_json::Value> = slate
+        .candidates
+        .iter()
+        .map(|c| {
+            serde_json::json!({
+                "index": c.index,
+                "path": c.path,
+                "address": c.address.to_hex(),
+                "publicKey": c.public_key.to_hex(),
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "slate": slate.nonce.to_hex(),
+        "count": candidates.len(),
+        "candidates": candidates,
+    })
+    .to_string()
+}
+
+/// What keeping a candidate needed from storage, and what it produced.
+///
+/// **An enum with one payload each rather than a struct of `Option`s**, following
+/// [`Capability`] and for the identical reason: the contract has exactly two
+/// shapes, and a struct could express states it does not have — a success with no
+/// identity, or a failure with one.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Kept {
+    /// The identity is stored. Carries what it is, and whether the master key was
+    /// encrypted at rest.
+    Stored {
+        address: String,
+        public_key: String,
+        path: u32,
+        encrypted: bool,
+    },
+    /// Nothing was stored. The reason names the fix.
+    Refused { reason: String },
+}
+
+impl Kept {
+    /// The wire form. Exactly one of the two shapes, by construction.
+    pub fn to_json(&self) -> String {
+        match self {
+            Kept::Stored {
+                address,
+                public_key,
+                path,
+                encrypted,
+            } => serde_json::json!({
+                "kept": true,
+                "address": address,
+                "publicKey": public_key,
+                "path": path,
+                "encrypted": encrypted,
+            })
+            .to_string(),
+            Kept::Refused { reason } => {
+                serde_json::json!({ "kept": false, "reason": reason }).to_string()
+            }
+        }
+    }
+}
+
+/// What a keep needs from the world, gathered so the decision below has one
+/// argument rather than four.
+///
+/// A struct rather than four parameters because `keep_selection` would otherwise be
+/// a function whose call sites differ only in argument order — and the path, the
+/// unlock and the record are a unit: they are the state a keep acts on.
+///
+/// **The keystore is not here.** It belongs to [`OnboardingSession`], because the
+/// key a keep writes must be the key the slate was derived from and a caller that
+/// could pass a different one is a caller that can reach the defect this change
+/// fixed. Taking it from the session rather than from the argument is that made
+/// unrepresentable.
+pub struct KeepTargets<'a> {
+    /// Where the master key goes.
+    pub keystore_path: &'a std::path::Path,
+    /// How it is protected. The spec deliberately does not settle where this
+    /// comes from; what it requires is that whichever protection applies be
+    /// recorded in the file and reportable, which [`Kept::Stored`]'s `encrypted`
+    /// discharges.
+    pub unlock: &'a crate::keystore::Unlock,
+    /// The record of chosen paths.
+    pub paths: &'a crate::identity_store::IdentityStore,
+}
+
+/// `{"stoa":"…","slate":"…","index":N}` -> the identity that was kept.
+///
+/// # The selection is checked against the slate it was made against
+///
+/// The request carries the slate's nonce, and it must equal the live one. That is
+/// how the spec's *"A selection made against a superseded set is refused"* is met,
+/// and the superseded case is the **same code path** as a nonce that never
+/// existed — so there is no second path to get wrong. See
+/// [`crate::onboarding`]'s module documentation for why the slate is a nonce.
+///
+/// # Nothing is coerced
+///
+/// An out-of-range index is refused, never clamped. The spec is explicit that
+/// coercing *"would store an identity the user did not choose — which is
+/// unrecoverable, because the choice cannot be recomputed"*.
+///
+/// # The write order is the atomicity story
+///
+/// Keystore first, path record second. The keystore write is the irreversible half
+/// and writes atomically, so a failure there leaves nothing anywhere. The reverse
+/// order would leave a recorded path naming a master key that does not exist.
+/// `design.md` records what this does and does not claim.
+///
+/// # The second-keep refusal is the path record's, not the keystore's
+///
+/// The first version of this used `Keystore::create`'s `AlreadyExists` as the
+/// refusal for a second keep. That is one mechanism doing two jobs, and review
+/// measured what the second one broke: the keystore is **one file per install**, so
+/// a user who kept an identity in Stoa A and then tried to keep one in Stoa B was
+/// refused at `create` before `record_path` was ever called — with a reason naming a
+/// keystore they did not know they had. `chosen_paths` could therefore never hold a
+/// second row through any wire call, which made the spec's *"Distinct choices for
+/// distinct Stoas are recorded separately"* unreachable through the API, and made
+/// `design.md`'s claim that the primary key discharges that scenario false.
+///
+/// So the two refusals are separated, each to the thing that actually knows:
+///
+/// - **A master key already on disk** is not an error. It is the expected state for
+///   every Stoa after the first, and the keystore is reused rather than rewritten.
+/// - **A choice already recorded for this Stoa** is the refusal, and it comes from
+///   `chosen_paths`' primary key — the same structural refusal `record_path`'s doc
+///   comment already argued for, now actually load-bearing.
+pub fn keep_identity(
+    session: &mut OnboardingSession,
+    request: &str,
+    open: impl FnOnce() -> Result<crate::keystore::Keystore, crate::keystore::KeystoreError>,
+    targets: KeepTargets<'_>,
+) -> String {
+    guarded("keep_identity", || {
+        let parsed = match Request::parse(request) {
+            Ok(r) => r,
+            Err(e) => return e,
+        };
+        let stoa = match parse_stoa(&parsed) {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
+        let nonce = match parsed.get("slate") {
+            Some(serde_json::Value::String(s)) => {
+                match crate::onboarding::SlateNonce::from_hex(s) {
+                    Ok(n) => n,
+                    // A malformed nonce is a malformed REQUEST, so it is §2.5's error
+                    // shape rather than a `Kept::Refused` — the same line
+                    // `get_capabilities` draws between a caller bug and a user state.
+                    Err(e) => return error_json(&format!("slate: {e}")),
+                }
+            }
+            Some(_) => return error_json("slate must be a string"),
+            None => return error_json("missing field: slate"),
+        };
+        let index = match parse_index(&parsed, "index") {
+            Ok(Some(i)) => i,
+            // Absent rather than defaulted to 0. A default here would keep the
+            // first candidate for a caller who named none, which is storing an
+            // identity nobody chose.
+            Ok(None) => return error_json("missing field: index"),
+            Err(e) => return e,
+        };
+
+        // Read before the keystore is taken, because taking it borrows the session
+        // mutably. The value is a `Copy` 32 bytes, so this is a read and not a
+        // second source of truth.
+        let live = session.live_slate;
+        let keystore = match session.keystore_for(open) {
+            Ok(k) => k,
+            Err(e) => return error_json(&e.to_string()),
+        };
+        keep_selection(&stoa, nonce, index, live, keystore, targets).to_json()
+    })
+}
+
+/// The keep's decision, separated from its JSON and its guard.
+///
+/// Split out for the reason [`capability_for`] is: the mapping from "what the
+/// stores said" to "what a view is told" is where the requirements actually live,
+/// and asserting on it through a JSON string would be asserting on serialisation
+/// at the same time.
+///
+/// The keystore is a parameter here rather than reached through the session,
+/// because this function is the *decision* and the session is state — separating
+/// them is what lets a test hand this one a specific key and assert on what it did
+/// with it.
+pub fn keep_selection(
+    stoa: &crate::identity::Address,
+    nonce: crate::onboarding::SlateNonce,
+    index: usize,
+    live_nonce: Option<crate::onboarding::SlateNonce>,
+    keystore: &crate::keystore::Keystore,
+    targets: KeepTargets<'_>,
+) -> Kept {
+    use crate::onboarding::OnboardingError;
+
+    let refused = |e: OnboardingError| Kept::Refused {
+        reason: e.to_string(),
+    };
+
+    // The nonce check comes FIRST, before anything is derived or written. A
+    // selection against a slate that is not live must cost nothing.
+    match live_nonce {
+        None => return refused(OnboardingError::NoLiveSlate),
+        Some(live) if live != nonce => return refused(OnboardingError::NonceIsNotTheLiveSlate),
+        Some(_) => {}
+    }
+
+    // Reproduced from the nonce rather than looked up — see `crate::onboarding`.
+    // This is the SAME keystore the slate was derived from, because the session
+    // holds it across the two calls; when it was minted per call, this line
+    // reproduced the five paths against a different key and the candidate it
+    // returned was one the user had never been shown.
+    let slate = match keystore.slate_from_nonce(stoa, nonce) {
+        Ok(s) => s,
+        Err(e) => return refused(e),
+    };
+    let candidate = match slate.candidate(index) {
+        Ok(c) => c,
+        Err(e) => return refused(e),
+    };
+
+    // THE ORDER. The keystore is the irreversible half and writes atomically, so a
+    // failure there leaves nothing anywhere.
+    //
+    // `create` where no file exists, and nothing where one does. A master key
+    // already on disk is the expected state for every Stoa after the first, so it
+    // is not a refusal — see this function's caller for why using `AlreadyExists`
+    // as the second-keep guard made a second Stoa unreachable.
+    //
+    // `encrypted` is settled HERE rather than at the end, because the truthful
+    // source differs between the two branches and only this code knows which
+    // branch it took. Deciding it below would mean re-deriving that, which is the
+    // second copy of a fact that CLAUDE.md's guard rule is about.
+    let encrypted = if targets.keystore_path.exists() {
+        // This call wrote nothing, so the protection that is true is the FILE's,
+        // and reading it is the only way to know. Note this is not the re-read the
+        // `design.md` decision rejects: that one is about re-reading a file this
+        // call just wrote, where the value this code used is the authority. Here
+        // there is no value this code used — the file predates the call.
+        match crate::keystore::Keystore::is_encrypted(targets.keystore_path) {
+            Ok(v) => v,
+            // The keystore is on disk and unreadable. Refusing rather than
+            // guessing: a keep that reported an identity while unable to tell
+            // whether its master key is protected has answered a question it does
+            // not know the answer to.
+            Err(e) => {
+                return Kept::Refused {
+                    reason: e.to_string(),
+                }
+            }
+        }
+    } else {
+        if let Err(e) = keystore.create(targets.keystore_path, targets.unlock) {
+            return Kept::Refused {
+                reason: e.to_string(),
+            };
+        }
+        // Taken from the unlock this keep USED, not from re-reading the file.
+        // Re-reading would report the protection of whatever is at the path now,
+        // which on a directory an attacker can write to is not necessarily the
+        // file just written. The value that is true is the one this code used.
+        matches!(targets.unlock, crate::keystore::Unlock::Passphrase(_))
+    };
+
+    // The refusal for a second choice in ONE Stoa. `chosen_paths`' primary key
+    // does the refusing, so it is a property of the schema rather than a branch
+    // here — and it is per-Stoa, which is the scope the spec asks for and the
+    // keystore's one-file-per-install scope could not express.
+    if let Err(e) = targets.paths.record_path(stoa, candidate.path) {
+        return Kept::Refused {
             reason: e.to_string(),
-        },
+        };
+    }
+
+    Kept::Stored {
+        address: candidate.address.to_hex(),
+        public_key: candidate.public_key.to_hex(),
+        path: candidate.path,
+        encrypted,
+    }
+}
+
+/// Who the user is in a Stoa, or why there is nobody.
+///
+/// **An enum with one payload each**, following [`Capability`]. The spec requires
+/// the reply carry *"an identity or a reason, never both and never neither —
+/// matching the posting probe's shape rather than introducing a second convention
+/// for the same job"*.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Whoami {
+    /// There is an identity.
+    Identity {
+        address: String,
+        public_key: String,
+        path: u32,
+        /// Whether recovering this identity needs more than the master key.
+        ///
+        /// **Always `true` in this change**, because no export or remote backup
+        /// exists — so the recorded path lives only in local storage and losing
+        /// that store loses the identity even with the master key preserved. The
+        /// spec confines the requirement to *"what is checkable now: that the
+        /// module reports the unbacked state"*.
+        ///
+        /// A boolean rather than only prose, so the change that implements backup
+        /// flips a value rather than changing a shape.
+        recovery_needs_the_record: bool,
+    },
+    /// There is nobody. The reason names the fix.
+    Nobody { reason: String },
+}
+
+impl Whoami {
+    /// The wire form. Exactly one of the two shapes, by construction.
+    pub fn to_json(&self) -> String {
+        match self {
+            Whoami::Identity {
+                address,
+                public_key,
+                path,
+                recovery_needs_the_record,
+            } => serde_json::json!({
+                "hasIdentity": true,
+                "address": address,
+                "publicKey": public_key,
+                "path": path,
+                "recoveryNeedsTheRecord": recovery_needs_the_record,
+            })
+            .to_string(),
+            Whoami::Nobody { reason } => {
+                serde_json::json!({ "hasIdentity": false, "reason": reason }).to_string()
+            }
+        }
+    }
+}
+
+/// `{"stoa":"<hex>"}` -> who the user is there.
+///
+/// # This is a different question from whether posting is possible
+///
+/// The spec is explicit, and the two *"can honestly disagree: a stored identity
+/// whose keystore permissions are too open is a real identity that cannot
+/// currently be used."* A caller with only the posting probe would have to render
+/// "you are nobody" to a user who has an identity and a fixable problem.
+///
+/// This handler therefore reports the identity where one is recorded and the
+/// keystore opens, and a **distinguishable reason** in each of the four ways that
+/// can fail: the keystore does not open, the record does not open, the record read
+/// fails, and — the one the two-store split creates — a master key with no recorded
+/// path for this Stoa. That last one's reason names the record, so it does not read
+/// as "you are nobody", and it is the same string `getCapabilities` gives for the
+/// same state.
+pub fn who_am_i(
+    request: &str,
+    master: impl Fn() -> Result<crate::keystore::Keystore, crate::keystore::KeystoreError>,
+    paths: impl Fn() -> Result<
+        crate::identity_store::IdentityStore,
+        crate::identity_store::IdentityStoreError,
+    >,
+) -> String {
+    guarded("who_am_i", || {
+        let parsed = match Request::parse(request) {
+            Ok(r) => r,
+            Err(e) => return e,
+        };
+        let stoa = match parse_stoa(&parsed) {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
+        whoami_for(&stoa, master, paths).to_json()
+    })
+}
+
+/// The identity question's decision, separated from its JSON and its guard.
+///
+/// Split out for the reason [`capability_for`] is.
+///
+/// **Every state is an answer, never the error shape**, following the posting
+/// probe: a caller handling both "you are nobody, because X" and "I could not
+/// determine who you are" has two negative branches and the second has no
+/// sensible rendering. §2.5's error shape stays reachable for the one failure that
+/// is not about identity — a request this code could not interpret — which is
+/// [`who_am_i`]'s job rather than this one's.
+pub fn whoami_for(
+    stoa: &crate::identity::Address,
+    master: impl Fn() -> Result<crate::keystore::Keystore, crate::keystore::KeystoreError>,
+    paths: impl Fn() -> Result<
+        crate::identity_store::IdentityStore,
+        crate::identity_store::IdentityStoreError,
+    >,
+) -> Whoami {
+    // The keystore is asked first, because "there is no master key" is the state a
+    // fresh install is in and it needs no record consulted to establish. Asking
+    // the record first would report a missing record for a user who has no
+    // identity at all, which sends them to fix the wrong thing.
+    let keystore = match master() {
+        Ok(k) => k,
+        // The reason IS the error's message. `KeystoreError::Display` already
+        // names the fix for each case with a test holding it to that, so
+        // paraphrasing here would maintain the same guidance twice and watch the
+        // two drift — the argument `capability_for` records.
+        Err(e) => {
+            return Whoami::Nobody {
+                reason: e.to_string(),
+            }
+        }
+    };
+    let store = match paths() {
+        Ok(s) => s,
+        Err(e) => {
+            return Whoami::Nobody {
+                reason: e.to_string(),
+            }
+        }
+    };
+    let path = match store.path_for(stoa) {
+        Ok(Some(p)) => p,
+        // The state the two-store split creates: a master key exists and this Stoa
+        // has no choice recorded. Named as such rather than reported as "no
+        // identity", because the fix is different — choose one here, not create a
+        // key.
+        Ok(None) => {
+            return Whoami::Nobody {
+                // The same constant `getCapabilities` reports for this state, so
+                // the two methods cannot describe one situation in two ways.
+                reason: NO_CHOICE_FOR_THIS_STOA.to_string(),
+            };
+        }
+        Err(e) => {
+            return Whoami::Nobody {
+                reason: e.to_string(),
+            }
+        }
+    };
+
+    let public_key = keystore.stoa_public_key_at_path(stoa, path);
+    Whoami::Identity {
+        address: public_key.address().to_hex(),
+        public_key: public_key.to_hex(),
+        path,
+        // Always true in this change: no export or remote backup exists, so the
+        // record lives only here. See the field's own documentation.
+        recovery_needs_the_record: true,
     }
 }
 
@@ -280,7 +1140,13 @@ pub fn list_threads<L: crate::log::OpLog>(
     log: &L,
     genesis: &crate::stoa::Genesis,
 ) -> String {
-    list_threads_inner(request, log, genesis)
+    guarded("list_threads", || {
+        let parsed = match Request::parse(request) {
+            Ok(r) => r,
+            Err(e) => return e,
+        };
+        list_threads_inner(&parsed, log, genesis)
+    })
 }
 
 /// Decode a genesis record from a request's hex form as the verified pair it and
@@ -312,7 +1178,7 @@ pub fn list_threads<L: crate::log::OpLog>(
 /// wants to store what it decoded already holds the only type `join` accepts,
 /// with nothing left to re-check and nothing left to forget.
 pub fn genesis_for(
-    parsed: &serde_json::Value,
+    parsed: &Request,
     stoa: &crate::identity::Address,
 ) -> Result<crate::membership::Membership, String> {
     let hex_str = match parsed.get("genesis") {
@@ -320,6 +1186,20 @@ pub fn genesis_for(
         Some(_) => return Err(error_json("genesis must be a string")),
         None => return Err(error_json("missing field: genesis")),
     };
+    // BEFORE the decode. `hex::decode` allocates `hex_str.len() / 2` bytes from
+    // a length the caller chose, and a genesis record has a known maximum — so a
+    // 64 MiB hex string can be refused for nothing rather than decoded into a
+    // 32 MiB `Vec` that `Genesis::decode` then rejects. The bound comes from
+    // `stoa` rather than being spelled out here: the largest record the format
+    // can hold is that module's knowledge, and a number copied over would drift
+    // from it silently.
+    if hex_str.len() > crate::stoa::MAX_CANONICAL_BYTES * 2 {
+        return Err(error_json(&format!(
+            "genesis is {} hex characters, over the {} the format allows",
+            hex_str.len(),
+            crate::stoa::MAX_CANONICAL_BYTES * 2
+        )));
+    }
     let bytes = match hex::decode(hex_str) {
         Ok(b) => b,
         Err(_) => return Err(error_json("genesis is not valid hex")),
@@ -331,68 +1211,91 @@ pub fn genesis_for(
     crate::membership::Membership::verified(stoa, &genesis).map_err(|e| error_json(&e.to_string()))
 }
 
+/// The feed read, from a request that is already parsed.
+///
+/// **Takes a `&Request` rather than a `&str`, and that is the fix to a double
+/// parse rather than a tidy-up.** `list_threads_from_request` parsed the request
+/// to read `stoa` and `genesis`, then handed the raw `&str` on to
+/// [`list_threads`], which parsed it again — two `Value` trees live at once, two
+/// nested `guarded` frames, one call. Harmless in output and not harmless in
+/// cost: it doubled the price of the very request-size lever
+/// [`MAX_REQUEST_BYTES`] exists to close, on the one path that already holds the
+/// larger of the two payloads.
+///
+/// The shape that prevents it recurring is the signature. A `&str` here is an
+/// invitation to parse; a `&Request` can only have come from a parse that already
+/// happened, so the second one is not merely discouraged but unspellable without
+/// widening this signature on purpose.
+///
+/// **No `guarded` frame of its own**, for the same reason: the two public entry
+/// points each carry one, and a third nested inside them would catch nothing
+/// either of them does not. `guarded` is idempotent, so the old nesting was
+/// harmless — but "two frames for one call" is the kind of thing that reads as
+/// intent and gets copied.
 fn list_threads_inner<L: crate::log::OpLog>(
-    request: &str,
+    parsed: &Request,
     log: &L,
     genesis: &crate::stoa::Genesis,
 ) -> String {
-    guarded("list_threads", || {
-        let parsed: serde_json::Value = match serde_json::from_str(request) {
-            Ok(v) => v,
-            Err(e) => return error_json(&format!("invalid JSON: {e}")),
-        };
+    let stoa = match parse_stoa(parsed) {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
 
-        let stoa = match parse_stoa(&parsed) {
-            Ok(a) => a,
-            Err(e) => return e,
-        };
+    // The Stoa asked for must be the one the genesis record names, or the
+    // moderator set being applied governs a different Stoa than the posts
+    // being filtered. That is check 3 of `moderation.rs`'s three, at the
+    // one place a caller could otherwise pair them wrongly.
+    let genesis_address = match genesis.address() {
+        Ok(a) => a,
+        Err(e) => return error_json(&format!("genesis: {e}")),
+    };
+    if genesis_address != stoa {
+        return error_json("the genesis record does not describe the Stoa this feed was asked for");
+    }
 
-        // The Stoa asked for must be the one the genesis record names, or the
-        // moderator set being applied governs a different Stoa than the posts
-        // being filtered. That is check 3 of `moderation.rs`'s three, at the
-        // one place a caller could otherwise pair them wrongly.
-        let genesis_address = match genesis.address() {
-            Ok(a) => a,
-            Err(e) => return error_json(&format!("genesis: {e}")),
-        };
-        if genesis_address != stoa {
-            return error_json(
-                "the genesis record does not describe the Stoa this feed was asked for",
-            );
-        }
+    let moderators = match crate::moderation::Moderators::of(genesis) {
+        Ok(m) => m,
+        Err(e) => return error_json(&format!("genesis: {e}")),
+    };
 
-        let moderators = match crate::moderation::Moderators::of(genesis) {
-            Ok(m) => m,
-            Err(e) => return error_json(&format!("genesis: {e}")),
-        };
+    // A present-but-wrong-typed field is a different mistake from an absent
+    // one, and a negative or fractional page is neither — each is refused by
+    // name rather than coerced, because coercing would answer a question the
+    // caller did not ask.
+    let page = match parse_index(parsed, "page") {
+        Ok(v) => v.unwrap_or(0),
+        Err(e) => return e,
+    };
+    let per_page = match parse_index(parsed, "perPage") {
+        Ok(v) => crate::feed::clamp_per_page(v),
+        Err(e) => return e,
+    };
 
-        // A present-but-wrong-typed field is a different mistake from an absent
-        // one, and a negative or fractional page is neither — each is refused by
-        // name rather than coerced, because coercing would answer a question the
-        // caller did not ask.
-        let page = match parse_index(&parsed, "page") {
-            Ok(v) => v.unwrap_or(0),
-            Err(e) => return e,
-        };
-        let per_page = match parse_index(&parsed, "perPage") {
-            Ok(v) => crate::feed::clamp_per_page(v),
-            Err(e) => return e,
-        };
+    // The contract's reading 2 again, and this is the field the contract
+    // names as its worked example: an optional flag whose `null` reads as
+    // absent BECAUSE `false` is the restrictive default. Hidden content stays
+    // excluded, so no caller reaches a wider answer by naming the field with
+    // no value.
+    //
+    // Flip the default to `true` and this arm becomes the authorisation
+    // bypass the contract's `SHALL NOT` forbids — the `null` would have to be
+    // refused as a wrong type instead. See `parse_index`'s doc for the full
+    // statement of the limit; it is one rule with two instances, not two
+    // local habits.
+    let include_hidden = match parsed.get("includeHidden") {
+        None | Some(serde_json::Value::Null) => false,
+        Some(serde_json::Value::Bool(b)) => *b,
+        Some(_) => return error_json("includeHidden must be a boolean"),
+    };
 
-        let include_hidden = match parsed.get("includeHidden") {
-            None | Some(serde_json::Value::Null) => false,
-            Some(serde_json::Value::Bool(b)) => *b,
-            Some(_) => return error_json("includeHidden must be a boolean"),
-        };
-
-        match crate::feed::list_threads(log, &moderators, &stoa, page, per_page, include_hidden) {
-            Ok(page) => feed_page_json(&page),
-            // §11.1 obligation 5: a storage failure is the error shape and NEVER
-            // an empty feed. The two mean opposite things and render identically
-            // if this arm is ever softened.
-            Err(e) => error_json(&e.to_string()),
-        }
-    })
+    match crate::feed::list_threads(log, &moderators, &stoa, page, per_page, include_hidden) {
+        Ok(page) => feed_page_json(&page),
+        // §11.1 obligation 5: a storage failure is the error shape and NEVER
+        // an empty feed. The two mean opposite things and render identically
+        // if this arm is ever softened.
+        Err(e) => error_json(&e.to_string()),
+    }
 }
 
 /// The feed handler as the module actually calls it: genesis record included.
@@ -412,12 +1315,12 @@ pub fn list_threads_from_request<L: crate::log::OpLog>(
     store: impl FnOnce() -> Result<L, crate::log::OpLogError>,
 ) -> String {
     guarded("list_threads", || {
-        let parsed: serde_json::Value = match serde_json::from_str(request) {
-            Ok(v) => v,
-            Err(e) => return error_json(&format!("invalid JSON: {e}")),
+        let parsed = match Request::parse(request) {
+            Ok(r) => r,
+            Err(e) => return e,
         };
         let stoa = match parse_stoa(&parsed) {
-            Ok(a) => a,
+            Ok(s) => s,
             Err(e) => return e,
         };
         // The verified pair; this path wants only the record half.
@@ -433,47 +1336,115 @@ pub fn list_threads_from_request<L: crate::log::OpLog>(
             Ok(l) => l,
             Err(e) => return error_json(&e.to_string()),
         };
-        list_threads(request, &log, &genesis)
+        // The request this already holds, not the raw `&str` again. Handing the
+        // string to `list_threads` parsed it a second time — two `Value` trees
+        // live at once, two nested `guarded` frames, one call. The `&Request`
+        // signature on `list_threads_inner` is what makes the mistake
+        // unspellable rather than merely fixed.
+        list_threads_inner(&parsed, &log, &genesis)
     })
 }
 
 /// A non-negative integer field, absent, or a refusal already in the wire shape.
 ///
-/// Separated out because `page` and `perPage` are the same parsing job with the
-/// same three failure modes, and a second copy would eventually disagree with
-/// the first about whether `-1` is an error or a zero.
-fn parse_index(parsed: &serde_json::Value, field: &str) -> Result<Option<usize>, String> {
+/// Separated out because its **three** callers are the same parsing job with the
+/// same three failure modes, and a second copy would eventually disagree with the
+/// first about whether `-1` is an error or a zero. The callers are `page` and
+/// `perPage` in the feed, and `index` in [`keep_identity`].
+///
+/// # The three callers do not have the same stakes, and the severe one governs
+///
+/// This comment used to name only the two pagination callers and argue entirely in
+/// their terms — *"a page of -1 is not a page"*. Readability review pointed out
+/// what that costs: a reader arriving from `keep_identity` asks why this refuses
+/// rather than coerces and is told about serving the wrong page of a feed.
+///
+/// The real answer is the `index` caller's, and it is much stronger. A coerced
+/// index keeps the **first candidate** for a caller who named something else, which
+/// stores an identity nobody chose — an outcome the spec calls unrecoverable,
+/// *"because the choice cannot be recomputed"*. CLAUDE.md's named tell is "do not
+/// let a function quietly acquire a second caller with different needs"; the needs
+/// here differ in consequence, and the shared guard has to be written for the worst
+/// of them.
+///
+/// The name is also now wrong in a small way worth flagging rather than churning:
+/// `index` is what the slate caller's *field* is called, meaning a slate position,
+/// while this function's name came from pagination. Renaming it touches three
+/// handlers for no behaviour change and is left for whoever next has a reason to
+/// touch them.
+///
+/// # WHY AN EXPLICIT `null` IS ABSENT HERE, AND WHEN COPYING THAT IS WRONG
+///
+/// [`Request::get`] distinguishes `{"page":null}` from `{}` faithfully —
+/// `Some(Null)` against `None` — and this reader deliberately collapses them.
+/// That is the contract's **reading 2**: an optional field treats a `null` as
+/// absent and acts on its restrictive default. `page` defaults to 0 and
+/// `perPage` to the module's own value, so a null-sending caller gets strictly no
+/// more than it would have got by omitting the field.
+///
+/// **The restrictive direction is the licence, and it does not travel with the
+/// spelling.** The contract states the limit as a `SHALL NOT`: a field must not
+/// read `null` as absent where the resulting default is the *permissive* choice,
+/// and such a field refuses the `null` as a wrong type instead (reading 3). So
+/// this spelling is the template the next optional field gets written from, and
+/// the property that makes it safe is not in the spelling.
+///
+/// A future `asModerator`, `includeRemoved` or `bypassPolicy` written as
+/// `None | Some(Null) => <permissive default>` would let `{"bypassPolicy":null}`
+/// reach the permissive branch by naming a field with no value, while a
+/// presence-checking validator upstream sees the field as set — the two
+/// disagreeing about whether the caller asked for anything. **Before copying this
+/// match arm, check which way your default leans; if it leans permissive, the
+/// contract requires you to refuse the null rather than default it.**
+fn parse_index(parsed: &Request, field: &str) -> Result<Option<usize>, String> {
     match parsed.get(field) {
+        // A null reads as absent HERE because the default it falls to is the
+        // restrictive one. That is the load-bearing half, not the collapse — see
+        // the doc above before copying this arm to a field whose default widens
+        // what the caller may see.
         None | Some(serde_json::Value::Null) => Ok(None),
         Some(serde_json::Value::Number(n)) => match n.as_u64() {
             // `as_u64` refuses a negative and a fractional number, which is
-            // exactly the set that should be refused: a page of -1 is not a
-            // page, and silently clamping it to 0 would serve the first page to
-            // a caller who asked for something impossible.
+            // exactly the set that should be refused. For `page`, clamping -1 to 0
+            // would serve the first page to a caller who asked for something
+            // impossible; for `index`, it would keep the first candidate, which is
+            // storing an identity the user did not choose.
             //
-            // `try_from` and not `as`, following `MembershipStore`'s own rule two
-            // files away — *"`try_from` rather than `as` so that a platform where it
-            // could fail says so instead of wrapping."* On this target
-            // `usize == u64` and the conversion is total, so this is not a live bug;
-            // it was the one width-changing `as` in the request path, and it fed the
-            // offset arithmetic `list` takes considerable care over
-            // (`findings/security.md` entry 4). A 32-bit build would have narrowed
-            // `{"page":4294967296}` to 0 and served page 0 while reporting `"page":0`
-            // — the same wrong answer
+            // **It refuses by SPELLING rather than by value, and the message says
+            // so.** `1e2` is JSON for exactly 100 and `0.0` for exactly 0 — both
+            // non-negative, both whole — and `as_u64` returns `None` for each,
+            // because serde parses any number carrying a `.` or an `e` as `f64`.
+            // Several JSON serialisers emit `1e2` for 100, so this is a spelling a
+            // legitimate caller can send. The ACCEPTANCE is deliberately
+            // unchanged: widening it to accept an exactly-integral float is a
+            // contract question the spec does not answer. Filed rather than fixed —
+            // a caller told the truth can restring its number today.
+            //
+            // `try_from` rather than `as usize`. On a 64-bit target the cast is
+            // lossless and this is belt-and-braces; on a 32-bit one it TRUNCATES,
+            // so `{"index": 4294967296}` would arrive as `0` and keep candidate 0 —
+            // exactly the coercion the paragraph above forbids, reached by a cast
+            // rather than by a decision. CI builds no 32-bit target, so the refusal
+            // is unreachable today and the point is that the property no longer
+            // depends on which target it is built for.
+            //
+            // `stoa-lifecycle` reached the same conclusion from the other end, and
+            // it is the same rule `MembershipStore` states two files away — *"`try_from`
+            // rather than `as` so that a platform where it could fail says so instead
+            // of wrapping."* Its `findings/security.md` entry 4 names the consequence
+            // for `page` specifically: a narrowed `{"page":4294967296}` would serve
+            // page 0 while reporting `"page":0`, which is the wrong answer
             // `a_page_index_too_large_to_offset_answers_empty_rather_than_the_first_page`
             // exists to prevent one layer down.
-            //
-            // An unrepresentable index is treated as the refusal it is, and shares
-            // the message: a page number this platform cannot hold is not a page
-            // number, exactly as `-1` is not.
             Some(v) => match usize::try_from(v) {
-                Ok(v) => Ok(Some(v)),
+                Ok(i) => Ok(Some(i)),
                 Err(_) => Err(error_json(&format!(
-                    "{field} must be a non-negative whole number"
+                    "{field} is larger than this build can represent"
                 ))),
             },
             None => Err(error_json(&format!(
-                "{field} must be a non-negative whole number"
+                "{field} must be a non-negative integer written without a decimal \
+                 point or exponent"
             ))),
         },
         Some(_) => Err(error_json(&format!("{field} must be a number"))),
@@ -558,6 +1529,43 @@ fn stoa_reply(stoa: &crate::identity::Address, genesis: &crate::stoa::Genesis) -
     .to_string()
 }
 
+// ─── The publish path ─────────────────────────────────────────────────────
+//
+// The contract is the `content-authoring` spec; the reasoning is in that
+// change's `design.md`. `crate::authoring` decides; this parses, and converts a
+// refusal into §2.5's one failure shape. What is repeated here is only what a
+// reader of THIS code needs in order not to undo it.
+
+/// What a successful publish tells the caller.
+///
+/// # Two fields, and the second is not decoration
+///
+/// An op id is a function of the op's own bytes, which carry no timestamp and no
+/// nonce, so one identity publishing the same content into the same Stoa twice
+/// publishes **one op** and the second call reports the first's id. Both reach a
+/// caller as a success naming one id, and `wasNew` is the only thing that tells
+/// them apart — a double-submitted form deduplicated, against a person
+/// deliberately posting the same reply twice. `op-log`'s append is what knows
+/// the answer, and this passes it on rather than discarding it.
+///
+/// # What is deliberately absent, on every one of the three
+///
+/// **No score, count, tally, rank or position — on a vote reply least of all.**
+/// Nothing in the current contract reads a `Vote` op ([`crate::feed`] says so in
+/// as many words), so a field describing an effect would be a caller inferring
+/// one that does not exist. This is the same shape for a post, a reply and a
+/// vote, which is what makes that absence structural rather than remembered.
+///
+/// It is also **not** a statement that any peer received the op. The append
+/// completed; delivery's outcome arrives later and is not waited on.
+fn published_json(published: &crate::authoring::Published) -> String {
+    serde_json::json!({
+        "opId": published.id.to_hex(),
+        "wasNew": published.was_new(),
+    })
+    .to_string()
+}
+
 /// A posting policy's name on the wire.
 ///
 /// **Exhaustive with no wildcard arm**, so a new variant forces a decision here
@@ -633,9 +1641,9 @@ pub fn create_stoa(
     store: &mut crate::membership::MembershipStore,
 ) -> String {
     guarded("create_stoa", || {
-        let parsed: serde_json::Value = match serde_json::from_str(request) {
-            Ok(v) => v,
-            Err(e) => return error_json(&format!("invalid JSON: {e}")),
+        let parsed = match Request::parse(request) {
+            Ok(r) => r,
+            Err(e) => return e,
         };
         let title = match parsed.get("title") {
             Some(serde_json::Value::String(s)) => s.clone(),
@@ -687,6 +1695,276 @@ pub fn create_stoa(
     })
 }
 
+/// Hand the published op to delivery, then report it as published — and do not
+/// let delivery's failure become the publish's.
+///
+/// # Why the handoff gets its own `catch_unwind` inside an already-guarded handler
+///
+/// The op is in the log before this is called, and the spec says so: *"WHEN
+/// delivery refuses or errors on the handoff, THEN the reply reports the op as
+/// published and names its op id"*. A panicking sink is the most violent form of
+/// "errors on the handoff", so it must not change the reply.
+///
+/// Without this, it changed the reply completely. [`guarded`] wraps the whole
+/// handler, so a panic in the sink unwound past the `published_json` that had
+/// already been computed and the caller received
+/// `{"error":"panic in publish_post: …"}` — no `opId`, for an op that **is**
+/// published. That is the one thing the requirement forbids: a publish reported
+/// as having failed on the strength of a delivery outcome.
+///
+/// **The outer guard stays.** Moving `deliver` outside it was the other candidate
+/// and is rejected: PHASE0-FINDINGS §3 measured what an unguarded panic costs —
+/// the module process aborts (`failed to initiate panic, error 5`, SIGABRT), the
+/// caller waits out a 20-second timeout, and every later call reports
+/// `MODULE_NOT_LOADED`. Two nested guards is the cheap way to keep a panic
+/// contained *and* keep the reply truthful.
+///
+/// # A caught panic is not swallowed silently
+///
+/// It goes to stderr, because the alternative is a transport defect that no
+/// operator can see. It deliberately does **not** reach the reply: there is no
+/// field for it. Per `delivery_module.lidl` the real outcome is asynchronous —
+/// `channelMessageSent`, `channelMessageError`, `messagePropagated` all arrive
+/// after this call has returned — so a synchronous reply could not carry a
+/// delivery outcome even if the contract wanted one. Accepting an op is
+/// `channelMessageSent` and says nothing about whether a peer received it.
+///
+/// Making an op that errors or never propagates visible is therefore
+/// `op-transport`'s obligation, not this function's. Until it lands, this
+/// conversion of a loud failure into a logged one is the known cost, recorded in
+/// `docs/PLAN.md` §9.2.
+fn delivered_and_published(
+    published: &crate::authoring::Published,
+    deliver: &mut dyn FnMut(&crate::op::OpId),
+) -> String {
+    if let Err(payload) = catch_unwind(AssertUnwindSafe(|| deliver(&published.id))) {
+        let detail = payload
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_string())
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "non-string panic payload".to_string());
+        eprintln!(
+            "dialectica: delivery panicked handing off {} — the op is published and stays published: {}",
+            published.id.to_hex(),
+            detail
+        );
+    }
+    published_json(published)
+}
+
+/// The wire reply for a publish that never reached a handler, because no identity
+/// was available to sign with.
+///
+/// # Why this exists rather than the adapter formatting its own message
+///
+/// The adapter is the only caller — it is the only code that can open a keystore,
+/// which is the only way to discover that there is no usable identity, and
+/// `dialectica-core` structurally cannot reach one. So the refusal can only be
+/// *raised* there.
+///
+/// It must not also be *worded* there. The adapter is behind
+/// `cfg(logos_scaffold)`, which no `cargo test` sets, so a message written in
+/// that file is a message no gate in this repo compiles, let alone asserts on.
+/// The first version of this change had exactly that: [`crate::authoring::Refusal::NoIdentity`]
+/// carried the text and nothing constructed the variant, while a hand-written
+/// `format!` in the adapter carried a second copy of the same sentence. Two
+/// copies of one message with no test tying them, and the copy that shipped was
+/// the one no test could see.
+///
+/// One line here fixes it in the direction that gains coverage rather than losing
+/// it: the text has one home, in `Refusal`'s `Display`, which `cargo test` does
+/// compile and `a_refusal_names_the_id_or_stoa_it_is_about` does assert on.
+pub fn no_identity(why: &str) -> String {
+    error_json(&crate::authoring::Refusal::NoIdentity(why.to_string()).to_string())
+}
+
+/// Field names no publish request may carry, and the reason each is refused.
+///
+/// **Refused rather than ignored**, which is the opposite of what
+/// [`list_threads`] does with an `order` field, and the difference is what the
+/// caller believes. A caller passing `order` believes it is selecting between
+/// orderings that exist; a caller passing `author` believes it is choosing who
+/// signs, and it is not — the identity falls out of the Stoa, so no operation can
+/// be asked to sign as someone it is not. A caller passing `thread` believes it
+/// is filing a reply somewhere, and the thread is derived from the parent.
+///
+/// Silently ignoring either leaves a caller acting on a belief the module has
+/// quietly declined to honour.
+///
+/// NO SPEC: the spec requires `thread` to be refused on a **reply**. Refusing it
+/// on a post and a vote too is chosen here — a caller who sent one has the same
+/// wrong model whichever operation they sent it to — and is marked in
+/// `a_forbidden_field_is_refused_on_every_operation`.
+const FORBIDDEN_FIELDS: [(&str, &str); 5] = [
+    (
+        "author",
+        "the identity that signs is derived from the Stoa and is never a parameter",
+    ),
+    (
+        "identity",
+        "the identity that signs is derived from the Stoa and is never a parameter",
+    ),
+    (
+        "key",
+        "the identity that signs is derived from the Stoa and is never a parameter",
+    ),
+    (
+        "address",
+        "the identity that signs is derived from the Stoa and is never a parameter",
+    ),
+    (
+        "thread",
+        "a reply's thread is derived from its parent and is never a parameter",
+    ),
+];
+
+/// Refuse a request carrying a field that names something the caller may not
+/// choose.
+///
+/// One guard over a list rather than a check per operation: CLAUDE.md keeps a
+/// guard as its own job, so "is it called everywhere?" stays a question with an
+/// answer. There are three callers and the list is the union across all three.
+fn reject_forbidden_fields(parsed: &serde_json::Value) -> Result<(), String> {
+    for (field, why) in FORBIDDEN_FIELDS {
+        if parsed.get(field).is_some() {
+            return Err(error_json(&format!("{field} is not accepted: {why}")));
+        }
+    }
+    Ok(())
+}
+
+/// A required string field, or a refusal that says which mistake was made.
+///
+/// A present-but-wrong-typed field is a different mistake from an absent one and
+/// the message has to say which — "missing field: body" sends someone looking for
+/// a field that is right there, holding a number.
+fn required_string<'a>(parsed: &'a serde_json::Value, field: &str) -> Result<&'a str, String> {
+    match parsed.get(field) {
+        Some(serde_json::Value::String(s)) => Ok(s),
+        Some(_) => Err(error_json(&format!("{field} must be a string"))),
+        None => Err(error_json(&format!("missing field: {field}"))),
+    }
+}
+
+/// The Stoa address every publish names.
+fn required_stoa(parsed: &serde_json::Value) -> Result<crate::identity::Address, String> {
+    let hex_str = required_string(parsed, "stoa")?;
+    crate::identity::Address::from_hex(hex_str).map_err(|e| error_json(&format!("stoa: {e}")))
+}
+
+/// An op id field — a parent, or a vote's target.
+fn required_op_id(parsed: &serde_json::Value, field: &str) -> Result<crate::op::OpId, String> {
+    let hex_str = required_string(parsed, field)?;
+    crate::op::OpId::from_hex(hex_str).map_err(|e| error_json(&format!("{field}: {e}")))
+}
+
+/// A vote's direction, by name.
+///
+/// # The names are on the wire, and an unrecognised one is never mapped
+///
+/// `"up"` raises and `"down"` lowers. Anything else is refused **naming what was
+/// supplied**, and is not defaulted onto a recognised direction: a caller whose
+/// `"upvote"` silently became `"down"` would have published the opposite of what
+/// it asked for, and nothing would error.
+fn required_direction(parsed: &serde_json::Value) -> Result<crate::op::VoteDirection, String> {
+    let name = required_string(parsed, "direction")?;
+    match name {
+        "up" => Ok(crate::op::VoteDirection::Up),
+        "down" => Ok(crate::op::VoteDirection::Down),
+        other => Err(error_json(&format!(
+            "direction must be \"up\" or \"down\", got \"{other}\""
+        ))),
+    }
+}
+
+/// Parse the whole request first, then act. The ordering is the requirement.
+///
+/// Each handler reads every field it needs before [`crate::authoring`] is
+/// reached, so "a refused publish appends nothing and delivery was not invoked"
+/// is structural: there is nothing to append until the last field has parsed.
+/// Under validate-as-you-go that property would be an artefact of the order the
+/// statements happen to be in.
+fn parsed_object(request: &str) -> Result<serde_json::Value, String> {
+    serde_json::from_str(request).map_err(|e| error_json(&format!("invalid JSON: {e}")))
+}
+
+/// `{"stoa":"…","body":"…"}` -> `{"opId":"…","wasNew":bool}`.
+///
+/// # `deliver` is a sink, and its RETURN TYPE carries three requirements at once
+///
+/// It returns **nothing**. So:
+///
+/// - the append has completed before it is called, because it is called after
+///   [`crate::authoring::post`] returns;
+/// - a declined or erroring handoff leaves the op published, because there is no
+///   outcome to inspect and none to act on;
+/// - a publish cannot be deferred until delivery reports, because there is
+///   nothing to report — a call that waited on one could not be written here.
+///
+/// It is also **not called on a refusal**, and structurally rather than by a
+/// guard: it sits on the success arm of the `Result` and no refusal path reaches
+/// it.
+///
+/// # `&mut dyn FnMut` rather than `impl FnOnce`, and the reason is a compile
+/// error nothing else could see
+///
+/// `impl FnOnce(&OpId)` was written first, because "called at most once" is the
+/// honest bound on what a sink is for.
+///
+/// What rules it out is the requirement that all three handlers be usable
+/// through **one** function-pointer type, which
+/// `the_three_handlers_share_one_signature_the_adapter_can_dispatch_over` pins
+/// with a `type Handler = fn(…)`. A generic `impl FnOnce` monomorphises per call
+/// site, so the three would be three types with no shared pointer, and coercing
+/// them fails on a higher-ranked lifetime.
+///
+/// **Be precise about where that constraint comes from, because an earlier
+/// version of this comment was not.** It said the *adapter* needs one pointer
+/// type. It does not: `Dialectica::publishing` is generic over the handler
+/// (`F: FnOnce(…)`), so it monomorphises per call site and would accept a
+/// generic sink. The single-pointer requirement is the test's, deliberately —
+/// the adapter is behind `cfg(logos_scaffold)`, which no `cargo test` sets, so
+/// pinning the three signatures as interchangeable in *this* crate is what stops
+/// a signature drifting into an error that would surface only in the builder's
+/// build, the one that runs last and reports worst.
+///
+/// So recovering `FnOnce` is a live option, not a closed one: it costs changing
+/// that test's `Handler` type, and buys back the at-most-once bound.
+///
+/// Nothing is lost that a requirement rests on. The return type `()` is what
+/// makes a delivery outcome unwaitable; `FnOnce` only added that the sink could
+/// not be called twice, which no requirement asks for and which the one call
+/// site makes true anyway.
+pub fn publish_post<L: crate::log::OpLog>(
+    request: &str,
+    log: &mut L,
+    key: &crate::identity::SecretKey,
+    deliver: &mut dyn FnMut(&crate::op::OpId),
+) -> String {
+    guarded("publish_post", || {
+        let parsed = match parsed_object(request) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        if let Err(e) = reject_forbidden_fields(&parsed) {
+            return e;
+        }
+        let stoa = match required_stoa(&parsed) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        let body = match required_string(&parsed, "body") {
+            Ok(v) => v.to_string(),
+            Err(e) => return e,
+        };
+
+        match crate::authoring::post(log, key, stoa, body) {
+            Ok(published) => delivered_and_published(&published, deliver),
+            Err(refusal) => error_json(&refusal.to_string()),
+        }
+    })
+}
+
 /// Join a Stoa: `{"stoa":"<hex>","genesis":"<hex>"}` -> the same reply shape.
 ///
 /// # It takes the record as well as the address, and that is a property of the
@@ -712,9 +1990,9 @@ pub fn create_stoa(
 /// joined" differently would be rendering a distinction the user did not make.
 pub fn join_stoa(request: &str, store: &mut crate::membership::MembershipStore) -> String {
     guarded("join_stoa", || {
-        let parsed: serde_json::Value = match serde_json::from_str(request) {
-            Ok(v) => v,
-            Err(e) => return error_json(&format!("invalid JSON: {e}")),
+        let parsed = match Request::parse(request) {
+            Ok(r) => r,
+            Err(e) => return e,
         };
         let stoa = match parse_stoa(&parsed) {
             Ok(a) => a,
@@ -760,9 +2038,9 @@ pub fn join_stoa(request: &str, store: &mut crate::membership::MembershipStore) 
 /// clamps what the other refuses.
 pub fn list_stoas(request: &str, store: &crate::membership::MembershipStore) -> String {
     guarded("list_stoas", || {
-        let parsed: serde_json::Value = match serde_json::from_str(request) {
-            Ok(v) => v,
-            Err(e) => return error_json(&format!("invalid JSON: {e}")),
+        let parsed = match Request::parse(request) {
+            Ok(r) => r,
+            Err(e) => return e,
         };
         let page = match parse_index(&parsed, "page") {
             Ok(v) => v.unwrap_or(0),
@@ -878,36 +2156,6 @@ pub fn with_membership_store_read(
 /// as the remaining one.
 pub use crate::membership::membership_path_in;
 
-/// Pull the Stoa address out of a request, or the error shape to send back.
-///
-/// **The only place this file parses the `stoa` field**, which is what makes "is the
-/// address guard called everywhere?" a question with an answer — CLAUDE.md: *"a
-/// guard is a job; keep it separate."* The three-way distinction (absent,
-/// wrong-typed, not an address) is the one `module-wire-contract` requires be
-/// reported by name, and one function is what stops the three answers drifting
-/// apart.
-///
-/// It was written as a helper and then not used by the three inline copies that
-/// already existed — `get_capabilities`, `list_threads_inner` and
-/// `list_threads_from_request`, all inherited rather than introduced
-/// (`git show origin/main:… | grep -c "missing field: stoa"` returned 3). The
-/// original comment here claimed the factoring prevented divergence in a file where
-/// divergence was four-way possible (`findings/readability.md` entry 3,
-/// `findings/security.md` entry 6). The copies agreed, so this was not a live
-/// defect; it is the shape that produces one, and the specific change it made
-/// harder is the next one — a length pre-check ahead of `hex::decode`
-/// (`findings/security.md` entry 2) had to be applied four times and would have been
-/// applied to one.
-fn parse_stoa(parsed: &serde_json::Value) -> Result<crate::identity::Address, String> {
-    match parsed.get("stoa") {
-        Some(serde_json::Value::String(s)) => {
-            crate::identity::Address::from_hex(s).map_err(|e| error_json(&format!("stoa: {e}")))
-        }
-        Some(_) => Err(error_json("stoa must be a string")),
-        None => Err(error_json("missing field: stoa")),
-    }
-}
-
 /// The pagination shape for a membership listing, built in one place.
 fn membership_page_json(page: &crate::membership::MembershipPage) -> String {
     let items: Vec<serde_json::Value> = page
@@ -928,6 +2176,87 @@ fn membership_page_json(page: &crate::membership::MembershipPage) -> String {
     .to_string()
 }
 
+/// `{"stoa":"…","parent":"…","body":"…"}` -> `{"opId":"…","wasNew":bool}`.
+///
+/// **There is no `thread` parameter**, and one supplied is refused rather than
+/// ignored. The thread is derived from the parent, which makes "a reply filed
+/// under a thread its parent does not belong to" unrepresentable rather than
+/// checked — see [`crate::authoring::reply`] for the derivation and what it
+/// trusts.
+pub fn publish_reply<L: crate::log::OpLog>(
+    request: &str,
+    log: &mut L,
+    key: &crate::identity::SecretKey,
+    deliver: &mut dyn FnMut(&crate::op::OpId),
+) -> String {
+    guarded("publish_reply", || {
+        let parsed = match parsed_object(request) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        if let Err(e) = reject_forbidden_fields(&parsed) {
+            return e;
+        }
+        let stoa = match required_stoa(&parsed) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        let parent = match required_op_id(&parsed, "parent") {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        let body = match required_string(&parsed, "body") {
+            Ok(v) => v.to_string(),
+            Err(e) => return e,
+        };
+
+        match crate::authoring::reply(log, key, stoa, parent, body) {
+            Ok(published) => delivered_and_published(&published, deliver),
+            Err(refusal) => error_json(&refusal.to_string()),
+        }
+    })
+}
+
+/// `{"stoa":"…","target":"…","direction":"up"|"down"}` ->
+/// `{"opId":"…","wasNew":bool}`.
+///
+/// The reply carries an op id and nothing that describes an effect. Nothing in
+/// the current contract reads a `Vote` op, so there is no score to report and
+/// reporting one would be a falsehood a caller would act on.
+pub fn publish_vote<L: crate::log::OpLog>(
+    request: &str,
+    log: &mut L,
+    key: &crate::identity::SecretKey,
+    deliver: &mut dyn FnMut(&crate::op::OpId),
+) -> String {
+    guarded("publish_vote", || {
+        let parsed = match parsed_object(request) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        if let Err(e) = reject_forbidden_fields(&parsed) {
+            return e;
+        }
+        let stoa = match required_stoa(&parsed) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        let target = match required_op_id(&parsed, "target") {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        let direction = match required_direction(&parsed) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+
+        match crate::authoring::vote(log, key, stoa, target, direction) {
+            Ok(published) => delivered_and_published(&published, deliver),
+            Err(refusal) => error_json(&refusal.to_string()),
+        }
+    })
+}
+
 // ─── The two halves of the delivery bridge that CAN be tested ─────────────
 //
 // `modules().delivery_module` cannot appear in this file: it calls `lp_*`
@@ -942,10 +2271,7 @@ fn membership_page_json(page: &crate::membership::MembershipPage) -> String {
 /// the wire reply, so a caller cannot accidentally invent a second error shape
 /// while converting one.
 pub fn parse_channel_id(request: &str) -> Result<String, String> {
-    let parsed: serde_json::Value = match serde_json::from_str(request) {
-        Ok(v) => v,
-        Err(e) => return Err(error_json(&format!("invalid JSON: {e}"))),
-    };
+    let parsed = Request::parse(request)?;
     match parsed.get("channelId") {
         Some(serde_json::Value::String(s)) => Ok(s.clone()),
         // A present-but-wrong-typed field is a different mistake from a missing
@@ -1272,8 +2598,14 @@ mod tests {
     /// test helper would be widening the library's surface for the
     /// convenience of testing it — the same trade `err_of` exists to avoid
     /// over `Debug`.
+    ///
+    /// The factory still yields a `KeystoreError` and the message is taken from its
+    /// `Display` here, which keeps these tests asserting on the SAME strings the
+    /// keystore's own "every message names the fix" obligation covers. The lookup's
+    /// error type widened to `String` when the probe began consulting the path
+    /// record; what these tests are about did not change.
     fn probe_err_with(request: &str, make: impl Fn() -> KeystoreError) -> serde_json::Value {
-        serde_json::from_str(&get_capabilities(request, |_| Err(make()))).unwrap()
+        serde_json::from_str(&get_capabilities(request, |_| Err(make().to_string()))).unwrap()
     }
 
     #[test]
@@ -1567,6 +2899,2118 @@ mod tests {
         assert_eq!(v["reason"], r#"at "C:\keys" — he said "no""#);
     }
 
+    // ─── Onboarding ───────────────────────────────────────────────────────
+
+    use crate::identity_store::IdentityStore;
+    use crate::keystore::{Keystore, Passphrase, Unlock};
+    use crate::onboarding::{SlateNonce, SLATE_SIZE};
+
+    /// A fresh temporary directory, and its guard.
+    ///
+    /// Copied in shape from `log/sqlite.rs`'s `TempDir`, for the reason it records:
+    /// one need, in tests, is not worth a `tempfile` dependency. The guard must be
+    /// held for the test's lifetime.
+    ///
+    /// **`log/sqlite.rs`'s and not `keystore.rs`'s**, which this comment used to
+    /// credit as well. They are two different collision strategies: this one and
+    /// `log/sqlite.rs`'s put `std::process::id()` in the name and so need the
+    /// pre-emptive `remove_dir_all` below, because a name is reused within one run;
+    /// `keystore.rs`'s takes 8 random bytes from `getrandom` and needs no removal.
+    /// A reader told they are "the same shape" and asked to change one has been
+    /// pointed at the wrong precedent — readability review caught it, and noted that
+    /// `identity_store.rs`'s equivalent comment gets this right, in the same change.
+    ///
+    /// This is the **fourth** near-copy of the helper in the crate (`keystore.rs`,
+    /// `log/sqlite.rs`, `identity_store.rs`, here). Four is where CLAUDE.md's "the
+    /// fourth slightly-different copy of a guard" starts to apply, and "one need, in
+    /// tests" was the argument for hand-rolling the first. Flagged rather than
+    /// unified: whoever needs a fifth should decide deliberately instead of adding
+    /// it, and unifying four test fixtures is not this change's business.
+    struct OnboardingDir(std::path::PathBuf);
+
+    impl OnboardingDir {
+        fn new(name: &str) -> Self {
+            let mut path = std::env::temp_dir();
+            path.push(format!("dialectica-onboard-{}-{name}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir_all(&path).expect("a temporary directory is creatable");
+            OnboardingDir(path)
+        }
+
+        fn keystore_path(&self) -> std::path::PathBuf {
+            crate::keystore::default_path_in(&self.0)
+        }
+
+        fn paths(&self) -> IdentityStore {
+            IdentityStore::open(&IdentityStore::default_path_in(&self.0))
+                .expect("a fresh identity record opens")
+        }
+    }
+
+    impl Drop for OnboardingDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// A keystore with a FIXED root, so expectations can be derived independently
+    /// of what the code under test produced.
+    fn a_master_key() -> Keystore {
+        Keystore::from_root_for_test([7u8; 32])
+    }
+
+    fn slate_request() -> String {
+        format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex())
+    }
+
+    /// A session whose keystore is the FIXED test root, as if one were on disk.
+    ///
+    /// The opener returns `Ok`, so `keystore_for` takes the "a keystore exists"
+    /// branch and never mints — which is what most tests want, because they assert
+    /// against values derived independently from `[7u8; 32]`.
+    fn a_session() -> OnboardingSession {
+        OnboardingSession::new()
+    }
+
+    /// Generate a slate through the wire handler, returning the reply and the
+    /// nonce the handler chose to remember.
+    fn slate_through_the_wire() -> (serde_json::Value, Option<SlateNonce>) {
+        let mut session = a_session();
+        let out = generate_identity_slate(&mut session, &slate_request(), || Ok(a_master_key()));
+        let v = serde_json::from_str(&out)
+            .unwrap_or_else(|e| panic!("the slate reply must be valid JSON ({e}): {out}"));
+        (v, session.live_slate())
+    }
+
+    #[test]
+    fn a_slate_reply_carries_the_fixed_count_and_that_many_candidates() {
+        // The spec: "the reply carries the fixed number of candidates, AND states
+        // that number alongside them". Both halves, and the count is checked
+        // against the hardcoded 5 rather than against the array's own length —
+        // otherwise the assertion is the reply agreeing with itself.
+        let (v, _) = slate_through_the_wire();
+        assert_eq!(v["count"], 5, "got {v}");
+        assert_eq!(v["candidates"].as_array().unwrap().len(), 5, "got {v}");
+        assert_eq!(SLATE_SIZE, 5, "the fixed count and the constant must agree");
+    }
+
+    #[test]
+    fn a_slate_reply_takes_no_count_from_the_caller() {
+        // The spec's reason is a security one: a caller-supplied count is "a
+        // number that decides how much key derivation this module performs". There
+        // is no field to pass, so the check is that offering one changes nothing.
+        let ignored = format!(r#"{{"stoa":"{}","count":500}}"#, a_stoa().to_hex());
+        let out = generate_identity_slate(&mut a_session(), &ignored, || Ok(a_master_key()));
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["count"], 5, "a caller-supplied count was honoured: {out}");
+        assert_eq!(v["candidates"].as_array().unwrap().len(), 5);
+    }
+
+    #[test]
+    fn the_slate_json_is_pinned_to_the_exact_shape_a_view_is_written_against() {
+        // Hardcoded key names, following
+        // `the_capability_json_is_pinned_to_the_exact_shape_the_plan_specifies`:
+        // a view reads these exact names and renaming one is a breaking change no
+        // type checker would catch.
+        //
+        // # The key set is asserted EXACTLY, not merely for presence
+        //
+        // This checked `is_some()` per expected field and nothing about extra ones,
+        // while its name and its doc comment both claimed "the exact shape" — so it
+        // had one fewer guarantee than the three sibling reply shapes, which pin
+        // their whole serialised string, and the difference was invisible from
+        // either. The spec-test reviewer measured the hole: adding a `displayName`
+        // to every candidate left all 553 tests green.
+        //
+        // That matters here specifically because of what the spec says about it. The
+        // scenario "A generated name and a mark are not settled by this capability"
+        // requires that **no candidate carries a display name or a visual mark**, on
+        // the reasoning that a caller written against one "would be written against a
+        // name this capability never defined". A presence-only check cannot fail on
+        // that scenario at all.
+        //
+        // The key set rather than the whole string, because a candidate's values are
+        // derived and a whole-string pin would be asserting on the derivation too.
+        // `assert_eq!` on a sorted `Vec` rather than `contains` per name, so an
+        // ADDED key fails and not only a removed one.
+        //
+        // NO SPEC: `path` is in this set, and no requirement or scenario in
+        // `specs/identity-onboarding/spec.md` names a reply field for it — every
+        // mention of "path" there is about derivation, recording, or the record's
+        // readability. Exposing it is a decision: it is not secret (the spec says
+        // the record "reveals nothing that a published identity does not already
+        // reveal"), and a view that can show which path is about to be kept is one
+        // that can render the recovery warning truthfully. Marked because it is a
+        // widening of the core API that the contract does not require, so a later
+        // reader can decide whether it was right rather than inheriting it by
+        // silence. It appears in the keep and whoami replies too.
+        let (v, _) = slate_through_the_wire();
+        let mut top: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
+        top.sort_unstable();
+        assert_eq!(
+            top,
+            ["candidates", "count", "slate"],
+            "the slate reply's top-level key set changed: {v}"
+        );
+        for candidate in v["candidates"].as_array().unwrap() {
+            let mut keys: Vec<&str> = candidate
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect();
+            keys.sort_unstable();
+            assert_eq!(
+                keys,
+                ["address", "index", "path", "publicKey"],
+                "a candidate's key set changed. An ADDED key fails here too, which \
+                 is the point: the spec requires no candidate carry a display name \
+                 or a visual mark, and this capability does not define either. {v}"
+            );
+        }
+        // And the candidates are indexed 0..5 in order, because a caller selects
+        // by index and an index that did not match the position would select the
+        // wrong candidate.
+        for (position, candidate) in v["candidates"].as_array().unwrap().iter().enumerate() {
+            assert_eq!(candidate["index"], position);
+        }
+    }
+
+    #[test]
+    fn a_slate_reply_carries_an_address_and_a_public_key_for_every_candidate() {
+        // The spec requires both, with a reason for each: the address "is the only
+        // unforgeable way to tell two candidates apart", and the public key
+        // because "the generated display name is derived from the public key
+        // rather than from the address".
+        //
+        // Checked as PARSEABLE values of the right length, not merely present — a
+        // field holding the empty string would satisfy a presence check and be
+        // useless to a view.
+        let (v, _) = slate_through_the_wire();
+        for candidate in v["candidates"].as_array().unwrap() {
+            let address = candidate["address"].as_str().unwrap();
+            assert!(
+                crate::identity::Address::from_hex(address).is_ok(),
+                "a candidate's address does not parse: {address}"
+            );
+            let key = hex::decode(candidate["publicKey"].as_str().unwrap()).unwrap();
+            assert!(
+                crate::identity::PublicKey::from_bytes(&key).is_ok(),
+                "a candidate's public key does not parse"
+            );
+        }
+    }
+
+    #[test]
+    fn no_secret_appears_anywhere_in_a_slate_reply() {
+        // The spec, at the boundary the view actually reads from rather than only
+        // in the slate type's own tests. Searched over the raw REPLY STRING, which
+        // is stronger than checking fields by name because it catches a field
+        // somebody adds later.
+        //
+        // The master key is `[7; 32]`, so the hex it would appear as is `07` x 32.
+        // Checked in both cases, because a reply is lowercase hex and a future one
+        // might not be.
+        let out =
+            generate_identity_slate(&mut a_session(), &slate_request(), || Ok(a_master_key()));
+        let master_hex = "07".repeat(32);
+        assert!(
+            !out.contains(&master_hex) && !out.contains(&master_hex.to_uppercase()),
+            "the master key's hex appears in the slate reply: {out}"
+        );
+
+        // And every candidate's secret key, derived independently here.
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        for candidate in v["candidates"].as_array().unwrap() {
+            let path = candidate["path"].as_u64().unwrap() as u32;
+            let secret = hex::encode(
+                crate::identity::derive_stoa_key_at_path(&[7u8; 32], &a_stoa(), path).to_bytes(),
+            );
+            assert!(
+                !out.contains(&secret),
+                "a candidate's secret key hex appears in the slate reply: {out}"
+            );
+        }
+
+        // The detection must work, or the assertions above prove nothing: a value
+        // that IS in the reply must be found.
+        let present = v["candidates"][0]["address"].as_str().unwrap();
+        assert!(
+            out.contains(present),
+            "the search is broken, so the assertions above prove nothing"
+        );
+    }
+
+    #[test]
+    fn generating_a_slate_writes_nothing() {
+        // The spec: "Generating a slate SHALL NOT write to storage", and
+        // "a caller asking who the user is still finds none".
+        //
+        // Checked by generating several slates against a real directory and then
+        // asserting the directory is still EMPTY — which is stronger than
+        // asserting a particular file is absent, because it catches a write to a
+        // name this test did not think of.
+        let dir = OnboardingDir::new("slate-writes-nothing");
+        // ONE session across the three slates, which is what the module has. A
+        // session per iteration would also pass and would be testing less: the
+        // property is that generating repeatedly writes nothing, and a fresh
+        // session each time hides whether the held key is the thing being written.
+        let mut session = a_session();
+        for _ in 0..3 {
+            let out =
+                generate_identity_slate(&mut session, &slate_request(), || Ok(a_master_key()));
+            assert!(
+                serde_json::from_str::<serde_json::Value>(&out)
+                    .unwrap()
+                    .get("candidates")
+                    .is_some(),
+                "got {out}"
+            );
+        }
+        let entries: Vec<_> = std::fs::read_dir(&dir.0).unwrap().collect();
+        assert!(
+            entries.is_empty(),
+            "generating a slate wrote {} entries",
+            entries.len()
+        );
+
+        // And who-am-i still finds nobody, which is the half a view would notice.
+        let v: serde_json::Value = serde_json::from_str(&who_am_i(
+            &slate_request(),
+            || Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted),
+            || Ok(dir.paths()),
+        ))
+        .unwrap();
+        assert_eq!(v["hasIdentity"], false, "got {v}");
+    }
+
+    #[test]
+    fn two_slates_in_a_row_offer_different_candidates() {
+        // The spec: "no candidate in the second set has a public key from the
+        // first". Through the wire rather than only through the slate type,
+        // because a handler that cached its reply would satisfy the type's test
+        // and fail this one.
+        let (first, _) = slate_through_the_wire();
+        let (second, _) = slate_through_the_wire();
+        let keys = |v: &serde_json::Value| {
+            v["candidates"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| c["publicKey"].as_str().unwrap().to_string())
+                .collect::<Vec<_>>()
+        };
+        for key in keys(&first) {
+            assert!(
+                !keys(&second).contains(&key),
+                "the second slate reoffered {key}"
+            );
+        }
+        assert_ne!(first["slate"], second["slate"], "the nonce must be fresh");
+    }
+
+    #[test]
+    fn a_malformed_slate_request_is_the_error_shape_and_carries_no_candidates() {
+        // §2.5: never a partial success. A reply carrying both an error and an
+        // empty `candidates` list would render as "no identities available" in any
+        // view that checked `candidates` first.
+        for bad in [
+            "not json",
+            r#"{}"#,
+            r#"{"stoa":7}"#,
+            r#"{"stoa":"nothex"}"#,
+            r#"{"stoa":"00ff"}"#,
+            r#"{"stoa":null}"#,
+        ] {
+            let out = generate_identity_slate(&mut a_session(), bad, || Ok(a_master_key()));
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(v.get("error").is_some(), "for {bad:?}, got {out}");
+            assert!(
+                v.get("candidates").is_none() && v.get("count").is_none(),
+                "a failure must never also carry a result — §2.5, got {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_malformed_slate_request_does_not_supersede_the_live_slate() {
+        // The subtle half of the above: a refused request must not have set the live
+        // slate, or a malformed call would invalidate a slate the user is still
+        // looking at — and their next selection would be refused for a reason that
+        // had nothing to do with them.
+        //
+        // Asserted against a real, live slate rather than against `None`, which is
+        // the stronger form: a handler that cleared the slot on failure and one that
+        // left it alone both leave `None` behind when nothing was ever live, so
+        // starting from `None` cannot tell them apart.
+        let mut session = a_session();
+        let good = generate_identity_slate(&mut session, &slate_request(), || Ok(a_master_key()));
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&good)
+                .unwrap()
+                .get("candidates")
+                .is_some(),
+            "the setup slate must succeed, got {good}"
+        );
+        let live = session
+            .live_slate()
+            .expect("a successful slate makes its nonce live");
+
+        for bad in ["not json", r#"{}"#, r#"{"stoa":"nothex"}"#] {
+            let _ = generate_identity_slate(&mut session, bad, || Ok(a_master_key()));
+            assert_eq!(
+                session.live_slate(),
+                Some(live),
+                "the refused request {bad:?} disturbed the live slate"
+            );
+        }
+    }
+
+    #[test]
+    fn a_keystore_that_cannot_be_opened_is_the_error_shape_rather_than_an_empty_slate() {
+        // A slate needs the master key, so a keystore failure is a failure to
+        // answer rather than a slate with nothing in it. The reason must reach the
+        // view, since `KeystoreError::Display` is what names the fix.
+        let out = generate_identity_slate(&mut a_session(), &slate_request(), || {
+            Err(crate::keystore::KeystoreError::PermissionsTooOpen { mode: 0o644 })
+        });
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_some(), "got {out}");
+        assert!(v.get("candidates").is_none());
+        assert!(
+            v["error"].as_str().unwrap().contains("chmod 600"),
+            "the fix must reach the view, got {out}"
+        );
+    }
+
+    // ─── Keeping a candidate ──────────────────────────────────────────────
+
+    /// Keep a candidate through the wire, against a real keystore path and record.
+    fn keep_through_the_wire(
+        dir: &OnboardingDir,
+        nonce: SlateNonce,
+        live: Option<SlateNonce>,
+        index: i64,
+        unlock: &Unlock,
+    ) -> serde_json::Value {
+        let mut session = a_session();
+        // Set the live slate directly rather than by generating one, so a test can
+        // present a nonce that is stale, forged or absent — the cases this helper
+        // exists to reach.
+        session.set_live_slate_for_test(live);
+        let paths = dir.paths();
+        let request = format!(
+            r#"{{"stoa":"{}","slate":"{}","index":{index}}}"#,
+            a_stoa().to_hex(),
+            nonce.to_hex()
+        );
+        let out = keep_identity(
+            &mut session,
+            &request,
+            || Ok(a_master_key()),
+            KeepTargets {
+                keystore_path: &dir.keystore_path(),
+                unlock,
+                paths: &paths,
+            },
+        );
+        serde_json::from_str(&out)
+            .unwrap_or_else(|e| panic!("the keep reply must be valid JSON ({e}): {out}"))
+    }
+
+    #[test]
+    fn keeping_a_candidate_stores_it_and_reports_what_was_kept() {
+        let dir = OnboardingDir::new("keep-stores");
+        let nonce = SlateNonce::generate().unwrap();
+        let v = keep_through_the_wire(&dir, nonce, Some(nonce), 2, &Unlock::Unencrypted);
+        assert_eq!(v["kept"], true, "got {v}");
+
+        // The expected address is derived HERE, independently, from the fixed
+        // master key and the path the reply named — not read back from the reply's
+        // own address field.
+        let path = v["path"].as_u64().unwrap() as u32;
+        let expected = crate::identity::derive_stoa_key_at_path(&[7u8; 32], &a_stoa(), path)
+            .public_key()
+            .address()
+            .to_hex();
+        assert_eq!(v["address"], expected, "got {v}");
+        assert!(v.get("reason").is_none(), "got {v}");
+
+        // And the path that reached the record is the one reported, checked
+        // through the store rather than through the reply.
+        assert_eq!(dir.paths().path_for(&a_stoa()).unwrap(), Some(path));
+    }
+
+    #[test]
+    fn a_kept_identity_survives_a_restart_and_is_the_one_reported() {
+        // The spec: "the identity reported is the one that was kept", after "the
+        // stored state is then loaded afresh" — and twice, because the spec
+        // requires it survive more than one restart and a store that consumed its
+        // content on read would pass a single reload.
+        let dir = OnboardingDir::new("keep-survives");
+        let nonce = SlateNonce::generate().unwrap();
+        let kept = keep_through_the_wire(&dir, nonce, Some(nonce), 1, &Unlock::Unencrypted);
+        let kept_address = kept["address"].as_str().unwrap().to_string();
+
+        for reload in 0..2 {
+            let v: serde_json::Value = serde_json::from_str(&who_am_i(
+                &slate_request(),
+                || Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted),
+                || Ok(dir.paths()),
+            ))
+            .unwrap();
+            assert_eq!(v["hasIdentity"], true, "reload {reload}: {v}");
+            assert_eq!(
+                v["address"], kept_address,
+                "reload {reload} reported a different identity than was kept"
+            );
+        }
+    }
+
+    #[test]
+    fn a_kept_identity_can_sign_as_the_identity_it_reported() {
+        // The spec: "an op signed by the identity it yields has as its author the
+        // identity that keeping it reported". END TO END through a real keystore
+        // on disk and a real signature — every other keep test compares addresses,
+        // so none of them could see a keep that reported one identity while the
+        // user posted under another.
+        use crate::identity::{sign_op_bytes, verify_authored_op, Address};
+
+        let dir = OnboardingDir::new("keep-signs");
+        let nonce = SlateNonce::generate().unwrap();
+        let kept = keep_through_the_wire(&dir, nonce, Some(nonce), 0, &Unlock::Unencrypted);
+        let reported =
+            Address::from_hex(kept["address"].as_str().unwrap()).expect("a parseable address");
+        let path = kept["path"].as_u64().unwrap() as u32;
+
+        // Reopened from disk, not the in-memory keystore the keep used — the
+        // question is whether what was PERSISTED signs as what was reported.
+        let reloaded = Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted).unwrap();
+        let key = reloaded.stoa_key_at_path(&a_stoa(), path);
+        let sig = sign_op_bytes(&key, b"a post");
+        assert!(
+            verify_authored_op(
+                &reported,
+                &key.public_key().to_bytes(),
+                b"a post",
+                &sig.to_bytes()
+            ),
+            "an op signed by the kept identity is not attributed to the reported address"
+        );
+
+        // The negative: another path's key must not verify, or the assertion
+        // above would hold for any key.
+        let other = reloaded.stoa_key_at_path(&a_stoa(), path.wrapping_add(1));
+        assert!(!verify_authored_op(
+            &reported,
+            &other.public_key().to_bytes(),
+            b"a post",
+            &sign_op_bytes(&other, b"a post").to_bytes()
+        ));
+    }
+
+    #[test]
+    fn a_selection_against_a_superseded_slate_is_refused_rather_than_satisfied() {
+        // The spec's sharpest requirement on this path: the attempt "is refused
+        // rather than storing a candidate from the second" set.
+        //
+        // So the assertion is not merely that an error came back — it is that
+        // NOTHING was stored. A handler that refused and wrote anyway would pass a
+        // weaker version of this test.
+        let dir = OnboardingDir::new("superseded");
+        let first = SlateNonce::generate().unwrap();
+        let second = SlateNonce::generate().unwrap();
+        assert_ne!(first, second);
+
+        let v = keep_through_the_wire(&dir, first, Some(second), 0, &Unlock::Unencrypted);
+        assert_eq!(v["kept"], false, "got {v}");
+        assert!(v.get("address").is_none(), "got {v}");
+        assert_eq!(
+            dir.paths().path_for(&a_stoa()).unwrap(),
+            None,
+            "a superseded selection recorded a path"
+        );
+        assert!(
+            !dir.keystore_path().exists(),
+            "a superseded selection wrote a keystore"
+        );
+    }
+
+    #[test]
+    fn a_selection_with_no_live_slate_at_all_is_refused() {
+        // Distinct from the superseded case in how a user reaches it — a restart
+        // between generating and keeping — and the same refusal, because there is
+        // one useful answer to both: generate a slate and choose from it.
+        let dir = OnboardingDir::new("no-live-slate");
+        let nonce = SlateNonce::generate().unwrap();
+        let v = keep_through_the_wire(&dir, nonce, None, 0, &Unlock::Unencrypted);
+        assert_eq!(v["kept"], false, "got {v}");
+        assert!(
+            v["reason"].as_str().unwrap().contains("generate"),
+            "the reason must name the fix, got {v}"
+        );
+        assert!(!dir.keystore_path().exists());
+    }
+
+    #[test]
+    fn a_selection_outside_the_set_is_refused_and_stores_nothing() {
+        // The spec: "the attempt is refused, AND no identity is stored". Coercing
+        // an out-of-range selection would store an identity the user did not
+        // choose, which the spec calls unrecoverable.
+        let dir = OnboardingDir::new("out-of-range");
+        let nonce = SlateNonce::generate().unwrap();
+        for index in [SLATE_SIZE as i64, SLATE_SIZE as i64 + 1, 99, 100_000] {
+            let v = keep_through_the_wire(&dir, nonce, Some(nonce), index, &Unlock::Unencrypted);
+            assert_eq!(v["kept"], false, "index {index}: {v}");
+            assert!(v.get("address").is_none(), "index {index}: {v}");
+            assert!(
+                !dir.keystore_path().exists(),
+                "index {index} wrote a keystore"
+            );
+            assert_eq!(dir.paths().path_for(&a_stoa()).unwrap(), None);
+        }
+        // And every in-range index IS accepted, or the refusals above could be
+        // unconditional and these assertions would still pass.
+        let ok = keep_through_the_wire(&dir, nonce, Some(nonce), 4, &Unlock::Unencrypted);
+        assert_eq!(ok["kept"], true, "got {ok}");
+    }
+
+    #[test]
+    fn a_second_keep_is_refused_and_leaves_the_stored_identity_unchanged() {
+        // The spec: "the attempt is refused, AND the stored identity is
+        // unchanged". The second assertion is the load-bearing one — a refusal
+        // that replaced the master key anyway would satisfy the first and destroy
+        // every identity derived from the old one, with no error saying so.
+        let dir = OnboardingDir::new("second-keep");
+        let nonce = SlateNonce::generate().unwrap();
+        let first = keep_through_the_wire(&dir, nonce, Some(nonce), 0, &Unlock::Unencrypted);
+        assert_eq!(first["kept"], true, "got {first}");
+        let before = std::fs::read(dir.keystore_path()).unwrap();
+
+        let second = keep_through_the_wire(&dir, nonce, Some(nonce), 3, &Unlock::Unencrypted);
+        assert_eq!(second["kept"], false, "got {second}");
+        assert_eq!(
+            std::fs::read(dir.keystore_path()).unwrap(),
+            before,
+            "a refused second keep rewrote the keystore"
+        );
+        assert_eq!(
+            dir.paths().path_for(&a_stoa()).unwrap(),
+            Some(first["path"].as_u64().unwrap() as u32),
+            "a refused second keep changed the recorded path"
+        );
+    }
+
+    #[test]
+    fn a_keep_whose_keystore_write_fails_records_no_path() {
+        // THE WRITE ORDER, and nothing else in this file pins it. Reversing the
+        // two writes left the whole suite green until this test existed —
+        // measured, not assumed.
+        //
+        // The observable difference is exactly the bad state `design.md` names: a
+        // recorded path naming a master key that does not exist, which the NEXT
+        // keep — with a different master key — would silently inherit.
+        //
+        // The keystore write is made to fail by putting a DIRECTORY where the
+        // keystore file goes, so `create` cannot write there. That is a failure of
+        // the keystore write specifically, with the path record perfectly healthy,
+        // which is the only fixture that separates the two orders.
+        let dir = OnboardingDir::new("keystore-write-fails");
+        std::fs::create_dir_all(dir.keystore_path()).unwrap();
+        let paths = dir.paths();
+        let nonce = SlateNonce::generate().unwrap();
+        let request = format!(
+            r#"{{"stoa":"{}","slate":"{}","index":0}}"#,
+            a_stoa().to_hex(),
+            nonce.to_hex()
+        );
+
+        let mut session = a_session();
+        session.set_live_slate_for_test(Some(nonce));
+        let out = keep_identity(
+            &mut session,
+            &request,
+            || Ok(a_master_key()),
+            KeepTargets {
+                keystore_path: &dir.keystore_path(),
+                unlock: &Unlock::Unencrypted,
+                paths: &paths,
+            },
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            v["kept"], false,
+            "the fixture must fail the keystore write, got {out}"
+        );
+
+        // The assertion the ordering exists for: nothing reached the record.
+        assert_eq!(
+            paths.path_for(&a_stoa()).unwrap(),
+            None,
+            "a failed keystore write left a recorded path behind — the writes are \
+             in the wrong order"
+        );
+
+        // And the spec's "a subsequent load finds no identity that was not there
+        // before": who-am-i must still find nobody.
+        let who: serde_json::Value = serde_json::from_str(
+            &whoami_for(&a_stoa(), || Ok(a_master_key()), || Ok(dir.paths())).to_json(),
+        )
+        .unwrap();
+        assert_eq!(who["hasIdentity"], false, "got {who}");
+    }
+
+    #[test]
+    fn the_second_keep_refusal_is_distinguishable_from_other_failures() {
+        // The spec: the reason must be "distinguishable from a malformed request
+        // and from a storage failure". Three states, three distinct outcomes —
+        // and the malformed one is the ERROR shape rather than a refusal, which is
+        // the strongest form of distinguishable.
+        let dir = OnboardingDir::new("refusal-kinds");
+        let nonce = SlateNonce::generate().unwrap();
+        keep_through_the_wire(&dir, nonce, Some(nonce), 0, &Unlock::Unencrypted);
+
+        let already = keep_through_the_wire(&dir, nonce, Some(nonce), 1, &Unlock::Unencrypted);
+        let already_reason = already["reason"].as_str().unwrap();
+
+        // A storage failure: the record's own file replaced by a directory, so
+        // opening it fails. Reached through a different `OnboardingDir` so the
+        // already-exists case is not also in play.
+        let broken = OnboardingDir::new("refusal-storage");
+        let record_path = IdentityStore::default_path_in(&broken.0);
+        std::fs::create_dir_all(&record_path).unwrap();
+        let storage_failure = IdentityStore::open(&record_path);
+        assert!(
+            storage_failure.is_err(),
+            "the fixture must actually fail, or this test proves nothing"
+        );
+        let storage_reason = storage_failure.unwrap_err().to_string();
+
+        assert_ne!(
+            already_reason, storage_reason,
+            "an existing identity and a storage failure must not read alike"
+        );
+
+        // And a malformed request is §2.5's error shape, not a refusal at all.
+        let mut session = a_session();
+        session.set_live_slate_for_test(Some(nonce));
+        let malformed = keep_identity(
+            &mut session,
+            r#"{"stoa":"nothex"}"#,
+            || Ok(a_master_key()),
+            KeepTargets {
+                keystore_path: &broken.keystore_path(),
+                unlock: &Unlock::Unencrypted,
+                paths: &dir.paths(),
+            },
+        );
+        let v: serde_json::Value = serde_json::from_str(&malformed).unwrap();
+        assert!(v.get("error").is_some(), "got {malformed}");
+        assert!(v.get("kept").is_none(), "got {malformed}");
+    }
+
+    #[test]
+    fn the_keep_reply_reports_whether_the_master_key_was_encrypted() {
+        // The spec: an encrypted store reports encrypted, an unencrypted one
+        // reports unencrypted. Both directions, because a field hardcoded to
+        // either value would satisfy one of them.
+        let plain = OnboardingDir::new("report-plain");
+        let nonce = SlateNonce::generate().unwrap();
+        let v = keep_through_the_wire(&plain, nonce, Some(nonce), 0, &Unlock::Unencrypted);
+        assert_eq!(v["kept"], true, "got {v}");
+        assert_eq!(
+            v["encrypted"], false,
+            "an unencrypted store must report unencrypted: {v}"
+        );
+
+        let encrypted = OnboardingDir::new("report-encrypted");
+        let unlock = Unlock::Passphrase(Passphrase::new(b"a real passphrase"));
+        let v = keep_through_the_wire(&encrypted, nonce, Some(nonce), 0, &unlock);
+        assert_eq!(v["kept"], true, "got {v}");
+        assert_eq!(
+            v["encrypted"], true,
+            "an encrypted store must report encrypted: {v}"
+        );
+
+        // And the report agrees with the FILE, not merely with the argument: the
+        // keystore's own inspection must say the same thing. This is what would
+        // catch a reply whose boolean had drifted from what was written.
+        assert!(Keystore::is_encrypted(&encrypted.keystore_path()).unwrap());
+        assert!(!Keystore::is_encrypted(&plain.keystore_path()).unwrap());
+    }
+
+    #[test]
+    fn the_keep_json_is_pinned_to_the_exact_shape_a_view_is_written_against() {
+        // Hardcoded strings, both shapes, following the capability probe's
+        // precedent.
+        assert_eq!(
+            Kept::Stored {
+                address: "aa".into(),
+                public_key: "bb".into(),
+                path: 7,
+                encrypted: true,
+            }
+            .to_json(),
+            r#"{"address":"aa","encrypted":true,"kept":true,"path":7,"publicKey":"bb"}"#
+        );
+        assert_eq!(
+            Kept::Refused {
+                reason: "no slate".into()
+            }
+            .to_json(),
+            r#"{"kept":false,"reason":"no slate"}"#
+        );
+    }
+
+    #[test]
+    fn a_malformed_keep_request_is_the_error_shape_and_carries_no_result() {
+        // §2.5, on the method where a partial success would be worst: a reply
+        // carrying an error and a `kept:true` beside it would tell a view an
+        // identity exists that was never written.
+        let dir = OnboardingDir::new("keep-malformed");
+        let nonce = SlateNonce::generate().unwrap();
+        let paths = dir.paths();
+        let stoa = a_stoa().to_hex();
+        for bad in [
+            "not json".to_string(),
+            r#"{}"#.to_string(),
+            format!(r#"{{"stoa":"{stoa}"}}"#),
+            format!(r#"{{"stoa":"{stoa}","slate":7}}"#),
+            format!(r#"{{"stoa":"{stoa}","slate":"nothex"}}"#),
+            format!(r#"{{"stoa":"{stoa}","slate":"00ff"}}"#),
+            format!(r#"{{"stoa":"{stoa}","slate":"{}"}}"#, nonce.to_hex()),
+            format!(
+                r#"{{"stoa":"{stoa}","slate":"{}","index":-1}}"#,
+                nonce.to_hex()
+            ),
+            format!(
+                r#"{{"stoa":"{stoa}","slate":"{}","index":1.5}}"#,
+                nonce.to_hex()
+            ),
+            format!(
+                r#"{{"stoa":"{stoa}","slate":"{}","index":"two"}}"#,
+                nonce.to_hex()
+            ),
+        ] {
+            let mut session = a_session();
+            session.set_live_slate_for_test(Some(nonce));
+            let out = keep_identity(
+                &mut session,
+                &bad,
+                || Ok(a_master_key()),
+                KeepTargets {
+                    keystore_path: &dir.keystore_path(),
+                    unlock: &Unlock::Unencrypted,
+                    paths: &paths,
+                },
+            );
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(v.get("error").is_some(), "for {bad:?}, got {out}");
+            assert!(
+                v.get("kept").is_none() && v.get("address").is_none(),
+                "a failure must never also carry a result — §2.5, got {out}"
+            );
+            assert!(
+                !dir.keystore_path().exists(),
+                "a malformed request for {bad:?} wrote a keystore"
+            );
+        }
+    }
+
+    // ─── Who the user is ──────────────────────────────────────────────────
+
+    #[test]
+    fn who_am_i_reports_an_identity_with_its_address_and_public_key() {
+        // The spec: "the reply states that there is an identity, AND carries its
+        // address and its public key, AND carries no reason". All three.
+        let dir = OnboardingDir::new("whoami-yes");
+        let nonce = SlateNonce::generate().unwrap();
+        let kept = keep_through_the_wire(&dir, nonce, Some(nonce), 2, &Unlock::Unencrypted);
+
+        let v: serde_json::Value = serde_json::from_str(&who_am_i(
+            &slate_request(),
+            || Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted),
+            || Ok(dir.paths()),
+        ))
+        .unwrap();
+        assert_eq!(v["hasIdentity"], true, "got {v}");
+        assert_eq!(v["address"], kept["address"], "got {v}");
+        assert!(v.get("reason").is_none(), "got {v}");
+        // The public key must be present AND must be the one the address derives
+        // from, which is the only way the "display name is derived from the public
+        // key" requirement is useful.
+        let key = hex::decode(v["publicKey"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            crate::identity::PublicKey::from_bytes(&key)
+                .unwrap()
+                .address()
+                .to_hex(),
+            v["address"].as_str().unwrap(),
+            "the reported public key does not derive the reported address: {v}"
+        );
+    }
+
+    #[test]
+    fn who_am_i_reports_nobody_with_a_reason_when_no_identity_is_stored() {
+        // The spec: "the reply states that there is none, AND carries a reason,
+        // AND carries no identity".
+        let dir = OnboardingDir::new("whoami-none");
+        let v: serde_json::Value = serde_json::from_str(&who_am_i(
+            &slate_request(),
+            || Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted),
+            || Ok(dir.paths()),
+        ))
+        .unwrap();
+        assert_eq!(v["hasIdentity"], false, "got {v}");
+        assert!(v.get("address").is_none(), "got {v}");
+        assert!(v.get("publicKey").is_none(), "got {v}");
+        assert!(!v["reason"].as_str().unwrap().is_empty(), "got {v}");
+    }
+
+    #[test]
+    fn an_unusable_identity_is_distinguishable_from_an_absent_one() {
+        // The spec's requirement, and the reason the method exists separately from
+        // the posting probe: "a stored identity whose keystore permissions are too
+        // open is a real identity that cannot currently be used", and a caller
+        // told "you are nobody" would render the wrong thing.
+        //
+        // Four states, and all four reasons must differ.
+        let absent = whoami_for(
+            &a_stoa(),
+            || Err(crate::keystore::KeystoreError::NotFound),
+            || Ok(IdentityStore::in_memory().unwrap()),
+        );
+        let unusable = whoami_for(
+            &a_stoa(),
+            || Err(crate::keystore::KeystoreError::PermissionsTooOpen { mode: 0o644 }),
+            || Ok(IdentityStore::in_memory().unwrap()),
+        );
+        let locked = whoami_for(
+            &a_stoa(),
+            || Err(crate::keystore::KeystoreError::Locked),
+            || Ok(IdentityStore::in_memory().unwrap()),
+        );
+        // The state the two-store split creates: a master key with no recorded
+        // path for this Stoa.
+        let unchosen = whoami_for(
+            &a_stoa(),
+            || Ok(a_master_key()),
+            || Ok(IdentityStore::in_memory().unwrap()),
+        );
+
+        let reason = |w: &Whoami| match w {
+            Whoami::Nobody { reason } => reason.clone(),
+            Whoami::Identity { .. } => panic!("expected nobody, got an identity"),
+        };
+        let reasons = [
+            reason(&absent),
+            reason(&unusable),
+            reason(&locked),
+            reason(&unchosen),
+        ];
+        for (i, a) in reasons.iter().enumerate() {
+            for b in reasons.iter().skip(i + 1) {
+                assert_ne!(a, b, "two states produced the same reason");
+            }
+        }
+        // And the unchosen state's reason names the record rather than reading as
+        // "you have no identity", which is the whole point of listing it.
+        assert!(
+            reason(&unchosen).contains("chosen") || reason(&unchosen).contains("slate"),
+            "the unchosen reason must name what is missing, got {}",
+            reason(&unchosen)
+        );
+    }
+
+    #[test]
+    fn who_am_i_reports_that_recovery_needs_more_than_the_master_key() {
+        // The spec: "a caller asking whether recovery needs more than the master
+        // key is told that it does", while paths are recorded and no export
+        // exists. A user who believes their exported master key is a complete
+        // backup "has been misled by omission", and the caller has no filesystem
+        // access to discover it for itself.
+        let dir = OnboardingDir::new("whoami-recovery");
+        let nonce = SlateNonce::generate().unwrap();
+        keep_through_the_wire(&dir, nonce, Some(nonce), 0, &Unlock::Unencrypted);
+
+        let v: serde_json::Value = serde_json::from_str(&who_am_i(
+            &slate_request(),
+            || Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted),
+            || Ok(dir.paths()),
+        ))
+        .unwrap();
+        assert_eq!(
+            v["recoveryNeedsTheRecord"], true,
+            "the unbacked state must be reported, got {v}"
+        );
+    }
+
+    #[test]
+    fn distinct_stoas_report_distinct_identities() {
+        // §5.2 gives a user one identity PER STOA, and the path record is keyed by
+        // Stoa. A handler that ignored the field would report one Stoa's identity
+        // while the user posted under another's.
+        let dir = OnboardingDir::new("whoami-per-stoa");
+        let store = dir.paths();
+        let here = a_stoa();
+        let elsewhere = stoa_address(b"another stoa");
+        store.record_path(&here, 1).unwrap();
+        store.record_path(&elsewhere, 2).unwrap();
+
+        let ask = |stoa: &Address| whoami_for(stoa, || Ok(a_master_key()), || Ok(dir.paths()));
+        let (a, b) = (ask(&here), ask(&elsewhere));
+        match (&a, &b) {
+            (
+                Whoami::Identity {
+                    address: addr_a,
+                    path: path_a,
+                    ..
+                },
+                Whoami::Identity {
+                    address: addr_b,
+                    path: path_b,
+                    ..
+                },
+            ) => {
+                assert_eq!(*path_a, 1);
+                assert_eq!(*path_b, 2);
+                assert_ne!(addr_a, addr_b, "two Stoas reported one address");
+                // And each address is the one the recorded path derives, computed
+                // here rather than read from the reply.
+                for (stoa, path, addr) in [(&here, 1u32, addr_a), (&elsewhere, 2, addr_b)] {
+                    assert_eq!(
+                        addr,
+                        &crate::identity::derive_stoa_key_at_path(&[7u8; 32], stoa, path)
+                            .public_key()
+                            .address()
+                            .to_hex()
+                    );
+                }
+            }
+            other => panic!("expected two identities, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_whoami_json_is_pinned_to_the_exact_shape_a_view_is_written_against() {
+        assert_eq!(
+            Whoami::Identity {
+                address: "aa".into(),
+                public_key: "bb".into(),
+                path: 7,
+                recovery_needs_the_record: true,
+            }
+            .to_json(),
+            r#"{"address":"aa","hasIdentity":true,"path":7,"publicKey":"bb","recoveryNeedsTheRecord":true}"#
+        );
+        assert_eq!(
+            Whoami::Nobody {
+                reason: "no keystore".into()
+            }
+            .to_json(),
+            r#"{"hasIdentity":false,"reason":"no keystore"}"#
+        );
+    }
+
+    #[test]
+    fn a_malformed_whoami_request_is_the_error_shape_and_carries_no_identity() {
+        for bad in [
+            "not json",
+            r#"{}"#,
+            r#"{"stoa":7}"#,
+            r#"{"stoa":"nothex"}"#,
+            r#"{"stoa":"00ff"}"#,
+        ] {
+            let out = who_am_i(
+                bad,
+                || Ok(a_master_key()),
+                || Ok(IdentityStore::in_memory().unwrap()),
+            );
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(v.get("error").is_some(), "for {bad:?}, got {out}");
+            assert!(
+                v.get("hasIdentity").is_none() && v.get("address").is_none(),
+                "a failure must never also carry a result — §2.5, got {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn who_am_i_is_an_answer_and_not_an_error_for_every_storage_state() {
+        // The posting probe's posture, applied here: a state that prevents naming
+        // an identity is reported as "nobody, because X" rather than as the call
+        // failing. A view handling both would have two negative branches and the
+        // second has no sensible rendering.
+        let makers: [fn() -> crate::keystore::KeystoreError; 5] = [
+            || crate::keystore::KeystoreError::NotFound,
+            || crate::keystore::KeystoreError::Io("disk on fire".into()),
+            || crate::keystore::KeystoreError::NotAKeystore,
+            || crate::keystore::KeystoreError::WrongPassphrase,
+            || crate::keystore::KeystoreError::Truncated,
+        ];
+        for make in makers {
+            let out = who_am_i(
+                &slate_request(),
+                || Err(make()),
+                || Ok(IdentityStore::in_memory().unwrap()),
+            );
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(
+                v.get("error").is_none(),
+                "a storage state became the error shape: {out}"
+            );
+            assert_eq!(v["hasIdentity"], false, "got {out}");
+        }
+
+        // And a failure of the RECORD, not only of the keystore.
+        let out = who_am_i(
+            &slate_request(),
+            || Ok(a_master_key()),
+            || {
+                Err(crate::identity_store::IdentityStoreError::Storage(
+                    "unable to open database file".into(),
+                ))
+            },
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_none(), "got {out}");
+        assert_eq!(v["hasIdentity"], false);
+        assert!(
+            v["reason"]
+                .as_str()
+                .unwrap()
+                .contains("unable to open database file"),
+            "the reason must reach the view, got {out}"
+        );
+    }
+
+    #[test]
+    fn no_onboarding_handler_panics_whatever_it_is_given_or_whatever_fails() {
+        // The guard, on three methods a view calls during onboarding. A panic here
+        // does not make one button unavailable — it aborts the module process
+        // (PHASE0-FINDINGS §3) and the entire interface is unrenderable.
+        //
+        // Two axes: arbitrary INPUT, and a dependency that panics. The second is
+        // the one a request-shaped sweep would miss.
+        let dir = OnboardingDir::new("no-panics");
+        let paths = dir.paths();
+        let stoa = a_stoa().to_hex();
+        let nonce = SlateNonce::generate().unwrap();
+
+        for input in [
+            "",
+            "not json",
+            "null",
+            "[]",
+            "0",
+            r#""a string""#,
+            r#"{}"#,
+            r#"{"stoa":null,"slate":null,"index":null}"#,
+            r#"{"stoa":[],"slate":{},"index":[]}"#,
+            &format!(
+                r#"{{"stoa":"{stoa}","slate":"{}","index":18446744073709551616}}"#,
+                nonce.to_hex()
+            ),
+            "\u{0}\u{1}\u{2}",
+        ] {
+            let mut slate_session = a_session();
+            let mut keep_session = a_session();
+            keep_session.set_live_slate_for_test(Some(nonce));
+            for out in [
+                generate_identity_slate(&mut slate_session, input, || Ok(a_master_key())),
+                keep_identity(
+                    &mut keep_session,
+                    input,
+                    || Ok(a_master_key()),
+                    KeepTargets {
+                        keystore_path: &dir.keystore_path(),
+                        unlock: &Unlock::Unencrypted,
+                        paths: &paths,
+                    },
+                ),
+                who_am_i(
+                    input,
+                    || Ok(a_master_key()),
+                    || Ok(IdentityStore::in_memory().unwrap()),
+                ),
+            ] {
+                serde_json::from_str::<serde_json::Value>(&out).unwrap_or_else(|e| {
+                    panic!("a handler emitted invalid JSON for {input:?} ({e}): {out}")
+                });
+            }
+        }
+
+        // A panicking dependency, which the guard has to convert rather than let
+        // through.
+        let out = generate_identity_slate(&mut a_session(), &slate_request(), || {
+            panic!("the keystore layer exploded")
+        });
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_some(), "got {out}");
+        assert!(v.get("candidates").is_none());
+
+        // The keep's opener is a dependency too, and it is the one the session
+        // reaches through — so a panic there is inside the session's borrow, which
+        // is the arrangement most likely to be got wrong.
+        let mut panicking = a_session();
+        panicking.set_live_slate_for_test(Some(nonce));
+        let out = keep_identity(
+            &mut panicking,
+            &format!(
+                r#"{{"stoa":"{stoa}","slate":"{}","index":0}}"#,
+                nonce.to_hex()
+            ),
+            || panic!("the keystore layer exploded during a keep"),
+            KeepTargets {
+                keystore_path: &dir.keystore_path(),
+                unlock: &Unlock::Unencrypted,
+                paths: &paths,
+            },
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_some(), "got {out}");
+        assert!(
+            v.get("kept").is_none(),
+            "§2.5: never a partial success, got {out}"
+        );
+
+        let out = who_am_i(
+            &slate_request(),
+            || Ok(a_master_key()),
+            || panic!("the record layer exploded"),
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_some(), "got {out}");
+        assert!(v.get("hasIdentity").is_none());
+    }
+
+    // ─── Onboarding: the tester's independent coverage ─────────────────────
+    //
+    // Written from the `identity-onboarding` spec rather than from the code, and
+    // each one was watched to fail under a named mutation before it was kept.
+    // Where a test overlaps one above, the reason is stated.
+
+    #[test]
+    fn a_keep_whose_path_record_fails_reports_failure_and_names_no_identity() {
+        // THE OTHER HALF OF THE WRITE ORDER, and nothing in this file covered it.
+        // `a_keep_whose_keystore_write_fails_records_no_path` pins the direction
+        // where the FIRST write fails, which is the clean case: nothing was
+        // written anywhere. It cannot see the case `design.md` calls "the one
+        // partial state" — the keystore succeeded and the record did not.
+        //
+        // That case is what the spec's "A failed keep records nothing" actually
+        // costs, and the spec is checkable on it: "no identity is reported as
+        // kept, AND a subsequent load finds no identity that was not there
+        // before". Both halves are asserted here.
+        //
+        // The record write is made to fail by handing the keep a store whose
+        // TABLE has been dropped out from under it — the connection is live, so
+        // `record_path` reaches SQLite and SQLite refuses. Putting a directory
+        // where the file goes would fail at `open`, which is a different arm and
+        // would never reach `record_path` at all.
+        let dir = OnboardingDir::new("record-write-fails");
+        let paths = dir.paths();
+        {
+            // A second connection to the same file, dropping the table. The
+            // keep's own store keeps its handle, so the failure happens at the
+            // write rather than at the open.
+            let saboteur = rusqlite::Connection::open(IdentityStore::default_path_in(&dir.0))
+                .expect("the record file opens");
+            saboteur
+                .execute_batch("DROP TABLE chosen_paths;")
+                .expect("the table is droppable");
+        }
+
+        let nonce = SlateNonce::generate().unwrap();
+        let request = format!(
+            r#"{{"stoa":"{}","slate":"{}","index":0}}"#,
+            a_stoa().to_hex(),
+            nonce.to_hex()
+        );
+        let mut session = a_session();
+        session.set_live_slate_for_test(Some(nonce));
+        let out = keep_identity(
+            &mut session,
+            &request,
+            || Ok(a_master_key()),
+            KeepTargets {
+                keystore_path: &dir.keystore_path(),
+                unlock: &Unlock::Unencrypted,
+                paths: &paths,
+            },
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+
+        // The fixture must actually fail the RECORD write and not something
+        // earlier, or this test proves nothing. The keystore file existing is
+        // what says the first write got through.
+        assert!(
+            dir.keystore_path().exists(),
+            "the fixture failed before the keystore write, so it does not \
+             exercise the partial state: {out}"
+        );
+
+        // The spec: "no identity is reported as kept".
+        assert_eq!(
+            v["kept"], false,
+            "a keep whose record write failed reported success: {out}"
+        );
+        assert!(v.get("address").is_none(), "got {out}");
+        assert!(v.get("path").is_none(), "got {out}");
+
+        // The spec: "a subsequent load finds no identity that was not there
+        // before". `whoAmI` must not name one — which is only true because it
+        // reads the RECORD, not the keystore.
+        //
+        // The store is opened here rather than through `OnboardingDir::paths`,
+        // because the sabotaged file no longer opens and `paths` panics on that.
+        // A load that CANNOT read the record is still a load that must not name
+        // an identity, so the failure is handed to the handler as the answer it
+        // is — which is the state a real user would be in.
+        let record_path = IdentityStore::default_path_in(&dir.0);
+        let who: serde_json::Value = serde_json::from_str(&who_am_i(
+            &slate_request(),
+            || Keystore::open(&dir.keystore_path(), &Unlock::Unencrypted),
+            || IdentityStore::open(&record_path),
+        ))
+        .unwrap();
+        assert_eq!(
+            who["hasIdentity"], false,
+            "a keep that did not complete left an identity reportable: {who}"
+        );
+        assert!(who.get("address").is_none(), "got {who}");
+    }
+
+    #[test]
+    fn each_keep_refusal_reason_is_pinned_to_its_own_situation() {
+        // `the_second_keep_refusal_is_distinguishable_from_other_failures`
+        // asserts that two reasons DIFFER without pinning either, and its
+        // storage-failure reason is built outside the handler — so it never
+        // observes what a keep actually says about a storage failure. Both
+        // reasons could become unhelpful in different ways and it would pass.
+        //
+        // This pins each reason to a substring chosen from the SPEC's own
+        // vocabulary for the situation, so a message that stopped naming its
+        // situation fails even while remaining distinct from the others.
+        //
+        // Three situations, one table — CLAUDE.md's rule, and it is also what
+        // makes the pairwise-distinctness check below free.
+        let dir = OnboardingDir::new("pinned-refusals");
+        let nonce = SlateNonce::generate().unwrap();
+        let other = SlateNonce::generate().unwrap();
+        assert_ne!(nonce, other);
+
+        // First keep succeeds, so the second reaches the already-exists arm.
+        let first = keep_through_the_wire(&dir, nonce, Some(nonce), 0, &Unlock::Unencrypted);
+        assert_eq!(first["kept"], true, "got {first}");
+
+        // A storage failure reached THROUGH the handler: the record's table is
+        // dropped, in a directory with no keystore yet, so the keystore write
+        // succeeds and the record write fails. That is the only way to observe
+        // what a keep says about a storage failure.
+        let broken = OnboardingDir::new("pinned-refusals-storage");
+        let broken_paths = broken.paths();
+        {
+            let saboteur =
+                rusqlite::Connection::open(IdentityStore::default_path_in(&broken.0)).unwrap();
+            saboteur.execute_batch("DROP TABLE chosen_paths;").unwrap();
+        }
+        let mut broken_session = a_session();
+        broken_session.set_live_slate_for_test(Some(nonce));
+        let storage_out = keep_identity(
+            &mut broken_session,
+            &format!(
+                r#"{{"stoa":"{}","slate":"{}","index":0}}"#,
+                a_stoa().to_hex(),
+                nonce.to_hex()
+            ),
+            || Ok(a_master_key()),
+            KeepTargets {
+                keystore_path: &broken.keystore_path(),
+                unlock: &Unlock::Unencrypted,
+                paths: &broken_paths,
+            },
+        );
+        let storage: serde_json::Value = serde_json::from_str(&storage_out).unwrap();
+        assert_eq!(storage["kept"], false, "got {storage_out}");
+
+        // (situation, reply, a word the reason must carry)
+        //
+        // Each expected word is hardcoded from what the SITUATION is, not read
+        // back from the message: an existing identity is about a keystore that
+        // already exists, a superseded slate is about generating a fresh one, an
+        // out-of-range selection is about choosing from the set, and a storage
+        // failure is about the record being unreadable.
+        let cases = [
+            (
+                "an identity already exists",
+                keep_through_the_wire(&dir, nonce, Some(nonce), 1, &Unlock::Unencrypted),
+                "already exists",
+            ),
+            (
+                "the slate was superseded",
+                keep_through_the_wire(&dir, other, Some(nonce), 0, &Unlock::Unencrypted),
+                "no longer the current one",
+            ),
+            (
+                "the selection names no candidate",
+                keep_through_the_wire(&dir, nonce, Some(nonce), 99, &Unlock::Unencrypted),
+                "there is no candidate 99",
+            ),
+            (
+                "the record could not be written",
+                storage,
+                "read or written",
+            ),
+        ];
+
+        let mut reasons: Vec<String> = Vec::new();
+        for (situation, reply, must_contain) in &cases {
+            assert_eq!(reply["kept"], false, "{situation}: {reply}");
+            let reason = reply["reason"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{situation} carried no reason: {reply}"))
+                .to_string();
+            assert!(
+                reason.contains(must_contain),
+                "{situation}: the reason does not name the situation. Expected a \
+                 reason containing {must_contain:?}, got {reason:?}"
+            );
+            reasons.push(reason);
+        }
+
+        // And still pairwise distinct, which pinning each one already implies but
+        // which is the spec's own wording ("distinguishable from").
+        for (i, a) in reasons.iter().enumerate() {
+            for b in reasons.iter().skip(i + 1) {
+                assert_ne!(a, b, "two situations produced the same reason");
+            }
+        }
+    }
+
+    #[test]
+    fn a_failed_keep_leaves_the_record_no_fuller_than_it_found_it() {
+        // The spec's "A failed keep records nothing" has a second clause the
+        // tests above read past: "a subsequent load finds no identity THAT WAS
+        // NOT THERE BEFORE". That is a statement about the record as a whole, not
+        // about the Stoa being kept — so it is checkable by counting rows across
+        // a failure, which nothing else here does.
+        //
+        // The fixture puts a pre-existing choice for a DIFFERENT Stoa in the
+        // record, so a handler that cleared or rewrote the record on failure
+        // would be caught, and so would one that recorded the failed Stoa.
+        let dir = OnboardingDir::new("failed-keep-leaves-record");
+        let paths = dir.paths();
+        let elsewhere = stoa_address(b"a stoa kept earlier");
+        paths.record_path(&elsewhere, 11).unwrap();
+
+        // The expected content is hardcoded, not read back from the store.
+        let before = vec![crate::identity_store::ChosenPath {
+            stoa: elsewhere,
+            path: 11,
+        }];
+        assert_eq!(paths.all_paths().unwrap(), before);
+
+        let nonce = SlateNonce::generate().unwrap();
+        let stale = SlateNonce::generate().unwrap();
+        assert_ne!(nonce, stale);
+
+        // Three ways to fail a keep for `a_stoa()`, none of which may touch the
+        // record: a superseded nonce, no live slate, and an out-of-range index.
+        for (situation, live, index) in [
+            ("a superseded slate", Some(stale), 0i64),
+            ("no live slate", None, 0),
+            ("an index outside the set", Some(nonce), 77),
+        ] {
+            let mut session = a_session();
+            session.set_live_slate_for_test(live);
+            let out = keep_identity(
+                &mut session,
+                &format!(
+                    r#"{{"stoa":"{}","slate":"{}","index":{index}}}"#,
+                    a_stoa().to_hex(),
+                    nonce.to_hex()
+                ),
+                || Ok(a_master_key()),
+                KeepTargets {
+                    keystore_path: &dir.keystore_path(),
+                    unlock: &Unlock::Unencrypted,
+                    paths: &paths,
+                },
+            );
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert_eq!(v["kept"], false, "{situation}: {out}");
+            assert_eq!(
+                paths.all_paths().unwrap(),
+                before,
+                "{situation} changed the record"
+            );
+        }
+    }
+
+    #[test]
+    fn a_slate_is_offered_for_the_stoa_it_was_asked_about() {
+        // The spec makes identity per-Stoa, and a slate is generated for one
+        // Stoa. Nothing in this file checks that the handler uses the `stoa`
+        // field it parsed rather than some other value — the existing slate tests
+        // all ask about one Stoa, so a handler that hardcoded a Stoa would pass
+        // every one of them.
+        //
+        // Asserted against candidates derived HERE from the fixed master key and
+        // the paths the reply named, so the expectation does not come from the
+        // reply's own address field.
+        let here = a_stoa();
+        let elsewhere = stoa_address(b"a different stoa entirely");
+        assert_ne!(here, elsewhere);
+
+        for stoa in [here, elsewhere] {
+            let request = format!(r#"{{"stoa":"{}"}}"#, stoa.to_hex());
+            let out = generate_identity_slate(&mut a_session(), &request, || Ok(a_master_key()));
+            let v: serde_json::Value = serde_json::from_str(&out)
+                .unwrap_or_else(|e| panic!("the reply must be JSON ({e}): {out}"));
+            for candidate in v["candidates"].as_array().unwrap() {
+                let path = candidate["path"].as_u64().unwrap() as u32;
+                let expected =
+                    crate::identity::derive_stoa_key_at_path(&[7u8; 32], &stoa, path).public_key();
+                assert_eq!(
+                    candidate["publicKey"],
+                    expected.to_hex(),
+                    "a candidate is not derived for the Stoa that was asked about: {v}"
+                );
+                assert_eq!(candidate["address"], expected.address().to_hex(), "got {v}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_kept_identity_is_the_candidate_the_slate_offered_at_that_index() {
+        // The spec's keep scenarios say the identity kept is the one that was
+        // chosen, and the selection is BY INDEX. Every keep test above derives
+        // its expectation from the path the REPLY named — which cannot see a keep
+        // that stored index 3's path while reporting it as the kept one, because
+        // reply and record would agree with each other.
+        //
+        // This instead generates the slate, reads candidate `n`'s public key from
+        // the SLATE reply, and requires the keep at index `n` to report exactly
+        // that. The two replies come from two calls, so agreeing is a property of
+        // the code rather than of one value being copied.
+        for index in 0..SLATE_SIZE {
+            let dir = OnboardingDir::new(&format!("keep-is-the-offered-one-{index}"));
+            let mut session = a_session();
+            let slate_out =
+                generate_identity_slate(&mut session, &slate_request(), || Ok(a_master_key()));
+            let slate: serde_json::Value = serde_json::from_str(&slate_out).unwrap();
+            let nonce = session.live_slate().expect("a slate was remembered");
+            let offered = slate["candidates"][index].clone();
+
+            let kept =
+                keep_through_the_wire(&dir, nonce, Some(nonce), index as i64, &Unlock::Unencrypted);
+            assert_eq!(kept["kept"], true, "index {index}: {kept}");
+            assert_eq!(
+                kept["publicKey"], offered["publicKey"],
+                "index {index}: the keep stored a candidate the slate did not \
+                 offer at that index. Offered {offered}, kept {kept}"
+            );
+            assert_eq!(kept["address"], offered["address"], "index {index}");
+            assert_eq!(kept["path"], offered["path"], "index {index}");
+        }
+    }
+
+    #[test]
+    fn on_a_fresh_install_the_identity_kept_is_the_candidate_the_slate_showed() {
+        // THE REGRESSION TEST for the defect three reviewers found independently,
+        // and the reason `OnboardingSession` exists.
+        //
+        // `a_kept_identity_is_the_candidate_the_slate_offered_at_that_index` above
+        // is the test written for this property and it could not see the defect,
+        // because it hands BOTH calls the same fixed `[7u8; 32]` keystore. A fixture
+        // that supplies one key to both cannot distinguish "the slate and the keep
+        // agree about the master key" from "the harness gave them the same one" —
+        // this project's recorded defect family, two explanations for one answer,
+        // here at the fixture boundary rather than inside a fixture.
+        //
+        // So this test does the one thing that fixture cannot: the opener reports
+        // NO KEYSTORE, which is the fresh install that onboarding exists for and
+        // the only state where minting happens at all. If the key is minted per
+        // call, the slate shows candidates of key A, the keep writes key B, and
+        // the addresses differ — which is exactly what was measured.
+        //
+        // No fixed root anywhere. The assertion is a relationship between two
+        // replies, not a comparison against a constant, so it holds whatever the
+        // minted key turns out to be — and it cannot be satisfied by the fixture
+        // handing the same value to both sides, because the fixture supplies none.
+        for index in 0..SLATE_SIZE {
+            let dir = OnboardingDir::new(&format!("fresh-install-keep-{index}"));
+            let paths = dir.paths();
+            let mut session = a_session();
+
+            // A fresh install: no keystore file, so the session mints.
+            let slate_out = generate_identity_slate(&mut session, &slate_request(), || {
+                Err(crate::keystore::KeystoreError::NotFound)
+            });
+            let slate: serde_json::Value = serde_json::from_str(&slate_out)
+                .unwrap_or_else(|e| panic!("the slate reply must be JSON ({e}): {slate_out}"));
+            assert!(
+                slate.get("candidates").is_some(),
+                "a slate must be available on a fresh install, got {slate_out}"
+            );
+            let offered = slate["candidates"][index].clone();
+            let nonce = session.live_slate().expect("a slate was remembered");
+
+            // The keep, through the SAME session — which is the whole fix — and with
+            // the keystore still absent from disk, as it is until this call writes
+            // it.
+            let kept_out = keep_identity(
+                &mut session,
+                &format!(
+                    r#"{{"stoa":"{}","slate":"{}","index":{index}}}"#,
+                    a_stoa().to_hex(),
+                    nonce.to_hex()
+                ),
+                || Err(crate::keystore::KeystoreError::NotFound),
+                KeepTargets {
+                    keystore_path: &dir.keystore_path(),
+                    unlock: &Unlock::Unencrypted,
+                    paths: &paths,
+                },
+            );
+            let kept: serde_json::Value = serde_json::from_str(&kept_out)
+                .unwrap_or_else(|e| panic!("the keep reply must be JSON ({e}): {kept_out}"));
+
+            assert_eq!(kept["kept"], true, "index {index}: {kept_out}");
+            assert_eq!(
+                kept["address"], offered["address"],
+                "index {index}: on a fresh install the identity KEPT is not the \
+                 candidate the slate SHOWED. The user chose {offered} and was given \
+                 {kept}. The address is the only unforgeable way to tell two \
+                 candidates apart, so this is the choice being silently replaced."
+            );
+            assert_eq!(kept["publicKey"], offered["publicKey"], "index {index}");
+            assert_eq!(kept["path"], offered["path"], "index {index}");
+
+            // And the identity that is actually ON DISK is that one too, read back
+            // through a keystore opened from the written file rather than from the
+            // session — so a session reporting its held key while writing another
+            // is caught as well.
+            let written = crate::keystore::Keystore::open(
+                &dir.keystore_path(),
+                &crate::keystore::Unlock::Unencrypted,
+            )
+            .expect("the keep wrote an openable keystore");
+            let recorded = paths
+                .path_for(&a_stoa())
+                .expect("the record reads")
+                .expect("the keep recorded a path");
+            assert_eq!(
+                written.stoa_address_at_path(&a_stoa(), recorded).to_hex(),
+                offered["address"].as_str().unwrap(),
+                "index {index}: the keystore on disk does not derive the identity \
+                 the slate showed at the path that was recorded"
+            );
+        }
+    }
+
+    #[test]
+    fn refreshing_a_slate_offers_candidates_of_one_master_key() {
+        // The other half of holding the key: `docs/UI-BRIEF.md` tells a designer the
+        // flow is "five identities, pick one, refresh for more". With a per-call
+        // mint that was false — each refresh offered candidates of a DIFFERENT
+        // master key, so "more" was the wrong word for what the button did.
+        //
+        // Asserted as a relationship rather than against a constant: two slates from
+        // one session must differ in their paths (a fresh nonce each time) and agree
+        // about the key those paths are derived under. The second half is checked by
+        // deriving the first slate's candidate at the SECOND slate's path and
+        // requiring it to match — which is only possible if one key produced both.
+        let mut session = a_session();
+
+        let first_out = generate_identity_slate(&mut session, &slate_request(), || {
+            Err(crate::keystore::KeystoreError::NotFound)
+        });
+        let first: serde_json::Value = serde_json::from_str(&first_out).unwrap();
+        let first_nonce = session.live_slate().expect("a slate is live");
+
+        let second_out = generate_identity_slate(&mut session, &slate_request(), || {
+            Err(crate::keystore::KeystoreError::NotFound)
+        });
+        let second: serde_json::Value = serde_json::from_str(&second_out).unwrap();
+        let second_nonce = session.live_slate().expect("a slate is live");
+
+        assert_ne!(
+            first_nonce, second_nonce,
+            "a refresh must offer a different set, so the nonce must move"
+        );
+
+        // The proof that one key produced both: reproduce the SECOND slate from the
+        // FIRST slate's nonce-independent ingredient — the session's key — by asking
+        // the session to keep a candidate of the second slate and checking the
+        // address it reports is derived from the same root the first slate's
+        // addresses were. The only value both slates share is that root, so a
+        // per-call mint makes this impossible to satisfy.
+        //
+        // Done by elimination rather than by reading the root, which is deliberately
+        // not accessible: for each candidate of the second slate, its address must
+        // NOT appear in the first slate (different paths) while both slates' paths
+        // must derive from one key — established by the keep below, which writes the
+        // held key and lets the written file re-derive the first slate's candidates.
+        let dir = OnboardingDir::new("refresh-one-key");
+        let paths = dir.paths();
+        let kept_out = keep_identity(
+            &mut session,
+            &format!(
+                r#"{{"stoa":"{}","slate":"{}","index":0}}"#,
+                a_stoa().to_hex(),
+                second_nonce.to_hex()
+            ),
+            || Err(crate::keystore::KeystoreError::NotFound),
+            KeepTargets {
+                keystore_path: &dir.keystore_path(),
+                unlock: &Unlock::Unencrypted,
+                paths: &paths,
+            },
+        );
+        let kept: serde_json::Value = serde_json::from_str(&kept_out).unwrap();
+        assert_eq!(kept["kept"], true, "got {kept_out}");
+
+        let written = crate::keystore::Keystore::open(
+            &dir.keystore_path(),
+            &crate::keystore::Unlock::Unencrypted,
+        )
+        .expect("the keep wrote an openable keystore");
+
+        // The written key re-derives EVERY candidate of the FIRST slate. That is the
+        // assertion: the key the second slate was kept under is the key the first
+        // slate was offered under, which is what "refresh for more candidates of one
+        // identity" means.
+        for candidate in first["candidates"].as_array().unwrap() {
+            let path = candidate["path"].as_u64().unwrap() as u32;
+            assert_eq!(
+                written.stoa_address_at_path(&a_stoa(), path).to_hex(),
+                candidate["address"].as_str().unwrap(),
+                "the first slate's candidate at path {path} is not derivable from \
+                 the key the second slate's keep wrote — a refresh minted a new \
+                 master key. First {first}, second {second}"
+            );
+        }
+    }
+
+    #[test]
+    fn keeping_an_identity_in_a_second_stoa_succeeds_and_reuses_the_master_key() {
+        // The regression test for the design review's first finding: `create`'s
+        // `AlreadyExists` was doing double duty as the second-keep guard AND as the
+        // per-Stoa gate, and the keystore is ONE FILE PER INSTALL — so a user who
+        // kept an identity in Stoa A was refused in Stoa B, before `record_path` was
+        // ever called, with a reason naming a keystore they did not know they had.
+        //
+        // `chosen_paths` could therefore never hold a second row through any wire
+        // call, which made the spec's "Distinct choices for distinct Stoas are
+        // recorded separately" unreachable through the API — and made `design.md`'s
+        // claim that the primary key discharges that scenario false.
+        //
+        // Both multi-Stoa tests in this file write the second row with
+        // `store.record_path(...)` directly, bypassing the handler, which is why
+        // nothing saw it. This one goes through the handler twice.
+        let dir = OnboardingDir::new("second-stoa");
+        let paths = dir.paths();
+        let first_stoa = a_stoa();
+        let second_stoa = stoa_address(b"the second stoa");
+        assert_ne!(first_stoa, second_stoa);
+
+        let mut session = a_session();
+        let keep_in = |session: &mut OnboardingSession, stoa: &Address, index: usize| {
+            // The opener reports whatever is actually on disk, which is the honest
+            // fixture: absent for the first keep, present for the second. A stub
+            // that always said `NotFound` would let the second keep mint a fresh
+            // key and hide the very thing this test is about.
+            let slate_out = generate_identity_slate(
+                session,
+                &format!(r#"{{"stoa":"{}"}}"#, stoa.to_hex()),
+                || {
+                    crate::keystore::Keystore::open(
+                        &dir.keystore_path(),
+                        &crate::keystore::Unlock::Unencrypted,
+                    )
+                },
+            );
+            let slate: serde_json::Value = serde_json::from_str(&slate_out)
+                .unwrap_or_else(|e| panic!("slate must be JSON ({e}): {slate_out}"));
+            let offered = slate["candidates"][index].clone();
+            let nonce = session.live_slate().expect("a slate is live");
+            let kept_out = keep_identity(
+                session,
+                &format!(
+                    r#"{{"stoa":"{}","slate":"{}","index":{index}}}"#,
+                    stoa.to_hex(),
+                    nonce.to_hex()
+                ),
+                || {
+                    crate::keystore::Keystore::open(
+                        &dir.keystore_path(),
+                        &crate::keystore::Unlock::Unencrypted,
+                    )
+                },
+                KeepTargets {
+                    keystore_path: &dir.keystore_path(),
+                    unlock: &Unlock::Unencrypted,
+                    paths: &paths,
+                },
+            );
+            let kept: serde_json::Value = serde_json::from_str(&kept_out)
+                .unwrap_or_else(|e| panic!("keep must be JSON ({e}): {kept_out}"));
+            (offered, kept)
+        };
+
+        let (first_offered, first_kept) = keep_in(&mut session, &first_stoa, 0);
+        assert_eq!(
+            first_kept["kept"], true,
+            "the first keep must succeed: {first_kept}"
+        );
+
+        let (second_offered, second_kept) = keep_in(&mut session, &second_stoa, 2);
+        assert_eq!(
+            second_kept["kept"], true,
+            "keeping an identity in a SECOND Stoa was refused — the keystore's \
+             one-file-per-install scope is being used as a per-Stoa gate. Got \
+             {second_kept}"
+        );
+
+        // Each Stoa got the candidate its own slate showed.
+        assert_eq!(second_kept["address"], second_offered["address"]);
+        assert_eq!(first_kept["address"], first_offered["address"]);
+
+        // Two rows, one per Stoa — the scenario the primary key is supposed to
+        // discharge, now actually reachable. Expectations hardcoded from the
+        // replies' own paths would be circular, so the check is on the SET of
+        // Stoas and that the two paths differ.
+        let all = paths.all_paths().expect("the record reads");
+        assert_eq!(
+            all.len(),
+            2,
+            "the record must hold one row per Stoa: {all:?}"
+        );
+        let mut stoas: Vec<_> = all.iter().map(|c| c.stoa.to_hex()).collect();
+        stoas.sort();
+        let mut expected = vec![first_stoa.to_hex(), second_stoa.to_hex()];
+        expected.sort();
+        assert_eq!(stoas, expected);
+
+        // And the two identities are genuinely different, which is what makes
+        // per-Stoa identity mean anything.
+        assert_ne!(
+            first_kept["address"], second_kept["address"],
+            "two Stoas must not report one identity"
+        );
+
+        // One master key, reused rather than replaced: the written keystore
+        // re-derives BOTH kept addresses at their recorded paths. A second keep that
+        // had minted and written a new key would break the first Stoa's identity
+        // silently, which is the failure the old `AlreadyExists` refusal was
+        // (accidentally) preventing — so this is the assertion that has to replace
+        // it.
+        let written = crate::keystore::Keystore::open(
+            &dir.keystore_path(),
+            &crate::keystore::Unlock::Unencrypted,
+        )
+        .expect("the keystore on disk opens");
+        for (stoa, kept) in [(&first_stoa, &first_kept), (&second_stoa, &second_kept)] {
+            let path = paths
+                .path_for(stoa)
+                .expect("the record reads")
+                .expect("a path is recorded");
+            assert_eq!(
+                written.stoa_address_at_path(stoa, path).to_hex(),
+                kept["address"].as_str().unwrap(),
+                "the keystore on disk does not derive the identity kept for Stoa {}",
+                stoa.to_hex()
+            );
+        }
+    }
+
+    #[test]
+    fn a_second_keep_for_one_stoa_is_still_refused_after_the_second_stoa_fix() {
+        // The other side of the change above, and the reason it is not a
+        // weakening. The spec requires that keeping an identity NOT replace an
+        // existing one, because replacing "discards every identity derived from it,
+        // while the ops those identities signed remain published and unreachable".
+        //
+        // That refusal moved from `Keystore::create` to `chosen_paths`' primary key.
+        // If the move had lost it, the second-Stoa fix would have bought a
+        // reachable second Stoa at the price of a silently replaceable identity —
+        // which is far worse than the bug it fixed. So this test exists beside that
+        // one deliberately: they constrain each other.
+        let dir = OnboardingDir::new("second-keep-one-stoa");
+        let paths = dir.paths();
+        let mut session = a_session();
+
+        let open = || {
+            crate::keystore::Keystore::open(
+                &dir.keystore_path(),
+                &crate::keystore::Unlock::Unencrypted,
+            )
+        };
+        let slate_out = generate_identity_slate(&mut session, &slate_request(), open);
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&slate_out)
+                .unwrap()
+                .get("candidates")
+                .is_some(),
+            "got {slate_out}"
+        );
+        let nonce = session.live_slate().expect("a slate is live");
+
+        let keep_at = |session: &mut OnboardingSession, index: usize| -> serde_json::Value {
+            let out = keep_identity(
+                session,
+                &format!(
+                    r#"{{"stoa":"{}","slate":"{}","index":{index}}}"#,
+                    a_stoa().to_hex(),
+                    nonce.to_hex()
+                ),
+                open,
+                KeepTargets {
+                    keystore_path: &dir.keystore_path(),
+                    unlock: &Unlock::Unencrypted,
+                    paths: &paths,
+                },
+            );
+            serde_json::from_str(&out).unwrap_or_else(|e| panic!("JSON ({e}): {out}"))
+        };
+
+        let first = keep_at(&mut session, 0);
+        assert_eq!(first["kept"], true, "got {first}");
+        let stored_path = first["path"].as_u64().unwrap() as u32;
+        let keystore_bytes = std::fs::read(dir.keystore_path()).expect("the keystore is readable");
+
+        // A different index, so a refusal that silently replaced would be visible in
+        // the recorded path.
+        let second = keep_at(&mut session, 3);
+        assert_eq!(
+            second["kept"], false,
+            "a second choice for ONE Stoa must be refused: {second}"
+        );
+        assert!(
+            second["reason"].as_str().unwrap_or_default().len() > 10,
+            "the refusal must carry a reason a user can act on: {second}"
+        );
+
+        // Nothing changed: not the record, and not the master key.
+        assert_eq!(
+            paths.path_for(&a_stoa()).expect("the record reads"),
+            Some(stored_path),
+            "a refused second keep changed the recorded path"
+        );
+        assert_eq!(
+            std::fs::read(dir.keystore_path()).unwrap(),
+            keystore_bytes,
+            "a refused second keep rewrote the master key"
+        );
+    }
+
+    #[test]
+    fn the_probe_and_whoami_report_the_same_identity_for_one_user_and_stoa() {
+        // The regression test for the finding architecture and security review
+        // reached independently: `getCapabilities` derived the reported identity
+        // through the PATHLESS trio under salt `/dialectica/1/…` while `whoAmI` used
+        // the PATH-TAKING one under `/dialectica/2/…`. `identity.rs`'s own test
+        // asserts those two schemes must disagree — so two shipped wire methods
+        // answered "who posts here" with two different addresses for one user in one
+        // Stoa, and no field in either reply told them apart.
+        //
+        // `posting-capability`'s requirement is explicit that the probe's identity
+        // "SHALL be the one an op published now would be attributed to, derived from
+        // the key that would actually sign it", and names the failure: "the user
+        // sees one handle and posts under another."
+        //
+        // No test could see it while the derivation lived in the adapter's closure:
+        // that file is `#[cfg(logos_scaffold)]` and every probe test injects a stub
+        // returning a literal. Moving the choice into `posting_identity` is what
+        // makes this assertable, and the assertion is between two methods rather
+        // than against a constant.
+        let dir = OnboardingDir::new("probe-agrees-with-whoami");
+        let paths = dir.paths();
+        let nonce = SlateNonce::generate().unwrap();
+        let kept = keep_through_the_wire(&dir, nonce, Some(nonce), 2, &Unlock::Unencrypted);
+        assert_eq!(kept["kept"], true, "got {kept}");
+
+        let request = format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex());
+
+        let probe_out =
+            get_capabilities_from_stores(&request, || Ok(a_master_key()), || Ok(dir.paths()));
+        let probe: serde_json::Value = serde_json::from_str(&probe_out)
+            .unwrap_or_else(|e| panic!("the probe reply must be JSON ({e}): {probe_out}"));
+
+        let who_out = who_am_i(&request, || Ok(a_master_key()), || Ok(dir.paths()));
+        let who: serde_json::Value = serde_json::from_str(&who_out)
+            .unwrap_or_else(|e| panic!("the whoami reply must be JSON ({e}): {who_out}"));
+
+        assert_eq!(probe["canPost"], true, "got {probe_out}");
+        assert_eq!(who["hasIdentity"], true, "got {who_out}");
+        assert_eq!(
+            probe["identity"], who["address"],
+            "getCapabilities and whoAmI report DIFFERENT addresses for one user in \
+             one Stoa. The probe says {probe}, whoAmI says {who}. A view rendering \
+             'you are posting as X' from the probe and 'you are X' from whoAmI shows \
+             two identities and has no way to decide which one signs."
+        );
+
+        // And both agree with what was actually kept, so "they agree" cannot be
+        // satisfied by both being wrong in the same way.
+        assert_eq!(
+            probe["identity"], kept["address"],
+            "the probe's identity is not the one the keep stored"
+        );
+
+        // The strongest form: an op signed by the key at the recorded path verifies
+        // against the address the probe reported. That is the requirement's own
+        // wording — "derived from the key that would actually sign it" — rather than
+        // a comparison of two derivations that could both be wrong.
+        let recorded = paths
+            .path_for(&a_stoa())
+            .expect("the record reads")
+            .expect("a path is recorded");
+        let signing = a_master_key().stoa_key_at_path(&a_stoa(), recorded);
+        let sig = crate::identity::sign_op_bytes(&signing, b"a post");
+        let author = Address::from_hex(probe["identity"].as_str().unwrap())
+            .expect("the probe reports a parseable address");
+        assert!(
+            crate::identity::verify_authored_op(
+                &author,
+                &signing.public_key().to_bytes(),
+                b"a post",
+                &sig.to_bytes()
+            ),
+            "an op signed by the key at the recorded path is not attributed to the \
+             address the probe reported"
+        );
+    }
+
+    #[test]
+    fn the_probe_and_whoami_give_one_reason_when_no_choice_is_recorded_for_this_stoa() {
+        // The state the two-store split creates: a master key exists, this Stoa has
+        // no choice recorded. Both methods must name it, and name it the SAME way —
+        // two methods describing one situation in two vocabularies is the split
+        // re-appearing at the wire.
+        //
+        // `canPost:false` here is the substantive half: the probe previously
+        // answered `true` with a pathless address, asserting posting ability for an
+        // identity that has no recorded path and that nothing in the signing path
+        // would ever use.
+        let dir = OnboardingDir::new("probe-no-choice");
+        let request = format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex());
+
+        let probe_out =
+            get_capabilities_from_stores(&request, || Ok(a_master_key()), || Ok(dir.paths()));
+        let probe: serde_json::Value = serde_json::from_str(&probe_out).unwrap();
+        let who_out = who_am_i(&request, || Ok(a_master_key()), || Ok(dir.paths()));
+        let who: serde_json::Value = serde_json::from_str(&who_out).unwrap();
+
+        assert_eq!(
+            probe["canPost"], false,
+            "a master key with no recorded choice for this Stoa cannot post as \
+             anyone: {probe_out}"
+        );
+        assert!(probe.get("identity").is_none(), "got {probe_out}");
+        assert_eq!(who["hasIdentity"], false, "got {who_out}");
+        assert_eq!(
+            probe["reason"], who["reason"],
+            "the two methods describe one state in two ways: probe {probe}, \
+             whoAmI {who}"
+        );
+        // Pinned to the constant, so a message that stopped naming the fix fails
+        // even while the two still agree with each other.
+        assert_eq!(probe["reason"], NO_CHOICE_FOR_THIS_STOA, "got {probe_out}");
+    }
+
+    #[test]
+    fn a_record_restored_beside_a_master_key_names_the_identities_in_use() {
+        // The spec's "A restore targets the device holding the master key": "the
+        // identities in use are those the record names, AND no other device's
+        // record participates". Nothing in this change covered it — the restore
+        // path is not a code path, it is the property that a record and a master
+        // key which never met each other in one process still agree.
+        //
+        // The fixture is a restore in the only sense that is checkable now: a
+        // record file written by one store, COPIED to a fresh directory, and read
+        // beside a keystore file also copied there. Neither handle nor connection
+        // is shared, which is what makes it a restore rather than a reuse.
+        let origin = OnboardingDir::new("restore-origin");
+        let nonce = SlateNonce::generate().unwrap();
+        let kept = keep_through_the_wire(&origin, nonce, Some(nonce), 3, &Unlock::Unencrypted);
+        assert_eq!(kept["kept"], true, "got {kept}");
+        let kept_address = kept["address"].as_str().unwrap().to_string();
+        let kept_path = kept["path"].as_u64().unwrap() as u32;
+
+        // The expected identity, derived HERE from the fixed master key and the
+        // path — not read back from either file.
+        let expected = crate::identity::derive_stoa_key_at_path(&[7u8; 32], &a_stoa(), kept_path)
+            .public_key()
+            .address()
+            .to_hex();
+        assert_eq!(kept_address, expected, "got {kept}");
+
+        let restored = OnboardingDir::new("restore-target");
+        // The target starts empty, or the "restore" would be reading what was
+        // already there.
+        assert!(
+            std::fs::read_dir(&restored.0).unwrap().next().is_none(),
+            "the restore target must start empty"
+        );
+        std::fs::copy(origin.keystore_path(), restored.keystore_path()).unwrap();
+        std::fs::copy(
+            IdentityStore::default_path_in(&origin.0),
+            IdentityStore::default_path_in(&restored.0),
+        )
+        .unwrap();
+
+        let v: serde_json::Value = serde_json::from_str(&who_am_i(
+            &slate_request(),
+            || Keystore::open(&restored.keystore_path(), &Unlock::Unencrypted),
+            || Ok(restored.paths()),
+        ))
+        .unwrap();
+        assert_eq!(v["hasIdentity"], true, "got {v}");
+        assert_eq!(
+            v["path"], kept_path,
+            "the restored record names a different path: {v}"
+        );
+        assert_eq!(
+            v["address"], expected,
+            "the restored identity is not the one the record names: {v}"
+        );
+
+        // "No other device's record participates": a SECOND restore target given
+        // the same master key but a record naming a DIFFERENT path must report
+        // that path's identity, not the first's. Without this, a handler ignoring
+        // the record entirely would satisfy everything above.
+        let other = OnboardingDir::new("restore-other-device");
+        std::fs::copy(origin.keystore_path(), other.keystore_path()).unwrap();
+        let other_path = kept_path.wrapping_add(1);
+        other.paths().record_path(&a_stoa(), other_path).unwrap();
+
+        let w: serde_json::Value = serde_json::from_str(&who_am_i(
+            &slate_request(),
+            || Keystore::open(&other.keystore_path(), &Unlock::Unencrypted),
+            || Ok(other.paths()),
+        ))
+        .unwrap();
+        assert_eq!(w["hasIdentity"], true, "got {w}");
+        assert_eq!(w["path"], other_path, "got {w}");
+        assert_ne!(
+            w["address"], v["address"],
+            "two records naming different paths reported one identity, so the \
+             record is not being read: {w}"
+        );
+        // And the expectation for it is also derived here.
+        assert_eq!(
+            w["address"],
+            crate::identity::derive_stoa_key_at_path(&[7u8; 32], &a_stoa(), other_path)
+                .public_key()
+                .address()
+                .to_hex(),
+            "got {w}"
+        );
+    }
+
     // ─── The feed handler ─────────────────────────────────────────────────
 
     use crate::arrival::Arrival;
@@ -1602,6 +5046,60 @@ mod tests {
         .sign(&key);
         let mut log = MemoryOpLog::new();
         log.append(op, Arrival::unordered()).unwrap();
+        log
+    }
+
+    /// A log holding two threads, one of them hidden by the Stoa's moderator.
+    ///
+    /// Needed because `includeHidden` is the contract's worked example for a
+    /// null-reads-as-absent field, and "the null took the restrictive default"
+    /// cannot be asserted against a log where the flag changes nothing — both
+    /// answers would be identical and the test would pass for the wrong reason.
+    ///
+    /// The hider is `feed_key(1)`, which is [`feed_genesis`]'s creator and
+    /// therefore the Stoa's only moderator: a hide op signed by anyone else is
+    /// unauthorised and filtered on read, so the thread would stay visible and
+    /// the fixture would silently be the one-visible-thread case again.
+    fn log_with_a_hidden_thread() -> MemoryOpLog {
+        let stoa = feed_genesis().address().unwrap();
+        let poster = feed_key(2);
+        let visible = Op {
+            stoa,
+            author: poster.public_key(),
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: "visible".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&poster);
+        let to_hide = Op {
+            stoa,
+            author: poster.public_key(),
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: "hidden".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&poster);
+        let moderator = feed_key(1);
+        let hide = Op {
+            stoa,
+            author: moderator.public_key(),
+            kind: OpKind::Moderate {
+                target: to_hide.op.id(),
+                action: crate::op::ModerationAction::Hide,
+            },
+        }
+        .sign(&moderator);
+
+        let mut log = MemoryOpLog::new();
+        log.append(visible, Arrival::unordered()).unwrap();
+        log.append(to_hide, Arrival::unordered()).unwrap();
+        log.append(hide, Arrival::unordered()).unwrap();
         log
     }
 
@@ -1950,6 +5448,57 @@ mod tests {
     }
 
     #[test]
+    fn an_over_long_genesis_hex_string_is_refused_before_it_is_decoded() {
+        // NO SPEC: the spec set bounds no field's length. This is the same
+        // absent decision `MAX_REQUEST_BYTES` is, one layer in — and it is kept
+        // beside the request cap rather than folded into it because they refuse
+        // different things: the request cap bounds what any request may cost,
+        // and this bounds what THIS field may allocate no matter how small the
+        // request around it is.
+        //
+        // The assertion is about ORDERING, which is the only part that matters:
+        // the fixture is over-long AND not valid hex. An implementation that
+        // decoded first answers "genesis is not valid hex"; only one that checks
+        // the length first can answer for the length. Swap the two lines in
+        // `genesis_for` and this goes red while every other genesis test stays
+        // green.
+        let stoa = feed_genesis().address().unwrap().to_hex();
+        let over_long = "z".repeat(crate::stoa::MAX_CANONICAL_BYTES * 2 + 1);
+        let request = format!(r#"{{"stoa":"{stoa}","genesis":"{over_long}"}}"#);
+        assert!(
+            request.len() < MAX_REQUEST_BYTES,
+            "the request must be well under the envelope cap, or THAT is what refuses it"
+        );
+
+        let out = list_threads_from_request(&request, || {
+            Ok::<_, crate::log::OpLogError>(log_with_body("hello"))
+        });
+        let message = error_message(&out);
+        assert!(
+            message.contains("over the") && message.contains("hex characters"),
+            "an over-long genesis must be refused for its length, got {message:?}"
+        );
+        assert!(
+            !message.contains("not valid hex"),
+            "the length must be checked BEFORE the decode, got {message:?}"
+        );
+
+        // The boundary from the other side: a hex string of exactly the largest
+        // record the format allows must still reach the decode, so a `>` written
+        // as `>=` is caught. Junk of that length is "not valid hex", which is the
+        // refusal it has always earned.
+        let exactly_at_bound = "z".repeat(crate::stoa::MAX_CANONICAL_BYTES * 2);
+        let at_bound_request = format!(r#"{{"stoa":"{stoa}","genesis":"{exactly_at_bound}"}}"#);
+        let at_bound = error_message(&list_threads_from_request(&at_bound_request, || {
+            Ok::<_, crate::log::OpLogError>(log_with_body("hello"))
+        }));
+        assert!(
+            at_bound.contains("not valid hex"),
+            "a hex string at the format's own bound must still be decoded, got {at_bound:?}"
+        );
+    }
+
+    #[test]
     fn a_store_that_cannot_be_opened_is_the_error_shape_and_not_an_empty_feed() {
         // The failure one step earlier than the read: opening the store. It is
         // just as easy to flatten into an empty page here, and it renders
@@ -1971,10 +5520,2937 @@ mod tests {
         );
     }
 
+    // ─── The publish path ─────────────────────────────────────────────────
+
+    /// The root secret a keystore would hold, fixed so derived addresses are
+    /// reproducible.
+    const PUBLISH_ROOT: [u8; 32] = [7u8; 32];
+
+    fn publish_stoa() -> Address {
+        feed_genesis().address().unwrap()
+    }
+
+    /// The per-Stoa signing key, derived exactly as the keystore derives it.
+    fn publish_key() -> crate::identity::SecretKey {
+        crate::identity::derive_stoa_key(&PUBLISH_ROOT, &publish_stoa())
+    }
+
+    /// A publish request naming this Stoa plus whatever else is given.
+    fn publish_request(extra: &str) -> String {
+        let stoa = publish_stoa().to_hex();
+        if extra.is_empty() {
+            format!(r#"{{"stoa":"{stoa}"}}"#)
+        } else {
+            format!(r#"{{"stoa":"{stoa}",{extra}}}"#)
+        }
+    }
+
+    /// A delivery sink that records nothing — for tests not about delivery.
+    ///
+    /// A plain `fn` item, so `&mut ignored_delivery` at a call site is a fresh
+    /// temporary whose borrow ends with the statement. A shared
+    /// `let mut sink = |_| {}` would borrow for the rest of the test and collide
+    /// with the handler's `&mut` log.
+    fn ignored_delivery(_id: &crate::op::OpId) {}
+
+    fn as_json(out: &str) -> serde_json::Value {
+        serde_json::from_str(out)
+            .unwrap_or_else(|e| panic!("a handler must emit valid JSON ({e}): {out}"))
+    }
+
     #[test]
-    fn every_handler_answers_with_an_object_carrying_exactly_one_top_level_shape() {
+    fn a_published_post_reply_names_the_op_and_whether_it_was_new() {
+        // Pinned by key name and by value. A view is written against these exact
+        // names, and `wasNew` is the only thing that tells a deduplicated
+        // publish from a first one.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+
+        let out = publish_post(
+            &publish_request(r#""body":"First""#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        );
+        let v = as_json(&out);
+        assert!(v.get("error").is_none(), "got {out}");
+        assert_eq!(v["wasNew"], true);
+
+        // The op id names the op now in the log, read back through the log
+        // rather than compared against itself.
+        let id = crate::op::OpId::from_hex(v["opId"].as_str().unwrap()).unwrap();
+        let entry = log.get(&id).unwrap().expect("the op must be in the log");
+        assert_eq!(entry.id(), id);
+        match &entry.op.op.kind {
+            OpKind::Post { body, parent, .. } => {
+                assert_eq!(body, "First");
+                assert_eq!(*parent, None, "a post names no parent");
+            }
+            other => panic!("expected a post, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_second_publish_of_one_body_says_it_was_not_new_and_names_the_same_op() {
+        // The contracted duplication behaviour, at the wire, where a caller has
+        // no other way to tell the two apart.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+        let request = publish_request(r#""body":"twice""#);
+
+        let first = as_json(&publish_post(
+            &request,
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        let second = as_json(&publish_post(
+            &request,
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+
+        assert_eq!(first["opId"], second["opId"]);
+        assert_eq!(first["wasNew"], true, "the first publish stored it");
+        assert_eq!(
+            second["wasNew"], false,
+            "the second must report already-present rather than failing"
+        );
+        assert!(
+            second.get("error").is_none(),
+            "a repeated publish is not a refusal: it is the retried-submission case"
+        );
+        assert_eq!(log.len().unwrap(), 1, "one op");
+    }
+
+    #[test]
+    fn a_published_reply_is_derived_into_its_parents_thread_through_the_wire() {
+        // End to end, three levels deep, because at two levels "the parent's id"
+        // and "the parent's thread" are the same value and a copy-the-parent
+        // implementation would agree.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+
+        let root = as_json(&publish_post(
+            &publish_request(r#""body":"the head""#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        let root_id = root["opId"].as_str().unwrap().to_string();
+
+        let middle = as_json(&publish_reply(
+            &publish_request(&format!(r#""parent":"{root_id}","body":"a reply""#)),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        let middle_id = middle["opId"].as_str().unwrap().to_string();
+        assert_ne!(root_id, middle_id, "the fixture needs distinct ops");
+
+        let leaf = as_json(&publish_reply(
+            &publish_request(&format!(r#""parent":"{middle_id}","body":"and again""#)),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        assert!(leaf.get("error").is_none(), "got {leaf}");
+
+        let id = crate::op::OpId::from_hex(leaf["opId"].as_str().unwrap()).unwrap();
+        let entry = log.get(&id).unwrap().unwrap();
+        match &entry.op.op.kind {
+            OpKind::Post { thread, parent, .. } => {
+                assert_eq!(
+                    parent.map(|p| p.to_hex()),
+                    Some(middle_id),
+                    "the parent is the one named"
+                );
+                assert_eq!(
+                    thread.map(|t| t.to_hex()),
+                    Some(root_id),
+                    "the thread is the ROOT's, derived rather than copied from the parent"
+                );
+            }
+            other => panic!("expected a post, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_request_supplying_a_thread_is_refused_and_not_ignored() {
+        // A caller passing `thread` believes it is filing the reply somewhere.
+        // Ignoring the field would leave that belief unhonoured and unreported —
+        // which is the opposite of the `order` field's treatment, deliberately.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+        let root = as_json(&publish_post(
+            &publish_request(r#""body":"the head""#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        let root_id = root["opId"].as_str().unwrap();
+        let before = log.len().unwrap();
+
+        let out = publish_reply(
+            &publish_request(&format!(
+                r#""parent":"{root_id}","thread":"{root_id}","body":"filed by hand""#
+            )),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        );
+        let v = as_json(&out);
+        assert!(v.get("error").is_some(), "got {out}");
+        assert!(
+            v["error"].as_str().unwrap().contains("thread"),
+            "the message must name the field, got {out}"
+        );
+        assert!(v.get("opId").is_none(), "a refusal carries no op id — §2.5");
+        assert_eq!(
+            log.len().unwrap(),
+            before,
+            "a refused publish appends nothing"
+        );
+    }
+
+    #[test]
+    fn a_forbidden_field_is_refused_on_every_operation() {
+        // NO SPEC: the spec's requirement names `author`, `identity`, `key` AND
+        // `address` as never-a-parameter on any publish, so four of the five are
+        // specified. (Its scenario one screen down names only the first three;
+        // the requirement is the contract.) `thread` is the unspecified one — the
+        // spec requires it refused on a REPLY only, and refusing it on a post and
+        // a vote too is chosen here, because a caller who sent one has the same
+        // wrong model whichever operation it reached. That choice is what this
+        // test pins.
+        //
+        // The trap avoided: a guard called from one handler and forgotten in the
+        // other two. That is invisible without checking all three.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+        let victim = as_json(&publish_post(
+            &publish_request(r#""body":"the subject""#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        let target = victim["opId"].as_str().unwrap().to_string();
+        let before = log.len().unwrap();
+
+        for field in ["author", "identity", "key", "address", "thread"] {
+            let forged = format!(r#""{field}":"00ff""#);
+            let requests = [
+                publish_request(&format!(r#""body":"x",{forged}"#)),
+                publish_request(&format!(r#""parent":"{target}","body":"x",{forged}"#)),
+                publish_request(&format!(r#""target":"{target}","direction":"up",{forged}"#)),
+            ];
+            let outs = [
+                publish_post(&requests[0], &mut log, &key, &mut ignored_delivery),
+                publish_reply(&requests[1], &mut log, &key, &mut ignored_delivery),
+                publish_vote(&requests[2], &mut log, &key, &mut ignored_delivery),
+            ];
+            for (out, request) in outs.iter().zip(requests.iter()) {
+                let v = as_json(out);
+                assert!(
+                    v.get("error").is_some(),
+                    "{field} must be refused, not ignored, for {request}: got {out}"
+                );
+                assert!(v.get("opId").is_none(), "got {out}");
+            }
+        }
+        assert_eq!(
+            log.len().unwrap(),
+            before,
+            "no refused publish appended anything"
+        );
+    }
+
+    #[test]
+    fn a_publish_requests_missing_field_is_named_and_is_not_defaulted() {
+        // Each of the six required fields, absent. A handler that defaulted a
+        // body to empty or a direction to `up` would publish something the
+        // caller never asked for.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+        let target = as_json(&publish_post(
+            &publish_request(r#""body":"the subject""#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ))["opId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let stoa = publish_stoa().to_hex();
+        let before = log.len().unwrap();
+
+        let cases: [(&str, String, &str); 6] = [
+            ("post", r#"{"body":"x"}"#.to_string(), "stoa"),
+            ("post", format!(r#"{{"stoa":"{stoa}"}}"#), "body"),
+            (
+                "reply",
+                format!(r#"{{"stoa":"{stoa}","body":"x"}}"#),
+                "parent",
+            ),
+            (
+                "reply",
+                format!(r#"{{"stoa":"{stoa}","parent":"{target}"}}"#),
+                "body",
+            ),
+            (
+                "vote",
+                format!(r#"{{"stoa":"{stoa}","direction":"up"}}"#),
+                "target",
+            ),
+            (
+                "vote",
+                format!(r#"{{"stoa":"{stoa}","target":"{target}"}}"#),
+                "direction",
+            ),
+        ];
+        for (op, request, field) in cases {
+            let out = match op {
+                "post" => publish_post(&request, &mut log, &key, &mut ignored_delivery),
+                "reply" => publish_reply(&request, &mut log, &key, &mut ignored_delivery),
+                _ => publish_vote(&request, &mut log, &key, &mut ignored_delivery),
+            };
+            let v = as_json(&out);
+            assert!(v.get("error").is_some(), "for {request}, got {out}");
+            let message = v["error"].as_str().unwrap();
+            assert!(
+                message.contains("missing") && message.contains(field),
+                "the message must say WHICH field is missing ({field}), got {out}"
+            );
+            assert!(v.get("opId").is_none());
+        }
+        assert_eq!(log.len().unwrap(), before);
+    }
+
+    #[test]
+    fn a_wrong_typed_direction_is_refused_by_its_type_with_a_valid_stoa_and_target() {
+        // THE GAP `findings/security.md` S2 NAMES, closed with the fixture it says
+        // is missing: a VALID Stoa and a VALID target, so the request survives
+        // parser one and two and the direction parser is actually entered.
+        //
+        // Why the existing coverage did not reach here. `stoa` is parsed first in
+        // all three handlers, and every wrong-typed `direction` fixture in the
+        // repo also malformed `stoa` — so all three handlers refused at parser one.
+        // Measured: `panic!` on `required_string`'s wrong-typed arm for
+        // `direction`, reached only from `required_direction`, left all 566 tests
+        // green.
+        //
+        // What this asserts, and why not merely `error.is_some()`: an array or an
+        // object in `direction` is an error EITHER WAY — `required_direction` would
+        // refuse it, and so would a handler that panicked, and so would one that
+        // read the field as absent. Three explanations, one answer, which is this
+        // repo's recurring defect family. So the assertions are:
+        //
+        //   1. the message is the WRONG-TYPE message, against the hardcoded
+        //      literal `required_string` writes — NOT "differs from the missing
+        //      one", which a panic marker would also satisfy;
+        //   2. it is not a panic marker;
+        //   3. it does not say "missing", because a present-but-wrong-typed field
+        //      reported as missing sends a caller looking for a field that is
+        //      right there.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+        let stoa = publish_stoa().to_hex();
+        let target = as_json(&publish_post(
+            &publish_request(r#""body":"the subject""#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ))["opId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let before = log.len().unwrap();
+
+        // Every JSON type that is not a string, `null` INCLUDED.
+        //
+        // I first excluded null here on the assumption that the envelope collapses
+        // it to absent, which would make it the MISSING mistake. That was wrong,
+        // and `wire/request.rs:229` says so in as many words: *"An explicit `null`
+        // is `Some(Value::Null)` and never `None` … a field holding an explicit
+        // `null` is present, not absent"*, and the envelope deliberately decides
+        // nothing further, leaving the reading to the reader. `required_string` is
+        // that reader here and refuses a null as a wrong TYPE. Confirmed by the
+        // sweep failing on the null fixture under the mutation below, which is what
+        // sent me to read the envelope rather than assume.
+        //
+        // So null belongs in this list, and pinning it here is what keeps the
+        // envelope's "a null is present" rule from being quietly reversed by a
+        // reader that starts treating it as absent — which, for an optional field,
+        // is the defaulting reading `parse_index`'s doc calls out as the half that
+        // can become an authorisation bypass.
+        for wrong in [
+            serde_json::Value::Null,
+            serde_json::json!(true),
+            serde_json::json!(false),
+            serde_json::json!(0),
+            serde_json::json!(-1),
+            serde_json::json!(1.5),
+            serde_json::json!({}),
+            serde_json::json!([]),
+            serde_json::json!(["up"]),
+            serde_json::json!({"direction": "up"}),
+        ] {
+            let request = serde_json::json!({
+                "stoa": stoa, "target": target, "direction": wrong
+            })
+            .to_string();
+            let out = publish_vote(&request, &mut log, &key, &mut ignored_delivery);
+            let v = as_json(&out);
+            let message = v["error"]
+                .as_str()
+                .unwrap_or_else(|| panic!("expected the error shape, got {out}"));
+
+            assert!(
+                !message.starts_with("panic in "),
+                "a wrong-typed direction must be refused, not panicked on, for {request}: {out}"
+            );
+            // The hardcoded literal, not a value read back out of the code.
+            assert_eq!(
+                message, "direction must be a string",
+                "the refusal must name the TYPE mistake, for {request}"
+            );
+            assert!(
+                !message.contains("missing"),
+                "a field that is present must not be reported as missing, for {request}"
+            );
+            assert!(v.get("opId").is_none(), "got {out}");
+        }
+        assert_eq!(
+            log.len().unwrap(),
+            before,
+            "no refused vote appended anything"
+        );
+    }
+
+    #[test]
+    fn a_wrong_typed_field_is_distinguishable_from_a_missing_one() {
+        // Both are errors, and they are different mistakes: "missing field:
+        // body" sends someone looking for a field that is right there holding a
+        // number. Asserted as the two messages DIFFERING and each naming its own
+        // mistake, not merely as two errors.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+        let stoa = publish_stoa().to_hex();
+
+        let missing = as_json(&publish_post(
+            &format!(r#"{{"stoa":"{stoa}"}}"#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        let wrong_typed = as_json(&publish_post(
+            &format!(r#"{{"stoa":"{stoa}","body":7}}"#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+
+        let missing_msg = missing["error"].as_str().unwrap();
+        let wrong_msg = wrong_typed["error"].as_str().unwrap();
+        assert_ne!(missing_msg, wrong_msg);
+        assert!(missing_msg.contains("missing"), "got {missing_msg}");
+        assert!(
+            wrong_msg.contains("must be a string"),
+            "a wrong type must not report as missing, got {wrong_msg}"
+        );
+        assert!(!wrong_msg.contains("missing"), "got {wrong_msg}");
+
+        // The same distinction on the Stoa field.
+        let stoa_missing = as_json(&publish_post(
+            r#"{"body":"x"}"#,
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        let stoa_wrong = as_json(&publish_post(
+            r#"{"stoa":7,"body":"x"}"#,
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        assert!(stoa_missing["error"].as_str().unwrap().contains("missing"));
+        assert!(stoa_wrong["error"]
+            .as_str()
+            .unwrap()
+            .contains("must be a string"));
+        assert_eq!(log.len().unwrap(), 0, "nothing was published");
+    }
+
+    #[test]
+    fn an_empty_body_publishes_through_the_wire() {
+        // `op-format` contracts an empty variable-length field as a value, so
+        // this must be a success and not "missing field: body".
+        let mut log = MemoryOpLog::new();
+        let out = publish_post(
+            &publish_request(r#""body":"""#),
+            &mut log,
+            &publish_key(),
+            &mut ignored_delivery,
+        );
+        let v = as_json(&out);
+        assert!(v.get("error").is_none(), "got {out}");
+        let id = crate::op::OpId::from_hex(v["opId"].as_str().unwrap()).unwrap();
+        match &log.get(&id).unwrap().unwrap().op.op.kind {
+            OpKind::Post { body, .. } => assert_eq!(body, ""),
+            other => panic!("expected a post, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn both_vote_directions_publish_and_an_unrecognised_one_is_refused_naming_it() {
+        // The sharp property: an unrecognised direction must NOT be mapped onto
+        // a recognised one. A caller whose "upvote" silently became "down" would
+        // have published the opposite of what it asked for, with no error.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+        let target = as_json(&publish_post(
+            &publish_request(r#""body":"the subject""#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ))["opId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let mut ids = Vec::new();
+        for (name, expected) in [
+            ("up", crate::op::VoteDirection::Up),
+            ("down", crate::op::VoteDirection::Down),
+        ] {
+            let out = publish_vote(
+                &publish_request(&format!(r#""target":"{target}","direction":"{name}""#)),
+                &mut log,
+                &key,
+                &mut ignored_delivery,
+            );
+            let v = as_json(&out);
+            assert!(v.get("error").is_none(), "for {name}, got {out}");
+            let id = crate::op::OpId::from_hex(v["opId"].as_str().unwrap()).unwrap();
+            match log.get(&id).unwrap().unwrap().op.op.kind {
+                crate::op::OpKind::Vote { direction, .. } => assert_eq!(direction, expected),
+                ref other => panic!("expected a vote, got {other:?}"),
+            }
+            ids.push(id);
+        }
+        assert_ne!(ids[0], ids[1], "the two directions are two ops");
+
+        // Every plausible near-miss, including the casing and pluralisation a
+        // caller would actually get wrong.
+        let before = log.len().unwrap();
+        for bad in ["UP", "Up", "upvote", "raise", "+1", "", "u p", "1", "down "] {
+            let out = publish_vote(
+                &publish_request(&format!(r#""target":"{target}","direction":"{bad}""#)),
+                &mut log,
+                &key,
+                &mut ignored_delivery,
+            );
+            let v = as_json(&out);
+            assert!(v.get("error").is_some(), "for {bad:?}, got {out}");
+            assert!(
+                v["error"].as_str().unwrap().contains(bad),
+                "the refusal must name the direction supplied, got {out}"
+            );
+            assert!(v.get("opId").is_none());
+        }
+        assert_eq!(
+            log.len().unwrap(),
+            before,
+            "no vote was published in either direction by a refused request"
+        );
+    }
+
+    #[test]
+    fn a_vote_reply_carries_no_score_count_tally_rank_or_position() {
+        // Nothing in the current contract reads a `Vote` op, so a field
+        // describing an effect would be a falsehood a caller would act on.
+        // Checked as an exhaustive key list rather than a spot-check of one
+        // name, so a new field cannot slip in unnoticed.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+        let target = as_json(&publish_post(
+            &publish_request(r#""body":"the subject""#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ))["opId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let out = publish_vote(
+            &publish_request(&format!(r#""target":"{target}","direction":"up""#)),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        );
+        let v = as_json(&out);
+        assert!(v.get("error").is_none(), "got {out}");
+        assert!(v["opId"].is_string(), "the reply carries the op id");
+
+        let keys: Vec<&String> = v.as_object().unwrap().keys().collect();
+        assert_eq!(
+            keys,
+            vec!["opId", "wasNew"],
+            "a vote reply must carry the op id and nothing describing an effect, got {out}"
+        );
+        for forbidden in [
+            "score", "count", "tally", "rank", "position", "votes", "total", "weight",
+        ] {
+            assert!(
+                v.get(forbidden).is_none(),
+                "a vote reply must not carry {forbidden}, got {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_vote_leaves_the_feed_row_of_its_target_identical() {
+        // The other half of "nothing reads a vote", at the layer a view actually
+        // reads from. A score computed anywhere would show up here.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+        let posted = as_json(&publish_post(
+            &publish_request(r#""body":"unaffected""#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        let target = posted["opId"].as_str().unwrap().to_string();
+
+        let before = list_threads(&feed_request(""), &log, &feed_genesis());
+        for direction in ["up", "down"] {
+            publish_vote(
+                &publish_request(&format!(r#""target":"{target}","direction":"{direction}""#)),
+                &mut log,
+                &key,
+                &mut ignored_delivery,
+            );
+        }
+        let after = list_threads(&feed_request(""), &log, &feed_genesis());
+        assert_eq!(
+            before, after,
+            "voting must change nothing a reader is told about the post"
+        );
+        // And the fixture really had a row, so this is not two empty feeds
+        // agreeing.
+        assert_eq!(as_json(&before)["items"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn delivery_is_handed_the_published_op_and_is_not_reached_by_a_refusal() {
+        // Two requirements: the sink receives the op that was published, and a
+        // refusal never reaches it at all.
+        //
+        // What this test does not see is the ORDERING — that the append
+        // happened before the sink was called. This test observes only that the
+        // sink got the right id, and that a refusal never reaches it.
+        //
+        // The ordering IS observable, and
+        // `the_append_completes_before_delivery_is_invoked_on_all_three_handlers`
+        // below observes it: a journal shared by a wrapping `OpLog` and the sink
+        // records a hardcoded `["append", "deliver"]`. An earlier version of
+        // this comment claimed no test through this API could see it, on the
+        // grounds that the sink cannot read the log the handler holds mutably.
+        // That is true of the log and false of the ordering — two clones of one
+        // `Rc<RefCell<Vec<_>>>` borrow nothing from each other. The claim was
+        // load-bearing while it stood, because it was the stated reason this
+        // weaker test was accepted as sufficient.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+
+        let mut delivered: Vec<crate::op::OpId> = Vec::new();
+        let out = publish_post(
+            &publish_request(r#""body":"ordered""#),
+            &mut log,
+            &key,
+            &mut |id: &crate::op::OpId| delivered.push(*id),
+        );
+        let v = as_json(&out);
+        let id = crate::op::OpId::from_hex(v["opId"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            delivered.as_slice(),
+            &[id],
+            "delivery must be handed the op that was published, and only it"
+        );
+        assert!(
+            log.get(&id).unwrap().is_some(),
+            "and the op is in the log by the time the call returns"
+        );
+
+        // A refusal must not reach the sink. An absent parent is the cheapest
+        // refusal to construct, and the sink PANICS if reached — so a handler
+        // that delivered on the refusal path fails loudly rather than by a count
+        // nobody reads.
+        let absent = crate::op::OpId::from_hex(&"cc".repeat(32))
+            .unwrap()
+            .to_hex();
+        let out = publish_reply(
+            &publish_request(&format!(r#""parent":"{absent}","body":"x""#)),
+            &mut log,
+            &key,
+            &mut |_: &crate::op::OpId| panic!("delivery was invoked for a refused publish"),
+        );
+        let v = as_json(&out);
+        assert!(v.get("error").is_some(), "got {out}");
+        assert!(
+            !v["error"]
+                .as_str()
+                .unwrap()
+                .contains("delivery was invoked"),
+            "the sink must not have been reached, got {out}"
+        );
+        assert!(
+            v["error"].as_str().unwrap().contains("does not hold"),
+            "the refusal must be the one the fixture built, got {out}"
+        );
+    }
+
+    /// An `OpLog` that records the order in which it was called, in a journal it
+    /// SHARES with a delivery sink.
+    ///
+    /// # Why this exists, when the change's own notes say the ordering is
+    /// unobservable
+    ///
+    /// `tasks.md` §10 records "that the append precedes delivery" as something
+    /// no test through this API can see, on the grounds that the sink cannot read
+    /// the log because the handler holds it mutably for the call's duration. That
+    /// is true of the *log*, and it is not true of the *ordering*: an
+    /// `Rc<RefCell<Vec<_>>>` held by BOTH the log wrapper and the sink is two
+    /// clones of one handle, so neither has to borrow the other. The log appends
+    /// its own name when `append` runs; the sink appends its own when it runs;
+    /// the resulting sequence is evidence, not an argument.
+    ///
+    /// So "sign, append, hand off — **in that order**" becomes a test that can
+    /// fail, which it could not while the only thing pinning it was the order two
+    /// statements happen to be in.
+    struct JournallingLog {
+        inner: MemoryOpLog,
+        journal: std::rc::Rc<std::cell::RefCell<Vec<&'static str>>>,
+    }
+
+    impl crate::log::OpLog for JournallingLog {
+        fn append(
+            &mut self,
+            op: crate::op::SignedOp,
+            arrival: crate::arrival::Arrival,
+        ) -> Result<crate::log::Appended, crate::log::OpLogError> {
+            let out = self.inner.append(op, arrival);
+            // Recorded AFTER the inner append returns, so the journal entry
+            // means "the op is stored", not "an append was attempted".
+            self.journal.borrow_mut().push("append");
+            out
+        }
+        fn get(
+            &self,
+            id: &crate::op::OpId,
+        ) -> Result<Option<crate::log::Entry>, crate::log::OpLogError> {
+            self.inner.get(id)
+        }
+        fn iter(&self) -> Result<Vec<crate::log::Entry>, crate::log::OpLogError> {
+            self.inner.iter()
+        }
+        fn iter_stoa(
+            &self,
+            stoa: &Address,
+        ) -> Result<Vec<crate::log::Entry>, crate::log::OpLogError> {
+            self.inner.iter_stoa(stoa)
+        }
+        fn iter_target(
+            &self,
+            target: &crate::op::OpId,
+        ) -> Result<Vec<crate::log::Entry>, crate::log::OpLogError> {
+            self.inner.iter_target(target)
+        }
+        fn len(&self) -> Result<usize, crate::log::OpLogError> {
+            self.inner.len()
+        }
+    }
+
+    #[test]
+    fn the_append_completes_before_delivery_is_invoked_on_all_three_handlers() {
+        // The spec's ordering requirement, observed rather than argued: "Each
+        // publish operation SHALL sign an op, append it to the local op log, and
+        // hand it to delivery. The append SHALL complete before delivery is
+        // invoked."
+        //
+        // The expected sequence is HARDCODED below and is not read back from
+        // anything the handlers produced. A handler that called the sink first
+        // yields `["deliver", "append"]` and this fails on the comparison.
+        //
+        // All three handlers, because the ordering is a property of each call
+        // site and one of them getting it right says nothing about the other two
+        // — which is the same "is the guard called everywhere?" shape as
+        // `a_forbidden_field_is_refused_on_every_operation`.
+        let key = publish_key();
+        let stoa = publish_stoa().to_hex();
+
+        for which in ["post", "reply", "vote"] {
+            let journal = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+            let mut log = JournallingLog {
+                inner: MemoryOpLog::new(),
+                journal: std::rc::Rc::clone(&journal),
+            };
+
+            // A seed post for the reply and the vote to point at. It goes
+            // through the same log, so the journal is CLEARED afterwards and
+            // only the measured call's sequence is asserted on.
+            let seed = as_json(&publish_post(
+                &publish_request(r#""body":"the subject""#),
+                &mut log,
+                &key,
+                &mut ignored_delivery,
+            ))["opId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            journal.borrow_mut().clear();
+
+            let request =
+                match which {
+                    "post" => serde_json::json!({"stoa": stoa, "body": "ordered"}).to_string(),
+                    "reply" => serde_json::json!({"stoa": stoa, "parent": seed, "body": "ordered"})
+                        .to_string(),
+                    _ => serde_json::json!({"stoa": stoa, "target": seed, "direction": "up"})
+                        .to_string(),
+                };
+            let sink_journal = std::rc::Rc::clone(&journal);
+            let out = match which {
+                "post" => publish_post(&request, &mut log, &key, &mut |_| {
+                    sink_journal.borrow_mut().push("deliver")
+                }),
+                "reply" => publish_reply(&request, &mut log, &key, &mut |_| {
+                    sink_journal.borrow_mut().push("deliver")
+                }),
+                _ => publish_vote(&request, &mut log, &key, &mut |_| {
+                    sink_journal.borrow_mut().push("deliver")
+                }),
+            };
+            assert!(as_json(&out).get("error").is_none(), "for {which}: {out}");
+            assert_eq!(
+                journal.borrow().as_slice(),
+                ["append", "deliver"],
+                "{which} must append before it hands off, and hand off exactly once"
+            );
+        }
+    }
+
+    #[test]
+    fn a_refused_publish_reaches_neither_the_append_nor_delivery() {
+        // The other half of the same requirement: "A publish that is refused
+        // appends nothing — AND delivery was not invoked." Asserted as an EMPTY
+        // journal, so it distinguishes "nothing happened" from "an append was
+        // rolled back", which counting the log afterwards cannot.
+        //
+        // The four refusals sit at three different depths: two fail in the parse
+        // (before `authoring` is reached at all), one in `authoring`'s presence
+        // check, and one in its cross-Stoa check — so a handler that reached the
+        // store or the sink on any of those paths is caught rather than one of
+        // them standing in for all three.
+        //
+        // Each case also asserts the refusal MESSAGE, not just that a refusal
+        // happened. That is what keeps the depths honest: the cross-Stoa fixture
+        // previously named an absent target against an empty log, so it refused at
+        // the presence check and was a second copy of the case above it.
+        let key = publish_key();
+        let stoa = publish_stoa().to_hex();
+        let elsewhere = crate::identity::Address::from_hex(&"4d".repeat(32))
+            .unwrap()
+            .to_hex();
+        let absent = crate::op::OpId::from_hex(&"9b".repeat(32))
+            .unwrap()
+            .to_hex();
+
+        let cases: [(&str, String, &str); 4] = [
+            // Refused in the parse: a forbidden field.
+            (
+                "post",
+                serde_json::json!({"stoa": stoa, "body": "x", "author": "00ff"}).to_string(),
+                "a forbidden field",
+            ),
+            // Refused in the parse: a direction the wire does not recognise.
+            (
+                "vote",
+                serde_json::json!({"stoa": stoa, "target": absent, "direction": "upvote"})
+                    .to_string(),
+                "an unrecognised direction",
+            ),
+            // Refused in `authoring`: the parent is not held.
+            (
+                "reply",
+                serde_json::json!({"stoa": stoa, "parent": absent, "body": "x"}).to_string(),
+                "an absent parent",
+            ),
+            // Refused in `authoring`'s CROSS-STOA check, which is a different
+            // depth from the one above and needs a target that IS held. The
+            // fixture seeds a post into `stoa` and then votes on it naming
+            // `elsewhere`.
+            //
+            // This case used to name an ABSENT target in another Stoa, against an
+            // empty log — so `log.get` returned `None` and it refused at `NotHeld`,
+            // the same path and the same depth as the case above it. The comment
+            // claimed three depths and the fixtures delivered two; a handler that
+            // reached the sink on the cross-Stoa path only would have left this
+            // test green (found by review, findings/correctness.md C2).
+            (
+                "vote-cross-stoa",
+                serde_json::json!({"stoa": elsewhere, "direction": "up"}).to_string(),
+                "a held target in another Stoa",
+            ),
+        ];
+
+        for (which, request, why) in cases {
+            let journal = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+            let mut log = JournallingLog {
+                inner: MemoryOpLog::new(),
+                journal: std::rc::Rc::clone(&journal),
+            };
+
+            // The cross-Stoa case is the only one needing a seeded target, and it
+            // must be seeded BEFORE the journal is cleared, so the seed's own
+            // append does not count as the refusal's.
+            let request = if which == "vote-cross-stoa" {
+                let seed = publish_post(
+                    &publish_request(r#""body":"the target""#),
+                    &mut log,
+                    &key,
+                    &mut ignored_delivery,
+                );
+                let target = as_json(&seed)["opId"].as_str().unwrap().to_string();
+                journal.borrow_mut().clear();
+                serde_json::json!({"stoa": elsewhere, "target": target, "direction": "up"})
+                    .to_string()
+            } else {
+                request
+            };
+            let sink_journal = std::rc::Rc::clone(&journal);
+            let out = match which {
+                "post" => publish_post(&request, &mut log, &key, &mut |_| {
+                    sink_journal.borrow_mut().push("deliver")
+                }),
+                "reply" => publish_reply(&request, &mut log, &key, &mut |_| {
+                    sink_journal.borrow_mut().push("deliver")
+                }),
+                _ => publish_vote(&request, &mut log, &key, &mut |_| {
+                    sink_journal.borrow_mut().push("deliver")
+                }),
+            };
+            let error = as_json(&out)["error"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            assert!(!error.is_empty(), "{why} must be refused, got {out}");
+
+            // Each case must be refused for the reason it was chosen to exercise,
+            // not merely refused. Without this the cross-Stoa fixture silently
+            // degraded into a second copy of the absent-target one, which is
+            // exactly what had happened.
+            let expected_fragment = match why {
+                "a forbidden field" => "author",
+                "an unrecognised direction" => "direction",
+                "an absent parent" => "does not hold",
+                "a held target in another Stoa" => "belongs to Stoa",
+                other => unreachable!("unnamed case: {other}"),
+            };
+            assert!(
+                error.contains(expected_fragment),
+                "{why}: expected a refusal mentioning {expected_fragment:?}, got {out}"
+            );
+
+            assert!(
+                journal.borrow().is_empty(),
+                "{why}: a refused publish must reach neither the store nor delivery, \
+                 and it reached {:?}",
+                journal.borrow()
+            );
+        }
+    }
+
+    #[test]
+    fn a_publish_whose_delivery_panics_leaves_the_op_in_the_log() {
+        // A panicking sink is the most violent form of "delivery errors on the
+        // handoff". What this pins is that the op STAYS: the append completed
+        // before delivery was reached and nothing rolls it back.
+        //
+        // The reply is pinned by
+        // `a_panicking_delivery_sink_still_reports_the_op_as_published_on_all_three_handlers`,
+        // which is the other half of this and covers all three handlers. This one
+        // is kept because the two assert different things: that one reads the
+        // reply, this one reads the LOG, and an implementation that reported
+        // success while rolling the op back would satisfy the reply assertion
+        // alone.
+        //
+        // This was an open question when the reviewers found it — `guarded` wrapped
+        // the `deliver` call, so a panicking sink turned a successful publish into
+        // `{"error":"panic in publish_post: …"}` with no `opId` while the op was in
+        // the log, against "a publish SHALL NOT be reported as having failed on the
+        // strength of a delivery outcome". The owner settled it: catch the panic at
+        // the handoff and report the publish as successful. See
+        // `delivered_and_published` for why the outer guard stays, and `docs/PLAN.md`
+        // §9.2 for the obligation this hands to `op-transport`.
+        //
+        // This test was named `…_still_reports_the_op_as_published` and asserted
+        // no such thing — the name claimed the requirement while the body checked
+        // only the log. Renamed to what it actually pins.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+
+        // The id the publish will produce, computed independently so the
+        // assertion does not depend on a reply the panic prevented.
+        let expected = crate::op::Op {
+            stoa: publish_stoa(),
+            author: key.public_key(),
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: "survives a broken delivery".to_string(),
+                attachments: vec![],
+            },
+        }
+        .id();
+
+        let out = publish_post(
+            &publish_request(r#""body":"survives a broken delivery""#),
+            &mut log,
+            &key,
+            &mut |_: &crate::op::OpId| panic!("delivery refused the handoff"),
+        );
+        // The handoff guard caught it, so this is a reply rather than an aborted
+        // process. Parsed for well-formedness only; what the reply SAYS is the
+        // sibling test's assertion, and what this test is named for is the log.
+        as_json(&out);
+        assert!(
+            log.get(&expected).unwrap().is_some(),
+            "a declined handoff must leave the op in the log, got {out}"
+        );
+        // The op the publish created, and nothing the panic added or rolled back.
+        assert_eq!(log.len().unwrap(), 1);
+    }
+
+    #[test]
+    fn a_panicking_delivery_sink_still_reports_the_op_as_published_on_all_three_handlers() {
+        // "A handoff that fails outright leaves the op published": WHEN delivery
+        // fails at the handoff in the most abrupt way the interface permits, THEN
+        // the reply reports the op as published and names its op id, the op is
+        // readable from the log, and the reply carries no error. A panicking sink
+        // IS the most abrupt way the interface permits — the sink returns `()`, so
+        // there is no error value it could return instead — which is what makes
+        // this test the scenario's own fixture rather than an approximation of it.
+        //
+        // The quoted name was "A declined handoff leaves the op published", which
+        // the spec no longer contains; the wording above is the live scenario's.
+        // The test itself needed no change, only the citation.
+        //
+        // This is the assertion the sibling test
+        // `a_publish_whose_delivery_panics_leaves_the_op_in_the_log` deliberately
+        // did NOT make while the question was open. It fails before the fix: with
+        // the sink call inside `guarded`, a panic discards the already-computed
+        // reply and yields `{"error":"panic in publish_post: …"}` with no `opId`
+        // for an op that IS in the log.
+        //
+        // Asserted on all three handlers because the sink is called from three
+        // places, so one fixed and two missed is the failure a single-handler
+        // test could not see.
+        let key = publish_key();
+
+        // A parent to reply to and a target to vote on, published with a sink
+        // that does not panic, so the fixtures are not themselves under test.
+        let mut log = MemoryOpLog::new();
+        let seed = as_json(&publish_post(
+            &publish_request(r#""body":"the parent""#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        let parent = seed["opId"].as_str().unwrap().to_string();
+
+        type Handler = fn(
+            &str,
+            &mut MemoryOpLog,
+            &crate::identity::SecretKey,
+            &mut dyn FnMut(&crate::op::OpId),
+        ) -> String;
+
+        let cases: [(String, Handler); 3] = [
+            (
+                publish_request(r#""body":"a post""#),
+                publish_post as Handler,
+            ),
+            (
+                publish_request(&format!(r#""parent":"{parent}","body":"a reply""#)),
+                publish_reply as Handler,
+            ),
+            (
+                publish_request(&format!(r#""target":"{parent}","direction":"up""#)),
+                publish_vote as Handler,
+            ),
+        ];
+
+        for (request, handler) in &cases {
+            let out = handler(request, &mut log, &key, &mut |_: &crate::op::OpId| {
+                panic!("delivery refused the handoff")
+            });
+            let v = as_json(&out);
+            assert!(
+                v.get("error").is_none(),
+                "a panicking sink must not be reported as a failed publish, got {out}"
+            );
+            let id = v["opId"]
+                .as_str()
+                .unwrap_or_else(|| panic!("the reply must name its op id, got {out}"));
+            let id = crate::op::OpId::from_hex(id).expect("the reply's op id must parse");
+            assert!(
+                log.get(&id).unwrap().is_some(),
+                "the op the reply names must be readable from the log, got {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_reply_names_the_op_and_whether_it_was_new_and_no_delivery_outcome() {
+        // REPOINTED, and the old test is worth saying what was wrong with it.
+        //
+        // It was `a_delivery_that_reports_nothing_and_one_that_reports_promptly_give_one_reply`,
+        // and its comment quoted a scenario — "A publish returns while delivery is
+        // still outstanding" — that the spec no longer contains (the `spec-writer`
+        // flagged it; `grep` over `specs/content-authoring/spec.md` finds no such
+        // text). So it was a test with no requirement behind it.
+        //
+        // It was also close to vacuous on its own terms. Both sinks were
+        // synchronous and the interface hands delivery a `&mut dyn FnMut` returning
+        // `()`, so "the reply does not depend on what delivery did" was true by the
+        // signature: there is no value a sink could return for a reply to depend
+        // on. Asserting two replies equal proved the sink cannot speak, which the
+        // type already guarantees, and nothing about the reply's CONTENT.
+        //
+        // What the spec does still require, and what had no test at all, is the
+        // scenario "The reply describes no delivery outcome": the reply carries the
+        // op id and whether the op was newly stored, "AND it carries no field
+        // describing whether the op was sent, accepted, delivered or propagated".
+        // That is an assertion about the reply's keys, and it can fail — a future
+        // field named `delivered` would trip it, which is the whole point, since the
+        // requirement's argument is that a reply carrying the weaker fact sits
+        // exactly where a reader looks for the stronger one.
+        //
+        // Not a duplicate of `a_vote_reply_carries_no_score…`, which pins the same
+        // key set: that one is about VOTE semantics (its forbidden list is score /
+        // tally / rank) on `publish_vote`. This one is about the DELIVERY outcome on
+        // `publish_post`. Same shape of assertion, two different requirements, and a
+        // publish-side delivery field would slip past the vote-side test entirely.
+        let key = publish_key();
+        let mut log = MemoryOpLog::new();
+        let out = publish_post(
+            &publish_request(r#""body":"whatever delivery does""#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        );
+        let v = as_json(&out);
+        assert!(v.get("error").is_none(), "got {out}");
+
+        // The keys the reply DOES carry, as an exact set rather than a
+        // `contains_key` pair — an exact set is what makes a NEW key fail this
+        // test, and a new key is the thing the scenario forbids. Hardcoded, not
+        // read back from the reply.
+        let mut keys: Vec<&str> = v
+            .as_object()
+            .expect("a reply is an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            ["opId", "wasNew"],
+            "the reply carries exactly the op id and whether the op was new, got {out}"
+        );
+
+        // And named individually, so the failure says WHICH outcome word appeared
+        // rather than only that the set changed. These are the four the scenario
+        // lists, plus the shapes a delivery outcome would plausibly take.
+        for forbidden in [
+            "sent",
+            "accepted",
+            "delivered",
+            "propagated",
+            "delivery",
+            "peers",
+            "outcome",
+        ] {
+            assert!(
+                v.get(forbidden).is_none(),
+                "the reply must describe no delivery outcome, but carries {forbidden:?}: {out}"
+            );
+        }
+
+        // The two it must carry are the two the requirement names, checked for
+        // type and not merely presence.
+        assert!(v["opId"].is_string(), "got {out}");
+        assert!(v["wasNew"].is_boolean(), "got {out}");
+    }
+
+    #[test]
+    fn a_publish_refused_for_an_absent_parent_says_which_and_not_that_it_is_the_wrong_kind() {
+        // The two refusals the spec requires be told apart, at the wire. A
+        // caller distinguishes a propagation gap it should wait out from a
+        // category mistake it must fix.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+        let post_id = as_json(&publish_post(
+            &publish_request(r#""body":"the subject""#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ))["opId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let vote_id = as_json(&publish_vote(
+            &publish_request(&format!(r#""target":"{post_id}","direction":"up""#)),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ))["opId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let absent = crate::op::OpId::from_hex(&"7f".repeat(32))
+            .unwrap()
+            .to_hex();
+
+        let not_held = as_json(&publish_reply(
+            &publish_request(&format!(r#""parent":"{absent}","body":"x""#)),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        let wrong_kind = as_json(&publish_reply(
+            &publish_request(&format!(r#""parent":"{vote_id}","body":"x""#)),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+
+        let absent_msg = not_held["error"].as_str().unwrap();
+        let kind_msg = wrong_kind["error"].as_str().unwrap();
+        assert_ne!(absent_msg, kind_msg, "the two refusals must be told apart");
+        assert!(absent_msg.contains("does not hold"), "got {absent_msg}");
+        assert!(kind_msg.contains("not a post"), "got {kind_msg}");
+        assert!(
+            !kind_msg.contains("does not hold"),
+            "a held op must not be reported as absent, got {kind_msg}"
+        );
+    }
+
+    #[test]
+    fn the_no_identity_refusal_is_the_error_shape_and_has_one_source_of_its_text() {
+        // The refusal that only the adapter can RAISE, worded in the one place a
+        // gate can read.
+        //
+        // Before this existed, `Refusal::NoIdentity` was constructed by nothing
+        // outside its own `Display` test while the adapter hand-wrote a second
+        // copy of the same sentence — and the adapter is behind
+        // `cfg(logos_scaffold)`, which no `cargo test` sets. So there were two
+        // copies of one message, no test tying them, and the copy that shipped
+        // was the one nothing compiled.
+        //
+        // This asserts the two are ONE string rather than two that happen to
+        // agree: the expected value is built from the variant, so the only way
+        // both sides can pass is by `no_identity` going through it. A
+        // `no_identity` that formatted its own text — even the same text — fails
+        // the moment the variant's wording moves, which is exactly the drift the
+        // old arrangement could not detect.
+        let why = "the keystore file is not there";
+        let out = no_identity(why);
+        let v = as_json(&out);
+        assert_eq!(
+            v["error"]
+                .as_str()
+                .expect("the error shape carries a string"),
+            crate::authoring::Refusal::NoIdentity(why.to_string()).to_string(),
+            "the wire reply must be the VARIANT's wording, not a second copy of it"
+        );
+        assert!(
+            v.get("opId").is_none() && v.get("wasNew").is_none(),
+            "a refusal is never a partial success — §2.5, got {out}"
+        );
+
+        // And the reason it was handed survives into the reply, so a reader is
+        // told what is missing rather than only that something is. A
+        // `no_identity` that discarded its argument passes the equality above.
+        let message = v["error"].as_str().unwrap();
+        assert!(message.contains(why), "the reason must survive, got {out}");
+        // NO SPEC: the spec's "A refused publish creates no key material" scenario
+        // is structural — no keystore or key exists that did not before — and does
+        // not require the refusal to say so. Saying it is chosen; see the matching
+        // marker on `a_refusal_names_the_id_or_stoa_it_is_about` in `authoring.rs`,
+        // and note this pins the sentence rather than the structural claim.
+        assert!(
+            message.contains("no key was created"),
+            "the refusal must say no key material was created, got {out}"
+        );
+    }
+
+    #[test]
+    fn every_publish_refusal_is_the_error_shape_and_carries_no_op_id() {
+        // §2.5: never a partial success. A reply carrying both an error and an
+        // op id would render as a published post in any view that read `opId`
+        // first — and the caller would then link to an op that does not exist.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+        let stoa = publish_stoa().to_hex();
+        let absent = crate::op::OpId::from_hex(&"3a".repeat(32))
+            .unwrap()
+            .to_hex();
+
+        let cases: [(&str, String); 12] = [
+            ("post", "not json".to_string()),
+            ("post", r#"{}"#.to_string()),
+            ("post", r#"{"stoa":"nothex","body":"x"}"#.to_string()),
+            ("post", r#"{"stoa":"00ff","body":"x"}"#.to_string()),
+            ("post", format!(r#"{{"stoa":"{stoa}","body":[]}}"#)),
+            ("reply", "not json".to_string()),
+            (
+                "reply",
+                format!(r#"{{"stoa":"{stoa}","parent":"nothex","body":"x"}}"#),
+            ),
+            (
+                "reply",
+                format!(r#"{{"stoa":"{stoa}","parent":"{absent}","body":"x"}}"#),
+            ),
+            ("vote", "not json".to_string()),
+            (
+                "vote",
+                format!(r#"{{"stoa":"{stoa}","target":"{absent}","direction":"up"}}"#),
+            ),
+            (
+                "vote",
+                format!(r#"{{"stoa":"{stoa}","target":"{absent}","direction":true}}"#),
+            ),
+            (
+                "vote",
+                format!(r#"{{"stoa":"{stoa}","target":7,"direction":"up"}}"#),
+            ),
+        ];
+        for (op, request) in cases {
+            let out = match op {
+                "post" => publish_post(&request, &mut log, &key, &mut ignored_delivery),
+                "reply" => publish_reply(&request, &mut log, &key, &mut ignored_delivery),
+                _ => publish_vote(&request, &mut log, &key, &mut ignored_delivery),
+            };
+            let v = as_json(&out);
+            assert!(v.get("error").is_some(), "for {request}, got {out}");
+            // `error.is_some()` CANNOT TELL A REFUSAL FROM A PANIC, and this test
+            // is the only one that reaches some of these parsers' refusal arms.
+            // `guarded` catches an unwind and returns
+            // `{"error":"panic in <method>: …"}` — which satisfies every other
+            // assertion in this loop — so without this line a handler that
+            // panicked on all twelve fixtures would pass, and the test would
+            // report "every refusal is the error shape" having checked only that
+            // the guard in front of the handler works.
+            //
+            // `findings/security.md` S2 measured exactly this: with a `panic!` on
+            // `required_direction`'s `Err` arm, this test passed. The sweep
+            // `hostile_publish_input_is_never_a_panic` already carries this
+            // assertion; it was missing from the one test that gets here.
+            assert!(
+                !v["error"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .starts_with("panic in "),
+                "a handler panicked rather than refusing, for {request}: {out}"
+            );
+            assert!(
+                v.get("opId").is_none(),
+                "a failure must never also carry an op id — §2.5, got {out}"
+            );
+            assert!(v.get("wasNew").is_none(), "got {out}");
+        }
+        assert_eq!(
+            log.len().unwrap(),
+            0,
+            "no refused publish appended anything"
+        );
+    }
+
+    #[test]
+    fn hostile_publish_input_is_never_a_panic() {
+        // A panic ABORTS the module process (PHASE0-FINDINGS §3), so an
+        // unparseable or adversarial request would be a denial of service
+        // against the peer. Every field type, absent fields, maximal lengths and
+        // adversarially chosen text, through all three handlers.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+        let stoa = publish_stoa().to_hex();
+        let id = crate::op::OpId::from_hex(&"5e".repeat(32))
+            .unwrap()
+            .to_hex();
+
+        let mut requests: Vec<String> = vec![
+            "".to_string(),
+            "not json".to_string(),
+            "null".to_string(),
+            "[]".to_string(),
+            "7".to_string(),
+            r#""a string""#.to_string(),
+            r#"{}"#.to_string(),
+            r#"{"stoa":null,"body":null,"parent":null,"target":null,"direction":null}"#.to_string(),
+            r#"{"stoa":{},"body":{},"parent":{},"target":{},"direction":{}}"#.to_string(),
+            r#"{"stoa":[1],"body":[1],"parent":[1],"target":[1],"direction":[1]}"#.to_string(),
+            r#"{"stoa":true,"body":false,"parent":1.5,"target":-1,"direction":0}"#.to_string(),
+        ];
+        for text in ["\u{202E}\u{202C}\u{200B}", "\0\0\0", "🏛🏛🏛", "Ἀγορά", "\"}]"] {
+            requests.push(
+                serde_json::json!({
+                    "stoa": stoa, "body": text, "parent": id, "target": id, "direction": text
+                })
+                .to_string(),
+            );
+        }
+        // Maximal field lengths: at the format's per-field cap, and past it.
+        for len in [150 * 1024, 150 * 1024 + 1] {
+            requests.push(
+                serde_json::json!({
+                    "stoa": stoa,
+                    "body": "x".repeat(len),
+                    "parent": id,
+                    "target": id,
+                    "direction": "up"
+                })
+                .to_string(),
+            );
+        }
+        // A hex string of every wrong length, since the op-id parser is reached
+        // with attacker-chosen text.
+        for len in [0, 1, 63, 64, 65, 128] {
+            requests.push(
+                serde_json::json!({
+                    "stoa": "a".repeat(len),
+                    "body": "x",
+                    "parent": "b".repeat(len),
+                    "target": "c".repeat(len),
+                    "direction": "up"
+                })
+                .to_string(),
+            );
+        }
+        // The same wrong lengths with a VALID Stoa, which is what actually
+        // reaches the op-id parser.
+        //
+        // Every case above malforms the Stoa too, and `stoa` is parsed first in
+        // all three handlers — so each of them refuses before `parent` or
+        // `target` is ever read, and the op-id parser was reached with nothing
+        // but well-formed hex. Verified: an `expect` on `OpId::from_hex` left the
+        // whole suite green, this test included, until these cases existed.
+        //
+        // Non-hex characters as well as wrong lengths, because "64 characters"
+        // and "64 HEX characters" are different acceptances and only the second
+        // is the parser's.
+        for text in [
+            "".to_string(),
+            "0".to_string(),
+            "z".repeat(64),
+            "g".repeat(64),
+            "0".repeat(63),
+            "0".repeat(65),
+            "0".repeat(128),
+            "ff ".repeat(21),
+            "0x".to_string() + &"0".repeat(64),
+            "\u{200B}".repeat(64),
+            "Ἀγορά".to_string(),
+        ] {
+            requests.push(
+                serde_json::json!({
+                    "stoa": stoa,
+                    "body": "x",
+                    "parent": text,
+                    "target": text,
+                    "direction": "up"
+                })
+                .to_string(),
+            );
+        }
+        // A VALID Stoa and a VALID target with a WRONG-TYPED `direction` and
+        // `body`, which is the only way to reach those parsers' wrong-type arms.
+        //
+        // This is the same ordering hazard the op-id block above exists for, one
+        // parser further along — and it was found the same way. `stoa` is parsed
+        // first in all three handlers, so every wrong-typed fixture earlier in
+        // this sweep malforms `stoa` too and dies at parser one; and the two
+        // blocks that DO carry a valid Stoa both pin `direction: "up"`. The
+        // result was that `required_direction`'s wrong-typed arm was never
+        // entered by any test in the repo.
+        //
+        // Measured, per `findings/security.md` S2: with a `panic!` on that arm
+        // alone, the whole 566-test suite stayed green. With these fixtures it
+        // does not. Note the absent arm was NOT the gap — a missing `direction`
+        // is caught by `a_publish_requests_missing_field_is_named_and_is_not_defaulted`,
+        // which asserts on the message naming the field, and a panic message
+        // does not contain it. The wrong-typed arm is the one nothing reached.
+        //
+        // `null` is included deliberately, and it is a wrong TYPE rather than an
+        // absence: `wire/request.rs:229` keeps an explicit null as
+        // `Some(Value::Null)` on purpose, so `required_string` refuses it by type.
+        // Pinned in the message-level test beside this one.
+        for wrong in [
+            serde_json::Value::Null,
+            serde_json::json!(true),
+            serde_json::json!(0),
+            serde_json::json!(-1),
+            serde_json::json!(1.5),
+            serde_json::json!({}),
+            serde_json::json!([]),
+            serde_json::json!(["up"]),
+            serde_json::json!({"direction": "up"}),
+        ] {
+            requests.push(
+                serde_json::json!({
+                    "stoa": stoa,
+                    "body": wrong,
+                    "parent": id,
+                    "target": id,
+                    "direction": wrong
+                })
+                .to_string(),
+            );
+        }
+
+        for request in &requests {
+            for out in [
+                publish_post(request, &mut log, &key, &mut ignored_delivery),
+                publish_reply(request, &mut log, &key, &mut ignored_delivery),
+                publish_vote(request, &mut log, &key, &mut ignored_delivery),
+            ] {
+                let v = as_json(&out);
+                assert!(
+                    v.is_object(),
+                    "every reply is a JSON object, got {out} for {request}"
+                );
+                // `is_object()` ALONE cannot see a panic, and that is the whole
+                // point of this test. `guarded` catches the unwind and returns
+                // `{"error":"panic in <method>: …"}` — a perfectly well-formed
+                // object — so a handler that panicked on every one of these
+                // inputs would satisfy the assertion above.
+                //
+                // The marker `guarded` writes is what tells the two apart, and it
+                // is the only thing that does. Without this line the requirement
+                // "a publish SHALL NOT panic for any request" has no test, only a
+                // test of the guard that stands in front of it.
+                assert!(
+                    !v["error"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .starts_with("panic in "),
+                    "a handler panicked rather than refusing, for {request}: {out}"
+                );
+            }
+        }
+
+        // Whatever this sweep DID accept must be readable back. "No panic" is not
+        // the only way hostile input can win: an input that succeeds and stores an
+        // op the decoder refuses is worse, because it is reported to the caller as
+        // a publish and then kills every read on the store.
+        //
+        // That is not hypothetical — it is how the over-cap body defect survived
+        // this test. The sweep already fed it `MAX_FIELD_LEN + 1`, asserted "an
+        // object and not a panic", and passed, because the handler *succeeded*.
+        // Asserting the absence of a panic cannot see a wrongful success.
+        for entry in log.iter().expect("the sweep's log must still be readable") {
+            crate::op::SignedOp::from_bytes(&entry.op.to_bytes())
+                .expect("an op a publish accepted must decode again");
+        }
+    }
+
+    #[test]
+    fn a_body_reaches_the_op_through_the_wire_exactly_as_supplied() {
+        // No normalisation, no trimming, no case-folding. `op-format` contracts
+        // an accepted encoding as re-encoding to itself, so a transformation
+        // here would mean the op published is not the content the caller
+        // supplied — and sanitisation is a RENDERING concern `feed.rs` applies
+        // on the way out.
+        let key = publish_key();
+        for body in [
+            "  padded  ",
+            "MiXeD",
+            "caf\u{00E9}",
+            "cafe\u{0301}",
+            "\u{202E}reversed",
+            "zero\u{200B}width",
+            "line\nbreak",
+        ] {
+            let mut log = MemoryOpLog::new();
+            let request =
+                serde_json::json!({ "stoa": publish_stoa().to_hex(), "body": body }).to_string();
+            let out = publish_post(&request, &mut log, &key, &mut ignored_delivery);
+            let v = as_json(&out);
+            assert!(v.get("error").is_none(), "for {body:?}, got {out}");
+            let id = crate::op::OpId::from_hex(v["opId"].as_str().unwrap()).unwrap();
+            match &log.get(&id).unwrap().unwrap().op.op.kind {
+                OpKind::Post { body: stored, .. } => assert_eq!(
+                    stored.as_bytes(),
+                    body.as_bytes(),
+                    "the body must reach the op byte for byte"
+                ),
+                other => panic!("expected a post, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn two_bodies_differing_only_by_normalisation_publish_as_two_ops_through_the_wire() {
+        // The sharp case for "no normalisation": NFC "é" against NFD "e"+U+0301
+        // render identically and are different bytes. A wire layer that
+        // normalised would collapse them into one op.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+        let stoa = publish_stoa().to_hex();
+
+        let composed = as_json(&publish_post(
+            &serde_json::json!({"stoa": stoa, "body": "caf\u{00E9}"}).to_string(),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        let decomposed = as_json(&publish_post(
+            &serde_json::json!({"stoa": stoa, "body": "cafe\u{0301}"}).to_string(),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        assert_ne!(composed["opId"], decomposed["opId"]);
+        assert_eq!(log.len().unwrap(), 2);
+    }
+
+    #[test]
+    fn the_three_handlers_share_one_signature_the_adapter_can_dispatch_over() {
+        // All three handlers must be interchangeable: same shape, same sink
+        // type, so one can be substituted for another without a signature
+        // change. This test pins that by naming ONE function-pointer type and
+        // requiring all three to coerce into it.
+        //
+        // The single pointer type is THIS TEST'S choice, not a constraint the
+        // adapter imposes — `Dialectica::publishing` is generic over the handler
+        // and would accept three distinct types. The reason to pin it here is
+        // that the adapter lives behind `cfg(logos_scaffold)`, which no
+        // `cargo test` ever sets (`lib.rs` explains why at length), so a
+        // signature that drifted out of line would fail in the BUILDER's build —
+        // the one that runs last and reports worst. This is the only gate that
+        // can catch that drift early, which is why the erased `&mut dyn FnMut`
+        // is worth its cost.
+        type Handler = fn(
+            &str,
+            &mut MemoryOpLog,
+            &crate::identity::SecretKey,
+            &mut dyn FnMut(&crate::op::OpId),
+        ) -> String;
+
+        let key = publish_key();
+        let stoa = publish_stoa().to_hex();
+        let mut log = MemoryOpLog::new();
+        let seed = as_json(&publish_post(
+            &publish_request(r#""body":"the subject""#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ))["opId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let cases: [(Handler, String); 3] = [
+            (
+                publish_post,
+                serde_json::json!({"stoa": stoa, "body": "through a pointer"}).to_string(),
+            ),
+            (
+                publish_reply,
+                serde_json::json!({"stoa": stoa, "parent": seed, "body": "likewise"}).to_string(),
+            ),
+            (
+                publish_vote,
+                serde_json::json!({"stoa": stoa, "target": seed, "direction": "up"}).to_string(),
+            ),
+        ];
+        let mut delivered = Vec::new();
+        for (handler, request) in cases {
+            let out = handler(&request, &mut log, &key, &mut |id| delivered.push(*id));
+            let v = as_json(&out);
+            assert!(v.get("error").is_none(), "for {request}, got {out}");
+            assert!(v["opId"].is_string(), "got {out}");
+        }
+        assert_eq!(
+            delivered.len(),
+            3,
+            "each dispatched handler must reach the shared sink"
+        );
+    }
+
+    // ─── The request envelope ─────────────────────────────────────────────
+    //
+    // WHY THESE TESTS LOOK OVERBUILT. Every hostile-input fixture already in
+    // this file is refused *whether or not* the envelope is checked:
+    // `"not json"` dies at the parse, and `{}` is refused for its missing
+    // field. Two explanations, one answer — so a test asserting only
+    // `error.is_some()` for `[]` passes against the unfixed code, because
+    // `parsed.get("stoa")` returns `None` for an array exactly as it does for
+    // an object without the field.
+    //
+    // The distinguishing assertion is therefore on the MESSAGE, and against a
+    // hardcoded expectation rather than "differs from the other one".
+
+    /// A directory name unique to this call, for the sweep fixtures that need one.
+    ///
+    /// **`OnboardingDir::new` is not safe to call twice with one name**, and the
+    /// sweeps are what make that reachable. Its name carries only
+    /// `std::process::id()`, and it `remove_dir_all`s the path before creating it —
+    /// which is what makes a *reused* name work across runs. Two live directories
+    /// of the same name inside one binary is the case that breaks: the second
+    /// call's pre-emptive removal deletes the first's, and the first's open SQLite
+    /// handle then fails with `Storage("disk I/O error")`.
+    ///
+    /// That is not hypothetical. `who_am_i` and `keep_identity` each open a record
+    /// per call and the sweeps below call them many times over, in tests that run
+    /// on parallel threads. With a fixed name per fixture, two of the sweeps
+    /// panicked on exactly that message — and they panicked only under a mutation,
+    /// so a fixed name would have passed here and failed on some later change for
+    /// a reason nobody would have connected to this one.
+    ///
+    /// The counter is per-binary and monotonic, so no two calls collide however the
+    /// harness schedules them.
+    fn sweep_dir_name(role: &str) -> String {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        format!("sweep-{role}-{}", NEXT.fetch_add(1, Ordering::Relaxed))
+    }
+
+    /// A method named, and callable with a raw request string.
+    type NamedMethod = (&'static str, fn(&str) -> String);
+
+    /// Every method whose request has **at least one required field**, so `{}` is a
+    /// refusal for it and the two missing-field sweeps can assert on the message.
+    ///
+    /// # Why this is a list and not a branch inside each sweep
+    ///
+    /// `list_stoas` is the surface's first method whose every field is optional:
+    /// `{}` is a *served* request for it, answering page 0 of the peer's Stoas. Two
+    /// sweeps — `the_three_refusals_a_caller_can_earn_are_three_different_messages`
+    /// and `an_empty_object_is_refused_for_its_missing_field_and_never_for_its_shape`
+    /// — read `{}` as the third caller mistake, which it is for every other listed
+    /// method and is not for that one.
+    ///
+    /// The alternative was `if name != "list_stoas"` inside each sweep, rejected for
+    /// CLAUDE.md's reason: two call sites that have to agree about which methods are
+    /// exempt is the shape where the third sweep gets it wrong. Naming the property
+    /// once puts it in the data, and a new all-optional method is added by leaving it
+    /// out of this list rather than by editing a sweep.
+    ///
+    /// **This does NOT exempt anything from the envelope.** The shape sweep and the
+    /// size sweep still run over every method in
+    /// [`every_request_taking_method`] — `list_stoas` included, and both of them
+    /// caught it bypassing `Request::parse`.
+    fn every_method_with_a_required_field() -> Vec<NamedMethod> {
+        every_request_taking_method()
+            .into_iter()
+            .filter(|(name, _)| *name != "list_stoas")
+            .collect()
+    }
+
+    /// A named field, the request that supplies it, and the call that reads it.
+    ///
+    /// A boxed closure rather than a `fn` pointer because each case captures a
+    /// different fixture — a `log`, a lookup, a genesis record — and a plain `fn`
+    /// cannot close over any of them. The alias is for `clippy::type_complexity`,
+    /// the same reason `NamedMethod` exists.
+    type NullReadingCase = (&'static str, String, Box<dyn Fn(&str) -> String>);
+
+    /// Every method that **reads a field of its request**, behind one uniform
+    /// call, so a new method is added to the sweep in one place rather than to
+    /// each test.
+    ///
+    /// The name is the contract's scope, which is the field read and not the
+    /// parameter: reading one field is enough to be inside the envelope rule, and
+    /// requiring none is not enough to be outside it.
+    ///
+    /// # ADD YOUR METHOD HERE
+    ///
+    /// **If you are adding a method to this crate's wire surface that reads a
+    /// field of its request, add it to this list and give it a fixture in
+    /// [`a_served_request`]. That is an obligation, not a courtesy.**
+    ///
+    /// Nothing checks it, and the cost was measured rather than imagined: a
+    /// reviewer built a sixth method — a handler parsing `Value` directly with
+    /// all-optional fields, serving `[]` as a request that named nothing — and the
+    /// whole suite passed. An unlisted method is silently unswept, every sweep
+    /// below goes green without it, and a guarantee about five methods reads as a
+    /// guarantee about the surface.
+    ///
+    /// The compiler cannot force this. Moving `Request` behind a module boundary
+    /// makes it impossible to hold one without the check, but nothing obliges a
+    /// handler to hold one at all — see
+    /// `the_sixth_method_the_boundary_does_not_stop`, which builds that method and
+    /// demonstrates it. And a source-scanning test was rejected for failing on
+    /// unrelated things (see `design.md`'s rejected alternatives). So the
+    /// obligation is written here, where an author adding a method has to be in
+    /// order to add it.
+    ///
+    /// Two absences are deliberate rather than forgotten, and both are now
+    /// governed by the spec rather than chosen here:
+    ///
+    /// - `panic_probe` takes a request and reads no field of it, passing it
+    ///   through as opaque text. The envelope rule's third case puts it outside,
+    ///   and its own requirement gives it a contract instead (design.md §4).
+    /// - `version` takes no request at all — the rule's second case.
+    fn every_request_taking_method() -> Vec<NamedMethod> {
+        fn ping_m(r: &str) -> String {
+            ping(r)
+        }
+        fn caps_m(r: &str) -> String {
+            get_capabilities(r, |_| Ok("abcd".to_string()))
+        }
+        fn feed_m(r: &str) -> String {
+            list_threads(r, &log_with_body("hello"), &feed_genesis())
+        }
+        fn feed_req_m(r: &str) -> String {
+            list_threads_from_request(r, || {
+                Ok::<_, crate::log::OpLogError>(log_with_body("hello"))
+            })
+        }
+        fn channel_m(r: &str) -> String {
+            // `parse_channel_id` returns the wire shape on both arms, so an
+            // `Ok` is folded into a reply in order to be swept uniformly. The
+            // sweep asserts on refusals, so the success arm's exact shape does
+            // not matter — only that it is not an error.
+            match parse_channel_id(r) {
+                Ok(id) => serde_json::json!({ "channelId": id }).to_string(),
+                Err(e) => e,
+            }
+        }
+        // The three `identity-onboarding` added. Each reads `stoa`, so each is
+        // inside the envelope rule's first case, and each is here because the
+        // obligation above is an obligation: when `main`'s envelope merged in, all
+        // three still called `serde_json::from_str` themselves and served `[]` as a
+        // request that named no Stoa. Adding them to this list is what turned the
+        // five sweeps below red and named the three handlers doing it.
+        //
+        // Each takes a session and a closure, so each is a `fn` wrapping them with
+        // a fresh session per call — the sweeps call these repeatedly and a session
+        // shared across calls would make one sweep's slate live for the next.
+        fn slate_m(r: &str) -> String {
+            generate_identity_slate(&mut OnboardingSession::new(), r, || {
+                Ok(Keystore::from_root_for_test([7u8; 32]))
+            })
+        }
+        fn keep_m(r: &str) -> String {
+            let dir = OnboardingDir::new(&sweep_dir_name("keep"));
+            let paths = dir.paths();
+            keep_identity(
+                &mut OnboardingSession::new(),
+                r,
+                || Ok(Keystore::from_root_for_test([7u8; 32])),
+                KeepTargets {
+                    keystore_path: &dir.keystore_path(),
+                    unlock: &Unlock::Unencrypted,
+                    paths: &paths,
+                },
+            )
+        }
+        fn whoami_m(r: &str) -> String {
+            // The `paths` opener is `impl Fn`, called once per handler call but
+            // typed as re-callable, so it opens the record rather than moving one
+            // in. The directory guard outlives the call.
+            let dir = OnboardingDir::new(&sweep_dir_name("whoami"));
+            who_am_i(
+                r,
+                || Ok(Keystore::from_root_for_test([7u8; 32])),
+                || Ok(dir.paths()),
+            )
+        }
+        // The three `stoa-lifecycle` added, listed for the reason the three above
+        // are: when `main`'s envelope merged into this piece, all three still called
+        // `serde_json::from_str` themselves. `create_stoa` reads `title` and the
+        // other two read `stoa`, so all three are inside the envelope rule's first
+        // case, and all three served `[]` as a request naming no field.
+        //
+        // Each takes a store, so each is a `fn` building a fresh one per call — the
+        // sweeps call these repeatedly and a store shared across calls would make
+        // one sweep's Stoa visible to the next.
+        fn create_m(r: &str) -> String {
+            create_stoa(
+                r,
+                || Ok(feed_key(1).public_key()),
+                &mut a_membership_store(),
+            )
+        }
+        fn join_m(r: &str) -> String {
+            join_stoa(r, &mut a_membership_store())
+        }
+        fn list_stoas_m(r: &str) -> String {
+            list_stoas(r, &a_membership_store())
+        }
+        vec![
+            ("ping", ping_m),
+            ("get_capabilities", caps_m),
+            ("list_threads", feed_m),
+            ("list_threads_from_request", feed_req_m),
+            ("parse_channel_id", channel_m),
+            ("generate_identity_slate", slate_m),
+            ("keep_identity", keep_m),
+            ("who_am_i", whoami_m),
+            ("create_stoa", create_m),
+            ("join_stoa", join_m),
+            ("list_stoas", list_stoas_m),
+        ]
+    }
+
+    /// A request each method would serve, so a refusal in the sweeps below is
+    /// attributable to the thing being varied and not to a missing field.
+    fn a_served_request(method: &str) -> String {
+        match method {
+            "ping" => r#"{"payload":1}"#.to_string(),
+            "get_capabilities" => format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex()),
+            "list_threads" => feed_request(""),
+            "list_threads_from_request" => full_request(),
+            "parse_channel_id" => r#"{"channelId":"stoa-abc/e7"}"#.to_string(),
+            "generate_identity_slate" | "who_am_i" => {
+                format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex())
+            }
+            // `slate` and `index` are required FIELDS, so they must be present or
+            // the sweeps that assert a served request see a missing-field error.
+            // The nonce is a well-formed one that is not live, which makes the
+            // reply `{"kept":false,"reason":…}` — an answer and not the error
+            // shape, which is what these sweeps check. That `Kept::Refused` is not
+            // `{"error":…}` is this handler's own contract, asserted where that
+            // contract is tested; here it is only what makes the fixture served.
+            // The nonce is spelled as a hex literal rather than built from bytes:
+            // `SlateNonce` has no `from_bytes`, and adding one to the production
+            // API so a test fixture can name a value is widening the surface for a
+            // test's convenience.
+            "keep_identity" => format!(
+                r#"{{"stoa":"{}","slate":"{}","index":0}}"#,
+                a_stoa().to_hex(),
+                "03".repeat(32)
+            ),
+            // `create_stoa` reads `title`; the other two are the `stoa`/`genesis`
+            // pair and the pagination shape. `join_stoa` is served with a record
+            // that MATCHES its address, because a mismatch is a refusal and these
+            // sweeps need the fixture to be served.
+            "create_stoa" => r#"{"title":"Agora"}"#.to_string(),
+            "join_stoa" => {
+                let genesis = a_joinable_record("Swept");
+                join_request(&genesis, &genesis.address().unwrap())
+            }
+            "list_stoas" => "{}".to_string(),
+            other => panic!("no served request known for {other}"),
+        }
+    }
+
+    fn error_message(out: &str) -> String {
+        let v: serde_json::Value = serde_json::from_str(out)
+            .unwrap_or_else(|e| panic!("reply must be valid JSON ({e}): {out}"));
+        v.get("error")
+            .unwrap_or_else(|| panic!("expected the error shape, got {out}"))
+            .as_str()
+            .unwrap_or_else(|| panic!("an error message must be a string, got {out}"))
+            .to_string()
+    }
+
+    #[test]
+    fn a_request_that_is_not_an_object_is_refused_for_its_shape() {
+        // THE test this change exists for. Note what it does NOT assert:
+        // `error.is_some()`, which is already true of `[]` on every method,
+        // because a required field is absent from an array just as it is from
+        // `{}`. What it asserts is the message, against the literal constant —
+        // so it fails on the unfixed code with the missing-field message, and
+        // it fails again if the constant is ever reworded without the spec
+        // being revisited.
+        for (name, method) in every_request_taking_method() {
+            for not_an_object in [
+                "[]",
+                r#"[{"stoa":"00"}]"#,
+                "7",
+                r#""a string""#,
+                "true",
+                "null",
+            ] {
+                let out = method(not_an_object);
+                assert_eq!(
+                    error_message(&out),
+                    REQUEST_NOT_AN_OBJECT,
+                    "{name} must refuse {not_an_object} for its shape, got {out}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_three_refusals_a_caller_can_earn_are_three_different_messages() {
+        // The spec's crux: three caller mistakes, three messages. Asserting
+        // only that they differ would be satisfied by any accident; each is
+        // pinned to what it must SAY, so a reword that collapses two is caught.
+        //
+        // The third mistake is "an object omitting a required field", so this sweeps
+        // the methods that HAVE one — see `every_method_with_a_required_field`. The
+        // first two mistakes are swept over every method by
+        // `a_request_that_is_not_an_object_is_refused_for_its_shape`.
+        for (name, method) in every_method_with_a_required_field() {
+            let not_an_object = error_message(&method("[]"));
+            let unparseable = error_message(&method("not json at all"));
+            let missing_field = error_message(&method("{}"));
+
+            assert_eq!(not_an_object, REQUEST_NOT_AN_OBJECT, "for {name}");
+            assert!(
+                unparseable.starts_with("invalid JSON"),
+                "{name}: an unparseable request must say so, got {unparseable:?}"
+            );
+            assert!(
+                missing_field.contains("missing field"),
+                "{name}: an object omitting a required field must name it, got \
+                 {missing_field:?}"
+            );
+
+            // And the pairwise statement, so the requirement is asserted as
+            // well as each message being pinned.
+            assert_ne!(not_an_object, unparseable, "for {name}");
+            assert_ne!(not_an_object, missing_field, "for {name}");
+            assert_ne!(unparseable, missing_field, "for {name}");
+        }
+    }
+
+    #[test]
+    fn an_empty_object_is_refused_for_its_missing_field_and_never_for_its_shape() {
+        // `{}` is an object, so the envelope check must pass it through to the
+        // method's own field checks. A check written as "refuse anything that
+        // is not a non-empty object" would break exactly here, and every other
+        // test in this file would stay green.
+        //
+        // Over the methods that have a required field, because the assertion is that
+        // `{}` earns the MISSING-FIELD refusal — a method with no required field has
+        // none to miss, and `list_stoas` serves `{}`. The "never for its shape" half
+        // still holds for it and is covered below.
+        for (name, method) in every_method_with_a_required_field() {
+            let message = error_message(&method("{}"));
+            assert_ne!(
+                message, REQUEST_NOT_AN_OBJECT,
+                "{name} refused `{{}}` for its shape rather than its missing field"
+            );
+            assert!(message.contains("missing field"), "{name}: got {message:?}");
+        }
+
+        // And the half that holds for a method with NO required field: `{}` must be
+        // SERVED, not refused for its shape. Without this, excluding `list_stoas`
+        // from the loop above would have excluded it from the envelope claim
+        // entirely — which is the failure mode the exclusion has to avoid, since a
+        // `Request::parse` that refused every empty object would pass every sweep
+        // that remains.
+        let out = list_stoas("{}", &a_membership_store());
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(
+            v.get("error").is_none(),
+            "list_stoas has no required field, so `{{}}` must be served: {out}"
+        );
+        assert_eq!(v["page"], 0, "an omitted page must default to 0: {out}");
+    }
+
+    #[test]
+    fn a_non_object_refusal_carries_no_result_field() {
+        // §2.5: never a partial success. A reply carrying both the refusal and
+        // an empty `items` renders as an empty feed in any view that checks
+        // `items` first.
+        for (name, method) in every_request_taking_method() {
+            for not_an_object in ["[]", "7", "null"] {
+                let out = method(not_an_object);
+                let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+                for result_field in ["items", "pong", "canPost", "identity", "channelId"] {
+                    assert!(
+                        v.get(result_field).is_none(),
+                        "{name} carried both an error and {result_field} for \
+                         {not_an_object}: {out}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn an_object_supplying_only_its_required_fields_is_served() {
+        // The other half of the check: it must refuse a wrong TYPE and not an
+        // absent optional field. Without this, a check that refused every
+        // request lacking `page` would satisfy every test above.
+        for (name, method) in every_request_taking_method() {
+            let out = method(&a_served_request(name));
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(
+                v.get("error").is_none(),
+                "{name} refused a request it must serve: {out}"
+            );
+        }
+    }
+
+    /// A served request with one extra key added, built through `serde_json`.
+    ///
+    /// The earlier spelling of this spliced text — `trim_end_matches('}')` then
+    /// append — was fragile to how a neighbouring fixture happened to be
+    /// written, and silently tested something else when it broke. Respelling
+    /// `a_served_request("ping")` from `{"payload":1}` to the equally valid
+    /// `{"payload":{"n":1}}` made `trim_end_matches` strip BOTH closing braces,
+    /// and the test then failed with `invalid JSON: EOF while parsing an object`
+    /// — reporting a refusal of the extra field that never happened. Parsing
+    /// into a `Map` and inserting cannot produce malformed JSON at all, so the
+    /// assertion is about the extra field and only about the extra field.
+    fn with_extra_field(served: &str, key: &str, value: serde_json::Value) -> String {
+        let mut map: serde_json::Map<String, serde_json::Value> = serde_json::from_str(served)
+            .unwrap_or_else(|e| panic!("a served fixture must be a JSON object ({e}): {served}"));
+        assert!(
+            map.insert(key.to_string(), value).is_none(),
+            "{key} is already a field of {served}, so adding it tests nothing"
+        );
+        serde_json::to_string(&map).expect("a Map always serialises")
+    }
+
+    #[test]
+    fn an_unrecognised_field_does_not_refuse_the_request() {
+        // Out of scope by decision, not by omission — the proposal argues that
+        // strictness is a compatibility policy and not an envelope rule. Pinned
+        // so tightening it later is a deliberate act that breaks a test.
+        for (name, method) in every_request_taking_method() {
+            let served = a_served_request(name);
+            let with_extra = with_extra_field(
+                &served,
+                "somethingNoMethodReads",
+                serde_json::json!({"nested": [1, 2, 3]}),
+            );
+            // The fixture must still be the request it was, plus one key —
+            // otherwise a broken construction is what the assertion below
+            // reports. This is the check the spliced spelling could not make.
+            let round_trip: serde_json::Value =
+                serde_json::from_str(&with_extra).unwrap_or_else(|e| {
+                    panic!("{name}: fixture is not valid JSON ({e}): {with_extra}")
+                });
+            let original: serde_json::Value = serde_json::from_str(&served).unwrap();
+            for (field, want) in original.as_object().unwrap() {
+                assert_eq!(
+                    round_trip.get(field),
+                    Some(want),
+                    "{name}: adding a field altered {field}"
+                );
+            }
+
+            let out = method(&with_extra);
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(
+                v.get("error").is_none(),
+                "{name} refused an unrecognised field: {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn panic_probe_still_panics_on_a_non_object_rather_than_refusing_it() {
+        // SPECIFIED, and the `NO SPEC:` marker that stood here is gone rather
+        // than reworded around: the envelope rule is now scoped by "reads a field
+        // of its request", and the probe's own requirement — "A panic in a
+        // handler becomes the error shape and the module keeps serving" — gives
+        // the probe a contract of its own. It treats its request as opaque text,
+        // reaches its panic for every request shape including a non-object and
+        // including text that is not JSON, refuses none, and carries the request
+        // in its message.
+        //
+        // The exclusion is still worth a comment, because the reason it is not a
+        // gap is not visible from the code: a probe that can refuse a request is
+        // a probe there are requests the guard is not exercised against, so the
+        // two rules cannot both reach it and the panic-guard one wins. That is
+        // the spec's own words, not this test's reasoning.
+        let out = panic_probe("[]");
+        let message = error_message(&out);
+        assert!(
+            message.contains("panic in panic_probe"),
+            "panic_probe must still reach its panic, got {message:?}"
+        );
+        assert_ne!(message, REQUEST_NOT_AN_OBJECT);
+        // The probe's own requirement also obliges the request to reach the
+        // message, which is "the observable difference between passing the text
+        // through and decoding it". Asserted here because the exclusion and the
+        // pass-through are one claim: a probe that decoded its request in order
+        // to refuse it could not carry the raw text.
+        assert!(
+            message.contains("[]"),
+            "the probe must carry the request it was given, got {message:?}"
+        );
+    }
+
+    #[test]
+    fn every_request_taking_method_refuses_an_oversized_request() {
+        // NO SPEC: the spec set says nothing about a size limit on a request —
+        // not that there is one, not that there is not. This is therefore an
+        // ABSENT decision rather than a rejected one, and the number is
+        // `dev-writer`'s choice pending the spec-writer: 4 MiB, derived in
+        // `MAX_REQUEST_BYTES`'s doc from what a legitimate composed op can
+        // carry.
+        //
+        // What made it necessary is measured rather than theorised: a 64 MiB
+        // request padded with one ignored field was ACCEPTED and served, at
+        // 92.6 ms and ~2N transient heap, for a 373-byte reply — an inverted
+        // amplification nothing downstream can notice. `ping` echoes `payload`,
+        // so 32 MiB in produced a 33,554,443-byte reply.
+        //
+        // Swept across every method rather than asserted once on
+        // `Request::parse`, because the claim being made is about the SURFACE:
+        // the envelope bounds every request-taking method, including one written
+        // next month. If this test ever has to be edited to exempt a method,
+        // that is the signal that the method reached around the type.
+        let oversized = format!(r#"{{"junk":"{}"}}"#, "x".repeat(MAX_REQUEST_BYTES));
+        assert!(oversized.len() > MAX_REQUEST_BYTES);
+        for (name, method) in every_request_taking_method() {
+            let message = error_message(&method(&oversized));
+            assert!(
+                message.contains("over the") && message.contains("byte limit"),
+                "{name} must refuse an oversized request for its size, got {message:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_request_within_the_cap_is_still_served() {
+        // The other half, and the one that stops a cap of zero from satisfying
+        // the sweep above. Every method's own served fixture is far under the
+        // cap, so this is really asserting that the check did not fire at all —
+        // which is what `an_object_supplying_only_its_required_fields_is_served`
+        // would also catch, except that a cap mistakenly written as
+        // `request.len() < MAX_REQUEST_BYTES` (refusing everything SMALL) would
+        // break both and only this one names the reason.
+        for (name, method) in every_request_taking_method() {
+            let served = a_served_request(name);
+            assert!(
+                served.len() < MAX_REQUEST_BYTES,
+                "{name}'s fixture must be under the cap for this test to mean anything"
+            );
+            let out = method(&served);
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(
+                v.get("error").is_none(),
+                "{name} refused a request well under the cap: {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn pings_payload_carries_an_explicit_null_through_as_a_value() {
+        // Reading 1, and the surface's only instance of it: `payload` is
+        // documented `<any>`, so a `null` is the value rather than a malformed
+        // parameter — and that reading takes precedence over the required-field
+        // one, which `payload` also satisfies.
+        //
+        // The assertion is that `pong` is PRESENT and holds `null`, which is a
+        // different statement from `v["pong"].is_null()`: indexing a missing key
+        // in `serde_json` yields `Value::Null` too, so the weaker spelling passes
+        // against a reply that dropped the field entirely. That is the two-
+        // explanations-one-answer shape this project keeps finding.
+        let out = ping(r#"{"payload":null}"#);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(
+            v.get("error").is_none(),
+            "a `<any>` field's null is a value, not a refusal: {out}"
+        );
+        assert_eq!(
+            v.as_object().and_then(|o| o.get("pong")),
+            Some(&serde_json::Value::Null),
+            "the null must be CARRIED, not dropped: {out}"
+        );
+        // And the whole reply, hardcoded, because the shape is the contract.
+        assert_eq!(out, r#"{"pong":null}"#);
+
+        // The two it must be told apart from. Omitting the field is the missing
+        // one, not a null value — so reading 1 has not been implemented by
+        // treating a null as absent.
+        assert_eq!(error_message(&ping("{}")), "missing field: payload");
+    }
+
+    #[test]
+    fn a_null_optional_field_takes_the_restrictive_default() {
+        // Reading 2, and the assertion the contract actually names: not merely
+        // "a null is accepted" but that the reply EQUALS the one omitting the
+        // field gives, and that it is the restrictive reply.
+        //
+        // `includeHidden` is the worked example — a hidden thread must stay
+        // hidden for `null`. Comparing against the omitted-field reply is what
+        // makes this fail if `null` were ever read as `true`: both replies would
+        // still parse, both would still be error-free, and only the comparison
+        // sees the difference.
+        let log = log_with_body("hello");
+        let omitted = list_threads(&feed_request(""), &log, &feed_genesis());
+        let null_valued = list_threads(
+            &feed_request(r#""includeHidden":null"#),
+            &log,
+            &feed_genesis(),
+        );
+        assert_eq!(
+            null_valued, omitted,
+            "a null optional field must answer exactly as omitting it does"
+        );
+        // And it is the restrictive side of the flag, not just the same side.
+        // `true` must differ from both, or the comparison above is satisfied by
+        // a handler that ignores the flag altogether.
+        let explicitly_true = list_threads(
+            &feed_request(r#""includeHidden":true"#),
+            &log,
+            &feed_genesis(),
+        );
+        let hidden_log = log_with_a_hidden_thread();
+        let with_hidden_excluded = list_threads(
+            &feed_request(r#""includeHidden":null"#),
+            &hidden_log,
+            &feed_genesis(),
+        );
+        let with_hidden_included = list_threads(
+            &feed_request(r#""includeHidden":true"#),
+            &hidden_log,
+            &feed_genesis(),
+        );
+        assert_ne!(
+            with_hidden_excluded, with_hidden_included,
+            "the flag must actually change the answer, or this test proves nothing \
+             about which side a null lands on ({explicitly_true})"
+        );
+        let excluded: serde_json::Value = serde_json::from_str(&with_hidden_excluded).unwrap();
+        let included: serde_json::Value = serde_json::from_str(&with_hidden_included).unwrap();
+        assert!(
+            excluded["items"].as_array().unwrap().len()
+                < included["items"].as_array().unwrap().len(),
+            "a null must land on the side that shows LESS: {with_hidden_excluded} \
+             vs {with_hidden_included}"
+        );
+
+        // `page` and `perPage` are the same reading through `parse_index`, and
+        // the same assertion: identical to omission.
+        for field in [r#""page":null"#, r#""perPage":null"#] {
+            assert_eq!(
+                list_threads(&feed_request(field), &log, &feed_genesis()),
+                omitted,
+                "{field} must answer exactly as omitting it does"
+            );
+        }
+    }
+
+    #[test]
+    fn a_null_required_field_is_refused_as_a_wrong_type_and_not_as_missing() {
+        // Reading 3, and the distinction the contract makes explicit: the caller
+        // DID name the field, so "missing" would describe a request it did not
+        // make. Asserted on both halves — what the message says, and what it must
+        // not say — because "an error came back" is true of both readings.
+        let stoa = feed_genesis().address().unwrap().to_hex();
+        for (request, field, method) in [
+            (
+                r#"{"stoa":null}"#.to_string(),
+                "stoa",
+                "get_capabilities" as &str,
+            ),
+            (
+                format!(r#"{{"stoa":"{stoa}","genesis":null}}"#),
+                "genesis",
+                "list_threads_from_request",
+            ),
+            (
+                r#"{"channelId":null}"#.to_string(),
+                "channelId",
+                "parse_channel_id",
+            ),
+        ] {
+            let out = match method {
+                "get_capabilities" => get_capabilities(&request, |_| Ok("abcd".to_string())),
+                "list_threads_from_request" => list_threads_from_request(&request, || {
+                    Ok::<_, crate::log::OpLogError>(log_with_body("hello"))
+                }),
+                "parse_channel_id" => match parse_channel_id(&request) {
+                    Ok(id) => serde_json::json!({ "channelId": id }).to_string(),
+                    Err(e) => e,
+                },
+                other => panic!("unhandled method {other}"),
+            };
+            let message = error_message(&out);
+            assert_eq!(
+                message,
+                format!("{field} must be a string"),
+                "{method}: a null required field is a wrong type, got {message:?}"
+            );
+            assert!(
+                !message.contains("missing"),
+                "{method}: a named field must not be reported as missing, got {message:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn one_field_has_one_null_reading() {
+        // The contract's "and never two for one field", asserted as the property
+        // rather than field by field: every field the surface reads, supplied as
+        // `null`, produces exactly ONE of the three outcomes.
+        //
+        // What this catches that the three tests above do not: a field acquiring
+        // a second reading later. A future `Some(Value::Null)` arm added to
+        // `ping` would leave all three of those tests green for `payload` if it
+        // returned the same answer by a different route — but a field landing in
+        // two buckets here is a count, and the count is what is asserted.
+        let stoa = feed_genesis().address().unwrap().to_hex();
+        let cases: Vec<NullReadingCase> = vec![
+            (
+                "payload",
+                r#"{"payload":null}"#.to_string(),
+                Box::new(|r: &str| ping(r)),
+            ),
+            (
+                "stoa",
+                r#"{"stoa":null}"#.to_string(),
+                Box::new(|r: &str| get_capabilities(r, |_| Ok("abcd".to_string()))),
+            ),
+            (
+                "genesis",
+                format!(r#"{{"stoa":"{stoa}","genesis":null}}"#),
+                Box::new(|r: &str| {
+                    list_threads_from_request(r, || {
+                        Ok::<_, crate::log::OpLogError>(log_with_body("hello"))
+                    })
+                }),
+            ),
+            (
+                "channelId",
+                r#"{"channelId":null}"#.to_string(),
+                Box::new(|r: &str| match parse_channel_id(r) {
+                    Ok(id) => serde_json::json!({ "channelId": id }).to_string(),
+                    Err(e) => e,
+                }),
+            ),
+            (
+                "page",
+                feed_request(r#""page":null"#),
+                Box::new(|r: &str| list_threads(r, &log_with_body("hello"), &feed_genesis())),
+            ),
+            (
+                "perPage",
+                feed_request(r#""perPage":null"#),
+                Box::new(|r: &str| list_threads(r, &log_with_body("hello"), &feed_genesis())),
+            ),
+            (
+                "includeHidden",
+                feed_request(r#""includeHidden":null"#),
+                Box::new(|r: &str| list_threads(r, &log_with_body("hello"), &feed_genesis())),
+            ),
+        ];
+
+        for (field, request, call) in cases {
+            let out = call(&request);
+            let v: serde_json::Value = serde_json::from_str(&out)
+                .unwrap_or_else(|e| panic!("{field}: reply must be JSON ({e}): {out}"));
+
+            let refused_as_wrong_type = v
+                .get("error")
+                .and_then(|e| e.as_str())
+                .is_some_and(|m| m.contains("must be"));
+            let refused_as_missing = v
+                .get("error")
+                .and_then(|e| e.as_str())
+                .is_some_and(|m| m.contains("missing"));
+            let served = v.get("error").is_none();
+
+            // A null must NEVER be reported as missing — that is the one outcome
+            // the contract rules out for every field, whichever reading applies.
+            assert!(
+                !refused_as_missing,
+                "{field}: a null was reported as missing: {out}"
+            );
+            let outcomes = [refused_as_wrong_type, served]
+                .iter()
+                .filter(|b| **b)
+                .count();
+            assert_eq!(
+                outcomes, 1,
+                "{field} must produce exactly one outcome, got {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_sixth_method_the_boundary_does_not_stop() {
+        // WHAT THE MODULE BOUNDARY DOES NOT FIX, built rather than asserted,
+        // because the honest scope of the fix is the thing most likely to be
+        // overclaimed.
+        //
+        // The reviewer's sixth method — a handler parsing `Value` directly with
+        // all-optional fields — was built and served `[]` as a request that named
+        // nothing, with the whole suite green. The question put to this change was
+        // whether the module boundary stops it.
+        //
+        // IT DOES NOT. Verified here: this compiles and serves `[]` with
+        // `Request` moved out of reach. The boundary closes exactly one hole —
+        // constructing a `Request` without going through `parse` — and it cannot
+        // close this one, because nothing in the type system obliges a handler to
+        // hold a `Request` at all. A handler that never mentions the type is
+        // never constrained by it.
+        //
+        // So the guarantee is precisely: a handler that reads fields THROUGH
+        // `Request` went through the envelope check. It is not "every handler is
+        // checked", and design.md says so in those words.
+        //
+        // What remains against this is the sweep — `every_request_taking_method`,
+        // whose doc now states the obligation — and review. Both are human, and
+        // that is the residual.
+        fn a_handler_that_never_holds_a_request(request: &str) -> String {
+            let parsed: serde_json::Value = match serde_json::from_str(request) {
+                Ok(v) => v,
+                Err(e) => return error_json(&format!("invalid JSON: {e}")),
+            };
+            let page = parsed.get("page").and_then(|v| v.as_u64()).unwrap_or(0);
+            serde_json::json!({ "items": [], "page": page, "hasMore": false }).to_string()
+        }
+
+        let served_an_array = a_handler_that_never_holds_a_request("[]");
+        let v: serde_json::Value = serde_json::from_str(&served_an_array).unwrap();
+        assert!(
+            v.get("error").is_none() && v.get("items").is_some(),
+            "if this ever FAILS, the compiler gained a way to force a handler \
+             through the envelope and design.md's residual is stale — which is a \
+             better outcome than this test passing: {served_an_array}"
+        );
+
+        // And the contrast, which is what the boundary did buy: the same handler
+        // written through `Request` cannot do this, and needs no author to
+        // remember why.
+        fn the_same_handler_through_the_type(request: &str) -> String {
+            let parsed = match Request::parse(request) {
+                Ok(r) => r,
+                Err(e) => return e,
+            };
+            let page = match parse_index(&parsed, "page") {
+                Ok(v) => v.unwrap_or(0),
+                Err(e) => return e,
+            };
+            serde_json::json!({ "items": [], "page": page, "hasMore": false }).to_string()
+        }
+        assert_eq!(
+            error_message(&the_same_handler_through_the_type("[]")),
+            REQUEST_NOT_AN_OBJECT,
+            "the type is what makes the difference, and it is the only thing that does"
+        );
+    }
+
+    #[test]
+    fn the_index_refusal_says_what_it_actually_refuses() {
+        // The message was factually wrong and is now factually narrow. `as_u64`
+        // refuses by SPELLING, not by value: `1e2` and `0.0` are both exactly
+        // whole non-negative numbers, and both are refused because serde parses
+        // them as `f64`. A message saying "must be a non-negative whole number"
+        // told such a caller its 100 was not a whole number.
+        //
+        // What is asserted here is the message for each of the four spellings
+        // that earn it, against a hardcoded literal — because what let this
+        // through is that nothing read the message beside the input that
+        // produced it. A test asserting `error.is_some()` for `{"page":1e2}`
+        // is satisfied by a message saying anything at all.
+        //
+        // An earlier version of this comment said the message "was wrong for
+        // two years". It was wrong for hours: `git log -S` finds it introduced
+        // in `0538c0d` and fixed in `134240b`, both 2026-09-12, and this
+        // repository's first commit is five days older than that. The duration
+        // was doing the persuading and it was invented — which is this
+        // project's recorded "persuasive citations get fabricated" trap wearing
+        // a number instead of a reference. The structural reason above is the
+        // real one and needs no duration.
+        let log = log_with_body("hello");
+        let refused = "page must be a non-negative integer written without a \
+                       decimal point or exponent";
+        for form in [
+            // The two the old message described correctly.
+            r#""page":-1"#,
+            r#""page":1.5"#,
+            // The two it described wrongly: exactly 100, and exactly 0.
+            r#""page":1e2"#,
+            r#""page":0.0"#,
+        ] {
+            let out = list_threads(&feed_request(form), &log, &feed_genesis());
+            assert_eq!(error_message(&out), refused, "for {form}, got {out}");
+        }
+
+        // And the acceptance is UNCHANGED — the fix is the message, not the set.
+        // `100` is served, so this test cannot be satisfied by a function that
+        // refuses every number.
+        let served = list_threads(&feed_request(r#""page":100"#), &log, &feed_genesis());
+        let v: serde_json::Value = serde_json::from_str(&served).unwrap();
+        assert!(v.get("error").is_none(), "got {served}");
+        assert_eq!(v["page"], 100);
+    }
+
+    #[test]
+    fn the_two_feed_entry_points_agree_after_the_parse_moved() {
+        // NAMED FOR WHAT IT ASSERTS, which is NOT what its old name
+        // (`the_feed_path_parses_its_request_once`) claimed. Nothing below
+        // counts parses, and nothing below could.
+        //
+        // The double parse was: `list_threads_from_request` parsed the request to
+        // read `stoa` and `genesis`, then handed the raw `&str` to `list_threads`,
+        // which parsed it again. Both replies were identical, so NO assertion on
+        // output can see the difference — which is why it survived on main.
+        //
+        // THE SINGLE PARSE IS ENFORCED BY THE COMPILER, NOT BY THIS TEST.
+        // `list_threads_inner` takes `&Request`, so there is no `&str` in scope
+        // for a second parse to consume. Reverting that signature to `&str` is
+        // what would let the bug back in, and it is a compile-visible change to a
+        // private function that this test would stay green through. If you are
+        // looking for the thing that guards the fix, it is the signature.
+        //
+        // So this test's job is the narrower one the refactor DID have to
+        // preserve: that moving the parse and dropping a nested `guarded` frame
+        // changed no reply. It is a refactor-safety net, and worth keeping as
+        // one — it is what would have caught the move going wrong — but it
+        // proves nothing about how many times anything is parsed.
+        //
+        // What the sweep below actually does, since the old comment said "three
+        // request shapes each, compared against each other" and both halves were
+        // wrong: FIVE shapes, and within the loop the two entry points are NOT
+        // compared to each other. Each is only checked to be a JSON object with
+        // no doubled guard frame — because for a malformed request the two are
+        // not obliged to agree (only one of them consults the genesis). The
+        // cross-entry-point equality is asserted once, after the loop, for the
+        // well-formed request alone, which is the one case where they must.
+        let log = log_with_body("hello");
+        let genesis = feed_genesis();
+
+        for request in [
+            full_request(),
+            "[]".to_string(),
+            "not json".to_string(),
+            "{}".to_string(),
+            feed_request(r#""page":1"#),
+        ] {
+            let through_the_decoded_form = list_threads(&request, &log, &genesis);
+            let through_the_hex_form = list_threads_from_request(&request, || {
+                Ok::<_, crate::log::OpLogError>(log_with_body("hello"))
+            });
+
+            // Both must be JSON objects, and neither may be a doubled-up envelope
+            // — a nested `guarded` that caught something would show as an error
+            // naming `list_threads` twice.
+            for (which, out) in [
+                ("list_threads", &through_the_decoded_form),
+                ("list_threads_from_request", &through_the_hex_form),
+            ] {
+                let v: serde_json::Value = serde_json::from_str(out)
+                    .unwrap_or_else(|e| panic!("{which} for {request}: not JSON ({e}): {out}"));
+                assert!(v.is_object(), "{which} for {request}: {out}");
+                if let Some(message) = v.get("error").and_then(|e| e.as_str()) {
+                    assert_eq!(
+                        message.matches("panic in list_threads").count(),
+                        0,
+                        "{which} for {request}: a guard fired, so the frames are \
+                         not equivalent: {out}"
+                    );
+                }
+            }
+        }
+
+        // And the one case where the two entry points must agree exactly: a
+        // well-formed request. They read the same fields from the same request, so
+        // a divergence here means the parse that was removed was doing something.
+        assert_eq!(
+            list_threads(&full_request(), &log, &genesis),
+            list_threads_from_request(&full_request(), || Ok::<_, crate::log::OpLogError>(
+                log_with_body("hello")
+            )),
+            "the two entry points must serve the same request identically"
+        );
+    }
+
+    #[test]
+    fn the_bypass_this_module_boundary_closes() {
+        // NOT A TEST OF BEHAVIOUR, and said so plainly: this is the honest half
+        // of the guarantee, because what it asserts cannot be asserted at
+        // runtime at all.
+        //
+        // The claim in `Request`'s doc is that a handler holding one went
+        // through the check. While `Request` was defined IN THIS FILE that was
+        // false, because a tuple struct's private field is private to its
+        // defining MODULE and every handler lives here. Verified before the fix
+        // by compiling, from this very `mod tests`:
+        //
+        //     let bypass = Request(serde_json::Map::new());
+        //     let inner_read = bypass.0.len();     // compiled, ran, returned 0
+        //
+        // Neither line contains a `from_str`, so the mitigation originally
+        // recorded — "a second parse is visible in review as an anomaly" — never
+        // applied to it.
+        //
+        // After the move to `wire::request` the first line fails to compile
+        // here. Verified, verbatim:
+        //
+        //     error[E0423]: cannot initialize a tuple struct which contains
+        //                   private fields
+        //       --> dialectica-core/src/wire.rs
+        //       note: constructor is not visible here due to private fields
+        //       --> dialectica-core/src/wire/request.rs
+        //
+        // That is a compile error, so it cannot be written as a `#[test]` in
+        // this file. A `compile_fail` doctest would not prove this either: a
+        // doctest compiles as an EXTERNAL consumer, so it would show the field
+        // is private across crates — a weaker statement than the one at issue,
+        // which is about `wire.rs` itself. Recording the verified error is
+        // therefore the whole proof, and it is deliberately stated as such
+        // rather than dressed up as a test that passes for a weaker reason.
+        //
+        // A side effect worth knowing: this crate's doctest run is empty, and
+        // CI's count-the-tests gate relies on that — it counts `#[test]`
+        // attributes in the source, which no doctest has. So a fenced block
+        // marked `ignore` rather than `text` fails that gate. Twice now; see
+        // `wire::request`'s module doc.
+        //
+        // What IS testable, and is: the positive half lives in
+        // `wire::request::tests::request_is_constructible_here_because_this_module_defines_it`,
+        // which compiles the same line inside the defining module. Together they
+        // say the refusal above is about the boundary and not about a typo.
+        //
+        // And the runtime half of the guarantee — that the only constructor
+        // reachable from here refuses a non-object — is
+        // `request_parse_refuses_every_non_object_json_value`, below.
+        //
+        // What this does NOT buy:
+        // `the_sixth_method_the_boundary_does_not_stop`, above, builds a handler
+        // that never mentions `Request` and serves an array. The claim is about
+        // handlers that hold a `Request`, not about every handler, and that is the
+        // claim design.md now makes.
+        let through_the_constructor = Request::parse(r#"{"payload":1}"#);
+        assert!(
+            through_the_constructor.is_ok(),
+            "the only reachable way in must still work"
+        );
+    }
+
+    #[test]
+    fn request_parse_refuses_every_non_object_json_value() {
+        // NAMED FOR WHAT THE BODY FALSIFIES, and it was not always. This test
+        // was called `request_parse_is_the_only_way_to_reach_a_field_read`,
+        // which asserted exclusivity that the body does not check and that is
+        // FALSE in the sense the name implies —
+        // `the_sixth_method_the_boundary_does_not_stop`, in this same file,
+        // reaches a field read without `Request::parse` at all. A name that
+        // contradicts a neighbouring passing test is worse than a vague one.
+        //
+        // What is true and is asserted: a `Request` cannot be built from a
+        // non-object, so a handler holding one cannot have skipped the check.
+        // That is what makes the guard inherited by a method nobody has written
+        // yet rather than something each author must remember — for handlers
+        // that hold a `Request`. See `wire::request`'s module doc for the
+        // boundary's exact scope.
+        // `err_of` rather than `unwrap_err`, which would require `Debug` on
+        // `Request` — widening the library's surface for a test's convenience,
+        // the same trade this file already declines for `KeystoreError: Clone`.
+        fn err_of(r: Result<Request, String>) -> Option<String> {
+            r.err()
+        }
+        // Every non-object variant `serde_json::Value` has, not just the array:
+        // the refusal is one `_` arm, so an implementation that enumerated the
+        // variants and forgot one would be caught here rather than only through
+        // whichever handler happened to be swept.
+        for not_an_object in [
+            "[]", "[1,2]", "7", "-1", "1.5", r#""s""#, "true", "false", "null",
+        ] {
+            assert_eq!(
+                err_of(Request::parse(not_an_object)),
+                Some(error_json(REQUEST_NOT_AN_OBJECT)),
+                "Request::parse accepted {not_an_object}"
+            );
+        }
+        assert!(err_of(Request::parse("{}")).is_none());
+        let unparseable = err_of(Request::parse("not json")).expect("must be refused");
+        assert!(unparseable.contains("invalid JSON"), "got {unparseable}");
+        // And the two failures are not the same failure.
+        assert_ne!(unparseable, error_json(REQUEST_NOT_AN_OBJECT));
+    }
+
+    #[test]
+    fn a_parsed_request_hands_back_the_fields_it_was_given_and_only_those() {
+        // The OTHER way "read as an object in which every field is absent" can
+        // come back, and the one no handler test can see: `parse` accepting an
+        // object and then handing on an EMPTY map. Every envelope test above
+        // asserts on refusals, and `an_object_supplying_only_its_required_fields_is_served`
+        // asserts only that no error came back — so a `parse` that discarded the
+        // map would be caught by the feed's own content tests, but nothing would
+        // say the envelope was where it went wrong.
+        //
+        // The expected values are literals written here, not values read back
+        // out of the parse and compared with themselves.
+        let parsed = match Request::parse(r#"{"s":"x","n":7,"b":true,"z":null,"o":{"k":[1]}}"#) {
+            Ok(r) => r,
+            Err(e) => panic!("an object must parse: {e}"),
+        };
+        assert_eq!(parsed.get("s"), Some(&serde_json::json!("x")));
+        assert_eq!(parsed.get("n"), Some(&serde_json::json!(7)));
+        assert_eq!(parsed.get("b"), Some(&serde_json::json!(true)));
+        // An explicit `null` is PRESENT, and that is now the contract's own words
+        // rather than this test's inference: "A field holding an explicit `null`
+        // is present, not absent", with three readings keyed to the field's
+        // declared type and optionality. The envelope must therefore preserve the
+        // distinction and decide none of it.
+        //
+        // WHICH READERS ACTUALLY OBSERVE IT, corrected — an earlier version of
+        // this comment named `parse_index` and `includeHidden` as the two that
+        // "both distinguish them", and that is exactly backwards. Those two are
+        // the only readers that DON'T: reading 2 collapses a null into absent on
+        // purpose. Four of the seven production field reads in this file do
+        // distinguish, measured on both sides of a `get` mutated to drop nulls
+        // (`.filter(|v| !v.is_null())`):
+        //
+        //   {"payload":null}   {"pong":null}                -> missing field: payload
+        //   {"channelId":null} channelId must be a string    -> missing field: channelId
+        //   {"stoa":null}      stoa must be a string         -> missing field: stoa
+        //   {"genesis":null}   genesis must be a string      -> missing field: genesis
+        //
+        // `ping` flips from SUCCESS to error, which is a behaviour change and not
+        // a reworded message; the other three collapse the wrong-type-against-
+        // missing distinction this very contract requires. So the mutation
+        // surviving 486 of 487 tests was a gap in the handler sweeps, never
+        // evidence that nothing observes the difference — the inference this
+        // comment used to draw.
+        //
+        // All four are now pinned at handler level, one fixture each, in
+        // `pings_payload_carries_an_explicit_null_through_as_a_value` and
+        // `a_null_required_field_is_refused_as_a_wrong_type_and_not_as_missing`,
+        // with the collapsing pair in
+        // `a_null_optional_field_takes_the_restrictive_default`. Four independent
+        // kills rather than one test's word.
+        assert_eq!(parsed.get("z"), Some(&serde_json::json!(null)));
+        assert_eq!(parsed.get("o"), Some(&serde_json::json!({"k": [1]})));
+
+        // And `None` means exactly one thing: this object has no such key. That
+        // is the ambiguity the type exists to remove, so it is asserted rather
+        // than assumed.
+        assert_eq!(parsed.get("neverSupplied"), None);
+        assert_eq!(Request::parse("{}").ok().unwrap().get("s"), None);
+    }
+
+    #[test]
+    fn a_handler_whose_fields_are_all_optional_refuses_a_non_object() {
+        // THE reachable form of the defect, which no method on today's surface
+        // exhibits — every one requires `stoa`, `payload` or `channelId`, so
+        // every one refuses an array as a side effect of that field being
+        // absent from it. That side effect is not this rule and does not
+        // survive the field becoming optional, which is exactly what the spec
+        // says.
+        //
+        // So the case is built here: a handler shaped like the ones the
+        // parallel branches are adding, whose fields are ALL optional. Written
+        // against `Request::parse` — the same constructor every real handler
+        // uses — so it demonstrates the property the type provides rather than
+        // a property of a test double.
+        fn all_fields_optional(request: &str) -> String {
+            let parsed = match Request::parse(request) {
+                Ok(r) => r,
+                Err(e) => return e,
+            };
+            // Every field defaulted. Under the unfixed code this body served
+            // `[]`, `7` and `null` as "a request that named nothing" — a
+            // successful reply to a request the caller never made.
+            let page = match parse_index(&parsed, "page") {
+                Ok(v) => v.unwrap_or(0),
+                Err(e) => return e,
+            };
+            serde_json::json!({ "items": [], "page": page, "hasMore": false }).to_string()
+        }
+
+        // The served cases first, so the refusals below are attributable to the
+        // envelope and not to this double refusing everything.
+        for served in ["{}", r#"{"page":3}"#, r#"{"unknown":true}"#] {
+            let out = all_fields_optional(served);
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(
+                v.get("error").is_none(),
+                "a request with no required field must be served: {served} -> {out}"
+            );
+        }
+
+        // And now the thing that was silently served.
+        for not_an_object in ["[]", "7", r#""s""#, "true", "null"] {
+            let out = all_fields_optional(not_an_object);
+            assert_eq!(
+                error_message(&out),
+                REQUEST_NOT_AN_OBJECT,
+                "for {not_an_object}, got {out}"
+            );
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(
+                v.get("items").is_none(),
+                "a refused request must not also carry a page of results: {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_non_object_message_does_not_read_as_either_refusal_it_must_be_told_from() {
+        // Why this exists BESIDE the pin below, and is not the same test.
+        //
+        // `the_three_refusals_a_caller_can_earn_are_three_different_messages`
+        // compares whole strings with `assert_ne!`, and that is not the
+        // requirement. The spec says a caller must not be "told its array
+        // failed to parse" — and a message reading
+        // `"invalid JSON: the request must be a JSON object"` tells it exactly
+        // that while comparing unequal to the parse failure's own text. Checked
+        // by mutation: reworded to that, and to
+        // `"missing field: the request must be a JSON object"`, the three-refusals
+        // test stayed GREEN both times. Only the literal pin went red — and a
+        // pin fails for "the string changed", which is not the reason this
+        // requirement names.
+        //
+        // So the property is asserted directly: the non-object message must not
+        // BEGIN with the phrase either neighbour opens on. The two prefixes are
+        // written out here rather than read from the code, because reading them
+        // from the code is how a reword makes both sides agree and the check
+        // evaporate.
+        for neighbour in ["invalid JSON", "missing field"] {
+            assert!(
+                !REQUEST_NOT_AN_OBJECT.starts_with(neighbour),
+                "the non-object refusal opens on {neighbour:?}, which is how a \
+                 caller reads a different mistake: {REQUEST_NOT_AN_OBJECT:?}"
+            );
+        }
+
+        // And the two prefixes are the right ones to have written down: each is
+        // what the neighbouring refusal actually says. Without this the test
+        // above could be guarding against phrases no message uses.
+        assert!(
+            error_message(&ping("not json")).starts_with("invalid JSON"),
+            "the unparseable refusal no longer opens on \"invalid JSON\", so the \
+             prefix this test guards against is the wrong one"
+        );
+        assert!(
+            error_message(&ping("{}")).starts_with("missing field"),
+            "the missing-field refusal no longer opens on \"missing field\", so \
+             the prefix this test guards against is the wrong one"
+        );
+    }
+
+    #[test]
+    fn the_non_object_message_is_pinned_to_a_known_answer() {
+        // Hardcoded, because a test that reads the constant and compares it to
+        // itself is the defect family this project has recorded three times. A
+        // view may render this string; changing it is a contract change.
+        assert_eq!(REQUEST_NOT_AN_OBJECT, "the request must be a JSON object");
+    }
+
+    #[test]
+    fn every_handler_answers_with_a_json_object_for_any_request_shape() {
+        // NAMED FOR WHAT IS ASSERTED. The old name claimed the reply carries
+        // "exactly one top-level shape", which nothing here checks: the body
+        // asserts `is_object()`, and asserting "exactly one shape" would mean
+        // asserting the key set — which these sweeps deliberately do not, since
+        // the success shapes differ per method (`pong`, `channelId`,
+        // `items`/`page`/`hasMore`).
+        //
         // The wire contract is only useful if it holds for EVERY method, so
         // check the property rather than each method's happy path again.
+        let mut publish_log = MemoryOpLog::new();
+        let key = publish_key();
         for out in [
             version("1.0.0"),
             ping(r#"{"payload":1}"#),
@@ -1999,10 +8475,36 @@ mod tests {
             join_stoa("garbage", &mut a_membership_store()),
             list_stoas("{}", &a_membership_store()),
             list_stoas("garbage", &a_membership_store()),
+            publish_post(
+                &publish_request(r#""body":"x""#),
+                &mut publish_log,
+                &key,
+                &mut ignored_delivery,
+            ),
+            publish_post("garbage", &mut publish_log, &key, &mut ignored_delivery),
+            publish_reply("garbage", &mut publish_log, &key, &mut ignored_delivery),
+            publish_vote("garbage", &mut publish_log, &key, &mut ignored_delivery),
         ] {
             let v: serde_json::Value = serde_json::from_str(&out)
                 .unwrap_or_else(|e| panic!("handler emitted invalid JSON ({e}): {out}"));
             assert!(v.is_object(), "every reply is a JSON object, got {out}");
+        }
+
+        // The reply half must hold for a REFUSED request too, and the scenario
+        // says so: "with a well-formed or a malformed request". A refusal built
+        // by hand rather than through `error_json` is the way this breaks — an
+        // array in, an array out.
+        for (name, method) in every_request_taking_method() {
+            for request in ["[]", "7", "null", "garbage", "{}"] {
+                let out = method(request);
+                let v: serde_json::Value = serde_json::from_str(&out).unwrap_or_else(|e| {
+                    panic!("{name} emitted invalid JSON for {request} ({e}): {out}")
+                });
+                assert!(
+                    v.is_object(),
+                    "{name} answered {request} with a non-object: {out}"
+                );
+            }
         }
     }
 
@@ -3451,6 +9953,7 @@ mod tests {
         // and this test fails, where the whole rest of the suite passes.
         let dir = WireTempDir::new("creator-is-poster");
         crate::keystore::Keystore::generate()
+            .expect("the test host has randomness")
             .create(
                 &crate::keystore::default_path_in(dir.path()),
                 &crate::keystore::Unlock::Unencrypted,
@@ -3471,11 +9974,29 @@ mod tests {
         );
         let stoa = crate::identity::Address::from_hex(created["stoa"].as_str().unwrap()).unwrap();
 
-        // `get_capabilities` is given the identity lookup exactly as the adapter
-        // gives it — including the `_stoa` argument it must NOT use to derive.
+        // `get_capabilities` is given the `creator_and_poster_in` half of the
+        // pairing, which is what this test is about.
+        //
+        // **It is no longer what the adapter passes**, and saying so is the point.
+        // This comment claimed it was, and `main`'s `identity-onboarding` made that
+        // false: the adapter now calls `get_capabilities_from_stores`, whose lookup
+        // is `posting_identity` — a PATH-DERIVED per-Stoa address read out of the
+        // identity record. So the live probe and `create_stoa`'s root-derived
+        // creator are two different keys again, which is the very divergence
+        // `creator_and_poster_in` exists to prevent, reintroduced by a merge rather
+        // than by an edit. This test cannot see it, because it injects both halves;
+        // the gap is recorded in `design.md` under Decisions and reported as a spec
+        // question rather than patched here.
+        //
+        // What the test still proves is the pairing itself: given the pairing, the
+        // creator a creation names IS the identity the probe reports.
         let probe = get_capabilities(
             &serde_json::json!({ "stoa": stoa.to_hex() }).to_string(),
-            |_stoa| crate::keystore::poster_address_in(dir.path()).map(|a| a.to_hex()),
+            |_stoa| {
+                crate::keystore::poster_address_in(dir.path())
+                    .map(|a| a.to_hex())
+                    .map_err(|e| e.to_string())
+            },
         );
         let probed: serde_json::Value = serde_json::from_str(&probe).unwrap();
 

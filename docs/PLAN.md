@@ -207,6 +207,11 @@ Adopted wholesale from the ecosystem convention:
 Widening this interface is a deliberate decision, not a side effect of needing
 one more field.
 
+**The contract is the `module-wire-contract` spec, which is where to read it.**
+It states both halves of the envelope — a request is an object and so is a
+reply — the one failure shape, the panic guard, and how a callee's own failure
+is decoded. This section is the summary; the spec is the obligation.
+
 ---
 
 ## 3. Dependencies
@@ -901,10 +906,13 @@ ionic thales* — not `user_8f3a` and not a handle someone registered. The shape
 is settled below and is **four words**, for reasons that are arithmetic rather
 than aesthetic.
 
-**But a user is not handed one.** At onboarding they are shown a slate of five
+**But a user is not handed one.** ~~At onboarding they are shown a slate of five
 generated identities and pick one, and they may refresh the slate as many times
-as they like. So a name is *chosen* in the ordinary sense — it carries intent,
-and a user who refreshed forty times meant the one they kept.
+as they like.~~ **Built — see the `identity-onboarding` spec**, which carries both
+the fixed count reported with the set and the unlimited regeneration as
+requirements. What matters here and is not a requirement anywhere: a name is
+*chosen* in the ordinary sense — it carries intent, and a user who refreshed forty
+times meant the one they kept.
 
 **What is being chosen is the key, and the name is the key's shadow.** This
 distinction is not pedantry and it is the single most important sentence in this
@@ -1384,30 +1392,40 @@ number them oppositely and each would be sure the other was the impostor.
 **A second collision question the slate introduces: two identical names in one
 picker.** Five draws from 2³⁴ collide with probability about `5·4/2S` = `10/S` —
 roughly one slate in 1.7 billion, against one in 1.7 million at 2²⁴. A user will
-never see it, and at this size arguably no deployment ever will. **The picker
-still discards and redraws a duplicate**, because the handling is three lines
-and the alternative is a display that reads as broken in the one case it
-appears.
+never see it, and at this size arguably no deployment ever will.
 
-This one *is* worth handling, and it is cheap precisely because it is local:
-the slate is generated on one peer, at one moment, with nothing published. So
-**the picker discards and redraws a duplicate before displaying**, which is a
-presentation rule with no protocol consequence whatsoever — unlike the
-cross-identity collision above, where discarding is impossible because both
-identities already exist and neither peer may decide which one is real. The two
-cases look alike and are not: one is a choice about what to draw, the other is a
-fact about what exists.
+~~**The picker still discards and redraws a duplicate**, because the handling is
+three lines and the alternative is a display that reads as broken in the one case
+it appears. This one *is* worth handling, and it is cheap precisely because it is
+local: the slate is generated on one peer, at one moment, with nothing published.
+So **the picker discards and redraws a duplicate before displaying**, which is a
+presentation rule with no protocol consequence whatsoever.~~
 
-**Regeneration discards keys, and the user cannot see it.** Each refresh mints
+**Built, and not by the picker** — see the `identity-onboarding` spec. Duplicate
+handling is in **core**, and it is an index walk rather than a redraw: the
+derivation walks forward until it has five distinct paths. A redraw would need a
+fresh nonce, which would destroy the reproducibility everything else rests on; the
+archived `design.md` carries that argument. The distinction this section draws
+against the cross-identity case still holds and is why it is kept: one is a choice
+about what to draw, the other a fact about what exists.
+
+~~**Regeneration discards keys, and the user cannot see it.** Each refresh mints
 five keypairs and keeps at most one; the rest are gone, unrecoverable, and were
-never anywhere. This sounds alarming and is not: a discarded key was never an
-identity — it signed nothing, appeared in no op, and no peer ever heard of it.
-There is nothing to lose. **The only case that would matter is if a refresh
-could discard a key the user had already used**, which is why selection and use
-must be one step: an identity becomes real when it signs, and nothing signs
-during onboarding. Whether the keystore writes on every refresh or only on
+never anywhere.~~ ~~Whether the keystore writes on every refresh or only on
 selection is an implementation question with no user-visible consequence, and is
-deliberately not decided here.
+deliberately not decided here.~~
+
+**Both halves are superseded.** A refresh mints **no keypairs**: the five
+candidates are derivation paths over **one** master key, differing by path alone —
+so there are no discarded keys to be invisible about, and a backup is one secret
+rather than five. And the write question **was decided**: nothing writes on
+refresh, structurally, because the slate handler has no store parameter to write
+to. See the `identity-onboarding` spec for both, and its archived `design.md` for
+why five independent roots was rejected.
+
+What survives from this paragraph, because it is the reason the shape is safe:
+**an identity becomes real when it signs, and nothing signs during onboarding.**
+That is now spec prose rather than a plan note.
 
 #### Grinding — and the slate makes this the central finding
 
@@ -3270,10 +3288,13 @@ stage needs a later one**, which is the §4.8 property worth preserving: if D
 never ships, dialectica is a single-Stoa forum, which is a smaller thing than
 intended and not a broken one.
 
-**What is deliberately not staged here:** votes. `op.rs` carries the `Vote`
-kind and §7.2 rule 2 ships no score, so a vote button would publish an op that
-changes nothing a reader can see. A control with no visible effect teaches users
-the app is broken. Votes arrive with scoring, not before.
+~~**What is deliberately not staged here:** votes.~~ **Overridden by the owner's
+MVP scope (§9.2), and publishing a vote is now contracted — see the
+`content-authoring` spec.** The objection this paragraph raised is not refuted and
+the spec does not paper over it: the requirement "A published vote is stored and
+readable, and no ordering consumes it" states the bound rather than an effect, and
+forbids the reply from describing one. What the vote *control* may honestly claim
+in the interface is the live half of the question, and it is §9.2's to carry.
 
 #### 1. What a feed is
 
@@ -3393,25 +3414,22 @@ forum client can do to someone.
 The probe already exists and answers `{"canPost":bool, "identity":"…" |
 "reason":"…"}`. What Stage B adds is the publish path:
 
-- `createPost` — a new thread in a Stoa
-- `createReply` — a post naming a parent, which is the same op kind with
-  `parent` set (`op.rs` has no `Reply` kind, deliberately)
-- `revisePost` — a new version of one of the caller's own posts
+~~- `createPost` — a new thread in a Stoa~~
+~~- `createReply` — a post naming a parent~~
 
-Three properties these share, each of which is a decision:
+**Posting, replying and voting are contracted; see the `content-authoring`
+spec.** It says what a caller supplies, what must hold of the op produced, what
+the peer holds after, and every refusal — including that the reply names the op
+id, that publishing is append-then-hand-off rather than send, that the identity
+is derived from the Stoa and never a parameter, and that a reply names only its
+parent with the thread derived from it. The reasoning for each, and for the
+`createdAt` field that was considered and declined, is in the `authoring-content`
+change's `proposal.md` and `design.md`.
 
-- **They return the op id of what was published**, so the view can scroll to it,
-  render it optimistically, or name it in an error. A publish that returns
-  `{"ok":true}` leaves the view unable to find what it just made.
-- **They are not "send to the network"; they are "append and publish".** The op
-  is signed, appended to the local log and handed to delivery. What the view is
-  told is that the op exists locally — delivery's own outcome arrives later
-  (§2.4: you cannot await a cross-module result inside a method), and a publish
-  call that blocked on it would be a call that can hang.
-- **The identity is not a parameter.** §5.2 gives a user one identity per Stoa,
-  derived from the root key and the Stoa address. The Stoa is a parameter; the
-  identity falls out of it. A method taking an author would be a method that can
-  be asked to sign as someone it is not.
+Still to build: **`revisePost`** — a new version of one of the caller's own posts.
+`post-revision` contracts which version is current; nothing publishes one. Its
+refusals turn on authorship of a target op, which is why it was left out of the
+authoring change rather than folded into it.
 
 **What the view must never do:** show a compose affordance without having asked
 the probe in the current render. The probe is cheap and re-determines its
@@ -3535,13 +3553,19 @@ that is sometimes meaningless is that shape in miniature.
 
 ```
 getCapabilities({stoa})     -> exists today
-createPost({stoa, body, attachments})          -> {op}
-createReply({stoa, thread, parent, body, attachments}) -> {op}
 revisePost({stoa, target, body, attachments})  -> {op}
 getPostHistory({stoa, post, page, perPage})
                             -> {"items":[{version, body, attachments, isCurrent}],
                                 page, hasMore}
 ```
+
+**`createPost`, `createReply` and the vote method are contracted — see the
+`content-authoring` spec, which supersedes the shapes sketched here.** One
+departure is worth flagging because this file sketched it the other way:
+`createReply` takes **no `thread`**. The thread is derived from the parent, so a
+reply filed under the wrong thread is unrepresentable rather than checked, and the
+cost — a reply to a parent this peer does not hold is refused — is contracted
+rather than hidden.
 
 **Stage C — moderate**
 
@@ -3577,9 +3601,9 @@ and is not built, so a join reply names the founding value and says so.
 **Methods deliberately NOT proposed**, each with its reason, because a list of
 what was declined is the part that stops the API growing by accident:
 
-- **`vote`** — the op kind exists, nothing reads it (§7.2 rule 2). A method
-  publishing an op with no observable effect is a method that will be called and
-  then explained away.
+- ~~**`vote`**~~ — **now proposed and contracted** (§9.2's scope decision; the
+  `content-authoring` spec). The objection stands as written and the spec bounds
+  what the method may claim rather than claiming an effect it does not have.
 - **`getPost`**, a single-post read — every screen that shows a post shows it
   inside a thread or a feed, and §2.4 makes per-item calls the expensive shape.
   Add it when a screen exists that genuinely wants one post.
@@ -3677,7 +3701,16 @@ being asked for rather than discovering it from a stalled view.
   it: the same gap closing, or a measurement showing the fold is cheap enough
   that the question does not arise.
 
-#### 9. Why this section ships without a spec delta
+#### 9. Why this section shipped without a spec delta
+
+> **Partly superseded.** Stage B's publish half now has one — the
+> `content-authoring` spec — written the way this section says a delta should be:
+> alongside the thing it contracts. The argument below is why *this section* was
+> not itself a delta, and it still holds for everything here that remains
+> unbuilt: the feed and thread reads, `revisePost`, `getPostHistory`, the
+> moderation calls, and the two orderings, which are still an open question
+> rather than a requirement.
+
 
 `.claude/agents/README.md` puts PLAN.md and the specs in different jobs: PLAN.md
 holds **what is not built yet** and the reasoning for it; a spec is a
@@ -3734,8 +3767,97 @@ All of it over **delivery's reliable channel** (§4.1). **No Logos Storage** —
 (§4.6).
 
 Nothing on either list is deleted or withdrawn. `moderation.rs` and its specs are
-built, tested and merged and they stay; `derive_stoa_key` is built and simply is
-not called; §4.6 stands as the attachment design for when attachments ship.
+built, tested and merged and they stay; §4.6 stands as the attachment design for
+when attachments ship.
+
+~~`derive_stoa_key` is built and simply is not called~~ — **this was false when
+written.** The adapter called it twice, and a Stoa's `creator` was derived under a
+synthetic domain rather than being the key its creator signs with, so a peer
+creating a Stoa was its sole moderator under a key it would never sign with. The
+stoa-lifecycle change made `identity_key` the root secret directly, which is what
+this paragraph had claimed all along. The derivation stays built and tested,
+because it is still the destination for per-Stoa identity.
+
+#### Follow-ups the publish path named, not yet built
+
+**"A publish requires a usable identity and says so when there is none" moves to
+`posting-capability`.** Decided 2026-09-13, to be done as its own change.
+
+The requirement's subject is the *absence* of an identity, and discovering that
+absence means reaching a keystore — which `dialectica-core` deliberately cannot
+do. So the requirement is undischarged in core, and the two alternatives to
+moving it both cost something real:
+
+- **Narrowing it to the wire shape** would contract the wording of a refusal only
+  the adapter can raise, and require nothing of the trigger — a module built with
+  no guard would satisfy it. A weaker contract bought with a tickable box.
+- **Taking a fallible key-supplier in core** would discharge it, but trades a
+  structural property for a tested one: `authoring` currently *cannot* create key
+  material, because it never holds anything that could. A closure replaces
+  "cannot" with "does not, and here is a test". That may still be right on its own
+  merits, and should be judged there rather than as the price of testability.
+
+`posting-capability` already owns eight requirements on this same question, so the
+generality is demonstrated. The move is `ADDED` there and `REMOVED` here, verbatim,
+with Reason and Migration in one change — which is why it does not ride inside the
+change that found it.
+
+Both came out of review and are recorded here rather than in a findings file,
+which is deleted at merge.
+
+**The publish prologue/tail wants reshaping into one place.** `publish_post`,
+`publish_reply` and `publish_vote` each carry the same prologue — parse, validate,
+open the keystore, open the store — and the same tail. Three copies of one guard
+is the point at which a guard should become a data structure, and two things make
+it more than tidiness:
+
+- It is a **precondition of `publish_moderation`**, where a missed guard is an
+  authorisation defect rather than a wrong reply.
+- The adapter runs a **64 MiB Argon2id unlock before any validation**, so a
+  request that will be refused for a malformed Stoa pays for a full key
+  derivation first. Validate, then unlock — one reshape fixes both.
+
+Deliberately **not** done inside the change that revealed it: make the change
+easy, then make the easy change. A diff that reshapes three handlers and adds a
+publish path cannot be reviewed for either.
+
+**A panicking delivery sink must not report a published op as failed.** `deliver`
+runs inside `guarded`, so a sink that panics yields `{"error":…}` with no `opId`
+for an op that **is already in the log** — against "a publish SHALL NOT be
+reported as having failed on the strength of a delivery outcome".
+
+The owner's decision: **catch it and report the publish as successful.** The op is
+published and the requirement says so; delivery is the transport's concern.
+
+**The synchronous reply was never the right place to learn about delivery, and the
+delivery contract already says so.** ~~Now contracted~~ — `content-authoring`'s
+"Publishing signs, appends, and hands off — in that order" requires that the reply
+carry no delivery outcome at all, and that the capability not require the interface
+to delivery to be able to express one. What remains open is the obligation below,
+not the decision.
+
+`delivery_module.lidl` carries three channel events — `channelMessageSent`,
+`channelMessageError` and `messagePropagated` — so the outcome arrives
+**asynchronously, after the publish call has returned**. A return value could not
+carry it even if we wanted it to.
+
+That also makes the return value a *worse* signal than the events, not merely a
+missing one: a sink that accepts an op tells you the transport took it, which is
+`channelMessageSent` and says nothing about whether any peer received it.
+`messagePropagated` is the fact a user cares about. Publishing and delivering are
+two events at two times, and this decision stops the API pretending they are one.
+
+**The obligation lands on `op-transport`**: an op that reaches
+`channelMessageError`, or that never reaches `messagePropagated` within some
+bound, has to become visible somewhere. Without that this decision converts a loud
+failure into a silent one. The bound, and what a view shows for an op in flight
+versus one that never propagated, are that capability's to specify — and
+`docs/UI-BRIEF.md` will need the rendering obligation once it does.
+
+Moving `deliver` outside `guarded` was rejected — PHASE0-FINDINGS §3 measured what
+an unguarded panic costs (the module aborts, the caller waits out a 20-second
+timeout, every later call reports `MODULE_NOT_LOADED`), which is a worse answer
+than an unreported delivery failure.
 
 #### How this sits against §9.1's stages
 
@@ -3768,6 +3890,14 @@ alongside it**: whoever builds the vote control inherits the problem §9.1
 identified, and the honest options are a visible per-post tally that is not a
 ranking, or a control whose effect the copy does not overstate. §7.4 settles the
 control's shape; it does not settle this.
+
+**The core half is now settled and the UI half is not.** The
+`content-authoring` spec contracts publishing a vote at exactly the honest width —
+the op is signed, appended and readable by its op id and by its target, and the
+reply carries an op id and nothing describing an effect. So core makes no claim a
+reader could be misled by. **What remains is entirely an interface obligation**:
+a vote control must not imply a ranking, and this is the open item, not a
+contracted one. It belongs on §11.1's rendering-obligations list when that lands.
 
 ---
 
@@ -3995,7 +4125,11 @@ thing (§2.3).
   unanswered, for the owner's own review** of identity and derivation: *"I would
   expect us to have all root identities using derivation."* Today §5.1's root
   secret is generated (`SecretKey::generate`) and only the per-Stoa key is derived
-  from it (§5.2, `derive_stoa_key`) — and §9.2's MVP does not call even that. The
+  from it — under **two** schemes now, not one: `derive_stoa_key` takes the root and
+  the Stoa, and `derive_stoa_key_at_path` takes a chosen derivation path as a third
+  input, under a bumped salt so the two cannot silently reproduce each other. The
+  path-taking one is what a kept identity uses (see the `identity-onboarding`
+  spec); the pathless one has no production caller left. The
   question is whether a root should itself be a derived child of something
   higher, and what that something is. **Do not answer it here**; it touches §5.1,
   §5.6's keystore and the LEZ key-tree path in the next entry, and the owner has
@@ -4282,6 +4416,40 @@ thing (§2.3).
   defined degraded order (ascending op id, always below any op the transport did
   order) that is identical on every peer and reports itself as degraded. **The op
   log and the resolvers are unblocked**: they have a defined thing to key on.
+
+- **Should an op carry an author-asserted `createdAt`, and what clamps it?**
+  **Raised by the authoring change, which declined to add it and contracted the
+  consequence instead.** One gap, two symptoms, and the second was not previously
+  written down:
+
+  1. Both accepted feed orderings degrade to ascending op id, because no op
+     carries a value that orders anything (§9.1 §8 has this half).
+  2. **Two identical posts are one op.** An op id hashes bytes carrying no
+     timestamp and no nonce, so one author posting the same body into one Stoa
+     twice publishes once. That is right for a double-clicked submit and wrong for
+     someone deliberately posting "agreed" twice.
+
+  The `content-authoring` spec makes symptom 2 **visible rather than surprising** —
+  its requirement "Publishing the same content twice publishes one op" states the
+  behaviour, requires the newly-stored-or-already-present answer to reach the
+  caller, and names this field as the declined fix. So the next reader meets a
+  decision rather than a user complaint.
+
+  **Why the authoring change declined it** is recorded where that reasoning
+  belongs, in that change's `design.md` under Decisions, rather than copied here —
+  two copies of a rationale drift and the wrong one gets read. In short: it is a
+  `MODIFIED` to `op-format`'s "An op carries no ordering field and no per-peer
+  state", and the clamp that would make it safe is unspecified.
+
+  **A nonce is the narrower alternative** — it separates two identical posts and
+  does nothing for ordering. Worth naming so the two are not conflated: if only
+  symptom 2 needs fixing, a nonce is cheaper and needs no clamp; if ordering is
+  wanted, `createdAt` covers both and the clamp is the work.
+
+  **What would decide it:** whoever takes the ordering question in §9.1 §8, since
+  it is the same field. Whichever change adds it must modify the
+  `content-authoring` requirement above, which is the correct place for the
+  pressure to land.
 
 - **Does an expiring credential want a grace period?** §5.5 settles that proofs
   expire and the holder re-proves on a cadence, and records the cost: a user

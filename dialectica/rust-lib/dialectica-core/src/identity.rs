@@ -66,6 +66,26 @@ const OP_SIGNING_PREFIX: &[u8; 32] = b"/dialectica/1/Signed/Op\0\0\0\0\0\0\0\0\0
 /// same root rather than silently colliding with this one.
 const STOA_KEY_SALT: &[u8] = b"/dialectica/1/Identity/Stoa";
 
+/// HKDF salt for per-Stoa derivation that also takes a **user-chosen path**
+/// ([`derive_stoa_key_at_path`]).
+///
+/// **Version 2, and the bump is the requirement rather than housekeeping.** The
+/// `identity` capability requires that where a scheme taking a path and one
+/// taking only the root and the Stoa both exist, they be distinguishable, "so
+/// that one scheme's identities cannot be silently reproduced by the other".
+///
+/// Without the bump, path 0 would append four zero bytes to the info and HKDF
+/// would produce a *different* key anyway — so the separation would hold, but by
+/// an accident of the info encoding rather than by a decision. Making path 0
+/// equal the two-input scheme may well be wanted one day, since it would keep
+/// existing identities valid; the point of the bump is that such a change has to
+/// be somebody's decision and not a collision nobody noticed.
+///
+/// The cost of the bump is zero today because nothing has been derived under the
+/// old scheme in the field: `identity-onboarding` is the change that mints the
+/// first keystore. It would not be zero later, which is why this comment exists.
+const STOA_KEY_SALT_WITH_PATH: &[u8] = b"/dialectica/2/Identity/Stoa";
+
 /// A 32-byte address: an author's, or a Stoa's.
 ///
 /// One type for both because they are the same construction over different
@@ -118,7 +138,37 @@ impl Address {
     /// **attacker-supplied content**: §4.8 has Stoa addresses appearing inside
     /// posts, where anything at all may show up. A lenient parser that accepted
     /// a truncated address would let two different Stoas collide in the UI.
+    /// **The length is checked BEFORE the decode, and the ordering is the
+    /// point.** `hex::decode` allocates `s.len() / 2` bytes from a length this
+    /// function does not control: a 64 MiB hex string arriving in a request's
+    /// `stoa` field built a 32 MiB `Vec` and only *then* met the "must be 32
+    /// bytes" refusal. Measured, with the refusal it produced:
+    /// `{"error":"stoa: address must be 32 bytes (64 hex chars), got 33554432
+    /// bytes"}`.
+    ///
+    /// `wire::MAX_REQUEST_BYTES` also closes this, and both are kept because they
+    /// are different layers: the envelope bounds what any request may cost, and
+    /// this bounds what this function may allocate regardless of who calls it —
+    /// including a future caller that is not a wire handler at all. The cheaper
+    /// check is also the more local one.
+    ///
+    /// **What it deliberately does not do is reorder the error taxonomy.** The
+    /// obvious spelling — `if s.len() != 64 { return WrongLength(s.len() / 2) }` —
+    /// closes the allocation but also changes what a *short* junk input reports:
+    /// `from_hex("nothex!!")` would become `WrongLength(4)` where it has always
+    /// been `NotHex`, and `address_parsing_rejects_attacker_supplied_junk` pins
+    /// that. A security fix that quietly reclassifies a caller-visible error is
+    /// two changes in one diff.
+    ///
+    /// So the guard is on the **over-long** case only, which is the case where
+    /// the allocation is the problem. Everything at or under 64 characters costs
+    /// at most 32 bytes to decode, and reaches exactly the arms it always did.
+    /// A `WrongLength` above the cap is reported in hex characters halved, which
+    /// is what the decoded length would have been.
     pub fn from_hex(s: &str) -> Result<Self, AddressError> {
+        if s.len() > 64 {
+            return Err(AddressError::WrongLength(s.len() / 2));
+        }
         let bytes = hex::decode(s).map_err(|_| AddressError::NotHex)?;
         let bytes: [u8; 32] = bytes
             .as_slice()
@@ -185,8 +235,8 @@ impl PublicKey {
     /// can never verify a signature is not a key worth holding.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, KeyError> {
         let bytes: &[u8; 32] = bytes.try_into().map_err(|_| KeyError::NotAValidPublicKey)?;
-        let key =
-            ed25519_dalek::VerifyingKey::from_bytes(bytes).map_err(|_| KeyError::NotAValidPublicKey)?;
+        let key = ed25519_dalek::VerifyingKey::from_bytes(bytes)
+            .map_err(|_| KeyError::NotAValidPublicKey)?;
         if key.is_weak() {
             return Err(KeyError::WeakPublicKey);
         }
@@ -272,16 +322,32 @@ impl SecretKey {
     /// no longer supplies an `OsRng` for. Identical result, one dependency
     /// instead of the `rand` stack.
     ///
-    /// Panics if the OS random source fails. That is the right response and not
-    /// a shortcut: there is no safe fallback for "I could not get entropy", and
-    /// continuing with a predictable key would forge every signature this
-    /// identity ever makes. It is also not reachable from a dispatch handler —
-    /// key generation happens at keystore setup, not while serving an
-    /// inbound op.
-    pub fn generate() -> Self {
+    /// **Fallible, because this IS reachable from a dispatch handler.**
+    ///
+    /// There is no safe fallback for "I could not get entropy" — continuing with a
+    /// predictable key would forge every signature this identity ever makes — so
+    /// the failure must stop the operation. What it must not do is `panic`.
+    ///
+    /// This doc comment used to say the opposite: *"not reachable from a dispatch
+    /// handler — key generation happens at keystore setup, not while serving an
+    /// inbound op."* That was true when it was written and `identity-onboarding`
+    /// made it false. On a fresh install — the only install onboarding exists for —
+    /// every `generateIdentitySlate` and `keepIdentity` call mints a master key, so
+    /// every one of them reached the `expect` this function used to carry. Review
+    /// found it, and found it in the worst arrangement: the mint was in the adapter,
+    /// *outside* `core::guarded`, so `catch_unwind` never saw it and
+    /// PHASE0-FINDINGS §3's measured consequence applied in full — the module
+    /// process aborts, the caller waits out its 20s timeout, and every later call
+    /// reports `MODULE_NOT_LOADED`.
+    ///
+    /// `SlateNonce::generate` had already taken the fallible shape for exactly this
+    /// reason, and its comment cited the contrast with *this* function. Rather than
+    /// update that comment to keep the asymmetry, the asymmetry is removed: both
+    /// randomness calls on the onboarding path return a `Result`.
+    pub fn generate() -> Result<Self, RandomnessUnavailable> {
         let mut seed = [0u8; 32];
-        getrandom::fill(&mut seed).expect("the OS random source must be available to mint a key");
-        SecretKey(ed25519_dalek::SigningKey::from_bytes(&seed))
+        getrandom::fill(&mut seed).map_err(|_| RandomnessUnavailable)?;
+        Ok(SecretKey(ed25519_dalek::SigningKey::from_bytes(&seed)))
     }
 
     /// Rebuild a key from stored bytes — what [`crate::keystore`] calls.
@@ -360,6 +426,88 @@ pub fn derive_stoa_key(root: &[u8; 32], stoa: &Address) -> SecretKey {
     SecretKey(ed25519_dalek::SigningKey::from_bytes(&seed))
 }
 
+/// Derive a signing key for one Stoa from a root secret **and a chosen path**.
+///
+/// This is [`derive_stoa_key`] with the third input the `identity` capability
+/// now admits, and the one `identity-onboarding` selects between: a user is
+/// offered several candidates for a Stoa and they differ by this value alone.
+///
+/// # This is the same scheme with one more input, not a second scheme
+///
+/// One HKDF-SHA512 expansion, the same infallible `from_bytes`, the same refusal
+/// of public derivation. `identity-onboarding` requires that derivation "remain
+/// that of the `identity` capability" and forbids introducing a second scheme,
+/// so everything [`derive_stoa_key`]'s doc comment argues applies here unchanged
+/// — including why Ed25519 was chosen for exactly this operation.
+///
+/// **The salt differs**, and that is the one deliberate divergence. See
+/// [`STOA_KEY_SALT_WITH_PATH`]: it is what keeps this scheme's path-0 identity
+/// distinct from the two-input scheme's, which the spec requires.
+///
+/// # The recomputability guarantee is narrower, and this is where it narrows
+///
+/// [`derive_stoa_key`] makes an identity reproducible from the root and the Stoa
+/// address alone, so nothing needs backing up beyond the root and the list of
+/// Stoas joined. **A user-chosen path is a third input that no value on the
+/// network carries**, so an unrecorded path is an identity that cannot be
+/// reproduced from any surviving material. `identity-onboarding` moves the
+/// guarantee onto the recorded path and requires the record be stored; see
+/// [`crate::identity_store`].
+///
+/// That is a real cost, accepted in exchange for the user getting a choice. It is
+/// stated here rather than only in the spec because this function is where a
+/// reader meets the third argument and asks what it costs.
+///
+/// # The path's encoding
+///
+/// `info = stoa || path.to_be_bytes()`. Unambiguous without a length prefix
+/// because an [`Address`] is a fixed 32 bytes — there is no variable-length
+/// concatenation here, which is the hazard the fixed-width prefixes elsewhere in
+/// this file exist to avoid. Big-endian so the bytes read in the order the
+/// number is written, which matters only for a human comparing a test vector.
+///
+/// A `u32` rather than a BIP-32 path string: what onboarding offers is an index,
+/// and a string would be a parser meeting caller input for no present gain.
+/// Accepting a string later is additive.
+pub fn derive_stoa_key_at_path(root: &[u8; 32], stoa: &Address, path: u32) -> SecretKey {
+    let hk = hkdf::Hkdf::<sha2::Sha512>::new(Some(STOA_KEY_SALT_WITH_PATH), root);
+    let mut info = [0u8; 36];
+    info[..32].copy_from_slice(stoa.as_bytes());
+    info[32..].copy_from_slice(&path.to_be_bytes());
+    let mut seed = [0u8; 32];
+    hk.expand(&info, &mut seed)
+        .expect("32 bytes is far below HKDF-SHA512's output limit");
+    SecretKey(ed25519_dalek::SigningKey::from_bytes(&seed))
+}
+
+/// The OS random source was unavailable.
+///
+/// Its own type rather than a [`KeyError`] arm, because it is not a fact about a
+/// key: every other arm there says "these bytes are not the thing you claimed",
+/// and this says "the machine could not give me entropy". Collapsing them would
+/// make `NotAValidSecretKey` mean two things, one of which is not about the
+/// secret key at all.
+///
+/// A unit struct rather than an enum with one arm: there is one way for this to
+/// happen and nothing to carry. `getrandom`'s own error is deliberately not
+/// wrapped — it names an OS errno that no caller of this can act on differently,
+/// and the fix ("the OS random source is unavailable") is the same in every case.
+#[derive(Debug, PartialEq, Eq)]
+pub struct RandomnessUnavailable;
+
+impl std::fmt::Display for RandomnessUnavailable {
+    /// Names the fix, following `KeystoreError::Display`'s documented obligation —
+    /// this string can reach a view through a slate or keep reply.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "the operating system's random source is unavailable, so no key can be \
+             minted; check that /dev/urandom is reachable and that no sandbox policy \
+             is blocking getrandom"
+        )
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum KeyError {
     NotAValidPublicKey,
@@ -376,7 +524,10 @@ impl std::fmt::Display for KeyError {
         match self {
             KeyError::NotAValidPublicKey => write!(f, "not a valid public key"),
             KeyError::WeakPublicKey => {
-                write!(f, "low-order public key, which can never verify a signature")
+                write!(
+                    f,
+                    "low-order public key, which can never verify a signature"
+                )
             }
             KeyError::NotAValidSecretKey => write!(f, "not a valid secret key"),
             KeyError::NotAValidSignature => write!(f, "not a valid signature"),
@@ -576,9 +727,57 @@ pub fn stoa_address(genesis_bytes: &[u8]) -> Address {
 mod tests {
     use super::*;
 
+    /// A fresh key, or a test failure.
+    ///
+    /// `SecretKey::generate` returns a `Result` because it is reachable from a
+    /// dispatch handler, where a panic aborts the module process. In a test a panic
+    /// IS the reporting mechanism, and a machine with no working random source
+    /// cannot run this suite meaningfully anyway — so the unwrap is concentrated
+    /// here rather than repeated at twenty call sites, where it would be twenty
+    /// chances to write something subtler than "this cannot fail in a test".
+    fn a_fresh_key() -> SecretKey {
+        SecretKey::generate().expect("a test host has a working random source")
+    }
+
+    #[test]
+    fn minting_a_key_is_fallible_rather_than_a_panic() {
+        // The regression test for the review finding that `SecretKey::generate`'s
+        // `expect` became reachable from a dispatch handler while its doc comment
+        // still said it was not. A panic on a handler path aborts the module process
+        // (PHASE0-FINDINGS §3), which is a dead module rather than a failed call.
+        //
+        // What is checkable is the SHAPE, not the failure: `getrandom` cannot be made
+        // to fail from a test without a seccomp sandbox, and a test that installed
+        // one would be testing the sandbox. So this pins that the signature is
+        // fallible and that its error names a fix — the two things that would have to
+        // be undone to reintroduce the panic.
+        //
+        // A `Result` is what makes the fix structural: reverting to `-> Self` is a
+        // compile error at `Keystore::generate`, not a silent change of failure mode.
+        let minted: Result<SecretKey, RandomnessUnavailable> = SecretKey::generate();
+        assert!(
+            minted.is_ok(),
+            "a test host must have a working random source"
+        );
+
+        // The message names the fix rather than only the fault, which is what lets it
+        // reach a view through a slate or keep reply and still be actionable.
+        let reason = RandomnessUnavailable.to_string();
+        assert!(
+            reason.contains("getrandom") && reason.contains("check"),
+            "the randomness failure must name what to check: {reason}"
+        );
+        // And it converts into the keystore's own error, so the handler path has one
+        // error type rather than two.
+        assert_eq!(
+            crate::keystore::KeystoreError::from(RandomnessUnavailable),
+            crate::keystore::KeystoreError::NoRandomness
+        );
+    }
+
     #[test]
     fn a_signature_verifies_against_its_own_key() {
-        let sk = SecretKey::generate();
+        let sk = a_fresh_key();
         let sig = sign_op_bytes(&sk, b"an op");
         assert!(verify_op_bytes(&sk.public_key(), b"an op", &sig));
     }
@@ -587,8 +786,8 @@ mod tests {
     fn a_signature_does_not_verify_against_a_different_key() {
         // The property moderation rests on (§6): a forged op is one signed by
         // somebody who is not who they claim to be.
-        let author = SecretKey::generate();
-        let impostor = SecretKey::generate();
+        let author = a_fresh_key();
+        let impostor = a_fresh_key();
         let sig = sign_op_bytes(&impostor, b"an op");
         assert!(!verify_op_bytes(&author.public_key(), b"an op", &sig));
     }
@@ -597,7 +796,7 @@ mod tests {
     fn a_signature_does_not_verify_over_different_bytes() {
         // Tamper with the op and the signature must stop matching, or "signed"
         // means nothing.
-        let sk = SecretKey::generate();
+        let sk = a_fresh_key();
         let sig = sign_op_bytes(&sk, b"an op");
         assert!(!verify_op_bytes(&sk.public_key(), b"a different op", &sig));
     }
@@ -651,18 +850,47 @@ mod tests {
             "op signing digest changed"
         );
         assert_eq!(
-            hex::encode(
-                derive_stoa_key(&[7u8; 32], &stoa_address(b"a genesis record")).to_bytes()
-            ),
+            hex::encode(derive_stoa_key(&[7u8; 32], &stoa_address(b"a genesis record")).to_bytes()),
             "b62b6b592aeb0779541bbe8beac60d8f505342c37c6a9bc990920d93e68026cf",
             "per-Stoa key derivation changed"
+        );
+
+        // The path-taking scheme, pinned the same way and for the same reason.
+        //
+        // Both values below were computed with OpenSSL's own HKDF rather than by
+        // reading back what this code produced:
+        //
+        //   openssl kdf -keylen 32 -kdfopt digest:SHA512 \
+        //     -kdfopt hexkey:<root> -kdfopt hexsalt:<salt> \
+        //     -kdfopt hexinfo:<stoa||path> HKDF
+        //
+        // That invocation was FIRST validated by reproducing the version-1 value
+        // above exactly, which is what makes these two trustworthy rather than
+        // merely plausible. A value read back from this implementation would be
+        // the implementation agreeing with itself — the defect this whole test
+        // exists to avoid.
+        //
+        // Path 1 and path 0 are both pinned. Path 0 is the interesting one: it is
+        // where the version-1 and version-2 schemes would collide if the salt
+        // bump were ever reverted, and `the_path_taking_scheme_does_not_collide_
+        // with_the_scheme_without_one` is the test that notices.
+        let pinned_stoa = stoa_address(b"a genesis record");
+        assert_eq!(
+            hex::encode(derive_stoa_key_at_path(&[7u8; 32], &pinned_stoa, 1).to_bytes()),
+            "b10513080c36903e20a08c3e4f114603dc9cd6fb57d247776312ada32322d5ef",
+            "path-taking per-Stoa key derivation changed"
+        );
+        assert_eq!(
+            hex::encode(derive_stoa_key_at_path(&[7u8; 32], &pinned_stoa, 0).to_bytes()),
+            "45bf5b4ecdb032428e71e9079b09c3c793663813940d87555bad1ed3072f2fe8",
+            "path-taking per-Stoa key derivation at path 0 changed"
         );
     }
 
     #[test]
     fn different_keys_get_different_addresses() {
-        let a = SecretKey::generate();
-        let b = SecretKey::generate();
+        let a = a_fresh_key();
+        let b = a_fresh_key();
         assert_ne!(a.public_key().address(), b.public_key().address());
     }
 
@@ -673,7 +901,7 @@ mod tests {
         // is the test that stops someone "simplifying" that away — it is the
         // only thing distinguishing the two, since both produce 32 plausible
         // bytes.
-        let sk = SecretKey::generate();
+        let sk = a_fresh_key();
         let bare = {
             let mut h = Sha256::new();
             h.update(sk.public_key().to_bytes());
@@ -694,7 +922,7 @@ mod tests {
         //
         // Without this, one byte string could be valid as both an author and a
         // Stoa address, and either could be presented as the other.
-        let sk = SecretKey::generate();
+        let sk = a_fresh_key();
         let mut author_preimage = vec![1u8];
         author_preimage.extend_from_slice(&sk.public_key().to_bytes());
         assert_ne!(
@@ -713,7 +941,7 @@ mod tests {
 
     #[test]
     fn an_address_survives_a_hex_round_trip() {
-        let sk = SecretKey::generate();
+        let sk = a_fresh_key();
         let addr = sk.public_key().address();
         assert_eq!(Address::from_hex(&addr.to_hex()).unwrap(), addr);
     }
@@ -732,6 +960,37 @@ mod tests {
         assert_eq!(
             Address::from_hex(&too_long),
             Err(AddressError::WrongLength(33))
+        );
+    }
+
+    #[test]
+    fn an_over_long_hex_address_is_refused_before_it_is_decoded() {
+        // `hex::decode` allocates `s.len() / 2` bytes from a length this parser
+        // does not control. §4.8 puts addresses inside posts and a request's
+        // `stoa` field carries one, so that length is attacker-supplied — a
+        // 64 MiB hex string built a 32 MiB `Vec` and only then met the "must be
+        // 32 bytes" refusal.
+        //
+        // What makes this a real assertion rather than a restatement of the
+        // existing `WrongLength` test: the input is over-long AND not valid hex.
+        // Only an implementation that checks the length BEFORE decoding can
+        // answer `WrongLength`; one that decodes first answers `NotHex`, because
+        // the decode fails before any length is compared. Swap the two and this
+        // is the test that goes red.
+        let over_long_and_not_hex = "z".repeat(1024);
+        assert_eq!(
+            Address::from_hex(&over_long_and_not_hex),
+            Err(AddressError::WrongLength(512)),
+            "the length must be checked before the decode allocates"
+        );
+
+        // And the boundary from both sides, so a `>` written as `>=` is caught:
+        // 64 characters is the legitimate length and must still reach the decode.
+        let exactly_64_not_hex = "z".repeat(64);
+        assert_eq!(
+            Address::from_hex(&exactly_64_not_hex),
+            Err(AddressError::NotHex),
+            "a 64-character input must still be decoded, so junk in it is NotHex"
         );
     }
 
@@ -755,7 +1014,7 @@ mod tests {
 
         // And through the wire-level entry point, where it must be `false`
         // rather than a panic.
-        let sk = SecretKey::generate();
+        let sk = a_fresh_key();
         let sig = sign_op_bytes(&sk, b"a post");
         assert!(!verify_authored_op(
             &sk.public_key().address(),
@@ -767,7 +1026,7 @@ mod tests {
 
     #[test]
     fn a_public_key_survives_a_byte_round_trip() {
-        let sk = SecretKey::generate();
+        let sk = a_fresh_key();
         let pk = sk.public_key();
         assert_eq!(PublicKey::from_bytes(&pk.to_bytes()).unwrap(), pk);
     }
@@ -775,7 +1034,7 @@ mod tests {
     #[test]
     fn a_secret_key_survives_a_byte_round_trip() {
         // What the keystore does on unlock: bytes in, same identity out.
-        let sk = SecretKey::generate();
+        let sk = a_fresh_key();
         let restored = SecretKey::from_bytes(&sk.to_bytes()).unwrap();
         assert_eq!(restored.public_key(), sk.public_key());
     }
@@ -784,7 +1043,7 @@ mod tests {
     fn a_signature_survives_a_byte_round_trip() {
         // Signatures cross the wire as 64 bytes, so this is the path every
         // inbound op takes.
-        let sk = SecretKey::generate();
+        let sk = a_fresh_key();
         let sig = sign_op_bytes(&sk, b"an op");
         let restored = Signature::from_bytes(&sig.to_bytes()).unwrap();
         assert!(verify_op_bytes(&sk.public_key(), b"an op", &restored));
@@ -861,7 +1120,7 @@ mod tests {
             "a low-order key must verify nothing, including a signature under its own seed"
         );
 
-        let honest = SecretKey::generate();
+        let honest = a_fresh_key();
         assert!(
             !verify_op_bytes(&low_order, b"an op", &sign_op_bytes(&honest, b"an op")),
             "a low-order key must verify nothing, including an honest signature"
@@ -903,7 +1162,7 @@ mod tests {
         // still pass.
         for _ in 0..16 {
             assert!(
-                PublicKey::from_bytes(&SecretKey::generate().public_key().to_bytes()).is_ok(),
+                PublicKey::from_bytes(&a_fresh_key().public_key().to_bytes()).is_ok(),
                 "a generated key must still parse"
             );
         }
@@ -969,7 +1228,7 @@ mod tests {
 
     #[test]
     fn an_authored_op_verifies_when_the_key_matches_the_claimed_author() {
-        let sk = SecretKey::generate();
+        let sk = a_fresh_key();
         let pk = sk.public_key();
         let sig = sign_op_bytes(&sk, b"a post");
         assert!(verify_authored_op(
@@ -986,8 +1245,8 @@ mod tests {
         // the steps by hand would miss: the signature is perfectly valid, the
         // bytes are untampered, and the op is still not from the author it
         // claims. Only re-deriving the address from the key catches it.
-        let victim = SecretKey::generate();
-        let attacker = SecretKey::generate();
+        let victim = a_fresh_key();
+        let attacker = a_fresh_key();
         let sig = sign_op_bytes(&attacker, b"a post");
 
         // The attacker signs with their own key but claims the victim's address.
@@ -1000,16 +1259,12 @@ mod tests {
 
         // And the signature itself is genuinely valid — so a caller who checked
         // only the signature would have accepted this.
-        assert!(verify_op_bytes(
-            &attacker.public_key(),
-            b"a post",
-            &sig
-        ));
+        assert!(verify_op_bytes(&attacker.public_key(), b"a post", &sig));
     }
 
     #[test]
     fn an_authored_op_is_rejected_when_the_bytes_were_tampered_with() {
-        let sk = SecretKey::generate();
+        let sk = a_fresh_key();
         let pk = sk.public_key();
         let sig = sign_op_bytes(&sk, b"a post");
         assert!(!verify_authored_op(
@@ -1026,17 +1281,189 @@ mod tests {
         // attacker-controlled. A panic would abort the module process
         // (PHASE0-FINDINGS §3), so wrong lengths and junk must be a plain
         // `false` on every field independently.
-        let sk = SecretKey::generate();
+        let sk = a_fresh_key();
         let pk = sk.public_key();
         let sig = sign_op_bytes(&sk, b"a post");
         let addr = pk.address();
 
         for bad_key in [vec![], vec![0u8; 31], vec![0u8; 33], vec![9u8; 64]] {
-            assert!(!verify_authored_op(&addr, &bad_key, b"a post", &sig.to_bytes()));
+            assert!(!verify_authored_op(
+                &addr,
+                &bad_key,
+                b"a post",
+                &sig.to_bytes()
+            ));
         }
         for bad_sig in [vec![], vec![0u8; 63], vec![0u8; 65], vec![9u8; 32]] {
-            assert!(!verify_authored_op(&addr, &pk.to_bytes(), b"a post", &bad_sig));
+            assert!(!verify_authored_op(
+                &addr,
+                &pk.to_bytes(),
+                b"a post",
+                &bad_sig
+            ));
         }
+    }
+
+    #[test]
+    fn a_path_derived_key_is_deterministic() {
+        // The same property `a_derived_stoa_key_is_deterministic` pins for the
+        // two-input scheme, and it matters MORE here: under the path-taking
+        // scheme the path is the value that has to be recorded, so instability
+        // would mean a recorded path naming an identity that no longer exists.
+        let root = [7u8; 32];
+        let stoa = stoa_address(b"a genesis record");
+        assert_eq!(
+            derive_stoa_key_at_path(&root, &stoa, 42).public_key(),
+            derive_stoa_key_at_path(&root, &stoa, 42).public_key()
+        );
+    }
+
+    #[test]
+    fn different_paths_give_different_identities_in_one_stoa() {
+        // The property the whole slate rests on: five candidates for ONE Stoa
+        // differ by path alone, so if paths did not separate keys there would be
+        // nothing to choose between.
+        let root = [7u8; 32];
+        let stoa = stoa_address(b"a genesis record");
+        let mut seen = Vec::new();
+        for path in [0u32, 1, 2, 7, 1000, u32::MAX] {
+            let pk = derive_stoa_key_at_path(&root, &stoa, path).public_key();
+            assert!(
+                !seen.contains(&pk),
+                "path {path} produced a key another path already produced"
+            );
+            seen.push(pk);
+        }
+    }
+
+    #[test]
+    fn the_path_taking_scheme_does_not_collide_with_the_scheme_without_one() {
+        // THE requirement the salt bump exists for. `identity` requires that
+        // where both schemes exist they be distinguishable, "so that one
+        // scheme's identities cannot be silently reproduced by the other".
+        //
+        // Path 0 is the only value where a reader would expect them to agree, so
+        // it is the value that has to be checked. Revert
+        // `STOA_KEY_SALT_WITH_PATH` to version 1 and this still fails — the four
+        // appended zero bytes change the info — which is precisely why the bump
+        // is argued as a decision rather than relied on as a mechanism.
+        let root = [7u8; 32];
+        let stoa = stoa_address(b"a genesis record");
+        assert_ne!(
+            derive_stoa_key(&root, &stoa).public_key(),
+            derive_stoa_key_at_path(&root, &stoa, 0).public_key(),
+            "the two derivation schemes must not produce one identity at path 0"
+        );
+
+        // And no path at all reproduces the two-input scheme's key. A handful
+        // rather than exhaustively: the point is that path 0 is not special-cased
+        // into equivalence, not a proof over 2^32.
+        let without = derive_stoa_key(&root, &stoa).public_key();
+        for path in [0u32, 1, 2, 3, 4, 5, u32::MAX] {
+            assert_ne!(
+                derive_stoa_key_at_path(&root, &stoa, path).public_key(),
+                without,
+                "path {path} reproduced the pathless scheme's identity"
+            );
+        }
+    }
+
+    #[test]
+    fn a_path_derived_key_signs_and_verifies_like_any_other() {
+        // Derivation must produce a USABLE identity, not merely a distinct one —
+        // the same thing `a_derived_key_signs_and_verifies_like_any_other` pins,
+        // and the reason it is repeated is that a new derivation is a new place
+        // for a seed to be mangled into something that signs but verifies
+        // against a different key.
+        let key = derive_stoa_key_at_path(&[7u8; 32], &stoa_address(b"a genesis record"), 3);
+        let sig = sign_op_bytes(&key, b"a post");
+        assert!(verify_op_bytes(&key.public_key(), b"a post", &sig));
+        // Through the wire-level entry point too, which is where the address
+        // binding lives: a path-derived key must be attributable to its own
+        // address like any other.
+        assert!(verify_authored_op(
+            &key.public_key().address(),
+            &key.public_key().to_bytes(),
+            b"a post",
+            &sig.to_bytes()
+        ));
+    }
+
+    #[test]
+    fn the_path_taking_scheme_keeps_cross_stoa_unlinkability() {
+        // The path is a new input and must not have become the ONLY input.
+        // One root, one path, two Stoas: the keys must still differ, or a
+        // user who chose path 3 everywhere would carry one key across Stoas.
+        let root = [7u8; 32];
+        assert_ne!(
+            derive_stoa_key_at_path(&root, &stoa_address(b"stoa one"), 3).public_key(),
+            derive_stoa_key_at_path(&root, &stoa_address(b"stoa two"), 3).public_key()
+        );
+        // And two roots at one path and one Stoa must differ, or two users who
+        // both chose path 3 would collide.
+        let stoa = stoa_address(b"a genesis record");
+        assert_ne!(
+            derive_stoa_key_at_path(&[1u8; 32], &stoa, 3).public_key(),
+            derive_stoa_key_at_path(&[2u8; 32], &stoa, 3).public_key()
+        );
+    }
+
+    #[test]
+    fn a_path_derived_key_is_not_the_root_key() {
+        // The root must never itself be the identity — it is the one value that,
+        // if leaked, yields every identity the user has. Pinned for the new
+        // scheme as well as the old, because a new derivation is a new place for
+        // the root to be passed through unchanged.
+        let root = [7u8; 32];
+        let stoa = stoa_address(b"a genesis record");
+        let root_as_key = SecretKey::from_bytes(&root).unwrap();
+        for path in [0u32, 1, 2] {
+            assert_ne!(
+                derive_stoa_key_at_path(&root, &stoa, path).public_key(),
+                root_as_key.public_key(),
+                "path {path} derived the root key itself"
+            );
+        }
+    }
+
+    #[test]
+    fn the_whole_path_reaches_derivation_and_not_only_its_low_byte() {
+        // The pinned constants use paths 0 and 1, which differ in the LAST byte
+        // alone — so an encoding that fed only the low byte, or only the low two,
+        // would reproduce both pinned values exactly. That is the shape this
+        // project's defect family takes: two explanations, one answer.
+        //
+        // A third pinned value fixes it, at a path whose low bytes are zero so
+        // that only the HIGH bytes distinguish it from path 0. Computed with
+        // OpenSSL, not read back from this code:
+        //
+        //   openssl kdf -keylen 32 -kdfopt digest:SHA512 \
+        //     -kdfopt hexkey:<07 x32> \
+        //     -kdfopt hexsalt:2f6469616c6563746963612f322f4964656e746974792f53746f61 \
+        //     -kdfopt hexinfo:<stoa>01000000 HKDF
+        //
+        // and that invocation was validated by reproducing the version-1 value
+        // `b62b6b59…` exactly first. Path 0x01000000 = 16,777,216: every byte but
+        // the third-from-top is zero, so a derivation reading only the low byte,
+        // the low two bytes, or the low three would all produce path 0's key.
+        let stoa = stoa_address(b"a genesis record");
+        assert_eq!(
+            hex::encode(derive_stoa_key_at_path(&[7u8; 32], &stoa, 0x0100_0000).to_bytes()),
+            "f1e32c8f4601cb1651be57d58e39f28cc1a6e4ef8a69b9bdd2155ef953a7572b",
+            "the high bytes of a path do not reach derivation"
+        );
+
+        // And the byte ORDER, which the pinned values also cannot see: 0x00000001
+        // and 0x01000000 are each other's byte-reversal, so a little-endian
+        // encoding would swap the two keys rather than producing a wrong one.
+        // Asserted as an inequality against the path-1 pinned value, so a swap is
+        // caught even if the hex above were ever regenerated.
+        assert_ne!(
+            derive_stoa_key_at_path(&[7u8; 32], &stoa, 0x0100_0000).public_key(),
+            derive_stoa_key_at_path(&[7u8; 32], &stoa, 1).public_key(),
+            "a path and its byte-reversal derive one key, so the encoding is \
+             order-blind"
+        );
     }
 
     #[test]
