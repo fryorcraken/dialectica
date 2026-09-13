@@ -116,7 +116,37 @@ impl Address {
     /// **attacker-supplied content**: §4.8 has Stoa addresses appearing inside
     /// posts, where anything at all may show up. A lenient parser that accepted
     /// a truncated address would let two different Stoas collide in the UI.
+    /// **The length is checked BEFORE the decode, and the ordering is the
+    /// point.** `hex::decode` allocates `s.len() / 2` bytes from a length this
+    /// function does not control: a 64 MiB hex string arriving in a request's
+    /// `stoa` field built a 32 MiB `Vec` and only *then* met the "must be 32
+    /// bytes" refusal. Measured, with the refusal it produced:
+    /// `{"error":"stoa: address must be 32 bytes (64 hex chars), got 33554432
+    /// bytes"}`.
+    ///
+    /// `wire::MAX_REQUEST_BYTES` also closes this, and both are kept because they
+    /// are different layers: the envelope bounds what any request may cost, and
+    /// this bounds what this function may allocate regardless of who calls it —
+    /// including a future caller that is not a wire handler at all. The cheaper
+    /// check is also the more local one.
+    ///
+    /// **What it deliberately does not do is reorder the error taxonomy.** The
+    /// obvious spelling — `if s.len() != 64 { return WrongLength(s.len() / 2) }` —
+    /// closes the allocation but also changes what a *short* junk input reports:
+    /// `from_hex("nothex!!")` would become `WrongLength(4)` where it has always
+    /// been `NotHex`, and `address_parsing_rejects_attacker_supplied_junk` pins
+    /// that. A security fix that quietly reclassifies a caller-visible error is
+    /// two changes in one diff.
+    ///
+    /// So the guard is on the **over-long** case only, which is the case where
+    /// the allocation is the problem. Everything at or under 64 characters costs
+    /// at most 32 bytes to decode, and reaches exactly the arms it always did.
+    /// A `WrongLength` above the cap is reported in hex characters halved, which
+    /// is what the decoded length would have been.
     pub fn from_hex(s: &str) -> Result<Self, AddressError> {
+        if s.len() > 64 {
+            return Err(AddressError::WrongLength(s.len() / 2));
+        }
         let bytes = hex::decode(s).map_err(|_| AddressError::NotHex)?;
         let bytes: [u8; 32] = bytes
             .as_slice()
@@ -730,6 +760,37 @@ mod tests {
         assert_eq!(
             Address::from_hex(&too_long),
             Err(AddressError::WrongLength(33))
+        );
+    }
+
+    #[test]
+    fn an_over_long_hex_address_is_refused_before_it_is_decoded() {
+        // `hex::decode` allocates `s.len() / 2` bytes from a length this parser
+        // does not control. §4.8 puts addresses inside posts and a request's
+        // `stoa` field carries one, so that length is attacker-supplied — a
+        // 64 MiB hex string built a 32 MiB `Vec` and only then met the "must be
+        // 32 bytes" refusal.
+        //
+        // What makes this a real assertion rather than a restatement of the
+        // existing `WrongLength` test: the input is over-long AND not valid hex.
+        // Only an implementation that checks the length BEFORE decoding can
+        // answer `WrongLength`; one that decodes first answers `NotHex`, because
+        // the decode fails before any length is compared. Swap the two and this
+        // is the test that goes red.
+        let over_long_and_not_hex = "z".repeat(1024);
+        assert_eq!(
+            Address::from_hex(&over_long_and_not_hex),
+            Err(AddressError::WrongLength(512)),
+            "the length must be checked before the decode allocates"
+        );
+
+        // And the boundary from both sides, so a `>` written as `>=` is caught:
+        // 64 characters is the legitimate length and must still reach the decode.
+        let exactly_64_not_hex = "z".repeat(64);
+        assert_eq!(
+            Address::from_hex(&exactly_64_not_hex),
+            Err(AddressError::NotHex),
+            "a 64-character input must still be decoded, so junk in it is NotHex"
         );
     }
 
