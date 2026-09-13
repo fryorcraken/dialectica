@@ -84,6 +84,30 @@ TestCase {
 
     // ---- the branch ------------------------------------------------------
 
+    function test_the_identity_report_request_carries_the_stoa_it_asks_about() {
+        // Spec/test review finding: no test asserted this request's `stoa`.
+        // `Core.qml:168` `{ stoa: stoa }` → `{}` passed all 12 launch-branch
+        // tests — the view asking "who am I" about no Stoa at all, and the whole
+        // branch deciding from the answer. The spec's scenario "A request
+        // carries the fields its method reads" names the identity-report call
+        // alongside the slate call.
+        //
+        // Identity is per-Stoa (`whoAmI(stoa)`), so a report for the wrong Stoa
+        // is not a near-miss: it is the branch being decided by somebody else's
+        // keystore.
+        var app = makeMain({
+            "who_am_i": '{"hasIdentity":false,"reason":"no keystore exists at /x/keys"}'
+        })
+
+        compare(spec.countOf("who_am_i"), 1, "the fixture's own precondition")
+        var sent = JSON.parse(spec.calls[0].request)
+        compare(sent.stoa, "ab".repeat(32),
+                "the identity report must name the Stoa it is asking about — the "
+                + "address this test handed Main, not whatever the request "
+                + "happened to carry")
+        app.destroy()
+    }
+
     function test_an_identity_reported_present_shows_the_forum() {
         var app = makeMain({
             "who_am_i": '{"hasIdentity":true,"address":"' + "aa".repeat(32)

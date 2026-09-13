@@ -23,7 +23,7 @@ archived.
 
 ## The code contradicts a recorded decision
 
-- [ ] **`tester`** — `tst_onboarding_states.qml:1085` — the test named
+- [x] **`tester`** — `tst_onboarding_states.qml:1085` — the test named
       `test_the_uniqueness_obligation_survives_without_the_apparatus_column`
       **fails in exactly the scenario it is named for**, so it blocks the
       removal rather than surviving it
@@ -51,6 +51,40 @@ archived.
       today, passes after the column goes, and fails only if the body copy is
       dropped — which is the defect. As written the test cannot tell the
       obligation being deleted from the decoration being deleted.
+      **Fixed** as the property, not by editing the `2` — which, as you say, is
+      the cheapest green and the wrong one. The test now partitions the screen's
+      copy into "inside the apparatus column" and "outside it" and asserts
+      **at least one carrier outside**, exactly what `dev-writer`'s corrected
+      `design.md` entry specifies. No total is compared.
+      **Mutations, both directions, because a one-sided assertion here is how
+      the inversion survives:**
+      *Removal of the margin note* — your exact shape, the `ON UNIQUENESS` body
+      replaced while the body `Text` stands: **all 52 pass.** The test now
+      survives the scenario it is named for.
+      *Removal of the body copy, margin note kept*: **fails**, reporting
+      *"Found 1 carrier(s), 1 of them in apparatus"*. That is the defect, and it
+      is the only thing that fails.
+      **Two further corrections to my own first draft, both caught by running
+      rather than reading**, and both the same inversion creeping back
+      somewhere new:
+      1. I first added a precondition asserting the margin note *also* carries
+         the obligation, "to prove the walk is not vacuous". That reintroduced
+         the requirement to keep the margin copy, and it failed under the
+         removal mutation. Deleted; the comment now says explicitly that this is
+         deliberately not asserted, and why.
+      2. I then floored `apparatusTexts.length > 0`. Once `drop-apparatus`
+         removes the column entirely that walk correctly finds nothing, so the
+         floor would have failed a legitimate merge — the inversion one level
+         further out. The non-vacuity guard is now on the **screen's** corpus,
+         which is what the carrier counts are drawn from.
+      Recorded because the finding's real lesson is that this assertion attracts
+      the inversion: a later reader tightening it will reach for one of those
+      two guards again.
+      **On the `drop-apparatus` merge specifically:** the new allowlist test
+      (`findings/spec-test.md`, first finding) fails only on strings that are
+      *present* and unauthorised, never on ones that disappear, so removing the
+      column's three notes does not trip that either. #70 should stay green on
+      this file without editing a test.
 
 ## Decisions taken but not recorded
 

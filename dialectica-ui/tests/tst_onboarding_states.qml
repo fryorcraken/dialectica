@@ -542,6 +542,27 @@ TestCase {
         screen.destroy()
     }
 
+    function test_the_slate_request_carries_the_stoa_it_was_made_for() {
+        // Spec/test review finding: only the KEEP request's `stoa` was
+        // asserted. `Core.qml:146` `{ stoa: stoa }` → `{}` passed 102/102 — a
+        // slate generated for no Stoa at all, with the whole suite green. The
+        // scenario "A request carries the fields its method reads" names the
+        // slate call and the identity-report call explicitly.
+        //
+        // Asserted against the address THIS TEST supplied to the screen, not
+        // against whatever the request happened to contain.
+        var screen = makeScreen({ "generate_identity_slate": spec.twoCandidateSlate })
+        screen.requestSlate()
+
+        compare(spec.countOf("generate_identity_slate"), 1, "the fixture's own precondition")
+        var sent = JSON.parse(spec.calls[0].request)
+        compare(sent.stoa, "ab".repeat(32),
+                "the slate request must carry the Stoa the screen was given — a "
+                + "slate for the wrong Stoa, or for none, is what this scenario "
+                + "exists to catch")
+        screen.destroy()
+    }
+
     function test_no_request_names_an_identity() {
         // The identity follows from the Stoa and the selection; a request
         // naming one would ask the module to act as somebody it is not.
@@ -984,24 +1005,145 @@ TestCase {
         screen.destroy()
     }
 
+    // EVERY sentence this screen is allowed to say, as an exact set.
+    //
+    // Spec/test review finding: the cross-Stoa unlinkability guard was a
+    // blocklist of five phrasings, and the reviewer appended *"This key stays
+    // private to this Stoa and no observer can connect it to your other
+    // Stoas."* — the false privacy claim the spec calls "the one failure here
+    // that could actually harm someone" — and **49 of 49 tests passed**. It
+    // matches no needle. A blocklist fails on an innocent reword and passes on
+    // a fluent lie, which is the wrong way round for the property that could
+    // hurt a user.
+    //
+    // So this is an allowlist, the same instrument that caught "Key H" in
+    // `test_a_row_shows_its_address_and_its_mark_and_nothing_else`: the screen's
+    // copy is entirely AUTHORED — no string here is computed — so the set of
+    // sentences it can show is finite and writable down. Any new sentence,
+    // anywhere, in any phase, fails until someone adds it here deliberately.
+    // That is the point: adding a privacy claim then requires typing it into a
+    // list headed by the reason it must not be typed.
+    //
+    // Module-supplied strings (refusal reasons, failure messages) and
+    // candidate-derived strings (addresses) are excluded by the caller, because
+    // those are not authored here and are pinned by their own tests.
+    readonly property var authoredCopy: [
+        // heading, shown in every phase
+        "Choose the identity you will keep here.",
+        "You are picking a key. Its name is computed from it, so the name cannot be changed afterwards.",
+        // intro
+        "You have no identity here yet. Nothing has been generated and nothing has been stored.",
+        "Show me some keys",
+        // slate
+        "SELECTED",
+        "Show me five more",
+        "Refresh as often as you like. Nothing is published until you keep one.",
+        "Keep this identity",
+        "There is no settings screen where this can be changed later, because the name is only the key written out. Choosing again means being someone else here.",
+        "Names are not unique and are not identifiers. Someone else in this Stoa may hold the same name. Your address is what tells you apart, so it is printed beside your name everywhere.",
+        // refused
+        "That identity was not kept.",
+        "Nothing was stored. The keys above are still on offer.",
+        // kept
+        "This is who you are here now.",
+        "The master key on this machine is stored encrypted.",
+        "The master key on this machine is stored unencrypted, in the clear. Anyone who can read the file can use it.",
+        "Which key you chose is recorded only on this machine. A copy of the master key by itself is not enough to get back in — it can derive this identity, but not tell you which one was yours.",
+        // failed
+        "No identity could be offered, so nothing can be chosen yet.",
+        "Nothing was stored and nothing was lost. This is a failure to read or write on this machine, not a choice that went wrong.",
+        "Try again",
+        // apparatus
+        "APPARATUS",
+        "ON PERMANENCE",
+        "ON UNIQUENESS",
+        "ON THE MARK",
+        "The hatched shape is drawn from the same key: two inks for the weave, a third for the outline, all three chosen by the key. A curved contour always means a person; an angular one always means a Stoa."
+    ]
+
+    function test_the_screen_says_only_what_it_is_allowed_to_say() {
+        // Drives every phase, because the walk reaches a phase's copy whether or
+        // not it is visible but a phase's copy only EXISTS once that phase has
+        // been entered — the refused and kept cards are built from replies.
+        var phases = [
+            { keep: undefined },
+            { keep: '{"kept":false,"reason":"REASON-FIXTURE"}' },
+            { keep: '{"kept":true,"address":"KEPT-ADDRESS-FIXTURE","publicKey":"pk",'
+                    + '"path":0,"encrypted":true}' }
+        ]
+        for (var p = 0; p < phases.length; p++) {
+            var replies = { "generate_identity_slate": spec.twoCandidateSlate }
+            if (phases[p].keep !== undefined)
+                replies["keep_identity"] = phases[p].keep
+            var screen = makeScreen(replies)
+            screen.requestSlate()
+            if (phases[p].keep !== undefined) {
+                screen.select(0)
+                screen.keepSelected()
+            }
+
+            var texts = spec.everyTextOn(screen)
+            // Both bounds. A neutered sweep satisfies an allowlist vacuously,
+            // which is the exact failure the reviewer measured on the blocklist
+            // this replaces: `everyTextOn()` → `return []` left it green.
+            verify(texts.length > 15,
+                   "the sweep must be finding the screen's copy, got " + texts.length)
+
+            for (var i = 0; i < texts.length; i++) {
+                var t = texts[i]
+                // Not authored HERE, and pinned elsewhere: every string the
+                // module supplied. Each is a distinctive fixture value rather
+                // than a pattern, so this skips exactly what this test handed
+                // the screen and nothing else — a wildcard here would be a hole
+                // an unauthorised sentence could be written through.
+                if (t === spec.addrA || t === spec.addrB)
+                    continue                                   // candidate addresses
+                if (t === "REASON-FIXTURE")
+                    continue                                   // the refusal reason
+                if (t === "KEPT-ADDRESS-FIXTURE")
+                    continue                                   // the kept reply's address
+                verify(spec.authoredCopy.indexOf(t) >= 0,
+                       "this screen said something no test authorised:\n    \"" + t
+                       + "\"\nEvery sentence the screen shows must be in "
+                       + "`authoredCopy` above. If this is a deliberate copy "
+                       + "change, add it there — and if it is a claim about "
+                       + "privacy, linkability or what an observer can see, read "
+                       + "the ninth requirement first: one key signs in every "
+                       + "Stoa in this release, so the screen must not say or "
+                       + "imply otherwise.")
+            }
+            screen.destroy()
+        }
+    }
+
     function test_no_copy_claims_the_identity_cannot_be_linked_elsewhere() {
-        // The bundle's body copy ends "the key is yours in this Stoa only — it
-        // cannot be linked to you anywhere else". One key signs in every Stoa
-        // in this release, so that is false, and an interface telling a user
-        // they have a privacy property they do not have is the one failure here
-        // that could actually harm someone.
+        // The allowlist above is what actually catches an unanticipated
+        // phrasing. This stays as the NAMED guard for the specific claim,
+        // because a reader looking for "where is cross-Stoa unlinkability
+        // pinned?" should find a test called that — and because the two fail
+        // differently: the allowlist says "nobody authorised this sentence",
+        // this says "that sentence is the forbidden claim".
+        //
+        // The corpus guard is the fix for the second half of the review
+        // finding: this was the only `everyTextOn` caller with no length bound,
+        // so neutering the helper left it vacuously green.
         var screen = makeScreen({ "generate_identity_slate": spec.twoCandidateSlate })
         screen.requestSlate()
 
         var texts = spec.everyTextOn(screen)
-        var forbidden = ["cannot be linked", "in this Stoa only", "anywhere else",
-                         "unlinkable", "not be linked"]
-        for (var i = 0; i < texts.length; i++) {
-            for (var j = 0; j < forbidden.length; j++) {
-                verify(texts[i].indexOf(forbidden[j]) < 0,
-                       "no copy may claim cross-Stoa unlinkability; found \""
-                       + forbidden[j] + "\" in: " + texts[i])
-            }
+        verify(texts.length > 15,
+               "the sweep must be finding the screen's copy, got " + texts.length)
+
+        var joined = texts.join(" ").toLowerCase()
+        var forbidden = ["cannot be linked", "in this stoa only", "anywhere else",
+                         "unlinkable", "not be linked", "stays private to this stoa",
+                         "connect it to your other", "no observer", "only this stoa",
+                         "cannot be connected", "not be connected", "cannot be traced",
+                         "cannot be tied"]
+        for (var j = 0; j < forbidden.length; j++) {
+            verify(joined.indexOf(forbidden[j]) < 0,
+                   "no copy may claim cross-Stoa unlinkability; found \""
+                   + forbidden[j] + "\" on screen")
         }
         screen.destroy()
     }
@@ -1011,7 +1153,20 @@ TestCase {
         // still state that a key is being picked and that the name follows from
         // it and cannot be changed.
         var screen = makeScreen({})
-        var joined = spec.everyTextOn(screen).join(" ")
+        var texts = spec.everyTextOn(screen)
+        var joined = texts.join(" ")
+
+        // Spec/test review finding: the scenario "The opening state says an
+        // identity is being chosen" pins a LITERAL heading, and no test
+        // contained it — replacing it with "Set up your account" passed 49/49.
+        // That is account-setup framing, which PLAN §5.2.1 says generates a
+        // support question that cannot be answered ("how do I change my
+        // username?"), so the wording is the requirement rather than decoration.
+        // Pinned as an exact element, not a substring of the joined copy.
+        verify(texts.indexOf("Choose the identity you will keep here.") >= 0,
+               "the spec states this heading exactly; the screen must show it "
+               + "verbatim rather than a paraphrase, because account-setup "
+               + "framing teaches the one mental model this flow cannot honour")
 
         verify(joined.indexOf("picking a key") >= 0,
                "the screen must say a key is being picked")
@@ -1046,46 +1201,142 @@ TestCase {
         verify(joined.indexOf("address") >= 0,
                "and that the address is what tells participants apart")
 
-        // And no count ships, whatever the count currently is. Written as a
-        // sweep over the spellings rather than a pin on one, so this fails on
-        // the reintroduction of ANY number rather than on the reword of one.
-        var counts = ["two words", "three words", "four words", "five words",
-                      "2 words", "3 words", "4 words", "5 words"]
-        for (var i = 0; i < counts.length; i++) {
-            verify(joined.indexOf(counts[i]) < 0,
+        // And no count ships, whatever the count currently is. The SHAPE here —
+        // assert no number at all rather than pin the current one — is right and
+        // was endorsed on review: a pin on a number fails on reword rather than
+        // on misinformation.
+        //
+        // The needle list under it was not. Spec/test review measured it: the
+        // eight literals missed `"three-word"` — hyphenated and attributive,
+        // which is the most natural way a count comes back ("Your three-word
+        // name is not unique…") — and 49 of 49 passed with a word count on
+        // screen. `"a pair of words"`, `"3-word"` and any capitalised form were
+        // missed too, since unlike the `username` sweep this one did not
+        // lowercase.
+        //
+        // Two regexes over the lowercased copy replace the list, so this fails
+        // on a spelling nobody enumerated rather than on one somebody did.
+        var lower = joined.toLowerCase()
+        var numberWord = "(one|two|three|four|five|six|seven|eight|nine|ten|[0-9]+)"
+        var patterns = [
+            // "three words", "three-word", "3 word", "3-word", and the plural
+            // and attributive forms of each.
+            new RegExp(numberWord + "[ -]words?\\b"),
+            // "a pair of words", "a trio of words", "a couple of words"
+            new RegExp("\\b(a pair|a trio|a couple|a set) of words\\b"),
+            // "words: three", "name is three", i.e. the count stated after the noun
+            new RegExp("\\b(name|names|words) (is|are|of) " + numberWord + "\\b")
+        ]
+        for (var i = 0; i < patterns.length; i++) {
+            var hit = lower.match(patterns[i])
+            verify(hit === null,
                    "the copy must state no word count — it has changed three "
                    + "times and a screen carrying a number goes stale on the "
-                   + "next move; found \"" + counts[i] + "\"")
+                   + "next move; found \"" + (hit === null ? "" : hit[0]) + "\"")
+        }
+
+        // The regexes above are themselves assertable, and a regex that matched
+        // nothing would make the sweep silently vacuous — the same defect as a
+        // neutered corpus, one level down. So prove each pattern fires on the
+        // exact reintroduction the reviewer measured, and on the literal forms
+        // the old list covered.
+        var mustBeCaught = [
+            "your three-word name is not unique",
+            "the same three words",
+            "the same 3 words",
+            "a pair of words",
+            "the name is three"
+        ]
+        for (var m = 0; m < mustBeCaught.length; m++) {
+            var caught = false
+            for (var q = 0; q < patterns.length; q++) {
+                if (mustBeCaught[m].match(patterns[q]) !== null)
+                    caught = true
+            }
+            verify(caught,
+                   "the count sweep must catch \"" + mustBeCaught[m] + "\" — a "
+                   + "pattern that matches nothing makes this test vacuous, "
+                   + "which is the defect it was written to fix")
         }
         screen.destroy()
     }
 
     function test_the_uniqueness_obligation_survives_without_the_apparatus_column() {
-        // The spec requires this screen to state that names are not unique and
-        // not identifiers. That obligation must not rest on the apparatus
-        // column, which is annotation rather than interface and which a sibling
-        // piece removes — a spec'd requirement deleted as a side effect of
-        // dropping decoration is the failure this pins.
+        // Design review finding: this asserted `compare(carriers, 2)` — EXACTLY
+        // two — so it **failed in exactly the scenario its name promises to
+        // survive**. Removing the `ON UNIQUENESS` margin note, which is what
+        // `piece/drop-apparatus` (#70) produces, gave `Actual: 1 Expected: 2`.
         //
-        // So: require the statement to appear on TWO separate elements. One is
-        // the margin note; the second is the body copy, and it is the one that
-        // survives the column's removal. With the margin note alone this finds
-        // one and fails.
+        // That inverted the rule it was cited as enforcing. `design.md` states
+        // it as *"apparatus may repeat an obligation, never carry it alone"* —
+        // repetition is PERMITTED, not required, and `ON THE MARK` is
+        // legitimately margin-only. An exact count turns the rule into a
+        // requirement to keep the column, and the cheapest green for a
+        // `drop-apparatus` author is to edit the `2`: a count-pin on decoration
+        // that is being deleted, which is the same failure mode this change's
+        // own word-count decision argues against, one file away.
+        //
+        // What the rule actually wants is that the obligation has a carrier
+        // OUTSIDE the apparatus column. That passes today, passes after the
+        // column goes, and fails only if the body copy is dropped — which is
+        // the defect. So the assertion is on the property, not the count.
         var screen = makeScreen({ "generate_identity_slate": spec.twoCandidateSlate })
         screen.requestSlate()
 
-        var texts = spec.everyTextOn(screen)
-        var carriers = 0
-        for (var i = 0; i < texts.length; i++) {
-            if (texts[i].indexOf("not unique") >= 0
-                && texts[i].indexOf("not identifiers") >= 0)
-                carriers++
+        // Both counts come from the SAME walk (`everyTextOn`), so the
+        // subtraction below is coherent. Counting the column with a different
+        // walk than the whole screen lets the two desynchronise — measured:
+        // neutering `everyTextOn` alone produced "Found 0 carrier(s), 1 of them
+        // in apparatus", a negative remainder that happened to fail for the
+        // right reason by luck rather than by arithmetic.
+        var apparatusTexts = []
+        for (var a = 0; a < screen.apparatus.length; a++)
+            apparatusTexts = apparatusTexts.concat(spec.everyTextOn(screen.apparatus[a]))
+
+        var carriesIt = function (s) {
+            return s.indexOf("not unique") >= 0 && s.indexOf("not identifiers") >= 0
         }
 
-        compare(carriers, 2,
-                "the obligation must be stated in the body as well as the "
-                + "margin, so dropping the apparatus column cannot delete a "
-                + "spec'd requirement")
+        // The non-vacuity guard is on the SCREEN's corpus, not the column's.
+        //
+        // An earlier draft floored `apparatusTexts.length` instead, and that was
+        // wrong in the way this whole finding is about: once `drop-apparatus`
+        // removes the column the walk correctly finds nothing there, and a floor
+        // would have failed a legitimate merge — the inversion again, one level
+        // out. What must not go vacuous is the screen-wide sweep, because that
+        // is what the carrier count is drawn from.
+        var all = spec.everyTextOn(screen)
+        verify(all.length > 15,
+               "the screen sweep must be finding copy, got " + all.length
+               + " — a neutered walk makes every count below meaningless")
+
+        // Deliberately NOT asserted: that the margin note also carries it.
+        // Requiring that is the inversion this finding is about — it would make
+        // the margin copy undroppable, which is the opposite of "repetition is
+        // permitted, not required". This count is subtracted, never floored.
+        var inApparatus = 0
+        for (var i = 0; i < apparatusTexts.length; i++) {
+            if (carriesIt(apparatusTexts[i]))
+                inApparatus++
+        }
+
+        var total = 0
+        for (var j = 0; j < all.length; j++) {
+            if (carriesIt(all[j]))
+                total++
+        }
+
+        // The assertion. At least one carrier outside the apparatus column —
+        // never an exact total, so removing the column is permitted and
+        // removing the body copy is not.
+        verify(total - inApparatus >= 1,
+               "the obligation must be stated somewhere OUTSIDE the apparatus "
+               + "column: that column is annotation, removable by a change with "
+               + "no reason to read this spec, so an obligation resting on it "
+               + "alone is deleted as a side effect of dropping decoration. "
+               + "Found " + total + " carrier(s), " + inApparatus + " of them in "
+               + "apparatus. Repetition in the margin is permitted, not "
+               + "required — do not satisfy this by pinning a count.")
         screen.destroy()
     }
 
@@ -1141,6 +1392,64 @@ TestCase {
             }
         }
         verify(found, "the reason must actually be rendered somewhere on the screen")
+        screen.destroy()
+    }
+
+    function test_every_row_carries_a_mark_drawn_from_its_own_address() {
+        // Spec/test review finding: the mark was pinned NOWHERE. Deleting the
+        // `Identicon` from every candidate row passed 49/49, and feeding every
+        // row the same constant address passed 49/49. The requirement is titled
+        // "A candidate row shows the full address **and the mark**", and its
+        // scenario says "each mark is derived from THAT ROW's address rather
+        // than from a shared or fixed value" — both halves were unasserted.
+        // `tst_identicon.qml` tests the component in isolation and says nothing
+        // about the row.
+        //
+        // Two assertions, because the two mutations are different defects: a
+        // missing mark removes the second recognition channel, and a shared
+        // mark replaces it with one that actively misleads — every candidate
+        // looking alike is worse than no mark, since a user told the shape
+        // identifies a key sees five identical shapes and concludes they are
+        // interchangeable.
+        var addrOne = "44".repeat(32)
+        var addrTwo = "55".repeat(32)
+        var screen = makeScreen({
+            "generate_identity_slate":
+                '{"slate":"s1","count":2,"candidates":['
+                + '{"index":0,"path":7,"address":"' + addrOne + '","publicKey":"pk"},'
+                + '{"index":1,"path":8,"address":"' + addrTwo + '","publicKey":"qk"}]}'
+        })
+        screen.requestSlate()
+
+        var rows = spec.candidateRowsOn(screen)
+        compare(rows.length, 2, "the fixture's own precondition: two rows")
+
+        var addresses = [addrOne, addrTwo]
+        var signatures = []
+        for (var r = 0; r < rows.length; r++) {
+            var marks = spec.marksOn(rows[r])
+            // Both bounds on the walker. Zero is the deletion mutation; more
+            // than one would mean a row carrying a second mark, which is its own
+            // confusion about which one identifies the key.
+            compare(marks.length, 1,
+                    "row " + r + " must carry exactly one mark — deleting the "
+                    + "Identicon from the row is invisible to every text sweep, "
+                    + "because a mark is not a Text")
+            compare(String(marks[0].address), addresses[r],
+                    "row " + r + "'s mark must be drawn from THAT ROW's address, "
+                    + "not a shared or fixed value")
+            signatures.push(spec.markSignature(marks[0]))
+        }
+
+        // And the two marks actually DRAW differently. The address check above
+        // would pass on a mark bound to the right address that derived its form
+        // and inks from something else; this reads the eight selectors
+        // Identicon computes and requires the tuples to differ.
+        verify(signatures[0] !== signatures[1],
+               "two candidates with different addresses must produce different "
+               + "marks — a mark identical across every row is a recognition "
+               + "channel that distinguishes nothing, got " + signatures[0]
+               + " for both")
         screen.destroy()
     }
 
@@ -1305,6 +1614,46 @@ TestCase {
             return
         for (var i = 0; i < kids.length; i++)
             spec.collectRows(kids[i], out)
+    }
+
+    // Every mark (Identicon) in a subtree.
+    //
+    // `visibleTextsOn()` CANNOT see a mark — a mark is not a `Text` — which is
+    // why the row-contents test passed with the Identicon deleted. This is the
+    // different instrument that needs, not a wider text sweep.
+    //
+    // Identified by `address` AND two of the mark's own selector functions.
+    // `address` alone also matches `AddressLabel`, which would make a row look
+    // marked when it only shows its address — the precise confusion the spec's
+    // "a second recognition channel, not a second guarantee" depends on not
+    // making. Callers pin the count found, both bounds.
+    function marksOn(item) {
+        var found = []
+        spec.collectMarks(item, found)
+        return found
+    }
+
+    function collectMarks(item, out) {
+        if (item === null || item === undefined)
+            return
+        if (item.address !== undefined && typeof item._form === "function"
+            && typeof item._inkA === "function")
+            out.push(item)
+        var kids = item.children
+        if (kids === undefined)
+            return
+        for (var i = 0; i < kids.length; i++)
+            spec.collectMarks(kids[i], out)
+    }
+
+    // What a mark actually draws, as a comparable tuple: the eight selectors
+    // Identicon derives from the address. Compared rather than the `address`
+    // property alone, because a mark bound to the right address that drew from
+    // something else would satisfy an address check and still show every
+    // candidate the same shape.
+    function markSignature(mark) {
+        return [mark._form(), mark._inkA(), mark._inkB(), mark._outlineInk(),
+                mark._angleDeg(), mark._pitch(), mark._duty(), mark._weave()].join("/")
     }
 
     function collectText(item, out) {

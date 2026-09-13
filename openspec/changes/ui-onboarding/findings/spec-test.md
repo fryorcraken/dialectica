@@ -10,7 +10,7 @@ Baseline before and after: **102 pass across 6 spec files**, tree restored
 
 ## Findings
 
-- [ ] **`tester`** — `test_no_copy_claims_the_identity_cannot_be_linked_elsewhere`
+- [x] **`tester`** — `test_no_copy_claims_the_identity_cannot_be_linked_elsewhere`
       cannot fail for the claim it names.
       **Scenario:** the sweep is a blocklist of five phrasings — `"cannot be
       linked"`, `"in this Stoa only"`, `"anywhere else"`, `"unlinkable"`,
@@ -29,8 +29,42 @@ Baseline before and after: **102 pass across 6 spec files**, tree restored
       was not carried to this test, which guards the more dangerous property.
       **Severity: high** — this is the spec's own nominated worst case, and the
       test that exists for it is green against it.
+      **Fixed**, by carrying the set-assertion instrument across exactly as you
+      say it should have been. New `test_the_screen_says_only_what_it_is_
+      allowed_to_say` holds `authoredCopy`, an **allowlist of every sentence
+      this screen may show**, and drives all three phases (intro/slate, refused,
+      kept) so each phase's copy is built before the walk. Every string the
+      sweep finds must be in that list; the only exclusions are the values THIS
+      TEST handed the screen — the two candidate addresses and two distinctive
+      fixture strings (`REASON-FIXTURE`, `KEPT-ADDRESS-FIXTURE`) standing in for
+      module-supplied text, matched exactly rather than by pattern so the
+      exclusion is not a hole.
+      That works because the screen's copy is entirely **authored** — no string
+      on it is computed — so the set is finite and writable down. Adding a
+      privacy claim now requires typing it into a list whose failure message
+      names the requirement forbidding it.
+      **Mutation 1, yours exactly:** appended *"This key stays private to this
+      Stoa and no observer can connect it to your other Stoas."* to
+      `OnboardingScreen.qml:338`. **2 of 52 fail**, the allowlist naming the
+      whole sentence verbatim.
+      **Mutation 2, and this is the one that matters:** because I had also
+      widened the named blocklist, mutation 1 no longer proves the allowlist is
+      what carries the property — the extended needle list could have caught it.
+      So I ran a *different* fluent lie, matching no needle in the original five
+      or my extension: *"What you do here is yours alone; nothing follows you
+      between forums."* **The blocklist test PASSED. The allowlist caught it
+      alone**, 1 of 52, naming the sentence. That is the measurement your
+      finding predicts and it is why the allowlist, not a longer list of
+      needles, is the fix.
+      **I kept the named test** rather than deleting it, with its needles
+      widened and lowercased. Two reasons: a reader asking "where is cross-Stoa
+      unlinkability pinned?" should find a test called that, and the two fail
+      differently — the allowlist says *nobody authorised this sentence*, the
+      named test says *that sentence is the forbidden claim*. The allowlist is
+      the load-bearing one and its comment says so, so nobody mistakes the
+      needle list for the guard.
 
-- [ ] **`tester`** — the mark is not pinned at all: it can be deleted from every
+- [x] **`tester`** — the mark is not pinned at all: it can be deleted from every
       candidate row, or fed a shared constant, with the suite green.
       **Scenario:** the requirement is titled "A candidate row shows the full
       address **and the mark**", and its scenario says "each mark is derived from
@@ -48,8 +82,39 @@ Baseline before and after: **102 pass across 6 spec files**, tree restored
       Note `visibleTextsOn()` cannot see it — the mark is not a `Text` — so the
       row-contents test's exact-set assertion passes unchanged either way.
       **Severity: high.**
+      **Fixed** with the different instrument you correctly say this needs
+      rather than a wider text sweep. `marksOn()` walks for Identicons —
+      duck-typed on `address` **plus** two of the mark's own selector functions
+      (`_form`, `_inkA`), because `address` alone also matches `AddressLabel`
+      and would report a row as marked when it only shows its address. New
+      `test_every_row_carries_a_mark_drawn_from_its_own_address` asserts both
+      halves of the scenario.
+      **Mutation (b), the deletion:** the `Identicon` block removed from the
+      row. **1 of 52 fails** — `row 0 must carry exactly one mark … Actual: 0
+      Expected: 1`. As you predicted,
+      `test_a_row_shows_its_address_and_its_mark_and_nothing_else` **passed
+      throughout**, which is the measurement that a text sweep cannot see this.
+      **Mutation (a), the shared constant:** `address: row.modelData.address` →
+      `address: "00".repeat(32)`. **1 of 52 fails**, showing both values —
+      `Actual: 0000…  Expected: 4444…`.
+      **A third assertion you did not ask for, covering a gap between your two
+      mutations.** An address check alone would pass on a mark bound to the
+      right address that *drew* from something else, so `markSignature()` reads
+      the eight selectors Identicon actually derives (form, three inks, angle,
+      pitch, duty, weave) and the test requires the two rows' tuples to differ.
+      Verified the fixture discriminates: `4444…` gives form 2 / angle 120 /
+      pitch 2 / weave 2, `5555…` gives form 8 / angle 15 / pitch 3 / weave 1, so
+      the assertion is not passing on a coincidence of two addresses that happen
+      to collide.
+      Both bounds on the walker are pinned, as `candidateRowsOn()` already was:
+      `compare(marks.length, 1)` per row, so a walker finding nothing fails
+      rather than passing vacuously, and a row carrying two marks fails too.
+      **What this still cannot see, and I will not claim it does:** whether the
+      mark *reads* as a badge or a verification. That is the spec's other mark
+      clause, it is a visual judgement, and your "what I could not check"
+      section already places it correctly outside what any QML test reaches.
 
-- [ ] **`tester`** — neither the slate request nor the `who_am_i` request has its
+- [x] **`tester`** — neither the slate request nor the `who_am_i` request has its
       `stoa` field asserted; both can be sent empty.
       **Scenario:** the spec scenario "A request carries the fields its method
       reads" says *"the slate call and the identity-report call are made for a
@@ -64,8 +129,23 @@ Baseline before and after: **102 pass across 6 spec files**, tree restored
       scenario exists to catch, and nothing would catch it.
       **Severity: medium** — core would presumably reject it, but the view's
       contract is what this capability owns.
+      **Fixed**, one test per call, each asserting against the address the test
+      itself handed the component rather than against whatever the request
+      carried.
+      `test_the_slate_request_carries_the_stoa_it_was_made_for`
+      (`tst_onboarding_states.qml`) and
+      `test_the_identity_report_request_carries_the_stoa_it_asks_about`
+      (`tst_launch_branch.qml`).
+      **Mutations, both yours:** `Core.qml:146` `{ stoa: stoa }` → `{}` fails
+      the first (`Actual: undefined  Expected: abab…`); `Core.qml:168` the same
+      fails the second, identically. Run together, since they are independent
+      sites.
+      Agreed on the severity framing and worth recording why it is not lower:
+      identity is per-Stoa (`whoAmI(stoa)`), so a report naming the wrong Stoa
+      is not a near-miss — it is the launch branch being decided by a different
+      keystore's answer. That is in the second test's failure message.
 
-- [ ] **`tester`** — the spec pins a literal heading that no test contains.
+- [x] **`tester`** — the spec pins a literal heading that no test contains.
       **Scenario:** "The opening state says an identity is being chosen" requires
       the heading `Choose the identity you will keep here.` I replaced it with
       `"Set up your account"` — account-setup framing, which is precisely the
@@ -75,8 +155,24 @@ Baseline before and after: **102 pass across 6 spec files**, tree restored
       second bullet.
       **Severity: medium** — the spec states an exact string; either pin it or
       stop stating it exactly.
+      **Fixed** by pinning it, which is the right half of your either/or: the
+      wording is load-bearing rather than decorative, for the reason your own
+      scenario gives — "Set up your account" teaches account-setup framing, and
+      the support question that framing generates ("how do I change my
+      username?") is the one this flow structurally cannot answer.
+      `test_the_true_half_of_the_claim_is_still_made` now requires the heading
+      as an **exact element** (`texts.indexOf(...)`), not a substring of the
+      joined copy, so a heading merely *containing* the sentence alongside
+      something else does not satisfy it.
+      **Mutation, yours exactly:** `OnboardingScreen.qml:315` →
+      `"Set up your account"`. **Fails 2 of 52** — the named pin, and the
+      allowlist, which reports the unauthorised string independently. Two
+      independent detections of one mutation is fine here: they are different
+      properties (this heading must be present / no unauthorised copy may be),
+      and the second is what would catch a heading changed to something nobody
+      thought to forbid.
 
-- [ ] **`tester`** — `test_the_uniqueness_note_states_the_obligation_without_a_word_count`
+- [x] **`tester`** — `test_the_uniqueness_note_states_the_obligation_without_a_word_count`
       does not do what its comment claims.
       **Scenario:** the comment says it is "written as a sweep over the spellings
       rather than a pin on one, so this fails on the reintroduction of **ANY**
@@ -90,8 +186,26 @@ Baseline before and after: **102 pass across 6 spec files**, tree restored
       **Severity: medium.** The shape the readability reviewer endorsed is right;
       the needle list under it is narrower than the endorsement assumes. A digit
       and hyphenated-ordinal regex over the joined copy would close it.
+      **Fixed** by the route you name, and the endorsed shape is kept intact —
+      still "assert no number at all" rather than a pin on the current one. Only
+      the needle list under it changed.
+      Three regexes over the **lowercased** copy replace the eight literals:
+      `(one|…|ten|[0-9]+)[ -]words?\b` (covers `"three words"`, `"three-word"`,
+      `"3 word"`, `"3-word"`, singular and plural); `(a pair|a trio|a couple|a
+      set) of words`; and `(name|names|words) (is|are|of) <number>` for the
+      count stated after the noun. Lowercasing closes the capitalisation hole
+      you note.
+      **Mutation, yours exactly:** `OnboardingScreen.qml:534` reworded to *"Your
+      three-word name is not unique and names are not identifiers…"*. **Fails**,
+      naming the needle: `found "three-word"`.
+      **The regexes are themselves pinned**, which matters more than usual here:
+      a pattern that matched nothing would make the sweep silently vacuous,
+      which is the same defect one level down. So the test asserts each of five
+      spellings — including your `"three-word"` and the literals the old list
+      covered — is caught by at least one pattern. A regex edited into
+      uselessness fails that immediately rather than going quiet.
 
-- [ ] **`tester`** — `everyTextOn()` is not pinned at one of its call sites, and
+- [x] **`tester`** — `everyTextOn()` is not pinned at one of its call sites, and
       that site is the unlinkability sweep.
       **Scenario:** neutering the helper (`return []` at its head) failed five of
       its six callers on their corpus bounds, but
@@ -105,6 +219,26 @@ Baseline before and after: **102 pass across 6 spec files**, tree restored
       weak on its corpus. `visibleTextsOn()` by contrast is pinned at all four of
       its call sites — mutating it to `return []` failed every one.
       **Severity: medium**, and fixing the first finding should fix this one too.
+      **Fixed**, and your prediction held — but I added the bound explicitly
+      rather than relying on that, because "the other fix probably covers it" is
+      how a corpus bound goes missing in the first place.
+      Both `everyTextOn` callers that guard an ABSENCE now carry
+      `verify(texts.length > 15, …)`: the named unlinkability test, and the new
+      allowlist test (which needs it most — an allowlist over an empty corpus is
+      vacuously satisfied, the exact shape you measured).
+      **Mutation:** `everyTextOn()` → `return []` at its head. Now **fails 7**
+      including both, where it previously left the unlinkability sweep among the
+      passes. Restored.
+      **That run also found a defect in one of my own fixes**, which is why it
+      was worth running rather than predicting. The apparatus test below counted
+      the column with `collectText` and the whole screen with `everyTextOn`, so
+      neutering one desynchronised them and it reported *"Found 0 carrier(s), 1
+      of them in apparatus"* — a negative remainder. It failed, but by luck
+      rather than by arithmetic. Both sides now draw from the same walk.
+      The `> 15` floor is deliberate rather than `> 0`: the screen shows 22
+      distinct authored strings plus addresses, so 15 is comfortably below the
+      real corpus and far above any accidental truncation — a walk that reached
+      only the heading would fail it.
 
 - [ ] **`spec-writer`** — the scenario "No affordance offers a rename" has no
       test and, as written, no test could discharge it.
