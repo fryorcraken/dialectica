@@ -588,6 +588,25 @@ Removal is moderation, which is a different and binding thing.
 A storage failure must never render as an empty feed. An empty feed and "we
 could not read the store" look identical and mean opposite things.
 
+**5b. One broken row breaks one row — it neither disappears nor takes the feed
+with it.**
+Posts arrive from peers, so a row can be missing a field the interface wanted.
+**Show the row and switch off just the control that cannot work** — a vote
+control with nothing to vote on goes dead rather than clickable-but-inert.
+
+The two tempting alternatives are both worse, and for reasons specific to this
+project rather than general tidiness. **Hiding the row** silently removes
+somebody's post, which is the exact outcome a censorship-resistant forum exists
+to prevent — and the reader cannot tell a hidden row from a row nobody wrote.
+**Failing the whole read** hands every peer a free way to blank your feed by
+sending one malformed row, and lands you back in obligation 5, showing "could not
+read the store" when the store read fine.
+
+So design rows to tolerate a missing piece: a control that can be present but
+dead, and a row that still reads properly without it. This is not hypothetical —
+two rows missing their identifier were found sharing a single vote slot, so a
+vote on one marked the other.
+
 **6. A generated name is never unique and never an identifier — the address is.**
 This is obligation 2b again, now applying to the thing **every post is
 attributed to**, which is a far larger surface than Stoa titles: a feed renders

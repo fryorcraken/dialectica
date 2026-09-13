@@ -577,6 +577,77 @@ the view SHALL be labelled as vote-based while no ordering consults votes.
 - **WHEN** the orderings the view offers are examined
 - **THEN** none is labelled as ordering by votes
 
+### Requirement: A row whose shape core did not guarantee degrades to what it can support, and is neither hidden nor fatal
+
+Content rows reaching the view are peer-derived, and the view SHALL NOT assume
+any field of a row is present or of the expected type merely because the module
+it came through currently always sends it.
+
+Where a row lacks a field an affordance needs, the view SHALL render the row and
+SHALL render that affordance **inert** — present but offering no action — rather
+than doing any of the following:
+
+- omitting the row,
+- failing the read that returned it,
+- or rendering an affordance that acts on a substituted, defaulted or absent
+  value.
+
+**No value derived from a missing field SHALL reach a core call**, and the guard
+SHALL be applied where the value is produced rather than at each place it is
+used, so that a later consumer inherits it rather than having to restate it.
+
+**The three outcomes differ in who bears the cost of one malformed row, which is
+what decides between them rather than taste.**
+
+Rendering the row inert costs the reader one control on one row. Omitting the row
+hides peer content, which on a forum whose purpose is resisting censorship is the
+outcome the system exists to prevent — and it hides it *silently*, so no reader
+can tell a suppressed row from a row nobody wrote. Failing the read lets a single
+malformed row blank an entire feed, which is a denial of service any peer can
+mount for free, and it collides with this view's governing rule that an empty
+store and an unreadable one must never look alike.
+
+Only the first confines the damage to the part that is actually broken. A row the
+view cannot offer every affordance for is still a row worth reading, and reading
+is what the forum is for.
+
+**This rule is general and SHALL NOT be read as being about any one field.** The
+argument that a key is safe "by construction" because it *is* the post holds only
+while every row carries that key, which is a property of peer-supplied data and
+not of the code — and the same sentence would be equally wrong about any other
+row field. A view that refuses to trust the shape of a reply's envelope while
+trusting the shape of the elements inside it holds two positions about one reply.
+
+#### Scenario: A row missing a field an affordance needs still renders
+
+- **WHEN** a read returns a row lacking the field an affordance requires
+- **THEN** the row's content is displayed
+- **AND** the read is not in a failure state
+- **AND** the other rows in that read are displayed
+
+#### Scenario: The affordance that cannot work is inert rather than absent-acting
+
+- **WHEN** a row lacks the field its vote control needs
+- **THEN** that control offers no action
+- **AND** acting on it reaches no core call
+
+#### Scenario: Two rows missing the same field do not share one slot
+
+- **WHEN** a read returns two rows that both lack the field identifying them, and
+  a vote is recorded against the first
+- **THEN** the second shows no vote
+
+#### Scenario: No call carries a value derived from a missing field
+
+- **WHEN** a vote is attempted on a row lacking its identifying field
+- **THEN** no publish call is made
+- **AND** no request is sent omitting the field that would have named the target
+
+#### Scenario: A well-formed row is unaffected
+
+- **WHEN** a read returns a row carrying every field
+- **THEN** its affordances are offered and act normally
+
 ### Requirement: The vote control shows the viewer their own vote back, and only for this session
 
 When a vote is published successfully, the view SHALL show that vote back on the
@@ -609,6 +680,14 @@ was recorded.
 
 - **WHEN** a vote is published on one post
 - **THEN** the control for a different post shows no vote
+
+#### Scenario: That separation does not rest on the rows being well-formed
+
+- **WHEN** a vote is published on one post among rows that do **not** carry
+  distinct identifying fields
+- **THEN** no other row's control shows a vote
+- **AND** the separation therefore holds for rows as peers may send them, not
+  only for rows every field of which core happened to supply
 
 #### Scenario: A post with no recorded vote renders neutrally
 

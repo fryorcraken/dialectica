@@ -312,6 +312,63 @@ any column. It does not oblige explanatory prose, and the spec now says so, beca
 The asymmetry has a reason: a missing number invites no false inference, since
 nothing appears and nothing is claimed, whereas a successful submission does.
 
+### A malformed row renders inert, and the rule is about rows rather than about one field
+
+A security review found two feed rows missing `currentVersion` colliding on one
+vote slot: `ownVotes` became `{"undefined":1}`, the second row read back the
+first's vote, and the request reaching core carried **no `target` field at all**,
+`JSON.stringify` having dropped the undefined. Every test stayed green, because
+every fixture gives rows distinct versions — the repo's known defect family, a
+fixture where two explanations produce the same answer.
+
+The fix shipped. What was left open was the contract question, and it is
+general: **what does the view do with a row whose shape core did not guarantee?**
+
+**Chosen: render the row, make the affordance that cannot work inert.** The three
+candidate positions are not three tastes — they differ in **who bears the cost of
+one malformed row**, and that is what decides between them:
+
+- **Render inert** costs the reader one control on one row. The damage is
+  confined to the part that is actually broken.
+- **Drop the row** hides peer content, which on a forum whose purpose is
+  resisting censorship is the outcome the system exists to prevent — and it hides
+  it *silently*, so no reader can tell a suppressed row from a row nobody wrote.
+- **Fail the read** lets one malformed row from any peer blank an entire feed: a
+  denial of service any peer can mount for free, colliding with this view's
+  governing rule that an empty store and an unreadable one must never look alike.
+
+A row the view cannot offer every affordance for is still a row worth reading,
+and reading is what the forum is for.
+
+**The requirement is written about rows, not about `currentVersion`**, because
+the discarded claim would have been equally wrong about any other field. The old
+design note said the invariant held "by construction … because the key *is* the
+post" — true only while every row carries that key, which is a property of
+peer-supplied data and not of the code. Contracting the specific field would
+leave the next field to be rediscovered the same way.
+
+**The asymmetry the reviewer found is the sharpest part and is now stated in the
+spec**: the view already refuses to trust the shape of `items` while trusting the
+shape of the rows inside the same reply. Holding two positions about one reply is
+the defect, independent of which field exposed it.
+
+Two further things this settles. The guard SHALL be applied **where the value is
+produced** rather than at each use, so a later consumer inherits it instead of
+restating it. And **no value derived from a missing field may reach a core
+call** — the targetless request was the worse half of the defect, and a rule
+about rendering alone would not have forbidden it.
+
+I also strengthened the existing "a vote on one post does not mark another"
+scenario, which passed throughout the defect's life. It now additionally requires
+the separation to hold for rows that do **not** carry distinct identifying
+fields, so it cannot be satisfied by a fixture that is well-formed by accident.
+
+**No code change follows**: the shipped `voteTarget` guard, the inert control and
+the `voteOn` restatement satisfy every clause, and four of the five new scenarios
+already have tests — including `tst_vote_and_gate.qml:191`, which pins that both
+malformed rows still render, the half distinguishing this position from dropping
+the row.
+
 ### The reply composer is contracted but not yet reachable, and the spec says so
 
 `Composer` supports both modes and tests exercise both; only the post mode is
