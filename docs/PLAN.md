@@ -645,17 +645,32 @@ each phase is independently useful and none depends on a later one landing.
 No discovery mechanism at all, and none needed to prove the rest of the system
 works.
 
-**Phase 1 — addresses as links.** A Stoa address is a copyable string. Importing
-one is how you join a Stoa nobody told the app about; a Stoa address appearing
-in a post renders as a link that enters that Stoa on click. This is the whole
-mechanism, and it is enough for a network that grows by word of mouth.
+**Phase 1 — addresses as links.** A Stoa address is a copyable string, and a
+Stoa address appearing in a post renders as a link that offers to enter that
+Stoa. This is the whole mechanism, and it is enough for a network that grows by
+word of mouth.
 
-Two things to get right, both security-relevant: an address must be
-**self-authenticating** — pasting it is enough to verify what you joined,
-because the address is a hash of the genesis record (§5.1), so a wrong or
-tampered record fails to match. And in-post addresses are **attacker-supplied
-content**: render them as an explicit affordance the reader chooses to act on,
-never auto-join, and show what is being joined before joining it.
+~~Importing an address is how you join a Stoa nobody told the app about.~~
+~~An address must be **self-authenticating** — pasting it is enough to verify
+what you joined.~~ **Retracted; the joining half is built.** Creating, joining
+and listing Stoas are contracted by the `stoa-membership` capability, which
+states that **an address alone is not joinable**: the address is a one-way hash
+of the genesis record, so it is sufficient to *verify* a record somebody hands
+over and insufficient to *reconstruct* one. A join therefore takes the address
+**and** the record it names. This is the same error §5.5 records having made
+twice in its own signature; the sentence above stated the false half more
+confidently than the retraction, which is why it is struck here rather than
+merely cross-referenced.
+
+What survives of the self-authentication property, and it is the load-bearing
+half: the address is a hash of the genesis record (§5.1), so a wrong or tampered
+record **fails to match the address it is offered with**. Verification needs
+nothing but those two inputs — no registry, no peer, no network call.
+
+Still to get right, and still not built: in-post addresses are
+**attacker-supplied content**. Render them as an explicit affordance the reader
+chooses to act on, never auto-join, and show what is being joined before joining
+it. That is a UI obligation — see §5.5, which holds it.
 
 **Phase 2 — opt-in broadcast.** A dedicated content topic, **outside SDS**,
 carries Stoa announcements. A creator decides at creation whether their Stoa is
@@ -3258,8 +3273,12 @@ projection already applies, and it needs no key and no authority. Putting it in
 Stage C would make "see what was moderated" a moderator privilege, which §6.1's
 ceiling does not support — the ops are in every peer's log regardless.
 
-**Stage D — reach another Stoa.** §4.8 Phase 1's copyable address: paste to
-join, and in-post addresses rendered as an affordance rather than acted on.
+**Stage D — reach another Stoa.** §4.8 Phase 1's address, which verifies the
+genesis record it is offered with, and in-post addresses rendered as an
+affordance rather than acted on. **The joining half is built** — see below and
+the `stoa-membership` capability; the in-post affordance is a UI obligation and
+is not. §4.8 Phase 1 records why "pasting an address is enough to join" was
+wrong: a join takes the address **and** the record.
 
 The ordering is not arbitrary and the dependencies run one way only. B needs A
 because a compose box needs somewhere to put the result; C needs A and B because
@@ -3457,27 +3476,29 @@ through one code path.
 #### 5. How a user reaches a Stoa
 
 §4.8 stages this and Stage D implements its Phase 1: **a Stoa address is a
-copyable string.** Two calls:
+copyable string.**
 
-- `getStoa` — what a Stoa is called today, resolved from the latest valid
-  `StoaMetadata` op with a fallback to the genesis title (§5.7). Note this is
-  **the one thing in this section that core cannot currently do**: the metadata
-  op exists and accumulates, and nothing resolves it. See "What the resolvers do
-  not provide" below.
-- `joinStoa` — take an address, verify the genesis record hashes to it, and
-  record it as one this peer reads.
+~~`joinStoa` — take an address, verify the genesis record hashes to it, and
+record it as one this peer reads.~~ **Built.** Creating, joining and listing
+Stoas exist on the module surface, contracted by the `stoa-membership` capability.
+The reasoning — including why the call takes the genesis **record** as well as the
+address, which is where this section's signature was wrong — is in that change's
+`design.md`. A hash verifies a record somebody hands over and cannot reconstruct
+one, so "take an address, verify the genesis record" named no record for the call
+to verify.
 
-**The security property is §4.8's and must not be weakened.** An address is
-self-authenticating: it is a hash of the genesis record, so a wrong or tampered
-record fails to match. `joinStoa` therefore verifies rather than trusts, and a
-mismatch is an error, never a join of something-close-enough.
+`getStoa` remains **not built**: it is the metadata-resolution call, resolving the
+latest valid `StoaMetadata` op with a fallback to the genesis title (§5.7). The
+metadata op exists and accumulates, and nothing resolves it. See "What the
+resolvers do not provide" below.
 
 **In-post addresses are attacker-supplied content.** §4.8 is explicit and this
 section adds nothing to it except the mechanics: a Stoa address appearing in a
 post body renders as an affordance the reader chooses to act on; acting on it
 shows what is being joined — the Stoa's title and address — **before** joining;
 and nothing auto-joins, ever. The relevant threat is not a malicious Stoa, which
-a reader can leave; it is a reader who does not know they joined one.
+a reader can leave; it is a reader who does not know they joined one. **This is a
+UI obligation and is not built**, which is why it stays here rather than moving.
 
 **The obligation this surfaces, also new to §11.1**: a Stoa's *displayed* title
 comes from a metadata op signed by its moderators and is not unique, not
@@ -3491,16 +3512,19 @@ confirmation that shows only a title has shown the reader the forgeable half.
 the deliverable, which CLAUDE.md asks be done on purpose.** They follow §2.5
 without exception: JSON in, JSON out, `{"error":"..."}` as the only failure
 shape, never a partial success. Pagination is `(page, perPage)` in and
-`{"items":[...],"page":N,"hasMore":bool}` out — **and nothing implements that
-shape yet**, so whichever of these lands first is the first instance of it and
-sets the precedent.
+`{"items":[...],"page":N,"hasMore":bool}` out. The feed and the Stoa listing both
+implement it, so the precedent is set rather than pending — read the built shape
+before proposing a variation.
 
 Field names are illustrative; the shapes and the arguments for them are not.
+**Methods marked BUILT are contracted by a capability in `openspec/specs/`, which
+is the authority for their actual shape; the line here is a pointer, not a
+signature.**
 
 **Stage A — read**
 
 ```
-listStoas()                 -> {"items":[{stoa, title, description}], page, hasMore}
+listStoas({page, perPage})  -> BUILT: see the `stoa-membership` capability
 getStoa({stoa})             -> {stoa, title, description, policy, isGenesisFallback}
 listThreads({stoa, order, page, perPage, includeHidden})
                             -> {"items":[{thread, currentVersion, body, attachments,
@@ -3556,12 +3580,23 @@ either/or shape rather than inventing a second convention for the same job.
 **Stage D — reach**
 
 ```
-joinStoa({address})         -> {stoa, title, description}
+createStoa({title})         -> BUILT: see the `stoa-membership` capability
+joinStoa({stoa, genesis})   -> BUILT: see the `stoa-membership` capability
 ```
 
-Returning the resolved title is what lets the view show what is being joined
-before it is joined, which §4.8 requires and which a bare `{"ok":true}` could
-not support.
+~~`joinStoa({address})`~~ — **this section specified the wrong input, twice, and
+the implementation is the correct one.** An address is a one-way hash: it verifies
+a record somebody hands over and cannot reconstruct one, so a join given only an
+address has nothing to verify and would leave the peer holding a Stoa whose record
+it does not have — which `moderation-resolution` requires before a reader may
+decide whether any moderation of that Stoa's content binds. The departure is
+argued in the `stoa-lifecycle` change's `design.md`; do not reinstate the
+single-argument form here.
+
+The reply carries the founding title, which is what lets the view show what is
+being joined before it is joined (§4.8) and which a bare `{"ok":true}` could not
+support. Note **founding**, not resolved: `getStoa` above is the resolution call
+and is not built, so a join reply names the founding value and says so.
 
 **Methods deliberately NOT proposed**, each with its reason, because a list of
 what was declined is the part that stops the API growing by accident:
@@ -3798,8 +3833,11 @@ the costs below were named and accepted.
 3. Post
 4. Reply to a post
 5. Upvote / downvote
-6. Share a Stoa — copy its address
-7. Join a Stoa by address
+6. Share a Stoa — copy its address. **Built** (the address is what creation
+   returns); sharing it *from the UI* is not
+7. ~~Join a Stoa by address~~ **Join a Stoa, given its address and its genesis
+   record. Built** — see the `stoa-membership` capability. An address alone is
+   not joinable; §4.8 Phase 1 records why the original wording was wrong
 8. **Receive ops from other peers**, over delivery's reliable channel
 9. **View a feed; view a thread**
 10. **Persistence on disk** of Stoas, identities and messages
@@ -3916,8 +3954,10 @@ only:
   needs a later one.
 - **Stage C (moderate) is out**, which is the §6 exclusion seen from the staging
   side.
-- **Stage D (reach another Stoa)** is **in**, via items 6 and 7 — sharing and
-  joining by address, §4.8 Phase 1. This is the one place the MVP scope departs
+- **Stage D (reach another Stoa)** is **in**, via items 6 and 7 — sharing an
+  address, and joining with an address **and** the genesis record it names (§4.8
+  Phase 1; "joining by address" was the wrong shape). This is the one place the
+  MVP scope departs
   from §9.1's ordering, and it is a deliberate reordering rather than an
   oversight: D before C. §9.1 permits it, since D depends on A and on nothing
   later.

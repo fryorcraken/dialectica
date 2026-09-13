@@ -23,6 +23,7 @@ pub mod identity;
 pub mod identity_store;
 pub mod keystore;
 pub mod log;
+pub mod membership;
 pub mod moderation;
 pub mod onboarding;
 pub mod op;
@@ -42,9 +43,10 @@ pub mod wire;
 // rather than in `wire` — a file with no handler in it, so its private field is
 // private to somewhere a handler cannot reach.
 pub use wire::{
-    callee_error, channel_exists_reply, error_json, generate_identity_slate, get_capabilities,
-    get_capabilities_from_stores, guarded, keep_identity, list_threads, list_threads_from_request,
-    no_identity, panic_probe, parse_channel_id, ping, posting_identity, publish_post,
-    publish_reply, publish_vote, version, who_am_i, KeepTargets, OnboardingSession, Request,
-    MAX_REQUEST_BYTES, REQUEST_NOT_AN_OBJECT,
+    callee_error, channel_exists_reply, create_stoa, error_json, generate_identity_slate,
+    get_capabilities, get_capabilities_from_stores, guarded, join_stoa, keep_identity, list_stoas,
+    list_threads, list_threads_from_request, membership_path_in, no_identity, panic_probe,
+    parse_channel_id, ping, posting_identity, publish_post, publish_reply, publish_vote, version,
+    who_am_i, with_membership_store, with_membership_store_read, KeepTargets, OnboardingSession,
+    Request, MAX_REQUEST_BYTES, REQUEST_NOT_AN_OBJECT,
 };
