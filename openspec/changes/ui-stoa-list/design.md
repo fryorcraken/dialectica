@@ -79,9 +79,9 @@ spec requires be kept distinct from a malformed paste.
   against the one they were expecting.
 
 **The prefix is stripped on the way in, never added on the way out.**
-`parseReference` accepts an address written `stoa:ab12…` because a user may have
-copied one from a screen, and normalises it to bare hex before it reaches core.
-`shareTextFor` writes bare hex. A prefix that survived into `join_stoa` would be
+`StoaReference.parse` accepts an address written `stoa:ab12…` because a user may
+have copied one from a screen, and normalises it to bare hex before it reaches
+core. `StoaReference.shareText` writes bare hex. A prefix that survived into `join_stoa` would be
 a hash that verifies against nothing, surfacing as a verification failure —
 exactly the wrong one of the spec's three outcomes.
 
@@ -187,9 +187,15 @@ default buried in the wrapper is a number two screens would silently share.
   apparatus column rather than left to be inferred. The real fix is the core
   piece that widens the listing item; until then the honest rendering is the one
   that cannot produce an unjoinable string.
-- **A user who joins a Stoa can share it, and after a restart cannot.** → Same
-  cause, same fix. Noted here because it is the shape in which the gap will be
-  reported as a defect, and the report will be correct.
+- **A user who joins a Stoa can share it, and after a restart cannot. A user who
+  CREATES one cannot share it at all, from the moment it exists.** → Same cause,
+  same fix, but the two are not symmetric and an earlier version of this line
+  said they were. `create_stoa` returns `{stoa, foundingTitle, policy}` and no
+  genesis record, so the view never holds one for a created Stoa — the
+  degradation bites immediately rather than at the next launch. Noted here
+  because it is the shape in which the gap will be reported as a defect, and the
+  report will be correct; and because the milder framing makes the creation case
+  look like it works until someone tries it.
 - **`TextEdit.copy()` is untestable headless.** → The sink records what it was
   asked to copy, the tests assert on that, and the test file says plainly which
   half is unverified. The alternative — asserting nothing and claiming coverage —
@@ -199,6 +205,60 @@ default buried in the wrapper is a number two screens would silently share.
   false *negative* (a real lookalike goes unmentioned), never a false positive,
   and it is the safe direction: a panel that appeared because of a failed read
   would be asserting a comparison nothing performed.
+
+### D9 — Every screen owns its way out, and the two navigator states exclude each other
+
+`FeedScreen` gained a `closed()` signal and an unconditional "All Stoas" button;
+`Main.qml` gained `preview()`, `open()` and `closeFeed()`, and the first two each
+clear what the other owns.
+
+**Arriving somewhere is half a transition.** `FeedScreen` had no signals at all,
+so nothing could clear `chosen`, and the first row a user opened was the last
+screen they saw until they restarted — taking the list, the share affordance and
+the join field with it. 103 tests passed while that held, because a suite that
+asserts up to a transition and nothing after it cannot see a one-way trip.
+
+Three decisions inside that:
+
+- **A signal, not a direct write.** The feed does not know what is above it, so
+  the caller decides what "back" means. That keeps D5's argument intact: the
+  navigator still holds one nullable property per screen and needs no
+  `StackView`.
+- **The affordance is unconditional.** The state a control exists to leave must
+  not be the state that withdraws it. The feed's own read can fail, and that is
+  when a user most wants out.
+- **The test asserts the control, not the signal.** A `closed()` signal nothing
+  renders a button for is a route only a test can take, and would satisfy a
+  weaker assertion while leaving the user equally stranded.
+
+**`chosen` and `previewing` are now mutually exclusive**, which is the second
+half. `screenShown` is an ordered ternary, so a preview requested while a feed
+was open was silently swallowed — latent today, because nothing on the feed emits
+one, but the spec's own model is that an address inside a post is an affordance a
+reader acts on, and a post lives on the feed. The setters clear each other, so
+the state `(chosen ≠ null, previewing ≠ null)` cannot be constructed and the
+ternary renders the state rather than resolving a clash. Functions rather than a
+comment explaining the precedence: a comment would have documented a trap instead
+of removing it, and the precedence was an accident of ordering rather than a
+decision worth recording.
+
+### D10 — `visibleRows` carries the read-state guard, `lastListing` holds the raw answer
+
+`StoaListScreen.rows` became `lastListing` (the last answer, current or not) plus
+a derived `readonly visibleRows` that is empty unless `readState === "ok"`.
+
+A failed reload deliberately does not blank the previous page — a failure must
+not destroy a good listing underneath a banner — so the screen held rows that
+`readState` said were not read, and safety depended on **every reader**
+remembering `readState === "ok" ? rows : []`. That guard was already written
+twice, in two files: once on the `Repeater` model 213 lines from the state making
+it necessary, and again in `Main.qml`. Two copies is CLAUDE.md's signal to let
+the data absorb it; a third reader would have had to know to write it a third
+time, and the one who forgets renders a listing the screen has said was unread.
+
+The rename is the load-bearing half. `rows` invited the wrong read; `lastListing`
+makes a reader ask "last as of when?" before using it. Both call-site guards are
+now gone rather than merely correct.
 
 ### D8 — An outcome is stored with the reference it describes, not beside it
 

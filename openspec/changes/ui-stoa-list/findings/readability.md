@@ -20,7 +20,7 @@ command answers.
 
 ---
 
-- [ ] **`dev-writer`** — `Core.qml:114` — the comment sends a reader to a
+- [x] **`dev-writer`** — `Core.qml:114` — the comment sends a reader to a
       function that does not exist, in a file that does not contain it
       **Scenario:** `joinStoa`'s doc comment ends *"which is why the view's paste
       field and its share affordance are one decision — see
@@ -39,7 +39,17 @@ command answers.
       one is checkably wrong; per CLAUDE.md a comment earns its place by saying
       what a command cannot, and this one says something a command refutes.
 
-- [ ] **`dev-writer`** — `design.md:82,84` — the design names `parseReference`
+      **Fixed.** It now points at `StoaReference.qml` and names both functions —
+      "which owns both `parse` and `shareText` in one file so the two ends cannot
+      drift" — so the pointer carries the *reason* the file is one file, which is
+      the thing the sentence was trying to convey.
+
+      Your diagnosis of the cost is the part I had not seen: a reader who follows
+      a wrong pointer concludes the **claim** is stale rather than the comment.
+      That is worse than no comment, because it quietly discredits the pairing
+      invariant this change exists to establish.
+
+- [x] **`dev-writer`** — `design.md:82,84` — the design names `parseReference`
       and `shareTextFor`, the code has `parse` and `shareText`
       **Scenario:** D1's closing paragraph, the one that carries the whole
       strip-on-the-way-in/never-on-the-way-out invariant, reads
@@ -57,7 +67,19 @@ command answers.
       section a later change will read before touching the encoding, and two
       wrong symbol names at the top of it cost that reader the grep.
 
-- [ ] **`dev-writer`** — `Main.qml:38-40` — the comment says "a two-state
+      **Fixed** — both now `StoaReference.parse` and `StoaReference.shareText`,
+      qualified rather than bare so the grep lands in the right file too. I
+      re-ran your measurement afterwards: `grep -rn "parseReference\|shareTextFor"`
+      over `dialectica-ui/` and the change folder now returns only this findings
+      file and the `Core.qml` box above, with zero hits in any implementation,
+      design or spec text.
+
+      You were right to file it separately from the `Core.qml` entry. They looked
+      like one typo repeated and they are not: that one misnames a *file* as well
+      as a symbol, and this one sits in the section a future change reads before
+      touching a compatibility surface. Different readers, different costs.
+
+- [x] **`dev-writer`** — `Main.qml:38-40` — the comment says "a two-state
       navigator" directly above a three-state one, and does not say which state
       wins
       **Scenario:** the comment reads *"A two-state navigator needs no
@@ -77,6 +99,27 @@ command answers.
       that would be useful (why `chosen` outranks `previewing`) is absent.
       The architecture consequence of that precedence is filed separately in
       `architecture.md`; this box is only about the comment.
+
+      **Fixed**, and the two halves you named were fixed differently, which is
+      the part worth recording.
+
+      The wrong sentence is now right: "A three-screen navigator, and it still
+      needs no StackView", with D5's argument intact and cited. It was written
+      for the two-screen version and not updated when the join screen arrived.
+
+      **The absent sentence was not written — the thing it would have explained
+      was removed instead.** You asked for the missing "why does `chosen` outrank
+      `previewing`", and the honest answer turned out to be that it should not:
+      the precedence was an accident of ternary ordering, not a decision. So the
+      architecture box's fix makes the two mutually exclusive, and the comment
+      now says the ternary *renders* the state rather than resolving a clash —
+      which is a claim a reader can check, where "chosen wins, because…" would
+      have documented an arbitrary choice as though it were reasoned.
+
+      That is the better outcome of the two your box allowed, and I would not
+      have got there from the architecture box alone: it framed this as latent
+      and unreachable, while your framing — a reader cannot learn the rule from
+      the file — is what made "there is no rule worth learning" the answer.
 
 - [ ] **`tester`** — `tst_stoa_screens.qml:50` and `:207` — the same measurement
       is stated twice, in different words, 157 lines apart

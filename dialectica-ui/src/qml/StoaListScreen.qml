@@ -19,7 +19,27 @@ ScreenFrame {
     //   "ok"      membership answered; `rows` is what it holds (possibly none)
     //   "failed"  membership could not be read; `failure` says why
     property string readState: "unread"
-    property var rows: []
+
+    // The last listing the core answered with, **whether or not it is current**.
+    //
+    // `reload()`'s failure path deliberately does not write this: a failure must
+    // not blank a good listing underneath a banner, so after a failed reload it
+    // still holds the previous page. That makes it the WRONG property for any
+    // caller asking "what is this peer in?", and it is private to this file for
+    // that reason — read `visibleRows` instead.
+    property var lastListing: []
+
+    // What the screen is entitled to render and what any other caller may read.
+    //
+    // **The guard lives in the data rather than at each call site.** It used to
+    // be written twice — once on this file's `Repeater` model, 213 lines from
+    // the state that makes it necessary, and again in `Main.qml` as
+    // `list.readState === "ok" ? list.rows : []`. Two copies of one guard in two
+    // files is CLAUDE.md's signal to reshape: a third reader would have had to
+    // know to write it a third time, and the one who forgets renders a listing
+    // the screen has already said was not read.
+    readonly property var visibleRows:
+        screen.readState === "ok" ? screen.lastListing : []
     property string failure: ""
     property bool hasMore: false
     property int page: 0
@@ -88,7 +108,7 @@ ScreenFrame {
             return
         }
 
-        screen.rows = reply.value.items
+        screen.lastListing = reply.value.items
         screen.hasMore = reply.value.hasMore === true
         screen.failure = ""
         screen.readState = "ok"
@@ -262,7 +282,7 @@ ScreenFrame {
 
     // ---- state: read fine, in no Stoas ----------------------------------
     Rectangle {
-        visible: screen.readState === "ok" && screen.rows.length === 0
+        visible: screen.readState === "ok" && screen.visibleRows.length === 0
         Layout.fillWidth: true
         implicitHeight: emptyBody.implicitHeight + 2 * Theme.cardPaddingY
         color: Theme.paper
@@ -301,7 +321,10 @@ ScreenFrame {
     // ---- state: the rows ------------------------------------------------
 
     Repeater {
-        model: screen.readState === "ok" ? screen.rows : []
+        // No guard here any more: `visibleRows` is already empty unless the read
+        // succeeded, so the invariant travels with the data instead of being
+        // restated 213 lines from the state that makes it necessary.
+        model: screen.visibleRows
 
         delegate: RowLayout {
             id: row

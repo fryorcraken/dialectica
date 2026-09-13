@@ -340,7 +340,7 @@ TestCase {
 
         compare(screen.readState, "ok",
                 "a membership that answered with nothing is a SUCCESS, not a failure")
-        compare(screen.rows.length, 0)
+        compare(screen.visibleRows.length, 0)
         compare(screen.failure, "", "an empty read has nothing to report")
         screen.destroy()
     }
@@ -349,7 +349,7 @@ TestCase {
         var screen = makeList({ "list_stoas": '{"error":"the membership store at /x/membership.sqlite is locked"}' })
 
         compare(screen.readState, "failed")
-        compare(screen.rows.length, 0, "a failure must not leave rows behind")
+        compare(screen.visibleRows.length, 0, "a failure must not leave rows behind")
         verify(screen.failure.indexOf("locked") >= 0,
                "core's reason names a fix and must reach the screen unreworded, got: "
                + screen.failure)
@@ -403,7 +403,7 @@ TestCase {
     function test_a_reply_that_is_not_json_is_a_failure_rather_than_a_value() {
         var screen = makeList({ "list_stoas": '<html>gateway timeout</html>' })
         compare(screen.readState, "failed")
-        compare(screen.rows.length, 0, "no Stoa may be obtained from a non-JSON reply")
+        compare(screen.visibleRows.length, 0, "no Stoa may be obtained from a non-JSON reply")
         screen.destroy()
     }
 
@@ -437,7 +437,7 @@ TestCase {
                         + '],"page":0,"hasMore":false}'
         })
 
-        compare(screen.rows.length, 2, "both rows must be rendered")
+        compare(screen.visibleRows.length, 2, "both rows must be rendered")
         var shown = visibleText(screen)
         // The prefixes are hardcoded rather than derived from the fixture: a
         // check that merely asserted "the two rows differ" would pass on two
@@ -455,7 +455,7 @@ TestCase {
         })
 
         compare(screen.readState, "ok")
-        compare(screen.rows.length, 1, "an empty title is legal and must not be omitted")
+        compare(screen.visibleRows.length, 1, "an empty title is legal and must not be omitted")
         var shown = visibleText(screen)
         verify(shown.indexOf("1ce0aa38") >= 0, "the row must carry its address")
         // No substitute title. "Untitled" is a title no peer agrees on, and a
@@ -1435,6 +1435,148 @@ TestCase {
         view.destroy()
     }
 
+    function test_a_failed_reload_makes_the_stale_listing_unreadable_not_merely_unrendered() {
+        // The previous shape kept the last page in `rows` after a failed reload
+        // — correct, because a failure must not blank a good listing underneath
+        // a banner — and relied on every READER remembering
+        // `readState === "ok" ? rows : []`. That guard was written twice, in two
+        // files, which is the point at which the data should absorb it.
+        //
+        // This asserts the absorbed form: after a failure the rows are gone from
+        // what any caller can read, while the raw listing is still there for the
+        // screen's own purposes.
+        var addr = "aa".repeat(32)
+        var screen = makeList({
+            "list_stoas": '{"items":[{"stoa":"' + addr + '","foundingTitle":"Held"}],'
+                        + '"page":0,"hasMore":false}'
+        })
+        compare(screen.readState, "ok")
+        compare(screen.visibleRows.length, 1, "the good listing is readable")
+
+        Core.bridge = bridgeFor({ "list_stoas": '{"error":"the membership store is locked"}' })
+        screen.reload()
+
+        compare(screen.readState, "failed")
+        compare(screen.visibleRows.length, 0,
+                "a caller reading the rows after a failed read gets none, "
+                + "without having to remember a guard")
+        compare(screen.lastListing.length, 1,
+                "while the previous page is still held, so a retry need not refetch "
+                + "and a failure does not destroy a good listing")
+
+        // And nothing stale is on screen, which is the user-visible half.
+        var body = spec.bodyText(screen)
+        verify(body.indexOf("Held") < 0, "no stale row may render: " + body)
+        verify(body.indexOf("locked") >= 0, "the core's reason is what shows instead")
+        screen.destroy()
+    }
+
+    function test_a_user_who_opened_a_stoa_can_return_to_the_list() {
+        // **Arriving somewhere is half a transition.** Nothing cleared `chosen`,
+        // and `FeedScreen` declared no signals at all — so the first row a user
+        // opened was the last screen they saw until they restarted the app. The
+        // list, the share affordance and the join field, which are the whole of
+        // what this piece added, all became unreachable after one click.
+        //
+        // 103 of 103 tests passed while that held, because the suite asserted up
+        // to the transition and nothing after it. A one-way trip satisfies every
+        // scenario about arriving.
+        var addr = "aa".repeat(32)
+        Core.bridge = bridgeFor({
+            "list_stoas": '{"items":[{"stoa":"' + addr + '","foundingTitle":"Held"}],'
+                        + '"page":0,"hasMore":false}',
+            "get_capabilities": '{"canPost":true,"identity":"aa"}',
+            "list_threads": '{"items":[],"page":0,"hasMore":false}'
+        })
+        var view = mainComponent.createObject(null, {})
+        var list = spec.visibleNamed(view, "stoaList")[0]
+        list.stoaChosen(addr, "Held", "00ff00ff")
+        compare(view.screenShown, "feed", "the user is on the feed")
+
+        // The affordance a user acts on, found on screen rather than assumed —
+        // a `closed` signal nothing renders a control for is a route only a test
+        // can take.
+        var backs = spec.visibleNamed(view, "feedBackButton")
+        compare(backs.length, 1, "a visible affordance must offer the return")
+        backs[0].clicked()
+
+        compare(view.screenShown, "list", "and acting on it renders the list")
+        compare(view.chosen, null, "with no Stoa still chosen")
+
+        // The list is genuinely usable again, not merely nominally rendered:
+        // the row is back and so is the paste field's action.
+        var body = spec.bodyText(spec.visibleNamed(view, "stoaList")[0])
+        verify(body.indexOf("Held") >= 0,
+               "the list's rows are on screen again: " + body)
+        view.destroy()
+    }
+
+    function test_a_preview_requested_while_a_feed_is_open_is_not_swallowed() {
+        // `screenShown` is an ordered ternary testing `chosen` first, so before
+        // the fix a preview requested while a feed was open left `screenShown`
+        // at "feed" — the JoinScreen rebound to the new reference behind an
+        // invisible panel, and nothing shown.
+        //
+        // Latent rather than live: nothing on the feed emits a preview request
+        // today. But the spec's model is that an address inside a post is an
+        // affordance a reader acts on, and a post lives on the feed — so the
+        // piece adding that affordance would have hit exactly this. It is pinned
+        // now so that piece inherits the behaviour instead of the silence.
+        var addr = "aa".repeat(32)
+        Core.bridge = bridgeFor({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "get_capabilities": '{"canPost":true,"identity":"aa"}',
+            "list_threads": '{"items":[],"page":0,"hasMore":false}'
+        })
+        var view = mainComponent.createObject(null, {})
+
+        view.open(addr, "Held", "00ff00ff")
+        compare(view.screenShown, "feed")
+
+        view.preview("bb".repeat(32), "00ff")
+
+        compare(view.screenShown, "join",
+                "a preview requested from anywhere must be shown, not swallowed")
+        compare(view.chosen, null,
+                "and the state (chosen, previewing) both set must not exist — "
+                + "the ternary renders the state rather than resolving a clash")
+
+        // And the reverse direction, so the exclusion is not one-way.
+        view.open(addr, "Held", "00ff00ff")
+        compare(view.screenShown, "feed")
+        compare(view.previewing, null, "opening a Stoa clears a pending preview")
+        view.destroy()
+    }
+
+    function test_reopening_a_stoa_after_returning_still_carries_its_record() {
+        // The return must not cost the record. `chosen` is cleared on the way
+        // out, and `genesisByStoa` lives on the list rather than on the feed, so
+        // a second open is as complete as the first — which is what makes the
+        // return safe to take rather than a thing to avoid.
+        var addr = "aa".repeat(32)
+        Core.bridge = bridgeFor({
+            "list_stoas": '{"items":[{"stoa":"' + addr + '","foundingTitle":"Held"}],'
+                        + '"page":0,"hasMore":false}',
+            "get_capabilities": '{"canPost":true,"identity":"aa"}',
+            "list_threads": '{"items":[],"page":0,"hasMore":false}'
+        })
+        var view = mainComponent.createObject(null, {})
+        var list = spec.visibleNamed(view, "stoaList")[0]
+        var held = {}
+        held[addr] = "00ff00ff"
+        list.genesisByStoa = held
+
+        list.stoaChosen(addr, "Held", "00ff00ff")
+        spec.visibleNamed(view, "feedBackButton")[0].clicked()
+        compare(view.screenShown, "list")
+
+        list.stoaChosen(addr, "Held", list.genesisFor(addr))
+        compare(view.screenShown, "feed")
+        compare(view.chosen.genesis, "00ff00ff",
+                "the record still travels on a second open")
+        view.destroy()
+    }
+
     function test_no_record_is_invented_for_a_row_the_view_has_none_for() {
         var addr = "bb".repeat(32)
         Core.bridge = bridgeFor({
@@ -1547,7 +1689,7 @@ TestCase {
         // Two rows, one record. Both halves from one fixture, and the count is
         // hardcoded rather than derived: `<= 1` would pass on zero buttons, and
         // zero is a different defect that this same assertion must catch.
-        compare(screen.rows.length, 2, "the fixture must put two rows on screen")
+        compare(screen.visibleRows.length, 2, "the fixture must put two rows on screen")
         compare(spec.visibleNamed(screen, "shareButton").length, 1,
                 "exactly one share affordance is on screen — the held row's — "
                 + "and the unheld row must offer none")
@@ -1634,7 +1776,7 @@ TestCase {
                           + '"page":0,"hasMore":true}'
         })
         compare(screen.readState, "ok")
-        compare(screen.rows.length, 1, "the fixture must put a row on screen")
+        compare(screen.visibleRows.length, 1, "the fixture must put a row on screen")
 
         var shown = spec.visibleText(screen)
         var runs = spec.digitRunsIn(shown)
@@ -1971,7 +2113,7 @@ TestCase {
             "list_stoas": '{"items":[{"stoa":"' + addr + '","foundingTitle":"Transport Notes"}],'
                         + '"page":0,"hasMore":false}'
         })
-        compare(screen.rows.length, 1, "the fixture must put a row on screen")
+        compare(screen.visibleRows.length, 1, "the fixture must put a row on screen")
 
         // The row's address element, found by carrying the address rather than
         // by a name the mutation could keep.

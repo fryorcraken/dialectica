@@ -33,7 +33,7 @@ first box.
 
 ---
 
-- [ ] **`dev-writer`** — `Main.qml:31,83-85` — once a Stoa is chosen the user
+- [x] **`dev-writer`** — `Main.qml:31,83-85` — once a Stoa is chosen the user
       cannot get back to the list, because nothing ever clears `chosen`
       **Scenario:** `chosen` is assigned by `onStoaChosen` (line 84) and by
       nothing else; `previewing` has `onCancelled` to clear it (line 112) and
@@ -60,6 +60,34 @@ first box.
       sound and I would keep it; the fix is a `cancelled`/`closed` signal on
       `FeedScreen` setting `chosen = null`, which is the symmetric counterpart
       of the `onCancelled` that already exists for `previewing`.
+
+      **Fixed**, and built exactly as you proposed — a `closed()` signal on
+      `FeedScreen`, `Main.qml` clearing `chosen` on it, no `StackView`. I
+      confirmed your measurement independently before writing anything: `grep -n
+      "signal" FeedScreen.qml` returns nothing, so the screen genuinely had no
+      way to say it was finished.
+
+      Two choices worth naming, both of which your finding shaped:
+
+      **The affordance is unconditional.** The spec's new requirement says a
+      return "must not be withdrawn by the very state it exists to leave", and
+      the feed's own read can fail — which is precisely when a user most wants
+      out. So the button has no `visible` guard, like the join screen's Cancel.
+
+      **The test asserts the control, not the signal.** A `closed()` signal that
+      nothing renders a control for is a route only a test can take, and would
+      have satisfied a weaker assertion while leaving the user exactly as
+      stranded. `test_a_user_who_opened_a_stoa_can_return_to_the_list` finds
+      `feedBackButton` among the *visible* elements, clicks it, and then checks
+      the list's rows are back on screen — so it fails if the control is absent,
+      hidden, or wired to nothing.
+
+      **Tests that fail without it:**
+      `test_a_user_who_opened_a_stoa_can_return_to_the_list` (confirmed failing
+      `Actual: 0 / Expected: 1` before the fix) and
+      `test_reopening_a_stoa_after_returning_still_carries_its_record`, which
+      pins that the return costs the user nothing — `genesisByStoa` lives on the
+      list, so a second open is as complete as the first.
 
 - [x] **`spec-writer`** — `specs/stoa-navigation-view/spec.md:538` — the
       requirement that puts the feed behind the list does not require a route
@@ -100,7 +128,7 @@ first box.
       adds the signal inherits the requirement rather than re-deriving it. The
       box above stays open on its own merits.
 
-- [ ] **`dev-writer`** — `Main.qml:41-44` — `screenShown` silently discards a
+- [x] **`dev-writer`** — `Main.qml:41-44` — `screenShown` silently discards a
       preview requested while a feed is open, and the precedence is undocumented
       **Scenario:** `screenShown` is an ordered ternary testing `chosen` first,
       so `previewing` is only consulted when `chosen` is null. Measured: with
@@ -119,6 +147,27 @@ first box.
       ternary resolves it by accident of ordering. One property naming the
       screen — or clearing `chosen` when a preview is requested — makes the
       impossible state unrepresentable instead of merely unreachable.
+
+      **Fixed**, taking your second option. `Main.qml` now has `preview()`,
+      `open()` and `closeFeed()`, and the first two each clear what the other
+      owns — so `(chosen ≠ null, previewing ≠ null)` cannot be constructed and
+      the ternary renders the state rather than resolving a clash.
+
+      Functions rather than a comment explaining the precedence, which was the
+      other way to close this box: a caller assigning `previewing` directly
+      re-creates the state, so a comment would have documented a trap instead of
+      removing it. The setters are the only way in, and the clearing travels
+      with them.
+
+      **Test that fails without it:**
+      `test_a_preview_requested_while_a_feed_is_open_is_not_swallowed`, which
+      asserts both directions — a preview from the feed is shown, and opening a
+      Stoa clears a pending preview.
+
+      Your "latent rather than live" framing is why this was worth fixing now
+      rather than noting: the piece that adds the in-post address affordance
+      would have set `previewing` from the feed and got silence, with nothing in
+      the file to warn it. That piece now inherits working behaviour.
 
 - [x] **`spec-writer`** — `StoaReference.qml:79-86` — the reference encoding is a
       compatibility surface decided by a `NO SPEC`, and it should be in the spec
@@ -218,7 +267,7 @@ first box.
       a code change. The scenario requires the screen to carry the explanation,
       which is what is built.
 
-- [ ] **`dev-writer`** — `StoaListScreen.qml:91` — `rows` keeps the previous
+- [x] **`dev-writer`** — `StoaListScreen.qml:91` — `rows` keeps the previous
       page's items after a failed reload, so the screen's state is safe only
       because two places agree
       **Scenario:** `reload()`'s failure path deliberately does not write `rows`
@@ -239,6 +288,29 @@ first box.
       `readState !== "ok"` (a derived `visibleRows`, or clearing on failure with
       the previous page held separately), so a third caller inherits the
       invariant instead of having to remember the guard.
+
+      **Fixed**, taking both halves of your suggestion rather than either alone:
+      `rows` is renamed `lastListing` — the raw answer, which after a failed
+      reload is deliberately *not* current — and a derived `readonly
+      visibleRows` is what every caller reads. The rename is the load-bearing
+      part: `rows` was a name that invited the wrong read, and a reader who sees
+      `lastListing` asks "last as of when?" before using it.
+
+      Both guards are now gone rather than merely correct. The `Repeater` model
+      is `screen.visibleRows` with no ternary, and `Main.qml:132` is
+      `heldStoas: list.visibleRows`. The invariant is in one place and a third
+      caller inherits it.
+
+      You were right that there was no live defect, and right that it was worth
+      a box anyway — `Main.qml` was already the second copy, which is exactly
+      CLAUDE.md's "fourth slightly-different guard" signal arriving early.
+
+      **Test that fails without it:**
+      `test_a_failed_reload_makes_the_stale_listing_unreadable_not_merely_unrendered`,
+      which asserts `visibleRows` is empty after a failure *and* that
+      `lastListing` still holds the previous page — so a future change cannot
+      "fix" this by destroying the good listing, which is the trap the original
+      comment correctly avoided.
 
 ---
 

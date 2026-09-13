@@ -111,7 +111,8 @@ QtObject {
     // awkwardness of this call: an address is a one-way hash of the record,
     // enough to verify a record handed over and not enough to reconstruct one.
     // A bare address is not joinable, which is why the view's paste field and
-    // its share affordance are one decision — see JoinScreen.parseReference.
+    // its share affordance are one decision — see StoaReference.qml, which owns
+    // both `parse` and `shareText` in one file so the two ends cannot drift.
     function joinStoa(stoa, genesis) {
         return root.call("join_stoa", [JSON.stringify({ stoa: stoa, genesis: genesis })])
     }

@@ -364,3 +364,50 @@ the one transition the code cannot satisfy: `FeedScreen` declares no signal and
 nothing clears `Main.qml`'s `chosen`. The requirement names it as deliberately
 outside itself so the gap reads as deferred rather than as an oversight. Closing
 it needs a `dev-writer`, and the architecture reviewer's box for it stays open.
+
+> **Superseded by §13.1.** The `dev-writer` pass below added `FeedScreen.closed()`
+> and the affordance that emits it, so the deferral above is discharged and the
+> architecture box is closed. Left in place rather than rewritten, because the
+> reasoning for deferring it is still the reason the requirement is worded as an
+> outcome rather than a mechanism.
+
+## 13. The way out, and two shapes that only held by agreement
+
+Numbered from the file's current maximum, per §11's rule.
+
+- [x] 13.1 `FeedScreen` gains a `closed()` signal and an unconditional
+      "All Stoas" affordance; `Main.qml` clears `chosen` on it. Verified by
+      `test_a_user_who_opened_a_stoa_can_return_to_the_list`, confirmed failing
+      `Actual: 0 / Expected: 1` beforehand. **The test finds the control among
+      the VISIBLE elements and clicks it**, rather than emitting the signal — a
+      signal with no rendered control is a route only a test can take, and would
+      leave the user exactly as stranded. `grep -n "signal" FeedScreen.qml`
+      returned nothing before this, confirming the reviewer's measurement
+      independently.
+- [x] 13.2 The return costs the user nothing: `genesisByStoa` lives on the list,
+      so a second open is as complete as the first. Verified by
+      `test_reopening_a_stoa_after_returning_still_carries_its_record`.
+- [x] 13.3 `Main.qml` gains `preview()`, `open()` and `closeFeed()`, each
+      clearing what the others own, so `(chosen ≠ null, previewing ≠ null)` —
+      which has no rendering and which the ordered ternary resolved by accident
+      — cannot be constructed. Verified by
+      `test_a_preview_requested_while_a_feed_is_open_is_not_swallowed`, which
+      asserts both directions.
+- [x] 13.4 `rows` becomes `lastListing` plus a derived `visibleRows` carrying the
+      read-state guard, removing both call-site copies of it (the `Repeater`
+      model and `Main.qml`'s `heldStoas`). Verified by
+      `test_a_failed_reload_makes_the_stale_listing_unreadable_not_merely_unrendered`,
+      which pins that `visibleRows` is empty **and** `lastListing` still holds
+      the previous page — so a later change cannot "fix" this by destroying a
+      good listing, which is the trap the original comment avoided.
+- [x] 13.5 Three wrong symbol names corrected — `Core.qml`'s pointer to a
+      nonexistent `JoinScreen.parseReference`, and `design.md` D1's
+      `parseReference`/`shareTextFor`. Re-measured afterwards: zero hits in any
+      implementation, design or spec text.
+- [x] 13.6 The share degradation restated correctly in `Main.qml`, `design.md`
+      and `docs/UI-BRIEF.md`. All three said "lost on restart", which is true of
+      a JOINED Stoa and **false of a created one** — `create_stoa` returns no
+      genesis record, so a created Stoa is unshareable immediately. UI-BRIEF was
+      the worst of the three: it said "created or joined in the current session",
+      which affirmatively misdescribes creation to a designer who cannot read the
+      code.

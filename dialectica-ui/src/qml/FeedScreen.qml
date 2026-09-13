@@ -114,11 +114,37 @@ ScreenFrame {
         screen.readState = "ok"
     }
 
+    // The user is finished with this Stoa and wants whatever brought them here.
+    //
+    // **Arriving somewhere is half a transition.** This screen had no signals at
+    // all, so `Main.qml` had nothing to clear `chosen` with and the first row a
+    // user opened was the last screen they saw until they restarted — taking the
+    // list, the share affordance and the join field with it. 103 tests passed
+    // while that held, because a suite that asserts up to a transition and
+    // nothing after it cannot see a one-way trip.
+    //
+    // A signal rather than a direct write: this screen does not know what is
+    // above it, and the caller decides what "back" means. That is the symmetric
+    // counterpart of the `cancelled` the join screen already has, and it is why
+    // no `StackView` is needed — the navigator still holds one nullable property
+    // per screen, as design.md D5 argues.
+    signal closed()
+
     // ---- header ---------------------------------------------------------
 
     RowLayout {
         Layout.fillWidth: true
         spacing: 16
+
+        // Offered unconditionally, because the state this control exists to
+        // leave is exactly the state that must not withdraw it. The feed's own
+        // read may have failed — that is when a user most wants out.
+        FlatButton {
+            objectName: "feedBackButton"
+            text: "All Stoas"
+            kind: "secondary"
+            onClicked: screen.closed()
+        }
 
         Identicon {
             address: screen.stoaAddress

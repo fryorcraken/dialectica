@@ -275,15 +275,23 @@ perfectly legitimate to show, and this one is simply not computed. Design the ro
 so such a number could appear later without the layout changing.
 
 **A row can be shared from only when this copy holds the Stoa's genesis record,
-and today that means only Stoas created or joined in the current session.** The
-core retains every joined Stoa's record, but the membership listing hands back
-the address and the founding title and not the record — so after a restart the
-view holds no record for any row. Since a shareable thing has to carry both
-halves (see *Joining a Stoa*), **the share affordance is absent on most rows, and
-its absence is the correct rendering rather than an error**. Do not design a
-disabled or explanatory share control in that position; design a row where the
-control is simply not there, and expect it to become universal when the listing
-starts returning the retained record.
+and today that means only Stoas JOINED in the current session.** The core retains
+every joined Stoa's record, but the membership listing hands back the address and
+the founding title and not the record — so after a restart the view holds no
+record for any row.
+
+**Creation is worse, and not symmetric with joining.** `create_stoa` returns the
+address, the founding title and the policy, and **no genesis record** — so a Stoa
+the user just created cannot be shared *at all*, from the moment it exists,
+without waiting for a restart. That is the opposite of what a designer would
+assume: the Stoa the user has the strongest reason to hand to someone is the one
+the interface can least help them hand over.
+
+Since a shareable thing has to carry both halves (see *Joining a Stoa*), **the
+share affordance is absent on most rows, and its absence is the correct rendering
+rather than an error**. Do not design a disabled or explanatory share control in
+that position; design a row where the control is simply not there, and expect it
+to become universal when the listing starts returning the retained record.
 
 ### Joining a Stoa — a security surface, not a form
 
