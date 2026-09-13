@@ -3711,8 +3711,69 @@ All of it over **delivery's reliable channel** (§4.1). **No Logos Storage** —
 (§4.6).
 
 Nothing on either list is deleted or withdrawn. `moderation.rs` and its specs are
-built, tested and merged and they stay; `derive_stoa_key` is built and simply is
-not called; §4.6 stands as the attachment design for when attachments ship.
+built, tested and merged and they stay; §4.6 stands as the attachment design for
+when attachments ship.
+
+~~`derive_stoa_key` is built and simply is not called~~ — **this was false when
+written.** The adapter called it twice, and a Stoa's `creator` was derived under a
+synthetic domain rather than being the key its creator signs with, so a peer
+creating a Stoa was its sole moderator under a key it would never sign with. The
+stoa-lifecycle change made `identity_key` the root secret directly, which is what
+this paragraph had claimed all along. The derivation stays built and tested,
+because it is still the destination for per-Stoa identity.
+
+#### Follow-ups the publish path named, not yet built
+
+Both came out of review and are recorded here rather than in a findings file,
+which is deleted at merge.
+
+**The publish prologue/tail wants reshaping into one place.** `publish_post`,
+`publish_reply` and `publish_vote` each carry the same prologue — parse, validate,
+open the keystore, open the store — and the same tail. Three copies of one guard
+is the point at which a guard should become a data structure, and two things make
+it more than tidiness:
+
+- It is a **precondition of `publish_moderation`**, where a missed guard is an
+  authorisation defect rather than a wrong reply.
+- The adapter runs a **64 MiB Argon2id unlock before any validation**, so a
+  request that will be refused for a malformed Stoa pays for a full key
+  derivation first. Validate, then unlock — one reshape fixes both.
+
+Deliberately **not** done inside the change that revealed it: make the change
+easy, then make the easy change. A diff that reshapes three handlers and adds a
+publish path cannot be reviewed for either.
+
+**A panicking delivery sink must not report a published op as failed.** `deliver`
+runs inside `guarded`, so a sink that panics yields `{"error":…}` with no `opId`
+for an op that **is already in the log** — against "a publish SHALL NOT be
+reported as having failed on the strength of a delivery outcome".
+
+The owner's decision: **catch it and report the publish as successful.** The op is
+published and the requirement says so; delivery is the transport's concern.
+
+**The synchronous reply was never the right place to learn about delivery, and the
+delivery contract already says so.** `delivery_module.lidl` carries three channel
+events — `channelMessageSent`, `channelMessageError` and `messagePropagated` —
+so the outcome arrives **asynchronously, after the publish call has returned**.
+A return value could not carry it even if we wanted it to.
+
+That also makes the return value a *worse* signal than the events, not merely a
+missing one: a sink that accepts an op tells you the transport took it, which is
+`channelMessageSent` and says nothing about whether any peer received it.
+`messagePropagated` is the fact a user cares about. Publishing and delivering are
+two events at two times, and this decision stops the API pretending they are one.
+
+**The obligation lands on `op-transport`**: an op that reaches
+`channelMessageError`, or that never reaches `messagePropagated` within some
+bound, has to become visible somewhere. Without that this decision converts a loud
+failure into a silent one. The bound, and what a view shows for an op in flight
+versus one that never propagated, are that capability's to specify — and
+`docs/UI-BRIEF.md` will need the rendering obligation once it does.
+
+Moving `deliver` outside `guarded` was rejected — PHASE0-FINDINGS §3 measured what
+an unguarded panic costs (the module aborts, the caller waits out a 20-second
+timeout, every later call reports `MODULE_NOT_LOADED`), which is a worse answer
+than an unreported delivery failure.
 
 #### How this sits against §9.1's stages
 
