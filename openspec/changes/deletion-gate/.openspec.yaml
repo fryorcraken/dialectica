@@ -1,0 +1,31 @@
+# `schema` is REQUIRED for this file to be valid change metadata, and without it
+# `skip_specs` is silently NOT HONOURED — `openspec validate --strict` reports
+# the marker as ignored and then fails for having no deltas, which reads as two
+# problems rather than one. It must name a known schema; this project's is the
+# built-in `spec-driven`, set in `openspec/config.yaml`.
+#
+# This file was absent from the first draft of this change, and the absence is
+# the reason `openspec validate deletion-gate --strict` failed on it. That is
+# worth recording here rather than in a commit message: a change that declares
+# no capability in its proposal still fails validation until the marker exists,
+# so the proposal's Capabilities section and this file are two halves of one
+# decision.
+schema: spec-driven
+
+# No spec delta: this change adds a CI gate, not a requirement.
+#
+# `openspec/specs/` is the behaviour contract for the dialectica modules — what
+# a peer may send, what core answers, what the view may claim. A workflow step
+# that reads a pull request's own diff asserts nothing in that contract. There
+# is no module that could fail such a requirement, and no test in any suite that
+# could cover it.
+#
+# The precedent is the existing `Lint` steps, none of which is specified: "the
+# UI icon is a 256x256 PNG" and "scaffold.toml kept its comments" are repository
+# hygiene enforced in CI with no capability behind them. `2026-09-13-core-e2e`
+# set this marker for the adjacent reason — a test target asserting requirements
+# that were already contracted elsewhere.
+#
+# Inventing a capability to satisfy validation would put a clause in the
+# contract that describes the repository rather than the system.
+skip_specs: true
