@@ -136,7 +136,7 @@ closed set, this file's first box is about **where the invariant lives**.
       instance, and no longer claims the one-string shape protects the rendering
       by itself.
 
-- [ ] **`design-reviewer`** — `FeedScreen.qml:743-776` — this piece adds two
+- [x] **`design-reviewer`** — `FeedScreen.qml:743-776` — this piece adds two
       `MarginNote`s to the column `piece/drop-apparatus` (#70) deletes, and one
       of them is the second copy of a sentence the tests exclude from a sweep
       **Scenario:** the piece correctly moved both *load-bearing* obligations out
@@ -158,6 +158,65 @@ closed set, this file's first box is about **where the invariant lives**.
       the right resolution is to drop both notes with the column and delete the
       `otherKnownDenials()` entry in the same change, so a dead exclusion does
       not outlive the string it excludes.
+
+      **Fixed** in the commit carrying this tick — both notes and the exclusion
+      deleted here, in this piece, rather than left for #70's conflict
+      resolution. Taken by `dev-writer` rather than by the addressed
+      `design-reviewer` because the recommendation is code: the judgement half
+      was already made and argued in the box, and what remained was to delete
+      two `MarginNote`s, one test helper, and the stale prose citing them.
+
+      **Your two load-bearing claims, both re-derived rather than taken on
+      trust.** `git diff main...piece/drop-apparatus -- FeedScreen.qml` deletes a
+      three-note block against this branch's five, so the conflict is real.
+      `composer-view/spec.md` does say the score's absence "does not oblige the
+      view to carry prose about why no number is there" (your `544-550` is the
+      wrong anchor — that range is the "No row is added by a publish" scenario;
+      the sentence is in the prose under "The vote control displays no score").
+      The line numbers on the box itself have moved too, `743-776` → `790-822`,
+      from the two boxes fixed above it.
+
+      **Severity low was generous, and the measurement is the argument.** The
+      `otherKnownDenials()` entry was not merely a dead exclusion waiting to be
+      tidied — it was actively suppressing a real failure. With the entry gone I
+      put the `ON PUBLISHING` note back, and
+      `test_no_gate_state_claims_delivery` **fails**, reporting the note's own
+      body as claiming `"was delivered"`. So for as long as both stood, that
+      sentence was the one place in the interface where a delivery claim could
+      have been reworded in with nothing failing anywhere — the sweep was
+      disarmed exactly where a claim would most plausibly be added. That is a
+      correctness hole with a coordination item wrapped around it, not the other
+      way round.
+
+      **The test that fails without the change:**
+      `test_the_sweep_filter_drops_only_the_pinned_denial` now asserts the
+      sentence passes the filter **untouched**, so re-adding an exclusion for it
+      fails rather than passing quietly. Measured by re-adding the entry: it
+      fails, naming the reason. The old loop it replaces iterated
+      `otherKnownDenials()` and would have degenerated to zero iterations —
+      green, and proving nothing.
+
+      Three stale claims went with it. `tasks.md`'s "nothing asserts the
+      interface positively DENIES delivery knowledge … lives only in the
+      `ON PUBLISHING` MarginNote" is simply false — the denial is in
+      `PublishOutcome`, pinned character-for-character — and the same sentence
+      was repeated in `tst_composer_claims.qml`'s comment as "a gap for whoever
+      owns the removal". Both corrected. `tasks.md`'s `compose.apparatus`
+      collision note is also resolved rather than open, and now says which of the
+      two readings the spec-writer took.
+
+      `design.md` carries the general lesson so it survives the tracker: **an
+      exclusion added to keep a sweep green is a hole in the sweep, and it is
+      only safe if something stricter covers what it hides.** "This text is
+      leaving the tree anyway" is not that something — it is a promise about a
+      future change, and the sweep is disarmed in the meantime.
+
+      What this does **not** resolve: #70 still conflicts with this branch on
+      `FeedScreen.qml`. The block is now three notes against `drop-apparatus`'s
+      three, and identical in content, so the resolution is mechanical rather
+      than a decision about what survives — which was the point. I did not run
+      the merge; the branch is `CONFLICTING` for reasons outside this box and
+      resolving it is not mine.
 
 ## Judgement on the questions asked
 

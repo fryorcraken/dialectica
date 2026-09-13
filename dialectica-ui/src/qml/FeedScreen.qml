@@ -787,22 +787,24 @@ ScreenFrame {
     // qualifies. A requirement discharged from here disappears when the column
     // does — silently, while still being required — so anything a reader is
     // OWED belongs where they will meet it, not here.
+    // **This piece adds nothing to the column.**
+    //
+    // It grew two notes during development — `ON PUBLISHING`, restating the
+    // delivery denial, and `ON THE ARROWS`, explaining the missing score — and
+    // both are gone. Neither was required: the score's absence explicitly
+    // "does not oblige the view to carry prose about why no number is there"
+    // (`composer-view/spec.md`, "The vote control displays no score"), and the
+    // delivery denial the spec DOES require is discharged in `PublishOutcome`
+    // beside the success it qualifies, where it is pinned character-for-
+    // character.
+    //
+    // `ON PUBLISHING` was the worse of the two. It was a SECOND copy of a
+    // delivery denial, excluded from `tst_composer_claims.qml`'s sweep and
+    // pinned by nothing — so it was the one place in the interface where a
+    // delivery claim could have been reworded in without a test failing. The
+    // exclusion that accommodated it is deleted with it, rather than outliving
+    // the string it excluded.
     apparatus: [
-        // What a published post is, and is not. It sits beside the composer
-        // because the success message's claim is deliberately weaker than a
-        // reader expects, and the weakness is the honest part.
-        MarginNote {
-            label: "ON PUBLISHING"
-            body: "Publishing writes the post to this machine's log and signs it. Whether any other peer receives it happens later and is not reported back here, so nothing in this interface will tell you a post was delivered."
-            visible: screen.capability.canPost === true
-        },
-        // Why the arrows carry no number. Without this the absence reads as a
-        // count that failed to load.
-        MarginNote {
-            label: "ON THE ARROWS"
-            body: "No number is shown beside them because nothing here counts votes. The arrows record yours on this machine for as long as this view is open; a zero would be a claim that nobody voted, which is not something this peer can know."
-            visible: screen.capability.canPost === true
-        },
         MarginNote {
             label: "ON THIS ORDERING"
             // copy.json `feed.orderingNote`

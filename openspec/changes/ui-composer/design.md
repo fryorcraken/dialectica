@@ -445,6 +445,38 @@ The same reasoning moved the delivery denial out of the column and into
 `PublishOutcome`, beside the success it qualifies. Nothing load-bearing is left in
 the apparatus list: what remains there is context a reader may skip.
 
+**And this piece adds nothing back to it.** Two `MarginNote`s grew there during
+development — `ON PUBLISHING`, restating the delivery denial, and `ON THE ARROWS`,
+explaining the missing vote score — and both were removed before merge. Neither is
+required: the spec says in as many words that the score's absence "does not oblige
+the view to carry prose about why no number is there". Keeping them would have
+handed `piece/drop-apparatus` (#70), which deletes the whole column, a decision
+about sentences nothing requires, in a conflict resolution rather than in review.
+
+`ON PUBLISHING` was the worse of the two, and the reason generalises past this
+piece. It was a **second** delivery denial, and the sweep in
+`tst_composer_claims.qml` had to exclude it to stay green — an entry in a list of
+"denials we know about", pinned by nothing, because nothing asserts apparatus text
+is present. The one hole the corpus is allowed is defensible only because the
+sentence in it is pinned character-for-character elsewhere, so a claim smuggled
+into it fails that pin first. The second hole had no such backing: it was the one
+place in the interface where a delivery claim could have been reworded in with no
+test failing anywhere.
+
+**Measured, because the exclusion was written to look harmless.** Re-adding the
+note with the exclusion gone fails `test_no_gate_state_claims_delivery` — the
+sweep reports the note's own text as claiming `"was delivered"`. That failure is
+what the exclusion was suppressing. So the note and the entry are deleted
+together, and
+`test_the_sweep_filter_drops_only_the_pinned_denial` now asserts that sentence
+passes the filter *untouched*, which fails if anyone re-adds an exclusion for it.
+
+The general shape, worth more than the instance: **an exclusion added to keep a
+sweep green is a hole in the sweep, and it is only safe if something stricter
+covers what it hides.** "This text is leaving the tree anyway" is not that
+something — it is a promise about a future change, and the sweep is disarmed in
+the meantime.
+
 ### There is no reply composer on the feed, because the feed has no thread view
 
 The spec contracts replying and the composer supports it — `Composer.kind` is

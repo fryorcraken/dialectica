@@ -177,7 +177,7 @@ TestCase {
     // corpus and leave the over-match exactly where it was.
     function stripPinnedDenials(text) {
         var out = text
-        var all = [spec.deliveryDenial()].concat(spec.otherKnownDenials())
+        var all = [spec.deliveryDenial()]
         for (var i = 0; i < all.length; i++) {
             var needle = all[i].toLowerCase()
             var scan = out.toLowerCase()
@@ -191,27 +191,21 @@ TestCase {
         return out
     }
 
-    // Denials this file does not pin but must not sweep, for the same reason.
+    // **There is exactly one hole in the corpus, and the sentence in it is
+    // pinned.** That is the whole justification for cutting a hole at all: a
+    // claim smuggled into the removed sentence fails
+    // `test_the_views_own_words_are_exactly_these_and_no_others` before any
+    // sweep gets a chance to miss it.
     //
-    // The apparatus column's `ON PUBLISHING` note is one: it ends "nothing in
-    // this interface will tell you a post was delivered", which is a denial
-    // containing the word the sweep hunts. It is listed rather than pinned
-    // because **nothing here asserts apparatus text is present** — that column is
-    // design-bundle annotation shipped into the QML by mistake and is on its way
-    // out, and a presence assertion would fail on removal and read as a
-    // regression. A `split`/`join` of a string that is absent is a no-op, so this
-    // keeps working either way.
+    // This file briefly carried a second exclusion, `otherKnownDenials()`, for
+    // the apparatus column's `ON PUBLISHING` note — a second delivery denial
+    // that was excluded here and pinned nowhere, because nothing asserts
+    // apparatus text is present. That is the strictly weaker arrangement: it
+    // made one sentence of the interface a place a delivery claim could be
+    // reworded into with no test failing. The note is deleted from
+    // `FeedScreen.qml` and the exclusion with it, so the corpus has one hole
+    // rather than two and both halves of the justification hold for it.
     //
-    // The asymmetry is deliberate and worth stating: the composer's denial is
-    // both excluded here AND pinned by
-    // `test_the_views_own_words_are_exactly_these_and_no_others`, so nothing can
-    // hide in it. This one is only excluded. That is the weaker arrangement, and
-    // it is acceptable only because the sentence is on its way out of the tree
-    // entirely rather than becoming a place to hide a claim.
-    function otherKnownDenials() {
-        return ["nothing in this interface will tell you a post was delivered."]
-    }
-
     // **Both bounds pinned, and the reason is a defect that already happened on
     // this branch.** The dev-writer's first apparatus walker identified the
     // column by a `content` property that `ColumnLayout` also has, so it
@@ -259,14 +253,21 @@ TestCase {
         compare(spec.stripPinnedDenials(spec.deliveryDenial().toUpperCase()), "",
                 "and from one folded the other way")
 
-        // The other known denial — the apparatus note — dropped by the same
-        // mechanism, and only it. Listed rather than pinned because nothing
-        // asserts apparatus text is present; see `otherKnownDenials`.
-        var others = spec.otherKnownDenials()
-        for (var i = 0; i < others.length; i++) {
-            compare(spec.stripPinnedDenials(others[i]), "",
-                    "a listed denial must be dropped: " + others[i])
-        }
+        // **The filter cuts exactly one hole, and this is what pins that.**
+        //
+        // This file used to carry a second exclusion for the apparatus column's
+        // `ON PUBLISHING` note — a delivery denial excluded here and pinned
+        // nowhere, so a claim reworded into it would have escaped every sweep.
+        // The note and the exclusion are both gone, and this asserts the
+        // exclusion cannot come back unnoticed: that sentence must now pass
+        // through the filter untouched, which means any sweep would see it.
+        //
+        // Re-adding an `otherKnownDenials()`-style entry for it fails here.
+        var wasExcluded = "nothing in this interface will tell you a post was delivered."
+        compare(spec.stripPinnedDenials(wasExcluded), wasExcluded,
+                "the apparatus note's denial is no longer excluded — it left the "
+                + "tree with the column, and re-excluding it would reopen an "
+                + "unpinned hole in the corpus")
     }
 
     // **The guard above is not enough, and finding that out cost a mutation.**
@@ -591,8 +592,7 @@ TestCase {
     // is the other place a reassuring sentence would land.
     //
     // **Nothing in this file asserts that APPARATUS text is rendered, and that
-    // is deliberate.** The right-hand `APPARATUS` column — `ON PUBLISHING`, `ON
-    // THE ARROWS`, `ON THE MISSING BOX` and the rest — is annotation from the
+    // is deliberate.** The right-hand `APPARATUS` column is annotation from the
     // design bundle explaining the design to a reader. It was shipped into the
     // real QML by mistake and is being removed from the screens. A test asserting
     // one of those notes is present would then fail for the right reason and read
@@ -600,10 +600,14 @@ TestCase {
     // indifferent to whether the apparatus is on screen or gone.
     //
     // The cost of that, stated rather than absorbed: the sweep can only say the
-    // interface does not claim delivery, never that it positively DENIES delivery
-    // knowledge. The denial currently lives only in an apparatus note, so once
-    // the column goes, no test in this repo checks that the honest disclaimer
-    // survives anywhere. That is a gap for whoever owns the removal.
+    // interface does not claim delivery, never that it positively DENIES
+    // delivery knowledge. **That positive half is not a gap here, and this is
+    // where it lives:** the denial is rendered by `PublishOutcome` beside the
+    // success it qualifies, and pinned character-for-character by
+    // `test_the_views_own_words_are_exactly_these_and_no_others`. It does not
+    // depend on the apparatus column and survives the column's removal. The
+    // column's own `ON PUBLISHING` restatement of it is deleted — it was a
+    // second copy pinned by nothing, so it could only ever weaken this file.
     function test_no_gate_state_claims_delivery() {
         var claims = spec.deliveryClaims()
 
@@ -641,8 +645,7 @@ TestCase {
         // One exclusion mechanism for every sweep in this file, rather than an
         // inline `replace` here and a helper elsewhere: two mechanisms drift, and
         // the one that is not exercised by the guard test drifts unnoticed. The
-        // apparatus note is excluded by `otherKnownDenials()` and the composer's
-        // denial by `deliveryDenial()`, both through `sweepCorpus`.
+        // single excluded sentence is `deliveryDenial()`, through `sweepCorpus`.
         var shownOpen = spec.sweepCorpus(open)
 
         for (var j = 0; j < claims.length; j++) {

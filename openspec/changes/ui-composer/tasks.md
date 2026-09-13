@@ -54,24 +54,32 @@
   judgement that a second QML implementation would get differently from core.
   Marked `NO SPEC` in `Composer.qml` and argued in `design.md`.
 
-- **The `compose.apparatus` requirement collides with removing the apparatus
-  column, and that collision is flagged rather than resolved.** The owner has
-  said the right-hand `APPARATUS` column is design-bundle annotation shipped
-  into the QML by mistake and is being removed from the screens. The spec
-  (`composer-view`, "A closed gate shows the reason verbatim and offers a fix")
-  still requires the view to state why no box is shown "using the bundle's
-  `compose.apparatus` string", and `tst_vote_and_gate.qml`'s
-  `test_the_apparatus_string_is_the_bundles_and_is_verbatim` asserts it is
-  rendered verbatim. Hiding `ApparatusColumn` in `ScreenFrame.qml` fails exactly
-  that one test across all eight spec files — measured, not predicted. The test
-  is left standing with a long comment explaining the choice: deleting it would
-  quietly drop a requirement the spec still makes. Either the spec stops
-  requiring the string, or the sentence moves into the closed gate's own body.
-  Both are spec-writer decisions.
+- **The `compose.apparatus` collision is resolved, and the resolution was the
+  second of the two readings offered.** The spec-writer chose "the sentence moves
+  into the closed gate's own body" over "the spec stops requiring the string", so
+  the requirement is now on the statement being present *where the gate is
+  rendered* — explicitly not discharged by placing it where a reader of the gate
+  would not meet it. `test_the_missing_box_statement_is_in_the_gates_own_body`
+  asserts placement rather than presence, via `renderedTextOutsideApparatus`, so
+  it survives the column's removal on `piece/drop-apparatus` (#70) rather than
+  failing with it.
 
-- **Once the apparatus column goes, nothing asserts the interface positively
-  DENIES delivery knowledge.** The denial ("whether any other peer receives it
-  happens later and is not reported back here") lives only in the `ON PUBLISHING`
-  MarginNote. The tester's delivery tests are absence sweeps and survive the
-  removal unchanged, which also means they cannot notice that the honest
-  disclaimer went with it.
+- **This piece adds nothing to the apparatus column, deliberately.** It grew two
+  MarginNotes during development — `ON PUBLISHING` and `ON THE ARROWS` — and both
+  were removed before merge. Neither was required (the spec says the score's
+  absence "does not oblige the view to carry prose about why no number is
+  there"), so keeping them would have handed #70's merge a decision about
+  sentences nothing requires. `ON PUBLISHING` was the worse of the two: a second
+  delivery denial that `tst_composer_claims.qml` excluded from its sweep and
+  pinned nowhere, which made it the one place a delivery claim could be reworded
+  in with no test failing. The exclusion is deleted with the note, and a new
+  assertion in `test_the_sweep_filter_drops_only_the_pinned_denial` fails if
+  anyone re-adds it.
+
+- **The interface positively DENIES delivery knowledge, and that does not depend
+  on the apparatus column.** The denial is rendered by `PublishOutcome` beside the
+  success it qualifies and pinned character-for-character by
+  `test_the_views_own_words_are_exactly_these_and_no_others`. The absence sweeps
+  remain absence sweeps — they can never prove something required was said — but
+  the positive half is carried by the pins, which is a different instrument doing
+  a different job.
