@@ -7,7 +7,14 @@
 //! **defining module**, not to its defining type — so while `Request` lived in
 //! `wire.rs` beside every handler, this compiled and the claim was false:
 //!
-//! ```ignore
+//! `text`, not `ignore`: this block is illustrative prose showing code that no
+//! longer compiles from `wire.rs` — the defect this module closed — so it is not
+//! a doc-test anyone should compile or count. `ignore` still registers a
+//! doc-test (reported as ignored), which made cargo run 507 tests where the
+//! source declared 506, and CI's count-the-tests gate caught exactly that. The
+//! same slip was fixed once already in `keystore.rs`.
+//!
+//! ```text
 //! let bypass = Request(serde_json::Map::new());   // inside wire.rs: legal
 //! ```
 //!

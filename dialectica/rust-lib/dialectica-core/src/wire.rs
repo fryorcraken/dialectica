@@ -2598,11 +2598,18 @@ mod tests {
         //       --> dialectica-core/src/wire/request.rs
         //
         // That is a compile error, so it cannot be written as a `#[test]` in
-        // this file — a compile-fail assertion would have to be a
-        // `compile_fail` doctest, and this crate's doctest run is empty by
-        // design. Recording the verified error is therefore the whole proof, and
-        // it is deliberately stated as such rather than dressed up as a test
-        // that passes for a weaker reason.
+        // this file. A `compile_fail` doctest would not prove this either: a
+        // doctest compiles as an EXTERNAL consumer, so it would show the field
+        // is private across crates — a weaker statement than the one at issue,
+        // which is about `wire.rs` itself. Recording the verified error is
+        // therefore the whole proof, and it is deliberately stated as such
+        // rather than dressed up as a test that passes for a weaker reason.
+        //
+        // A side effect worth knowing: this crate's doctest run is empty, and
+        // CI's count-the-tests gate relies on that — it counts `#[test]`
+        // attributes in the source, which no doctest has. So a fenced block
+        // marked `ignore` rather than `text` fails that gate. Twice now; see
+        // `wire::request`'s module doc.
         //
         // What IS testable, and is: the positive half lives in
         // `wire::request::tests::request_is_constructible_here_because_this_module_defines_it`,
