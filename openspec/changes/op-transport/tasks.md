@@ -115,7 +115,10 @@ rule exists to prevent.
 
 ## 6. Tests, and mutation-verifying them
 
-**475 before, 531 after — 56 new tests, none ignored.**
+**475 before, 531 after this change's 56 tests, 562 once `origin/main` was
+merged** — `main` had moved twice and brought 31 tests of its own. None ignored,
+and no doc-test registered: the count gate's `ran == declared` holds at 562,
+checked by hand against the per-file `#[test]` counts rather than asserted.
 
 - [x] Expectations hardcoded, never read back from the implementation.
 - [x] **The known-answer test was derived independently of this crate**, which is
@@ -193,3 +196,26 @@ Recorded because a passing suite here proves less than it appears to.
       parameter and stores it nowhere.
 - [x] **No change to the op format, the op log, `arrival.rs`, or any resolver.**
       `lib.rs` gains one `pub mod` line and nothing else in the crate was touched.
+- [x] **Not routed through `wire::request::Request`**, which landed on `main`
+      while this change was in flight. That type is the envelope for the module's
+      JSON `String`→`String` methods; this boundary is handed a `&[u8]` payload and
+      a `&str` channel id from a delivery **event**, so there is no JSON on the
+      path and therefore no second parser. The core API methods that will use
+      `Request` are excluded from this change.
+
+## 9. Merged `origin/main` before finishing
+
+- [x] `git merge origin/main` (not rebase), because the branch had gone stale in
+      the dangerous direction: its diff against `main` **deleted content it never
+      touched** — `CLAUDE.md` −21 (the "Worktrees are not scratch" section),
+      `.claude/agents/README.md` −5 (the checkbox-gate blindspot rule), `wire.rs`
+      −1480, `wire/request.rs` −378, the archived wire-request change, and
+      `openspec/specs/module-wire-contract/spec.md` −228. `mergeStateStatus`
+      reported `UNKNOWN` rather than a conflict, so nothing would have warned.
+- [x] Verified with `git diff origin/main --stat` that the only files differing
+      are the ones this change touches: `transport.rs`, one line of `lib.rs`, the
+      three `op-transport` documents, and `docs/PLAN.md` — the last being the
+      `spec-writer`'s shedding commit that was already on the branch.
+- [x] Gates re-run on the merged tree: 562 tests passing, clippy
+      `-D warnings` clean, `rustfmt --check` clean on the new file,
+      `openspec validate op-transport --strict` valid.
