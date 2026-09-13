@@ -74,7 +74,7 @@ QtObject {
     // ground to match.
     //
     // Returns "" when no record is held. A caller MUST treat that as "offer no
-    // share" rather than as a string to hand over — see StoaListScreen, where
+    // share" rather than as a string to hand over — see DStoaListScreen, where
     // the share affordance's absence is the honest rendering.
     function shareText(stoa, genesis) {
         if (!stoa || !genesis)

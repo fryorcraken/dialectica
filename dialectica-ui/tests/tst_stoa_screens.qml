@@ -212,7 +212,7 @@ TestCase {
     // `Text` does not, so the set is "things that accept typing" rather than
     // "things that look like a field". `readOnly` is checked because a read-only
     // TextEdit is a display element, not somewhere a user enters a key — the
-    // ClipboardSink is exactly that and must not be counted.
+    // DClipboardSink is exactly that and must not be counted.
     function editableInputs(item) {
         var found = []
         function walk(node, ancestorsVisible) {
@@ -321,9 +321,9 @@ TestCase {
         return at < 0 ? whole : (whole.slice(0, at) + whole.slice(at + app.length))
     }
 
-    Component { id: listComponent; StoaListScreen {} }
-    Component { id: joinComponent; JoinScreen {} }
-    Component { id: sinkComponent; ClipboardSink {} }
+    Component { id: listComponent; DStoaListScreen {} }
+    Component { id: joinComponent; DJoinScreen {} }
+    Component { id: sinkComponent; DClipboardSink {} }
 
     function makeList(replies, props) {
         Core.bridge = bridgeFor(replies)
@@ -535,7 +535,7 @@ TestCase {
         // Word-boundary, not a bare substring. `indexOf("members")` also matches
         // `membership`, and **"Your membership was read without error" is
         // deliberate honest copy** in the list's empty state
-        // (StoaListScreen.qml) — the sentence that stops a user re-joining Stoas
+        // (DStoaListScreen.qml) — the sentence that stops a user re-joining Stoas
         // they are already in. The bare form passes here only because this
         // fixture puts a row on screen, which hides that panel; add a row to the
         // empty-state fixture, or move that sentence into a row, and the test
@@ -580,7 +580,7 @@ TestCase {
                 "a Stoa whose record the view has NOT got must offer no share")
 
         // And nothing is produced for it, not merely nothing offered.
-        compare(StoaReference.shareText(without, screen.genesisFor(without)), "",
+        compare(DStoaReference.shareText(without, screen.genesisFor(without)), "",
                 "nothing carrying the address without a record may be produced")
         screen.destroy()
     }
@@ -588,7 +588,7 @@ TestCase {
     function test_a_share_carries_both_halves_and_the_address_in_full() {
         var addr = "b02d5e77a41c6b9013c6a9408ff4af235d7e1b06c92a84f13be057dc6104a8bf"
         var genesis = "0102030405060708"
-        var text = StoaReference.shareText(addr, genesis)
+        var text = DStoaReference.shareText(addr, genesis)
 
         verify(text.indexOf(addr) >= 0,
                "the whole address must be present, unabbreviated: " + text)
@@ -604,7 +604,7 @@ TestCase {
         // recipient can do nothing with it.
         var addr = "b02d5e77" + "44".repeat(28)
         var genesis = "deadbeefcafe"
-        var parsed = StoaReference.parse(StoaReference.shareText(addr, genesis))
+        var parsed = DStoaReference.parse(DStoaReference.shareText(addr, genesis))
 
         compare(parsed.ok, true, "a share's own output must parse: ")
         compare(parsed.stoa, addr, "the preview must name the same Stoa")
@@ -632,7 +632,7 @@ TestCase {
         // anywhere can check what actually landed on it — TextEdit.copy() writes
         // nowhere readable. That half is unverified, here and in CI, and is
         // stated rather than papered over.
-        compare(sink.lastCopied, StoaReference.shareText(addr, "00ff"))
+        compare(sink.lastCopied, DStoaReference.shareText(addr, "00ff"))
         verify(sink.lastCopied.indexOf(addr) >= 0)
         verify(sink.lastCopied.indexOf("00ff") >= 0)
         screen.destroy()
@@ -658,7 +658,7 @@ TestCase {
     }
 
     function test_an_address_with_no_record_is_named_as_the_missing_half() {
-        var parsed = StoaReference.parse('{"stoa":"' + "aa".repeat(32) + '"}')
+        var parsed = DStoaReference.parse('{"stoa":"' + "aa".repeat(32) + '"}')
         compare(parsed.ok, false)
         verify(parsed.reason.toLowerCase().indexOf("record") >= 0,
                "the refusal must name the half that is missing: " + parsed.reason)
@@ -675,7 +675,7 @@ TestCase {
         })
 
         var addr = "b02d5e77" + "55".repeat(28)
-        screen.pasted = StoaReference.shareText(addr, "00ff")
+        screen.pasted = DStoaReference.shareText(addr, "00ff")
         screen.preview()
 
         compare(seen.count, 1, "the preview must be requested")
@@ -693,10 +693,10 @@ TestCase {
         // rather than as the malformed paste it actually is, which is the one
         // confusion the three outcomes exist to prevent.
         var addr = "b02d5e77" + "66".repeat(28)
-        var parsed = StoaReference.parse('{"stoa":"stoa:' + addr + '","genesis":"00ff"}')
+        var parsed = DStoaReference.parse('{"stoa":"stoa:' + addr + '","genesis":"00ff"}')
         compare(parsed.ok, true)
         compare(parsed.stoa, addr, "the prefix must not reach the core")
-        verify(StoaReference.shareText(addr, "00ff").indexOf("stoa:") < 0,
+        verify(DStoaReference.shareText(addr, "00ff").indexOf("stoa:") < 0,
                "and must never be added on the way out")
     }
 
@@ -709,19 +709,19 @@ TestCase {
         // at their sender instead of at their own paste.
         //
         // That is the exact confusion the three paste outcomes are designed to
-        // keep apart, and both design.md and StoaReference's own source comment
+        // keep apart, and both design.md and DStoaReference's own source comment
         // assert it cannot happen. The invariant the comment claimed was not the
         // one the code enforced.
         var addr = "b02d5e77" + "88".repeat(28)
-        var parsed = StoaReference.parse('{"stoa":"stoa:stoa:' + addr + '","genesis":"00ff"}')
+        var parsed = DStoaReference.parse('{"stoa":"stoa:stoa:' + addr + '","genesis":"00ff"}')
         compare(parsed.ok, true)
         compare(parsed.stoa, addr, "every prefix must be stripped, not just one")
 
         // Whitespace between them too — a paste that picked up a stray space is
         // the same user error with the same right answer.
-        compare(StoaReference.parse('{"stoa":"stoa: stoa:' + addr + '","genesis":"00ff"}').stoa,
+        compare(DStoaReference.parse('{"stoa":"stoa: stoa:' + addr + '","genesis":"00ff"}').stoa,
                 addr)
-        compare(StoaReference.parse('{"stoa":"  stoa:stoa:stoa:' + addr + '  ","genesis":"00ff"}').stoa,
+        compare(DStoaReference.parse('{"stoa":"  stoa:stoa:stoa:' + addr + '  ","genesis":"00ff"}').stoa,
                 addr, "three, with surrounding whitespace")
 
         // And the end-to-end consequence: nothing carrying a prefix reaches the
@@ -760,7 +760,7 @@ TestCase {
 
     // ---- a second preview inherits nothing from the first -----------------
     //
-    // **These drive `Main.qml`, not a fresh `JoinScreen`, and that is the whole
+    // **These drive `Main.qml`, not a fresh `DJoinScreen`, and that is the whole
     // point of them.** Every other join-state test in this file constructs its
     // own screen — and `Main.qml` ships ONE reused instance, which is the only
     // configuration a user ever meets. So the suite could be entirely green
@@ -1183,7 +1183,7 @@ TestCase {
         // re-derived an address would be a second implementation of the one
         // check this design rests on.
         var addr = "b02d5e77" + "99".repeat(28)
-        var parsed = StoaReference.parse(StoaReference.shareText(addr, "00"))
+        var parsed = DStoaReference.parse(DStoaReference.shareText(addr, "00"))
         compare(parsed.ok, true,
                 "the view must accept a well-formed pair without judging it")
 
@@ -1699,7 +1699,7 @@ TestCase {
     function test_a_preview_requested_while_a_feed_is_open_is_not_swallowed() {
         // `screenShown` is an ordered ternary testing `chosen` first, so before
         // the fix a preview requested while a feed was open left `screenShown`
-        // at "feed" — the JoinScreen rebound to the new reference behind an
+        // at "feed" — the DJoinScreen rebound to the new reference behind an
         // invisible panel, and nothing shown.
         //
         // Latent rather than live: nothing on the feed emits a preview request
@@ -1792,7 +1792,7 @@ TestCase {
     // deliberate one. Anyone who has already copied a reference holds a string
     // in this format, so changing it strands them.
     function test_the_reference_format_is_a_json_object_with_two_hex_fields() {
-        var text = StoaReference.shareText("aabb", "ccdd")
+        var text = DStoaReference.shareText("aabb", "ccdd")
         var obj = JSON.parse(text)
         compare(obj.stoa, "aabb")
         compare(obj.genesis, "ccdd")
@@ -1835,9 +1835,9 @@ TestCase {
     // than coerced, so nothing but a string can reach JSON.stringify and the
     // core.
     function test_a_half_that_is_not_a_string_is_refused_rather_than_coerced() {
-        compare(StoaReference.parse('{"stoa":12345,"genesis":"00ff"}').ok, false)
-        compare(StoaReference.parse('{"stoa":"aa","genesis":{"x":1}}').ok, false)
-        compare(StoaReference.parse('["aa","00ff"]').ok, false,
+        compare(DStoaReference.parse('{"stoa":12345,"genesis":"00ff"}').ok, false)
+        compare(DStoaReference.parse('{"stoa":"aa","genesis":{"x":1}}').ok, false)
+        compare(DStoaReference.parse('["aa","00ff"]').ok, false,
                 "an array is not a reference either")
     }
 

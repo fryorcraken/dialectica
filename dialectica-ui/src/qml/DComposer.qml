@@ -25,7 +25,7 @@ ColumnLayout {
     // The op a reply answers. **Read only when `kind` is "reply"**, and an
     // earlier comment here claimed more than that — it said "a post must not
     // have one", stated as an invariant that nothing established. A
-    // `Composer { kind: "post"; parentOp: "deadbeef" }` was accepted and
+    // `DComposer { kind: "post"; parentOp: "deadbeef" }` was accepted and
     // silently dropped the parent: no warning, no refusal, no test. A sentence
     // that reads as a constraint the component enforces, when it enforces
     // nothing, is worse than no sentence — the next person writes a call site
@@ -79,7 +79,7 @@ ColumnLayout {
 
     // ---- the outcome, as ONE value --------------------------------------
     //
-    // "" | "stored" | "existing" | "refused". See PublishOutcome.qml for why
+    // "" | "stored" | "existing" | "refused". See DPublishOutcome.qml for why
     // this is a string rather than a set of booleans.
     property string outcome: ""
     property string outcomeDetail: ""
@@ -95,7 +95,7 @@ ColumnLayout {
     // a dead text field.
     readonly property bool submittable: root.draft.length > 0 && !root.overLimit
 
-    spacing: Theme.itemGap
+    spacing: DTheme.itemGap
 
     // ---- the UTF-8 byte count -------------------------------------------
     //
@@ -271,16 +271,16 @@ ColumnLayout {
     Rectangle {
         Layout.fillWidth: true
         implicitHeight: 130
-        color: Theme.field
-        border.width: Theme.hairline
-        border.color: root.overLimit ? Theme.accent : Theme.rule2
+        color: DTheme.field
+        border.width: DTheme.hairline
+        border.color: root.overLimit ? DTheme.accent : DTheme.rule2
 
         TextEdit {
             id: field
             anchors.fill: parent
-            anchors.margins: Theme.itemGap
-            font: Theme.body
-            color: Theme.ink
+            anchors.margins: DTheme.itemGap
+            font: DTheme.body
+            color: DTheme.ink
             wrapMode: TextEdit.Wrap
             selectByMouse: true
 
@@ -303,8 +303,8 @@ ColumnLayout {
     Text {
         visible: root.draft.length > 0
         text: root.draftBytes + " OF " + root.bodyByteLimit + " BYTES"
-        font: Theme.label
-        color: root.overLimit ? Theme.accent : Theme.inkMuted
+        font: DTheme.label
+        color: root.overLimit ? DTheme.accent : DTheme.inkMuted
         textFormat: Text.PlainText
     }
 
@@ -317,8 +317,8 @@ ColumnLayout {
         visible: root.overLimit
         text: "This " + root.kind + " is longer than the core module will accept, so it "
             + "cannot be sent yet. Nothing has been removed from what you wrote."
-        font: Theme.bodySmall
-        color: Theme.accent
+        font: DTheme.bodySmall
+        color: DTheme.accent
         wrapMode: Text.WordWrap
         lineHeight: 1.55
         textFormat: Text.PlainText
@@ -332,8 +332,8 @@ ColumnLayout {
         text: "This draft contains " + root.invisibleCount + " invisible character(s). "
             + "They will be published exactly as you typed them, and readers' software "
             + "will remove them when it renders this " + root.kind + "."
-        font: Theme.bodySmall
-        color: Theme.accent
+        font: DTheme.bodySmall
+        color: DTheme.accent
         wrapMode: Text.WordWrap
         lineHeight: 1.55
         textFormat: Text.PlainText
@@ -344,7 +344,7 @@ ColumnLayout {
 
     RowLayout {
         Layout.fillWidth: true
-        spacing: Theme.itemGap
+        spacing: DTheme.itemGap
 
         FlatButton {
             // "Publish", not "Send". The word is the claim: nothing here sends
@@ -360,7 +360,7 @@ ColumnLayout {
 
     // ---- what happened --------------------------------------------------
 
-    PublishOutcome {
+    DPublishOutcome {
         outcome: root.outcome
         detail: root.outcomeDetail
         subject: root.kind

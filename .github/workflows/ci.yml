@@ -218,6 +218,50 @@ jobs:
           done
           [ "$fail" -eq 0 ] && echo "ok: no shadowed component names"
 
+      # The second half of "no QML type of ours may be named X", and it sits
+      # beside the first on purpose: the check above covers names QtQuick
+      # claims, this one covers names BASECAMP claims, and someone adding a
+      # third will look here rather than in two jobs.
+      #
+      # It is in `lint` and not in `qml` because it needs no Qt — it is
+      # `pathlib` and `re` over the checkout — and `lint` installs nothing, so
+      # the cheapest check in the repo now also reports the fastest. It used to
+      # sit in the `qml` job behind a full Qt6 apt-get for no reason.
+      #
+      # WHY IT IS A SCRIPT AND NOT A HEREDOC. It was a heredoc, and a heredoc
+      # cannot be tested: the only way to exercise it was to push a branch and
+      # read a log. Both of the defects the architecture review found — a
+      # prefix rule that read only `singleton` lines, and a reference arm
+      # hardcoded to one name — shipped through review for that reason.
+      #
+      # The gate is now `dialectica-ui/tests/check_qml_names.py`, and its own
+      # tests run FIRST, in the step immediately below: a gate is part of the
+      # measurement, and one narrowed until it matches nothing passes exactly
+      # as quietly as a correct one. That is the standard this repo already
+      # holds `check_bindings` to. The tests pin both directions and require a
+      # FAILURE when the gate's corpus is empty, so a walk that silently stops
+      # matching cannot report clean.
+      #
+      # WHY IT IS A NAME CHECK AT ALL, in one paragraph with a pointer rather
+      # than the fourth copy of the narrative: the collision lives in the host's
+      # C++ type registration, so no component test in this repo can see it —
+      # `qmltestrunner` runs with the host absent, so an assertion like
+      # `verify(DTheme.paper !== undefined)` cannot fail ON THE COLLISION. Note
+      # the qualifier: that assertion is not a check that cannot fail, it is one
+      # blind to this defect specifically, and the overbroad version of the
+      # claim is what left qmllint's `missing-property` unexamined. The
+      # mechanism, the withdrawn precedence premise and the measurements are in
+      # CLAUDE.md's "Module contract traps", which is where a person ADDING a
+      # singleton meets them.
+      #
+      # A red here is diagnosed from the error message alone; it names the file,
+      # the line, the offending name and what to rename it to.
+      - name: the QML type-name gate's own tests
+        run: dialectica-ui/tests/tst_check_qml_names.py
+
+      - name: no QML type name collides with the host
+        run: dialectica-ui/tests/check_qml_names.py dialectica-ui
+
       - name: every QML file importing layouts declares the import
         run: |
           set -eu
@@ -515,27 +559,185 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Qt6. The Qt5 tools are a trap here (see the note above), so the package
-      # names are the qt6 ones and the tool lookup below prefers qt6 paths.
+      # Qt6, INSTALLED AT A PINNED VERSION RATHER THAN FROM APT, and the reason
+      # is a red CI run rather than a preference.
       #
-      # `qml6-module-qtqml` is what supplies the **`Qt` namespace object's**
-      # qmltypes — `Qt.AlignHCenter`, `Qt.PointingHandCursor`,
-      # `Qt.RightButton`. Without it qmllint resolves none of them and reports
-      # `Property "AlignHCenter" not found on type "Qt"` on perfectly valid
-      # code. It is a separate package from `qml6-module-qtquick` and is easy
-      # to omit, because nothing imports "QtQml" by name — QtQuick pulls it in
-      # at runtime, so the app works and only the LINTER is blind.
-      - name: Install Qt
+      # This step was `apt-get install qt6-declarative-dev-tools ...`. On
+      # `ubuntu-latest` (Ubuntu 24.04 noble) that package is Qt **6.4.2**, and
+      # 6.4.2's `qmllint` HAS NO `--missing-property` COMMAND-LINE FLAG. The
+      # `the QML member gate's own tests` step below therefore failed with
+      #
+      #   /usr/lib/qt6/bin/qmllint does not accept --unqualified/--missing-property
+      #
+      # and — this is the part that made it expensive — the five steps AFTER it
+      # were skipped, so qmllint proper, the binding check and the whole
+      # component suite were unverified rather than passing. Noble has no
+      # newer Qt: there is no noble-updates or noble-backports entry for that
+      # package, and a Qt PPA would swap the whole qt6-base stack underneath
+      # the image. So apt cannot supply what the gate needs on this runner.
+      #
+      # READ THAT MESSAGE PRECISELY — it names two flags and only ONE is
+      # missing. `--unqualified` exists at 6.4.2; it is `--missing-property`
+      # alone that does not, its 6.4 counterpart being the differently-named
+      # `--property`. The probe passes both flags in one invocation, so it
+      # cannot say which was rejected, and the message reports the pair. Worth
+      # knowing before someone concludes 6.4 lacks per-category options
+      # generally: it does not. Checked in qtdeclarative at tag v6.4.2,
+      # `src/qmlcompiler/qqmljslogger.cpp` — the category list there has
+      # `unqualified` and no `missing-property`.
+      #
+      # PINNED TO 6.8.3, and the pin is the point. `--missing-property <level>`
+      # is what `dialectica-ui/tests/check_qml_members.sh` escalates on.
+      # Confirmed present at this exact version in Qt's own source: at tag
+      # v6.8.3, `src/qmlcompiler/qqmljslogger.cpp` declares
+      # `qmlMissingProperty{ "missing-property" }` and registers it in
+      # `defaultCategories()`, which is what `tools/qmllint/main.cpp` turns into
+      # a command-line option taking a level. (The category arrived in 6.5; 6.4
+      # is the last release without it.)
+      #
+      # THE CATEGORY IS NOT THE WHOLE REQUIREMENT, and reading it as such cost a
+      # red run. The gate once escalated with the LEVEL `error`, and that level
+      # arrived LATER than the category: 6.8.3 accepts `--missing-property` and
+      # rejects `error`, offering only disable/info/warning, while 6.10.3 adds a
+      # fourth. So the source check above was true and the gate was still
+      # unrunnable here — a green developer machine, a red CI. The gate now
+      # escalates with `--missing-property warning -W 0`, which both versions
+      # accept, and its preflight LINTS A FILE instead of appending `--help`
+      # (`--help` exits 0 without validating a level, which is why nothing
+      # caught this). If this pin is ever LOWERED OR RAISED, run
+      # `dialectica-ui/tests/tst_check_qml_members.sh` against the candidate
+      # first — it fails loudly rather than skipping.
+      #
+      # A FLOATING VERSION WOULD REINTRODUCE THIS THE DAY THE IMAGE MOVES, which
+      # is how it arrived: `ubuntu-latest` is a moving label, and the Qt it
+      # carries is whatever that Ubuntu release froze. Ubuntu 26.04 happens to
+      # ship 6.10.2 and would work today, so `runs-on: ubuntu-26.04` looks like
+      # a one-word fix — it is the same bug with a later fuse, because the Qt
+      # version would again be a property of an image nobody in this repo
+      # chose.
+      #
+      # The action is SHA-pinned like every other third-party action in this
+      # file: `v4` is a BRANCH here, not a tag, so `@v4` is a mutable ref that
+      # can change under us.
+      #
+      # BUT THE PIN DOES NOT REACH THE CODE THAT DOWNLOADS QT, and that is
+      # stated here rather than left for someone to assume otherwise. The
+      # commit above is a COMPOSITE action whose real step is
+      #
+      #   uses: jurplel/install-qt-action/action@v4
+      #
+      # — a floating branch ref in the nested action, read at this very SHA. So
+      # pinning the wrapper pins the input forwarding and the aqtinstall
+      # version default; the fetcher and the apt dependency list still resolve
+      # `@v4` at run time. GitHub offers no way to pin a nested `uses:` from
+      # the caller.
+      #
+      # Why that is accepted here, in the terms this file already uses for
+      # `install-nix-action`: this job LINTS and runs component tests. It
+      # produces no artefact — `build` and `release` are separate jobs that
+      # install no Qt — so a compromised fetcher here cannot reach a published
+      # `.lgx`. The exposure is a wrong or malicious Qt making this job lie
+      # about the view, which is real but is not the supply-chain path the
+      # other pins defend. If that trade stops being acceptable, the move is to
+      # vendor the nested action or install Qt from a checksummed archive, not
+      # to re-pin this line — re-pinning cannot fix it.
+      #
+      # `archives:` is deliberately NOT set. The default install is the whole
+      # desktop package — qtbase + qtdeclarative + qttools + qtsvg + qtwayland —
+      # and qtdeclarative is what builds `qmllint`, `qmlformat` AND
+      # `qmltestrunner`, while the `QtTest` QML module the specs import comes
+      # from the same place. Slimming this to `qtbase qtdeclarative` drops
+      # qtsvg/qtwayland and risks the headless run for no gain worth having.
+      #
+      # This replaces the apt `qml6-module-*` packages, which existed for one
+      # reason worth keeping written down: `qml6-module-qtqml` supplied the
+      # **`Qt` namespace object's** qmltypes — `Qt.AlignHCenter`,
+      # `Qt.PointingHandCursor`, `Qt.RightButton` — and without it qmllint
+      # resolved none of them and reported `Property "AlignHCenter" not found on
+      # type "Qt"` on perfectly valid code. It was easy to omit because nothing
+      # imports "QtQml" by name. An upstream Qt tree has QtQml, QtQuick,
+      # QtQuick.Controls/Layouts/Templates/Window in the one qtdeclarative
+      # build, so they cannot be omitted individually any more — but if that
+      # diagnostic ever returns, THAT is what it means.
+      #
+      # `libgl1-mesa-dev` WENT WITH THE APT LINE AND THAT IS DELIBERATE, not an
+      # oversight: `install-deps` defaults to true and its list installs that
+      # exact package, plus the whole `libxcb-*` set, `libxkbcommon-x11-0`, and
+      # `libxcb-cursor0` for Qt >= 6.5 — a requirement Qt added at 6.5 that a
+      # hand-written apt line here would not have known about. Checked in the
+      # action's own source at the pinned commit (`action/lib/main.js`), not
+      # inferred. Leaving `install-deps` at its default is what keeps that list
+      # maintained upstream instead of going stale here.
+      #
+      # `QT_QPA_PLATFORM=offscreen` is still required and is still set by
+      # `run-qml-tests.sh` itself: the runner has the xcb libraries but no X
+      # display, so Qt would default to xcb and abort. If `qmltestrunner` ever
+      # fails on GL CONTEXT CREATION rather than on the platform plugin, the
+      # first thing to try is `QT_QUICK_BACKEND=software` — not more apt
+      # packages.
+      - uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
+        with:
+          version: "6.8.3"
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          cache: true
+
+      # The tool-discovery lists in the scripts and steps below name absolute
+      # apt paths (`/usr/lib/qt6/bin/qmllint`, ...) before the bare name. Those
+      # paths do not exist on this runner now — nothing apt-installs Qt any more
+      # — so discovery falls through to the bare name, which resolves on PATH to
+      # the pinned Qt the action just installed. Assert that rather than assume
+      # it: a bare `qmllint` that silently resolved to some OTHER Qt is exactly
+      # the wrong-version failure this whole block exists to stop, and it would
+      # otherwise only surface as a confusing diagnostic six steps later.
+      - name: the Qt on PATH is the pinned one
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            qt6-base-dev qt6-declarative-dev \
-            qt6-declarative-dev-tools \
-            qml6-module-qtqml qml6-module-qtqml-workerscript \
-            qml6-module-qtquick qml6-module-qtquick-controls \
-            qml6-module-qtquick-layouts qml6-module-qtquick-templates \
-            qml6-module-qtquick-window \
-            libgl1-mesa-dev
+          set -eu
+          echo "QT_ROOT_DIR=${QT_ROOT_DIR:-<unset>}"
+          # `qmltestrunner` is deliberately NOT in this loop, and must not be
+          # added back. It is a QGuiApplication with no `--version` flag, so it
+          # fails two different ways and neither says anything about which Qt
+          # is on PATH: with no display it aborts (134) in QGuiApplication
+          # construction before the parser sees the argument, and with one it
+          # exits 1 on `Unknown option: '--version'`. So `QT_QPA_PLATFORM=
+          # offscreen` does not rescue it — that only swaps the first failure
+          # for the second. `-help`, the flag it does have, exits 0 without a
+          # display but prints no version at all: a probe that passes on every
+          # Qt is worse than no probe, because it closes the question this step
+          # exists to ask. The component-suite step below runs qmltestrunner
+          # for real, which is where a wrong one shows up.
+          for tool in qmllint qmlformat; do
+            path=$(command -v "$tool") || {
+              echo "::error::$tool is not on PATH — the pinned Qt did not install it"
+              exit 1
+            }
+            echo "$tool -> $path"
+            "$tool" --version
+          done
+          # The flags whose absence took this job red. THE PROBE LINTS A FILE,
+          # and that is the correction rather than a detail: this probe used to
+          # append `--help`, and it PASSED on 6.8.3 while the gate it claims to
+          # vet was unrunnable there. `--help` makes Qt's argument parser print
+          # usage and exit 0 BEFORE validating any level VALUE, so it proves a
+          # flag NAME is known and nothing about the value passed to it — and
+          # the value was what broke (`--missing-property error`: category
+          # present at 6.8.3, level `error` not).
+          #
+          # Keep this invocation identical to the one in
+          # `dialectica-ui/tests/check_qml_members.sh`. A probe that vets a
+          # different command than the gate runs is not a probe.
+          probe=$(mktemp -d)
+          printf 'import QtQuick\nItem {}\n' > "$probe/Probe.qml"
+          if ! qmllint --unqualified disable --missing-property warning -W 0 "$probe/Probe.qml" >/dev/null 2>&1; then
+            echo "::error::the pinned qmllint cannot run the member gate's invocation"
+            echo "         Probed by LINTING A FILE, not --help, which exits 0"
+            echo "         without validating a level value."
+            qmllint --unqualified disable --missing-property warning -W 0 "$probe/Probe.qml" || true
+            exit 1
+          fi
+          rm -rf "$probe"
+          echo "ok: qmllint runs the member gate's --missing-property/-W invocation"
 
       # qmllint does NOT catch a syntax error — radicle watched it report "ok"
       # on a file Qt then refused with "Unexpected token `}'", and basecamp
@@ -625,6 +827,29 @@ jobs:
       #
       # Named files, absolute intent: never a bare `qmllint` (a bare invocation
       # opens a GUI file picker and hangs a CI runner forever).
+      # The undefined-MEMBER gate, and its own tests first.
+      #
+      # WHAT IT CLOSES, which three steps in this job were green over. With
+      # `color: DTheme.desk` in Main.qml rewritten as `DTheme.noSuchDesk`, the
+      # QML suite passed (no spec instantiates Main.qml, so `check_bindings`
+      # never sees it), the static name gate passed (a D-prefixed typo contains
+      # no bare `Theme`), and the qmllint step below passed WHILE PRINTING the
+      # defect as a warning. `--missing-property warning -W 0` escalates that
+      # warning into a failure and reaches every file in src/qml, not only the
+      # ones a spec constructs. (`-W 0` rather than the level `error`, which
+      # 6.8.3 does not accept — see the Qt pin above.)
+      #
+      # It does NOT see the host collision — `-I src/qml` puts our own singleton
+      # on the import path, so qmllint checks a different resolution than the app
+      # performs. A green here says nothing about shadowing. That limit is in the
+      # script's header too, because a gate whose green is mistaken for a broader
+      # guarantee is the failure this repo has already paid for.
+      - name: the QML member gate's own tests
+        run: dialectica-ui/tests/tst_check_qml_members.sh
+
+      - name: every QML member read off our own types exists
+        run: dialectica-ui/tests/check_qml_members.sh
+
       - name: qmllint
         run: |
           set -eu
@@ -660,6 +885,22 @@ jobs:
             exit 1
           fi
           echo "ok: qmllint clean"
+
+      # The runner's own undefined-binding check, tested before the suite that
+      # relies on it. `check_bindings` is what turns a QML binding evaluating to
+      # `undefined` from a QWARN the runner ignores into a failed run — see the
+      # long comment on it in run-qml-tests.sh for why that gap exists.
+      #
+      # It is gated separately because a helper is part of the measurement: a
+      # check narrowed until it matches nothing passes every run exactly as
+      # quietly as a correct one, and the suite it guards would go on reporting
+      # green. This step pins both directions — what it must catch and what it
+      # must not — so a later edit that guts it fails HERE, loudly, rather than
+      # silently widening the blind spot the suite already had.
+      #
+      # Needs no Qt: it runs check_bindings over recorded runner output.
+      - name: the runner's undefined-binding check
+        run: dialectica-ui/tests/tst_check_bindings.sh
 
       # The component tests. `REQUIRE_QML_TESTS=1` so a missing or
       # wrong-major-version runner FAILS rather than skipping: a job that

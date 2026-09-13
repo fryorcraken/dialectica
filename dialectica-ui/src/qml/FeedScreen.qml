@@ -312,8 +312,8 @@ ScreenFrame {
 
             Text {
                 text: screen.stoaTitle
-                font: Theme.heading
-                color: Theme.ink
+                font: DTheme.heading
+                color: DTheme.ink
                 textFormat: Text.PlainText   // peer-supplied: never rich text
                 visible: screen.stoaTitle !== ""
             }
@@ -340,8 +340,8 @@ ScreenFrame {
             delegate: Text {
                 required property var modelData
                 text: modelData.label
-                font: Theme.bodySmall
-                color: screen.ordering === modelData.key ? Theme.ink : Theme.inkMuted
+                font: DTheme.bodySmall
+                color: screen.ordering === modelData.key ? DTheme.ink : DTheme.inkMuted
                 textFormat: Text.PlainText
             }
         }
@@ -351,8 +351,8 @@ ScreenFrame {
         // reader's affordance, not a moderator privilege.
         Text {
             text: "SHOW HIDDEN"
-            font: Theme.label
-            color: screen.includeHidden ? Theme.accent : Theme.inkMuted
+            font: DTheme.label
+            color: screen.includeHidden ? DTheme.accent : DTheme.inkMuted
             // Explicit even though the text is a literal today. QML's default
             // is AutoText, which SNIFFS its input and switches to rich text
             // when the string looks like markup — so an element left on the
@@ -385,8 +385,8 @@ ScreenFrame {
     ColumnLayout {
         Layout.fillWidth: true
         spacing: 2
-        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: Theme.hairline; color: Theme.ink }
-        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: Theme.hairline; color: Theme.ink }
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: DTheme.hairline; color: DTheme.ink }
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: DTheme.hairline; color: DTheme.ink }
     }
 
     // ---- state: the store could not be read -----------------------------
@@ -398,22 +398,22 @@ ScreenFrame {
     Rectangle {
         visible: screen.readState === "failed"
         Layout.fillWidth: true
-        implicitHeight: failedBody.implicitHeight + 2 * Theme.cardPaddingY
-        color: Theme.field
-        border.width: Theme.border
-        border.color: Theme.accent
+        implicitHeight: failedBody.implicitHeight + 2 * DTheme.cardPaddingY
+        color: DTheme.field
+        border.width: DTheme.border
+        border.color: DTheme.accent
 
         ColumnLayout {
             id: failedBody
             anchors.fill: parent
-            anchors.margins: Theme.cardPaddingY
-            spacing: Theme.itemGap
+            anchors.margins: DTheme.cardPaddingY
+            spacing: DTheme.itemGap
 
             Text {
                 // copy.json `states.failedTitle`
                 text: "The store could not be read, so nothing can be shown."
-                font: Theme.heading
-                color: Theme.accent
+                font: DTheme.heading
+                color: DTheme.accent
                 wrapMode: Text.WordWrap
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
@@ -423,8 +423,8 @@ ScreenFrame {
                 // copy.json `states.failedBody` opens with this sentence, and
                 // it is the load-bearing half: it says what this ISN'T.
                 text: "This is not an empty Stoa. Posts you already hold are on disk and unreadable right now."
-                font: Theme.bodySmall
-                color: Theme.inkSoft
+                font: DTheme.bodySmall
+                color: DTheme.inkSoft
                 wrapMode: Text.WordWrap
                 lineHeight: 1.55
                 textFormat: Text.PlainText
@@ -436,8 +436,8 @@ ScreenFrame {
             // something more soothing and less actionable.
             Text {
                 text: screen.failure
-                font: Theme.address
-                color: Theme.ink
+                font: DTheme.address
+                color: DTheme.ink
                 wrapMode: Text.WrapAnywhere
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
@@ -459,22 +459,22 @@ ScreenFrame {
     Rectangle {
         visible: screen.readState === "ok" && screen.rows.length === 0
         Layout.fillWidth: true
-        implicitHeight: emptyBody.implicitHeight + 2 * Theme.cardPaddingY
-        color: Theme.paper
-        border.width: Theme.hairline
-        border.color: Theme.rule2
+        implicitHeight: emptyBody.implicitHeight + 2 * DTheme.cardPaddingY
+        color: DTheme.paper
+        border.width: DTheme.hairline
+        border.color: DTheme.rule2
 
         ColumnLayout {
             id: emptyBody
             anchors.fill: parent
-            anchors.margins: Theme.cardPaddingY
-            spacing: Theme.itemGap
+            anchors.margins: DTheme.cardPaddingY
+            spacing: DTheme.itemGap
 
             Text {
                 // copy.json `states.emptyTitle`
                 text: "You have not received anything for this Stoa yet."
-                font: Theme.heading
-                color: Theme.ink
+                font: DTheme.heading
+                color: DTheme.ink
                 wrapMode: Text.WordWrap
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
@@ -483,8 +483,8 @@ ScreenFrame {
             Text {
                 // copy.json `states.emptyBody`
                 text: "The store was read without error; it holds no posts for this address. Other peers may hold posts you have not been sent. This is a fact about your copy, not about the Stoa."
-                font: Theme.bodySmall
-                color: Theme.inkSoft
+                font: DTheme.bodySmall
+                color: DTheme.inkSoft
                 wrapMode: Text.WordWrap
                 lineHeight: 1.55
                 textFormat: Text.PlainText
@@ -501,8 +501,8 @@ ScreenFrame {
                 // among bound neighbours is the kind of thing that stays
                 // accurate right up until the visibility condition changes.
                 text: "STORE READ OK · " + screen.rows.length + " POSTS HELD"
-                font: Theme.label
-                color: Theme.inkMuted
+                font: DTheme.label
+                color: DTheme.inkMuted
                 textFormat: Text.PlainText
             }
         }
@@ -517,7 +517,7 @@ ScreenFrame {
             id: row
             required property var modelData
             Layout.fillWidth: true
-            spacing: Theme.itemGap
+            spacing: DTheme.itemGap
 
             // The arrows, with NO number. `showScore` is left at its default
             // false, which is the decision rather than an omission: no call in
@@ -565,7 +565,7 @@ ScreenFrame {
 
             ColumnLayout {
                 Layout.fillWidth: true
-                spacing: Theme.itemGap
+                spacing: DTheme.itemGap
 
                 PostHeader {
                     identityAddress: row.modelData.author
@@ -585,8 +585,8 @@ ScreenFrame {
                 Text {
                     visible: row.modelData.isHidden === true
                     text: "HIDDEN BY A MODERATOR · SHOWN BECAUSE YOU ASKED TO SEE HIDDEN POSTS"
-                    font: Theme.label
-                    color: Theme.accent
+                    font: DTheme.label
+                    color: DTheme.accent
                     textFormat: Text.PlainText
                 }
 
@@ -600,16 +600,16 @@ ScreenFrame {
                     delegate: SanitisedText {
                         required property var modelData
                         value: modelData
-                        bodyFont: Theme.address
-                        bodyColor: Theme.inkMuted
+                        bodyFont: DTheme.address
+                        bodyColor: DTheme.inkMuted
                         Layout.fillWidth: true
                     }
                 }
 
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: Theme.hairline
-                    color: Theme.rule
+                    Layout.preferredHeight: DTheme.hairline
+                    color: DTheme.rule
                 }
             }
         }
@@ -623,7 +623,7 @@ ScreenFrame {
     RowLayout {
         visible: screen.readState === "ok" && (screen.hasMore || screen.page > 0)
         Layout.fillWidth: true
-        spacing: Theme.itemGap
+        spacing: DTheme.itemGap
 
         FlatButton {
             text: "Previous"
@@ -654,18 +654,18 @@ ScreenFrame {
     ColumnLayout {
         visible: screen.capability.canPost === true
         Layout.fillWidth: true
-        spacing: Theme.itemGap
+        spacing: DTheme.itemGap
 
-        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: Theme.hairline; color: Theme.ink }
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: DTheme.hairline; color: DTheme.ink }
 
         Text {
             text: "Post to this Stoa"
-            font: Theme.heading
-            color: Theme.ink
+            font: DTheme.heading
+            color: DTheme.ink
             textFormat: Text.PlainText
         }
 
-        Composer {
+        DComposer {
             id: composer
             kind: "post"
             stoaAddress: screen.stoaAddress
@@ -695,7 +695,7 @@ ScreenFrame {
         Layout.fillWidth: true
         spacing: 6
 
-        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: Theme.hairline; color: Theme.ink }
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: DTheme.hairline; color: DTheme.ink }
 
         // **NOT copy.json's `compose.blockedTitle`.** That string is "You cannot
         // reply in this Stoa yet", and it is wrong twice over: the gate
@@ -708,8 +708,8 @@ ScreenFrame {
         // at two times, and the second is not wired.
         Text {
             text: "You cannot post, reply or vote in this Stoa yet."
-            font: Theme.heading
-            color: Theme.ink
+            font: DTheme.heading
+            color: DTheme.ink
             wrapMode: Text.WordWrap
             textFormat: Text.PlainText
             Layout.fillWidth: true
@@ -734,8 +734,8 @@ ScreenFrame {
             // have concluded it was redundant and deleted it for the wrong
             // reason. The invariant now lives where the value is made.
             text: screen.capability.reason
-            font: Theme.bodySmall
-            color: Theme.inkSoft
+            font: DTheme.bodySmall
+            color: DTheme.inkSoft
             wrapMode: Text.WordWrap
             lineHeight: 1.55
             textFormat: Text.PlainText
@@ -759,8 +759,8 @@ ScreenFrame {
         // So the statement is owed to the reader facing the gate, and it is here.
         Text {
             text: "There is no disabled composer here. A box you could type into and not send would lose what you wrote."
-            font: Theme.bodySmall
-            color: Theme.inkSoft
+            font: DTheme.bodySmall
+            color: DTheme.inkSoft
             wrapMode: Text.WordWrap
             lineHeight: 1.55
             textFormat: Text.PlainText
@@ -794,8 +794,8 @@ ScreenFrame {
                 + "the core module found when it looked for a usable key just now, and the line "
                 + "before it is that report word for word. Resolve what it names and reopen this "
                 + "Stoa; the gate is checked again every time this feed is read."
-            font: Theme.bodySmall
-            color: Theme.inkSoft
+            font: DTheme.bodySmall
+            color: DTheme.inkSoft
             wrapMode: Text.WordWrap
             lineHeight: 1.55
             textFormat: Text.PlainText
@@ -809,7 +809,7 @@ ScreenFrame {
     // reached the shipped interface by mistake, and it is being removed. Two
     // obligations were attached to it and both have moved into the bodies they
     // qualify: the missing-box statement is now in the closed gate's own body,
-    // and the delivery denial is in `PublishOutcome` beside the success it
+    // and the delivery denial is in `DPublishOutcome` beside the success it
     // qualifies. A requirement discharged from here disappears when the column
     // does — silently, while still being required — so anything a reader is
     // OWED belongs where they will meet it, not here.
@@ -820,7 +820,7 @@ ScreenFrame {
     // both are gone. Neither was required: the score's absence explicitly
     // "does not oblige the view to carry prose about why no number is there"
     // (`composer-view/spec.md`, "The vote control displays no score"), and the
-    // delivery denial the spec DOES require is discharged in `PublishOutcome`
+    // delivery denial the spec DOES require is discharged in `DPublishOutcome`
     // beside the success it qualifies, where it is pinned character-for-
     // character.
     //

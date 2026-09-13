@@ -21,7 +21,7 @@ RowLayout {
         // the design's, unchanged.
         Layout.preferredWidth: 2
         Layout.fillHeight: true
-        color: root.caveat ? Theme.accent : Theme.rule2
+        color: root.caveat ? DTheme.accent : DTheme.rule2
     }
 
     ColumnLayout {
@@ -30,14 +30,14 @@ RowLayout {
 
         Text {
             text: root.label
-            font: Theme.label
-            color: root.caveat ? Theme.accent : Theme.inkMuted
+            font: DTheme.label
+            color: root.caveat ? DTheme.accent : DTheme.inkMuted
             textFormat: Text.PlainText
         }
         Text {
             text: root.body
-            font: Theme.note
-            color: Theme.inkSoft
+            font: DTheme.note
+            color: DTheme.inkSoft
             wrapMode: Text.WordWrap
             lineHeight: 1.4
             // `body` is a bound property, so a caller may one day put a
@@ -48,8 +48,8 @@ RowLayout {
         Text {
             visible: root.linkText !== ""
             text: root.linkText
-            font: Theme.bodySmall
-            color: Theme.accent
+            font: DTheme.bodySmall
+            color: DTheme.accent
             textFormat: Text.PlainText
             MouseArea {
                 anchors.fill: parent

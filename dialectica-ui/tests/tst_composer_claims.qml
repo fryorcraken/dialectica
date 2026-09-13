@@ -20,7 +20,7 @@ import "../src/qml"
 //
 // So every test here asserts what a particular message must and must not imply,
 // with the phrases hardcoded in this file rather than read back off the
-// component. A test that took its expectation from `PublishOutcome`'s own
+// component. A test that took its expectation from `DPublishOutcome`'s own
 // property would be asking the implementation what it wrote and agreeing.
 //
 // ## What these tests structurally cannot see
@@ -54,9 +54,9 @@ TestCase {
         }
     }
 
-    Component { id: composerComponent; Composer {} }
+    Component { id: composerComponent; DComposer {} }
     Component { id: feedComponent;     FeedScreen {} }
-    Component { id: outcomeComponent;  PublishOutcome {} }
+    Component { id: outcomeComponent;  DPublishOutcome {} }
 
     // **Create AND submit before the next composer is made.**
     //
@@ -602,7 +602,7 @@ TestCase {
     // The cost of that, stated rather than absorbed: the sweep can only say the
     // interface does not claim delivery, never that it positively DENIES
     // delivery knowledge. **That positive half is not a gap here, and this is
-    // where it lives:** the denial is rendered by `PublishOutcome` beside the
+    // where it lives:** the denial is rendered by `DPublishOutcome` beside the
     // success it qualifies, and pinned character-for-character by
     // `test_the_views_own_words_are_exactly_these_and_no_others`. It does not
     // depend on the apparatus column and survives the column's removal. The
@@ -722,7 +722,7 @@ TestCase {
     // match a changed component.** They are the requirement's text, and a change
     // to them is a change to what the interface promises.
     //
-    // `PublishOutcome` is driven directly rather than through a composer, so the
+    // `DPublishOutcome` is driven directly rather than through a composer, so the
     // residue check sees only the outcome block. Driven through a composer it
     // would also sweep up the byte counter and the submit label, and the only way
     // to exclude those would be to list them — at which point the check is a
@@ -834,7 +834,7 @@ TestCase {
     // **The claims table has one row per KNOWN outcome and therefore cannot
     // report an unknown one.** That is the measuring-instrument question asked
     // of the table itself: a reviewer added a fourth outcome to
-    // `Composer.applyReply` and the whole suite passed, while the screen
+    // `DComposer.applyReply` and the whole suite passed, while the screen
     // rendered a refusal headline on top of both success sentences.
     //
     // These values are deliberately the near-misses rather than nonsense: a

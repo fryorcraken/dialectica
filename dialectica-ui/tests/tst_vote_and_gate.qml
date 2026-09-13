@@ -1026,7 +1026,7 @@ TestCase {
     // **A new defect shape, and worth naming: a connection is a thing that can
     // be absent.**
     //
-    // `tst_composer.qml` pins that `Composer` emits `published` on a success.
+    // `tst_composer.qml` pins that `DComposer` emits `published` on a success.
     // `test_a_publish_adds_no_row_the_view_composed` pinned that `reload()`
     // behaves. Both ends were tested; **nothing tested that they are joined.** A
     // reviewer replaced `onPublished: screen.reload()` with a no-op and all 124
@@ -1036,7 +1036,7 @@ TestCase {
     // Testing an emitter and a receiver separately proves neither end is
     // connected. The only way to see the wire is to drive the real component at
     // one end and observe the far end, which is what these do: they submit
-    // through the screen's actual `Composer` and count the reads that reach core.
+    // through the screen's actual `DComposer` and count the reads that reach core.
 
     // Submit a draft through the screen's own composer, the way a user would.
     // Returns nothing; the caller observes what the screen did.

@@ -87,7 +87,7 @@ necessary and not sufficient; the dimension work is what moved the number.
 The original mark read six bytes (2^48 states) and rendered them through these
 dimensions. The count is *perceptual*: where two parameter values produce marks
 a person cannot separate at the rendered size, they are counted once. The
-governing size is `Theme.markInFeed` = **19px**, because that is where
+governing size is `DTheme.markInFeed` = **19px**, because that is where
 recognition actually happens; `markInList` = 40px is the generous case.
 
 **Contour.** Byte 0 drove three things at once — `_sides()` (period 6),
@@ -336,7 +336,7 @@ reproduce a known value is not trusted to produce unknown ones.
 **That assertion was itself a false green for one revision**, which is worth
 recording because it is the same shape as everything else in this section: the
 check concatenated the measured value into a printed report and asserted *nothing*,
-so a mismatch would have been exactly as silent as a match — while `Theme.qml`
+so a mismatch would have been exactly as silent as a match — while `DTheme.qml`
 claimed it "self-tests before reporting". A guard that cannot fail is not a guard,
 and this one was holding up the credibility of every number here. It is now a real
 `fuzzyCompare` that fails the run.
@@ -816,21 +816,21 @@ only one honestly available.
 
 ## Where the palette lives
 
-The seven inks are named roles in `Theme.qml`, in their own block separate from the
+The seven inks are named roles in `DTheme.qml`, in their own block separate from the
 three interface inks. They carry the `mark` prefix rather than extending the
 `accent` series because the mark's palette has a different job, and a change to
 `accent2` must not silently change what every identity looks like.
 
 **They are frozen wire-visible constants, not theme tokens**, and this is the one
 thing about them most likely to be got wrong later. The mark binds to
-`Theme.mark*`, so editing a value there changes every identity's appearance — and
+`DTheme.mark*`, so editing a value there changes every identity's appearance — and
 two peers on different app versions would then render *different marks for the
 same address*, which is precisely the failure the determinism contract exists to
 prevent. That is far more likely in practice than any renderer difference. An
 earlier revision of this note presented the theme binding as a benefit ("the look
 can be iterated without touching this component"), which is true of interface
 colours and false of these. **Add an ink if the mark needs one; do not retune an
-existing one.** The obligation is recorded beside the values in `Theme.qml`.
+existing one.** The obligation is recorded beside the values in `DTheme.qml`.
 
 ### Removing isPerson touched two call sites
 
