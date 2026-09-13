@@ -356,7 +356,7 @@ entry constructed, so the reasoning survives even though no gate exercises it.
 
 ---
 
-- [ ] **5. `Policy::to_byte` replaced by a constant still survives the whole suite, and a code comment says it does not**
+- [x] **5. `Policy::to_byte` replaced by a constant still survives the whole suite, and a code comment says it does not**
 
 **For:** `tester`
 
@@ -420,6 +420,102 @@ test.
 Nothing in this change touches `Policy::to_byte`, `Policy::ALL`, or
 `every_policy_round_trips_through_its_discriminant`, so the entry's measurement still
 stands as written.
+
+**Outcome (`tester`): FIXED, with two corrections to the entry — the mutant is
+unkillable, and the fix the entry names does not kill it either.**
+
+**First, the entry's measurements reproduce exactly.** Both halves verified before
+changing anything:
+
+1. **The mutation survives.** `Policy::to_byte` replaced by `{ 0 }`, whole suite,
+   no filter: predicted 551 passed / 0 failed, **observed 551 passed, 0 failed**.
+   Restored.
+2. **`cargo mutants` agrees**, re-run at this tree: **19 mutants, 1 missed, 14
+   caught, 4 unviable**, the miss being `replace Policy::to_byte -> u8 with 0` —
+   the entry's numbers to the mutant.
+
+So the entry is right that the mutant is live and right that the comment read as
+claiming otherwise. Both stand.
+
+**Correction 1 — the entry's proposed fix does not close it.** The entry names the
+fix as *"assert `Policy::Open.to_byte() == 0` against the literal rather than
+round-tripping"*. I wrote that assertion and ran it under the mutation: predicted
+pass, **observed pass**. It cannot fail.
+
+The reason is structural rather than a weakness in the assertion. `Policy` has
+exactly one inhabitant and its discriminant *is* `0`, so `to_byte` and the constant
+`0` are **the same function on the whole domain**. No fixture — hardcoded literal,
+round-trip, hex blob or otherwise — can distinguish them, because there is nothing
+to distinguish. This is an **equivalent mutant**, not a coverage gap, and the entry's
+own sentence *"either a second variant (not in scope) or a hardcoded expectation"*
+presents those as alternatives when only the first works. Confirmed after the fix:
+`cargo mutants` still reports **1 missed, 14 caught, 4 unviable**. The mutant is
+still alive and will remain so until a second `Policy` variant exists.
+
+**Correction 2 — and this is the part that was a real, closable gap.** While
+establishing the above I found that the promise `Policy::ALL`'s doc makes —
+*"a test iterating this fails when a new variant is added without a discriminant"* —
+**does not hold**, for a reason the entry does not mention. A variant added to the
+enum but **not** added to `ALL` leaves `every_policy_round_trips_through_its_discriminant`
+green, because it iterates `ALL` and `ALL` still has one entry. Measured: with a
+second variant wired correctly through `to_byte`, `from_byte` and `policy_name` but
+absent from `ALL`, that test **passes**. So the enum's exhaustiveness bookkeeping —
+which every iterating test in the module depends on — was enforced by a comment
+asking the next author to remember.
+
+**The test that now fails without it:**
+`stoa.rs::policy_all_holds_every_variant_and_each_maps_to_its_pinned_byte`.
+It carries a table of `(variant, hardcoded byte)` rows plus an exhaustive `match`
+whose only job is to be exhaustive, so the enforcement is a **compile error** rather
+than a request. Proven able to fail, in both of its modes:
+
+- **A variant missing from `ALL`** (the gap above): predicted a length disagreement,
+  **observed `left: 2, right: 1`** — *"the pinned table and Policy::ALL disagree
+  about how many variants exist"*. The pre-existing round-trip test passes in the
+  same tree, which is what makes this test worth having.
+- **A variant not in the table at all**: predicted a non-exhaustive-match compile
+  error naming the test's line, **observed `E0004` at `stoa.rs:963`**. A useful
+  extra observation while doing this: `to_byte` itself and `wire.rs:570`'s
+  `policy_name` are *also* exhaustive and *also* fail to compile, so a variant
+  genuinely cannot be added without choosing a discriminant. The gap was only ever
+  `ALL`.
+
+The bytes are hardcoded literals, not `Self::OPEN` — reading the discriminant back
+out of the implementation would be the "ask the code what it wrote and agree" shape,
+and `Policy::OPEN` is a `const`, which `cargo mutants` cannot mutate, so an assertion
+written against it is the one thing no gate can check.
+
+**And the comment, which the entry is right to call the part that costs something
+now.** Both overclaiming comments are corrected rather than deleted:
+
+- **`Policy::ALL`'s doc** (`stoa.rs:122-140`) now says the mutant **is still
+  reported MISSED**, why it is unkillable, that the literal assertion survives it
+  too, and what the named test actually closes.
+- **`every_policy_round_trips_through_its_discriminant`'s comment** made the same
+  overclaim from the test side and is corrected the same way: iterating `ALL` does
+  not make the mutant die today, and does not catch a variant that never reached
+  `ALL`.
+
+**What `cargo mutants` cannot see here**, since the brief asked: two things, and the
+second is new.
+
+1. As the entry says and the "Checked and clean" section repeats — it mutates
+   functions, not `const` values, so `Policy::OPEN` is invisible to it. The real
+   exposure on the *discriminant* is therefore a constant, pinned only by
+   hand-written assertions (`the_wire_format_is_pinned_to_a_known_answer`'s
+   `assert_eq!(Policy::OPEN, 0, …)` and now the table above).
+2. **It cannot distinguish an equivalent mutant from a missed one.** A permanently
+   MISSED row that no test can ever kill looks identical in its report to a genuine
+   coverage gap, which is how this entry came to name a fix that could not work.
+
+**Gates.** Suite **552 passed, 0 failed** (551 baseline + 1 new test). Clippy
+`-D warnings` clean. `rustfmt --check --config skip_children=true` on `stoa.rs`
+reports **5 hunks, all pre-existing** — verified by stashing this work and
+re-running on the untouched baseline, which reports the same 5. Nothing
+pre-existing reformatted. `git diff --stat` shows **one file, `stoa.rs`**: the
+implementation is untouched apart from the doc comment this entry asks to be
+corrected, and the three scratch mutations (`to_byte`, a second `Policy` variant,
+`wire.rs`'s `policy_name` arm) are all restored.
 
 ---
 

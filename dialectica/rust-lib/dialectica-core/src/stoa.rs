@@ -121,12 +121,23 @@ pub enum Policy {
 impl Policy {
     /// Every variant, so a test can iterate them.
     ///
-    /// Exists because `cargo mutants` found that replacing [`Policy::to_byte`]
-    /// with a hardcoded `0` survived the suite — true while there is one
-    /// variant, and silently wrong the moment there are two. A test iterating
-    /// this fails when a new variant is added without a discriminant.
+    /// **Add every new variant here.** `policy_all_holds_every_variant_and_each_maps_to_its_pinned_byte`
+    /// fails if you do not, and that test — not this comment — is what enforces it.
     ///
-    /// **Add every new variant here.**
+    /// This doc used to claim the `cargo mutants` finding
+    /// *"replace `Policy::to_byte` with `0`"* was closed by a test iterating
+    /// `ALL`. It is not, and **the mutant is still reported MISSED**: with one
+    /// variant whose discriminant is `0`, `to_byte` and the constant `0` are the
+    /// same function on the whole domain, so no test can distinguish them. It is
+    /// an equivalent mutant, and the only thing that kills it is a second variant
+    /// existing. Measured, not assumed — including that asserting
+    /// `Policy::Open.to_byte() == 0` against a hardcoded literal survives it too.
+    ///
+    /// What the iterating test *did* leave open is bookkeeping: a second variant
+    /// added to the enum but not to `ALL` left every iterating test green over the
+    /// one entry `ALL` still had. That is what the named test above closes, with an
+    /// exhaustive `match` so the enforcement is a compile error rather than a
+    /// request to remember.
     pub const ALL: [Policy; 1] = [Policy::Open];
 
     /// Explicit discriminants: these bytes are on the wire and in the address,
@@ -901,8 +912,13 @@ mod tests {
         // input would encode every policy as Open — silently, since the
         // discriminant is inside the address.
         //
-        // Iterating every variant is what makes this fail then, rather than
-        // needing to be remembered. Add new variants to `Policy::ALL`.
+        // Iterating every variant is what makes this fail then. It does NOT make
+        // the mutant die today — that mutant is still reported MISSED, and is
+        // unkillable while `Policy` has one inhabitant whose byte is `0`. Nor does
+        // iterating `Policy::ALL` catch a variant that was never added to `ALL`:
+        // this test would keep passing over the one entry it has.
+        // `policy_all_holds_every_variant_and_each_maps_to_its_pinned_byte` is
+        // what closes that, and it carries the measurements.
         for policy in Policy::ALL {
             assert_eq!(
                 Policy::from_byte(policy.to_byte()),
@@ -916,6 +932,82 @@ mod tests {
             assert!(
                 seen.insert(policy.to_byte()),
                 "{policy:?} reuses a discriminant"
+            );
+        }
+    }
+
+    #[test]
+    fn policy_all_holds_every_variant_and_each_maps_to_its_pinned_byte() {
+        // WHY THIS EXISTS, and what the `Policy::ALL` doc comment used to claim
+        // and could not deliver.
+        //
+        // `cargo mutants` reports `replace Policy::to_byte -> u8 with 0` as a
+        // MISSED mutant, and it still does at the time of writing. That is not a
+        // coverage gap that a better test can close: `Policy` has exactly one
+        // inhabitant and its discriminant IS 0, so `to_byte` and the constant `0`
+        // are the SAME FUNCTION on the whole domain. No fixture can tell them
+        // apart — measured, not argued: asserting
+        // `Policy::Open.to_byte() == 0` against a hardcoded literal (the fix
+        // `findings/security.md` entry 5 proposed) passes under the mutation too.
+        // It is an EQUIVALENT MUTANT, and the only thing that kills it is a
+        // second variant existing.
+        //
+        // So what is actually at risk is not `to_byte`'s body. It is the
+        // bookkeeping the round-trip test above depends on: that second variant
+        // being listed in `Policy::ALL`. `ALL`'s doc says "a test iterating this
+        // fails when a new variant is added without a discriminant" — but a
+        // variant added to the enum and NOT added to `ALL` leaves every iterating
+        // test still green over the one entry it does have, so the promise did
+        // not hold by itself.
+        //
+        // The `match` below is what makes it hold, and it holds at COMPILE time
+        // rather than by anyone remembering: adding a variant to `Policy` without
+        // adding it here is a non-exhaustive-match error, and the error points at
+        // the table that must grow.
+        //
+        // The bytes are HARDCODED LITERALS, not `Self::OPEN`. Reading the
+        // discriminant back out of the implementation would be the
+        // "ask the code what it wrote and agree" shape — and `Policy::OPEN` is a
+        // `const`, which `cargo mutants` cannot mutate at all, so an assertion
+        // written against it is the one thing no gate can check.
+        //
+        // If this fails, do NOT update the expected byte to match. The
+        // discriminant is inside the address preimage, so changing it re-mints
+        // every Stoa address in existence with no error anywhere.
+
+        // The pinned table: one row per variant, each byte a hardcoded literal.
+        let pinned: &[(Policy, u8)] = &[(Policy::Open, 0)];
+
+        // What forces a new variant into that table. This `match` binds nothing
+        // and computes nothing — its only job is to be exhaustive, so adding a
+        // variant to `Policy` without adding a row above is a COMPILE error whose
+        // message names this line. A comment asking the next author to remember is
+        // what this replaces, because the old one did exactly that and the
+        // remembering is the part that does not hold.
+        for (policy, _) in pinned {
+            match policy {
+                Policy::Open => {}
+            }
+        }
+        assert_eq!(
+            pinned.len(),
+            Policy::ALL.len(),
+            "the pinned table and Policy::ALL disagree about how many variants exist"
+        );
+
+        for (policy, byte) in pinned {
+            assert_eq!(
+                policy.to_byte(),
+                *byte,
+                "{policy:?} no longer encodes as the byte the format pins"
+            );
+            // `ALL` is what the round-trip test above iterates, so a variant
+            // pinned here and missing there would leave that test green over a
+            // domain it no longer covers. This is the assertion that catches it.
+            assert!(
+                Policy::ALL.contains(policy),
+                "{policy:?} is pinned here but missing from Policy::ALL, \
+                 which every iterating test in this module walks"
             );
         }
     }
