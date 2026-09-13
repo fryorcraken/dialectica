@@ -47,7 +47,19 @@
       one enforced by a green test. Also: `tmp/gen.rs` and every wordlist source
       file are **gitignored and absent**, so D1's auditability argument has no
       artefact behind it once the author's worktree is pruned.
-- [ ] review: spec-test — `spec-test-reviewer`
+- [x] review: spec-test — `spec-test-reviewer` — 10 findings in
+      `findings/spec-test.md`. Nine mutations run, **four survived**, three of
+      those `const` or QML `Theme` values that `cargo mutants` cannot reach:
+      the **denylist's 199 pairs are pinned by nothing** (deleted two real
+      figures' pairs, 946/946 green); the **abbreviation side of the
+      channel-disjointness requirement has no test at all** (`headChars: 24` or
+      `middleChars: 24` puts the mark's window back on screen, 42/42 QML green);
+      and `feed.rs:293`'s spec-forbidden placeholder passes. The blocker is a
+      **cross-capability contradiction** — this spec's "every reply carrying an
+      author carries a name" against `thread-read`'s "no item SHALL carry a
+      display name", both live, `validate --strict` blind to it, and the tests
+      firmly enforcing the side this change loses. Two `tasks.md` claims of
+      untestability were disproved by writing the tests.
 - [x] review: design — `design-reviewer` — 14 findings. D3/D4/D6–D10/D13 verified
       against the code and the exclusion withdrawal is clean. **One behavioural
       finding**: `feed.rs:293` silently drops a post whose author's name cannot be
