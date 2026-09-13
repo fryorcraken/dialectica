@@ -28,7 +28,15 @@
       against its "about 960". Every worked example in the module — *measured
       aporia of lampsacus*, `brittle`, `damp`, `alexandria troas` — names entries
       that are not in the lists. `feed.rs:292` cites a test that does not exist.
-- [ ] review: architecture — `code-reviewer`
+- [x] review: architecture — `code-reviewer` — Six findings in
+      `findings/architecture.md`. The change added `displayName` to the feed row
+      and never noticed the **second** author-reporting surface: `thread_page_json`
+      ships `authorKey` and no name, and `openspec/specs/thread-read/spec.md:192`
+      requires it carry none — so this change's "a name wherever core reports an
+      author" and a merged requirement now contradict each other, with the losing
+      one enforced by a green test. Also: `tmp/gen.rs` and every wordlist source
+      file are **gitignored and absent**, so D1's auditability argument has no
+      artefact behind it once the author's worktree is pruned.
 - [ ] review: spec-test — `spec-test-reviewer`
 - [x] review: design — `design-reviewer` — 14 findings. D3/D4/D6–D10/D13 verified
       against the code and the exclusion withdrawal is clean. **One behavioural
