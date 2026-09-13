@@ -265,6 +265,151 @@ TestCase {
 
     // ---- selection -------------------------------------------------------
 
+    // Regression, correctness review: `-1` was both the "nothing selected"
+    // sentinel and a value a reply's `index` could carry, so a candidate
+    // carrying `index:-1` drew the chosen background, the chosen border and a
+    // visible SELECTED word while `selectedIndex` was `-1` and nothing was
+    // selected. Pressing Keep then hit the `selectedIndex < 0` guard and
+    // returned silently, and clicking the row called `select(-1)` which changed
+    // nothing — a dead button with no way for the user to tell why.
+    //
+    // Asserted on what an OBSERVER OF THE SCREEN can see, not on the sentinel's
+    // value: a test comparing `selectedIndex` to `-1` passed throughout the
+    // defect, because `selectedIndex` was never wrong. What was wrong was the
+    // row.
+    readonly property string slateWithNegativeIndex:
+        '{"slate":"s1","count":2,"candidates":['
+        + '{"index":-1,"path":0,"address":"' + "11".repeat(32) + '","publicKey":"aa"},'
+        + '{"index":0,"path":1,"address":"' + "22".repeat(32) + '","publicKey":"bb"}'
+        + ']}'
+
+    function test_no_row_reads_as_chosen_while_nothing_is_selected() {
+        var normal = makeScreen({ "generate_identity_slate": spec.twoCandidateSlate })
+        normal.requestSlate()
+        compare(spec.visibleSelectedMarkers(normal), 0,
+                "the fixture's own precondition: a normal slate marks no row")
+        normal.destroy()
+
+        var hostile = makeScreen({ "generate_identity_slate": spec.slateWithNegativeIndex })
+        hostile.requestSlate()
+
+        compare(hostile.selectedIndex, -1, "nothing is selected")
+        compare(spec.visibleSelectedMarkers(hostile), 0,
+                "so NO row may read as chosen — a row drawing SELECTED while "
+                + "nothing is selected is a choice made for the user, and the "
+                + "keep button is dead beneath it")
+        hostile.destroy()
+    }
+
+    function test_a_candidate_whose_index_is_not_a_position_is_a_failure() {
+        // The durable fix is that a candidate list containing an entry the
+        // screen cannot address is not a slate. A range check that let the row
+        // render and merely refused to select it would leave the user looking
+        // at a candidate they cannot choose.
+        var screen = makeScreen({ "generate_identity_slate": spec.slateWithNegativeIndex })
+        screen.requestSlate()
+
+        compare(screen.phase, "failed",
+                "a candidate the screen cannot address is a reply it cannot read")
+        compare(screen.candidates.length, 0)
+        verify(screen.failure.length > 0, "the failure must name itself")
+        screen.destroy()
+    }
+
+    function test_a_candidate_that_is_not_an_object_is_a_failure_not_a_blank_row() {
+        // Regression, correctness review: `Array.isArray` established that
+        // `candidates` was a list, not that its ENTRIES were candidates. A
+        // reply of `[null,"str",{...}]` reached the slate phase and built three
+        // rows, one of them blank, with the delegate throwing on every access —
+        // and the user was invited to choose between them.
+        var screen = makeScreen({
+            "generate_identity_slate":
+                '{"slate":"s1","count":3,"candidates":[null,"str",{"index":0,"path":0,'
+                + '"address":"' + "11".repeat(32) + '","publicKey":"aa"}]}'
+        })
+        screen.requestSlate()
+
+        compare(screen.phase, "failed",
+                "an array whose elements are unreadable is the same confusion "
+                + "one level down: a blank row is a candidate that is not there")
+        compare(screen.candidates.length, 0)
+        screen.destroy()
+    }
+
+    function test_a_candidate_without_a_usable_address_is_a_failure() {
+        // The address is the only unforgeable way to tell two candidates apart,
+        // so a candidate with none is not a candidate the user can choose
+        // between.
+        var missing = makeScreen({
+            "generate_identity_slate":
+                '{"slate":"s1","count":1,"candidates":[{"index":0,"path":0,"publicKey":"aa"}]}'
+        })
+        missing.requestSlate()
+        compare(missing.phase, "failed", "a candidate with no address cannot be chosen between")
+        missing.destroy()
+
+        var notAString = makeScreen({
+            "generate_identity_slate":
+                '{"slate":"s1","count":1,"candidates":[{"index":0,"path":0,'
+                + '"address":{"hex":"aa"},"publicKey":"aa"}]}'
+        })
+        notAString.requestSlate()
+        compare(notAString.phase, "failed", "nor one whose address is not a string")
+        notAString.destroy()
+    }
+
+    function test_the_keep_guard_refuses_at_the_sentinel_even_when_a_row_carries_it() {
+        // The guard `design.md` calls "the guard that actually guards" was
+        // unprotected: every fixture's candidates had non-negative indexes, so
+        // `candidateAt(-1)` found nothing and the SECOND guard caught the call.
+        // This drives the first one by making the sentinel addressable.
+        //
+        // With the fix, such a slate never reaches the slate phase at all — so
+        // the assertion is that no keep request is sent, which holds whether
+        // the refusal comes from the guard or from the slate being refused
+        // earlier. Both are the screen declining to keep something the user did
+        // not choose.
+        var screen = makeScreen({
+            "generate_identity_slate": spec.slateWithNegativeIndex,
+            "keep_identity": '{"kept":true,"address":"ff","publicKey":"gg","path":0,"encrypted":false}'
+        })
+        screen.requestSlate()
+        compare(screen.selectedIndex, -1, "the fixture's own precondition")
+
+        screen.keepSelected()
+
+        compare(spec.countOf("keep_identity"), 0,
+                "nothing is selected, so no keep may reach the bridge — not even "
+                + "when a candidate carries the sentinel as its index")
+        verify(screen.phase !== "kept",
+               "and the reply above WOULD have produced the kept state had the "
+               + "call been made")
+        screen.destroy()
+    }
+
+    // Counts the rows that are VISIBLY marked as chosen, by walking the live
+    // object tree for a shown Text reading SELECTED. `visible` is checked up
+    // the chain, because an element is only on screen if every ancestor is.
+    function visibleSelectedMarkers(item) {
+        var items = spec.everyTextItemOn(item)
+        var n = 0
+        for (var i = 0; i < items.length; i++) {
+            if (String(items[i].text) === "SELECTED" && spec.isShown(items[i]))
+                n++
+        }
+        return n
+    }
+
+    function isShown(item) {
+        var node = item
+        while (node !== null && node !== undefined) {
+            if (node.visible === false)
+                return false
+            node = node.parent
+        }
+        return true
+    }
+
     function test_nothing_is_selected_when_a_set_arrives() {
         var screen = makeScreen({ "generate_identity_slate": spec.twoCandidateSlate })
         screen.requestSlate()
@@ -426,6 +571,76 @@ TestCase {
 
         screen.keepSelected()
         compare(spec.countOf("keep_identity"), 2, "the keep can be invoked again")
+        screen.destroy()
+    }
+
+    function test_a_non_string_reason_does_not_render_as_object_Object() {
+        // Regression, correctness review: `String(reply.value.reason)` on an
+        // object yields the literal text `[object Object]`, which the screen
+        // then showed the user in place of a reason. The spec requires a
+        // refusal's reason be shown "as the module wrote it, since a module's
+        // reasons are written to name a fix" — `[object Object]` names no fix
+        // and is strictly worse than the screen's own fallback, which exists
+        // for exactly the case where no usable reason arrived.
+        var screen = makeScreen({
+            "generate_identity_slate": spec.twoCandidateSlate,
+            "keep_identity": '{"kept":false,"reason":{"code":7}}'
+        })
+        screen.requestSlate()
+        screen.select(0)
+
+        screen.keepSelected()
+
+        compare(screen.phase, "refused", "it is still a refusal")
+        verify(screen.refusal.indexOf("[object Object]") < 0,
+               "a non-string reason must not be stringified onto the screen, got: "
+               + screen.refusal)
+        verify(screen.refusal.length > 0,
+               "and the screen must still say something rather than showing a blank")
+        screen.destroy()
+    }
+
+    function test_a_non_string_slate_identifier_is_not_stringified_into_a_request() {
+        // The same coercion at the other `String()` call site. A slate
+        // identifier that is not a string is a reply the screen cannot read,
+        // not one to stringify and send back.
+        var screen = makeScreen({
+            "generate_identity_slate":
+                '{"slate":{"nonce":"aa"},"count":1,"candidates":[{"index":0,"path":0,'
+                + '"address":"' + "11".repeat(32) + '","publicKey":"aa"}]}'
+        })
+        screen.requestSlate()
+
+        compare(screen.phase, "failed",
+                "a set identifier the screen cannot read is a reply it cannot read")
+        verify(screen.slateId.indexOf("[object Object]") < 0)
+        screen.destroy()
+    }
+
+    function test_a_new_slate_clears_a_previously_kept_identity() {
+        // Regression, correctness review: `requestSlate()`'s success path
+        // cleared `refusal` and `failure` but not `keptIdentity`, while
+        // `enterFailed()` cleared it — so the two exits from a state disagreed
+        // about what they clean up, and the next reader of `keptIdentity`
+        // inherited a stale value for free.
+        var screen = makeScreen({
+            "generate_identity_slate": spec.twoCandidateSlate,
+            "keep_identity": '{"kept":true,"address":"' + "99".repeat(32)
+                           + '","publicKey":"pk","path":0,"encrypted":true}'
+        })
+        screen.requestSlate()
+        screen.select(0)
+        screen.keepSelected()
+        compare(screen.phase, "kept", "the fixture's own precondition")
+        verify(screen.keptIdentity !== null)
+
+        screen.requestSlate()
+
+        compare(screen.phase, "slate")
+        compare(screen.keptIdentity, null,
+                "a screen back on a slate holds no kept identity — the state "
+                + "machine the spec asks to be single-valued must not carry a "
+                + "second, stale answer alongside it")
         screen.destroy()
     }
 
@@ -644,20 +859,41 @@ TestCase {
         screen.destroy()
     }
 
-    function test_the_uniqueness_note_says_four_words_not_three() {
-        // PLAN.md §5.2.1 settled FOUR words; the design bundle's copy says
-        // three. The count is corrected where the string is used.
+    function test_the_uniqueness_note_states_the_obligation_without_a_word_count() {
+        // **No count, in the copy or in this assertion.** The count has now
+        // moved three times — three words, then four (merged), now three again
+        // on a different basis (adjective + noun + "of" + place) — and each
+        // move made the shipped copy wrong and the pinning test an obstacle to
+        // correcting it. A pin on a number fails on reword rather than on
+        // misinformation, which is the wrong failure.
+        //
+        // The sentence's obligation does not need a number. What it must say is
+        // that names are not unique, are not identifiers, that someone else may
+        // hold the same name, and that the ADDRESS is what distinguishes two
+        // participants — and that survives every future change to how many
+        // words a name has.
         var screen = makeScreen({ "generate_identity_slate": spec.twoCandidateSlate })
         screen.requestSlate()
         var joined = spec.everyTextOn(screen).join(" ")
 
-        verify(joined.indexOf("same four words") >= 0,
-               "the uniqueness note must say four words")
-        verify(joined.indexOf("three words") < 0,
-               "the bundle's superseded count must not ship")
-        verify(joined.indexOf("not unique") >= 0
-               && joined.indexOf("not identifiers") >= 0,
-               "and must still say names are neither unique nor identifiers")
+        verify(joined.indexOf("not unique") >= 0,
+               "the note must say names are not unique")
+        verify(joined.indexOf("not identifiers") >= 0,
+               "and that they are not identifiers")
+        verify(joined.indexOf("address") >= 0,
+               "and that the address is what tells participants apart")
+
+        // And no count ships, whatever the count currently is. Written as a
+        // sweep over the spellings rather than a pin on one, so this fails on
+        // the reintroduction of ANY number rather than on the reword of one.
+        var counts = ["two words", "three words", "four words", "five words",
+                      "2 words", "3 words", "4 words", "5 words"]
+        for (var i = 0; i < counts.length; i++) {
+            verify(joined.indexOf(counts[i]) < 0,
+                   "the copy must state no word count — it has changed three "
+                   + "times and a screen carrying a number goes stale on the "
+                   + "next move; found \"" + counts[i] + "\"")
+        }
         screen.destroy()
     }
 

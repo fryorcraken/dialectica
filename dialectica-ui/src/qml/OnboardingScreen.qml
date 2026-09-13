@@ -50,10 +50,23 @@ ScreenFrame {
     property string failure: ""
     property string refusal: ""
 
-    // -1 is "nothing selected", and it is the value every path that replaces
-    // the candidate list assigns. A position carried across a refresh would
-    // name a candidate the user never looked at.
-    property int selectedIndex: -1
+    // The "nothing selected" sentinel, named once rather than spelled `-1` at
+    // six call sites.
+    //
+    // Naming it is not cosmetic. While it was a bare literal, a candidate whose
+    // reply carried `index:-1` collided with it and rendered as chosen while
+    // nothing was selected — the sentinel and a position were the same value
+    // and nothing said they must not be. The collision is now closed at the
+    // boundary (`isCandidate` refuses a negative index), and this constant is
+    // what makes the two readable as different things at every site that
+    // compares them.
+    readonly property int nothingSelected: -1
+
+    // Which candidate is selected, as that candidate's own `index`, or
+    // `nothingSelected`. Every path that replaces the candidate list assigns
+    // the sentinel: a position carried across a refresh would name a candidate
+    // the user never looked at.
+    property int selectedIndex: nothingSelected
 
     // The identity as the KEEP REPLY reported it — never the row that was sent.
     // Null until a reply said `kept:true` and carried an address.
@@ -107,15 +120,77 @@ ScreenFrame {
             return
         }
 
+        // A set identifier the screen cannot read is a reply it cannot read.
+        // NOT `String(...)`: stringifying an object yields the literal text
+        // `[object Object]`, which would then be sent back to core as the set
+        // the selection was made against.
+        if (typeof reply.value.slate !== "string") {
+            screen.enterFailed("The core module answered without naming the set of "
+                             + "candidates it offered, so a choice made here could "
+                             + "not be tied to what was shown.")
+            return
+        }
+
+        // **Every entry must be a candidate, not merely present.** The check
+        // above establishes that `candidates` is a list; it says nothing about
+        // what is in it. An array of `[null,"str",…]` passed it, reached the
+        // slate phase and built rows that threw on every access — rendering a
+        // blank row with no address and no mark, and inviting the user to
+        // choose between it and a real one.
+        //
+        // This runs BEFORE anything is assigned, so a bad entry anywhere means
+        // no slate rather than a slate with a hole in it. Core validates its
+        // own output; this is the view validating what it is handed, which is
+        // the standing rule for everything arriving from outside.
+        for (var i = 0; i < reply.value.candidates.length; i++) {
+            if (!screen.isCandidate(reply.value.candidates[i])) {
+                screen.enterFailed("The core module offered something this screen "
+                                 + "cannot read as an identity, so what it offered "
+                                 + "is unknown.")
+                return
+            }
+        }
+
         // The count is the reply's. A view laying out a fixed number of rows
         // would show four of five, or an empty fifth, the moment the module's
         // count changed — and the module's count is the module's to change.
         screen.candidates = reply.value.candidates
-        screen.slateId = reply.value.slate !== undefined ? String(reply.value.slate) : ""
-        screen.selectedIndex = -1
+        screen.slateId = reply.value.slate
+        screen.selectedIndex = screen.nothingSelected
         screen.refusal = ""
         screen.failure = ""
+        screen.keptIdentity = null
         screen.phase = "slate"
+    }
+
+    // What this screen can render and address as a candidate.
+    //
+    // **`index` must be a non-negative integer**, and that is the load-bearing
+    // clause rather than a tidiness check. `selectedIndex` uses a negative
+    // sentinel for "nothing selected", so a candidate carrying a negative index
+    // COLLIDES with it: the row drew the chosen background, the chosen border
+    // and a visible SELECTED word while nothing was selected, and the keep
+    // button beneath it was dead — `keepSelected()`'s guard returned silently
+    // and clicking the row re-selected the sentinel, so the user could not
+    // escape it.
+    //
+    // Refusing the whole slate rather than range-checking at the render site is
+    // the fix the shape of the bug asks for: a range check would leave a
+    // candidate on screen that the user can see and cannot choose, which is the
+    // same dead end with a narrower blast radius. A candidate this screen
+    // cannot address is not a candidate.
+    function isCandidate(value) {
+        if (value === null || typeof value !== "object")
+            return false
+        if (typeof value.index !== "number" || !isFinite(value.index))
+            return false
+        if (value.index < 0 || Math.floor(value.index) !== value.index)
+            return false
+        // The address is the only unforgeable way to tell two candidates apart,
+        // so one without a usable address is not something to choose between.
+        if (typeof value.address !== "string" || value.address === "")
+            return false
+        return true
     }
 
     // Every failure arrives here, so there is one place where `candidates` is
@@ -124,7 +199,7 @@ ScreenFrame {
     function enterFailed(message) {
         screen.candidates = []
         screen.slateId = ""
-        screen.selectedIndex = -1
+        screen.selectedIndex = screen.nothingSelected
         screen.refusal = ""
         screen.keptIdentity = null
         screen.failure = message
@@ -140,12 +215,21 @@ ScreenFrame {
     // ---- keeping ---------------------------------------------------------
 
     function keepSelected() {
-        // The guard that actually guards. `FlatButton` emits `clicked()` from
-        // its own MouseArea whatever it looks like, so dimming the control is
+        // ONE guard, not two. `FlatButton` emits `clicked()` from its own
+        // MouseArea whatever it looks like, so dimming the control is
         // appearance and this line is the refusal.
-        if (screen.selectedIndex < 0)
-            return
-
+        //
+        // This was two guards — `selectedIndex === nothingSelected` and then
+        // `candidate === null` — and the review found the first untestable:
+        // every fixture's indexes were non-negative, so the second caught
+        // everything and removing the first left the suite green. The answer is
+        // not a third fixture to reach a guard, it is that there is only one
+        // question here. `isCandidate()` refuses a negative index at the
+        // boundary, so the sentinel is not a value any candidate can carry, so
+        // **"is a candidate selected" and "does the selection name a candidate"
+        // are the same question** — and `candidateAt()` is the one thing that
+        // answers it. A second guard that could only ever be true when the
+        // first was is not a guard, it is a comment that runs.
         var candidate = screen.candidateAt(screen.selectedIndex)
         if (candidate === null)
             return
@@ -161,8 +245,14 @@ ScreenFrame {
         // answered". What it answered is `kept`, and a refusal is a successful
         // reply carrying a negative answer.
         if (reply.value.kept !== true) {
-            screen.refusal = reply.value.reason !== undefined
-                ? String(reply.value.reason)
+            // A NON-STRING reason is treated as absent, not stringified.
+            // `String({code:7})` is the literal text `[object Object]`, which
+            // names no fix and is strictly worse than the fallback below — the
+            // fallback exists for exactly the case where no usable reason
+            // arrived, and a reason that cannot be read is that case.
+            screen.refusal = typeof reply.value.reason === "string"
+                             && reply.value.reason !== ""
+                ? reply.value.reason
                 : "The core module refused to keep this identity and gave no reason."
             // `candidates` and `slateId` are deliberately untouched: a refusal
             // leaves the set on screen so the keep can be tried again.
@@ -194,6 +284,16 @@ ScreenFrame {
         screen.identityKept()
     }
 
+    // The candidate carrying this `index`, or null.
+    //
+    // **This is `keepSelected()`'s only guard**, and it can be because
+    // `isCandidate()` guarantees no candidate carries a negative index: the
+    // sentinel therefore matches nothing here, and "nothing is selected" and
+    // "the selection names no candidate" collapse into one answer. A scan
+    // rather than `candidates[index]` because `index` is the candidate's own
+    // identifier as core published it, not its position in the array — those
+    // agree as core builds them and reading one as the other would be the view
+    // re-deriving a value it was handed.
     function candidateAt(index) {
         for (var i = 0; i < screen.candidates.length; i++) {
             if (screen.candidates[i].index === index)
@@ -612,19 +712,29 @@ ScreenFrame {
         },
         MarginNote {
             label: "ON UNIQUENESS"
-            // copy.json `onboarding.apparatus.uniqueness`, with ONE correction:
-            // the bundle says "the same three words" and PLAN.md §5.2.1 settled
-            // FOUR. Corrected rather than dropped, because the rest of the
-            // sentence carries the obligation — uniqueness is not merely
-            // unbuilt but unavailable, since there is no authority to hold a
-            // namespace, so the interface has to stay correct when two
-            // identities present the same name.
+            // copy.json `onboarding.apparatus.uniqueness`, with the WORD COUNT
+            // REMOVED rather than corrected.
+            //
+            // The bundle says "the same three words"; a previous revision of
+            // this file said "four", because §5.2.1 had settled four at the
+            // time. The count has now moved three times — three, then four
+            // (merged), now three again on a different basis (adjective + noun
+            // + "of" + place) — and each move made this copy wrong and left a
+            // test pinning the wrong number, which then had to be argued with
+            // before the copy could be corrected.
+            //
+            // So the sentence states its obligation and no number. That
+            // obligation is what actually matters here and it does not depend
+            // on the count: uniqueness is not merely unbuilt but UNAVAILABLE,
+            // since there is no authority to hold a namespace, so the interface
+            // has to stay correct when two identities present the same name —
+            // and the correctness is that the address is always present.
             //
             // Required even though no row shows a name yet: what the user is
             // choosing is a key whose name follows from it, and a screen that
             // explained the choice without saying the name settles nothing
             // would have taught the opposite of what is true.
-            body: "Names are not unique and are not identifiers. Someone else in this Stoa may hold the same four words. Your address is what tells you apart, so it is printed beside your name everywhere."
+            body: "Names are not unique and are not identifiers. Someone else in this Stoa may hold the same name. Your address is what tells you apart, so it is printed beside your name everywhere."
         },
         MarginNote {
             label: "ON THE MARK"

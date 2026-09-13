@@ -106,8 +106,14 @@ Item {
         // reverse is not: onboarding's own keep is refused by core where an
         // identity already exists, so the worst case is a refusal the user can
         // read, rather than a forum they cannot post in.
-        root.identityReason = reply.value.reason !== undefined
-            ? String(reply.value.reason)
+        // A non-string reason is held as absent rather than stringified.
+        // `String({...})` yields `[object Object]`, and this value exists to
+        // keep the two absent cases distinguishable to a later screen — a
+        // placeholder that is the same text for every unreadable reason
+        // distinguishes nothing, while an empty string is honestly "the module
+        // gave no reason this view could read".
+        root.identityReason = typeof reply.value.reason === "string"
+            ? reply.value.reason
             : ""
         root.recoveryNeedsTheRecord = reply.value.recoveryNeedsTheRecord
         root.identityFailure = ""
