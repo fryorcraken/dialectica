@@ -94,4 +94,48 @@ QtObject {
     function getCapabilities(stoa) {
         return root.call("get_capabilities", [JSON.stringify({ stoa: stoa })])
     }
+
+    // ---- onboarding ------------------------------------------------------
+    //
+    // **None of these three takes an identity**, and the omission is the
+    // contract's rather than an oversight: the identity follows from the Stoa
+    // and the selection, so a request naming one would be asking the module to
+    // act as somebody it is not. Core refuses such a request; there is nothing
+    // here that could send one.
+    //
+    // Two of the three have TWO success shapes — `{"kept":true,…}` /
+    // `{"kept":false,"reason":…}` and the same for `hasIdentity`. `call()`
+    // normalises both to `ok:true`, because both ARE successes at the wire
+    // level: the module answered the question it was asked. Telling a refusal
+    // from a success is the caller's job and is done once, in
+    // OnboardingScreen, where the three outcomes become three phases.
+
+    // `{"stoa":hex}` -> `{"slate":hex,"count":N,"candidates":[…]}`.
+    // No count parameter: a caller-supplied count is a number deciding how much
+    // key derivation the module performs, so the module fixes it and reports it.
+    function generateIdentitySlate(stoa) {
+        return root.call("generate_identity_slate", [JSON.stringify({ stoa: stoa })])
+    }
+
+    // `{"stoa":hex,"slate":hex,"index":N}` -> kept, or refused with a reason.
+    //
+    // `slate` is the identifier the offering reply carried, and sending it is
+    // what lets core refuse a selection made against a superseded set rather
+    // than satisfying it with the current set's candidate at that index — which
+    // would store an identity the user never saw.
+    function keepIdentity(stoa, slate, index) {
+        return root.call("keep_identity",
+                         [JSON.stringify({ stoa: stoa, slate: slate, index: index })])
+    }
+
+    // `{"stoa":hex}` -> the identity in use, or that there is none with a reason.
+    //
+    // A DIFFERENT question from `getCapabilities`, and the two can honestly
+    // disagree: a stored identity whose keystore permissions are too open is a
+    // real identity that cannot currently be used. This is the one that decides
+    // whether onboarding is shown, because it is the one that can tell an
+    // absent identity from an unusable one.
+    function whoAmI(stoa) {
+        return root.call("who_am_i", [JSON.stringify({ stoa: stoa })])
+    }
 }

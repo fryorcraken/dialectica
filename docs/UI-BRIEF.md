@@ -179,6 +179,18 @@ Two consequences for you:
   and a public key each, a keep call stores the one chosen, and a "who am I" call
   answers afterwards. Refreshing is unlimited and is never refused for having
   been pressed too often.
+
+  **But core serves no name**, and the built screen therefore shows none. Which
+  words a key produces is a separate contract that is not yet built, and the
+  view cannot compute the name itself — it derives from the public key under a
+  scheme that does not exist. So a candidate row today is **the mark and the
+  full address, with nothing in the name's position**: not the derivation path,
+  not an index, not a shortened address. Each of those would be read as the
+  thing the user is choosing, and none of them is.
+
+  Design the row so a name can **arrive above the address** without the layout
+  moving. That is the one thing to get right here, because the name is coming
+  and the row is the only place it goes.
 - **A name is not unique and not an identifier** — see obligation 6 below.
   Accidental collisions are now rare: in a Stoa of a thousand the chance two
   people share a name is **about 0.003%**, and at five thousand **about 0.07%**.
