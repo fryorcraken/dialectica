@@ -23,9 +23,9 @@ past decision means grepping the archive.
 
 **Archiving has enough traps to be worth its own page:
 [`docs/OPENSPEC-ARCHIVE.md`](../../docs/OPENSPEC-ARCHIVE.md). Read it before you
-archive, not before you start.** Archiving runs after the merge, not before, and
-the `closer` is the agent that runs it — [`closer.md`](closer.md) says why that
-ordering. `openspec` is installed; run
+archive, not before you start.** Archiving is the `closer`'s, and it runs as a
+commit on the piece branch before CI and the merge — [`closer.md`](closer.md)
+says why that ordering. `openspec` is installed; run
 `openspec --version` rather than believing any document about it, this one
 included.
 
@@ -66,7 +66,7 @@ Leave it. It shrinks by attrition as changes touch each area.
 | Agent | Reads | Writes |
 |---|---|---|
 | `spec-writer` | PLAN.md (from `origin/main`) | `proposal.md`, `specs/` |
-| `dev-writer` | spec, PLAN.md | `design.md`, `tasks.md`, code, tests-as-it-goes |
+| `dev-writer` | spec, PLAN.md | `design.md`, `tasks.md`, code, tests-as-it-goes, **the PR** |
 | `tester` | spec, inherited tests | the test suite |
 | `spec-test-reviewer` | **spec + tests only** | findings |
 | `design-reviewer` | code, `design.md`, PLAN.md | findings |
@@ -118,9 +118,9 @@ Every branch rule below follows from that asymmetry.
 
 | Branch | Worktree | Whose | Holds |
 |---|---|---|---|
-| `piece/<name>` | one, shared | the three writers in turn, then the `closer` | **the** task branch, and the only branch of the three that is pushed. Spec, code, tests and findings-fixes all commit here directly |
+| `piece/<name>` | one, shared | the three writers in turn, then the `closer` | **the** task branch, and the only branch of the three that is pushed. Spec, code, tests, findings-fixes and the archive all commit here directly |
 | `review/<name>/<dimension>` | one each | one reviewer | **local only** — its findings file, nothing else, cherry-picked onto the piece and never pushed |
-| `main` | the main checkout | the `closer`, after the merge | the archive commit, and nothing else an agent writes |
+| `main` | — | nobody | **no agent ever pushes here.** It takes commits through a PR only |
 
 **`spec-writer`, `dev-writer` and `tester` share one worktree, checked out on
 `piece/<name>`.** They can share it precisely because they never run at the same
@@ -130,8 +130,9 @@ wrong. Reviewers get a tree each because they are the only agents that overlap.
 Named for the role and not the stage, because `dev/x` invites a `test/x` beside
 it — which is the shape this section exists to stop.
 
-**Open the PR on `piece/<name>` from the first commit. It cannot be corrected
-later, and every workaround loses something.** A PR's head ref is immutable:
+**The PR is opened on `piece/<name>` and nothing else. Whichever ref it is opened
+on, it is stuck with — and every workaround loses something.** A PR's head ref is
+immutable:
 `PATCH /pulls/<n> -f head=…` returns **200 and silently ignores the field**, and
 `--base` changes the target, not the source. The rename endpoint
 (`POST /branches/<old>/rename`) does follow open PRs — but it **auto-closes** one
@@ -155,13 +156,16 @@ rather than merged shows here even though its content is in, so read the commits
 rather than the count. Say in the closing comment where the work went, and keep
 the branch.
 
-**Only the runner pushes `piece/<name>`.** With one pusher there is no race to
-lose, no rebase to retry, and no force-push to be tempted by.
+**Each agent pushes its own commits, once its work is done** — `dev-writer` and
+`tester` after theirs. The `dev-writer` pushes at the end of its first pass and
+opens the PR there; see [`dev-writer.md`](dev-writer.md).
 
-The `closer` is the single exception, and it is not a second pusher of the piece:
-it pushes the **archive commit to `main`**, after the merge, and never touches the
-piece branch. Two agents pushing one branch is the race this rule prevents; one
-agent pushing a branch nobody else is on is not.
+The `closer` also pushes, after committing the **archive** to the piece branch,
+before the CI check and the merge.
+
+**Nobody pushes `main`.** It takes commits through a PR only — `enforce_admins`
+is on, and a direct push is rejected with `GH006`. This page and `closer.md` both
+used to say the archive was an exception, until a closer tried it.
 
 **Only reviewers get a side branch**, because only reviewers run genuinely in
 parallel — six at once, while a fixer may still be changing the code they are
@@ -199,8 +203,8 @@ recognise, because everyone reads both.
 - [ ] review: spec-test — `spec-test-reviewer`
 - [ ] review: design — `design-reviewer`
 - [ ] findings all ticked, `findings/` deleted — `closer`
-- [ ] CI green, PR merged — `closer`
 - [ ] `openspec validate --strict`, then `archive` — `closer`
+- [ ] CI green, PR merged — `closer`
 ```
 
 **One row per agent instance, not per role** — `code-reviewer` runs four times, so
@@ -266,11 +270,44 @@ does not reach you is its *report*, which returns to the runner; so anything an
 agent needs passed on must be in a file, not in a report.
 
 **A brief points at the work; it does not contain it.** A dispatch is which piece,
-which worktree, which file:
+which worktree, which file — and it tells the agent to enter that worktree first:
 
 > Act on the findings for `dev-writer` in
 > `openspec/changes/wire-request-envelope/findings/`. Piece branch
-> `piece/wire-request`, worktree `.claude/worktrees/piece-wire`.
+> `piece/wire-request`, worktree `.claude/worktrees/piece-wire` — enter it with
+> `EnterWorktree(path: "…/.claude/worktrees/piece-wire")` before anything else,
+> then use plain relative paths.
+
+**Say that in every brief, because it is what keeps an agent out of the shapes
+that cost a permission click.** An agent that never moves its working directory
+reaches for `cd <dir> && …` or `git -C <dir> …` on every call — the first is the
+single biggest source of prompts here, and the second spreads an absolute path
+through every git command an agent writes. `EnterWorktree` moves the session into
+the tree once, and everything after is an ordinary relative-path command in the
+right place.
+
+Two things about the tool that decide how it is used here:
+
+- **`path` enters an existing worktree; `name` creates one.** The runner has
+  already made the piece's worktree with `git worktree add`, so a dispatched agent
+  passes `path` and never `name` — `name` would branch from `origin/main` and
+  strand the agent in an empty tree with none of the piece's commits.
+- **It only moves the agent that calls it.** From an agent whose directory was
+  pinned at launch, the switch affects that agent alone. So the runner cannot
+  enter a worktree on an agent's behalf; the instruction has to be in the brief,
+  which is why it belongs in the dispatch shape above rather than in a setup step.
+
+The runner itself stays in the main checkout. It dispatches and reads; it is the
+agents that need to be somewhere specific.
+
+**A reviewer has to step out before it deletes its tree.** `git worktree remove`
+cannot remove the directory you are standing in, so the last two acts are
+`ExitWorktree(action: "keep")` — which returns the session to where it started and
+leaves the tree alone — and then the `git worktree remove <absolute-path> --force`
+its own file already specifies. `keep` is the right action there rather than
+`remove`: `ExitWorktree` only removes worktrees it created itself, and these were
+made by the runner with `git worktree add`, so asking it to remove one does
+nothing and the tree would survive.
 
 **If you are writing out what a finding says, you have the wrong shape.** The
 reviewer already wrote it with the measurement behind it; a restatement puts a
@@ -285,9 +322,11 @@ approach impossible has produced a result worth as much as the review, and
 unwritten the next agent spends the same afternoon. It goes in `design.md`, beside
 the decision it rules out.
 
-**The runner owns dispatching and pushing; the `closer` owns the last three
-stage rows.** `tasks.md`'s stage block is the list — read it to see what is left,
-because an unticked row with no agent running is a stage nobody is doing.
+**The runner owns dispatching, and should set a 5–10 minute reminder to ensure at
+least one agent is working; the `dev-writer` opens the PR; the `closer` owns the
+last three stage rows.** `tasks.md`'s stage block is the list — read it to see
+what is left, because an unticked row with no agent running is a stage nobody is
+doing.
 Dispatch by naming the findings files rather than carrying their content, and
 re-run only the reviewers whose findings led to changes.
 

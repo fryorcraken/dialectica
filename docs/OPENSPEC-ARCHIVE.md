@@ -1,15 +1,14 @@
 # Archiving an OpenSpec change
 
-Read this when you are **archiving** — the last step in closing a change, run
-**after** its PR merges, by the `closer`. `.claude/agents/README.md` is the
+Read this when you are **archiving** — run by the `closer` as a commit on the
+piece branch, before CI and before the merge. `.claude/agents/README.md` is the
 flow; this is the one step with enough mechanical detail to be worth its own
 page.
 
-Archiving after the merge rather than before is deliberate: `archive` rewrites
-the live contract in `openspec/specs/`, so running it on the piece branch folds
-a contract promotion and the code into one squashed commit that cannot be
-reverted in halves — and running it before CI is green promotes a contract for
-code that may never land.
+Archiving before the merge rather than after is deliberate: `archive` rewrites
+the live contract in `openspec/specs/`, so it has to be in the tree CI tests and
+in the diff the merge applies. The whole change — code, spec delta and the
+promotion — lands as one squashed commit under one PR.
 
 `openspec` is installed. **Run `openspec --version` rather than believing any
 document about it** — including this one. This file once recorded the CLI as
@@ -74,7 +73,8 @@ one field and disagreeing. Re-read the whole requirement after editing it.
 **Archive in merge order**, oldest first — a later `MODIFIED` must apply to the
 text an earlier `ADDED` produced. Derive the order from
 `git log --name-status --diff-filter=A -- openspec/changes`; do not guess from
-folder names. The archive date is the **merge** date from that commit.
+folder names. The archive date is the day you archive, which is the day the
+piece merges unless the merge is held overnight.
 
 ## The root comes from the cwd
 
