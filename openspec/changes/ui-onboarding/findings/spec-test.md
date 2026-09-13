@@ -240,7 +240,7 @@ Baseline before and after: **102 pass across 6 spec files**, tree restored
       real corpus and far above any accidental truncation — a walk that reached
       only the heading would fail it.
 
-- [ ] **`spec-writer`** — the scenario "No affordance offers a rename" has no
+- [x] **`spec-writer`** — the scenario "No affordance offers a rename" has no
       test and, as written, no test could discharge it.
       **Scenario:** *"the onboarding screen is shown in any of its states → it
       offers no control that edits, renames or replaces a name or an identity"*.
@@ -252,8 +252,25 @@ Baseline before and after: **102 pass across 6 spec files**, tree restored
       rather than a scenario. The repo's rule is never to write a scenario no
       test can honestly discharge.
       **Severity: medium** (spec defect, not a code defect).
+      **Fixed** — narrowed to your first option, which captures the obligation
+      rather than abandoning it. The requirement now reads "SHALL NOT offer a
+      control into which text can be entered, in any of its states", and the
+      scenario is "No text can be entered anywhere on the screen": every element
+      in the tree, each phase in turn, none accepting text entry. The reasoning
+      sits in the requirement rather than only here — a rename affordance needs
+      somewhere to type, so text-entry absence is the property that catches the
+      realistic regression and can honestly fail, while "reads as a rename" has
+      no predicate and is now named in the spec as a review obligation on this
+      screen rather than left as a scenario nothing discharges.
+      **This leaves a test gap, and I am not the agent to close it.** The
+      property holds today — `grep -rn "TextInput\|TextField\|TextEdit"` over
+      `dialectica-ui/src/qml/` returns nothing — but no test asserts it, so the
+      scenario is now discharged by the code and undischarged by the suite. It
+      needs one `tester` test walking each phase's tree. Raised in my report to
+      the coordinator rather than as a new box, since adding a row is what the
+      one-row-per-agent rule exists to prevent.
 
-- [ ] **`spec-writer`** — the first requirement's "by a named wrapper rather than
+- [x] **`spec-writer`** — the first requirement's "by a named wrapper rather than
       by a method string written at the call site" clause is unverifiable at
       runtime.
       **Scenario:** I replaced `Core.generateIdentitySlate(screen.stoaAddress)`
@@ -270,6 +287,29 @@ Baseline before and after: **102 pass across 6 spec files**, tree restored
       many-to-many coverage while every wrapper routes through `call()`, but it
       is not pinned here.
       **Severity: low.**
+      **Fixed** — the clause is removed from the requirement, taking your first
+      option. The requirement now contracts only what is observable: the three
+      calls go through the one bridge, and "each SHALL reach that bridge under
+      its own distinct method name". Your measurement is what settled it — an
+      inline `Core.call(...)` at the call site is indistinguishable at the bridge
+      from a wrapper, so the clause was a source-structure rule wearing a
+      scenario's clothes.
+      The spec now says so in prose, and names your 49/49 result as the reason
+      without citing you by name: *"an earlier version of this requirement
+      demanded wrappers, and substituting an inline call at a call site left the
+      whole suite green. A requirement nothing can discharge is worse than none,
+      so this is left to review and lint."* The *reasons* for wrappers — one edit
+      on a rename, a load error instead of a silent empty screen — are kept in
+      that prose rather than dropped, so the next reader sees why the convention
+      is worth keeping even though no scenario enforces it.
+      **Not cited to `design.md`, deliberately.** My first attempt pointed there;
+      I checked and `design.md` names the wrappers (`:6`) without arguing them,
+      so the pointer would have been a citation to an argument that is not
+      made — which is the defect `design-review.md:232` had just caught in my
+      `proposal.md`. `design.md` is `dev-writer`'s file and I did not edit it.
+      The smaller half — "each names the same module" being covered only
+      transitively — is left as you judged it: acceptable, unpinned, and now
+      recorded here rather than in the requirement.
 
 ## What was clean
 
@@ -318,7 +358,7 @@ collide — "no row presents a name" against "the screen states that a name is n
 unique" — is addressed in the spec's own prose ("This is required even though no
 row shows a name"), and both halves are tested.
 
-- [ ] **`spec-writer`** — `docs/PLAN.md` on `origin/main` §5.2.1 contradicts both
+- [x] **`spec-writer`** — `docs/PLAN.md` on `origin/main` §5.2.1 contradicts both
       this spec and PLAN's own §5.2.
       **Scenario:** the UI-obligations bullet at `PLAN.md:1671-1674` reads
       *"**Never imply a user's names are linked across Stoas** … The names are
@@ -334,6 +374,24 @@ row shows a name"), and both halves are tested.
       the suspension correctly; PLAN's own bullet is the stale one.
       **Severity: medium.** `openspec validate --strict` cannot see this — it
       checks heading structure only.
+      **Fixed elsewhere — PR #64 (`docs/name-shape-sweep`), not duplicated
+      here.** That PR's second commit is this finding, acted on: its body names
+      it as *"Added after review, from a spec-test reviewer's finding on
+      `piece/ui-onboarding`"*, and quotes the `copy.json` sentence as the copy
+      the stale bullet generated.
+      **Verified rather than taken on trust**, since a PR body is a claim.
+      `git grep -n "unlinkable by construction" FETCH_HEAD -- docs/PLAN.md` on
+      that branch returns exactly one line (`:1959`), and reading it shows the
+      phrase surviving only inside the strike-through record of its own
+      correction. The live bullet now says §5.2 is the authority and deliberately
+      does not restate it, adds the direction that actually shipped (never claim
+      identities *cannot* be linked), and quotes "this key cannot be linked to
+      you anywhere else" as the copy it must not generate. That is your finding's
+      fix, including the half about the direction the old bullet did not cover.
+      **Not edited here on purpose.** Your own diagnosis is that two copies of a
+      suspended-property rule is how §5.2.1 drifted; two branches editing §5.2.1
+      in the same week is the same failure one level up, and would conflict at
+      merge. Left to #64.
 
 PLAN.md is otherwise current against this spec: the slate and unlimited
 regeneration at `PLAN.md:950-953` are struck through and marked *"Built — see the

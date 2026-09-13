@@ -229,7 +229,7 @@ archived.
 
 ## An entry that is thin
 
-- [ ] **`spec-writer`** — `proposal.md:88-95` still records the **opposite**
+- [x] **`spec-writer`** — `proposal.md:88-95` still records the **opposite**
       decision from `design.md` and the shipped code on the word count
       The proposal says the uniqueness copy *"is therefore used with 'three
       words' corrected"*, that *"the settled shape is four words"*, and that it
@@ -246,6 +246,20 @@ archived.
       survives into the archive alongside the spec, so whoever reads the change
       later gets both answers with nothing marking which won. Two lines: state
       that no count is asserted, and point at the design entry.
+      **Fixed**, and the correction is written as one rather than as a silent
+      replacement — the paragraph now opens by saying an earlier version claimed
+      the opposite, because the wrong version was the plausible one and a reader
+      of the archive is owed the reason it changed.
+      What it says now: the copy ships with **no count at all** ("may hold the
+      same name"), this change asserts none anywhere in copy or test, and the
+      count has moved three times (three → four → three on a different basis,
+      `d3e7579`) — which is itself the argument for stating none, since a pin on
+      a number fails on reword rather than on misinformation. It points at
+      `design.md` for the decision, as you asked.
+      **Verified against the tree rather than against your text**, on the
+      principle that a finding is a claim too: `OnboardingScreen.qml:534` and
+      `:767` both read "may hold the same name", so the code and the proposal now
+      agree. The false "four is settled" assertion is gone with it.
 
 ## What I could not check
 

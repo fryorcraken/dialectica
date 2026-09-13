@@ -85,14 +85,21 @@ that is not this change.
   present anything else as a name. The name arrives with the change that builds
   the derivation, and the row must have room for it — which is a layout
   obligation, not a behaviour one.
-- **The mockup's placeholder name is three words and reads as a fantasy
-  handle** — `vermilion patient sandworm` — and its `ON UNIQUENESS` apparatus
-  copy says "the same three words". Both are superseded: the settled shape is
-  four words from Greek philosophy and letters, and the brief names that exact
-  placeholder as the draft that went wrong. **The uniqueness copy is therefore
-  used with "three words" corrected**, which is the one place this change edits
-  the bundle's verbatim copy, and it is corrected rather than dropped because
-  the rest of the sentence carries the obligation.
+- **The mockup's placeholder name reads as a fantasy handle** — `vermilion
+  patient sandworm` — which the brief names as the draft that went wrong, and
+  its `ON UNIQUENESS` apparatus copy asserts a word count. **The copy ships with
+  no count at all**, reading "may hold the same name": this change asserts no
+  word count anywhere, in the copy or in a test.
+
+  **An earlier version of this paragraph said the opposite** — that the count
+  was "corrected" from three to four, and that four was settled. Both halves
+  were wrong. The count has now moved three times (three, then four, then three
+  again on a different basis, `d3e7579`), which is the argument for stating none:
+  a pin on a number fails when someone rewords it, not when it becomes untrue.
+  The sentence's obligation — not unique, not identifiers, the address
+  distinguishes — needs no count to carry it. `design.md` argues the decision;
+  this entry exists so a later reader of the archive does not find the rejected
+  alternative recorded here as the chosen one.
 - **The mockup's body copy claims cross-Stoa unlinkability** — "the key is
   yours in this Stoa only — it cannot be linked to you anywhere else". The MVP
   ships one identity used in every Stoa, so that sentence is **false today**,

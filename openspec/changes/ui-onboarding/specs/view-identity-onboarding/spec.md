@@ -9,14 +9,24 @@ Defines what the view shows while a user acquires an identity — the states bet
 ### Requirement: The view reaches onboarding through the one core bridge, by name
 
 The view SHALL call the slate, keep and identity-report methods through the same
-single bridge every other core call goes through, and SHALL address each by a
-named wrapper rather than by a method string written at the call site.
+single bridge every other core call goes through, and each SHALL reach that
+bridge under its own distinct method name.
 
 The view has no second route to anything: the engine is sandboxed with a
 deny-all network access manager and no filesystem access, so a method the bridge
-does not expose is behaviour no screen can reach. Naming each wrapper once is
-what makes a renamed core method a single edit, and what stops a typo becoming a
-screen that renders its empty state forever.
+does not expose is behaviour no screen can reach. One bridge is what gives the
+view exactly one error branch, and a distinct method name per call is what makes
+a call that went to the wrong method observable rather than silent.
+
+**Where the method string is written is not contracted here.** Collecting the
+three behind named wrappers is worth doing — it makes a renamed core method one
+edit instead of several, and a typo a load error instead of a screen that
+renders its empty state forever — but it is a property of how the source is
+arranged rather than of what the view does. An inline call and a wrapper reach
+the bridge identically, so no scenario can tell them apart: an earlier version
+of this requirement demanded wrappers, and substituting an inline call at a call
+site left the whole suite green. A requirement nothing can discharge is worse
+than none, so this is left to review and lint.
 
 Each request SHALL be a JSON object carrying the fields that method reads and
 SHALL NOT carry a field standing in for the identity being acted on. The
@@ -318,8 +328,18 @@ screen cannot exist. The warning belongs at the point of action because that is
 the last moment at which it is still information rather than an explanation of
 something that already happened.
 
-The screen SHALL NOT use the word "username", and SHALL NOT offer any affordance
-that reads as renaming, editing or replacing the identity.
+The screen SHALL NOT use the word "username", and SHALL NOT offer a control into
+which text can be entered, in any of its states.
+
+**The text-entry rule is the checkable form of a wider obligation**, and the
+narrowing is deliberate. What the screen must not do is offer anything that
+reads as renaming, editing or replacing the identity — but "reads as" has no
+predicate a test can evaluate, and a test cannot enumerate the controls that do
+not exist. A rename affordance needs somewhere to type, so the absence of any
+text-entry control is the property that catches the realistic regression and can
+honestly fail. Whether some other control *reads as* a rename is a review
+obligation on this screen, and is left to review rather than written as a
+scenario no test could discharge.
 
 The screen SHALL state that nothing has been published while a set is merely on
 offer, so that the user knows refreshing costs them nothing.
@@ -342,11 +362,11 @@ offer, so that the user knows refreshing costs them nothing.
 - **WHEN** every piece of text the onboarding screen shows is examined
 - **THEN** none of it contains the word "username"
 
-#### Scenario: No affordance offers a rename
+#### Scenario: No text can be entered anywhere on the screen
 
-- **WHEN** the onboarding screen is shown in any of its states
-- **THEN** it offers no control that edits, renames or replaces a name or an
-  identity
+- **WHEN** the onboarding screen is shown in each of its states in turn, and
+  every element in its tree is examined
+- **THEN** none of them accepts text entry
 
 ### Requirement: The screen states that a name is not unique and not an identifier
 
@@ -377,8 +397,10 @@ was looking at the impostor.
 
 - **WHEN** a set of candidates is shown
 - **THEN** the screen shows a note stating that names are not unique, are not
-  identifiers, that someone else in this Stoa may hold the same words, and that
+  identifiers, that someone else in this Stoa may hold the same one, and that
   the address is what tells participants apart
+- **AND** the note asserts no number of words, so that it fails on a count being
+  reintroduced rather than on the sentence being reworded
 
 #### Scenario: Nothing is numbered to tell two names apart
 

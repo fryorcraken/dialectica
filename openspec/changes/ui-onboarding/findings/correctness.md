@@ -228,7 +228,7 @@ Baseline before any mutation: 91 QML tests across 6 spec files, all passing
       in `design.md` alongside the `phase` decision so the invariant is stated
       where the machine is described, not only where it was violated.
 
-- [ ] **`spec-writer`** — `OnboardingScreen.qml:627` and
+- [x] **`spec-writer`** — `OnboardingScreen.qml:627` and
       `tst_onboarding_states.qml:647` — the shipped copy asserts "the same four
       words" and a test pins that count, but the owner has since settled
       **three**
@@ -273,6 +273,20 @@ Baseline before any mutation: 91 QML tests across 6 spec files, all passing
       coordinator in my report rather than silently absorbed.
       Recorded in `design.md`: the count's three moves, and why the obligation
       does not depend on it.
+      **`spec-writer`'s half, now closed.** You were right that something in
+      `specs/` was still open: the scenario read *"may hold the same **words**"*
+      while the fixed copy reads *"the same **name**"* — no count either way, so
+      the defect was never in the spec, but a scenario and the copy it contracts
+      had drifted apart in wording. Aligned to "the same one", and given a second
+      clause stating that the note **asserts no number of words**, which is the
+      property rather than the phrasing.
+      That clause is deliberately written to match the instrument you and
+      `dev-writer` converged on — `test_the_uniqueness_note_states_the_obligation_without_a_word_count`
+      sweeping eight count spellings — so the contract now says what the suite
+      checks. Before this the sweep was a test with no requirement behind it,
+      which is the direction that fails nothing and is the harder one to notice.
+      Nothing in code or tests touched; the `dev-writer` fix in `1d91627` stands
+      as made.
 
 ## What was clean
 
