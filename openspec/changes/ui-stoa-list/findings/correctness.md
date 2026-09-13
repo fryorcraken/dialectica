@@ -11,7 +11,7 @@ appears it was measured, not estimated.
 
 ---
 
-- [ ] **`dev-writer`** — `JoinScreen.qml:92` / `Main.qml:99` — a second preview
+- [x] **`dev-writer`** — `JoinScreen.qml:92` / `Main.qml:99` — a second preview
       inherits the first preview's `joinState`, so a Stoa nobody joined renders
       under the "Joined." panel
       **Scenario:** with one `JoinScreen` instance reused for every reference
@@ -30,7 +30,31 @@ appears it was measured, not estimated.
       **Measured:** all 95 tests pass while this holds; every existing join-state
       test constructs a fresh `JoinScreen`, so none exercises reuse.
 
-- [ ] **`dev-writer`** — `JoinScreen.qml:26` — the founding title carries over
+      **Fixed** in the commit carrying this file. Reproduced first: the new test
+      failed with `Actual: joined / Expected: previewing` before any change, so
+      the defect is confirmed independently of the report.
+
+      **The fix is structural rather than a reset**, which the finding's own
+      framing invites and which I think would have been the wrong answer. A
+      `reset()` on navigation has to be *remembered* at every present and future
+      entry point, and the one place it is forgotten is a screen claiming
+      something about the wrong Stoa. Instead `JoinScreen` now stores the outcome
+      **together with the reference it describes** — `{stoa, genesis, state,
+      failure, foundingTitle}` — and `joinState`, `failure` and `foundingTitle`
+      are `readonly` properties derived through `currentOutcome`, which yields
+      `null` unless the stored pair equals the pair on screen. A stale outcome is
+      not unlikely, it is unrepresentable: there is no longer a variable that can
+      hold one Stoa's verdict while another is displayed. `join()` also captures
+      the pair before calling and never re-reads `stoaAddress` afterwards, since
+      that property is a binding that may have moved.
+
+      **Test that fails without it:**
+      `test_a_second_preview_does_not_inherit_the_first_joined_state`. It drives
+      `Main.qml` — the reused-instance shape the app ships — and asserts the
+      user-visible consequences as well as the state string: no `joinedPanel` on
+      screen, the `joinButton` back, and no "started collecting" in the body.
+
+- [x] **`dev-writer`** — `JoinScreen.qml:26` — the founding title carries over
       from the previous preview, captioning one Stoa with another's title
       **Scenario:** same two-paste sequence. `join()` writes
       `screen.foundingTitle` from A's reply (`JoinScreen.qml:115`) and nothing
@@ -45,7 +69,25 @@ appears it was measured, not estimated.
       other.
       **Measured:** 95 of 95 tests pass with this behaviour present.
 
-- [ ] **`dev-writer`** — `JoinScreen.qml:54` — a verification refusal for one
+      **Fixed** in the same commit and by the same shape — `foundingTitle` is now
+      a derived `readonly` property reading `currentOutcome.foundingTitle`, so it
+      can only ever be the title the core returned for the reference on screen.
+      The reviewer's "distinct from the entry above" is right and the separation
+      was worth making: the derivation had to be written for the title as well as
+      for the state, not merely inherited from it.
+
+      One consequence worth recording, which the finding implies but does not
+      state: `lookalikes` compares against `foundingTitle`, so a carried-over
+      title could previously **suppress the lookalike comparison entirely** by
+      making both sides of the equality the same string from the same source. The
+      requirement built to expose impersonation was blind to the one the view
+      itself produced. That is now impossible for the same structural reason.
+
+      **Test that fails without it:**
+      `test_a_second_preview_does_not_inherit_the_first_founding_title` —
+      confirmed failing with `Actual: Nym Research / Expected: ""` before the fix.
+
+- [x] **`dev-writer`** — `JoinScreen.qml:54` — a verification refusal for one
       Stoa stays on screen while a different Stoa is previewed
       **Scenario:** preview A, press Join, core answers
       `{"error":"the genesis record does not hash to this address"}`, then
@@ -57,7 +99,18 @@ appears it was measured, not estimated.
       `stoaAddress` change) but a separately observable wrong claim, so it needs
       its own regression test rather than being assumed fixed.
 
-- [ ] **`dev-writer`** — `StoaReference.qml:45` — `stripPrefix` strips one
+      **Fixed**, and the reviewer was right to insist on its own test rather than
+      letting it ride on the other two: `failure` needed its own derivation, and
+      a fix that cleared only `joinState` would have left the refusal text in
+      place with nothing rendering it — a latent wrong claim waiting for the next
+      binding change.
+
+      **Test that fails without it:**
+      `test_a_second_preview_does_not_inherit_the_first_refusal` — confirmed
+      failing with `Actual: failed / Expected: previewing`. It asserts the
+      absence of the `joinFailurePanel` on screen, not only the empty string.
+
+- [x] **`dev-writer`** — `StoaReference.qml:45` — `stripPrefix` strips one
       prefix, so a doubled `stoa:` reaches `join_stoa` and surfaces as a
       *verification* failure
       **Scenario:** paste `{"stoa":"stoa:stoa:b02d5e77…","genesis":"00ff"}`.
@@ -75,6 +128,23 @@ appears it was measured, not estimated.
       not the address.
       **Measured:** `test_a_display_prefix_is_stripped_before_anything_is_sent`
       passes, because it only ever supplies a single prefix.
+
+      **Fixed.** `stripPrefix` now loops until no prefix remains, trimming
+      whitespace between passes so `stoa: stoa:<hex>` is handled too. A loop
+      rather than a second `if`: the defect was a *fixed number of passes*, so a
+      fix with a different fixed number is the same defect one step further out.
+
+      The reviewer's second observation — that `previewAddress` was rendering
+      `stoa:<hex>` as "the address in full", so the address shown was not the
+      address — is the part I had not seen, and it is arguably worse than the
+      misdirected refusal: the screen whose entire job is showing the address
+      exactly was showing something else.
+
+      **Test that fails without it:**
+      `test_a_repeated_display_prefix_is_stripped_rather_than_forwarded` —
+      confirmed failing with `Actual: stoa:b02d5e77… / Expected: b02d5e77…`. It
+      covers two and three prefixes, interleaved whitespace, and asserts
+      end-to-end that nothing carrying a prefix reaches `join_stoa`.
 
 - [ ] **`tester`** — `tst_stoa_screens.qml:1306` — the malformed-paste assertion
       blocks three exact phrasings and admits equivalent misinformation

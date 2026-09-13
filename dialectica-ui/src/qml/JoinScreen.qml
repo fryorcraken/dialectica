@@ -19,11 +19,60 @@ ScreenFrame {
     property string stoaAddress: ""
     property string stoaGenesis: ""
 
+    // ---- the outcome, and the reference it describes ----------------------
+    //
+    // **An outcome is meaningless without the reference it belongs to, so the
+    // two are stored together and never separately.** This is the fix for a
+    // defect found in review, and the shape matters more than the fix:
+    //
+    // `stoaAddress` is a BINDING — `Main.qml` ships one reused `JoinScreen` and
+    // rebinds it whenever a reference is previewed. The outcome used to be
+    // independent mutable state (`joinState`, `foundingTitle`, `failure`), so
+    // previewing a second reference moved the address and left the outcome
+    // behind. Measured on the shipped code: paste a legitimate reference, join
+    // it, then paste an attacker's — their address on screen, `joinState` still
+    // `joined`, the joined panel claiming this machine had started collecting
+    // their records, the join button gone, and `join_stoa` called once, for the
+    // other Stoa. No verification had occurred at all, and the screen read as
+    // done. That is strictly worse than the residual risk the spec analyses.
+    //
+    // A `reset()` called from every entry point would have fixed the symptom and
+    // left the shape that produced it: a reset has to be REMEMBERED, at every
+    // present and future caller, and the one place it is forgotten is a screen
+    // making a claim about the wrong Stoa. Tying the outcome to its subject
+    // makes the invariant hold by construction — a stale outcome is not merely
+    // unlikely, it is unrepresentable, because the derived state below asks
+    // "whose outcome is this?" and gets an answer.
+    //
+    // `null` means no call has been made for anything. Otherwise:
+    //   { stoa, genesis, state, failure, foundingTitle }
+    // where `state` is "joining" | "joined" | "failed".
+    property var outcome: null
+
+    // The outcome, but only when it belongs to the reference now on screen.
+    //
+    // Every reader goes through this rather than through `outcome` directly, so
+    // a leftover from another reference is invisible to the whole screen at
+    // once rather than at each site that remembered to check.
+    readonly property var currentOutcome:
+        (screen.outcome !== null
+         && screen.outcome.stoa === screen.stoaAddress
+         && screen.outcome.genesis === screen.stoaGenesis)
+            ? screen.outcome : null
+
     // The founding title, where one is known. Today nothing resolves a title
     // from a genesis record inside the view, so this is "" until a join
     // succeeds and the reply names it — which is why the founding-title panel is
     // conditional rather than always filled.
-    property string foundingTitle: ""
+    //
+    // Derived, not assigned: it can only ever be the title the core returned for
+    // THIS reference. A title carried over from another Stoa would caption an
+    // untrusted address with a name the user already trusts — the exact
+    // impersonation the lookalike requirement exists to expose, delivered by the
+    // view itself, and invisible to that requirement because the two titles
+    // being compared would be the same string from the same source.
+    readonly property string foundingTitle:
+        screen.currentOutcome !== null ? screen.currentOutcome.foundingTitle : ""
 
     // A resolved CURRENT title, from a moderator-signed metadata op. Nothing
     // supplies one and nothing on this build can: `stoa-metadata` says plainly
@@ -47,12 +96,24 @@ ScreenFrame {
     // `failed` renders through; an `isMalformed`/`hasError` pair can, and the
     // bug would be a missing `&& !`.
     //
-    //   "previewing"  shown, nothing called
+    //   "previewing"  shown, nothing called FOR THIS REFERENCE
     //   "joining"     the call is out
     //   "joined"      the core answered successfully
     //   "failed"      the core refused; `failure` is its words
-    property string joinState: "previewing"
-    property string failure: ""
+    //
+    // **Derived from `currentOutcome`, never assigned.** A reference with no
+    // outcome of its own is `previewing` whatever happened to any other
+    // reference — which is what makes "a join is reported from the core's reply,
+    // never assumed" true of the second preview as well as the first.
+    readonly property string joinState:
+        screen.currentOutcome !== null ? screen.currentOutcome.state : "previewing"
+
+    // Likewise: a refusal describes the reference it was returned for and
+    // nothing else. A user reading "the record you were sent is wrong" about a
+    // reference the core has never seen is being told to distrust their sender
+    // on no evidence.
+    readonly property string failure:
+        screen.currentOutcome !== null ? screen.currentOutcome.failure : ""
 
     property ClipboardSink clipboard: null
 
@@ -70,8 +131,13 @@ ScreenFrame {
     // forbids**, and the two read alike enough to be worth separating. This is a
     // rendering decision made BEFORE the user acts. Comparing ADDRESSES to
     // decide whether a completed join was new would be a claim about what the
-    // core did — which the reply deliberately does not answer — and `outcome()`
-    // below never reads this property or `heldStoas` for that reason.
+    // core did — which the reply deliberately does not answer — and `join()`
+    // never reads this property or `heldStoas` for that reason.
+    //
+    // Note this now depends on the DERIVED `foundingTitle`, so a lookalike can
+    // only be reported against a title the core returned for the reference on
+    // screen. Previously a carried-over title could suppress the comparison
+    // entirely by making both sides equal.
     readonly property var lookalikes: {
         var out = []
         if (screen.foundingTitle === "")
@@ -90,10 +156,20 @@ ScreenFrame {
     // and nothing calls it on load — a preview that joined would enrol a user in
     // a Stoa they never chose, which is the harm the preview exists to prevent.
     function join() {
-        screen.joinState = "joining"
-        screen.failure = ""
+        // The reference is captured up front and every write below names it.
+        // Nothing here reads `screen.stoaAddress` a second time: the property is
+        // a binding on `Main.qml`'s `previewing`, so re-reading it after the
+        // call would be reading whatever is on screen THEN rather than what was
+        // submitted — the same class of confusion this whole shape prevents.
+        var stoa = screen.stoaAddress
+        var genesis = screen.stoaGenesis
 
-        var reply = Core.joinStoa(screen.stoaAddress, screen.stoaGenesis)
+        screen.outcome = {
+            stoa: stoa, genesis: genesis,
+            state: "joining", failure: "", foundingTitle: ""
+        }
+
+        var reply = Core.joinStoa(stoa, genesis)
 
         // Success is reported from the REPLY and never from having dispatched
         // the call. A screen that navigated onward on dispatch would show a Stoa
@@ -101,8 +177,10 @@ ScreenFrame {
         // a restart: membership is what the core retained, not what was
         // displayed.
         if (!reply.ok) {
-            screen.joinState = "failed"
-            screen.failure = reply.error
+            screen.outcome = {
+                stoa: stoa, genesis: genesis,
+                state: "failed", failure: reply.error, foundingTitle: ""
+            }
             return
         }
 
@@ -112,10 +190,16 @@ ScreenFrame {
         // new, and nothing here infers it: not from `heldStoas`, not from
         // `lookalikes`, not from a listing fetched earlier. A repeat is not an
         // error, a warning, or a collision.
-        if (typeof reply.value.foundingTitle === "string")
-            screen.foundingTitle = reply.value.foundingTitle
-        screen.joinState = "joined"
-        screen.joined(screen.stoaAddress, screen.foundingTitle, screen.stoaGenesis)
+        //
+        // The title comes from THIS reply and is stored against THIS reference,
+        // so it cannot outlive the Stoa it describes.
+        var title = typeof reply.value.foundingTitle === "string"
+            ? reply.value.foundingTitle : ""
+        screen.outcome = {
+            stoa: stoa, genesis: genesis,
+            state: "joined", failure: "", foundingTitle: title
+        }
+        screen.joined(stoa, title, genesis)
     }
 
     // ---- the address, which is the subject -------------------------------

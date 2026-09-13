@@ -12,7 +12,7 @@ recording fake bridge; no shipped file was mutated.
 
 ---
 
-- [ ] **`dev-writer`** — `JoinScreen.qml:54` / `Main.qml:80` — **a hostile
+- [x] **`dev-writer`** — `JoinScreen.qml:54` / `Main.qml:80` — **a hostile
       reference can be made to render under a "Joined." panel it never earned**
       **Scenario:** the attacker's goal is a screen that reads as settled for
       their address. Paste any legitimate reference and join it; then paste the
@@ -33,7 +33,29 @@ recording fake bridge; no shipped file was mutated.
       `JoinScreen`; none reuses one, which is the only configuration `Main.qml`
       actually ships.
 
-- [ ] **`dev-writer`** — `JoinScreen.qml:26,115` — the carried-over founding
+      **Fixed** — see the correctness entry for the mechanism. Recording here the
+      two things that are security judgements rather than correctness ones, and
+      accepting the reviewer's severity without argument.
+
+      **The reviewer is right that this is strictly worse than the residual risk
+      the spec analyses, and my spec did not anticipate it.** The spec's model of
+      the worst case is a reader who verified an attacker's record against an
+      attacker's address — successfully, but having checked the wrong thing. This
+      defect produces a screen reading as *settled* with **no verification having
+      occurred at all**, and with the join affordance removed so the user cannot
+      even trigger one. I wrote the requirement "a join is reported from the
+      core's reply, never assumed" and then shipped a screen that inherited a
+      verdict; the requirement was right and the implementation contradicted it
+      in a way none of my tests could see.
+
+      **Why the tests could not see it**, which is the transferable part: every
+      join-state test built its own `JoinScreen`, and `Main.qml` ships exactly one
+      reused instance. The suite exercised a configuration the application never
+      creates. That is the corpus lesson from my earlier finding — an assertion is
+      only as strong as what it runs against — appearing at integration scale
+      rather than within one screen. The four new tests all drive `Main.qml`.
+
+- [x] **`dev-writer`** — `JoinScreen.qml:26,115` — the carried-over founding
       title lends a trusted name to an untrusted address
       **Scenario:** in the same sequence, the panel captioned `FOUNDING TITLE —
       FIXED FOREVER` renders the *previous* Stoa's title above the attacker's
@@ -44,6 +66,18 @@ recording fake bridge; no shipped file was mutated.
       titles being compared are the same string from the same source.
       **Severity:** high, and separable from the entry above: clearing
       `joinState` alone still leaves the wrong title on screen.
+
+      **Fixed** — `foundingTitle` is derived from the outcome's own reference, so
+      a title can never outlive the Stoa it describes.
+
+      The sentence worth keeping from this finding is *"delivered by the view
+      itself rather than by the attacker's record"*. Every impersonation defence
+      on this screen assumes the hostile title arrives **in the record**, where
+      the lookalike comparison can catch it. A title the view supplies is outside
+      that model entirely — and, as noted on the correctness entry, it actively
+      disabled the comparison, because `lookalikes` matched the carried-over
+      title against itself. A defence that the defect switches off is worse than
+      no defence, because its presence is what stops anyone looking.
 
 - [ ] **`tester`** — `tst_stoa_screens.qml:1375` — the address-note assertion
       admits a note that claims the Stoa itself is confirmed
@@ -66,7 +100,7 @@ recording fake bridge; no shipped file was mutated.
       the prompt records a tester finding once already — three required
       substrings present while the sentence around them says the opposite.
 
-- [ ] **`dev-writer`** — `StoaReference.qml:45` — a single-pass `stripPrefix`
+- [x] **`dev-writer`** — `StoaReference.qml:45` — a single-pass `stripPrefix`
       lets a `stoa:` prefix reach `join_stoa`, converting a malformed paste into
       a verification accusation
       **Scenario:** `{"stoa":"stoa:stoa:<hex>","genesis":"00ff"}` parses `ok` and
@@ -79,6 +113,13 @@ recording fake bridge; no shipped file was mutated.
       is repeated here because the harm is a misdirected trust judgement, not
       just a wrong string.
       **Severity:** medium.
+
+      **Fixed** — `stripPrefix` loops; see the correctness entry for the fix and
+      its test. The framing "a misdirected trust judgement, not just a wrong
+      string" is the right one and is why the cross-listing was worth making:
+      the user is told, by the software, that the person who sent them the
+      reference sent a bad record. Nothing in the UI offers a way to discover
+      that the fault was a doubled paste.
 
 - [ ] **`spec-writer`** — `StoaReference.qml:80` — the reference encoding accepts
       arbitrary non-hex content in both halves, and no requirement says whether

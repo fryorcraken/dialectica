@@ -99,6 +99,32 @@ TestCase {
         return null
     }
 
+    // Every descendant carrying `name`, visible or not.
+    //
+    // Distinct from `visibleNamed` on purpose. Absence assertions must use the
+    // visible form — that is the property a user is affected by. But a test that
+    // needs to REACH a screen in order to drive it needs it whether or not it is
+    // currently on screen: `Main.qml` mounts all three screens and toggles
+    // `visible`, so the join screen exists from startup and is hidden until a
+    // reference is previewed. Using the visible walker to find it returned
+    // nothing and produced "Cannot call method 'join' of undefined" — a test
+    // failing for a reason unrelated to the defect it was written for.
+    function namedAnywhere(item, name) {
+        var found = []
+        function walk(node) {
+            if (!node)
+                return
+            if (node.objectName === name)
+                found.push(node)
+            var kids = node.children
+            if (kids !== undefined)
+                for (var i = 0; i < kids.length; i++)
+                    walk(kids[i])
+        }
+        walk(item)
+        return found
+    }
+
     // Every visible descendant of `item` carrying `name`, at any depth.
     //
     // `visible` is checked on each ancestor rather than trusting the element's
@@ -558,6 +584,40 @@ TestCase {
                "and must never be added on the way out")
     }
 
+    function test_a_repeated_display_prefix_is_stripped_rather_than_forwarded() {
+        // **A single-pass strip is the defect, and the test above could not see
+        // it** because it only ever supplied one prefix. A doubled `stoa:`
+        // survived, reached `join_stoa` as part of the address, and came back as
+        // "the genesis record does not hash to this address" — turning a
+        // malformed paste into a VERIFICATION ACCUSATION and pointing the user
+        // at their sender instead of at their own paste.
+        //
+        // That is the exact confusion the three paste outcomes are designed to
+        // keep apart, and both design.md and StoaReference's own source comment
+        // assert it cannot happen. The invariant the comment claimed was not the
+        // one the code enforced.
+        var addr = "b02d5e77" + "88".repeat(28)
+        var parsed = StoaReference.parse('{"stoa":"stoa:stoa:' + addr + '","genesis":"00ff"}')
+        compare(parsed.ok, true)
+        compare(parsed.stoa, addr, "every prefix must be stripped, not just one")
+
+        // Whitespace between them too — a paste that picked up a stray space is
+        // the same user error with the same right answer.
+        compare(StoaReference.parse('{"stoa":"stoa: stoa:' + addr + '","genesis":"00ff"}').stoa,
+                addr)
+        compare(StoaReference.parse('{"stoa":"  stoa:stoa:stoa:' + addr + '  ","genesis":"00ff"}').stoa,
+                addr, "three, with surrounding whitespace")
+
+        // And the end-to-end consequence: nothing carrying a prefix reaches the
+        // core, so no verification refusal can be provoked by a paste artefact.
+        Core.bridge = bridgeFor({ "join_stoa": '{"stoa":"' + addr + '","foundingTitle":"t"}' })
+        var bridge = Core.bridge
+        Core.joinStoa(parsed.stoa, parsed.genesis)
+        var sent = String(spec.lastArgsTo(bridge, "join_stoa"))
+        verify(sent.indexOf("stoa:") < 0,
+               "no prefix may reach join_stoa: " + sent)
+    }
+
     // ---- the join preview ------------------------------------------------
 
     function test_the_preview_makes_no_join_call_until_the_user_acts() {
@@ -580,6 +640,166 @@ TestCase {
                 "the join call is made when, and only when, the user acts")
         compare(screen.joinState, "joined")
         screen.destroy()
+    }
+
+    // ---- a second preview inherits nothing from the first -----------------
+    //
+    // **These drive `Main.qml`, not a fresh `JoinScreen`, and that is the whole
+    // point of them.** Every other join-state test in this file constructs its
+    // own screen — and `Main.qml` ships ONE reused instance, which is the only
+    // configuration a user ever meets. So the suite could be entirely green
+    // while a hostile reference rendered under a "Joined." panel it never
+    // earned, and it was: 95 of 95 passed with that defect present.
+    //
+    // That is the corpus lesson at integration scale. A test exercising a
+    // component in a shape the app does not use is testing something the app
+    // does not do.
+
+    function test_a_second_preview_does_not_inherit_the_first_joined_state() {
+        var a = "aaaaaaaa" + "11".repeat(28)
+        var b = "bbbbbbbb" + "22".repeat(28)
+        Core.bridge = bridgeFor({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "join_stoa": '{"stoa":"' + a + '","foundingTitle":"Nym Research","policy":"open"}'
+        })
+        var bridge = Core.bridge
+        var view = mainComponent.createObject(null, {})
+        var join = spec.namedAnywhere(view, "joinScreen")[0]
+
+        // Preview A and join it, the legitimate half of the sequence.
+        view.previewing = { stoa: a, genesis: "00ff" }
+        join.join()
+        compare(join.joinState, "joined", "A was genuinely joined")
+        compare(spec.callsTo(bridge, "join_stoa"), 1)
+
+        // Now the attacker's reference, with NO Cancel in between — an ordinary
+        // two-paste sequence, not a contrived one.
+        view.previewing = { stoa: b, genesis: "00ff" }
+
+        compare(join.stoaAddress, b, "the attacker's address is what is on screen")
+        compare(spec.callsTo(bridge, "join_stoa"), 1,
+                "no join call was made for B")
+        compare(join.joinState, "previewing",
+                "so B must NOT read as joined — a join is reported from the "
+                + "core's reply, never inherited from another Stoa's")
+
+        // The user-visible consequence, not only the state string feeding it.
+        compare(spec.visibleNamed(join, "joinedPanel").length, 0,
+                "no joined panel for a Stoa the core never saw")
+        compare(spec.visibleNamed(join, "joinButton").length, 1,
+                "and the join affordance must be back, or the user cannot act")
+        var body = spec.bodyText(join)
+        verify(body.indexOf("started collecting") < 0,
+               "nothing may claim this machine began collecting B's records: " + body)
+        view.destroy()
+    }
+
+    function test_a_second_preview_does_not_inherit_the_first_founding_title() {
+        var a = "aaaaaaaa" + "33".repeat(28)
+        var b = "bbbbbbbb" + "44".repeat(28)
+        Core.bridge = bridgeFor({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "join_stoa": '{"stoa":"' + a + '","foundingTitle":"Nym Research","policy":"open"}'
+        })
+        var view = mainComponent.createObject(null, {})
+        var join = spec.namedAnywhere(view, "joinScreen")[0]
+
+        view.previewing = { stoa: a, genesis: "00ff" }
+        join.join()
+        compare(join.foundingTitle, "Nym Research", "A's title came from A's reply")
+
+        view.previewing = { stoa: b, genesis: "00ff" }
+
+        // **Separable from the state carryover, and it must be asserted
+        // separately.** Clearing `joinState` alone would still leave A's title
+        // captioned "FIXED FOREVER" above B's address — a trusted name lent to
+        // an untrusted address, which is precisely the impersonation the
+        // lookalike requirement exists to expose, delivered by the view itself.
+        // The lookalike panel cannot catch it: the two titles being compared
+        // are the same string from the same source.
+        compare(join.foundingTitle, "",
+                "B's title is unknown until B's record is decoded, so nothing "
+                + "may be rendered as B's founding title")
+        var body = spec.bodyText(join)
+        verify(body.indexOf("Nym Research") < 0,
+               "A's title must not decorate B's address: " + body)
+        view.destroy()
+    }
+
+    function test_a_second_preview_does_not_inherit_the_first_refusal() {
+        var a = "aaaaaaaa" + "55".repeat(28)
+        var b = "bbbbbbbb" + "66".repeat(28)
+        Core.bridge = bridgeFor({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "join_stoa": '{"error":"the genesis record does not hash to this address"}'
+        })
+        var view = mainComponent.createObject(null, {})
+        var join = spec.namedAnywhere(view, "joinScreen")[0]
+
+        view.previewing = { stoa: a, genesis: "00ff" }
+        join.join()
+        compare(join.joinState, "failed", "A was refused by the core")
+
+        view.previewing = { stoa: b, genesis: "00ff" }
+
+        // The mirror of the joined case and just as wrong: a user reads "the
+        // record you were sent is wrong" about a reference the core has not
+        // seen. Listed separately by the reviewer because fixing either of the
+        // two above does not fix this one.
+        compare(join.joinState, "previewing")
+        compare(join.failure, "", "A's refusal says nothing about B")
+        compare(spec.visibleNamed(join, "joinFailurePanel").length, 0,
+                "no refusal may be attached to an address never submitted")
+        view.destroy()
+    }
+
+    function test_an_outcome_survives_re_previewing_the_very_same_reference() {
+        // **The other side of the rule, and I got this one wrong first.**
+        //
+        // My initial version of this test asserted that re-previewing the SAME
+        // reference after joining it must read `previewing` again — that Cancel
+        // should wipe the outcome. It failed against the fix, and the fix was
+        // right: the core genuinely answered for this exact (stoa, genesis)
+        // pair, so reporting it is reporting a fact, not inheriting another
+        // Stoa's. Making the screen forget a true answer would have been a
+        // second defect dressed as caution, and would have cost a real join call
+        // every time a user glanced back at a Stoa they already hold.
+        //
+        // The invariant is not "clear on navigation" — that is the reset shape
+        // the fix deliberately avoided. It is "an outcome describes exactly the
+        // reference it was returned for", which is true here and false for the
+        // three tests above. Recorded so nobody later "fixes" this into a wipe.
+        var a = "aaaaaaaa" + "77".repeat(28)
+        Core.bridge = bridgeFor({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}',
+            "join_stoa": '{"stoa":"' + a + '","foundingTitle":"Nym Research","policy":"open"}'
+        })
+        var bridge = Core.bridge
+        var view = mainComponent.createObject(null, {})
+        var join = spec.namedAnywhere(view, "joinScreen")[0]
+
+        view.previewing = { stoa: a, genesis: "00ff" }
+        join.join()
+        join.cancelled()
+        compare(view.previewing, null)
+
+        view.previewing = { stoa: a, genesis: "00ff" }
+        compare(join.joinState, "joined",
+                "the core answered for THIS reference, so the answer stands")
+        compare(join.foundingTitle, "Nym Research",
+                "and the title it returned belongs to this Stoa")
+        compare(spec.callsTo(bridge, "join_stoa"), 1,
+                "and no second call was needed to say so")
+
+        // A DIFFERENT genesis for the same address is a different reference, and
+        // must not inherit: the address alone does not identify what was
+        // verified, since the pair is what the core checked.
+        view.previewing = { stoa: a, genesis: "ffff" }
+        compare(join.joinState, "previewing",
+                "a different record against the same address is a different "
+                + "reference and carries no outcome")
+        compare(join.foundingTitle, "")
+        view.destroy()
     }
 
     function test_the_preview_renders_the_whole_address_not_an_abbreviation() {

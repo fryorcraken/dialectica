@@ -85,6 +85,15 @@ copied one from a screen, and normalises it to bare hex before it reaches core.
 a hash that verifies against nothing, surfacing as a verification failure —
 exactly the wrong one of the spec's three outcomes.
 
+**Stripping must be a loop, not a pass.** The first implementation stripped one
+prefix, so `stoa:stoa:<hex>` forwarded a prefixed address and produced precisely
+the verification accusation this paragraph says cannot happen — the invariant the
+comment asserted was not the one the code enforced, found in review rather than
+by the test, which only ever supplied one prefix. The defect was a *fixed number
+of passes*, so a second `if` would have been the same defect one step further
+out. It also meant the preview rendered `stoa:<hex>` as "the address in full", so
+the screen whose job is showing the address exactly was showing something else.
+
 ### D2 — The clipboard is a hidden `TextEdit`, selected and copied
 
 `ClipboardSink.qml`: a zero-size, non-visible `TextEdit` with a `copy(text)`
@@ -190,6 +199,43 @@ default buried in the wrapper is a number two screens would silently share.
   false *negative* (a real lookalike goes unmentioned), never a false positive,
   and it is the safe direction: a panel that appeared because of a failed read
   would be asserting a comparison nothing performed.
+
+### D8 — An outcome is stored with the reference it describes, not beside it
+
+`JoinScreen` holds one `outcome` object — `{stoa, genesis, state, failure,
+foundingTitle}` — and `joinState`, `failure` and `foundingTitle` are `readonly`
+properties derived through `currentOutcome`, which yields `null` unless the
+stored pair equals the pair on screen.
+
+**This replaced three independent mutable properties, and the reason is a defect
+found in review.** `Main.qml` ships ONE reused `JoinScreen`; `stoaAddress` is a
+binding on `previewing`, while the outcome was separate state. So previewing a
+second reference moved the address and left the verdict behind: paste a
+legitimate reference, join it, paste an attacker's, and the attacker's address
+rendered under a "Joined." panel with the join button gone and `join_stoa` never
+called for it. The previous Stoa's founding title came along too, under "FIXED
+FOREVER".
+
+**Why not `reset()` on navigation**, which is the obvious fix and the wrong one:
+a reset must be *remembered*, at every present and future entry point, and the
+one place it is forgotten is a screen making a claim about the wrong Stoa. The
+derivation makes a stale outcome unrepresentable rather than unlikely — there is
+no variable that can hold one Stoa's verdict while another is displayed. This is
+CLAUDE.md's "complexity in the data structure, not the logic", and the same
+argument that put the `-1` sentinel in the onboarding screen.
+
+Two consequences worth recording:
+
+- **An outcome legitimately survives re-previewing the identical reference.** The
+  core answered for that exact `(stoa, genesis)` pair, so reporting it is
+  reporting a fact. My first regression test asserted the opposite — that Cancel
+  should wipe it — and failed against the fix; the fix was right and the test was
+  wrong. The invariant is "an outcome describes exactly the reference it was
+  returned for", never "clear on navigation". `test_an_outcome_survives_re_previewing_the_very_same_reference`
+  pins this so nobody later "fixes" it into a wipe.
+- **The pair, not the address, is the identity.** A different genesis against the
+  same address is a different reference and inherits nothing, because the pair is
+  what the core verified.
 
 ### D7 — Absence assertions scan the card body, never the apparatus column
 

@@ -42,11 +42,28 @@ QtObject {
     // So: stripped on the way in, never added on the way out.
     readonly property string displayPrefix: "stoa:"
 
+    // **Strips EVERY leading prefix, not one.** A single pass was the original
+    // implementation and it was wrong in exactly the way the comment above says
+    // must not happen: `stoa:stoa:<hex>` left one prefix in place, `parse()`
+    // answered `ok`, and the prefixed string reached `join_stoa` — where it came
+    // back as "the genesis record does not hash to this address".
+    //
+    // That is a **verification accusation manufactured by a paste artefact**. It
+    // points the user at their sender when the fault is in their own clipboard,
+    // and it collapses two of the three paste outcomes this screen spends its
+    // whole design keeping apart. It also made `previewAddress` render
+    // `stoa:<hex>` as "the address in full", so the address shown was not the
+    // address.
+    //
+    // A loop rather than a second `if`: the defect was a fixed number of passes,
+    // so a fix with a different fixed number is the same defect further out.
+    // Whitespace is trimmed between passes because a paste that picked up a
+    // stray space is the same user error with the same right answer.
     function stripPrefix(value) {
         var s = String(value).trim()
-        return s.indexOf(root.displayPrefix) === 0
-            ? s.slice(root.displayPrefix.length)
-            : s
+        while (s.indexOf(root.displayPrefix) === 0)
+            s = s.slice(root.displayPrefix.length).trim()
+        return s
     }
 
     // What a user copies. Bare hex on both halves, one line.
