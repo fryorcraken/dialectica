@@ -36,6 +36,19 @@ of merging into it. It takes an explicit marker; nothing here does it.
 
 **`archive` aborts and writes nothing if the target spec has no `## Purpose`.**
 
+**And where the target spec already has one, a delta's `## Purpose` is silently
+discarded.** The warning reads *"delta Purpose ignored; <capability> already has
+one"* and scrolls past among the totals. That matters because a `MODIFIED` delta's
+Purpose is usually the argument for *why* the requirement is being widened — the
+one thing the live spec cannot say for itself. On `identity-onboarding` it carried
+the reason both determinism scenarios had to be restated, and it survives only in
+the archived delta.
+
+So a Purpose is a **precondition for a new capability** and **a document with no
+destination for an existing one**. If a delta's Purpose carries reasoning worth
+keeping, put it in `design.md` before archiving; the archive will not move it for
+you.
+
 ## The transformation, and why to diff it
 
 For a capability `openspec/specs/` does not yet hold, exactly two edits:
