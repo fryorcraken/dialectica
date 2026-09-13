@@ -5,6 +5,12 @@ never do**. Look, feel and theme are yours to explore; everything here is a
 functional constraint, and most of them come from the fact that this is
 peer-to-peer software with no server.
 
+**Two audiences, and the second one is easy to forget.** This is written for a
+designer, and it is also the contract for whoever implements a screen in QML —
+the obligations below are the ones the code must meet, and *What `ScreenFrame`
+gives you* is addressed to the implementer directly. Read it before writing a
+screen, not after a review finds the screen does not meet it.
+
 The logo is the Greek delta, **Δ**. The name is from *dialectic* — reasoned
 argument between positions.
 
@@ -359,6 +365,14 @@ out of the first release — which is why the gap costs nothing yet.
 
 Paginated. Hidden posts are omitted by default.
 
+**Paging is an extent claim, and rendering obligation 10 governs it.** "Next"
+appears when *this peer* holds another page — the core computes it from the local
+store and it means nothing about the Stoa. A reader seeing thirty posts and a
+"Next" button reads it as "there is more in this Stoa", so **the state that offers
+paging is the state that owes the locality statement**. Putting that sentence in
+the empty state instead satisfies nothing: the empty state is the one state where
+no page control is offered.
+
 **Orderings, and an honesty problem worth designing around.**
 
 The intended orderings are **new** (most recent first), **active** (threads by
@@ -398,6 +412,13 @@ and it resolves when an upstream gap closes, but until then:
 - **Do not label an ordering "new", "latest" or "recent"** unless it is one.
 - A neutral label is honest and available now. Consider what the control should
   say when the thing it names is not yet true.
+- **A neutral label is not by itself enough, and this is the part that is easy to
+  miss.** A reader meeting a forum feed assumes newest-first unless told
+  otherwise, and a label that merely declines to claim recency does not correct
+  that assumption — it leaves the interface relying on the reader not to make the
+  ordinary one. So the screen must **say plainly that this is not newest first**,
+  somewhere the reader actually reads. That sentence is currently in the feed's
+  own body, under the heading rule.
 - Whatever you design, **the labels must be able to change** when the real
   ordering arrives, without the layout changing around them.
 
@@ -537,6 +558,50 @@ Moderators see a hide control on any post. **See the irreversibility warning.**
 These exist because the core's honest answer is *incomplete* without something
 the interface does. Each was discovered while building the core, and the gap is
 invisible from inside it.
+
+> **Where these belong on screen, and one way it has already gone wrong.** An
+> obligation here is a thing the interface must *do* — omit a hidden post, show an
+> address beside a name, refuse to claim delivery. It is **not** a licence to
+> print the obligation's own text at the reader.
+>
+> The design bundle's right-hand `APPARATUS` column — the italic marginal notes
+> headed `ON THIS ORDERING`, `ON WHAT YOU HOLD`, `ON THE MARK` — is **annotation
+> explaining the design to whoever is reading it, and is not part of the
+> interface.** It was nonetheless built into the shipped QML, so the running app
+> showed users a column of commentary written for a designer. It has been removed.
+>
+> Read the apparatus notes in the bundle as you would read this brief: as
+> statements of what the screen owes its reader. Then discharge each in the
+> screen itself — **structurally where you can, in the screen's own body where a
+> sentence is genuinely required**, and in neither case in a margin addressed to
+> somebody else. Most discharge structurally: "the mark is never proof" is met by
+> printing the address beside every mark, which is obligation 6, and a note saying
+> so would add nothing a reader acts on.
+
+### What `ScreenFrame` gives you, and the one thing it asks
+
+**For whoever implements a screen in QML, not only for the designer.** Every
+screen is a `ScreenFrame` — the card, which decides padding, width and the
+hairline border once. Its contract is short and the failure mode of getting it
+wrong is silent, so it is stated here rather than only in the component:
+
+- **The card reports its own height** from its content. `Main.qml` reads that to
+  size the scroll area, so this is what makes a long feed scroll at all.
+- **A child with `Layout.fillHeight: true` gets real slack** — it grows to fill
+  the card rather than collapsing to nothing. A screen whose body should fill the
+  card says so on the child that fills it.
+- **Do not give a `ScreenFrame` an explicit `height`.** Let it size from its
+  content. A card with an explicit height and no child claiming the slack spreads
+  its rows down the card instead of stacking them at the top.
+- If you must set one, put `Layout.fillHeight: true` on the child that should
+  absorb the slack. A trailing `Item { Layout.fillHeight: true }` looks like the
+  same fix and is not: it inflates the card's reported height by one gap, and the
+  scroll area then runs past the end of the content.
+
+The reason this is here and not only in a code comment: the apparatus column
+shipped because an obligation lived in a document nobody implementing a screen
+had a reason to open. A contract that can only be found by someone who already
+knows to look for it is a contract the next screen will not meet.
 
 **1. Sanitise display text, because the core deliberately does not — and this
 applies to every string, not just titles.**
@@ -787,6 +852,46 @@ signal no call produces; a spinner that can never resolve is worse than no
 spinner. Design the saved state to be correct on its own, and leave room beside it
 for a later "not yet propagated" marker — that marker is additive when the three
 are answered, which is the point of not inventing one now.
+
+**10. Every quantity is a fact about this machine's copy, and "more" is a
+quantity.**
+
+Constraint 1 forbids showing a count of anything global. This obligation is the
+half that is easy to satisfy on the empty screen and easy to miss everywhere
+else: **the prohibition does not stop at numerals.** A control that offers a next
+page, a "showing 30" line, a reply count, a scrollbar that implies an end — each
+asserts something about how much exists, and none of them can mean more than
+*how much has reached this peer*.
+
+Two rules, and they are different obligations rather than one stated twice:
+
+- **Never render a quantity the core cannot know.** There is no total, no member
+  count, no "of N". A peer cannot see the whole of a Stoa, so any figure
+  presented as the size of something is false — not imprecise, false. This is a
+  prohibition, and a screen that shows no such figure has met it.
+- **Where the interface does assert extent, it must be readable as local.** The
+  feed's "Next" is the live instance: it appears when this peer holds another
+  page and disappears when it does not, so it is honest — and a reader meeting
+  thirty posts and a "Next" button will nonetheless read it as *this Stoa has
+  more*, which is the claim nothing can make. Whatever carries that assertion has
+  to say whose copy it is about.
+
+**Where this does not apply, and why saying so matters.** An interface owes a
+locality statement where it makes an extent claim — **not once per screen as a
+disclaimer**. A screen that shows no count and offers no paging owes nothing
+here, and adding a line to it would be printing an obligation at the reader
+rather than discharging one. This is the distinction the box at the top of this
+section draws: the second half of this obligation is one of the cases it means by
+*"in the screen's own body where a sentence is genuinely required"* — the claim is
+made by a control, so no structure can unmake it, and the reader has to be told.
+
+**How this obligation was found, which is the part worth keeping.** The feed's
+locality sentence — "This is a fact about your copy, not about the Stoa." — was
+written into the empty state, where there is nothing to over-read, and the
+paging control that does make a claim got nothing. Nobody noticed because the
+brief said *count* and the claim had stopped being a number. **So check the
+trigger, not the vocabulary**: if a screen tells a reader there is more, it has
+made the claim, whatever shape the telling took.
 
 ---
 

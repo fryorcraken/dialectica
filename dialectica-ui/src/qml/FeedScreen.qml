@@ -208,6 +208,30 @@ ScreenFrame {
         Rectangle { Layout.fillWidth: true; Layout.preferredHeight: Theme.hairline; color: Theme.ink }
     }
 
+    // ---- what this ordering is, and what it is not ----------------------
+    //
+    // This sentence used to live in the apparatus column's ON THIS ORDERING
+    // note, which was annotation explaining the design rather than interface.
+    // The column is gone; the obligation is not, so the sentence moves into the
+    // screen's own body rather than into `docs/UI-BRIEF.md` alone.
+    //
+    // It is load-bearing in a way the ordering LABEL is not. "Same order for
+    // everyone" is honest and satisfies UI-BRIEF's rule against labelling an
+    // ordering "new", "latest" or "recent" — but it is NEUTRAL, and a reader
+    // meeting a forum feed assumes newest-first unless told otherwise. The
+    // denial is the part the label cannot carry, so removing it would leave the
+    // interface silently relying on the reader not to make the ordinary
+    // assumption.
+    Text {
+        text: "Not newest first. Timestamps do not reach this machine yet, so posts are ordered by a rule every peer computes identically. When real times arrive this label changes and nothing else does."
+        font: Theme.note
+        color: Theme.inkSoft
+        wrapMode: Text.WordWrap
+        lineHeight: 1.4
+        textFormat: Text.PlainText
+        Layout.fillWidth: true
+    }
+
     // ---- state: the store could not be read -----------------------------
     //
     // Screen 07's failed half. An accent border, the failure named, and a
@@ -388,26 +412,59 @@ ScreenFrame {
     // Pagination only: no infinite scroll and no totals. "Next" is offered when
     // this peer holds another page, which is a fact about this copy and not a
     // claim about how much exists.
-    RowLayout {
+    //
+    // That fact used to live only in the comment you are reading, which no user
+    // opens. UI-BRIEF rendering obligation 10 makes it interface: paging is an
+    // EXTENT CLAIM, and where the interface asserts extent the assertion must be
+    // readable as local. `hasMore` is computed by `feed::list_threads` from this
+    // peer's log alone, so "Next" means *this machine holds another page* — while
+    // a reader meeting thirty posts and a "Next" button reads it as *this Stoa
+    // has more*, which is the claim no peer can make.
+    //
+    // The whole control is one ColumnLayout so the sentence CANNOT render without
+    // the claim it qualifies, and cannot fail to render with it: there is one
+    // `visible:` binding for both, and it is the binding the row already had.
+    // Obligation 10's other half — a screen asserting no extent owes nothing —
+    // is therefore satisfied by construction rather than by a second guard
+    // someone has to remember: no paging offered, no sentence.
+    ColumnLayout {
         visible: screen.readState === "ok" && (screen.hasMore || screen.page > 0)
         Layout.fillWidth: true
         spacing: Theme.itemGap
 
-        FlatButton {
-            text: "Previous"
-            kind: "secondary"
-            visible: screen.page > 0
-            onClicked: { screen.page = screen.page - 1; screen.reload() }
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Theme.itemGap
+
+            FlatButton {
+                text: "Previous"
+                kind: "secondary"
+                visible: screen.page > 0
+                onClicked: { screen.page = screen.page - 1; screen.reload() }
+            }
+
+            FlatButton {
+                text: "Next"
+                kind: "secondary"
+                visible: screen.hasMore
+                onClicked: { screen.page = screen.page + 1; screen.reload() }
+            }
+
+            Item { Layout.fillWidth: true }
         }
 
-        FlatButton {
-            text: "Next"
-            kind: "secondary"
-            visible: screen.hasMore
-            onClicked: { screen.page = screen.page + 1; screen.reload() }
+        // The locality statement obligation 10 requires. Deliberately about the
+        // PAGES rather than about the posts: "Next" is the claim being qualified,
+        // so the sentence has to deny what "Next" would otherwise be read to say.
+        Text {
+            text: "Pages are what this machine holds. \"Next\" means another page has reached your copy — not that the Stoa has more, which no peer can know."
+            font: Theme.note
+            color: Theme.inkSoft
+            wrapMode: Text.WordWrap
+            lineHeight: 1.4
+            textFormat: Text.PlainText
+            Layout.fillWidth: true
         }
-
-        Item { Layout.fillWidth: true }
     }
 
     // ---- posting gate: a reason, never a dead text field -----------------
@@ -442,24 +499,4 @@ ScreenFrame {
             Layout.fillWidth: true
         }
     }
-
-    apparatus: [
-        MarginNote {
-            label: "ON THIS ORDERING"
-            // copy.json `feed.orderingNote`
-            body: "Not newest first. Timestamps do not reach this machine yet, so posts are ordered by a rule every peer computes identically. When real times arrive this label changes and nothing else does."
-        },
-        MarginNote {
-            label: "ON WHAT YOU HOLD"
-            caveat: false
-            body: "Every number here counts what this machine has received. No peer can see the whole of a Stoa, so there is no total to show."
-        },
-        MarginNote {
-            label: "ON THE MARK"
-            caveat: false
-            // The identicon is a second forgeable channel, and saying so is
-            // part of not letting it stand in for the address.
-            body: "The hatched shape is drawn from the address and is identical on every peer. It is a shortcut for recognition, never a proof of anything — which is why the address is printed beside it."
-        }
-    ]
 }
