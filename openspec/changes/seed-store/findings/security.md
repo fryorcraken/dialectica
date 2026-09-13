@@ -1,0 +1,152 @@
+# Security findings: the store seeder
+
+Reviewed `dialectica/rust-lib/dialectica-core/examples/seed_store.rs` at
+`04da8c8`. This tool mints a real Ed25519 root secret and writes it to a
+directory the user names on the command line, so the review concentrated on what
+happens to that secret and on what `--fresh` is capable of destroying.
+
+Everything below was reproduced by running the program against scratch
+directories under the worktree's gitignored `tmp/`.
+
+---
+
+- [ ] **`dev-writer`** — `seed_store.rs:255` — the seeder writes a root secret
+      into a world-writable directory without complaint, producing a keystore the
+      module itself then refuses to open
+      **Scenario:** `std::fs::create_dir_all(&dir)` creates the directory under
+      the process umask and nothing checks its mode; `Keystore::create`
+      (`keystore.rs:934-939`) checks only that the *file* does not already exist
+      and delegates to `write_to`, which does not check the containing directory
+      either. The directory guard lives only on the read path, in `read_checked`
+      (`keystore.rs:1235-1247` calling `check_directory_mode` at `:1322-1324`,
+      refusing `mode & 0o022 != 0`).
+      Reproduced end to end:
+      ```
+      mkdir -m 777 tmp/openperm
+      cargo run --example seed_store -- tmp/openperm      # succeeds, prints a full report
+      keystore::open_in("tmp/openperm")
+        -> "the keystore's directory is writable by others (mode 0777);
+            restrict it to owner-only (chmod 700) — the key can be replaced
+            there whatever its own permissions say"
+      ```
+      Two distinct harms. First, a **real root secret sits in a directory any
+      local user can write**, and the keystore's own doc comment
+      (`keystore.rs:1300-1304`) states the threat precisely: "a *writable*
+      directory lets someone replace the keystore, delete it, or plant something
+      at a name a write will touch, none of which the file's own 0600 prevents."
+      The seeder set the file to 0600 (verified: `-rw-------`) and the directory
+      defeats it. Second, **every assertion in the program passes** and the report
+      prints in full, so the tool reports success over a store the module will
+      refuse — which is precisely the "a caller would trust a store that does not
+      work, and would go looking for the bug in the UI" failure the read-back
+      section at `:454-459` exists to prevent.
+      **The fix is to ask the keystore rather than to re-implement the check:**
+      after writing, call `keystore::open_in(&dir)` and fail on its error. That
+      reuses the guard already written and tested, costs one call, and converts a
+      silent bad store into a named refusal. **Severity: high** — a root secret
+      written to a location the codebase's own guard classifies as unsafe, with
+      no diagnostic.
+
+- [ ] **`dev-writer`** — `seed_store.rs:297-302` — the keystore is written
+      unencrypted by default and the run says nothing about it
+      **Scenario:** `keystore::protection_from_env()`
+      (`keystore.rs:365-370`) returns `Unlock::Unencrypted` whenever
+      `DIALECTICA_PASSPHRASE` is unset or empty, so the default run stores a
+      32-byte Ed25519 root secret in the clear. Verified: `identity.key` is 35
+      bytes — a 3-byte header (`MAGIC`, `VERSION_1`, `Protection::None`) plus the
+      raw root, per `to_file_bytes` at `keystore.rs:953-959`.
+      **The choice of default is correct and is not the finding** — it is
+      `protection_from_env`'s own documented contract, deliberately inherited
+      rather than reinvented here, and `keystore.rs:350-355` explains why a
+      fallback constant would be worse. The finding is that **the run output never
+      says which of the two happened.** `keepIdentity`'s reply reports protection
+      so that "an unencrypted keystore is a state a view can name rather than a
+      silent default" (`lib.rs:731-736`); this tool prints eight labelled values
+      and omits that one. A developer seeding a laptop cannot tell from the
+      scrollback whether a plaintext root secret was just written.
+      One line in the report — `protection  unencrypted (set DIALECTICA_PASSPHRASE
+      to encrypt)` — closes it. **Severity: medium.**
+
+- [ ] **`dev-writer`** — `seed_store.rs:262-288` — `--fresh` deletes by name
+      without confirming the directory is a dialectica store, so a mistyped path
+      destroys four arbitrary files
+      **Scenario:** the deletion loop removes any existing file at the four
+      derived paths. Three of the four names are generic enough to collide with
+      unrelated data: `identity.key`, `identity.sqlite`, `stoas.sqlite`,
+      `ops.sqlite`. Reproduced: a directory containing only a hand-made
+      `ops.sqlite` (not a dialectica op log, just a touched file) was deleted
+      without a word beyond `--fresh: deleting op log …`, and the seeder then
+      wrote a fresh store over it. Nothing checks that a file at a derived path is
+      the thing the name claims — e.g. that `identity.key` starts with the
+      keystore `MAGIC` byte.
+      The preamble's defence is that deletion is opt-in and each file is named as
+      it goes, which is genuine mitigation and is why this is not rated higher.
+      But "a person who passed `--fresh` by mistake can see in the scrollback
+      exactly what they lost" (`:282-283`) is after-the-fact: the lines print as
+      the deletions happen, not before. **Checking the keystore magic before
+      deleting `identity.key`** — the one file whose loss is unrecoverable —
+      would cost a four-byte read and would refuse the case that actually hurts.
+      **Severity: medium.**
+
+- [ ] **`dev-writer`** — `seed_store.rs:361` — `stoa_key` is documented as
+      called by no handler, so "matching the module" pins a derivation the MVP
+      does not use
+      **Scenario:** the seeder signs with `keystore.stoa_key(&address)`, which
+      matches `lib.rs:539` exactly — the claim in `design.md` is true as written.
+      But `Keystore::stoa_key`'s own doc comment
+      (`keystore.rs:793-797`) says it is "**Built and, in the MVP, not called by
+      any handler** — see `Keystore::identity_key`, which is the key the module
+      actually signs and creates with today", and `identity_key`'s comment
+      (`keystore.rs:813-826`) says "**there is exactly one derivation position, so
+      a creator and a poster cannot be two keys.**"
+      These two statements contradict the adapter, which does call `stoa_key`.
+      The seeder has faithfully copied the adapter, so it is not wrong — but it
+      has thereby **frozen the contradiction into a tool whose output developers
+      will treat as ground truth**, and its own inequality assertion at `:511-516`
+      now guarantees the program fails if anyone resolves it in the direction
+      `keystore.rs` says is already true. Whoever fixes the three-derivations gap
+      will hit this assertion and must delete it; that is by design and is handled
+      well. What is missing is a pointer **from** this file to the two docstrings
+      that disagree with the adapter, so the next reader does not conclude the
+      seeder invented the divergence. **Severity: low — documentation**, but it
+      bears directly on the moderation defect in `correctness.md`.
+
+## What was clean
+
+**No secret reaches stdout.** The report prints addresses and public keys only —
+`address.to_hex()`, `genesis_hex`, `posting_address`, `signing_address`, five op
+ids and the Stoa title. The `visitor` secret is generated, used and dropped;
+neither it nor the root is formatted anywhere. The `why` helper wraps only
+`Display` of this crate's error types, and `KeystoreError`'s no-secret-material
+property is itself covered by a test at `keystore.rs:2193-2200`.
+
+**File permissions on the keystore are correct**: `identity.key` came out
+`-rw-------` (0600), which `check_mode` (`keystore.rs:1292-1294`) accepts. The
+three SQLite files are `-rw-r--r--`, which matches what the module's own stores
+produce and holds no secret material.
+
+**`--fresh` cannot escape the named files.** It iterates a fixed four-element
+list derived from `core` path functions, calls `remove_file` (never
+`remove_dir_all`), and takes no glob or recursion. Pointed at a directory where
+`identity.key` was a symlink into another directory, it unlinked the symlink and
+left the target file byte-identical — checked by reading the target back
+afterwards. `design.md`'s "`--fresh` does not remove the directory" claim is
+accurate.
+
+**The refusal path is ordered correctly** and cannot be raced into a partial
+write by the program itself: the existence check at `:262-265` completes before
+`Keystore::generate`, and `Keystore::create` independently refuses an existing
+file (`keystore.rs:935-937`), so the "half-seeded directory is not a state this
+program can produce" claim holds for the non-`--fresh` case. A TOCTOU window
+exists between the check and the write, but the attacker who could exploit it is
+a local user who can already write the directory, which is the finding above.
+
+**No peer input is involved.** The tool reads no network data and parses no
+untrusted bytes; every value it writes it computed. The standing "never trust an
+inbound message" rule has no surface here, and I found no indexing, slicing or
+arithmetic reachable from anything an attacker supplies. The one `expect`
+(`:494`) is on a value this program wrote a few lines earlier.
+
+**No new dependency**, so no licence or supply-chain question: `hex` is already
+`dialectica-core/Cargo.toml:110`, and the argument parser is hand-rolled
+specifically to avoid adding a flag crate.
