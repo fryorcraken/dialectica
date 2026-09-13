@@ -205,6 +205,14 @@ doing** — that is the whole point, and without it this session took a piece to
 edge of merge with zero reviewers and another missing four, neither visible until
 someone asked.
 
+**A piece with no behaviour change still gets a change folder and a stage block.**
+A test-only piece — an integration target, a regression suite — adds no
+requirement, so it has no spec delta and its spec row is struck through with that
+reason. It still needs reviewing, and without the block there is no unticked row to
+say so: the signal that catches a missing reviewer is absent exactly where it is
+easiest to skip one. The first such piece here reached review with no
+`openspec/changes/<name>/` at all, so a reviewer had no row to tick and said so.
+
 **`findings/<dimension>.md`**, one file per reviewer — `correctness`, `security`,
 `readability`, `architecture`, `spec-test`, `design-review`. **Every finding is a
 checkbox**, written unticked by the reviewer:
@@ -226,6 +234,11 @@ Three consequences worth knowing whatever your role:
 
 - **An unticked entry blocks the merge.** A file, not a convention, so a forgotten
   finding stops a PR instead of evaporating.
+- **The gate only sees checkboxes.** `grep -rn "^- \[ \]"` reports a file of
+  headings as clean, so an entry written any other way is invisible to it — this
+  has already happened, with forty findings including four high-severity defects
+  reading as done. Before trusting an empty result, check the files have boxes at
+  all: `grep -rc "^- \[" findings/` should be non-zero for every one.
 - **Findings stay attributable**, which is what a rejection needs: a fixer that
   disagrees knows which reviewer to argue with.
 - **Never relay a finding through a brief.** Name the file. A paraphrase arrives

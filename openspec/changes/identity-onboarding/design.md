@@ -650,6 +650,68 @@ truthfully). Marked so a later reader can decide whether it was right rather tha
 inheriting it by silence — readability review noted that a reviewer grepping
 `NO SPEC` would otherwise conclude the wire replies carry nothing unspecified.
 
+### `main`'s `Request` envelope wins, and `parse_stoa` is what carries it
+
+When `main` merged the `wire-request-envelope` piece, this branch had three
+handlers of its own — `generateIdentitySlate`, `keepIdentity`, `whoAmI` — each
+opening with its own `serde_json::from_str` into a bare `Value`, the shape that
+predated the envelope. Both sides changed `wire.rs` heavily, so which envelope
+survives was a decision rather than a textual outcome.
+
+**`main`'s wins, and it is not a close call.** The two are not competing designs:
+`Request::parse` does strictly more than this branch's parse — it refuses a
+non-object by name and enforces `MAX_REQUEST_BYTES` before allocating — and it
+does it from `wire::request`, a module holding no handler, so the check cannot be
+bypassed by a handler that holds the type. Keeping this branch's parse would have
+been choosing the weaker of two available checks and re-opening a defect that had
+already been measured and closed.
+
+**What the merge needed was not a choice between them but a retarget.**
+`parse_stoa` — this change's own field-reading helper, and the thing the
+architecture reviewer made six-call-site — took a `&serde_json::Value`. Changing
+its parameter to `&Request` is the whole substance of the resolution, and it
+converts an invisible problem into a compiler error: git's textual auto-merge
+produced a tree where all three onboarding handlers still parsed to `Value` and
+served `[]` as a request naming no Stoa, and it **compiled**. Retargeting
+`parse_stoa` made `rustc` name all four offending call sites.
+
+**That is also the answer to what the envelope's own `design.md` records it does
+not buy.** Its residual is that "a handler need not hold a `Request` at all" — a
+sixth method was built that served `[]` with the suite green. A shared field
+reader taking `&Request` narrows that: a new Stoa-taking handler cannot reach the
+`stoa` field without a `Request`, because `parse_stoa` is the only code that reads
+it. The residual does not vanish — a handler can still read some *other* field off
+a bare `Value` — but for the field six handlers share, the type now stands where
+review used to.
+
+**The sweep is the other half, and it was the thing actually missing.**
+`every_request_taking_method` lists the methods the envelope sweeps, and its doc
+says in capitals that adding a method to it is an obligation because nothing
+checks it. This change added three request-reading methods and listed none of
+them, so all five sweeps went green over handlers that bypassed the envelope
+entirely — exactly the failure that doc predicts, arriving in the merge rather
+than in a new change. All three are now listed, and adding them is what turned
+the sweeps red and named the handlers.
+
+Two smaller resolutions, both keeping this branch's side on its merits:
+`parse_index` keeps `usize::try_from` over `main`'s `v as usize` (the entry above
+says why), and both sides' doc comments were joined rather than one being
+dropped — `main`'s states the null-reading contract and its permissive-default
+`SHALL NOT`, this branch's states the three callers' differing stakes, and neither
+is recoverable from the other.
+
+**One test-fixture defect surfaced in the merge and is fixed here**, because it
+would otherwise have been inherited as a flake. `OnboardingDir::new` derives its
+directory name from `std::process::id()` alone and `remove_dir_all`s the path
+before creating it — which is what makes a name safe to *reuse across runs* and
+unsafe to hold *twice at once*. The new `keepIdentity` and `whoAmI` sweep
+fixtures each open a record per call, over many calls, on parallel test threads;
+with a fixed name per fixture the second call's removal destroyed the first's
+directory and its open SQLite handle failed with `Storage("disk I/O error")`.
+Found only because a mutation run happened to schedule them concurrently — so a
+fixed name would have passed here and failed later for a reason nobody would have
+connected to this change. `sweep_dir_name` appends a monotonic per-binary counter.
+
 ## Risks / Trade-offs
 
 **A crash between the keystore write and the path write leaves a keystore with
