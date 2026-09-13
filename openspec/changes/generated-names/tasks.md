@@ -28,6 +28,35 @@
 - [ ] findings all ticked, `findings/` deleted — runner
 - [ ] `openspec validate --strict`, then `archive` — runner
 
+## Two owner decisions taken after the reviewers were dispatched
+
+Recorded here rather than acted on, because the flow's rule is that a spec must
+not move while agents are reading it. Both land **after** the six findings files
+are in, as a `spec-writer` pass and then a `dev-writer` pass.
+
+**1. Nouns and places each need a one-sentence gloss, and nothing provides one.**
+The lists are `pub const NOUNS: &[&str]` — bare words. A user is shown *measured
+aporia of lampsakos* and has no way to learn what `aporia` or `lampsakos` mean,
+and the QML sandbox forbids a view from looking anything up, so the gloss can
+only come from core. **Scoped to noun and place only**: an English adjective
+needs no translation for an English-speaking reader, where a Greek noun does.
+That is ~2,048 short glosses, not 10,240, and it changes the wordlist shape from
+`&[&str]` to a pair and widens the reply beside `displayName`.
+
+**2. §5.2.1 must be SHED into the spec and `design.md`, not corrected in place.**
+This is the flow's standing rule (`.claude/agents/README.md`, "PLAN.md sheds in
+two directions") and this change did the opposite: its exclusion apparatus was
+*edited* in PLAN.md when it should have moved out. §5.2.1 currently runs
+**lines 956–1994, about a fifth of the whole document**, and nearly all of it is
+now either behaviour the spec owns or reasoning `design.md` owns.
+
+What stays in PLAN.md is what is **not built yet**, plus one line saying the
+thing exists — never why it works that way. Keeping a second copy of the
+reasoning is the failure mode this rule exists to prevent: two copies drift and
+the wrong one gets read, which is exactly what happened here when a spec invented
+a single-word screen PLAN.md never had and a census blocked the change against
+it.
+
 ## Implementation
 
 > **The sizes are settled at 8,192 / 1,024 / 1,024 and the options in `design.md`
