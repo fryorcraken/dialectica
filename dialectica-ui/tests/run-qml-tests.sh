@@ -83,6 +83,27 @@ fi
 
 echo "qml tests: using $runner"
 
+# A single spec, when an argument is given: `run-qml-tests.sh <file.qml>`.
+#
+# This exists so nobody has to invoke qmltestrunner directly. Doing so means
+# hand-writing `QT_QPA_PLATFORM=offscreen` — and an environment-variable prefix
+# is a shape the permission checker cannot analyse, so every such call costs the
+# user an approval click. It also loses the runner discovery above, which is the
+# difference between a real failure and a Qt5 binary exiting 1 with no output.
+#
+# The argument may be any path; a probe under ./tmp/ is the common case.
+if [ "$#" -gt 0 ]; then
+    for spec in "$@"; do
+        [ -e "$spec" ] || { echo "qml tests: no such spec: $spec" >&2; exit 1; }
+    done
+    status=0
+    for spec in "$@"; do
+        echo "--- $(basename "$spec")"
+        "$runner" -input "$spec" -import "$qml_dir" || status=1
+    done
+    exit "$status"
+fi
+
 # Every tst_*.qml in this directory, so a new spec file is picked up without
 # editing this script.
 #
