@@ -11,8 +11,8 @@
 - [x] review: architecture — `code-reviewer`
 - [x] review: spec-test — `spec-test-reviewer`
 - [x] review: design — `design-reviewer`
-- [ ] findings all ticked, `findings/` deleted — runner
-- [ ] `openspec validate --strict`, then `archive` — runner
+- [x] findings all ticked, `findings/` deleted — runner
+- [x] `openspec validate --strict`, then `archive` — runner
 
 The spec row is left for `spec-writer` to tick: the spec was written before this
 agent ran, and ticking another agent's row is the one thing the one-row-per-agent
