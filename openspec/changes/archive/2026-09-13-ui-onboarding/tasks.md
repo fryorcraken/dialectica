@@ -11,8 +11,8 @@
 - [x] review: architecture — `code-reviewer`
 - [x] review: spec-test — `spec-test-reviewer`
 - [x] review: design — `design-reviewer`
-- [ ] findings all ticked, `findings/` deleted — runner
-- [ ] `openspec validate --strict`, then `archive` — runner
+- [x] findings all ticked, `findings/` deleted — closer
+- [x] `openspec validate --strict`, then `archive` — closer
 
 ## Implementation
 
