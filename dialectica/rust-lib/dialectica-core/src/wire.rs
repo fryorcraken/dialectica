@@ -5690,7 +5690,12 @@ mod tests {
         // this as well as a removed one. Presence-only checking is the gap the
         // spec-test reviewer measured on the slate reply, by adding a
         // `displayName` to every candidate and watching the suite stay green.
-        let mut keys: Vec<&str> = row.as_object().unwrap().keys().map(|k| k.as_str()).collect();
+        let mut keys: Vec<&str> = row
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|k| k.as_str())
+            .collect();
         keys.sort_unstable();
         assert_eq!(
             keys,

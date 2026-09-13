@@ -1866,6 +1866,7 @@ fn a_vote_is_stored_and_is_rendered_by_nothing() {
         thread,
         current_version,
         author,
+        display_name,
         body,
         attachments,
         is_revised,
@@ -1892,6 +1893,25 @@ fn a_vote_is_stored_and_is_rendered_by_nothing() {
         author,
         &voter.public_key().address().to_hex(),
         "and never to whoever voted on it"
+    );
+    // The name is derived from the POSTER's key, so it must equal what the
+    // derivation gives for that key and differ from the voter's. Compared
+    // against a name derived here from a key this test chose, rather than read
+    // back from the row: a row that took its name from the wrong author would
+    // otherwise agree with itself.
+    assert_eq!(
+        display_name,
+        &dialectica_core::names::display_name(&poster.public_key())
+            .expect("a well-formed key derives a name")
+            .render(),
+        "the row's name is the one derived from the poster's key"
+    );
+    assert_ne!(
+        display_name,
+        &dialectica_core::names::display_name(&voter.public_key())
+            .expect("a well-formed key derives a name")
+            .render(),
+        "and never the voter's"
     );
     assert_eq!(body.text, "voted on");
     assert!(attachments.is_empty());

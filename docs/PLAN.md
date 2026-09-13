@@ -1492,7 +1492,20 @@ the original three-word argument's point, and it was always a real one.
 
 **Each list's status is different and mixing them up is how a "verified" figure
 gets invented**, so they are marked individually. The word "verified" below means a
-published count was read, not that a list exists — no list is written.
+published count was read, not that a list exists.
+
+> **The lists are now written, and the estimates below held.** `generated-names`
+> shipped them; the counts are in
+> `dialectica/rust-lib/dialectica-core/src/names/` and the tests assert the exact
+> sizes, so run the suite rather than trusting a number here. What is worth
+> keeping is that the three predictions were each **conservative in the right
+> direction**: places came in at 1,131 against a predicted 1,150–1,200 (just
+> under, and the thin-headroom warning was the accurate part — 107 to spare);
+> nouns at 1,892 against 1,400–1,800 (above the range); adjectives at 17,349
+> usable against "~20,000+", from suffix-filtering a dictionary rather than
+> WordNet. **The place list's caution was the one that mattered and it was
+> right.** The estimates below stay as written because a prediction is only
+> evidence about method if it is left where it can be checked.
 
 - **Places: ~1,150–1,200 candidates, largely VERIFIED.** The bulk is the **1,035
   poleis** catalogued in Hansen & Nielsen, *An Inventory of Archaic and Classical

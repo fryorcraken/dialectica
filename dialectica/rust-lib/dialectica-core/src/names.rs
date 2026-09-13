@@ -371,6 +371,31 @@ fn is_refused(noun_index: u16, place_index: u16) -> bool {
         .is_ok()
 }
 
+/// Written-down names, shared with the modules whose rows must carry them.
+///
+/// **These are the only values in the crate that cannot be re-derived from the
+/// implementation**, and that is their entire purpose. Change one byte of
+/// `NAME_PREFIX`, one entry of a list, the order of two entries, which bytes a
+/// slot reads, or the connector, and every peer's names change together with no
+/// error anywhere — each peer stays internally consistent while agreeing with
+/// nobody. A check that asks the implementation what it produced and agrees with
+/// the answer cannot see that. These were produced independently, by
+/// `tmp/pin.rs`, which reads the wordlists from the text files and does the
+/// index arithmetic itself rather than calling [`name_from_digest`].
+///
+/// `feed.rs` uses them for the same reason: a row built by calling the
+/// derivation and then checked by calling the derivation agrees with itself
+/// whatever either does, and would pass on a row that named the wrong author's
+/// key.
+///
+/// **If one of these fails, do not update it to match.** Work out what changed
+/// and whether the network can survive it.
+#[cfg(test)]
+pub mod tests_support {
+    pub const PINNED_NAME_FOR_KEY_4: &str = "quipful ismene of korykos";
+    pub const PINNED_NAME_FOR_KEY_5: &str = "periculous kreios of narthakion";
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -426,8 +451,94 @@ mod tests {
     /// independent statement and not the implementation agreeing with itself:
     /// see `the_pinned_name_is_derivable_by_hand_from_the_pinned_digest`, which
     /// does the index arithmetic in the test rather than by calling `draw_at`.
-    const PINNED_NAME_FOR_KEY_7: &str = "PLACEHOLDER";
-    const PINNED_DIGEST_FOR_KEY_7: &str = "PLACEHOLDER";
+    const PINNED_NAME_FOR_KEY_7: &str = "expatiative karpos of pythion";
+    const PINNED_DIGEST_FOR_KEY_7: &str =
+        "09c2b1c9373894cc7c47ee573ca06a8d9950a834d0dbb69a35ffcbcb0cdf7e74";
+
+    #[test]
+    fn the_pinned_name_is_derivable_by_hand_from_the_pinned_digest() {
+        // The pin above is only independent if it can be reached WITHOUT the
+        // function under test. This does the index arithmetic here, from the
+        // digest's bytes, and indexes the lists directly — so it fails if
+        // `draw_at` reads different bytes, reduces differently, orders the slots
+        // differently, or emits a different connector.
+        //
+        // `PINNED_NAME_FOR_KEY_7` and `PINNED_DIGEST_FOR_KEY_7` were produced by
+        // `tmp/pin.rs`, which reads the wordlists from the TEXT FILES the
+        // modules were generated from. So three independent routes — that
+        // program, this arithmetic, and `display_name` — must agree.
+        let digest = hex::decode(PINNED_DIGEST_FOR_KEY_7).expect("the pin is hex");
+
+        // Bytes 0..2, 2..4, 4..6, big-endian, reduced into each list.
+        let adjective_index = u16::from_be_bytes([digest[0], digest[1]]) % 8_192;
+        let noun_index = u16::from_be_bytes([digest[2], digest[3]]) % 1_024;
+        let place_index = u16::from_be_bytes([digest[4], digest[5]]) % 1_024;
+
+        // Written out rather than computed from the constant, so this is a
+        // statement about WHICH entries rather than a restatement of the
+        // arithmetic above.
+        assert_eq!(adjective_index, 2_498);
+        assert_eq!(noun_index, 457);
+        assert_eq!(place_index, 824);
+
+        // The first draw must not be refused, or the pinned name would be the
+        // REDRAW and this arithmetic would be the wrong story about it.
+        assert!(
+            !is_refused(noun_index, place_index),
+            "the pinned key's first draw must be permitted, or the pin is \
+             pinning the redraw path by accident"
+        );
+
+        assert_eq!(
+            format!(
+                "{} {} {CONNECTOR} {}",
+                ADJECTIVES[adjective_index as usize],
+                NOUNS[noun_index as usize],
+                PLACES[place_index as usize]
+            ),
+            PINNED_NAME_FOR_KEY_7
+        );
+    }
+
+    #[test]
+    fn the_redraw_path_is_pinned_to_a_written_down_name() {
+        // The spec requires the redraw path be pinned and not only the common
+        // one, because a scheme that redrew wrongly would pass every pin above.
+        //
+        // Reached through a CONSTRUCTED DIGEST rather than a key: a refused first
+        // draw is reachable through a chosen key only by grinding for one.
+        //
+        // The digest's first six bytes select `TRUE_ATTRIBUTION_PAIRS[0]`, which
+        // is `(11, 436)` = `agatharchides of knidos` — a real figure's canonical
+        // name, which is exactly what the family refuses. The reserve selects
+        // index 7 of each list.
+        let refused = (11u16, 436u16);
+        assert_eq!(
+            TRUE_ATTRIBUTION_PAIRS[0], refused,
+            "this fixture names the first denylist pair explicitly, so a change \
+             to the denylist's head fails here rather than silently retargeting"
+        );
+        assert_eq!(
+            format!("{} {CONNECTOR} {}", NOUNS[11], PLACES[436]),
+            "agatharchides of knidos",
+            "the refused pair is the one this test claims it is"
+        );
+
+        let digest = digest_drawing((3, refused.0, refused.1), (7, 7, 7));
+        let name = name_from_digest(&digest).expect("the reserve draw is permitted");
+
+        // WRITTEN DOWN, from `tmp/pin.rs`'s reading of the text files, not read
+        // back from `name_from_digest`.
+        assert_eq!(name.render(), PINNED_REDRAW_NAME);
+
+        // And it is the RESERVE's draw, not the refused one with a slot swapped.
+        assert_ne!(name.noun, NOUNS[refused.0 as usize]);
+        assert_ne!(name.place, PLACES[refused.1 as usize]);
+        assert_ne!(name.adjective, ADJECTIVES[3]);
+    }
+
+    /// The name the reserve bytes `(7, 7, 7)` select: index 7 of each list.
+    const PINNED_REDRAW_NAME: &str = "aberrative aedon of acherousia";
 
     #[test]
     fn a_name_is_the_same_every_time_and_across_a_rebuild() {
@@ -513,7 +624,10 @@ mod tests {
             assert_eq!(name.words().len(), 3, "three drawn words: {rendered}");
             assert_eq!(
                 rendered,
-                format!("{} {} {CONNECTOR} {}", name.adjective, name.noun, name.place),
+                format!(
+                    "{} {} {CONNECTOR} {}",
+                    name.adjective, name.noun, name.place
+                ),
                 "the connector sits between the noun and the place"
             );
             // The connector never varies with the key, so it carries no entropy.
@@ -586,7 +700,10 @@ mod tests {
 
             match slot {
                 "adjective" => {
-                    assert_ne!(moved.adjective, reference.adjective, "adjective did not move");
+                    assert_ne!(
+                        moved.adjective, reference.adjective,
+                        "adjective did not move"
+                    );
                     assert_eq!(moved.noun, reference.noun);
                     assert_eq!(moved.place, reference.place);
                 }
@@ -627,7 +744,10 @@ mod tests {
                 counts.iter().all(|&c| c == expected),
                 "{name}: reduction is not uniform"
             );
-            assert!(counts.iter().all(|&c| c > 0), "{name}: an index is unreachable");
+            assert!(
+                counts.iter().all(|&c| c > 0),
+                "{name}: an index is unreachable"
+            );
         }
     }
 
@@ -647,8 +767,14 @@ mod tests {
             );
         }
         for &(noun, place) in TRUE_ATTRIBUTION_PAIRS {
-            assert!((noun as usize) < NOUNS.len(), "noun index {noun} out of range");
-            assert!((place as usize) < PLACES.len(), "place index {place} out of range");
+            assert!(
+                (noun as usize) < NOUNS.len(),
+                "noun index {noun} out of range"
+            );
+            assert!(
+                (place as usize) < PLACES.len(),
+                "place index {place} out of range"
+            );
         }
         assert!(
             !TRUE_ATTRIBUTION_PAIRS.is_empty(),
@@ -662,10 +788,7 @@ mod tests {
     /// Constructing the digest is the whole point: a refused draw is reachable
     /// through a chosen digest and reachable through a chosen KEY only by
     /// grinding for one.
-    fn digest_drawing(
-        first: (u16, u16, u16),
-        reserve: (u16, u16, u16),
-    ) -> [u8; 32] {
+    fn digest_drawing(first: (u16, u16, u16), reserve: (u16, u16, u16)) -> [u8; 32] {
         let mut d = [0u8; 32];
         for (i, v) in [first.0, first.1, first.2, reserve.0, reserve.1, reserve.2]
             .iter()
@@ -694,7 +817,10 @@ mod tests {
         let digest = digest_drawing((0, noun, place), (500, reserve_noun, reserve_place));
         let name = name_from_digest(&digest).unwrap();
 
-        assert_eq!(name.adjective, ADJECTIVES[500], "the adjective was not redrawn");
+        assert_eq!(
+            name.adjective, ADJECTIVES[500],
+            "the adjective was not redrawn"
+        );
         assert_eq!(name.noun, NOUNS[reserve_noun as usize]);
         assert_eq!(name.place, PLACES[reserve_place as usize]);
 
@@ -723,14 +849,14 @@ mod tests {
     fn an_unrefused_draw_never_consults_the_reserve() {
         // Two digests differing ONLY in bytes 6..11. If the first draw is
         // permitted the reserve must be untouched, so the names must be equal.
-        let mut a = digest_drawing((10, 20, 30), (0, 0, 0));
-        assert!(!is_refused(20, 30), "the fixture's first draw must be permitted");
+        let a = digest_drawing((10, 20, 30), (0, 0, 0));
+        assert!(
+            !is_refused(20, 30),
+            "the fixture's first draw must be permitted"
+        );
         let mut b = a;
-        for i in 6..12 {
-            b[i] = 0xff;
-        }
+        b[6..12].fill(0xff);
         assert_ne!(a, b, "the fixture must actually differ in the reserve");
-        a[31] = 0; // silence the unused-mut lint path without changing the read range
         assert_eq!(name_from_digest(&a).unwrap(), name_from_digest(&b).unwrap());
     }
 
@@ -775,7 +901,10 @@ mod tests {
                 break;
             }
         }
-        assert!(found_permitted_noun, "the place must still pair with some noun");
+        assert!(
+            found_permitted_noun,
+            "the place must still pair with some noun"
+        );
     }
 
     #[test]
@@ -947,7 +1076,8 @@ mod tests {
             place: PLACES[index as usize],
         };
         assert!(
-            name.render().ends_with(&format!("{CONNECTOR} {}", PLACES[index as usize])),
+            name.render()
+                .ends_with(&format!("{CONNECTOR} {}", PLACES[index as usize])),
             "a multi-word place must render whole, after the connector: {}",
             name.render()
         );
@@ -989,42 +1119,71 @@ mod tests {
     }
 
     #[test]
-    fn no_entry_is_a_term_of_this_projects_own_vocabulary() {
-        // The collision is worst in a feed, where every row attributes a post to
-        // one of these names. `stoic` deliberately SURVIVES as an adjective — in
-        // that slot it cannot be misread as naming a place — and must never be a
-        // noun, which is why the two lists are checked against different sets.
-        for term in ["stoa", "dialectic", "dialectical", "delta", "genesis"] {
-            assert!(!NOUNS.contains(&term), "noun list holds {term}");
-            assert!(!PLACES.contains(&term), "place list holds {term}");
-            assert!(!ADJECTIVES.contains(&term), "adjective list holds {term}");
-        }
-        // `stoic` is an adjective and must not be a noun.
-        assert!(!NOUNS.contains(&"stoic"), "stoic must never be a noun");
-    }
-
-    #[test]
-    fn no_noun_is_a_figure_whose_invocation_is_an_argument() {
-        // A user rendered under one of these is signed by them on every post, and
-        // anyone disagreeing is visually disagreeing with them. Deliberately a
-        // handful of the most invoked figures; everything arguable is kept.
-        for figure in [
-            "plato", "platon", "aristotle", "aristoteles", "socrates", "sokrates",
-        ] {
-            assert!(!NOUNS.contains(&figure), "noun list holds {figure}");
+    fn no_noun_entry_carries_the_connector_as_a_word() {
+        // The `X of Y` shape is what makes this reachable. A source supplying
+        // named historical Greeks supplies them already QUALIFIED — `zenon
+        // kitieus`, `straton lampsakenos` — and such an entry renders
+        // *measured zeno of citium of lampsacus*, which reads as two places
+        // attached to one name and leaves a reader unable to tell which of them
+        // the place slot supplied.
+        //
+        // This is a rule about ONE LITERAL SUBSTRING and not a semantic screen:
+        // what the noun means is still no part of whether it is in.
+        let connector_as_word = format!(" {CONNECTOR} ");
+        for entry in NOUNS {
+            assert!(
+                !entry.contains(&connector_as_word),
+                "noun {entry:?} carries the connector as a word"
+            );
         }
     }
 
     #[test]
-    fn no_entry_asserts_authority() {
-        // A participant handed one of these has been handed apparent standing BY
-        // THE WORDLIST, and a name is never a credential.
-        for word in [
-            "moderator", "archon", "ephor", "magistrate", "strategos", "sovereign",
-        ] {
-            assert!(!NOUNS.contains(&word), "noun list holds {word}");
-            assert!(!ADJECTIVES.contains(&word), "adjective list holds {word}");
-            assert!(!PLACES.contains(&word), "place list holds {word}");
+    fn the_lists_carry_no_exclusion_of_any_kind() {
+        // **The screens are three and they are all mechanical: ASCII,
+        // deduplicated, attested.** Every successive draft that added a fourth
+        // was withdrawn on challenge — familiarity, which cut the place list by
+        // 28%; a rebadged "legibility", which cut it by 88%; a single-word rule,
+        // which made 1,024 places look unreachable; and a tone-and-authority
+        // apparatus.
+        //
+        // This test is the inverse of the three it replaced. Those asserted
+        // that `stoa`, `platon`, `sokrates`, `archon` and `strategos` were
+        // ABSENT. The contract now says no word is kept out for what it says,
+        // what it connotes or whom it names, so their absence would be the
+        // defect and their presence is the requirement.
+        //
+        // Pinned as PRESENT rather than merely "not asserted absent", because a
+        // curation pass that quietly dropped them would otherwise reintroduce
+        // the withdrawn screen with every test still green.
+        for term in ["stoa", "agora", "archon", "tyrannos", "genesis"] {
+            assert!(
+                NOUNS.contains(&term),
+                "{term} was excluded; there is no exclusion screen"
+            );
+        }
+        for figure in ["platon", "aristoteles", "sokrates"] {
+            assert!(
+                NOUNS.contains(&figure),
+                "{figure} was excluded; no figure is kept out for whom it names"
+            );
+        }
+    }
+
+    #[test]
+    fn a_refused_pair_leaves_both_of_its_words_drawing_freely() {
+        // The denylist refuses a COMPOSITION, never a word. Both halves of every
+        // refused pair must still be in their lists — this is what distinguishes
+        // the true-attribution family from the exclusions the contract forbids.
+        for &(noun, place) in TRUE_ATTRIBUTION_PAIRS {
+            assert!(
+                NOUNS.contains(&NOUNS[noun as usize]),
+                "a refused pair cost a noun its place in the list"
+            );
+            assert!(
+                PLACES.contains(&PLACES[place as usize]),
+                "a refused pair cost a place its place in the list"
+            );
         }
     }
 }

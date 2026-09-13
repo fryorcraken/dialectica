@@ -50,6 +50,17 @@ compiler guarantees every entry is valid UTF-8 in a fixed order.
 
 The cost is compile time on a 10,240-entry literal, which measured as noise.
 
+**The arrays are generated, not typed.** `tmp/gen.rs` reads the curated text
+files and emits the four modules. That is a decision about *provenance* rather
+than convenience, and it is the one thing that makes the spec's attestation
+screen auditable: a reviewer can diff a generated array against the text file it
+came from, and the text file against the census it came from, where a
+hand-transcribed array can only be read and believed. It also removes the defect
+both census agents hit and one of them caught in itself — **Cyrillic homoglyphs
+in hand-typed Greek**, where the habit is reliable and the typing is not.
+Generation cannot introduce a character that was not in the source, and the
+generator asserts ASCII before it writes.
+
 ### D2. `NAME_PREFIX` joins the family in `identity.rs`, but the derivation lives in its own module
 
 The separator is `b"/dialectica/1/Name/Display\0\0\0\0\0\0\0"` — 32 bytes, the
@@ -196,298 +207,162 @@ already refused for carrying an unknown field. The requirement holds because
 there is nothing to reach, and the test asserts the refusal rather than
 asserting a filter exists.
 
-## The screen was a defect, and removing it did not reach 1,024
+### D11. The lists are built by cutting a surplus down, never by padding up
 
-**REOPENED by a second, independent census — this one written *after* the screen
-was removed, with multi-word entries accepted throughout.** The resolution below
-was correct that the single-word rule was a mistake and correct to remove it. It
-was wrong that removing it makes 1,024 reachable. The relief is real and small:
-multi-word entries are **37 of 682** places and **29 of 551** nouns, about 5% of
-each, where the gap to be closed is 33% and 46%.
+The spec requires each list be **cut down to the nearest power of two below what
+its source yields, never padded up to reach one**, and the direction is the whole
+point: a list with headroom discards real candidates, which costs only choice,
+where a padded list ships entries invented to fill it. Every list here was built
+that way, and the margin is recorded because it is the evidence the rule was
+followed:
 
-### What was counted, and how
-
-Written region by region into `tmp/names/places-0*.txt` and
-`tmp/names/nouns-0*.txt`, concatenated, then `sort -u`, then `grep -c .`. The
-counts are from those commands, not from an estimate:
-
-| List | Required | Counted, deduplicated | Short by |
+| list | source yield | shipped | discarded |
 |---|---|---|---|
-| places | 1,024 | **833** | 191 |
-| nouns | 1,024 | **551** | 473 |
+| adjectives | 17,349 | 8,192 | 9,157 |
+| nouns | 1,892 | 1,024 | 868 |
+| places | 1,131 | 1,024 | 107 |
 
-**The place sweep covered every category the design enumerates**: all seventeen
-mainland regions, the Attic demes, Megaris, Crete, the Aegean and Ionian
-islands, Cyprus, the whole Asia Minor coast, Magna Graecia and Sicily, the Black
-Sea colonies, Cyrenaica, the western colonies, sanctuaries, mountains, rivers,
-regions, and mythological geography.
+The counts are from `grep -c .` on the files, not from an estimate.
 
-**833 is already the stretched figure and should be read as an upper bound.**
-The first six batches — the poleis, demes, islands and colonies I am confident
-are real, distinct and correctly transliterated — total **682**. The seventh
-batch adds 151 by reaching into rivers, Athenian hills and the Homeric Boeotian
-and Locrian catalogues, which is where the design's third defect begins:
-"descending below the polis/deme level into unlocatable single-inscription
-fragments". A reviewer should treat everything past 682 as the weakest material
-in the list.
+**The place list is the one with thin margin, and its 107 cuts are each a defect
+the spec names rather than a judgement about what a place connotes.** Latinised
+doublets sitting beside their transliterations (`piraeus` beside `peiraion`,
+`ocalea`, `tricolonoi`, `halaesa`), near-duplicate transliterations of one place
+(`gortynia` beside `gortyn` and `gortys`), entries that are not toponyms at all
+(`lelantine` is an adjective; `asphodel` is the English form of `asphodelos`),
+one Latin name (`avernus`), and Greek exonyms for non-Greek regions
+(`india`, `persis`, `sarmatia`, `baktria`). The first two families are the
+deduplication screen applied *in substance* — shipping them would pass a naive
+string comparison while violating dedup in fact, which the spec names as a way to
+fake a full list.
 
-**The noun census reproduces the earlier one almost exactly**, which is what
-makes it trustworthy rather than merely another opinion: 252 abstractions
-against that census's predicted 250–270, and 299 named Greeks raw. It also
-reproduces the *mechanism* it predicted — the canon individuates people by name
-plus place, so `zenon` is one entry standing for five philosophers, and
-`apollodoros`, `krates` and `dionysios` each collapsed the same way in my own
-sweep before I disambiguated a handful of them.
+**The noun list's 868 cuts include 24 that matter structurally**: qualified forms
+like `zenon kitieus` and `straton lampsakenos`. A source supplying named
+historical Greeks supplies them already attached to a place, and such an entry
+renders *measured zenon kitieus of lampsakos* — two places on one name, with no
+way for a reader to tell which the place slot supplied. The bare names stay, so
+no figure is lost; what changes is that the noun–place denylist becomes the thing
+that handles this family, at the pair level where the spec puts it. Eight
+Roman/Latin entries (`lucretius`, `agrippa`, `antoninus`, `quintus`, `rufus`,
+`musonius`, `josephos`, `aelianus`) were also cut: the spec's source is any
+attested ancient *Greek* noun.
 
-### Why the screen removal could not have closed the gap
+### D12. The adjective list is derived from a dictionary, not from recall
 
-The census the resolution overturned attributed the shortfall to three
-attritions, and the single-word screen is only the first. Removing it recovers
-attrition 1 and part of 2. **Attrition 3 — cross-regional collision — is
-untouched by it, and it is the one that compounds**: the Greeks reused
-toponyms, so `apollonia`, `herakleia`, `magnesia`, `naxos` and `chersonesos`
-each occur across a dozen regions and dedupe to one entry however many words
-the rule permits. Yield therefore falls as the list grows, which is why the last
-200 entries are far harder than the first 200 and why a sweep that looks
-thorough still lands under 1,000.
+8,192 English adjectives is past what anyone writes down honestly, and the
+failure mode is specific: an agent asked for 8,192 words produces perhaps 2,000
+real ones and then fills. So the list is derived mechanically from
+`/usr/share/dict/words` — Webster's unabridged, present on the build host — by
+suffix, and the selection rules are stated here so the result is reproducible
+rather than merely asserted:
 
-Multi-word entries help attrition 3 only where a source supplies a *standard*
-disambiguating epithet (`herakleia pontike`, `magnesia`). Where it does not, the
-disambiguator would have to be invented, which is defect 4.
+1. Words matching `[a-z]{4,8}(able|ible|ous|ive|ful|less)` — the six
+   near-unambiguously adjectival English suffixes. 11,467 matched.
+2. Less the technical `-ous` tails (`-aceous`, `-iferous`, `-ivorous`,
+   `-icolous`, `-ogenous`, …) and the `-eable` doublets. 10,345 left.
+3. Less the `un-`, `non-`, `ir-`, `il-` negations and the `over-`, `under-`,
+   `counter-`, `pseudo-`, `semi-`, `multi-`, `inter-`, `super-` compounds — each
+   a mechanical derivative of a base already in the list, which is the same
+   near-duplicate family the dedup screen targets. 8,454 left.
+4. Less the 115 `-isable`/`-izable` British/American spelling doublets. 8,339.
+5. Less 147 by a **deterministic stride** over line numbers, to land on exactly
+   8,192.
 
-### This is an owner decision, and the options are the ones already written
+**Step 5 is the honest part and is worth naming as such.** Steps 1–4 are
+defensible rules; step 5 is not a rule, it is arithmetic to reach a power of two,
+and no amount of regex tuning would have made it one. A stride was chosen over
+cutting the alphabetical tail precisely because the tail would have deleted every
+adjective from `v` to `z` — a visible, arbitrary bias — where a stride treats
+every letter alike. The alternative considered and rejected was to widen step 1
+until some *other* rule happened to land on 8,192, which is the same arbitrariness
+with its arithmetic hidden.
 
-**Nothing here is new information about what to do** — options 1 to 4 below were
-written for exactly this position and the reasoning that ruled each in or out is
-unchanged. What is new is that the position is real rather than hypothetical,
-and that the noun list, not the place list, is now the binding constraint: at
-551 it is short by 473, and **512 is the nearest power of two below it**, which
-is what PLAN.md lines 1363–1368 concluded independently and before this spec was
-written.
+**This is better for the attestation screen than hand-authoring would have
+been**, which is the argument for the whole approach: every entry traces to a
+line in a dictionary file on disk, so "is this a real English adjective?" is a
+question a reviewer can answer with `grep` rather than by trusting the author's
+memory. The cost is register — `abdominous` and `viraginous` draw alongside
+`luminous` — and that cost is accepted rather than argued away, because the spec
+forbids a familiarity screen and a register screen by name.
 
-The place list at 833 also cuts to **512**, since 1,024 is above it and the rule
-is to cut down rather than pad up. So the honest sizes are 8,192 / 512 / 512 and
-the space is 2³¹ — **option 1**, reached by measurement rather than by choice.
+### D13. The denylist is generated from a named-figure table, and its gaps are visible
 
-**Option 2 is the one that preserves the arithmetic the owner accepted** —
-8,192 → 32,768 adjectives restores 2³³ exactly with no Greek source strained —
-and it remains unassessed. The adjective list was not written, because writing
-8,192 entries against a size that may become 32,768 is work done twice.
+`tmp/attributions.txt` lists each named historical Greek in the noun list beside
+the place that figure is canonically cited with; the generator resolves both
+halves to indices and emits the sorted pair array. An attribution naming a word
+that did not survive curation is **reported and skipped rather than failing the
+build**: the pair is unreachable because one half is absent, so there is nothing
+to refuse, and treating it as an error would make a curation change look like a
+defect.
 
-### The original resolution follows, as written
+The completeness of that table is the one claim in this change that no test can
+check, and it is stated in Risks below rather than implied to be covered.
 
-**The census below remains true of the rule it was measured against**, and the
-screen removal it argues for was right and has been kept. The census that follows is sound arithmetic applied to a
-screen the design never imposed: an earlier draft of this spec required every
-entry to be a single word with no whitespace, and PLAN.md names exactly two
-screens, ASCII-transliterable and deduplicated, adding that "if a word is being
-excluded for any reason other than the two above, that is the mistake, not the
-word."
+## What was superseded, and why it is not here
 
-The single-word rule was that mistake. It is what discards *alexandria troas*
-and *heraclea pontica*, and what turns "Apollonia (northern Crete)" into a
-collision rather than a distinct entry — attritions 1 and 2 below, and a large
-part of 3. **The screen has been removed from the spec** and multi-word place
-entries are accepted, which restores the supply the census had subtracted and
-makes 1,024 reachable against merged PLAN.md's anchor of Hansen & Nielsen's
-1,035 catalogued poleis.
+An earlier draft of this document carried a long escalation arguing that 1,024
+was unreachable for both Greek lists and that the sizes should fall to 512. That
+argument is **gone rather than struck through**, and the reason is worth one
+paragraph because the conclusion was wrong in an instructive way.
 
-**The sizes stand at 8,192 / 1,024 / 1,024, and every collision figure in the
-spec is unchanged.** Options 1–4 below were the escalation written when the
-blocker looked binding; none was taken, and they are kept because the reasoning
-that ruled each in or out is not recoverable from the decision alone.
+It rested on two censuses, both written against a noun slot read as *"the
+vocabulary of Greek thought plus named thinkers"* — a narrow technical
+vocabulary. The spec's slot is any attested ancient Greek noun across four pools,
+and the two pools those censuses omitted entirely (mythological figures, ordinary
+concrete nouns) turned out to be the larger half: 341 and 811 against the 443 and
+304 of the two they did count. A census taken under the old scope was not
+evidence about the new one, in either direction, and the 551 it reported against
+a target of 1,024 became 1,892 once the scope was measured as written.
 
-**What is kept as a live caution rather than a resolved one:** the place list's
-headroom is thin either way — PLAN.md itself calls it "a little over 10%" and
-"the one list where the estimate being wrong would matter" — so the person
-writing the list must count, not estimate, and report a shortfall rather than
-padding. The four ways to fake a full list, below, are all still defects.
+The place census was under unchanged scope and did apply, and its author was
+honest that the margin was thin. It held: 1,131 deduplicated, 1,024 shipped, 107
+discarded. Thin is not short.
 
-The original finding follows, as written.
-
-Two requirements in the spec cannot both be satisfied for the place list:
-
-- *"The list sizes SHALL be exactly 8,192 adjectives, 1,024 nouns and 1,024
-  places"* — from **A name is three drawn words in the form adjective noun of
-  place**.
-- *"Each list SHALL be **cut down to the nearest power of two below what its
-  source yields, never padded up to reach one**. The direction matters — a list
-  with headroom discards real candidates, which costs only choice, where a padded
-  list ships entries invented to fill it."* — same requirement, four sentences
-  later.
-
-**The place source does not yield 1,024.** A census of the enumerated categories
-puts the honest supply at **620-780 net-distinct entries**, with the estimate
-anchored on two *complete* category audits (ancient Crete, 113 raw entries;
-the ancient Aegean islands, 145 raw) that each independently yielded ~70-75%
-net-new after the losses below. The categories counted are the full set: mainland
-poleis across all seventeen regions, the 139 Attic demes, Crete, the Aegean
-islands, the Asia Minor coast, Magna Graecia and Sicily, the Black Sea colonies,
-Cyrenaica and the western colonies, sanctuaries, mountains and rivers, regions,
-and mythological geography.
-
-Three attritions do the damage, and the third is the one that is easy to miss:
-
-1. **Multi-word names fail the single-word screen** — *alexandria troas*,
-   *heraclea pontica*, *antioch on the orontes*.
-2. **Sources disambiguate with parentheses rather than with distinct names** —
-   "Apollonia (northern Crete)". Stripping the parenthetical is what *causes* the
-   collision; keeping it violates the single-word screen.
-3. **Cross-regional collision, which compounds.** The Greeks reused toponyms
-   relentlessly: Minoa appears three times in the Aegean alone and twice more on
-   Crete; Apollonia, Heraclea, Chersonesus, Naxos, Magnesia and Arsinoe recur
-   across a dozen regions. The deduplication screen destroys all but one of each.
-   **Yield therefore falls as the list grows** — each region added collides more
-   with what is already held, so the last 200 entries are far harder than the
-   first 200.
-
-Reaching 1,024 requires one of four things, and each is a defect the spec names:
-
-- shipping near-duplicate transliterations as distinct entries (*gortyn* and
-  *gortyna*, *polichna* and *polichne*) — which passes a naive string comparison
-  while violating deduplication in substance;
-- shipping Latinised/Hellenised doublets (*knossos*/*cnossus*,
-  *miletos*/*miletus*) — the same trap, and the easiest to fall into by accident
-  because the sources themselves carry both;
-- descending below the polis/deme level into unlocatable single-inscription
-  fragments;
-- **inventing entries**, which is what the spec forbids by name. The
-  mythological bucket genuinely supplies 30-40; any list claiming 150 legendary
-  Greek places is fabricating them.
-
-The last is the failure mode that matters most here, and it is invisible on
-inspection: **a fabricated Greek toponym reads exactly like a real one.** A
-reviewer cannot catch it by reading the list, and no test can catch it at all.
-That is precisely why the shortfall must be resolved by decision rather than
-absorbed quietly by whoever writes the list.
-
-### What the arithmetic becomes
-
-The spec's collision figures are computed against `2^33`. Cutting the place list
-to the nearest power of two below its yield gives **512**, and the space becomes
-`8192 x 512 x 1024` = **2^32** — half the specified size, so:
-
-| identities in one Stoa | at 2^33 (spec) | at 2^32 (512 places) |
-|---|---|---|
-| 5,000 | 0.145% | **0.291%** |
-| 10,000 | 0.580% | **1.157%** |
-
-Working for the 2^32 row, since the spec asks that a restated figure be
-re-derived rather than copied: at k=5,000, `k(k-1)/2 = 12,497,500`;
-`12,497,500 / 4,294,967,296 = 2.90982e-3`; less `x^2/2 = 4.2335e-6` gives
-`2.90559e-3` = **0.2906%**. At k=10,000, `49,995,000 / 4,294,967,296 =
-1.164037e-2`; less `x^2/2 = 6.7749e-5`, plus `x^3/6 = 2.63e-7`, gives
-`1.157287e-2` = **1.1573%**.
-
-Both were re-derived independently and agree to four significant figures; the
-same derivation reproduces the spec's own 0.145% and 0.580% at 2^33 exactly,
-which is what makes the pair trustworthy rather than merely plausible.
-
-**0.291% at 5,000 is four times the four-word scheme's 0.073%** and twice what
-the owner accepted when taking three words. Whether that is still acceptable is
-the owner's call and not mine — which is exactly why this is reported rather
-than decided.
-
-### Options, for the owner
-
-Each is a spec change, and none is available to an implementer:
-
-1. **Accept 512 for both Greek lists** (space `2^31`, **0.5803%** at 5,000).
-   Honest lists with real curation margin — at ~790 and ~700 available you
-   discard the weakest third, which is the position curation should be in. The
-   smallest change to the spec: two numbers, and it agrees with merged PLAN.md.
-2. **Accept 512 for both and widen the adjective list to 32,768** (`2^33`
-   restored, every collision figure in the spec unchanged). The adjective slot
-   is English and uncapped, so this costs no Greek source material. **Unassessed
-   — do not adopt without measuring whether 32,768 English adjectives survive
-   the tone and authority screens.** This is the option that keeps the arithmetic
-   the owner already accepted.
-3. **Add a fourth slot**, the lever PR #22 used and PR #27 withdrew. Reopens a
-   settled decision and puts a word back on every feed row.
-4. **Keep 1,024 and relax the source rule**, accepting variant spellings as
-   distinct entries. **This is the option to refuse**: it ships the same place or
-   person twice, which is the deduplication screen defeated in substance while
-   passing it in form — and it contradicts PLAN.md, which reached "1,024 is not
-   reachable" independently and before this spec was written.
-
-### The noun list falls short too, and PLAN.md already said so
-
-Assessed the same way, by enumeration rather than estimate. Raw sweep across
-twenty categories — presocratics, the four Hellenistic schools, the Academy,
-Peripatetics, Neoplatonists, mathematicians, astronomers, physicians,
-historians, orators, poets, playwrights, grammarians, geographers, sculptors,
-engineers, naturalists, the sages — yields **745 lines, falling to 580 distinct
-bare single-word names**, and to roughly **520-545** after removing Latin and
-Christian-era figures, mythological names that are not thinkers, entries that
-are already ordinary English words (`ion`, `bias`, `oros`), and true minimal
-pairs (`kritias`/`kritios`, `zenodoros`/`zenodotos`, `theon`/`theano`).
-
-The abstractions pool is **not** the constraint: roughly 250-270 clean entries,
-which *exceeds* the 224 the design assumed. **Combined honest ceiling: 770-815.**
-
-**The structural cause is the single-word rule, and it is worth understanding
-because it also explains the denylist.** The Greek canon individuates people by
-*name plus place*: Zeno of Citium, Zeno of Elea, Zeno of Sidon, Zeno of Tarsus
-and Zeno of Rhodes are five philosophers and **one** wordlist entry. The same
-collapses Philo (×4), Diogenes (×5), Apollonius (×6), Dionysius (×6). That is
-164 collapses in the raw sweep, 22% of everything enumerated.
-
-So the noun–place denylist is **re-expanding exactly the distinctions the
-single-word rule collapsed** — which is why the *X of Y* shape can spell a real
-figure's canonical name at all. The two facts are the same fact.
-
-**`docs/PLAN.md` lines 1363-1368 already record this, on merged main**, and I
-read the passage rather than grepping it:
-
-> **Nouns: 512.** The pooled list is deep: roughly 250 terms from the vocabulary
-> of Greek thought, and roughly 250 thinkers, writers and makers once the handful
-> of argument-move names come out. **1,024 is not reachable** without scraping
-> every minor figure in Diogenes Laertius and every technical entry in
-> Liddell–Scott […]
-
-Line 1340 flags these as *"estimates, not counts"* and says the way to falsify
-them is **"to write the list and count"**. That is what the two censuses did, and
-the conclusion holds: PLAN underestimated the named-Greek half (250 against ~520)
-while this spec overestimates it (800), and both land on 1,024 being out of reach.
-
-**So the spec contradicts merged PLAN.md on a number PLAN.md had already settled**
-— which is a stronger finding than the census alone, because it means the 1,024
-was never sourced from an assessment that reached it.
-
-### If both lists go to 512
-
-Space is `8192 x 512 x 512` = **2^31** = 2,147,483,648, and at k=5,000:
-`12,497,500 / 2,147,483,648 = 5.81964e-3`; less `x^2/2 = 1.69341e-5` gives
-`5.80271e-3` = **0.5803%** — four times the spec's 0.145%, and equal to what the
-spec quotes for *ten thousand* identities at 2^33.
-
-**The adjective slot is the lever, and it is the cheap one.** It is English,
-uncapped, and 8,192 was itself reached by withdrawing a self-imposed cap rather
-than by hitting a source limit. Recovering both lost doublings there — 8,192 to
-**32,768** — restores `32768 x 512 x 512` = 2^33 exactly, with the spec's
-original collision figures intact and no Greek source strained. Whether 32,768
-English adjectives survive the tone and authority screens has **not** been
-assessed and must not be assumed; it is the first thing to measure if this route
-is taken.
+**The lesson kept rather than the argument**: a count is evidence only about the
+scope it was taken under, and "the source does not yield N" is a claim to
+re-measure whenever the source definition moves.
 
 ## Risks / Trade-offs
 
 - **The wordlists are the change's real surface and cannot be reviewed by
   reading them.** 10,240 entries is past what a reviewer will check word by
-  word. → The screens that *can* be mechanically checked are tests over the whole
-  list (ASCII, lowercase, no whitespace, no duplicates, the exact size, no
-  project vocabulary, no excluded figure). What no test can check is the tone
-  screen on entry 6,000. Stated plainly rather than implied to be covered.
+  word. → What *can* be checked mechanically is checked, as tests over the whole
+  of every list: the exact size, ASCII, lowercase, well-formed spacing, no
+  duplicates, and no noun carrying the connector. **What no test can check is
+  attestation** — whether entry 6,000 is a real word. That is stated here rather
+  than implied to be covered, and it is why the lists are generated from files a
+  reviewer can trace rather than transcribed by hand.
 
-- **The denylist's completeness is not testable.** "Every noun–place pair that
-  spells a real figure's canonical name" is a claim about the world. A test can
-  assert the list is well-formed, sorted, in range and that the pairs on it are
-  refused; it cannot assert that a pair *missing* from it should have been on
-  it. → The named figures it does cover are drawn from each noun entry that is a
-  person, and the spec's own arithmetic (~800 named Greeks × ~1.2 places) is the
-  target. A missed pair renders one identity under a real person's name, which
-  is the harm; it is a curation gap and not a code defect, and it cannot be
-  repaired after release without a scheme version bump.
+  Note there is **no tone, register, familiarity or exclusion check to write**,
+  and their absence is the requirement rather than a gap: every draft that added
+  a fourth screen was withdrawn. A test asserting `platon` is absent would now be
+  a defect, and the test that replaced the three such tests asserts the opposite.
+
+- **The denylist's completeness is not testable, and this is the change's largest
+  uncheckable claim.** "Every noun–place pair that spells a real figure's
+  canonical name" is a claim about the world. A test can assert the list is
+  sorted, deduplicated, in range, and that the pairs on it are refused; it
+  **cannot** assert that a pair missing from it should have been on it. → The
+  table covers the named historical Greeks in the shipped noun list against the
+  places canonically associated with them, built to under-include rather than
+  guess: a figure whose canonical place the author was unsure of was left out. A
+  missed pair renders one identity under a real person's name — a curation gap
+  rather than a code defect, and one that cannot be repaired after release
+  without a scheme version bump.
+
+- **The adjective list's register is uneven, and that is the contract working
+  rather than failing.** A dictionary-derived list contains `abdominous` beside
+  `luminous`. The spec forbids a familiarity screen and a register screen by
+  name, and the long tail is described there as "deliberately in, and the
+  consequence is accepted rather than argued away — some names will be legible
+  but hard to tell apart". → Accepted. The alternative is a fourth screen, which
+  is the mistake this contract has made and withdrawn four times.
+
+- **The final 147 adjectives were cut by a stride rather than by a rule.** →
+  Recorded in D12 rather than dressed up as mechanical. No rule lands on a power
+  of two by itself, and the honest options were a stride or a rationalised regex
+  tuned until its count matched; the stride is the one whose arbitrariness is
+  visible.
 
 - **Moving the mark's window invalidates every rendered mark.** → Accepted and
   free: there is nothing in the field. `tst_identicon.qml` pins the old window
