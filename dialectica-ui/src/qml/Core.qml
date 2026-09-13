@@ -43,6 +43,11 @@ QtObject {
     // "failed" from "succeeded with nothing" is the caller that eventually
     // renders a broken store as an empty feed — which is the one confusion
     // UI-BRIEF obligation 5 exists to prevent.
+    //
+    // **This separates a failure from an answer. It does not tell you the
+    // operation succeeded** — for three methods the answer itself can be no.
+    // See the note at the `ok: true` return below, which is the half of this
+    // contract a caller is most likely to miss.
     function call(method, args) {
         // The bridge is injected by the host. Absent means the view is running
         // somewhere that provides no core, which is worth saying plainly: a
@@ -73,6 +78,30 @@ QtObject {
         if (reply.error !== undefined)
             return { ok: false, error: String(reply.error) }
 
+        // **`ok: true` means THE MODULE ANSWERED. It does not mean the thing
+        // you asked for happened.**
+        //
+        // Read that before using `value`. Three core methods answer a refusal
+        // as a wire SUCCESS, so `ok` is true and the answer is no:
+        //
+        //   keep_identity     {"kept":false,"reason":…}
+        //   who_am_i          {"hasIdentity":false,"reason":…}
+        //   get_capabilities  {"canPost":false,"reason":…}
+        //
+        // For those three, the negative field is the answer and `reason` says
+        // why. A caller that stops at `ok` reports an identity that was never
+        // stored, or opens a composer for a user who cannot post — and it does
+        // so silently, because nothing failed.
+        //
+        // This is not a defect in the normalisation. `{"error":…}` is the wire's
+        // one FAILURE shape and that is what `ok:false` reports; a refusal is a
+        // different thing from a failure and the contract is right to keep them
+        // apart. What the caller owes is the second branch: `ok` first, then the
+        // method's own answer field.
+        //
+        // The warning lives HERE rather than only at the call sites that
+        // already get it right, because this is the line a new wrapper's author
+        // reads.
         return { ok: true, value: reply }
     }
 
@@ -93,5 +122,49 @@ QtObject {
 
     function getCapabilities(stoa) {
         return root.call("get_capabilities", [JSON.stringify({ stoa: stoa })])
+    }
+
+    // ---- onboarding ------------------------------------------------------
+    //
+    // **None of these three takes an identity**, and the omission is the
+    // contract's rather than an oversight: the identity follows from the Stoa
+    // and the selection, so a request naming one would be asking the module to
+    // act as somebody it is not. Core refuses such a request; there is nothing
+    // here that could send one.
+    //
+    // Two of the three have TWO success shapes — `{"kept":true,…}` /
+    // `{"kept":false,"reason":…}` and the same for `hasIdentity`. `call()`
+    // normalises both to `ok:true`, because both ARE successes at the wire
+    // level: the module answered the question it was asked. Telling a refusal
+    // from a success is the caller's job and is done once, in
+    // OnboardingScreen, where the three outcomes become three phases.
+
+    // `{"stoa":hex}` -> `{"slate":hex,"count":N,"candidates":[…]}`.
+    // No count parameter: a caller-supplied count is a number deciding how much
+    // key derivation the module performs, so the module fixes it and reports it.
+    function generateIdentitySlate(stoa) {
+        return root.call("generate_identity_slate", [JSON.stringify({ stoa: stoa })])
+    }
+
+    // `{"stoa":hex,"slate":hex,"index":N}` -> kept, or refused with a reason.
+    //
+    // `slate` is the identifier the offering reply carried, and sending it is
+    // what lets core refuse a selection made against a superseded set rather
+    // than satisfying it with the current set's candidate at that index — which
+    // would store an identity the user never saw.
+    function keepIdentity(stoa, slate, index) {
+        return root.call("keep_identity",
+                         [JSON.stringify({ stoa: stoa, slate: slate, index: index })])
+    }
+
+    // `{"stoa":hex}` -> the identity in use, or that there is none with a reason.
+    //
+    // A DIFFERENT question from `getCapabilities`, and the two can honestly
+    // disagree: a stored identity whose keystore permissions are too open is a
+    // real identity that cannot currently be used. This is the one that decides
+    // whether onboarding is shown, because it is the one that can tell an
+    // absent identity from an unusable one.
+    function whoAmI(stoa) {
+        return root.call("who_am_i", [JSON.stringify({ stoa: stoa })])
     }
 }
