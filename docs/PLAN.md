@@ -3842,9 +3842,17 @@ two events at two times, and this decision stops the API pretending they are one
 **The obligation lands on `op-transport`**: an op that reaches
 `channelMessageError`, or that never reaches `messagePropagated` within some
 bound, has to become visible somewhere. Without that this decision converts a loud
-failure into a silent one. The bound, and what a view shows for an op in flight
-versus one that never propagated, are that capability's to specify — and
-`docs/UI-BRIEF.md` will need the rendering obligation once it does.
+failure into a silent one.
+
+~~The bound, and what a view shows for an op in flight versus one that never
+propagated, are that capability's to specify~~ — **the obligation is now stated
+there rather than only here.** The `op-transport` spec's "A successful publish is
+a statement about the local log and nothing more" contracts what a publish may
+claim, and names the three things still owed: the bound, what a peer records for
+an op in flight, and what it records for one that never propagated. **Still not
+built** — meeting it needs state outliving the publish call and a clock, which is
+a component rather than a branch. `docs/UI-BRIEF.md` will need the rendering
+obligation when those three are answered.
 
 Moving `deliver` outside `guarded` was rejected — PHASE0-FINDINGS §3 measured what
 an unguarded panic costs (the module aborts, the caller waits out a 20-second

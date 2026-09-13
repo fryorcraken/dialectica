@@ -347,6 +347,59 @@ Mutation 4b is the one new measurement that matters, and it is finding 1 below.
       a brief edit against an unmerged PLAN change is the stale-brief failure
       CLAUDE.md warns about, from the other direction.
 
+      **SUPERSEDED, same session — §9.2's follow-ups reached `origin/main` while
+      this was being written**, via PR #51 (authoring), which carried the
+      cherry-picked `962b746`. `git grep -c messagePropagated origin/main --
+      docs/PLAN.md` returns 4; the paragraph above was true when written and is
+      not now. Merged again and **checked the two texts agree rather than assuming
+      it, which found one real disagreement and two overreaches of mine.** All
+      three are mine to fix, and are fixed:
+
+      - **The landed `content-authoring` spec (`openspec/specs/content-authoring/
+        spec.md:37-40`) requires that a *failed handoff* still report the op as
+        published.** My requirement said a refused handoff "is a failure of the
+        publish call itself … and reportable as such" — a clause added for
+        internal consistency with the no-open-channel refusal, and flatly
+        contradicting a spec that names `op-transport` as the obligation's owner.
+        Corrected: **neither** a delivery outcome **nor** a failed handoff may be
+        reported as a failed publish, with the reason the two differ only in when
+        they are knowable, and with the no-open-channel case explained as a
+        distinction between refusals of a publish that never stored anything —
+        which is what it actually is, re-read at spec line 207 rather than
+        recalled.
+      - **My opening sentence overreached.** It said a successful publish means
+        the op is in the log *and that its bytes were handed to the transport* —
+        the second half being exactly what `content-authoring` forbids reading into
+        it. Now: the log, and that is the whole of what it means, with the transport
+        having accepted the bytes explicitly excluded alongside a peer having
+        received it.
+      - **I nearly committed the failure this brief was about.** Reconciling the
+        above, I wrote a scenario *"A handoff that fails does not make the publish
+        a failure"* — then checked it against the surface and found `publish`
+        **returns** a `Publishable` and never sends (`transport.rs:573-600`), so no
+        handoff failure is reachable from it and the scenario could not be tested
+        here. Replaced with what is checkable — that there is no route by which a
+        handoff failure could unpublish the op, which is the structural property
+        the function's shape already holds — and the requirement now says plainly
+        that reporting the handoff correctly binds whichever caller performs the
+        send, naming `content-authoring` as contracting that reply.
+
+      **And the agreement is now closer than "does not contradict".** PLAN.md's
+      landed text says the bound, and what a view shows for an op in flight versus
+      one that never propagated, are **this capability's to specify** — which my
+      original wording did not carry; it said only that the obligation is not
+      discharged here, which disowns the specification along with the
+      implementation. The requirement now names **three owed things** (the bound,
+      what a peer records for an op in flight, what it records for one that never
+      propagated), says they are owed here, and says none is met by this change —
+      a scope statement rather than an impossibility, which is the distinction this
+      whole finding turned on. PLAN.md's §9.2 paragraph is struck to match and
+      points at the requirement, so the two now say the same thing from both ends
+      rather than one anticipating the other.
+
+      **Test count moved and not because of this**: 562 → 623, which is #51's
+      authoring suite arriving with the merge. Spec edits moved nothing.
+
 - [x] **`spec-writer`** — `the_content_topic_keeps_the_prefix_autosharding_reads`
       pins an interop property **no requirement states**: that both the content
       topic and the channel id begin with the literal `/dialectica/1/`, because
