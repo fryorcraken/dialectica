@@ -317,34 +317,78 @@ jobs:
           done
           [ "$fail" -eq 0 ] && echo "ok: every Text declares a textFormat"
 
-      # scaffold.toml is destroyed a little on every `lgs basecamp` verb:
-      # PHASE0-FINDINGS §4 records that `setup`, `modules` AND `install` each
-      # strip every comment from it, and that the comments were lost twice
-      # because PLAN.md §11 named only `setup`.
+      # Every `lgs basecamp` verb rewrites scaffold.toml — `setup`, `modules`
+      # AND `install`, per PHASE0-FINDINGS §4. This gate used to count comment
+      # lines, because the comments were the irreplaceable part and a wipe was
+      # invisible to every other check. They no longer live in that file: the
+      # reasoning is in docs/SCAFFOLD.md, which no verb can reach, so there is
+      # nothing left in scaffold.toml for a stray verb to *delete*.
       #
-      # Those comments are the record of bugs that each cost a debugging
-      # session and are not recoverable from the values alone, so a commit that
-      # silently drops them is a real loss that no build failure would show.
-      # A count floor is the cheapest gate that notices: it cannot fail when a
-      # comment is EDITED, only when the block is wiped, which is the actual
-      # failure mode.
-      - name: scaffold.toml kept its comments
+      # What a verb can still do is rewrite a VALUE, and the values below are
+      # the ones whose corruption is silent — no build failure, no test
+      # failure, nothing until someone runs `install` or clicks a tile:
+      #
+      #   - `role = "dependency"` on delivery_module is WRITTEN BY
+      #     `lgs basecamp modules`, so the verb most likely to run is the one
+      #     that touches this key. Lose it and `install` never installs
+      #     delivery, the core fails to resolve, and it presents as a launcher
+      #     tile that does nothing when clicked — while the build stays green.
+      #   - The basecamp/lgpm `attr` pair selects the dev or the portable
+      #     stack, and the halves must match. `nix flake show` cannot tell them
+      #     apart; only `install` reveals a mismatch.
+      #
+      # This asserts the pairing and the role, NOT the pins — a pin is meant to
+      # be bumped, and asserting it would fail on every deliberate update. It
+      # deliberately does not assert the two-line pointer comment either:
+      # guarding prose is what this gate stopped being for.
+      - name: scaffold.toml kept the values a lgs verb can silently rewrite
         run: |
           python3 - <<'PY'
-          import sys
-          lines = open("scaffold.toml").read().splitlines()
-          comments = [l for l in lines if l.lstrip().startswith("#")]
-          # A floor, not an exact count, so editing prose does not fail CI.
-          # It is deliberately well under the real number: this fires when a
-          # `lgs basecamp` verb wiped the file, not when someone tightened a
-          # paragraph. Raise it only if the block genuinely grows a lot.
-          floor = 40
-          if len(comments) < floor:
-              print(f"::error::scaffold.toml has {len(comments)} comment lines, expected >= {floor} — "
-                    "did an `lgs basecamp setup|modules|install` strip them? "
-                    "Run `git diff scaffold.toml` after ANY lgs basecamp verb.")
+          import re, sys, tomllib
+          cfg = tomllib.load(open("scaffold.toml", "rb"))
+
+          errors = []
+
+          # The dev/portable pairing. Recorded in docs/SCAFFOLD.md.
+          pairs = {("app", "cli"), ("bin-bundle-dir-inspector", "cli-portable")}
+          got = (cfg["repos"]["basecamp"]["attr"], cfg["repos"]["lgpm"]["attr"])
+          if got not in pairs:
+              errors.append(
+                  f"[repos.basecamp].attr={got[0]!r} and [repos.lgpm].attr={got[1]!r} "
+                  "are not a matching dev/portable pair — `install` will deadlock on a "
+                  "package-variant mismatch that `nix flake show` cannot see. "
+                  "Valid pairs: " + ", ".join(sorted(map(str, pairs)))
+              )
+
+          # delivery must stay a dependency, or it is built but never installed.
+          role = cfg["modules"].get("delivery_module", {}).get("role")
+          if role != "dependency":
+              errors.append(
+                  f"[modules.delivery_module].role={role!r}, expected 'dependency' — "
+                  "without it `install` builds delivery but never installs it, and the "
+                  "core fails to load with `Cannot resolve dependencies for: dialectica`, "
+                  "which presents as a launcher tile that does nothing when clicked."
+              )
+
+          # Module flake refs must stay RELATIVE: an absolute path pins every
+          # worktree's build to one checkout, and fails silently with a green
+          # build of the wrong tree.
+          for name, mod in cfg["modules"].items():
+              ref = mod.get("flake", "")
+              if ref.startswith("path:") and not re.match(r"^path:\./", ref):
+                  errors.append(
+                      f"[modules.{name}].flake={ref!r} is an absolute path: ref — it must "
+                      "stay relative (`path:./<dir>#lgx`), or every worktree builds this "
+                      "one checkout and the wrong tree goes green."
+                  )
+
+          if errors:
+              for e in errors:
+                  print(f"::error::{e}")
+              print("::error::Run `git diff scaffold.toml` after ANY `lgs basecamp` verb — "
+                    "every one of them rewrites the file. See docs/SCAFFOLD.md.")
               sys.exit(1)
-          print(f"ok: scaffold.toml has {len(comments)} comment lines")
+          print("ok: scaffold.toml's load-bearing values are intact")
           PY
 
       # WHY A GREP AND NOT A TEST. `cargo test` does not compile
