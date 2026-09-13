@@ -39,7 +39,7 @@ Two findings below. The second is the `per_page` deferral, which I am **not**
 asking to be reversed — the box is for one sentence the deferral is missing, not
 for the newtype.
 
-- [ ] **`dev-writer`** — `wire.rs:1481` against `wire.rs:1733` — the feed and the
+- [x] **`dev-writer`** — `wire.rs:1481` against `wire.rs:1733` — the feed and the
       thread report the **same** moderation state in two different wire shapes,
       and nothing records that as a decision. **Scenario:** a feed row carries
       `"isHidden": <bool>` (`feed_page_json`, `wire.rs:1481`); a thread item
@@ -69,7 +69,34 @@ for the newtype.
       than on the other. One entry in "What this change found and did not fix",
       beside the feed's author gap which is exactly the same shape of debt.
 
-- [ ] **`dev-writer`** — `thread.rs:309` and `authoring.rs:292` — two functions
+      **Fixed as a record, in two places rather than the one you asked for.**
+      `design.md`'s "found and did not fix" gains the entry, stating both shapes,
+      that both are built from the same `Moderation`, the CLAUDE.md convention
+      they violate together, why the thread's shape is nonetheless the right one,
+      and that the repair belongs in `feed.rs` — not here, for the same reason
+      the other entries in that list are not fixed here.
+
+      **I also updated `docs/UI-BRIEF.md`, which your severity paragraph argued
+      for even though the box did not ask for it.** CLAUDE.md is explicit that a
+      change making the brief wrong fixes it in the same change, and the brief was
+      silent on a difference a designer meets on their second screen. It now says
+      the thread screen is told three states where the feed is told two, that the
+      **restored** state is the one a boolean cannot carry and why that matters to
+      a reader, and — the part that keeps a designer from building on sand — that
+      the asymmetry is a known core gap rather than design intent, so no layout
+      should depend on the two staying different.
+
+      I verified your measurement before writing any of it: `grep -n
+      "isHidden\|source-independent\|branching"` over `design.md`, `proposal.md`
+      and `spec.md` returns nothing, so the divergence really was recorded in
+      none of the three while the feed's author gap is in two.
+
+      **Not fixed in `feed.rs`**, per your own conclusion and the coordinator's
+      instruction. The feed read has no spec at all, so reshaping its reply from
+      this piece would change a merged contract past the review it had — the same
+      boundary that governs the three entries already in that list.
+
+- [x] **`dev-writer`** — `thread.rs:309` and `authoring.rs:292` — two functions
       named `thread_of` in one crate, with **opposite** rules about the field
       they are both about, and neither doc mentions the other. **Scenario:**
       `authoring::thread_of(op, id)` reads the `thread` field and trusts it —
@@ -95,6 +122,33 @@ for the newtype.
       `op.rs`'s field doc gaining "**and never read on the read side** — see
       [`crate::thread`]", and `authoring.rs`'s deferral naming the module that
       discharged it. Renaming either function is a larger call and not required.
+
+      **Fixed — your two pointers, plus a third that closes the loop.**
+
+      - `op.rs`'s `thread` field doc gains a section headed "THIS FIELD IS THE
+        AUTHOR'S CLAIM, AND THE READ SIDE NEVER BELIEVES IT", naming **both**
+        derivations, saying which is correct where, and closing "reach for the
+        second unless you are on the publish path". This is the one that mattered
+        most, for the reason you gave: it is where a reader who wants to *use*
+        the field arrives, and it previously stated the trusting rule as the
+        whole truth and pointed only at `authoring`.
+      - `authoring.rs`'s deferral now says the audit exists and names
+        `crate::thread::thread_of` as what performs it, so the paragraph reads as
+        a division of labour rather than a gap — and warns that the two share a
+        name and hold opposite rules.
+      - **The reciprocal pointer, which your two did not cover:**
+        `thread::thread_of`'s own doc now says "**Not to be confused with
+        [`crate::authoring`]'s function of the same name**", that the two are
+        inverses rather than one rule at two layers, and that the inverse of this
+        one is the attack. A reader arriving at the safe function should also
+        learn the unsafe sibling exists, or the warning only works in one
+        direction.
+
+      **Not renamed**, agreeing with your judgement. The names are right in their
+      own modules — each genuinely answers "which thread does this op belong
+      to?" — and the difference is the trust boundary, not the question. Three
+      pointers make the boundary visible at every door; a rename would make one
+      of the two names worse to buy the same thing.
 
 ## The `per_page` deferral: sound, and one sentence short
 
@@ -122,6 +176,21 @@ the second time a reviewer has asked for the shape and the second time a guard
 was written instead. Whoever picks the work up should know it is the third
 request, not the first — otherwise the same deferral is available a fourth time
 on the same reasoning.
+
+**Recorded in §12, and the correction is yours.** I verified the citation —
+`membership.rs:595` does cite `findings/architecture.md` entry 6 — and §12 no
+longer calls that comment an independent arrival at this change's argument. It
+now states the tally plainly: three requests, three guards, each defensible
+alone and each leaving the next request to be made again. It closes with the
+part that makes this more than bookkeeping — a deferral is reasonable once, and
+the same deferral available a fourth time on the same reasoning is a decision
+nobody is making on purpose, so a fourth guard needs a stronger argument than
+any of the three so far.
+
+This is the second time on this piece that a claim of mine turned out to
+understate how often something had already been raised; the first was §12's
+"if a third paginated read is added" trigger, which design review found had
+already fired. Same shape, same section.
 
 ## Checked and sound
 

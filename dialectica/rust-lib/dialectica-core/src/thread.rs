@@ -284,6 +284,13 @@ pub fn clamp_per_page(requested: Option<usize>) -> usize {
 /// not read, not compared and not mentioned — see this module's documentation
 /// for the attack that makes reading it unsafe.
 ///
+/// **Not to be confused with [`crate::authoring`]'s function of the same name**,
+/// which reads that field and trusts it. The two are not one rule at two layers;
+/// they are inverses, and the inverse of this one is the attack. `authoring`'s is
+/// correct because it runs on an op this peer is about to sign, where the field
+/// is this peer's own. Everything reaching *this* function arrived from somebody
+/// else.
+///
 /// # What each outcome means
 ///
 /// `Ok(Some(root))` — the chain reached a post with no parent, and that post's
@@ -372,7 +379,10 @@ pub fn thread_of<L: OpLog>(log: &L, id: &OpId) -> Result<Option<OpId>, OpLogErro
 ///
 /// # What is filtered, and in what order
 ///
-/// 1. The named op is resolved and refused three ways if it is not a root.
+/// 1. The named op is resolved and refused if it is not a usable root — **five
+///    gates producing three messages**, each gate carrying its own reason at the
+///    line that makes it. `design.md` §4 tabulates which gate maps to which
+///    message and why.
 /// 2. Ops in this Stoa, already in [`cmp_ops`](crate::arrival::cmp_ops) order.
 /// 3. Keep the ops that are **authentic** — the log holds junk deliberately
 ///    (§3.3) and the reader never trusts it.
@@ -424,10 +434,17 @@ pub fn thread_of<L: OpLog>(log: &L, id: &OpId) -> Result<Option<OpId>, OpLogErro
 /// caller inherits it without knowing the rule exists.
 ///
 /// The alternative — a page-size type that cannot be zero — is the better shape
-/// by "put the complexity in the data structure", and was not taken here because
-/// it changes [`crate::feed::list_threads`]'s signature too, and `feed.rs` is not
-/// this change's to touch. Recorded in `design.md` as the shape to reach for if a
-/// third read is added.
+/// by "put the complexity in the data structure", and it is **deferred rather
+/// than unneeded**. There are already three paginated reads answering a zero in
+/// two different ways: this one and [`crate::feed::list_threads`] clamp up to the
+/// default, and `MembershipStore::list` returns an empty last page. Introducing
+/// the type means editing `feed.rs`, `membership.rs`, `wire.rs` and this module
+/// at once, which is why it did not happen in a thread read.
+///
+/// `design.md` §12 carries the count, the table of what each site answers, the
+/// owner, and the question that owner has to settle first — which of the two zero
+/// answers becomes the single one. **Do not re-derive the argument from this
+/// comment**; it is a pointer, and §12 is the record.
 pub fn read_thread<L: OpLog>(
     log: &L,
     moderators: &Moderators,

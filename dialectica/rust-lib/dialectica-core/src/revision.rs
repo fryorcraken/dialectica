@@ -237,11 +237,20 @@ impl CurrentVersion {
 ///
 /// # What is dropped, and in what order
 ///
-/// A candidate revision must be all four of: a [`OpKind::Revise`], naming this
-/// post, **authentic**, and **by this post's author**. The log's `iter_target`
-/// supplies the second; the two checks here supply the rest, in that order —
-/// see this module's documentation for why verifying first is load-bearing
-/// rather than tidy.
+/// A candidate revision must be all **five** of: a [`OpKind::Revise`], naming
+/// this post, **in the same Stoa as the post**, **authentic**, and **by this
+/// post's author**. The log's `iter_target` supplies the second; the three checks
+/// in [`is_valid_revision`] supply the rest, with verification before the
+/// authorship comparison — see this module's documentation for why that order is
+/// load-bearing rather than tidy.
+///
+/// **The Stoa condition is the one a reader auditing this from the outside would
+/// otherwise miss**, and it is named here rather than only on the private helper
+/// because this is the doc every caller reaches. Its absence was a real defect,
+/// found by security review of the `thread-read` change: an author could sign a
+/// revision of their own post while stamping it with another Stoa's address, and
+/// every reader rendered the rewritten body. [`is_valid_revision`] carries why
+/// the signed preimage does not close that on its own.
 pub fn current_version<L: OpLog>(
     log: &L,
     post: &OpId,

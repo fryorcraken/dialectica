@@ -288,12 +288,27 @@ rather than glossing:
 | `thread::read_thread` | `thread::clamp_per_page`, now inside the function | the default page size |
 
 **The three `pub` functions do not agree what a zero means**, which is precisely
-the state a type prevents. `membership.rs`'s own comment reaches this change's
-argument independently and at length — the guard is unconditional "because this
-function is `pub` on a `pub mod`", and a storage module whose correctness rests
-on a caller one layer up "invites someone to delete the guard when that caller
-changes". That is CLAUDE.md's fourth-slightly-different-guard signal, and §10
-invokes it for the Stoa check while this section did not.
+the state a type prevents. `membership.rs`'s own comment makes this change's
+argument at length — the guard is unconditional "because this function is `pub`
+on a `pub mod`", and a storage module whose correctness rests on a caller one
+layer up "invites someone to delete the guard when that caller changes". That is
+CLAUDE.md's fourth-slightly-different-guard signal, and §10 invokes it for the
+Stoa check while this section did not.
+
+**AND IT IS NOT AN INDEPENDENT ARRIVAL — THIS IS THE THIRD REQUEST FOR THE SHAPE,
+NOT THE FIRST.** An earlier draft of this section called `membership.rs`'s
+comment an independent arrival at the same conclusion. Architecture review
+corrected it: that comment cites `findings/architecture.md` entry 6, a **prior
+piece's** architecture review, which asked the same question and got a guard
+rather than a type. So the tally is that a reviewer has now asked for this shape
+three times and a guard has been written three times, each defensible on its own
+and each leaving the next request to be made again.
+
+**Whoever picks this up must know that**, because it is the fact that changes the
+decision. A deferral is reasonable once; the same deferral available a fourth
+time on the same reasoning is a decision nobody is making on purpose. If the
+fourth request arrives and the answer is a guard again, that answer needs a
+stronger argument than any of the three so far.
 
 Two things make the divergence smaller than it first reads, and neither
 dissolves it. **All three wire paths clamp up to the default**, `list_stoas`
@@ -423,3 +438,36 @@ deeper reply instead. Nothing in the spec picks between them, so
   thread read's. Not this piece's: the feed read has no spec, and a test written
   here would promote a requirement for code that merged in another piece past
   the review that piece had. Reported so it is not lost.
+- **THE FEED AND THE THREAD NOW REPORT THE SAME MODERATION STATE IN TWO
+  DIFFERENT WIRE SHAPES**, which is a divergence in the module's contract and
+  the one entry in this list that a view will actually trip over.
+
+  A feed row carries `"isHidden": <bool>`; a thread item carries
+  `"moderation": {"state": "unmoderated"|"hidden"|"unhidden"}` with an optional
+  `"decidedBy"`. **Both are built from the same `crate::moderation::Moderation`**
+  — the feed flattens it, this read does not. So a view rendering "was this post
+  moderated?" must branch on *which call produced the item*, and CLAUDE.md's wire
+  conventions forbid exactly that: "JSON shapes are source-independent, so a view
+  renders without branching on where the data came from."
+
+  **The thread's shape is the right one and §6 argues why**: a boolean collapses
+  "nobody moderated this" and "a moderator looked at it and restored it" into one
+  `false`, and the difference cannot be recovered afterwards. The finding is not
+  that this piece chose wrongly — it is that **choosing rightly created a
+  divergence, and this record is where it stops being invisible.** Architecture
+  review measured that `isHidden`, `source-independent` and `branching` appear
+  nowhere in `design.md`, `proposal.md` or `spec.md`, so the feed's *author* gap
+  was recorded in two documents while this one was recorded in none.
+
+  **The fix belongs in `feed.rs`, and not here**, for the same reason as the two
+  entries above: the feed read has no spec, and reshaping its reply from a
+  thread-read piece would change a merged contract past the review it had. What
+  this change owes is the record, not the edit.
+
+  **`docs/UI-BRIEF.md` is the document that will be designed against in the
+  meantime**, and it is written for someone who cannot read the code — so the
+  cost of the silence lands there first: a designer discovers that "hidden" means
+  a richer thing on the thread screen than on the feed screen. This change
+  updated the brief thoroughly in every other respect, so the omission was an
+  oversight rather than a decision. Whoever unifies the shapes should update the
+  brief in the same change.

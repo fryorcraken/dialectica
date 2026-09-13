@@ -43,7 +43,7 @@ when written and that a later correction on this same branch left behind. Both
 are the failure this repo has a named rule against (a claim that cannot fail
 loudly), and neither is a defect in behaviour.
 
-- [ ] **`dev-writer`** — `thread.rs:426-430` — `read_thread`'s doc defers the
+- [x] **`dev-writer`** — `thread.rs:426-430` — `read_thread`'s doc defers the
       non-zero page-size type on a trigger that has already fired, and points at
       a `design.md` section that no longer says what it is cited for.
       **Scenario:** the doc comment reads "The alternative — a page-size type
@@ -68,7 +68,26 @@ loudly), and neither is a defect in behaviour.
       The fix is to restate the honest count (three) and the real four-file
       reason, or simply to point at §12 without re-deriving it.
 
-- [ ] **`dev-writer`** — `revision.rs:240-244` — `current_version`'s doc still
+      **Fixed**, taking both halves of your suggestion. The comment now states
+      the count (three reads, two different zero answers, with `MembershipStore`
+      named as the third), states the four-file cost, and then **stops** — it
+      closes "**Do not re-derive the argument from this comment**; it is a
+      pointer, and §12 is the record." Two copies of an argument is how one goes
+      stale, which is this box.
+
+      Your severity reasoning is what shaped that ending: `design.md` is archived
+      with the change and `thread.rs` is not, so the code comment has to be the
+      one that survives — and the way to keep a surviving copy true is to make it
+      carry the facts a reader needs and defer the reasoning rather than mirror
+      it.
+
+      **Also folded in the observation you left in prose rather than a box**
+      (`read_thread`'s "refused three ways" beside §4's five-gates table).
+      `thread.rs:375` now reads "five gates producing three messages" and points
+      at §4 for the mapping. You were right that it did not need its own box, but
+      it was the same class of drift and the edit was one line.
+
+- [x] **`dev-writer`** — `revision.rs:240-244` — `current_version`'s doc still
       enumerates **four** conditions and omits the Stoa, which this change added
       as a fifth. **Scenario:** the public function's "What is dropped, and in
       what order" section reads "A candidate revision must be all four of: a
@@ -91,6 +110,33 @@ loudly), and neither is a defect in behaviour.
       screen below it (`revision.rs:706-721`), left in the doc directly above the
       fix. One sentence naming the Stoa as a condition and correcting "the two
       checks here" to three.
+
+      **Fixed** — "all four" is now "all **five**", the Stoa is named in the
+      enumeration between "naming this post" and "authentic", and "the two checks
+      here" is "the three checks in `is_valid_revision`".
+
+      **Your framing is the part I want to record, because it is sharper than
+      "update the count".** The omitted condition was *the one this change
+      discovered was missing*, in the doc a caller reads, while the corrected
+      version sits on a helper no caller outside the module reaches. A reader
+      auditing "what makes a revision bind?" from the public entry point was told
+      authorship and authenticity and not the Stoa — which is exactly the audit
+      that would have caught the defect in the first place. So the doc now says
+      why the condition exists and that its absence was a real defect found by
+      security review, rather than silently listing a fifth item.
+
+      I checked your caller claim before editing rather than after: `grep -n
+      "current_version("` over `dialectica-core/src/` confirms `feed.rs:238` and
+      `thread.rs:576` are the only non-test callers, and nothing outside the
+      module calls `is_valid_revision`.
+
+      Two intra-doc links from this public doc to the private
+      `is_valid_revision` produce `cargo doc` warnings. Left as they are: the
+      crate has the same pattern in at least four places (`moderation`,
+      `contains`, `resolve` and `sanitise` all link to private items), `cargo
+      doc` is not a CI gate here, and pointing a reader at the helper that holds
+      the reasoning is worth more than a clean docs build this repo does not
+      produce anyway.
 
 ## Checked and clean
 

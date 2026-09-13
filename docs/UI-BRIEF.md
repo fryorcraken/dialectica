@@ -405,6 +405,24 @@ has never received, and those mean opposite things. So a thread screen must have
 a state for "this thread's opening post was hidden", and it must not look like
 the not-found state or the empty state.
 
+**The thread screen is told more about moderation than the feed screen is, and
+today you have to handle both.** A feed row says only *hidden or not*. A thread
+item says one of **three** things — nothing binding was found, a moderator hid
+it, or a moderator deliberately **restored** it — and names the decision when
+there was one.
+
+That third state is the one worth designing for, because a boolean cannot carry
+it: a post nobody ever moderated and a post a moderator looked at and put back
+read identically under "not hidden", and they mean different things to a reader
+deciding whether to trust what they are seeing. You are not obliged to render the
+restored state differently — but if you do, the thread screen is the only place
+the information exists.
+
+**This asymmetry is a known gap in the core, not a design intent.** Both screens
+are computing from the same underlying answer and the feed flattens it; the
+thread's richer shape is the correct one. Expect the feed to catch up, and do not
+build a layout that depends on the two staying different.
+
 **A post whose thread this machine cannot place does not appear.** A reply
 whose parent has not arrived yet cannot be positioned, so it is not shown
 anywhere rather than being shown at the root. It appears when the parent does.
