@@ -155,7 +155,7 @@ recording fake bridge; no shipped file was mutated.
       reference sent a bad record. Nothing in the UI offers a way to discover
       that the fault was a doubled paste.
 
-- [ ] **`spec-writer`** — `StoaReference.qml:80` — the reference encoding accepts
+- [x] **`spec-writer`** — `StoaReference.qml:80` — the reference encoding accepts
       arbitrary non-hex content in both halves, and no requirement says whether
       it should
       **Scenario:** `{"stoa":"zzzz not hex at all","genesis":"!!!"}` parses `ok`
@@ -175,6 +175,28 @@ recording fake bridge; no shipped file was mutated.
       the core sees them. That is a spec question, not a bug.
       **Severity:** low, and deliberately not addressed to `dev-writer`: tightening
       this without a requirement risks refusing a future address encoding.
+
+      **Fixed as an explicit non-decision, which is the honest shape here.** The
+      new requirement "The reference encoding is a compatibility surface and is
+      fixed here" records that whether the halves need a character-class gate is
+      **deliberately left open**, and says why: the view checks two halves of the
+      right type and nothing more, verification is the core's single check, and a
+      second implementation of it is what this design refuses. Tightening it
+      without a requirement risks refusing an address encoding a later version
+      uses — your argument, kept.
+
+      What I did add is the bound that makes the openness safe, because "unspecified"
+      and "anything goes" are different things: **the view MUST NOT report such
+      input as verified, or as malformed, on its own authority.** A well-typed
+      half that is not a valid address is the core's to refuse, and the screen
+      renders the core's answer. That closes the gap between "carries two halves"
+      and "carries two halves that could conceivably be an address" without
+      deciding the character class — a scenario pins it.
+
+      Recorded as open rather than silently left open, so the next reader finds a
+      decision rather than an absence. Your judgement that the JSON choice is
+      sound and the type-strictness correct is now contracted by the same
+      requirement.
 
 ---
 

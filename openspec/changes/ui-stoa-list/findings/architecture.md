@@ -61,7 +61,7 @@ first box.
       `FeedScreen` setting `chosen = null`, which is the symmetric counterpart
       of the `onCancelled` that already exists for `previewing`.
 
-- [ ] **`spec-writer`** — `specs/stoa-navigation-view/spec.md:538` — the
+- [x] **`spec-writer`** — `specs/stoa-navigation-view/spec.md:538` — the
       requirement that puts the feed behind the list does not require a route
       back, so the strandedness above is spec-compliant
       **Scenario:** "The view holds no Stoa of its own, and the feed is reached
@@ -77,6 +77,28 @@ first box.
       **Severity:** medium. Addressed to `spec-writer` rather than `dev-writer`
       deliberately: the code fix is the box above, and this box is the reason
       the gate did not catch it.
+
+      **Fixed**, and widened past the transition you measured. New requirement
+      "Every state a user can enter has a specified way out", because the
+      spec-test reviewer found the same hole on two further transitions
+      (`preview → joined`, `create → created`) — so a scenario naming only the
+      feed would have left two of three uncovered and taught the next view piece
+      the narrow lesson.
+
+      Your framing is what the requirement is built on: a route back is a
+      rendering obligation the core cannot discharge, of the same family this
+      capability already owns. It is specified as an **outcome** — the user
+      reaches the list again without restarting — so it does not prescribe a
+      mechanism, which keeps D5's argument against a `StackView` intact. I have
+      not touched `Main.qml`.
+
+      **Your transition specifically is deferred, not contracted, and the spec
+      says so.** It is the one of the three that needs code: `FeedScreen` has no
+      signal to clear `chosen` with, and the `dev-writer` boxes are closed. The
+      requirement names the feed→list return as deliberately outside itself, so
+      the gap reads as deferred rather than as an oversight, and the change that
+      adds the signal inherits the requirement rather than re-deriving it. The
+      box above stays open on its own merits.
 
 - [ ] **`dev-writer`** — `Main.qml:41-44` — `screenShown` silently discards a
       preview requested while a feed is open, and the precedence is undocumented
@@ -98,7 +120,7 @@ first box.
       screen — or clearing `chosen` when a preview is requested — makes the
       impossible state unrepresentable instead of merely unreachable.
 
-- [ ] **`spec-writer`** — `StoaReference.qml:79-86` — the reference encoding is a
+- [x] **`spec-writer`** — `StoaReference.qml:79-86` — the reference encoding is a
       compatibility surface decided by a `NO SPEC`, and it should be in the spec
       **Scenario:** `{"stoa":"<hex>","genesis":"<hex>"}`, bare hex, no `stoa:`
       prefix, is what `shareText` emits. A user who has copied a reference holds
@@ -120,7 +142,28 @@ first box.
       field, non-string half) have no such cross-version cost and I would leave
       them as design decisions.
 
-- [ ] **`spec-writer`** — `StoaListScreen.qml:45,146-150` — the conditional
+      **Fixed.** New requirement "The reference encoding is a compatibility
+      surface and is fixed here", pinning the shape (`{"stoa","genesis"}`, bare
+      strings, no display prefix) and requiring share and paste to be specified
+      together rather than separately.
+
+      Your sharper reason is the one the requirement is written around, because
+      it is the one a future change needs: the format is **the only thing making
+      the two ends one decision across a version boundary**. Within one build
+      `StoaReference` enforces it; between two builds nothing does, and a spec
+      requirement is what gets read before someone touches it.
+
+      Self-describing is required as *behaviour* rather than recorded as a
+      preference — a truncated paste must fail as malformed and not as a
+      verification mismatch. That makes it the same obligation as the display
+      prefix one added under R9: both are about not manufacturing a verification
+      accusation out of a paste artefact, which is the property worth a
+      requirement rather than a comment.
+
+      I followed your judgement on the other three and left them as design
+      decisions; they cost nothing across a version boundary.
+
+- [x] **`spec-writer`** — `StoaListScreen.qml:45,146-150` — the conditional
       share requirement is honest, but "a Stoa you just created cannot be
       shared" is a degradation the spec does not name
       **Scenario:** I checked the core claim rather than taking it: `wire.rs:1587`
@@ -145,6 +188,35 @@ first box.
       not at fault; the gap is that the spec and the risk list do not.
       The degradation *is* legible in the view — the button is simply absent and
       the apparatus note explains the absence — so the rendering half is right.
+
+      **Fixed**, and your framing was sharper than my first attempt at it, which
+      is worth recording because I had to correct myself mid-edit.
+
+      I initially wrote the degradation as "a created Stoa cannot be shared
+      **after a restart**" — reasoning from the listing reply, which is where the
+      record is missing for *joined* Stoas. Then I read
+      `StoaListScreen.qml:146-150` and `wire.rs`: **the creation reply carries no
+      record either** (`stoa`, `foundingTitle`, `policy`). So a created Stoa is
+      unshareable *immediately*, with no restart involved, which is exactly the
+      "create a Stoa, and it is immediately unshareable" you wrote and I had
+      softened into something milder and wrong.
+
+      The requirement now says it in your terms and draws the contrast that makes
+      it land: a joined Stoa can be shared until the view restarts; a created one
+      cannot be shared even once — for a Stoa whose entire purpose is to be
+      shared and which no registry can be looked up in later.
+
+      Two scenarios rather than one, so the asymmetry is pinned rather than
+      described: a Stoa joined in this session offers a share; a Stoa just
+      created offers none but still renders its address. Both match the shipped
+      behaviour — I checked against `canShare` at :388 and the existing test at
+      tst_stoa_screens.qml:1551, and wrote nothing that would need a code change.
+
+      On the rendering half, I kept your judgement that the absence is legible
+      and did **not** require a per-row explanation: the `ON SHARING` apparatus
+      note (:621-624) is screen-level, and requiring per-row text would have been
+      a code change. The scenario requires the screen to carry the explanation,
+      which is what is built.
 
 - [ ] **`dev-writer`** — `StoaListScreen.qml:91` — `rows` keeps the previous
       page's items after a failed reload, so the screen's state is safe only

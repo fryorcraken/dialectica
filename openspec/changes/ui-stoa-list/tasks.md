@@ -297,3 +297,70 @@ non-digit glyphs is still invisible to
 independently reached the same conclusion and declined to mutate it, on the
 grounds that the test already declares the limit — which is the right call, and
 is what an honestly stated gap is for.
+
+## 12. The spec-writer's second pass, and what it leaves uncovered
+
+Closing the eight `spec-writer` findings added three requirements and extended
+two. **No code and no test was touched** — every `dev-writer` and `tester` box is
+closed and both agents have left the tree, so a spec moving under them is the
+failure the one-writer rule exists to prevent.
+
+- [x] 12.1 The `stoa:` display prefix contracted under R9, where the defect it
+      caused belongs: a surviving prefix manufactures a verification accusation
+      out of a clipboard artefact. Stripping is required to be unbounded rather
+      than a fixed number of passes.
+- [x] 12.2 New requirement fixing the reference encoding as a compatibility
+      surface, including that it must be self-describing so a truncated paste
+      fails as malformed rather than as a verification mismatch.
+- [x] 12.3 New requirement "Every state a user can enter has a specified way
+      out", covering `preview → joined` and `create → created`.
+- [x] 12.4 R10's summary sentence rewritten so it stops forbidding the address
+      comparison its own second scenario requires.
+- [x] 12.5 The share requirement extended with the immediately-unshareable
+      created Stoa, and the character-class question recorded as deliberately
+      open with the bound that keeps it safe.
+- [x] 12.6 PLAN.md: two passages struck to strikethrough-plus-pointer, and the
+      join-confirmation entries redirected off the never-landed §11.1.
+
+### What the new scenarios cover, and the four that are genuinely unpinned
+
+**Most of the new scenarios were already written against behaviour the suite
+tests** — they were added because no *requirement* named it, which was the whole
+of the finding in each case. Checked against a full run (103 passing, and the run
+corrected one claim I had drafted from memory):
+
+Already covered, so these are a citation rather than new coverage:
+
+| Scenario | Existing test |
+|---|---|
+| a display prefix never reaches the core | `test_a_display_prefix_is_stripped_before_anything_is_sent` |
+| a repeated prefix is stripped rather than forwarded | `test_a_repeated_display_prefix_is_stripped_rather_than_forwarded` |
+| a share round-trips through a paste | `test_what_a_share_produces_is_what_a_paste_accepts` |
+| the encoding is a JSON object of two string halves | `test_the_reference_format_is_a_json_object_with_two_hex_fields` |
+| a half of the wrong type is refused | `test_a_half_that_is_not_a_string_is_refused_rather_than_coerced` |
+| a truncated reference fails as malformed | `test_text_that_is_not_a_stoa_reference_is_refused_before_any_call` |
+| a Stoa joined in this session can be shared | `test_a_share_is_offered_only_where_the_view_holds_the_record` |
+| a row without a record offers no share | `test_no_share_button_is_on_screen_for_a_row_whose_record_is_not_held` |
+
+**Genuinely unpinned, for the `tester`** — each is satisfied by the shipped tree
+(checked against the code before being written, and two were rewritten when the
+code disproved my first draft), but none has a test, so each would survive its
+behaviour being deleted:
+
+| Requirement | Scenario |
+|---|---|
+| R9 (malformed vs unjoinable) | a prefix is not added to what is shared |
+| Way out | the preview can be left without joining |
+| Way out | the return is still available after a join succeeds |
+| Way out | a created Stoa reaches the list without a restart |
+
+The last three are the ones the spec-test reviewer measured as "relied on by the
+tests and required by no scenario" — `join.cancelled()` is called at line 897 as
+setup only, and no test asserts the post-creation `reload()`. They now have
+requirements; they still need tests.
+
+**The `list → feed` return is deferred and is not in the table**, because it is
+the one transition the code cannot satisfy: `FeedScreen` declares no signal and
+nothing clears `Main.qml`'s `chosen`. The requirement names it as deliberately
+outside itself so the gap reads as deferred rather than as an oversight. Closing
+it needs a `dev-writer`, and the architecture reviewer's box for it stays open.

@@ -708,10 +708,21 @@ half: the address is a hash of the genesis record (§5.1), so a wrong or tampere
 record **fails to match the address it is offered with**. Verification needs
 nothing but those two inputs — no registry, no peer, no network call.
 
-Still to get right, and still not built: in-post addresses are
+~~Still to get right, and still not built: in-post addresses are
 **attacker-supplied content**. Render them as an explicit affordance the reader
 chooses to act on, never auto-join, and show what is being joined before joining
-it. That is a UI obligation — see §5.5, which holds it.
+it. That is a UI obligation — see §5.5, which holds it.~~
+
+**Contracted, and built for the paste route.** "Joining shows what is being
+joined, and joins nothing until the user acts" in the `stoa-navigation-view`
+capability holds every clause: a preview before any join, no auto-join, and the
+address rendered in full because this is where the decision is made.
+
+**Still not built: the in-post affordance itself.** Nothing in a rendered post
+yet offers a Stoa address to act on, so the route exists for a pasted reference
+and not for one read out of a post body. That half arrives with the piece that
+renders addresses inside posts, and it inherits the requirement above rather than
+needing a new one.
 
 **Phase 2 — opt-in broadcast.** A dedicated content topic, **outside SDS**,
 carries Stoa announcements. A creator decides at creation whether their Stoa is
@@ -1512,7 +1523,11 @@ social: a reader who recognises people by name is fooled; a reader who has the
 address in front of them is not.
 
 **The interface consequence is therefore identical in shape to the join
-confirmation, and belongs on §11.1's list:**
+confirmation, and belongs on §11.1's list** — the *name* half of it does, at
+least. The join confirmation it is compared to is no longer waiting on that list:
+`stoa-navigation-view` contracts it, and is the worked example of this same
+argument applied to Stoa titles. This obligation is about attribution on every
+post, which no spec yet owns:
 
 > **A name alone is the forgeable half.** Wherever recognition carries weight —
 > a moderator's name above all, because that is what converts a button press
@@ -3266,11 +3281,18 @@ restating it.
 > change and is not in this file until that lands.** The references to it below
 > are deliberate forward references rather than mistakes: this section
 > *surfaces* three new obligations — an `Unhide` affordance that must not be
-> offered as symmetric, a join confirmation that must show the address and not
-> only the title, and a bidi obligation wider than the one §11.1 records — and
+> offered as symmetric, ~~a join confirmation that must show the address and not
+> only the title~~, and a bidi obligation wider than the one §11.1 records — and
 > their home is that list, not here. If
 > §11.1 is absent when you read this, that change has not merged yet — which is
 > a fact `git log` answers and this sentence should not.
+>
+> **The join-confirmation obligation no longer waits on §11.1**: it is contracted
+> by the `stoa-navigation-view` capability, whose list rows, join preview and
+> lookalike panel all require the address on screen. A forward reference to an
+> unlanded list is the wrong pointer for an obligation that already has a spec,
+> so read that capability rather than §11.1 for this one. The other two are
+> genuinely still waiting.
 
 #### The constraint everything below follows from
 
@@ -3542,14 +3564,21 @@ section adds nothing to it except the mechanics: a Stoa address appearing in a
 post body renders as an affordance the reader chooses to act on; acting on it
 shows what is being joined — the Stoa's title and address — **before** joining;
 and nothing auto-joins, ever. The relevant threat is not a malicious Stoa, which
-a reader can leave; it is a reader who does not know they joined one. **This is a
-UI obligation and is not built**, which is why it stays here rather than moving.
+a reader can leave; it is a reader who does not know they joined one. ~~**This is
+a UI obligation and is not built**, which is why it stays here rather than
+moving.~~ **The obligation is now contracted** by `stoa-navigation-view`'s
+"Joining shows what is being joined, and joins nothing until the user acts";
+what remains unbuilt is only the affordance inside a post body, as §4.8 Phase 1
+now records.
 
-**The obligation this surfaces, also new to §11.1**: a Stoa's *displayed* title
+~~**The obligation this surfaces, also new to §11.1**: a Stoa's *displayed* title
 comes from a metadata op signed by its moderators and is not unique, not
 verified against anything, and freely chosen. Two Stoas may present the same
 title. The address is the identity and the title is decoration, so a join
-confirmation that shows only a title has shown the reader the forgeable half.
+confirmation that shows only a title has shown the reader the forgeable half.~~
+**Contracted across three `stoa-navigation-view` requirements** — the list row
+carrying its address, the preview's full address, and the same-title Stoa shown
+beside a lookalike. It is no longer waiting on §11.1.
 
 #### 6. The core API this requires
 

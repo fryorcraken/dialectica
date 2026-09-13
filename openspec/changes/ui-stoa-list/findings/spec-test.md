@@ -245,7 +245,7 @@ Four of five survived. Each survivor is a box.
       passes, because it supplies a resolved title and is a different test; the
       new predicates are scoped to the screen where nothing resolves one.
 
-- [ ] **`spec-writer`** — the `stoa:` display prefix is behaviour two tests pin
+- [x] **`spec-writer`** — the `stoa:` display prefix is behaviour two tests pin
       and **no requirement describes**, with no `NO SPEC` marker
       **Scenario:** `test_a_display_prefix_is_stripped_before_anything_is_sent`
       (line 615) and `test_a_repeated_display_prefix_is_stripped_rather_than_forwarded`
@@ -267,7 +267,29 @@ Four of five survived. Each survivor is a box.
       malformed-versus-unverified requirement would also give the regression a
       requirement to cite.
 
-- [ ] **`spec-writer`** — the spec specifies **no route out of any terminal
+      **Fixed.** Taken exactly where suggested — four paragraphs and three
+      scenarios added to "A malformed address and an unjoinable one are different
+      failures", which is the requirement whose purpose the defect subverted.
+
+      The argument I wrote it around is yours and the correctness reviewer's: a
+      surviving prefix is not merely a wrong string, it **manufactures a
+      verification accusation out of a clipboard artefact**, and the accusation
+      points at the sender. That is the two-outcomes-collapsed harm this
+      requirement exists to prevent, so it belongs here rather than in a
+      formatting note.
+
+      Three things are now required rather than incidental: every prefix is
+      stripped before anything reaches the core or is rendered as the address;
+      none is added on the way out; and **stripping is not a fixed number of
+      passes** — stated as a requirement because the shipped defect was one pass
+      and a two-pass fix is the same defect one paste further out, which is a
+      distinction a scenario alone would not carry.
+
+      Not marked `NO SPEC` and then left: the marker was the right call for an
+      undeclared decision, but this one has a security consequence and a shipped
+      regression, so it is now contracted instead.
+
+- [x] **`spec-writer`** — the spec specifies **no route out of any terminal
       state**, so the strandedness the architecture reviewer measured on the feed
       recurs twice more with no requirement to cite
       **Scenario:** `grep -in "cancel\|back\|return"` over the spec returns no
@@ -290,6 +312,39 @@ Four of five survived. Each survivor is a box.
       a specified way out — is what stops the next view piece rediscovering this,
       and is the same family of rendering obligation this capability already
       owns.
+
+      **Fixed for two of the three; the third is deferred to a code change and
+      named in the spec as deferred.** New requirement "Every state a user can
+      enter has a specified way out", written in the general form you asked for
+      rather than as three button-shaped scenarios, with the return specified as
+      an **outcome** so a cancel, a back affordance or an automatic return all
+      satisfy it.
+
+      I checked each transition against the tree rather than taking the split
+      from the finding, and one of your two turned out to be already working:
+
+      - **preview → joined.** The cancel affordance at `JoinScreen.qml:532-537`
+        has **no `visible` guard**, so it survives the joined state and
+        `screen.cancelled()` clears `previewing` at `Main.qml:112`. The route
+        works and was merely unrequired — exactly your "deleting it would leave
+        the suite green". Now contracted, including that it stays available
+        **after** a join, since a control withdrawn by the state it exists to
+        leave is the failure mode worth naming. (Only `joinButton` hides at 513.)
+      - **create → created.** `StoaListScreen.qml:152-153` sets `page = 0` and
+        calls `reload()`, so the created Stoa does reach the list. Also working,
+        also unrequired. Now contracted.
+      - **list → feed.** Genuinely absent: `FeedScreen` declares no signals
+        (confirmed by grep across the three screens — only `StoaListScreen` and
+        `JoinScreen` have any), and nothing clears `chosen`. **Closing it needs a
+        signal on `FeedScreen` and an `onClosed` in `Main.qml`, which is code**,
+        and every `dev-writer` box on this piece is closed. I have not written
+        it. The spec names this transition as deliberately outside the
+        requirement, so the gap is visible rather than reading as an oversight,
+        and the change that adds the signal inherits the requirement.
+
+      So both scenarios you could not cite now exist, and the one you and the
+      architecture reviewer both measured stays open against the code box rather
+      than being closed by prose here.
 
 - [x] **`dev-writer`** — `openspec validate --strict` **fails on this change
       today**, blocking the runner's final gate
@@ -321,7 +376,7 @@ Four of five survived. Each survivor is a box.
       runs last. A `tasks.md` section numbered from the file's current maximum
       rather than from what the author last wrote would make it unrepresentable.
 
-- [ ] **`spec-writer`** — spec.md:427-432 states a prohibition its own scenario
+- [x] **`spec-writer`** — spec.md:427-432 states a prohibition its own scenario
       requires violating, and a reader could resolve the ambiguity either way
       **Scenario:** "A Stoa already held whose title matches…" reconciles itself
       against the idempotence rule with: "Comparing *titles* to surface a
@@ -343,7 +398,23 @@ Four of five survived. Each survivor is a box.
       addresses *for the purpose of deciding whether a join was new*, which is
       what the surrounding prose already means.
 
-- [ ] **`spec-writer`** — `docs/PLAN.md` still states as **not built** two
+      **Fixed**, and the diagnosis is right: the qualifier was in the prose and
+      the summary sentence dropped it, which is the half a reader quotes.
+
+      Rewritten so the permission comes first and the prohibition is scoped to
+      its purpose. Both pre-join comparisons are now explicitly permitted — title
+      comparison to surface a lookalike, **and address comparison to tell a
+      lookalike from the Stoa being previewed**, with a pointer to the second
+      scenario as the thing that cannot be satisfied otherwise. What is forbidden
+      is now stated as one inference, made after a join, for one purpose:
+      deciding whether the join was new.
+
+      The sentence a reader could previously quote against the scenario below it
+      ("the second is forbidden") is gone rather than qualified, because a
+      qualified version of it is the same trap for the next reader who quotes
+      half of it.
+
+- [x] **`spec-writer`** — `docs/PLAN.md` still states as **not built** two
       passages describing behaviour this spec now contracts, and the branch's own
       PLAN.md edit fixed the neighbouring three while leaving these
       **Scenario:** the branch already corrects §9.1 Stage D and §9.2 items 2, 6
@@ -370,7 +441,28 @@ Four of five survived. Each survivor is a box.
       names, in a file the branch has already opened and half-corrected, so the
       cost is small and the inconsistency is visible to the next reader.
 
-- [ ] **`spec-writer`** — PLAN.md routes this spec's central obligation to
+      **Fixed**, both passages, in the strikethrough-plus-pointer shape the
+      neighbouring three already use.
+
+      One correction to the finding, and it changes what was struck rather than
+      whether: **the passages are not wholly superseded.** Each bundles two
+      obligations — *paste-to-preview* (never auto-join, show what is being
+      joined) and *the in-post affordance* (an address in a post body rendered as
+      something a reader acts on). The spec contracts the first. The second is
+      still unbuilt: nothing in a rendered post offers an address, which is why
+      the architecture reviewer's `screenShown` box calls the feed→preview path
+      *latent* rather than live.
+
+      So I struck the contracted half and left the unbuilt half standing, with a
+      sentence at §4.8 Phase 1 saying which is which and that the in-post piece
+      inherits the existing requirement rather than needing a new one. Striking
+      both would have deleted a live obligation — which is the failure mode the
+      archive guidance is warning about, in the other direction.
+
+      (b)'s trailing duplicate paragraph — the near-verbatim twin of spec.md:312 —
+      is struck and pointed at the three requirements that now own it.
+
+- [x] **`spec-writer`** — PLAN.md routes this spec's central obligation to
       **§11.1, a section that does not exist**, and the spec does not say it has
       taken it over
       **Scenario:** PLAN.md:3265-3273 says *"§11.1 'Rendering obligations,
@@ -392,6 +484,31 @@ Four of five survived. Each survivor is a box.
       a reason to build §11.1 here; the ask is that PLAN.md's join-confirmation
       entries point at `stoa-navigation-view` instead, so the obligation is not
       waiting on an unrelated change to acquire a home it already has.
+
+      **Fixed**, scoped to the join-confirmation entries as asked. Re-measured
+      before editing: `grep -n "^### 11.1\|^## 11.1"` returns nothing, so the
+      absence is confirmed. The citation count is now 18 rather than your 16 —
+      it moves as the file is edited, which is why the absence is the durable
+      fact and the count is not; I have not written a number into PLAN.md.
+
+      Two sites changed, and I deliberately did not change a third:
+
+      - **The forward-reference block (§9.1).** It names three obligations bound
+        for §11.1; the join-confirmation one is struck and redirected to
+        `stoa-navigation-view`, with the other two left standing because they
+        are genuinely still waiting. This is the site that did the damage —
+        it is what told a reader the obligation had no home.
+      - **The §9.1 duplicate paragraph.** Struck and pointed at the three
+        requirements that own it.
+      - **PLAN.md:1525 — left as an obligation, pointer added.** You cited this
+        as aiming a live cross-reference at a superseded list. Reading it, the
+        obligation there is about **attribution on every post** — a name needing
+        its address beside it — and it merely *compares itself* to the join
+        confirmation. No spec owns that yet, so redirecting it to
+        `stoa-navigation-view` would have pointed it at a capability that does
+        not cover it. I added a clause saying the join confirmation it compares
+        itself to is now contracted, and left the obligation on §11.1's list
+        where it belongs.
 
 ---
 

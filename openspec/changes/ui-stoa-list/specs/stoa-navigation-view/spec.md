@@ -185,6 +185,45 @@ machine, as a refusal they cannot explain. Where the record is not available for
 a Stoa, no share is offered for it; the affordance's absence is the honest
 rendering, and it is not an error state.
 
+**The case a user meets first is the one worth naming rather than leaving as an
+edge case: a Stoa this peer has just created cannot be shared at all.** Neither the
+listing reply nor the creation reply carries a genesis record — creation answers
+with the address, the founding title and the policy — so the only records the view
+ever holds are the ones a user pasted when joining, and they are lost on restart.
+
+The consequence is sharper than the restart case and points the other way from
+what a reader would assume: **the primary creation flow ends with an address on
+screen and nothing to hand anybody**, immediately, for a Stoa whose entire purpose
+is to be shared and which no registry can be looked up in later. A joined Stoa can
+be shared until the view restarts; a created one cannot be shared even once.
+
+This is a degradation of the interface caused by a core reply, not a decision this
+capability is making, and it is recorded so the core change that widens the
+listing item has a requirement pointing at it. **What the view MUST do meanwhile is
+account for the absence somewhere the user can read it**, so that a share missing
+from a row reads as a reference this copy does not have rather than as a feature
+that broke. The screen MUST NOT present the missing share as an error, and MUST
+NOT offer a share that produces nothing.
+
+#### Scenario: A Stoa joined in this session can be shared
+
+- **WHEN** a Stoa is joined from a pasted reference and its row is rendered
+- **THEN** a share is offered for it, the record having arrived with the paste
+
+#### Scenario: A Stoa just created offers no share
+
+- **WHEN** a Stoa is created successfully and its row is rendered
+- **THEN** no share is offered for it, the creation reply carrying no record
+- **AND** its address is still rendered, so what was made can be named
+
+#### Scenario: A held Stoa whose record is not held offers no share, and the screen says why
+
+- **WHEN** the list renders a Stoa from the listing for which no record is held
+- **THEN** no share is offered for that row
+- **AND** the screen carries an explanation that a row without a record offers no
+  share
+- **AND** nothing is rendered as an error for that row
+
 #### Scenario: A share carries both halves
 
 - **WHEN** a user shares a Stoa whose genesis record the view holds
@@ -202,6 +241,67 @@ rendering, and it is not an error state.
 - **WHEN** the list renders a Stoa for which no genesis record was supplied
 - **THEN** no share affordance is offered for that row
 - **AND** nothing is produced that carries the address without a record
+
+### Requirement: The reference encoding is a compatibility surface and is fixed here
+
+A shared reference MUST be a JSON object carrying the address under `stoa` and the
+genesis record under `genesis`, each a string of the bare value with no display
+prefix. A paste MUST accept exactly that, and the two MUST NOT be specified
+separately.
+
+**This is in the spec because it outlives the build that wrote it.** Every other
+format decision on these screens is internal and revisable; this one is not. A
+user who copies a reference holds a string that may be pasted days later, possibly
+into a different build, so changing the encoding strands strings already in the
+wild. Within one build a single implementation keeps the two ends in step —
+between two builds nothing does, and a requirement is what a future change reads
+before touching it.
+
+**The encoding MUST be self-describing, and that is a behavioural choice rather
+than a matter of taste.** A user who pastes half a reference must get a *malformed*
+failure, not a verification failure. A positional format would accept a truncated
+second field as a short record, forward it to the core, and come back as a record
+that does not hash to the address — collapsing two of the three outcomes the
+preceding requirement spends its whole text keeping apart, and manufacturing the
+same accusation a surviving display prefix does.
+
+**Whether the two halves must look like addresses before they are forwarded is
+deliberately left open.** The view checks that a reference carries two halves of
+the right type and nothing more; it does not check their character class, so a
+value that is not hex, or that carries a homoglyph, is forwarded and refused by the
+core. That is sound today — verification is the core's single check and a second
+implementation of it is what this design refuses — and it is recorded as undecided
+rather than as settled, because tightening it without a requirement risks refusing
+an address encoding a later version uses. **What MUST NOT happen is the view
+reporting such input as verified, or as malformed, on its own authority**: the
+core's answer is what the screen renders.
+
+#### Scenario: A share round-trips through a paste
+
+- **WHEN** a reference produced by a share is pasted back
+- **THEN** it parses as a reference
+- **AND** the address and record recovered are the ones shared
+
+#### Scenario: A truncated reference fails as malformed, not as unverified
+
+- **WHEN** part of a reference is pasted
+- **THEN** the screen reports it as not a Stoa reference
+- **AND** no join call has been made, so nothing can be reported as a verification
+  failure
+
+#### Scenario: A half of the wrong type is refused rather than forwarded
+
+- **WHEN** a reference is pasted whose `stoa` or `genesis` is a number, an object,
+  an array, or absent
+- **THEN** the screen reports it as not a Stoa reference
+- **AND** no join call has been made
+
+#### Scenario: A well-typed half the core rejects is the core's answer to give
+
+- **WHEN** a reference is pasted whose halves are strings that are not valid
+  addresses, and the user acts on it
+- **THEN** what the screen reports is the core's reply
+- **AND** the view does not report it as verified on its own authority
 
 ### Requirement: Joining shows what is being joined, and joins nothing until the user acts
 
@@ -349,6 +449,47 @@ The failure the core reported MUST be rendered. A refusal that names what was
 wrong is the difference between a user who knows the record they were sent is
 wrong and a user who thinks the app is broken.
 
+**A display prefix is a reading aid and MUST NOT reach the core.** The interface
+renders an address with a human-facing prefix (`stoa:`), and a user pasting from a
+screen or a chat message brings it along — sometimes more than once, since a
+double-click that selects a rendered address and a paste onto a field already
+holding one both produce `stoa:stoa:<hex>`. Every such prefix MUST be removed
+before a value is sent to the core or rendered as the address itself, however many
+are present, and one MUST NOT be added on the way out.
+
+**The reason this is a requirement and not a formatting detail is that leaving one
+in place converts a paste artefact into an accusation.** A prefixed value is not
+the hash of anything, so the core answers that the record does not hash to the
+address — a *verification* failure, which this requirement's whole purpose is to
+keep separate from a malformed paste. The user is then told, by the software, that
+whoever sent them the reference sent a bad record, when the fault was in their own
+clipboard and nothing on the screen offers a way to discover that. It also makes
+the address rendered "in full" not the address.
+
+Stripping MUST NOT be a fixed number of passes. A single pass is the defect that
+shipped here; a fix that strips exactly twice is the same defect one paste further
+out.
+
+#### Scenario: A display prefix never reaches the core
+
+- **WHEN** a reference whose address carries the display prefix is pasted and the
+  user acts on it
+- **THEN** what is sent to the core carries no display prefix
+- **AND** the address rendered as the full address carries none either
+
+#### Scenario: A repeated prefix is stripped rather than forwarded
+
+- **WHEN** a reference whose address carries the display prefix repeated, with or
+  without whitespace between the repetitions, is pasted
+- **THEN** every prefix is removed before anything is sent
+- **AND** the outcome is not a verification failure, which is what a surviving
+  prefix would produce
+
+#### Scenario: A prefix is not added to what is shared
+
+- **WHEN** a share is produced for a Stoa
+- **THEN** neither half of what is produced carries the display prefix
+
 #### Scenario: Input that is not a Stoa reference is refused before any call
 
 - **WHEN** the paste field is given text that does not carry both an address and
@@ -424,12 +565,17 @@ to the first.
 
 **Consulting the held Stoas for this comparison is not the inference the
 idempotence requirement forbids**, and the two are worth telling apart because
-they read alike. Comparing *titles* to surface a lookalike is a rendering
-decision made before the user acts, and it is what this requirement is for.
-Comparing *addresses* to decide whether a completed join was new is a claim about
-what the core did, which the reply deliberately does not answer and which a
-listing fetched earlier cannot supply. The first is required here; the second is
-forbidden under "A join is reported from the core's reply, never assumed".
+they read alike. Both comparisons this screen makes before the user acts are
+permitted and one of them is required: comparing *titles* to surface a lookalike,
+and comparing *addresses* to tell a lookalike apart from the very Stoa being
+previewed — the second scenario below cannot be satisfied any other way.
+
+What is forbidden is narrower, and it is a comparison made **after** a join, for
+one particular purpose: deciding whether a completed join was *new*. That is a
+claim about what the core did, which the reply deliberately does not answer and
+which a listing fetched earlier cannot supply. The prohibition is on that
+inference, under "A join is reported from the core's reply, never assumed", and
+not on address comparison as such.
 
 #### Scenario: A same-title Stoa already held is shown beside the preview
 
@@ -579,6 +725,56 @@ verification in the core and surface as a refusal the user cannot act on.
 - **WHEN** the view is started and no Stoa has been chosen
 - **THEN** no feed is rendered for any Stoa
 - **AND** the view does not supply a Stoa address of its own
+
+### Requirement: Every state a user can enter has a specified way out
+
+A user who reaches the join preview MUST be able to return to the list without
+restarting, both before acting and after a join has succeeded; and a Stoa created
+through the create affordance MUST reach the list without a restart.
+
+**The general rule is that arriving somewhere is half a transition**, and a spec
+that pins only the arrival leaves the return implemented by habit rather than by
+contract. That is not hypothetical here: a return route that no scenario requires
+can be deleted with every test still passing, so it is unprotected precisely
+because it works. Stating it once, as a property of the screens rather than as a
+list of buttons, is what stops the next view piece rediscovering it.
+
+**A return is specified as an outcome, not as a mechanism.** Whether it is a
+cancel affordance, a back affordance, or an automatic return when a join
+completes is a design decision; what is required is that the user reaches the list
+again without restarting, and that the affordance which does it is not withdrawn
+by the very state it exists to leave. A control hidden once the user has succeeded
+is a control absent exactly when the return is needed.
+
+The join preview's return MUST remain available after a successful join. Reporting
+success and offering nothing further is a terminal state, and a user who has just
+joined a Stoa is the user most likely to want to open it.
+
+**One transition is deliberately outside this requirement: the return from a
+Stoa's feed to the list.** No route exists today, and none can be specified
+without the feed gaining a way to say it is finished, which is a change to a
+screen this capability does not own. It is named here rather than omitted so the
+gap is visible rather than looking like an oversight, and closing it is the
+change's that adds that signal.
+
+#### Scenario: The preview can be left without joining
+
+- **WHEN** the preview is rendered and the user declines it
+- **THEN** the list is rendered again
+- **AND** no join call has been made
+
+#### Scenario: The return is still available after a join succeeds
+
+- **WHEN** a join has succeeded and the joined outcome is rendered
+- **THEN** an affordance returning to the list is still offered
+- **AND** acting on it renders the list
+
+#### Scenario: A created Stoa reaches the list without a restart
+
+- **WHEN** a Stoa is created successfully
+- **THEN** the listing is read again
+- **AND** the created Stoa is among the rows rendered, without the view being
+  restarted
 
 ### Requirement: Nothing on these screens claims a per-Stoa identity, a membership, or a moderator
 
