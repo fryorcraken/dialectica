@@ -23,9 +23,9 @@ past decision means grepping the archive.
 
 **Archiving has enough traps to be worth its own page:
 [`docs/OPENSPEC-ARCHIVE.md`](../../docs/OPENSPEC-ARCHIVE.md). Read it before you
-archive, not before you start.** Archiving runs after the merge, not before, and
-the `closer` is the agent that runs it — [`closer.md`](closer.md) says why that
-ordering. `openspec` is installed; run
+archive, not before you start.** Archiving is the `closer`'s, and it runs as a
+commit on the piece branch before CI and the merge — [`closer.md`](closer.md)
+says why that ordering. `openspec` is installed; run
 `openspec --version` rather than believing any document about it, this one
 included.
 
@@ -118,9 +118,9 @@ Every branch rule below follows from that asymmetry.
 
 | Branch | Worktree | Whose | Holds |
 |---|---|---|---|
-| `piece/<name>` | one, shared | the three writers in turn, then the `closer` | **the** task branch, and the only branch of the three that is pushed. Spec, code, tests and findings-fixes all commit here directly |
+| `piece/<name>` | one, shared | the three writers in turn, then the `closer` | **the** task branch, and the only branch of the three that is pushed. Spec, code, tests, findings-fixes and the archive all commit here directly |
 | `review/<name>/<dimension>` | one each | one reviewer | **local only** — its findings file, nothing else, cherry-picked onto the piece and never pushed |
-| `main` | the main checkout | the `closer`, after the merge | the archive commit, and nothing else an agent writes |
+| `main` | — | nobody | **no agent ever pushes here.** It takes commits through a PR only |
 
 **`spec-writer`, `dev-writer` and `tester` share one worktree, checked out on
 `piece/<name>`.** They can share it precisely because they never run at the same
@@ -166,10 +166,15 @@ the agent that knows what the change does. It is not a second pusher — it push
 once, at a moment when it is the only agent holding the piece, and the runner
 pushes everything after. See [`dev-writer.md`](dev-writer.md).
 
-The `closer` is the other exception, and also not a pusher of the piece: it pushes
-the **archive commit to `main`**, after the merge, and never touches the piece
-branch. Two agents pushing one branch at once is the race this rule prevents; a
-branch handed from one agent to the next is not.
+The `closer` is the other exception: it commits the **archive** to the piece
+branch and pushes that, before CI and the merge. By then every writer and
+reviewer is done, so it holds the branch alone. Two agents pushing one branch at
+once is the race this rule prevents; a branch handed from one agent to the next
+is not.
+
+**Nobody pushes `main`.** It takes commits through a PR only — `enforce_admins`
+is on, and a direct push is rejected with `GH006`. This page and `closer.md` both
+used to say the archive was an exception, until a closer tried it.
 
 **Only reviewers get a side branch**, because only reviewers run genuinely in
 parallel — six at once, while a fixer may still be changing the code they are
@@ -207,8 +212,8 @@ recognise, because everyone reads both.
 - [ ] review: spec-test — `spec-test-reviewer`
 - [ ] review: design — `design-reviewer`
 - [ ] findings all ticked, `findings/` deleted — `closer`
-- [ ] CI green, PR merged — `closer`
 - [ ] `openspec validate --strict`, then `archive` — `closer`
+- [ ] CI green, PR merged — `closer`
 ```
 
 **One row per agent instance, not per role** — `code-reviewer` runs four times, so

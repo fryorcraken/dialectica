@@ -18,22 +18,23 @@ goes back to the runner with the evidence attached.
 1. **Confirm the piece is actually finished** — the findings gate, and the
    stage block.
 2. **Check the branch is not stale** against current `main`.
-3. **Watch CI to green.**
-4. **Ensure the PR's title and body are up to date** and matches content, update them if needed.
-5. **Merge.**
-6. **Archive**, then push the archive commit to `main`.
+3. **Archive**, as one more commit on the piece branch.
+4. **Watch CI to green.**
+5. **Ensure the PR's title and body are up to date** and matches content, update them if needed.
+6. **Merge.**
 
-**Archiving comes after the merge, not before.** `openspec archive` merges the
-spec delta into `openspec/specs/` and moves the change folder — it rewrites the
-live contract. Do it before CI is green and you have promoted a contract for
-code that may never land; do it before the merge at all and the archive commit
-is on the piece branch, so a squash merge folds a contract change and the code
-into one commit that cannot be reverted in halves. The commit that promotes the
-contract should be readable on its own.
+**The archive is a commit on `piece/<name>`, like every other stage.** One piece
+is one branch and one PR, and the archive is not an exception: it commits on the
+piece branch, rides the same PR, gets the same CI run, and lands in the same
+squash.
 
-The cost of this ordering is that the archive is a second push. Accept it. It
-is one commit straight to `main` with no code in it, and it is the only push in
-this flow that does not go through a PR.
+**Archive before CI, not after the merge.** The archive rewrites
+`openspec/specs/`, so it has to be in the tree CI tests and in the diff the merge
+applies. Archive after the merge and it has nowhere left to land.
+
+This page used to say the opposite: archive after the merge, then push the commit
+straight to `main`. That push is impossible — `main` takes commits through a PR
+only, `enforce_admins` is on, and a closer that tried it got `GH006`.
 
 ## Step 1 — is the piece finished?
 
@@ -109,7 +110,46 @@ one.** `git diff origin/main HEAD --stat` on a correctly merged branch showed
 reporting what `main` has and the branch does not. Name the commit you merged
 rather than the moving branch: `git diff <merged-sha> HEAD --stat`.
 
-## Step 3 — watching CI
+## Step 3 — archiving
+
+**Read [`docs/OPENSPEC-ARCHIVE.md`](../../docs/OPENSPEC-ARCHIVE.md) in full
+before you run anything.** Most of this step's traps are there and none of them
+are visible from the files; this section does not restate them, because two
+copies drift and the reader who finds the stale one cannot tell. What follows
+is only what is specific to closing.
+
+Run `openspec --version` first. This page once recorded the CLI as absent, the
+absence was real, the sentence outlived it, and "openspec is not installed"
+reached five agents in one day on that basis. Believe the command, not any
+document — this one included.
+
+The root comes from the cwd: `openspec` walks up to the nearest `openspec/` and
+has no `--directory`, `-C` or `--root`. `cd <dir> && openspec …` with **no path
+argument after it** is the one shape the permission checker accepts for this.
+Check the reported root before concluding a change is missing.
+
+Three things to get right in the closing context specifically:
+
+- **Take the delta-merge prompt.** Declining it archives without promoting the
+  spec, which leaves `main` carrying code whose contract never landed — the
+  exact split that one-piece-one-PR exists to prevent, arriving one step later.
+- **Diff the promoted file against the delta.** The CLI does not report what it
+  changed. For a capability the live specs do not yet hold, exactly two hunks
+  are expected. A merge nobody diffed is a merge nobody verified, and
+  `validate --strict` will not save you — it checks heading structure, not
+  consistency, and has twice passed a spec that contradicted itself.
+- **Archive in merge order, oldest first**, if more than one change is waiting.
+  A later `MODIFIED` must apply to the text an earlier `ADDED` produced. Derive
+  the order from `git log --name-status --diff-filter=A -- openspec/changes`;
+  do not guess from folder names.
+
+Then `openspec validate --strict`, and commit it to `piece/<name>` with named
+paths. Most of the diff is renames — the change folder is *moved* into
+`changes/archive/<date>-<name>/`. The findings tracker you deleted in Step 1 is
+the one real deletion, so say so in the commit message, or the diff reads as
+though it is removing review evidence.
+
+## Step 4 — watching CI
 
 Get the run for **your commit**, not for the branch:
 
@@ -147,7 +187,7 @@ retry without asking is a job that failed for a reason with no content —
 cancelled by a superseding push, a runner timeout — and say in your report that
 you retried and why.
 
-## Step 4 — ensure the title and body are up to date and matches the content
+## Step 5 — ensure the title and body are up to date and matches the content
 
 A squash merge writes the PR's title and body into `main`'s history, so they are
 the only prose from the piece that survives the merge. The `dev-writer` wrote
@@ -169,7 +209,7 @@ diff and the body disagree about what the change *does* — not how it is worded
 that is a question for the runner, because one of the two is wrong and you cannot
 tell which from here.
 
-## Step 5 — merging, and on whose authority
+## Step 6 — merging, and on whose authority
 
 **Squash merge, and ask the owner before you run it.**
 
@@ -183,8 +223,8 @@ keeping on `main`.
 The asking part is not squeamishness about a command. **Merging is the one
 irreversible, outward-facing act in this flow.** Everything else an agent here
 does lives on a branch or in a worktree and can be thrown away; a merge changes
-what `main` says to everyone reading the repo, and the archive commit that
-follows rewrites the live contract. The repo's own protection does not stand in
+what `main` says to everyone reading the repo, and it carries the archive commit
+that rewrites the live contract. The repo's own protection does not stand in
 for the judgement: `required_approving_review_count` is **0**, so nothing
 between you and `main` would stop a wrong merge. Run
 `gh api repos/<owner>/<repo>/branches/main/protection` to see what is actually
@@ -201,42 +241,6 @@ succeeded; only the local delete failed, and that non-zero exit reads exactly
 like a failed merge. Remove the worktree first, or check
 `gh pr view <n> --json state` before believing the exit code.
 
-## Step 5 — archiving
-
-**Read [`docs/OPENSPEC-ARCHIVE.md`](../../docs/OPENSPEC-ARCHIVE.md) in full
-before you run anything.** Most of this step's traps are there and none of them
-are visible from the files; this section does not restate them, because two
-copies drift and the reader who finds the stale one cannot tell. What follows
-is only what is specific to closing.
-
-Run `openspec --version` first. This page once recorded the CLI as absent, the
-absence was real, the sentence outlived it, and "openspec is not installed"
-reached five agents in one day on that basis. Believe the command, not any
-document — this one included.
-
-The root comes from the cwd: `openspec` walks up to the nearest `openspec/` and
-has no `--directory`, `-C` or `--root`. `cd <dir> && openspec …` with **no path
-argument after it** is the one shape the permission checker accepts for this.
-Check the reported root before concluding a change is missing.
-
-Three things to get right in the closing context specifically:
-
-- **Take the delta-merge prompt.** Declining it archives without promoting the
-  spec, which leaves `main` carrying code whose contract never landed — the
-  exact split that one-piece-one-PR exists to prevent, arriving one step later.
-- **Diff the promoted file against the delta.** The CLI does not report what it
-  changed. For a capability the live specs do not yet hold, exactly two hunks
-  are expected. A merge nobody diffed is a merge nobody verified, and
-  `validate --strict` will not save you — it checks heading structure, not
-  consistency, and has twice passed a spec that contradicted itself.
-- **Archive in merge order, oldest first**, if more than one change is waiting.
-  A later `MODIFIED` must apply to the text an earlier `ADDED` produced. Derive
-  the order from `git log --name-status --diff-filter=A -- openspec/changes`;
-  do not guess from folder names.
-
-Then `openspec validate --strict`, commit the archive with named paths, and
-push it to `main`.
-
 ## What you never do
 
 Each of these is here because the cheap version of it is tempting:
@@ -248,8 +252,11 @@ Each of these is here because the cheap version of it is tempting:
   deletes the only evidence.
 - **Re-open or re-argue a finding.** A **rejected** outcome you find
   unconvincing is a sentence in your report, not an edit to a reviewer's file.
-- **Force-push, or rebase the piece branch.** You never push the piece at all;
-  the runner does. A stale branch is a report, not a repair.
+- **Force-push, or rebase the piece branch.** The archive commit is the only
+  thing you push, and it is an ordinary commit on top. A stale branch is a
+  report, not a repair.
+- **Push to `main`.** Not the archive, not anything. `main` takes commits
+  through a PR only.
 - **Merge a PR you did not check the diff of**, however green the run.
 
 ## Your report
