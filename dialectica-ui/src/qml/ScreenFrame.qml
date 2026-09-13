@@ -39,6 +39,15 @@ Rectangle {
     // passes qmllint — the failure mode is a blank region on a screen where
     // every gate is green.
     //
+    // READ THE SCOPE OF THAT NUMBER BEFORE RELYING ON IT. It is measured in a
+    // card given an EXPLICIT height, and no caller gives one — `Main.qml` sets
+    // width and alignment only. In a content-sized card there is no slack to
+    // distribute, so a `fillHeight` child measures 0 even with this binding.
+    // What the binding buys is that a card WITH a height behaves, not that a
+    // body can fill a card sized from its own content. `docs/UI-BRIEF.md` under
+    // *What `ScreenFrame` gives you* states this for screen authors; the first
+    // draft of that section promised the opposite and was corrected here.
+    //
     // That matters because a screen wanting a body that fills the card is the
     // ordinary case, and the text such a screen owes its reader — a seed-phrase
     // permanence warning, a closed-gate reason, a publish outcome that must not

@@ -498,7 +498,7 @@ invisible from inside it.
 > printing the address beside every mark, which is obligation 6, and a note saying
 > so would add nothing a reader acts on.
 
-### What `ScreenFrame` gives you, and the one thing it asks
+## What `ScreenFrame` gives you, and the one thing it asks
 
 **For whoever implements a screen in QML, not only for the designer.** Every
 screen is a `ScreenFrame` — the card, which decides padding, width and the
@@ -507,21 +507,33 @@ wrong is silent, so it is stated here rather than only in the component:
 
 - **The card reports its own height** from its content. `Main.qml` reads that to
   size the scroll area, so this is what makes a long feed scroll at all.
-- **A child with `Layout.fillHeight: true` gets real slack** — it grows to fill
-  the card rather than collapsing to nothing. A screen whose body should fill the
-  card says so on the child that fills it.
 - **Do not give a `ScreenFrame` an explicit `height`.** Let it size from its
-  content. A card with an explicit height and no child claiming the slack spreads
-  its rows down the card instead of stacking them at the top.
-- If you must set one, put `Layout.fillHeight: true` on the child that should
-  absorb the slack. A trailing `Item { Layout.fillHeight: true }` looks like the
-  same fix and is not: it inflates the card's reported height by one gap, and the
-  scroll area then runs past the end of the content.
+  content. This is how every screen in the tree is used: `Main.qml` gives the card
+  a width and an alignment and no height at all.
+- **So a card is exactly as tall as its content, and there is no slack to fill.**
+  A child declaring `Layout.fillHeight: true` in a content-sized card measures
+  **zero** — not because the shell withholds the space, but because a card sized
+  from its content has none to give. Measured at Qt 6.10.3 in a `Main.qml`-shaped
+  harness: `frame.h=116`, `filler.h=0`.
+- **Design screens that grow downward, not screens that fill a viewport.** If a
+  region should look like it occupies the rest of the page, give it a height you
+  choose — a minimum, a ratio, a fixed block — rather than asking it to fill.
+  `Layout.fillWidth` behaves as you expect; its vertical twin does not, and
+  nothing warns you: no error, no binding loop, every gate green, and a blank
+  region on the screen.
+- **If you do set an explicit height**, a `Layout.fillHeight: true` child then
+  does get real slack (measured: 484 of a 600px card), and it is what stops the
+  rows spreading down the card instead of stacking at the top. A trailing
+  `Item { Layout.fillHeight: true }` looks like the same fix and is not: it
+  inflates the card's reported height by one gap, and the scroll area then runs
+  past the end of the content.
 
 The reason this is here and not only in a code comment: the apparatus column
 shipped because an obligation lived in a document nobody implementing a screen
 had a reason to open. A contract that can only be found by someone who already
 knows to look for it is a contract the next screen will not meet.
+
+## The obligations themselves
 
 **1. Sanitise display text, because the core deliberately does not — and this
 applies to every string, not just titles.**

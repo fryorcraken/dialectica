@@ -125,6 +125,46 @@ assertion is a gate the defect satisfies. What is readable is the object graph:
 the sentence and the buttons sharing one governing ancestor is the property that
 makes "renders where paging is offered, and only there" true by construction.
 
+### The two framings that were rejected, and what obligation 10 costs
+
+Recorded here after review, which found the decision itself lived only in
+`proposal.md` — and a decision recorded only in the proposal is one `design.md`
+claims did not happen. The alternatives are the substance of it:
+
+**Rejected: "the locality claim must appear once per screen."** That is a
+disclaimer rather than an obligation, and it is the exact mistake this change
+exists to undo: a screen with no count and no paging would be made to print a
+sentence at the reader that corrects nothing. An obligation is a thing the
+interface must **do**.
+
+**Rejected: "the empty-screen-only behaviour is correct as it stands."** It is
+correct about counts and silent about paging, and the paging case is the one where
+a reader is actually misled. Accepting it would leave the interface relying on the
+reader not to make the ordinary assumption — which §3 establishes, on the other
+obligation, is not a thing an interface may rely on. The same test, applied twice.
+
+**What it costs, which is the part that was written down nowhere.** Obligation
+10's second half is the **first brief obligation dischargeable only by prose**, in
+a change whose whole thesis is that an obligation is something the interface
+*does* and that text printed at a reader is what the apparatus column got wrong.
+That tension is real rather than apparent, and naming it is what keeps the next
+author from reading obligation 10 as licence for the disclaimer the same
+obligation forbids.
+
+It is accepted because the two halves fail differently. Most obligations discharge
+structurally because a structure can make the wrong state unreachable — printing
+the address beside every mark means no mark can appear unaddressed. Here the claim
+is made **by a control**, so there is no structure that unmakes it: the only way to
+stop "Next" reading as *this Stoa has more* is to say whose copy it is about. The
+brief states this discriminator itself, at *"the claim is made by a control, so no
+structure can unmake it"*, and pairs it with the explicit non-obligation — a screen
+asserting no extent owes nothing — which is what stops the licence generalising.
+
+So the line between this and the apparatus is not prose-versus-structure. It is
+**who is addressed**: the apparatus explained the design to a designer in a margin,
+where obligation 10 qualifies a claim the interface itself just made, to the reader
+who just met it, only in the state that makes it.
+
 ## 3. The one obligation that would have vanished, and the decision taken
 
 `ON THIS ORDERING` is the exception, and it is the case the dispatch warned
@@ -145,6 +185,18 @@ note, so deleting the column would have removed the correction and left nothing.
 rule, in `Theme.note` — verbatim, since its wording was already reviewed. It is
 now interface addressed to a user rather than margin addressed to a designer,
 which is the distinction this whole change turns on.
+
+**The `copy.json` key moves with it**, which review found had been dropped. The
+deleted `MarginNote` carried `// copy.json \`feed.orderingNote\``, and the `Text`
+that replaced it first carried none — the only bundle-sourced string in the tree
+without one, against seven that keep theirs (six in `FeedScreen.qml`, two in
+`SanitisedText.qml`). The argument for dropping it is real: the text is no longer
+a *margin* note, so `feed.orderingNote` arguably no longer names it. It is
+rejected because **what changed is the presentation and not the string**. The
+wording is the bundle's, unaltered, and the key is how a later reader reconciles
+the QML against the bundle; renaming or dropping it would make this one sentence
+untraceable in a scheme §7 of this document reasons from directly when it hands
+the `compose.apparatus` question to the composer piece.
 
 **Rejected: leaving it to `docs/UI-BRIEF.md` alone.** A brief obligation with no
 interface text is precisely how the apparatus came to ship in the first place —
@@ -297,6 +349,52 @@ section and asks for the two to be kept in step.
 that produced the gap. It also hides the rule from anyone reading the brief to
 decide what a screen owes, which is the audience that most needs it.
 
+#### The contract's first draft promised something it cannot deliver
+
+Added after the design review, which measured the two middle bullets against each
+other and found them jointly false. One bullet promised a `Layout.fillHeight`
+child "gets real slack"; another, five lines later, forbade giving a `ScreenFrame`
+an explicit `height`. **An author following the second gets the collapse the first
+says cannot happen.** Re-measured independently here, one probe, Qt 6.10.3:
+
+| Frame | `frame.h` | `filler.h` |
+|---|---|---|
+| `height: 600` — the forbidden form | 600 | **484** |
+| no explicit height — the mandated form | 116 | **0** |
+| inside a `Main.qml`-shaped Flickable + ColumnLayout | 116 | **0** |
+
+The third row is the only call shape in the tree: `Main.qml` assigns the frame
+`Layout.alignment` and `Layout.preferredWidth` and no height. So **in the app as
+shipped, a `fillHeight` child of a `ScreenFrame` is zero-height**, and the brief
+was telling the authors on #60, #62 and #63 the opposite.
+
+The 544 figure §4 records is real and reproduces — what was wrong is the **scope
+claimed for it**. It was measured against `ScreenFrame { width: 1000; height: 600
+}`, closed against the same markup, and written up without the qualifier; the
+brief then turned an unqualified sentence into guidance for callers who, by this
+same section's trade paragraph, never give a card an explicit height.
+
+**Taken: say plainly that a content-sized card has no slack to give**, and tell a
+screen author to design a screen that grows downward rather than one that fills a
+viewport. The `fillHeight` bullet is kept but moved behind the explicit-height
+condition that makes it true.
+
+**Rejected: make `ScreenFrame` fill its parent.** That would make `fillHeight`
+work as the first draft promised, and it would undo `implicitHeight` — the card
+would stop reporting its content height, `Main.qml`'s `contentHeight` would go
+back to reading the viewport, and the feed would stop scrolling. That is the
+defect §4 exists to fix, traded for a convenience no screen has yet asked for.
+
+**Rejected: qualify the bullet and leave it there.** It removes the contradiction
+without answering the question the author actually has, which is what to do
+instead. A brief that says "not this" and stops is how the apparatus shipped.
+
+**What this costs, named because it is a real limit rather than a wording
+choice:** a screen genuinely wanting a full-height region — a two-pane thread
+view, say — cannot get one from the shell as it stands, and will have to pick a
+height or change `ScreenFrame`'s contract deliberately. The brief now says so,
+which is better than a promise that measures zero.
+
 **Rejected: a spec delta.** The contract is about how a QML shell is used, not
 about observable forum behaviour; `.openspec.yaml` sets `skip_specs: true` for
 this change and nothing here alters that.
@@ -324,10 +422,13 @@ usage rather than a designed set.
 
 - **No spec delta.** `.openspec.yaml` sets `skip_specs: true` with the
   measurement. See §7 for the one spec that *does* name an apparatus string.
-- **No test changes.** No test on `main` asserts apparatus content — measured by
-  grep over `dialectica-ui/tests/`, which returns one line, in `tst_identicon.qml`,
-  and it is the word "mark" inside an unrelated comment. **That is itself a
-  finding**: the column shipped, and no gate could see it.
+- **No test assertion is changed or removed.** No test on `main` asserts
+  apparatus content — measured by grep over `dialectica-ui/tests/`, which returns
+  one line, in `tst_identicon.qml`, and it is the word "mark" inside an unrelated
+  comment. **That is itself a finding**: the column shipped, and no gate could see
+  it. Two test-directory changes are nonetheless in the diff and are listed in
+  `proposal.md`'s Impact: `tst_feed_extent_claim.qml` is added, and
+  `run-qml-tests.sh` gains a single-spec mode with the reasoning recorded there.
 - **No core change.** View-only.
 - **No unrelated staleness fixed.** Several things in `UI-BRIEF.md` invite
   editing; all are left alone. Three branches are editing this file concurrently

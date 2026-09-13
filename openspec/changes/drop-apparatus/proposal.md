@@ -144,12 +144,33 @@ the first place.
   `dialectica-ui/src/qml/MarginNote.qml`.
 - **Modified:** `dialectica-ui/src/qml/ScreenFrame.qml`,
   `dialectica-ui/src/qml/FeedScreen.qml`, `dialectica-ui/src/qml/qmldir`,
-  `dialectica-ui/src/qml/Theme.qml`, `docs/UI-BRIEF.md`.
-- **No test changes.** `grep -rniI "MarginNote\|apparatus\|ON THIS ORDERING\|ON
-  WHAT YOU HOLD\|ON THE MARK"` over `dialectica-ui/tests/` returns one line, in
-  `tst_identicon.qml`, and it is the word "mark" inside an unrelated comment. **No
-  test asserts apparatus content**, which is itself worth recording: the column
-  shipped and no gate could see it.
+  `dialectica-ui/src/qml/Theme.qml`, `docs/UI-BRIEF.md`, `CLAUDE.md` (the
+  *Where to look for what* row now sends a screen author to the brief **before
+  writing a screen**, argued in `design.md` §4), and
+  `dialectica-ui/tests/run-qml-tests.sh` — see the next two entries.
+- **Added:** `dialectica-ui/tests/tst_feed_extent_claim.qml`, pinning obligation
+  10's discharge.
+- **The test runner gained a single-spec mode**, which is a change to test
+  machinery rather than to any assertion. `run-qml-tests.sh <file.qml>` now runs
+  one spec. **Why it exists rather than leaving callers to reach past the
+  script:** invoking `qmltestrunner` directly means hand-writing
+  `QT_QPA_PLATFORM=offscreen`, and an environment-variable prefix is a shape the
+  permission checker cannot analyse, so every such call costs the user an approval
+  click; it also loses the script's runner discovery, which is the difference
+  between a real failure and a Qt5 binary exiting 1 with no output. **What it
+  costs:** the script now has two modes, and the glob branch and the argument
+  branch can drift — accepted because both delegate to the same discovered runner
+  with the same import path, so a drift would have to be written deliberately.
+- **No test *assertion* was changed or removed**, which is the claim this list
+  used to overstate as "no test changes". `grep -rniI "MarginNote\|apparatus\|ON
+  THIS ORDERING\|ON WHAT YOU HOLD\|ON THE MARK"` over `dialectica-ui/tests/`
+  returns one line, in `tst_identicon.qml`, and it is the word "mark" inside an
+  unrelated comment. **No test asserted apparatus content**, which is itself worth
+  recording: the column shipped and no gate could see it — and **no gate can see
+  it come back**, either. Restoring both components and their two `qmldir` lines
+  would pass every gate in the repo. That is accepted rather than overlooked: a
+  test asserting the absence of a deleted component is usually the wrong
+  instrument, and the obligations the notes carried are pinned instead.
 - **No core change.** This is view-only.
 - **`docs/UI-BRIEF.md` needed less correcting than expected on the apparatus
   itself**, and the reason is recorded in `design.md` §1: the brief never

@@ -24,10 +24,12 @@
 - [x] review: architecture — `code-reviewer`
 - [x] review: spec-test — `spec-test-reviewer`
 - [x] review: design — `design-reviewer` — `findings/design.md`. Seven boxes, all
-      `dev-writer`'s. The big one: **rendering obligation 10 is not in `design.md`
-      at all**. Also a `UI-BRIEF.md` contract whose `fillHeight` promise is false
-      in the only call shape the tree has — measured, `filler.h=0` in a
-      `Main.qml`-shaped harness. §4's six figures all reproduce; PLAN.md is clean.
+      `dev-writer`'s, **all now closed — see §10**. The big one: **rendering
+      obligation 10's decision is not in `design.md`**. Also a `UI-BRIEF.md`
+      contract whose `fillHeight` promise is false in the only call shape the tree
+      has — measured, `filler.h=0` in a `Main.qml`-shaped harness, and reproduced
+      independently when the box was closed. §4's six figures all reproduce;
+      PLAN.md is clean.
 - [ ] findings all ticked, `findings/` deleted — `closer`
 - [ ] `openspec validate --strict`, then `archive` — `closer`
 
@@ -69,10 +71,10 @@ it is that it was invisible to the suite in its previous location too.
 Done before any deletion, since a note whose obligation exists nowhere else is a
 requirement being deleted by accident. The table is `design.md` §2.
 
-- [x] 2.1 `ON WHAT YOU HOLD` — survives in the brief at constraint 1
-      (`UI-BRIEF.md:86-88`, "a count of *anything* global … is unknowable") **and
-      in the interface already**, at `FeedScreen.qml`'s empty state: "This is a
-      fact about your copy, not about the Stoa."
+- [x] 2.1 `ON WHAT YOU HOLD` — survives in the brief at **constraint 1** ("a
+      count of *anything* global … is unknowable. Do not show one") **and in the
+      interface already**, at `FeedScreen.qml`'s empty state: "This is a fact
+      about your copy, not about the Stoa."
       **Narrowed by the `spec-writer`'s second pass — the "in the interface
       already" half is true only of the empty state**, and the state where the
       screen asserts extent (the pagination control) carries no locality
@@ -82,9 +84,10 @@ requirement being deleted by accident. The table is `design.md` §2.
       `findings/correctness.md`. Read that box and `proposal.md`'s *The obligation
       the move narrowed* before citing this line as evidence the obligation
       survived intact — it did not.
-- [x] 2.2 `ON THE MARK` — survives in the brief at obligation 6 layer 2
-      (`UI-BRIEF.md:584-593`, "must never be rendered as a verification mark, a
-      badge, or anything that reads as 'checked'") **and structurally**, since
+- [x] 2.2 `ON THE MARK` — survives in the brief at **obligation 6, layer 2 (the
+      identicon)** in its four-layer list — "must never be rendered as a
+      verification mark, a badge, or anything that reads as 'checked'" — **and
+      structurally**, since
       `PostHeader.qml` and the Stoa header both render `AddressLabel` beside
       `Identicon` unconditionally.
 - [x] 2.3 `ON THIS ORDERING` — **does not fully survive**, and this is the one
@@ -283,3 +286,58 @@ boxes are one `spec-writer`'s and one `tester`'s and are deliberately untouched.
       CI's `textFormat` gate balances under its own regex. `git diff` on
       `FeedScreen.qml` read back to confirm both mutations were reverted with no
       residue, and the scratch probe deleted.
+
+## 10. The design review's seven boxes
+
+All seven are `dev-writer`'s and all seven are closed. Outcomes and measurements
+live beside the reviewer's text in `findings/design.md`; this records what was
+done. Two of the seven describe a tree that had already moved — the review read
+`4ab9144` and was committed at `dd0fe95`, two commits later.
+
+- [x] 10.1 Record obligation 10's **decision** in `design.md`, which carried its
+      reasoning but not its alternatives. New §2 subsection with the two rejected
+      framings (a once-per-screen disclaimer; empty-screen-only is correct) and
+      **what the obligation costs** — it is the first brief obligation
+      dischargeable only by prose, in a change arguing obligations are things the
+      interface *does*. The discriminator that makes that defensible is *who is
+      addressed*, not prose-versus-structure.
+- [x] 10.2 §2's `ON WHAT YOU HOLD` row and its `findings/` pointer — **already
+      fixed by `2fc3689`**, which landed after the commit the review read. No edit
+      made; verified by diff that both halves are gone and that
+      `grep -n "findings/correctness"` over `design.md` returns nothing, so no
+      citation dangles after archive deletes `findings/`.
+- [x] 10.3 Correct the `ScreenFrame` contract in `docs/UI-BRIEF.md`, whose two
+      middle bullets contradicted each other. **Re-measured independently before
+      editing**: a `fillHeight` child gets 484 in a card with an explicit height
+      and **0** in a content-sized card — including the `Main.qml`-shaped harness,
+      which is the only call shape in the tree. The brief now says a content-sized
+      card has no slack to give and tells an author to design a screen that grows
+      downward. Two alternatives rejected in `design.md` §4, with the cost named:
+      a screen wanting a full-height region cannot get one from the shell as it
+      stands. `ScreenFrame.qml`'s comment carried the same unqualified figure and
+      now carries the scope with it.
+- [x] 10.4 Stop the `ScreenFrame` section swallowing the ten rendering
+      obligations. It was the only heading between `## Non-negotiable rendering
+      obligations` and `## The vote control`, so all ten nested inside it.
+      Promoted to `##` **and** the obligations given `## The obligations
+      themselves` — promoting alone leaves obligation 1 under the wrong heading.
+      Restores `origin/main`'s structure while keeping the reading order
+      `design.md` §4 argues for.
+- [x] 10.5 Restore the `copy.json` `feed.orderingNote` provenance comment on the
+      relocated ordering sentence — the one bundle-sourced string in the tree
+      without one, against seven that keep theirs. Kept rather than dropped
+      because what changed is the presentation and not the string. Recorded in
+      `design.md` §3 with the rejected alternative.
+- [x] 10.6 Fix 2.2's stale `UI-BRIEF.md` line range, the twin of the one
+      `findings/readability.md` fixed in `design.md`. The cited sentence has now
+      been measured at three different lines across three reviews (622, 641,
+      **875** today) without changing, so the range is replaced by the heading.
+      2.1's range is replaced too — it is still accurate, and it is the same
+      instrument.
+- [x] 10.7 Correct `proposal.md`'s Impact list, which said "**No test changes**"
+      while the diff modified `run-qml-tests.sh`, and omitted `CLAUDE.md` and the
+      added spec file. The runner's single-spec mode is now argued where a reader
+      of the change folder will meet it rather than only in `git log`, with the
+      cost it accepts (two modes that can drift) stated. `design.md` §6 carried
+      the same false sentence and is corrected to match.
+- [x] 10.8 Gates after all of the above — see §11.

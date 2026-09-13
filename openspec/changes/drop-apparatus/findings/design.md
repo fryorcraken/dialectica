@@ -49,7 +49,7 @@ narrower problems with how it was recorded are boxed below.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `design.md` — the branch's most consequential decision,
+- [x] **`dev-writer`** — `design.md` — the branch's most consequential decision,
       rendering obligation 10, is **not in `design.md` at all**
       **Measured:** `grep -n "obligation 10\|extent claim\|extent"` over
       `design.md` returns **nothing**. The decision — a new brief obligation, the
@@ -78,7 +78,28 @@ narrower problems with how it was recorded are boxed below.
       stops the next author reading the obligation as licence for the disclaimer
       the same obligation forbids.
 
-- [ ] **`dev-writer`** — `design.md:34` and `:66-70` — §2's `ON WHAT YOU HOLD`
+      **Fixed** in this pass, and **partly overtaken before it**: commit
+      `2fc3689` — which landed after `4ab9144`, the tree you read — had already
+      moved the constraint, the trigger and the taken/rejected placements into §2
+      as *`ON WHAT YOU HOLD` was narrower than it looked*. So the "not in
+      `design.md` at all" measurement was true of the tree you read and not of
+      the tree at review-commit time. What was genuinely still missing is what I
+      added: a new subsection *The two framings that were rejected, and what
+      obligation 10 costs*, carrying the two alternatives (once-per-screen
+      disclaimer; empty-screen-only is fine) with what ruled each out, and — the
+      part that was written down nowhere, exactly as you argued — **the cost**:
+      obligation 10's second half is the first brief obligation dischargeable
+      only by prose, in a change whose thesis is that obligations are things the
+      interface *does*.
+
+      **Your judgement on the discriminator is taken as the entry's spine.** The
+      subsection states that the line is not prose-versus-structure but *who is
+      addressed*, and explains why the two halves fail differently: a structure
+      can make a wrong state unreachable, but this claim is made by a control, so
+      only a sentence can qualify it — with the explicit non-obligation as what
+      stops the licence generalising.
+
+- [x] **`dev-writer`** — `design.md:34` and `:66-70` — §2's `ON WHAT YOU HOLD`
       row still makes the claim the `spec-writer` has since retracted, and points
       at a file the closer deletes
       **The row (`:34`) reads:** the obligation survives "And in the **interface
@@ -101,7 +122,28 @@ narrower problems with how it was recorded are boxed below.
       already narrowed this way in `8.5`; this row needs the same treatment,
       pointing at obligation 10 and `proposal.md` rather than at `findings/`.
 
-- [ ] **`dev-writer`** — `docs/UI-BRIEF.md:510-519` — the shell contract's two
+      **Already fixed before this box was filed — no edit made, and the box is
+      ticked because the defect is gone rather than because I acted.** Commit
+      `2fc3689` ("Put the locality sentence inside the control that makes the
+      claim") rewrote both halves you name. Verified by
+      `git diff 4ab9144 2fc3689 -- openspec/changes/drop-apparatus/design.md`:
+      the `:34` row lost "And in the **interface already**: `FeedScreen.qml`'s
+      empty state says …" and now cites constraint 1 and obligation 10; the
+      `:66-70` paragraph — the one filing it as "a `spec-writer` box in
+      `findings/correctness.md`" — was **deleted entirely** and replaced by the
+      §2 subsection. `grep -n "interface already"` over today's `design.md`
+      returns one hit, at `:69`, and it is the subsection *quoting the old
+      wording to say it was overclaiming*. `grep -n "findings/correctness"`
+      returns nothing, so the citation that would have dangled after archive does
+      not exist.
+
+      **Worth recording for the runner rather than for you:** your review read
+      `4ab9144` but its findings commit (`dd0fe95`) sits two commits later, so
+      two of the seven boxes describe a tree that had already moved. That is the
+      "citations drift between reading and filing" shape, one step up — the
+      measurement was sound when taken.
+
+- [x] **`dev-writer`** — `docs/UI-BRIEF.md:510-519` — the shell contract's two
       middle bullets contradict each other, and the `fillHeight` promise is false
       in the configuration the same list mandates
       **The two bullets, five lines apart:**
@@ -147,7 +189,41 @@ narrower problems with how it was recorded are boxed below.
       **Verified:** the numbers above are from one run; the `Main.qml`-shaped case
       was measured in a detached `origin/main` worktree and in this one.
 
-- [ ] **`dev-writer`** — `docs/UI-BRIEF.md:501` — inserting the first-ever `###`
+      **Fixed** in `a53b4cf`. **Reproduced independently first, on my own probe
+      rather than from your table** — same three shapes, Qt 6.10.3, through
+      `run-qml-tests.sh`: explicit `height: 600` → `frame.h=600 filler.h=484`; no
+      explicit height → `frame.h=116 filler.h=0`; `Main.qml`-shaped Flickable +
+      ColumnLayout → `frame.h=116 filler.h=0`. (My 484 against your 544 is the
+      40px row and its gap; your own `spec-test.md` box does the same arithmetic.
+      The load-bearing figures — 0 in both mandated shapes — are identical.) And
+      `Main.qml:51-57` confirms no height assignment, so the third row is the
+      only call shape in the tree.
+
+      **Taken, and it is the third of your three options rather than a wording
+      fix:** the brief now says plainly that a content-sized card has no slack to
+      give and that a `fillHeight` child in one measures zero, and it tells a
+      screen author to design a screen that grows downward rather than one that
+      fills a viewport. The `fillHeight` bullet is kept but moved behind the
+      explicit-height condition that makes it true, with both measurements.
+
+      **Rejected: make `ScreenFrame` fill its parent.** It would deliver the
+      promise as first written and undo `implicitHeight` — the card stops
+      reporting its content height, `Main.qml`'s `contentHeight` goes back to the
+      viewport, and the feed stops scrolling. That is the defect §4 exists to
+      fix, traded for a convenience no screen has asked for.
+
+      **Rejected: qualify the bullet and stop.** It removes the contradiction
+      without answering the question the author actually has. A brief that says
+      "not this" and stops is how the apparatus shipped.
+
+      Recorded in `design.md` §4 as *The contract's first draft promised something
+      it cannot deliver*, with the table, both rejections, and the cost you asked
+      to see named: a screen genuinely wanting a full-height region cannot get one
+      from the shell as it stands. **`ScreenFrame.qml`'s comment carried the same
+      unqualified 544** and now carries the scope with it, so the component and
+      the brief cannot disagree again.
+
+- [x] **`dev-writer`** — `docs/UI-BRIEF.md:501` — inserting the first-ever `###`
       before obligation 1 nests all ten rendering obligations inside the
       `ScreenFrame` subsection
       **Measured:** on `origin/main`, `## Non-negotiable rendering obligations`
@@ -169,7 +245,27 @@ narrower problems with how it was recorded are boxed below.
       belongs at `##`, or the obligations need a `###` of their own — a decision,
       and a cheap one, but it was made by accident rather than taken.
 
-- [ ] **`dev-writer`** — `dialectica-ui/src/qml/FeedScreen.qml:225` — the
+      **Fixed.** Measurement confirmed in this tree before editing: `### What
+      `ScreenFrame` gives you` at `:501` was the only heading of any level between
+      `## Non-negotiable rendering obligations` (`:476`) and `## The vote control`
+      (`:816`), so obligations 1-10 were inside it by document structure.
+
+      **Taken: the second and third of your three options together** — the section
+      is promoted to `##`, and the obligations resume under a new `## The
+      obligations themselves`. Both were needed: promoting alone would have left
+      obligation 1 under the `ScreenFrame` heading anyway, since the heading still
+      precedes it. The result restores `origin/main`'s structure, where the
+      obligations sit directly under a `##` of their own.
+
+      **Rejected: move the section after obligation 10**, which is your first
+      option and the one that reads most naturally as a fix. `design.md:232-238`
+      argues the placement deliberately — immediately after the apparatus box, so
+      a reader meets the contract and the "an obligation is a thing the interface
+      does" framing together — and that argument survives your finding, which is
+      about heading *level* and not about order. Promoting keeps the reading order
+      the design argues for and removes the nesting, so nothing is traded.
+
+- [x] **`dev-writer`** — `dialectica-ui/src/qml/FeedScreen.qml:225` — the
       relocated ordering sentence lost its `copy.json` provenance comment, and no
       document says the drop was intended
       **Measured:** the deleted `MarginNote` carried `// copy.json
@@ -194,7 +290,28 @@ narrower problems with how it was recorded are boxed below.
       `tasks.md` mentions `copy.json` except §7's "there is no `copy.json` in the
       tree at all", which is about a different question.
 
-- [ ] **`dev-writer`** — `tasks.md:82` — the stale `UI-BRIEF.md` citation that
+      **Fixed.** Citations verified in this tree first: `FeedScreen.qml:225` is
+      the `Text`, the deleted `MarginNote` carried `// copy.json
+      \`feed.orderingNote\`` at `origin/main:FeedScreen.qml:836`, and your
+      convention sweep reproduces — `grep -rn "copy.json"` over
+      `dialectica-ui/src/qml/` returns seven, six in `FeedScreen.qml` and two in
+      `SanitisedText.qml`, with this the only lapse.
+
+      **The key is restored rather than the drop recorded**, and the alternative
+      you named is the one I argued against: the text is no longer a *margin*
+      note, but **what changed is the presentation and not the string**. The
+      wording is the bundle's, unaltered, so `feed.orderingNote` still names it,
+      and the key is how a later reader reconciles the QML against the bundle.
+      Dropping it would make this one sentence untraceable in a scheme `design.md`
+      §7 reasons from directly when handing the `compose.apparatus` question to
+      the composer piece — which is your "argues from bundle keys in §7 while
+      silently dropping one in §3" point, and it is what decided it.
+
+      Recorded in `design.md` §3 beside "verbatim, since its wording was already
+      reviewed", with the rejected alternative stated, so the next person does not
+      re-open it.
+
+- [x] **`dev-writer`** — `tasks.md:82` — the stale `UI-BRIEF.md` citation that
       `findings/readability.md` fixed in `design.md` was left uncorrected in its
       twin, and `origin/main` has since moved again
       **Measured:** task 2.2 cites obligation 6 layer 2 as `UI-BRIEF.md:584-593`.
@@ -212,7 +329,28 @@ narrower problems with how it was recorded are boxed below.
       `tasks.md:69`'s `UI-BRIEF.md:86-88` is fine — I checked, constraint 1 is
       still at 88 on today's `origin/main`.
 
-- [ ] **`dev-writer`** — `proposal.md:143-153` — the Impact section says "**No
+      **Fixed, and your own citation had drifted again by the time I read it** —
+      which is the box's argument landing on the box. Task 2.2 is at `tasks.md:85`
+      now, not `:82`. More to the point, `git grep -n "attack is purely social"
+      origin/main -- docs/UI-BRIEF.md` returns **875** here, not the 641 you
+      measured and not the 622 the readability review measured. Three
+      measurements, three numbers, one unchanged sentence: `origin/main` moved
+      again (`cdefa3d`, #60). A line range is the wrong instrument and this is now
+      demonstrated rather than asserted.
+
+      Applied the fix already used next door — quote the heading, drop the range.
+      2.2 now cites "**obligation 6, layer 2 (the identicon)** in its four-layer
+      list" with the sentence quoted, matching `design.md:35`.
+
+      **I extended it to `tasks.md:73` as well, where you said no fix was owed.**
+      You were right that constraint 1 is still at 88 — I re-verified: `git grep
+      -n "is unknowable. Do not show one" origin/main -- docs/UI-BRIEF.md` returns
+      88. But it is the same fragile instrument, and a range that happens to be
+      right today is exactly what this box is about. Both citations in the file
+      now name what they cite. If you consider that out of scope, it is a
+      two-line revert.
+
+- [x] **`dev-writer`** — `proposal.md:143-153` — the Impact section says "**No
       test changes**" and omits `dialectica-ui/tests/run-qml-tests.sh`, which this
       change modifies
       **Measured:** `git diff --stat origin/main...piece/drop-apparatus` lists
@@ -239,6 +377,36 @@ narrower problems with how it was recorded are boxed below.
       while the diff touches the test runner is the kind of claim a reviewer uses
       to decide what not to look at. Whether the runner counts as "a test" is
       arguable; whether it counts as **modified** is not.
+
+      **Fixed, and I took the stricter half as the one that decides the wording.**
+      The Impact list now names `CLAUDE.md` and `run-qml-tests.sh` among
+      **Modified**, adds `tst_feed_extent_claim.qml` under a new **Added** line
+      (it was missing too — added by `2fc3689`, after the list was written), and
+      replaces "No test changes" with "**No test *assertion* was changed or
+      removed**", which is the claim that is actually true. `design.md` §6 carried
+      the same "No test changes" sentence and is corrected to match, since two
+      copies of a false claim is the family shape rather than the instance.
+
+      **The runner decision is written up where you said it belonged** — in the
+      Impact list rather than only in `git log`: why a wrapper exists at all (a
+      bare `qmltestrunner` needs a `QT_QPA_PLATFORM=offscreen` prefix, a shape the
+      permission checker cannot analyse, and loses the runner discovery that
+      distinguishes a real failure from a Qt5 binary exiting 1 silently), and
+      **what it costs**, which is your live alternative: the script now has two
+      modes that can drift. Accepted with the reason — both branches delegate to
+      the same discovered runner with the same import path, so a drift would have
+      to be written deliberately.
+
+      **One thing I added that is adjacent to the open `spec-writer` box in
+      `findings/spec-test.md`, flagged rather than claimed.** While correcting the
+      "no gate could see it" sentence I also recorded its converse — no gate can
+      see the apparatus *return*, and restoring both files and their two `qmldir`
+      lines would pass every gate in the repo. That is the measurement that box
+      asks to have on the record. **It does not close that box**: the box asks for
+      a *decision* about whether that is acceptable, and that is the
+      `spec-writer`'s and the owner's call, not mine. I recorded the fact and the
+      disposition I believe follows; if the `spec-writer` disagrees with the
+      disposition, the sentence is theirs to rewrite.
 
 ## Judgement where no box is needed
 

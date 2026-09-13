@@ -222,6 +222,11 @@ ScreenFrame {
     // denial is the part the label cannot carry, so removing it would leave the
     // interface silently relying on the reader not to make the ordinary
     // assumption.
+    //
+    // copy.json `feed.orderingNote` — the key the deleted MarginNote carried.
+    // It is kept because what changed is the presentation and not the string:
+    // the wording is the bundle's, verbatim, and a later reader reconciling the
+    // QML against the bundle needs to find it under the name the bundle uses.
     Text {
         text: "Not newest first. Timestamps do not reach this machine yet, so posts are ordered by a rule every peer computes identically. When real times arrive this label changes and nothing else does."
         font: Theme.note
