@@ -2467,6 +2467,107 @@ mod tests {
     }
 
     #[test]
+    fn a_wrong_typed_direction_is_refused_by_its_type_with_a_valid_stoa_and_target() {
+        // THE GAP `findings/security.md` S2 NAMES, closed with the fixture it says
+        // is missing: a VALID Stoa and a VALID target, so the request survives
+        // parser one and two and the direction parser is actually entered.
+        //
+        // Why the existing coverage did not reach here. `stoa` is parsed first in
+        // all three handlers, and every wrong-typed `direction` fixture in the
+        // repo also malformed `stoa` — so all three handlers refused at parser one.
+        // Measured: `panic!` on `required_string`'s wrong-typed arm for
+        // `direction`, reached only from `required_direction`, left all 566 tests
+        // green.
+        //
+        // What this asserts, and why not merely `error.is_some()`: an array or an
+        // object in `direction` is an error EITHER WAY — `required_direction` would
+        // refuse it, and so would a handler that panicked, and so would one that
+        // read the field as absent. Three explanations, one answer, which is this
+        // repo's recurring defect family. So the assertions are:
+        //
+        //   1. the message is the WRONG-TYPE message, against the hardcoded
+        //      literal `required_string` writes — NOT "differs from the missing
+        //      one", which a panic marker would also satisfy;
+        //   2. it is not a panic marker;
+        //   3. it does not say "missing", because a present-but-wrong-typed field
+        //      reported as missing sends a caller looking for a field that is
+        //      right there.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+        let stoa = publish_stoa().to_hex();
+        let target = as_json(&publish_post(
+            &publish_request(r#""body":"the subject""#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ))["opId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let before = log.len().unwrap();
+
+        // Every JSON type that is not a string, `null` INCLUDED.
+        //
+        // I first excluded null here on the assumption that the envelope collapses
+        // it to absent, which would make it the MISSING mistake. That was wrong,
+        // and `wire/request.rs:229` says so in as many words: *"An explicit `null`
+        // is `Some(Value::Null)` and never `None` … a field holding an explicit
+        // `null` is present, not absent"*, and the envelope deliberately decides
+        // nothing further, leaving the reading to the reader. `required_string` is
+        // that reader here and refuses a null as a wrong TYPE. Confirmed by the
+        // sweep failing on the null fixture under the mutation below, which is what
+        // sent me to read the envelope rather than assume.
+        //
+        // So null belongs in this list, and pinning it here is what keeps the
+        // envelope's "a null is present" rule from being quietly reversed by a
+        // reader that starts treating it as absent — which, for an optional field,
+        // is the defaulting reading `parse_index`'s doc calls out as the half that
+        // can become an authorisation bypass.
+        for wrong in [
+            serde_json::Value::Null,
+            serde_json::json!(true),
+            serde_json::json!(false),
+            serde_json::json!(0),
+            serde_json::json!(-1),
+            serde_json::json!(1.5),
+            serde_json::json!({}),
+            serde_json::json!([]),
+            serde_json::json!(["up"]),
+            serde_json::json!({"direction": "up"}),
+        ] {
+            let request = serde_json::json!({
+                "stoa": stoa, "target": target, "direction": wrong
+            })
+            .to_string();
+            let out = publish_vote(&request, &mut log, &key, &mut ignored_delivery);
+            let v = as_json(&out);
+            let message = v["error"]
+                .as_str()
+                .unwrap_or_else(|| panic!("expected the error shape, got {out}"));
+
+            assert!(
+                !message.starts_with("panic in "),
+                "a wrong-typed direction must be refused, not panicked on, for {request}: {out}"
+            );
+            // The hardcoded literal, not a value read back out of the code.
+            assert_eq!(
+                message, "direction must be a string",
+                "the refusal must name the TYPE mistake, for {request}"
+            );
+            assert!(
+                !message.contains("missing"),
+                "a field that is present must not be reported as missing, for {request}"
+            );
+            assert!(v.get("opId").is_none(), "got {out}");
+        }
+        assert_eq!(
+            log.len().unwrap(),
+            before,
+            "no refused vote appended anything"
+        );
+    }
+
+    #[test]
     fn a_wrong_typed_field_is_distinguishable_from_a_missing_one() {
         // Both are errors, and they are different mistakes: "missing field:
         // body" sends someone looking for a field that is right there holding a
@@ -3073,10 +3174,17 @@ mod tests {
 
     #[test]
     fn a_panicking_delivery_sink_still_reports_the_op_as_published_on_all_three_handlers() {
-        // "A declined handoff leaves the op published": WHEN delivery refuses or
-        // errors on the handoff, THEN the reply reports the op as published and
-        // names its op id. A panicking sink is the most violent form of "errors",
-        // so the reply must still be the success shape.
+        // "A handoff that fails outright leaves the op published": WHEN delivery
+        // fails at the handoff in the most abrupt way the interface permits, THEN
+        // the reply reports the op as published and names its op id, the op is
+        // readable from the log, and the reply carries no error. A panicking sink
+        // IS the most abrupt way the interface permits — the sink returns `()`, so
+        // there is no error value it could return instead — which is what makes
+        // this test the scenario's own fixture rather than an approximation of it.
+        //
+        // The quoted name was "A declined handoff leaves the op published", which
+        // the spec no longer contains; the wording above is the live scenario's.
+        // The test itself needed no change, only the citation.
         //
         // This is the assertion the sibling test
         // `a_publish_whose_delivery_panics_leaves_the_op_in_the_log` deliberately
@@ -3144,36 +3252,86 @@ mod tests {
     }
 
     #[test]
-    fn a_delivery_that_reports_nothing_and_one_that_reports_promptly_give_one_reply() {
-        // "A publish returns while delivery is still outstanding" — the reply is
-        // the same either way, because the sink returns nothing and there is no
-        // outcome to wait for.
+    fn a_reply_names_the_op_and_whether_it_was_new_and_no_delivery_outcome() {
+        // REPOINTED, and the old test is worth saying what was wrong with it.
+        //
+        // It was `a_delivery_that_reports_nothing_and_one_that_reports_promptly_give_one_reply`,
+        // and its comment quoted a scenario — "A publish returns while delivery is
+        // still outstanding" — that the spec no longer contains (the `spec-writer`
+        // flagged it; `grep` over `specs/content-authoring/spec.md` finds no such
+        // text). So it was a test with no requirement behind it.
+        //
+        // It was also close to vacuous on its own terms. Both sinks were
+        // synchronous and the interface hands delivery a `&mut dyn FnMut` returning
+        // `()`, so "the reply does not depend on what delivery did" was true by the
+        // signature: there is no value a sink could return for a reply to depend
+        // on. Asserting two replies equal proved the sink cannot speak, which the
+        // type already guarantees, and nothing about the reply's CONTENT.
+        //
+        // What the spec does still require, and what had no test at all, is the
+        // scenario "The reply describes no delivery outcome": the reply carries the
+        // op id and whether the op was newly stored, "AND it carries no field
+        // describing whether the op was sent, accepted, delivered or propagated".
+        // That is an assertion about the reply's keys, and it can fail — a future
+        // field named `delivered` would trip it, which is the whole point, since the
+        // requirement's argument is that a reply carrying the weaker fact sits
+        // exactly where a reader looks for the stronger one.
+        //
+        // Not a duplicate of `a_vote_reply_carries_no_score…`, which pins the same
+        // key set: that one is about VOTE semantics (its forbidden list is score /
+        // tally / rank) on `publish_vote`. This one is about the DELIVERY outcome on
+        // `publish_post`. Same shape of assertion, two different requirements, and a
+        // publish-side delivery field would slip past the vote-side test entirely.
         let key = publish_key();
-        let request = publish_request(r#""body":"whatever delivery does""#);
-
-        let mut silent_log = MemoryOpLog::new();
-        let silent = publish_post(
-            &request,
-            &mut silent_log,
+        let mut log = MemoryOpLog::new();
+        let out = publish_post(
+            &publish_request(r#""body":"whatever delivery does""#),
+            &mut log,
             &key,
-            &mut |_: &crate::op::OpId| {},
+            &mut ignored_delivery,
         );
+        let v = as_json(&out);
+        assert!(v.get("error").is_none(), "got {out}");
 
-        let mut prompt_log = MemoryOpLog::new();
-        let mut reported = false;
-        let prompt = publish_post(
-            &request,
-            &mut prompt_log,
-            &key,
-            &mut |_: &crate::op::OpId| reported = true,
-        );
-
-        assert!(reported, "the prompt sink must actually have been called");
+        // The keys the reply DOES carry, as an exact set rather than a
+        // `contains_key` pair — an exact set is what makes a NEW key fail this
+        // test, and a new key is the thing the scenario forbids. Hardcoded, not
+        // read back from the reply.
+        let mut keys: Vec<&str> = v
+            .as_object()
+            .expect("a reply is an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
         assert_eq!(
-            silent, prompt,
-            "the reply must not depend on what delivery did"
+            keys,
+            ["opId", "wasNew"],
+            "the reply carries exactly the op id and whether the op was new, got {out}"
         );
-        assert!(as_json(&silent).get("error").is_none(), "got {silent}");
+
+        // And named individually, so the failure says WHICH outcome word appeared
+        // rather than only that the set changed. These are the four the scenario
+        // lists, plus the shapes a delivery outcome would plausibly take.
+        for forbidden in [
+            "sent",
+            "accepted",
+            "delivered",
+            "propagated",
+            "delivery",
+            "peers",
+            "outcome",
+        ] {
+            assert!(
+                v.get(forbidden).is_none(),
+                "the reply must describe no delivery outcome, but carries {forbidden:?}: {out}"
+            );
+        }
+
+        // The two it must carry are the two the requirement names, checked for
+        // type and not merely presence.
+        assert!(v["opId"].is_string(), "got {out}");
+        assert!(v["wasNew"].is_boolean(), "got {out}");
     }
 
     #[test]
@@ -3327,6 +3485,26 @@ mod tests {
             };
             let v = as_json(&out);
             assert!(v.get("error").is_some(), "for {request}, got {out}");
+            // `error.is_some()` CANNOT TELL A REFUSAL FROM A PANIC, and this test
+            // is the only one that reaches some of these parsers' refusal arms.
+            // `guarded` catches an unwind and returns
+            // `{"error":"panic in <method>: …"}` — which satisfies every other
+            // assertion in this loop — so without this line a handler that
+            // panicked on all twelve fixtures would pass, and the test would
+            // report "every refusal is the error shape" having checked only that
+            // the guard in front of the handler works.
+            //
+            // `findings/security.md` S2 measured exactly this: with a `panic!` on
+            // `required_direction`'s `Err` arm, this test passed. The sweep
+            // `hostile_publish_input_is_never_a_panic` already carries this
+            // assertion; it was missing from the one test that gets here.
+            assert!(
+                !v["error"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .starts_with("panic in "),
+                "a handler panicked rather than refusing, for {request}: {out}"
+            );
             assert!(
                 v.get("opId").is_none(),
                 "a failure must never also carry an op id — §2.5, got {out}"
@@ -3433,6 +3611,50 @@ mod tests {
                     "parent": text,
                     "target": text,
                     "direction": "up"
+                })
+                .to_string(),
+            );
+        }
+        // A VALID Stoa and a VALID target with a WRONG-TYPED `direction` and
+        // `body`, which is the only way to reach those parsers' wrong-type arms.
+        //
+        // This is the same ordering hazard the op-id block above exists for, one
+        // parser further along — and it was found the same way. `stoa` is parsed
+        // first in all three handlers, so every wrong-typed fixture earlier in
+        // this sweep malforms `stoa` too and dies at parser one; and the two
+        // blocks that DO carry a valid Stoa both pin `direction: "up"`. The
+        // result was that `required_direction`'s wrong-typed arm was never
+        // entered by any test in the repo.
+        //
+        // Measured, per `findings/security.md` S2: with a `panic!` on that arm
+        // alone, the whole 566-test suite stayed green. With these fixtures it
+        // does not. Note the absent arm was NOT the gap — a missing `direction`
+        // is caught by `a_publish_requests_missing_field_is_named_and_is_not_defaulted`,
+        // which asserts on the message naming the field, and a panic message
+        // does not contain it. The wrong-typed arm is the one nothing reached.
+        //
+        // `null` is included deliberately, and it is a wrong TYPE rather than an
+        // absence: `wire/request.rs:229` keeps an explicit null as
+        // `Some(Value::Null)` on purpose, so `required_string` refuses it by type.
+        // Pinned in the message-level test beside this one.
+        for wrong in [
+            serde_json::Value::Null,
+            serde_json::json!(true),
+            serde_json::json!(0),
+            serde_json::json!(-1),
+            serde_json::json!(1.5),
+            serde_json::json!({}),
+            serde_json::json!([]),
+            serde_json::json!(["up"]),
+            serde_json::json!({"direction": "up"}),
+        ] {
+            requests.push(
+                serde_json::json!({
+                    "stoa": stoa,
+                    "body": wrong,
+                    "parent": id,
+                    "target": id,
+                    "direction": wrong
                 })
                 .to_string(),
             );

@@ -184,7 +184,7 @@ something the green gate structurally could not see.
       on only the `Err` arm still passes, and names the missing fixtures. The
       `dev-writer` side needed no code change, which is what the finding says.
 
-- [ ] **`tester`** — **S2's suite gap** — no fixture pairs a valid Stoa with a wrong-typed `direction`, and the refusal sweep cannot tell a refusal from a panic
+- [x] **`tester`** — **S2's suite gap** — no fixture pairs a valid Stoa with a wrong-typed `direction`, and the refusal sweep cannot tell a refusal from a panic
       **Still open, verified on conversion** (2026-09-13): the sweep's wrong-typed
       fixtures at `wire.rs:3088-3091` all malform `stoa` alongside `direction`, so
       `required_direction`'s `Err` arm is still unexercised by a request that is
@@ -276,6 +276,117 @@ Your sharpest observation is the one I want the tester to act on:
 which a *caught panic* also satisfies. So no test in the repo distinguishes a
 refusal from a panic on that parser. That is the `starts_with("panic in ")`
 assertion the sweep already has, missing from the one test that gets there.
+
+**Outcome (`tester`): FIXED — both halves, with one correction narrowing the claim
+and one wrong assumption of my own caught by a measurement.**
+
+**Reproduced first.** `panic!` on `required_direction`'s `Err` arm, then
+`every_publish_refusal_is_the_error_shape_and_carries_no_op_id` alone: predicted
+pass, **observed pass**. The entry's central measurement holds exactly — that test
+cannot tell a refusal from a caught panic.
+
+**Correction: "no test in the repo" is one arm too broad.** Running the *whole*
+suite under that same mutation, I predicted 566 green and **observed 565 passed, 1
+failed** — `a_publish_requests_missing_field_is_named_and_is_not_defaulted`
+(`wire.rs:2463`) catches it, because it asserts the message *names the field*
+(`"missing" && "direction"`) and a panic marker contains neither. So the **absent**
+arm was already covered, by message content rather than by a panic check.
+
+Splitting `required_direction`'s three arms by mutation located the gap precisely:
+
+| Arm mutated to `panic!` | Suite result |
+|---|---|
+| absent (`None`) | **1 failed** — the missing-field test's message assertion |
+| **wrong-typed (`Some(_)`)** | **566 passed, 0 failed** — nothing reached it |
+| unrecognised name (`"sideways"`) | **2 failed** — the sweep, plus the naming test |
+
+So exactly **one** arm was unreachable, and it is the one the entry names as the
+missing fixture. The entry's prescription was right; its scope was wider than the
+defect. Worth recording because the two covered arms are covered by *different
+mechanisms*, and only one of them is a panic check.
+
+**What landed — three changes, each proven to fail.**
+
+1. **The sweep's missing fixtures** (`hostile_publish_input_is_never_a_panic`): a
+   block pairing a **valid** Stoa and a **valid** target with a wrong-typed
+   `direction` and `body`, over every non-string JSON type. This is the fixture the
+   entry asks for, and the same ordering hazard the op-id block already exists for,
+   one parser along.
+2. **The panic-marker assertion** on
+   `every_publish_refusal_is_the_error_shape_and_carries_no_op_id` — the entry's
+   own prescription, `starts_with("panic in ")`, copied from the sweep that already
+   had it. The fix is the assertion, not the code, exactly as the brief framed it.
+3. **`a_wrong_typed_direction_is_refused_by_its_type_with_a_valid_stoa_and_target`**,
+   new. The sweep proves only "not a panic"; this pins the *message* against the
+   hardcoded literal `"direction must be a string"`, and asserts it does **not**
+   say "missing". Necessary because an object in `direction` is an error under
+   three different explanations — refused by type, panicked on, or read as absent —
+   and only the message separates them.
+
+**Predicted versus observed**, one mutation covering all three: `panic!` on the
+wrong-typed arm alone. Predicted **3 failures**, precisely those three tests;
+**observed 564 passed, 3 failed**, and the three are exactly those. The same
+mutation left all 566 green before this work.
+
+**A wrong assumption of mine, caught by that measurement rather than by review.** I
+first excluded `null` from the new test, assuming the envelope collapses a null field
+to absent — which would make it the *missing* mistake. The sweep then failed on its
+`null` fixture, which sent me to read `wire/request.rs:229`: *"An explicit `null` is
+`Some(Value::Null)` and never `None` … a field holding an explicit `null` is present,
+not absent"*, with the envelope deliberately leaving the reading to the reader.
+`required_string` is that reader and refuses a null **by type**. So null belongs in
+the wrong-typed list, it is now pinned there, and both comments that stated the
+opposite are corrected. Pinning it also keeps the envelope's rule from being
+reversed by a reader that starts treating null as absent — the defaulting reading
+`parse_index`'s doc calls out as the half that can become an authorisation bypass.
+
+**Two stale comments, routed here by the `spec-writer`, both resolved.**
+
+- **The vacuous test is repointed, not deleted**, and is now
+  `a_reply_names_the_op_and_whether_it_was_new_and_no_delivery_outcome`. Its old
+  name quoted *"A publish returns while delivery is still outstanding"*, which the
+  spec no longer contains — a test with no requirement behind it, as the brief said.
+  It was also near-vacuous on its own terms: both sinks were synchronous and the
+  interface hands delivery a `&mut dyn FnMut` returning `()`, so *"the reply does
+  not depend on what delivery did"* was true **by the signature** — there is no
+  value a sink could return for a reply to depend on. It proved the sink cannot
+  speak, which the type already guarantees.
+
+  Repointed at the live scenario **"The reply describes no delivery outcome"**
+  (`spec.md:55`), which had **no test at all**: the reply must carry the op id and
+  `wasNew` *"AND no field describing whether the op was sent, accepted, delivered or
+  propagated"*. Asserted as an exact key set plus each forbidden word by name.
+  Proven to fail: adding `"delivered": true` to `published_json` gives predicted 2
+  failures (mine plus the vote-side key-set test, which shares the builder),
+  **observed exactly 2**, mine reporting `["delivered","opId","wasNew"]` against
+  `["opId","wasNew"]`. The old test would have passed that mutation, since both its
+  replies would have carried `delivered` equally.
+
+- **`a_panicking_delivery_sink_still_reports_the_op_as_published_on_all_three_handlers`**
+  quoted *"A declined handoff leaves the op published"*; the live scenario is *"A
+  handoff that fails outright leaves the op published"*. **The citation was stale,
+  the test was not** — it asserts all four of the scenario's clauses (no error, names
+  the op id, readable from the log, reported as published), and a panicking sink
+  genuinely is the most abrupt failure the interface permits, since the sink returns
+  `()` and has no error value to return instead. Only the quote is changed.
+
+**On the 4 MiB envelope cap from `main`, which the brief asked me to verify rather
+than assume: it does not close this gap, as expected.** `Request::parse` refuses a
+non-object and an over-cap request before any handler runs, but every fixture here
+is a well-formed object far under 4 MiB, so all of them still reach
+`required_direction`. Confirmed by the mutation results above, which were measured
+on the merged tree with the envelope in place.
+
+**Gates.** Suite **567 passed, 0 failed** (566 after merging `main`, plus one new
+test; the 535 baseline in the brief predates that merge).
+`rustfmt --check --config skip_children=true` on `wire.rs` reports **8 hunks, all
+pre-existing** — the count the brief predicted; my one new hunk was formatted away,
+and nothing pre-existing was reformatted. Clippy `-D warnings` clean.
+`git diff` confirms every hunk is inside `mod tests`: the implementation is
+untouched, and all five scratch mutations (three arms of `required_direction`, the
+`Err`-arm variant, and `published_json`'s added field) are restored.
+
+---
 
 ---
 
