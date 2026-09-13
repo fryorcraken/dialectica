@@ -960,6 +960,284 @@ TestCase {
                 "an array is not a reference either")
     }
 
+    // ---- rendering, where a property was standing in for it ----------------
+    //
+    // Every test in this section exists because a property assertion elsewhere
+    // in this file passed against a mutation that broke the rendering. The
+    // pattern is the one that moved the markup test from `text` to `textFormat`:
+    // asking the implementation what it computed and agreeing, where the
+    // requirement is about what reaches the screen. Each was proved by mutating
+    // a `visible:` binding and watching the whole suite stay green.
+
+    // A share affordance offered for a Stoa the view holds no record for
+    // produces a string that fails to verify on somebody else's machine — the
+    // third failure this file's header names. `canShare()` answering correctly
+    // is not that requirement: the requirement is that no BUTTON is on screen.
+    //
+    // Proved: `visible: screen.canShare(row.rowStoa)` → `visible: true` on the
+    // share button left all 47 prior tests passing.
+    function test_no_share_button_is_on_screen_for_a_row_whose_record_is_not_held() {
+        var withRecord = "aa".repeat(32)
+        var without = "bb".repeat(32)
+        var screen = makeList({
+            "list_stoas": '{"items":['
+                        + '{"stoa":"' + withRecord + '","foundingTitle":"Held"},'
+                        + '{"stoa":"' + without + '","foundingTitle":"Not held"}'
+                        + '],"page":0,"hasMore":false}'
+        })
+        var held = {}
+        held[withRecord] = "00ff00ff"
+        screen.genesisByStoa = held
+        screen.reload()
+
+        // Two rows, one record. Both halves from one fixture, and the count is
+        // hardcoded rather than derived: `<= 1` would pass on zero buttons, and
+        // zero is a different defect that this same assertion must catch.
+        compare(screen.rows.length, 2, "the fixture must put two rows on screen")
+        compare(spec.visibleNamed(screen, "shareButton").length, 1,
+                "exactly one share affordance is on screen — the held row's — "
+                + "and the unheld row must offer none")
+        screen.destroy()
+    }
+
+    // The joined outcome has to be REPORTED, which is a thing on screen and not
+    // a string in a property. A screen holding `joinState === "joined"` while
+    // rendering nothing has told the user nothing.
+    //
+    // Proved: `visible: screen.joinState === "joined"` → `visible: false` on the
+    // joined panel left all 47 prior tests passing, including the two that
+    // assert a repeat join is success.
+    function test_the_joined_outcome_is_reported_on_screen_and_not_only_in_a_property() {
+        var addr = "7f3a91c4" + "ee".repeat(28)
+        var screen = makeJoin({
+            "join_stoa": '{"stoa":"' + addr + '","foundingTitle":"Nym Research","policy":"open"}'
+        }, { stoaAddress: addr, stoaGenesis: "00ff", foundingTitle: "Nym Research" })
+
+        compare(spec.visibleNamed(screen, "joinedPanel").length, 0,
+                "nothing reports a join before the user acts")
+
+        screen.join()
+
+        compare(spec.visibleNamed(screen, "joinedPanel").length, 1,
+                "a successful reply must put the outcome on screen, not only in joinState")
+        // And the failure panel is not up alongside it. One outcome, not two.
+        compare(spec.visibleNamed(screen, "joinFailurePanel").length, 0)
+        screen.destroy()
+    }
+
+    // "No feed is rendered for any Stoa" before one is chosen. `screenShown` is
+    // a derived string; what the spec forbids is a feed on screen.
+    //
+    // Proved: `visible: root.screenShown === "feed"` → `visible: true` on the
+    // FeedScreen left all 47 prior tests passing, with the feed rendering for
+    // the empty address at startup.
+    function test_no_feed_is_on_screen_before_a_stoa_has_been_chosen() {
+        Core.bridge = bridgeFor({ "list_stoas": '{"items":[],"page":0,"hasMore":false}' })
+        var view = mainComponent.createObject(null, {})
+
+        compare(spec.visibleNamed(view, "feed").length, 0,
+                "no feed may be on screen before a Stoa is chosen")
+        compare(spec.visibleNamed(view, "joinScreen").length, 0,
+                "nor a join preview, which nothing has been previewed for")
+        compare(spec.visibleNamed(view, "stoaList").length, 1,
+                "the list is the entry point — asserted so that a view rendering "
+                + "NOTHING cannot satisfy the two absences above")
+        view.destroy()
+    }
+
+    // ---- no number appears that nothing computed ---------------------------
+
+    // Every run of digits in what a row renders, in source order.
+    function digitRunsIn(text) {
+        return text.match(/[0-9]+/g) || []
+    }
+
+    // The strengthened count assertion. The dev-writer's version was a blocklist
+    // of the mockup's phrasings — `posts received here`, `nothing received yet`,
+    // `3 posts` — and said so: it could not catch a count rendered as a bare
+    // `31` in a row's margin, which is the shape the mockup actually draws.
+    //
+    // This is that same requirement stated as a relation instead: **every digit
+    // on this screen must be traceable to something the fixture supplied.** The
+    // fixture's address carries digits deliberately, so the test is not passing
+    // merely because nothing anywhere renders a digit — remove the address from
+    // the row and the allowed set shrinks rather than the assertion vanishing.
+    //
+    // What it still cannot see: a count rendered in a glyph that is not a digit,
+    // or spelled out in words. That residue is smaller than a phrase blocklist
+    // and is stated rather than left to be assumed.
+    function test_no_digit_is_rendered_that_the_reply_did_not_supply() {
+        // Digits in the address (4 0 3 9 1 …) and in the title, so the allowed
+        // set is non-empty and the test has something to distinguish.
+        var addr = "7f3a91c4" + "40".repeat(28)
+        var title = "Transport Notes 1972"
+        var screen = makeList({
+            "list_stoas": '{"items":[{"stoa":"' + addr + '","foundingTitle":"' + title + '"}],'
+                        + '"page":0,"hasMore":false}',
+            // A thread listing is answered too, so a screen tempted to render
+            // some OTHER call's page length has one available to render.
+            "list_threads": '{"items":[{"thread":"t1"},{"thread":"t2"},{"thread":"t3"}],'
+                          + '"page":0,"hasMore":true}'
+        })
+        compare(screen.readState, "ok")
+        compare(screen.rows.length, 1, "the fixture must put a row on screen")
+
+        var shown = spec.visibleText(screen)
+        var runs = spec.digitRunsIn(shown)
+        // Non-empty, or the assertion below is vacuous: a screen rendering no
+        // digits at all would satisfy "every digit is traceable" for free, and
+        // that is exactly the self-satisfying shape this file is written against.
+        verify(runs.length > 0,
+               "the fixture's own digits must reach the screen, or this test "
+               + "proves nothing: " + shown)
+
+        for (var i = 0; i < runs.length; i++) {
+            var run = runs[i]
+            var fromAddress = addr.indexOf(run) >= 0
+            var fromTitle = title.indexOf(run) >= 0
+            verify(fromAddress || fromTitle,
+                   "the screen renders the number '" + run + "', which nothing "
+                   + "in the reply supplied. No call answers how many posts this "
+                   + "peer holds for a Stoa, so any number here was invented or "
+                   + "taken from another call's page length. Rendered: " + shown)
+        }
+        screen.destroy()
+    }
+
+    // ---- the two paste outcomes, pinned by meaning rather than by difference
+
+    // The sibling `thread-read` piece shipped three refusal messages asserted to
+    // be three DIFFERENT strings; a tester reworded one to actively misinform
+    // and both distinguishability tests stayed green, because three misinforming
+    // strings are still three distinct strings. So this asserts what each of the
+    // two paste outcomes must and must not IMPLY, and the difference between
+    // them falls out of that rather than standing in for it.
+    //
+    // The two mean opposite things about what to do next:
+    //   malformed  — the paste went wrong; paste it again.
+    //   unverified — somebody handed over a record that is not the one that
+    //                address names; do NOT try again.
+    function test_a_malformed_paste_and_an_unverified_record_say_different_things_to_do() {
+        // 1. Text that is not a reference at all.
+        var list = makeList({ "list_stoas": '{"items":[],"page":0,"hasMore":false}' })
+        list.pasted = "not a reference"
+        list.preview()
+        var malformed = list.pasteFailure
+        verify(malformed.length > 0, "a malformed paste must say something")
+
+        var m = malformed.toLowerCase()
+        // It must name the INPUT as the problem — what was pasted — so the
+        // reader knows to look at what they pasted.
+        verify(m.indexOf("pasted") >= 0 || m.indexOf("paste") >= 0,
+               "a malformed paste must name what was pasted as the problem: " + malformed)
+        // And it must NOT describe a verification outcome. A malformed paste has
+        // been compared against nothing; saying it failed to verify would send
+        // the reader to blame their sender for a paste they truncated.
+        verify(m.indexOf("does not hash") < 0 && m.indexOf("did not verify") < 0
+               && m.indexOf("does not match") < 0,
+               "nothing was verified here, so nothing may report a verification "
+               + "failure: " + malformed)
+
+        // 2. A well-formed pair the core refuses because it does not verify.
+        var addr = "b02d5e77" + "88".repeat(28)
+        var join = makeJoin({
+            "join_stoa": '{"error":"the genesis record does not hash to this address; '
+                       + 'whoever sent it did not send the record this address names"}'
+        }, { stoaAddress: addr, stoaGenesis: "00ff" })
+        join.join()
+
+        var panels = spec.visibleNamed(join, "joinFailureText")
+        compare(panels.length, 1, "the refusal must be on screen, not only in a property")
+        var refusal = panels[0].text
+
+        // The core's own words, unreworded — they name what was wrong, and that
+        // is the difference between a user who knows the record they were sent
+        // is wrong and one who thinks the app is broken.
+        verify(refusal.indexOf("does not hash to this address") >= 0,
+               "the core's refusal must be rendered as it came: " + refusal)
+        // It must NOT invite a retry. Pressing again produces the same refusal,
+        // and an interface offering one teaches the reader to mistake a
+        // permanent answer for a transient fault.
+        var retryButtons = spec.visibleNamed(join, "joinRetryButton")
+        compare(retryButtons.length, 0, "a verification refusal offers no retry")
+        var joinShown = spec.visibleText(join).toLowerCase()
+        verify(joinShown.indexOf("try again") < 0 && joinShown.indexOf("retry") < 0,
+               "nor may anything on screen suggest one: " + joinShown)
+
+        // And only NOW the difference, which is a consequence of the two
+        // meanings above rather than the whole of the assertion.
+        verify(refusal.indexOf(malformed) < 0 && malformed.indexOf(refusal) < 0,
+               "neither refusal may contain the other")
+        join.destroy()
+        list.destroy()
+    }
+
+    // ---- what the address proves, pinned by what a simplification would lose
+
+    // The spec deliberately does not pin this copy's wording, because the thing
+    // it has to convey is a distinction: the check is a hash comparison between
+    // TWO INPUTS THE USER SUPPLIED, so a reader who pasted a hostile address and
+    // saw a verified record has verified the attacker's record against the
+    // attacker's address, perfectly successfully.
+    //
+    // The dev-writer's version pins three substrings, which fails on a reword
+    // and passes on a misinformation. This asserts the two halves the copy
+    // cannot lose — the scope of the proof, and the named remainder — and
+    // requires that no unqualified claim of verification stands anywhere on the
+    // screen. Someone simplifying this copy to "Verified." satisfies none of
+    // the three.
+    function test_the_address_note_cannot_be_simplified_into_an_unqualified_verified() {
+        var screen = makeJoin({}, { stoaAddress: "aa".repeat(32), stoaGenesis: "00ff",
+                                    foundingTitle: "Nym Research" })
+        var notes = spec.visibleNamed(screen, "addressNote")
+        compare(notes.length, 1, "the explanation must be on screen")
+        var note = notes[0].text
+        var n = note.toLowerCase()
+
+        // 1. The proof is SCOPED to the record this address names. Not to the
+        //    Stoa, its creator, or its reachability.
+        verify(n.indexOf("this address names") >= 0 || n.indexOf("the record shown") >= 0,
+               "the note must say what is proved: that the record shown is the "
+               + "one this address names. Got: " + note)
+
+        // 2. The remainder is NAMED, not merely unmentioned. An absence
+        //    assertion here would pass on copy that said nothing at all, which
+        //    is the failure: a reader told nothing assumes everything checked.
+        verify(n.indexOf("unverified") >= 0 || n.indexOf("not verified") >= 0
+               || n.indexOf("not checked") >= 0,
+               "the note must NAME the unverified remainder rather than leave it "
+               + "unmentioned. Got: " + note)
+
+        // 3. And the scope is bounded by an explicit negation. Copy that states
+        //    the positive and stops has told the reader they finished checking.
+        verify(n.indexOf("nothing more") >= 0 || n.indexOf("not checked against") >= 0
+               || n.indexOf("no registry") >= 0 || n.indexOf("any registry") >= 0,
+               "the note must bound what the check consulted — no registry, no "
+               + "peer, no third party. Got: " + note)
+
+        // 4. Nothing anywhere on the screen makes an unqualified claim of
+        //    verification. This is the assertion a "Verified." simplification
+        //    fails: the founding title is on screen beside it, freely chosen and
+        //    matched against nothing, so a bare "verified" attaches to it.
+        //
+        //    This scan covers every visible Text on the screen, which today
+        //    includes the apparatus column. **Nothing in the apparatus is what
+        //    satisfies these assertions** — checks 1 to 3 read `addressNote` by
+        //    name, and no apparatus note contains "verified" — so removing the
+        //    apparatus column weakens none of them. Said explicitly because a
+        //    whole-screen scan otherwise leaves that unanswerable by reading.
+        var shown = spec.visibleText(screen).toLowerCase()
+        verify(shown.indexOf("verified") < 0 || shown.indexOf("unverified") >= 0
+               || shown.indexOf("not verified") >= 0,
+               "the word 'verified' may not stand on this screen without the "
+               + "remainder being named alongside it: " + shown)
+        verify(shown.indexOf("this stoa is verified") < 0
+               && shown.indexOf("verified stoa") < 0
+               && shown.indexOf("verified record") < 0,
+               "nothing may present the Stoa or its record as verified outright: " + shown)
+        screen.destroy()
+    }
+
     // ---- every call goes through the one wrapper --------------------------
 
     function test_each_core_method_is_named_once_and_reached_through_the_wrapper() {
