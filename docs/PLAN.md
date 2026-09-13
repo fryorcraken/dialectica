@@ -207,6 +207,11 @@ Adopted wholesale from the ecosystem convention:
 Widening this interface is a deliberate decision, not a side effect of needing
 one more field.
 
+**The contract is the `module-wire-contract` spec, which is where to read it.**
+It states both halves of the envelope — a request is an object and so is a
+reply — the one failure shape, the panic guard, and how a callee's own failure
+is decoded. This section is the summary; the spec is the obligation.
+
 ---
 
 ## 3. Dependencies
