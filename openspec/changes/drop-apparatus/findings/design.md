@@ -189,7 +189,7 @@ narrower problems with how it was recorded are boxed below.
       **Verified:** the numbers above are from one run; the `Main.qml`-shaped case
       was measured in a detached `origin/main` worktree and in this one.
 
-      **Fixed** in `a53b4cf`. **Reproduced independently first, on my own probe
+      **Fixed** in `721aed6`. **Reproduced independently first, on my own probe
       rather than from your table** — same three shapes, Qt 6.10.3, through
       `run-qml-tests.sh`: explicit `height: 600` → `frame.h=600 filler.h=484`; no
       explicit height → `frame.h=116 filler.h=0`; `Main.qml`-shaped Flickable +
