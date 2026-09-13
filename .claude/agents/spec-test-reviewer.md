@@ -22,8 +22,12 @@ read no further than the lines you are mutating.
 `review/<name>/spec-test`. Mutation runs collide: two reviewers sharing a tree see
 each other's broken code and cannot tell it from the author's.
 
-**When you finish, remove the worktree rather than restoring it** —
-`git worktree remove <absolute-path> --force`. Restoring depends on your having
+**When you finish, step out of the worktree and remove it rather than restoring
+it** — `ExitWorktree(action: "keep")`, then
+`git worktree remove <absolute-path> --force`. The exit comes first because
+`git worktree remove` cannot remove the directory you are standing in, and `keep`
+rather than `remove` because the tool only deletes worktrees it created itself and
+the runner made this one. Restoring depends on your having
 tracked every edit, and one missed restore ships a deliberately broken line into
 the piece; removing the tree needs no bookkeeping and cannot half-succeed. Your
 findings file is already committed and cherry-picked, so nothing you want lives

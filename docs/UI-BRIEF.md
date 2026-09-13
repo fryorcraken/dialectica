@@ -399,6 +399,55 @@ A reply is just a post that names a parent, so threads nest naturally.
 Each post shows: author identity, body, attachments, whether it was edited, the
 up/down control, and a report action.
 
+**What core hands you is a flat list, and nesting is yours to compute** (the
+`thread-read` spec). Each item names its parent; nothing reports a depth or an
+indent level. That is deliberate and it costs you nothing: depth is a count of
+parents, and you hold the parents. Two consequences worth designing for.
+
+- **An item's parent may not be on screen.** It can fall on an earlier page, or
+  be hidden while the reader has not asked to see hidden posts. So a reply can
+  arrive with nothing to attach it to. Do not drop it, and do not render it as a
+  root — it is a reply to something not shown, and saying so is honest.
+- **Hiding a post does not hide the replies under it.** One hide binds one post.
+  A subtree that vanished because its top was hidden would apply a moderation to
+  ops no moderator acted on.
+
+**The root is always the first item of the first page and never repeats.** Later
+pages are replies only.
+
+**A hidden root behaves unlike a hidden reply, and the asymmetry is deliberate.**
+A hidden *reply* is simply absent from the default view. A hidden *root* is still
+returned, marked hidden, with its body withheld — because a thread read that
+dropped its own subject would be indistinguishable from a thread this machine
+has never received, and those mean opposite things. So a thread screen must have
+a state for "this thread's opening post was hidden", and it must not look like
+the not-found state or the empty state.
+
+**The thread screen is told more about moderation than the feed screen is, and
+today you have to handle both.** A feed row says only *hidden or not*. A thread
+item says one of **three** things — nothing binding was found, a moderator hid
+it, or a moderator deliberately **restored** it — and names the decision when
+there was one.
+
+That third state is the one worth designing for, because a boolean cannot carry
+it: a post nobody ever moderated and a post a moderator looked at and put back
+read identically under "not hidden", and they mean different things to a reader
+deciding whether to trust what they are seeing. You are not obliged to render the
+restored state differently — but if you do, the thread screen is the only place
+the information exists.
+
+**This asymmetry is a known gap in the core, not a design intent.** Both screens
+are computing from the same underlying answer and the feed flattens it; the
+thread's richer shape is the correct one. Expect the feed to catch up, and do not
+build a layout that depends on the two staying different.
+
+**A post whose thread this machine cannot place does not appear.** A reply
+whose parent has not arrived yet cannot be positioned, so it is not shown
+anywhere rather than being shown at the root. It appears when the parent does.
+Nothing is lost and nothing is wrong; it is the ordinary condition of a
+peer-to-peer forum, and it is the same fact the reply composer already has to
+explain.
+
 **Attachments are not in the first release** — posts are text (PLAN.md §9.2
 excludes Logos Storage, which is where attachment bytes live). Design the post so
 an attachment area can appear later without the layout changing; do not design a
@@ -548,14 +597,23 @@ This is obligation 2b again, now applying to the thing **every post is
 attributed to**, which is a far larger surface than Stoa titles: a feed renders
 an attribution on every row.
 
-*(One thing to know about where the name comes from, and an earlier version of
-this paragraph had it wrong. The core returns the author as an **address**, not
-a name — PLAN §9.1 lists the feed's author field as "the author, as the per-Stoa
-address (§5.2) — never a name, because there are no names". But the name is
-**not** derived from that address: §5.2.1 derives it from the **public key**, on
-purpose, so that a name tracks the key that signs. So a view holding only an
-address **cannot** compute the name itself, and core must return the rendered
-name alongside the address. Treat both as things you are given.)*
+*(One thing to know about where the name comes from, and this paragraph has been
+wrong twice. The name is **not** derived from the address: it is derived from the
+**public key**, on purpose, so that a name tracks the key that signs — while the
+**mark** is derived from the address. Two independent digests, two different
+inputs. So a view holding only an address **cannot** compute the name.*
+
+*The correction to the previous version: core does **not** hand you a rendered
+name, and should not — a name is a pure function of the key, so sending both
+would put a derived value on the wire beside the material it comes from, where
+the two could disagree. **Core gives you the address and the public key**, and
+deriving the name from the key is the interface's job, as deriving the mark from
+the address already is.*
+
+*The thread read does this (the `thread-read` spec). **The feed read does not
+yet** — it returns an address per row and drops the key, which is why the feed
+screen renders an empty name today. That is a known gap with an owner, not a
+design decision to build around.)*
 
 **Uniqueness is not merely unbuilt — it is unavailable.** A uniqueness check
 needs agreement about who holds which name, and there is no authority to hold
@@ -739,11 +797,11 @@ it.** The design is:
 > - **Safe:** showing the reader their own vote back, as state on the button. That
 >   is real, immediate and true — they voted, and the interface remembers.
 > - **Not available yet, though it would be safe:** a plain count of votes on a
->   post. No call returns one — there is no thread read at all, and the publish
->   reply carries only an op id — so a count cannot be rendered today. Design for
->   its absence. If a later change exposes one, it is safe only presented as a
->   count, never as a position, a rank, or a reason this post appears where it
->   does.
+>   post. No call returns one — the thread read carries no score or tally, and the
+>   publish reply carries only an op id — so a count cannot be rendered today.
+>   Design for its absence. If a later change exposes one, it is safe only
+>   presented as a count, never as a position, a rank, or a reason this post
+>   appears where it does.
 > - **Not safe:** anything suggesting the vote moved the post, changed what anyone
 >   else sees, or fed an ordering. It did not. No "trending", no arrow, no implied
 >   effect on the feed.
