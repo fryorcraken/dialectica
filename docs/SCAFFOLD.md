@@ -12,6 +12,14 @@ the current values, read the file. For the two pins `lgs basecamp doctor` warns
 about on every run, read [`PHASE0-FINDINGS.md`](PHASE0-FINDINGS.md) §8 — that is
 where the decision lives, and repeating it here would be a second copy to drift.
 
+**CI asserts three of the values below**, in the `Lint` job's *"scaffold.toml
+kept the values a lgs verb can silently rewrite"* step: the `attr` pairing, the
+`role = "dependency"` on `delivery_module`, and that `[modules.*].flake` refs
+stay relative. Those three are the ones whose corruption produces no build or
+test failure — the reason a gate has to watch them at all. It deliberately does
+*not* assert the pins, which are meant to be bumped. Change one of the three on
+purpose and the gate is what you update alongside this document.
+
 ## `[repos.lez]` and `[repos.spel]` are schema furniture, not dependencies
 
 `lgs` refuses a `scaffold.toml` without `[repos.lez]` — *"invalid scaffold.toml:

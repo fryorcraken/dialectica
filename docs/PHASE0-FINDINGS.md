@@ -395,11 +395,13 @@ In PLAN.md §11's style — structural, and each one cost a debugging cycle here
   view works".
 
 - **`lgs basecamp setup`, `modules` and `install` each strip every comment from
-  `scaffold.toml`.** PLAN.md §11 names only `setup`, which is why this was
+  `scaffold.toml`.** PLAN.md §11 named only `setup`, which is why this was
   rediscovered: the comments came back after a restore and vanished again on
-  the next unrelated verb. Treat *any* `lgs basecamp` verb as comment-
-  destroying, run `git diff scaffold.toml` after each, and restore in one pass
-  at the end rather than after every command.
+  the next unrelated verb. Restoring them was abandoned after failing
+  repeatedly — the reasoning now lives in [`SCAFFOLD.md`](SCAFFOLD.md), which
+  no verb can reach, and the file carries bare values. Still treat *any*
+  `lgs basecamp` verb as file-rewriting and run `git diff scaffold.toml` after
+  each, because a verb can also change a *value*.
 
 - **The newest builder *tag* cannot build a Rust module on a cold cache.**
   `importCargoLock` fetches crates through a nixpkgs `fetchurl` that sends no
