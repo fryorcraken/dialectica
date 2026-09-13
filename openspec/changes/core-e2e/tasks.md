@@ -11,7 +11,7 @@
 - [x] review: security — `code-reviewer`
 - [x] review: readability — `code-reviewer`
 - [x] review: architecture — `code-reviewer`
-- [ ] review: spec-test — `spec-test-reviewer`
+- [x] review: spec-test — `spec-test-reviewer`
 - [x] review: design — `design-reviewer`
 - [ ] findings all ticked, `findings/` deleted — runner
 - [ ] `openspec validate --strict`, then `archive` — runner
@@ -20,8 +20,9 @@
 `findings/architecture.md` were committed in `df91185`; `findings/correctness.md`
 and `findings/security.md` followed from the instance that was still running when
 this block was first written. Each carries its own defect list, and those files are
-the evidence. `spec-test` and `design` remain unticked, so those rows are still
-doing the job an unticked row is for.
+the evidence. `spec-test` and `design` have since been ticked too, each carrying
+its own findings file, so every review row is now answered by a file rather than by
+this note.
 
 The correctness and security reviewer measured against `8bfe77d` rather than the
 `9bb2bc1` its dispatch named, and says so in both files: two of the findings it had
