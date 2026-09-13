@@ -10,10 +10,12 @@
 //! **Does NOT cover, and these are absences to know about rather than gaps to
 //! infer:**
 //!
-//! - **The publish path.** Every test here is a READ. Posting, replying, voting
-//!   and revising are exercised only as fixtures — an op is constructed and
-//!   appended directly, never through whatever public write entry point arrives.
-//!   When one does, it gets its own section (see the sectioning rule below).
+//! - **Revising.** No test here publishes a revision. The rest of the publish
+//!   path is now crossed — `authoring::post`, `reply` and `vote` have their own
+//!   section at the end of this file, added under rule 2 when the seeder piece
+//!   needed the write path covered by something that runs. Every test ABOVE that
+//!   section is still a read over hand-appended fixtures, which is why the
+//!   sections are ordered as they are.
 //! - **`list_stoas` and membership.** Neither exists yet: `grep -rn
 //!   "list_stoas\|listStoas"` over `dialectica/` **and** `docs/` finds nothing in
 //!   `dialectica/` but these comment lines, and in `docs/` only the `listStoas()`
@@ -53,8 +55,9 @@
 //! 1. A test belonging to two sections goes under the boundary it would fail at
 //!    **first**. A forged hide is both authority and refusal; it fails at the
 //!    authority check, so it lives under moderation.
-//! 2. A test crossing a boundary no section names **gets a new section**, and the
-//!    write path is the one known to be coming.
+//! 2. A test crossing a boundary no section names **gets a new section**. The
+//!    write path was the one this rule anticipated, and it has arrived: the final
+//!    section crosses `authoring::*`. A revision publish is the next one.
 //! 3. A section's heading states the boundary, never a count of what is under it.
 //!    A count goes stale the first time somebody adds a test and is a claim
 //!    nothing checks — this file shipped "at three boundaries" over four.
@@ -214,6 +217,18 @@
 //! | the feed reply emits `"page": 0, "hasMore": false` as literals | the envelope test at its `page` assertion on page 1, `0` vs `1` | that test alone, 1 of 26, but at the **`hasMore` assertion on page 0** — `Bool(false)` vs `Bool(true)`. See note 6 |
 //! | `"page": 0` alone, `has_more` restored | the `page` assertion on page 1, `0` vs `1` | exactly that, `Number(0)` vs `Number(1)` — so the two halves discriminate independently and neither rides on the other |
 //!
+//! ## Measured on `piece/seed-store`, when the publish-path section was added
+//!
+//! Three mutations, for the two tests in the final section. Each was applied to
+//! the implementation, the target run, and the mutation reverted; `git status`
+//! was checked clean before the commit.
+//!
+//! | Mutation | Predicted | Observed |
+//! |---|---|---|
+//! | `authoring::publish` signs and attributes EVERY op with one fixed key — authorship collapsed | both new tests: the set assertion, and the seeding test's feed-author check | exactly that, 2 of 28. The set came back one address against two; the seeding test died at claim 2. **The other 26 survived**, which is what shows the publish path had no attribution coverage in this target before |
+//! | `authoring::thread_of` returns the op's own id instead of the parent's `thread` — the `thread: parent` bug | the seeding test alone, at the **`nested`** row and not the `reply` row | exactly that, 1 of 28, `nested`'s thread `Some(reply)` vs `Some(root)`. The `reply` row passed first, because at two levels the parent's id and the parent's thread are the same value — which is why the fixture has three |
+//! | `wire.rs`'s `posting_identity` reports `stoa_public_key` instead of `stoa_address_at_path` — **the three-derivations gap closed at the probe** | the seeding test alone, at the `assert_ne!`, both operands equal | exactly that, 1 of 28. This is the same mutation a review ran against the example's copy of this assertion and watched **exit 0** — the copy in `examples/` is compiled by CI and run by nothing, which is the whole reason this section exists |
+//!
 //! **Note 6 — the mutation this file could not kill, and why the fixture was the
 //! reason.** A review replaced `"page": page.page, "hasMore": page.has_more` in
 //! `wire::feed_page_json` with the literals `0` and `false`, and **all 25 tests
@@ -334,11 +349,14 @@
 //! `Op::canonical_bytes` and `MAX_FIELD_LEN`.
 
 use dialectica_core::arrival::{Arrival, MessageId};
+use dialectica_core::authoring;
 use dialectica_core::feed::{self, FeedPage, FeedRow};
 use dialectica_core::identity::{Address, PublicKey, SecretKey};
+use dialectica_core::identity_store::IdentityStore;
 use dialectica_core::keystore::{Keystore, Unlock};
 use dialectica_core::log::sqlite::LAYOUT_VERSION;
 use dialectica_core::log::{Appended, Entry, OpLog, OpLogError, SqliteOpLog};
+use dialectica_core::membership::{Membership, MembershipStore};
 use dialectica_core::moderation::{self, Moderation, Moderators};
 use dialectica_core::op::{ModerationAction, Op, OpId, OpKind, SignedOp, VoteDirection};
 use dialectica_core::revision::current_version;
@@ -2367,5 +2385,323 @@ fn a_store_on_disk_that_is_not_a_database_reaches_the_view_as_the_error_shape() 
     assert!(
         !v["error"].as_str().expect("error is a string").is_empty(),
         "the error must say something, not merely exist"
+    );
+}
+
+// ─── The publish path, and the seeding sequence built on it ─────────────────
+//
+// **A new section under rule 2**: every test above appends a hand-built `SignedOp`
+// directly, which is what the store sees and not what a caller does. These cross
+// `authoring::post`/`reply`/`vote` — the public write entry point the file's
+// preamble named as "the one known to be coming".
+//
+// **Why these two live here rather than in `examples/seed_store.rs`.** The seeder
+// asserts these same properties inline and `cargo test` compiles that file without
+// ever running it, so every assertion in it is behind "a person typed `cargo run
+// --example`". That blind spot is not hypothetical: it is how a report line
+// claiming "every seeded op is by ⟨one address⟩" went false for five of nine ops
+// with every check in the file still green
+// (`openspec/changes/seed-store/findings/spec-test.md`, the two `tester` boxes).
+// A `#[test]` may never be added to that example — CI's count gate walks
+// `examples/` and cargo does not run an example's tests, so one declared there
+// makes `declared` exceed `ran` — so the property has to be re-established here,
+// by a target the same `cargo test` invocation executes.
+//
+// These do not duplicate the seeder: they assert the properties, where it also
+// prints a report. If the seeder's fixture changes, these keep holding; if the
+// *publish path* stops distinguishing authors or stops chaining replies, both
+// die here, in CI, without anybody running a binary.
+
+/// The two-identity structure a seeded store must have, as a SET over every op.
+///
+/// **Existential is not universal, and that is the whole reason this test
+/// exists.** The seeder's neighbouring checks are `authors.contains(founder)` and
+/// `authors.contains(visitor)` — each says "at least one op has this author", and
+/// no number of them can contradict a claim about *every* op. So a store with one
+/// author and a store with two both satisfy them: this repo's recorded family, a
+/// fixture where two explanations give the same answer.
+///
+/// The rival explanations this fixture excludes, one assertion each:
+///
+/// - **"the store collapsed to a single author"** — excluded by asserting the set
+///   has two members, which a `contains` pair cannot do;
+/// - **"a third identity leaked in"** — excluded by the same assertion, since the
+///   set is compared for equality rather than for containment;
+/// - **"the authors are whatever the ops say they are"** — excluded because the
+///   expected pair is derived from the two SECRET KEYS, through
+///   `public_key().address()`, never read out of an op. A publish path that
+///   stamped a constant author, or the signer's key on somebody else's op, would
+///   satisfy a self-referential version of this and fail this one.
+///
+/// **Both authors sign more than one KIND of op**, so the pair cannot be satisfied
+/// by a path that attributes roots correctly and votes to whoever is handy: each
+/// identity here signs a root, a reply and a vote.
+#[test]
+fn a_store_seeded_from_two_identities_carries_exactly_those_two_authors() {
+    let dir = TempDir::new("two-authors");
+
+    // The two identities, from fixed seeds so a failure is reproducible.
+    let founder = a_key(1);
+    let visitor = a_key(2);
+    let genesis = a_genesis(&founder.public_key(), "Agora");
+    let stoa = genesis.address().expect("a short title encodes");
+
+    // The expected pair, derived from the KEYS rather than from any op. This is
+    // the operand the implementation did not produce.
+    let mut expected = vec![
+        founder.public_key().address().to_hex(),
+        visitor.public_key().address().to_hex(),
+    ];
+    expected.sort();
+    assert_ne!(
+        expected[0], expected[1],
+        "two seeds must give two identities, or the set assertion proves nothing"
+    );
+
+    let mut store = dir.store();
+
+    // One root each, so authorship is visible in the FEED and not only in the log.
+    let founders_root = authoring::post(
+        &mut store,
+        &founder,
+        stoa,
+        "What does it mean for a forum to be decentralized?".to_string(),
+    )
+    .expect("a root post is publishable");
+    let visitors_root = authoring::post(
+        &mut store,
+        &visitor,
+        stoa,
+        "On the difference between moderation and censorship".to_string(),
+    )
+    .expect("a root post is publishable");
+
+    // A reply each, crossing identities in both directions.
+    authoring::reply(
+        &mut store,
+        &visitor,
+        stoa,
+        founders_root.id,
+        "That it has no single party who can switch it off.".to_string(),
+    )
+    .expect("a reply is publishable");
+    authoring::reply(
+        &mut store,
+        &founder,
+        stoa,
+        visitors_root.id,
+        "One is a Stoa deciding what it is.".to_string(),
+    )
+    .expect("a reply is publishable");
+
+    // A vote each, so neither identity is present only as a poster.
+    authoring::vote(
+        &mut store,
+        &visitor,
+        stoa,
+        founders_root.id,
+        VoteDirection::Up,
+    )
+    .expect("a vote is publishable");
+    authoring::vote(
+        &mut store,
+        &founder,
+        stoa,
+        visitors_root.id,
+        VoteDirection::Down,
+    )
+    .expect("a vote is publishable");
+
+    // THE RESTART, so this is a claim about the file and not about the handle
+    // that wrote it.
+    let store = dir.reopen(store);
+
+    // Fixture guard, AFTER nothing it blocks: it is the count the set assertion is
+    // taken over, and a store holding fewer ops would make a two-member set a
+    // weaker claim than it reads as. Note 5's rule applies — the mutation this
+    // test is aimed at is one that changes ATTRIBUTION, which cannot change the
+    // count, so this guard cannot fire in front of the assertion it guards.
+    assert_eq!(
+        store.len(),
+        Ok(6),
+        "two roots, two replies and two votes is six ops"
+    );
+
+    let mut authors: Vec<String> = store
+        .iter()
+        .expect("the store is readable")
+        .iter()
+        .map(|e| e.op.op.author.address().to_hex())
+        .collect();
+    authors.sort();
+    authors.dedup();
+
+    assert_eq!(
+        authors, expected,
+        "the store must carry exactly the two identities that signed it — no \
+         collapse to one, no third author, and each address as its own key derives it"
+    );
+}
+
+/// The seeding sequence a developer tool performs, as an integration test.
+///
+/// Mint a keystore on disk, found a Stoa from it, record a chosen path, publish a
+/// nested thread through the public write path, restart, and read it back. This is
+/// `tasks.md`'s "the shape worth considering" for this piece, and it covers what
+/// the example's nine inline assertions cover without needing anybody to run a
+/// binary.
+///
+/// Three claims, each excluding a rival explanation:
+///
+/// 1. **The reply chain is a tree and not a flat list.** Asserted at THREE levels,
+///    because at two "the parent's id" and "the parent's thread" are the same
+///    value — a `thread: parent` bug is invisible in a two-level fixture, which is
+///    the same-answer family again. `nested`'s parent is the reply and its thread
+///    is the ROOT's, so the two fields carry different values and a reader that
+///    confused them fails here.
+/// 2. **The feed attributes the root to the key that signed it**, derived from the
+///    keystore reopened from disk rather than read from the row.
+/// 3. **The probe and the publish path disagree about which identity this user
+///    posts under** — the three-derivations gap. Asserted as the state of the
+///    world TODAY, self-invalidatingly: the operands are `wire::posting_identity`'s
+///    own answer and the address the feed actually carries, both produced by the
+///    module, so closing the gap anywhere makes this fail and name itself.
+///
+/// **Claim 3 is why this is not just the example re-typed.** The example asserts
+/// the same inequality, and for a while asserted it between two keystore
+/// derivations it made itself — two HD paths off one root, which differ for the
+/// reason any two do, so closing the real gap left it green (`findings/spec-test.md`
+/// entry 1). Here the right operand is the author the STORE reports through
+/// `feed::list_threads`, so neither side is a derivation this test performed.
+#[test]
+fn the_seeding_sequence_builds_a_nested_thread_whose_author_the_probe_does_not_report() {
+    let dir = TempDir::new("seeding-sequence");
+
+    // ── A keystore on disk, as the seeder mints one ──
+    let key_path = dir.file("identity.key");
+    Keystore::generate()
+        .expect("the test host has randomness")
+        .create(&key_path, &Unlock::Unencrypted)
+        .expect("a keystore is creatable in a 0700 directory");
+    let keystore =
+        Keystore::open(&key_path, &Unlock::Unencrypted).expect("the keystore reopens unencrypted");
+
+    // ── The Stoa, founded on `identity_public_key` as `createStoa` names it ──
+    let genesis = a_genesis(&keystore.identity_public_key(), "Ἀγορά");
+    let stoa = genesis.address().expect("a short title encodes");
+
+    // ── Membership, through the only constructor `join` accepts ──
+    let mut memberships =
+        MembershipStore::open(&dir.file("memberships.sqlite")).expect("a membership store opens");
+    memberships
+        .join(&Membership::verified(&stoa, &genesis).expect("the record matches its address"))
+        .expect("a membership is recordable");
+    assert_eq!(
+        memberships.contains(&stoa),
+        Ok(true),
+        "the Stoa this peer founded must be one it has joined"
+    );
+
+    // ── The chosen path, so the probe has one to read ──
+    //
+    // Without this row `posting_identity` answers `NO_CHOICE_FOR_THIS_STOA` and
+    // claim 3 below would be comparing against an error rather than an address.
+    let seeded_path: u32 = 0;
+    let paths = IdentityStore::open(&IdentityStore::default_path_in(&dir.0))
+        .expect("an identity record opens");
+    paths
+        .record_path(&stoa, seeded_path)
+        .expect("a chosen path is recordable");
+
+    // ── A nested thread, through the publish path ──
+    //
+    // The founder signs with `stoa_key`, which is what the module's publish path
+    // signs with. A visitor with no keystore behind it stands in for an op that
+    // arrived from another peer.
+    let founder = keystore.stoa_key(&stoa);
+    let visitor = a_key(9);
+
+    let mut store = dir.store();
+    let root = authoring::post(&mut store, &founder, stoa, "root".to_string())
+        .expect("a root post is publishable");
+    let reply = authoring::reply(&mut store, &visitor, stoa, root.id, "reply".to_string())
+        .expect("a reply is publishable");
+    let nested = authoring::reply(&mut store, &founder, stoa, reply.id, "nested".to_string())
+        .expect("a reply to a reply is publishable");
+
+    let store = dir.reopen(store);
+
+    // ── Claim 1: the chain is a tree ──
+    //
+    // Read back through `OpLog::get`, so these are the fields the STORE holds and
+    // not the `Published` values the calls handed back.
+    for (what, id, expected_parent, expected_thread) in [
+        ("reply", reply.id, root.id, root.id),
+        // The discriminating row: parent and thread are DIFFERENT values here.
+        ("nested", nested.id, reply.id, root.id),
+    ] {
+        let entry = store
+            .get(&id)
+            .expect("the store is readable")
+            .unwrap_or_else(|| panic!("the store must hold {what}"));
+        match &entry.op.op.kind {
+            OpKind::Post { parent, thread, .. } => {
+                assert_eq!(
+                    *parent,
+                    Some(expected_parent),
+                    "{what} must name its parent"
+                );
+                assert_eq!(
+                    *thread,
+                    Some(expected_thread),
+                    "{what} must belong to the root's thread, not its parent's id"
+                );
+            }
+            other => panic!("{what} must be a post, got {other:?}"),
+        }
+    }
+
+    // ── Claim 2: the feed attributes the root to the signing key ──
+    let moderators = Moderators::of(&genesis).expect("a genesis record yields its moderator set");
+    let page = feed::list_threads(&store, &moderators, &stoa, 0, 20, false)
+        .expect("a feed is readable from a reopened store");
+    assert_eq!(
+        bodies(&page),
+        vec!["root"],
+        "a feed lists thread heads, and both replies are not ones"
+    );
+    let feed_author = page.items[0].author.clone();
+    assert_eq!(
+        feed_author,
+        keystore.stoa_address(&stoa).to_hex(),
+        "the root must be attributed to the address the keystore derives for this Stoa"
+    );
+
+    // ── Claim 3: the probe reports an identity the feed does not carry ──
+    //
+    // `wire::posting_identity` is what `getCapabilities` calls. Both operands are
+    // the module's own answers — the probe's, and the author the store reported —
+    // so this cannot be satisfied by two derivations performed here.
+    let probe_reports =
+        wire::posting_identity(&stoa, &keystore, &paths).expect("a recorded path is readable");
+    assert_ne!(
+        probe_reports, feed_author,
+        "the probe and the publish path have stopped disagreeing — the \
+         three-derivations gap is closed. That is good news: delete this \
+         assertion, the equivalent one in examples/seed_store.rs, and the \
+         paragraphs in openspec/changes/seed-store/design.md that document the gap"
+    );
+
+    // The consequence, asserted rather than left as prose: the record's creator
+    // moderates, and the key every op was signed with does not — so a hide
+    // published through the module against a seeded Stoa is refused.
+    assert!(
+        moderators.contains(&genesis.creator),
+        "the record's creator must moderate its own Stoa"
+    );
+    assert!(
+        !moderators.contains(&founder.public_key()),
+        "the signing key has BECOME a moderator — the same gap closing from the \
+         other side, and the same deletions apply"
     );
 }
