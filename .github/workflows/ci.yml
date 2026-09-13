@@ -763,33 +763,54 @@ jobs:
           # and if it ever did, the mismatch is a loud failure rather than a
           # quiet pass.
           #
-          # BOTH crates are scanned, and the inner one is where the tests
-          # actually live. `dialectica-core/` sits INSIDE `rust-lib/`, so a
-          # single rglob from `rust-lib/` would cover it — but it would also
-          # walk `target/`, and it would keep passing if the inner crate were
-          # moved out. Listing the two source roots explicitly means a missing
-          # one is a loud failure rather than a silently smaller count.
+          # ONE rglob over the whole Rust tree, with `target/` excluded — NOT a
+          # hand-maintained list of source roots. `dialectica-core/` sits inside
+          # `rust-lib/`, so one walk from `rust-lib/` reaches every crate, every
+          # `src/`, every `tests/` and every future `benches/` with nothing to
+          # keep in sync.
+          #
+          # An explicit list was tried and is the shape this project has been
+          # bitten by: the next integration target that is not
+          # `dialectica-core/tests` escapes a list silently, and the failure it
+          # produces is the MISLEADING one — `ran` grows, `declared` does not, and
+          # the job dies with a message about cfg-gating, which is the one
+          # explanation that is not the problem. The list's two claimed advantages
+          # do not survive scrutiny: walking `target/` is the one-line exclusion
+          # below, and "a moved crate would still pass" is covered by the
+          # `declared == 0` guard plus the `ran != declared` mismatch, because
+          # moving a crate out of the `-p` set changes `ran` too.
+          #
+          # `examples/` IS in scope, and that is deliberate rather than incidental.
+          # Cargo does not run an example's `#[test]` functions under `cargo test`,
+          # so one declared there would be counted and never run — `declared`
+          # exceeds `ran` and this gate fails, which is correct, because a test
+          # that cannot run is worse than no test. The previous comment here
+          # claimed that protection while excluding the directory that would have
+          # provided it: a review created an example holding one `#[test]` and
+          # measured the old gate staying green, because the example was in
+          # neither number. Re-measured under this rglob with the same probe
+          # restored, `declared` came out one HIGHER than `ran` and the mismatch
+          # fired. The claim is true now because `examples/` is walked; no number
+          # is quoted here because both move with every test added.
           import pathlib
-          roots = [
-              pathlib.Path("dialectica/rust-lib/src"),
-              pathlib.Path("dialectica/rust-lib/dialectica-core/src"),
-          ]
+          tree = pathlib.Path("dialectica/rust-lib")
+          if not tree.is_dir():
+              print(f"::error::expected source tree {tree} does not exist — a crate "
+                    "was moved or renamed, and this count is now measuring less "
+                    "than it claims to.")
+              sys.exit(1)
           declared = 0
-          for root in roots:
-              if not root.is_dir():
-                  print(f"::error::expected source root {root} does not exist — a crate "
-                        "was moved or renamed, and this count is now measuring less "
-                        "than it claims to.")
-                  sys.exit(1)
-              for p in root.rglob("*.rs"):
-                  declared += len(re.findall(r"^\s*#\[test\]\s*$", p.read_text(), re.M))
+          for p in tree.rglob("*.rs"):
+              if "target" in p.parts:
+                  continue
+              declared += len(re.findall(r"^\s*#\[test\]\s*$", p.read_text(), re.M))
 
           print(f"tests reported by cargo: {ran}")
-          print(f"#[test] functions in src: {declared}")
+          print(f"#[test] functions in the Rust tree ({tree}): {declared}")
 
           if declared == 0:
               print("::error::no #[test] functions found — has the suite been deleted, "
-                    f"or moved out of {' / '.join(str(r) for r in roots)}?")
+                    f"or moved out of {tree}?")
               sys.exit(1)
           if ran != declared:
               print(f"::error::cargo ran {ran} tests but the source declares {declared}. "

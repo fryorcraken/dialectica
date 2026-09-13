@@ -3737,6 +3737,88 @@ method sets the precedent for every later one, so its spec is the one that
 should pin the envelope — `items`, `page`, `hasMore` — rather than each
 subsequent spec restating it and slowly disagreeing.
 
+##### The feed read is built and still has no contract — a named debt, not an oversight
+
+**This is the one place the "specs come per stage" rule has already been
+overtaken by the code.** `feed::list_threads` and
+`wire::list_threads_from_request` are on `main` and are the largest behaviour
+block the integration suite pins, and `openspec/specs/` carries **no feed
+requirement at all** — `grep -rli "feed\|list_threads"` over that directory
+returns nothing. The read shipped in the feed-screen change, which merged before
+this repo adopted OpenSpec, so no delta was skipped; there was no flow to skip
+one in.
+
+What is consequently unspecified is not a detail. None of these is a promoted
+requirement, and each is behaviour a reader can rely on today:
+
+- a feed lists thread heads and never replies as their own rows
+- pages tile with no gap and no repeat, and a page past the end is empty rather
+  than a panic or an error
+- a thread whose root post is hidden is omitted by default and is included,
+  flagged, under the explicit parameter — the distinction this section's
+  "Hidden threads are omitted by default" paragraph draws between a hidden root
+  and a hidden reply
+- a post whose signature does not verify is refused by the reader rather than
+  rendered
+- a body and its attachment CIDs are sanitised on the way out (`feed.rs:254-255`).
+  The nearest promoted text points the other way: `stoa-metadata`'s "Display text
+  is preserved rather than sanitised in the data layer" governs what is *stored*,
+  and says nothing about what a read returns
+- the JSON envelope reports the page that was asked for and whether more follows
+
+**Why this was not closed by the change that found it.** It surfaced in a
+spec-test review of the `core-e2e` integration target — a piece declaring
+`skip_specs: true` that adds no behaviour and only tests. Writing the feed
+contract there would have put a behaviour contract for code that merged in other
+pieces into a change whose reviewers never read those pieces, and promoted it
+past the review each of those pieces actually had. The contract is owed by
+whoever next touches the feed read, which is also the only agent positioned to
+write it against the projection that exists rather than against the tests that
+happen to pin it.
+
+**The cost of leaving it, stated so it is not rediscovered.** Until this lands,
+an integration test in `dialectica-core/tests/end_to_end.rs` is the only written
+statement of what the feed does — so a change that makes the feed list replies as
+rows contradicts no requirement, passes `openspec validate --strict`, and is
+objected to only by a test whose own header says it is organised by boundary
+rather than by capability. A reviewer then has no contract to weigh the change
+against, which is the failure a spec exists to prevent.
+
+**Store lifecycle is the same shape and is already in hand.** `op-log` as
+promoted specifies nothing file-backed, so the suite also pins store creation,
+layout versioning, mislabelling and restart with no promoted requirement behind
+them. Unlike the feed, that gap has an owner in flight: the `sqlite-projection`
+change's `op-log` delta adds "A persistent log survives the process that wrote
+it", "A persistent log declares the layout it was written with" and "A persistent
+log verifies the layout its declared version promises", and extends the
+every-read requirement to separate a storage failure from emptiness. Read that
+delta before writing anything here. **One piece of it is genuinely absent even
+there**: that opening a path holding no store *creates* it rather than refusing
+it — the suite's `a_missing_store_file_is_created_rather_than_refused` — which no
+requirement in that delta states. It belongs to `sqlite-projection`, not to a
+later change.
+
+**A third, much smaller debt of the same class**, found while answering whether
+an integration test may construct a hostile keystore. `posting-capability`'s
+requirement "The reason names the fix" enumerates six reasons the probe must
+distinguish, and carries a scenario for five of them. **"The keystore's directory
+is writable by others" has no scenario** — the phrase appears only in the
+requirement text. The *behaviour* is contracted: `keystore`'s "A keystore in a
+directory others can write to is refused" specifies the refusal and its
+distinguishability, with both a refusing and an accepting scenario. What is
+unpinned is that the **probe** surfaces that state as its own reason, which is
+`posting-capability`'s claim rather than `keystore`'s. One scenario on an existing
+promoted requirement closes it, and it belongs to whoever next touches the probe.
+
+On the question that surfaced it: all three of the enumeration's file-level
+states — permissions too open, a directory writable by others, an unreadable or
+malformed keystore — are legitimately constructible by a test, because `keystore`
+specifies each as a scenario whose WHEN clause *is* that construction. A
+requirement that specifies refusing a hostile file cannot also forbid making one
+to check the refusal; that scenario would be untestable, which is the defect
+`.claude/agents/README.md` names as this repo's most common — "Never write a
+scenario that cannot be tested".
+
 ### 9.2 The MVP, as scoped by the owner
 
 **The owner has directed a rush to a working MVP.** This section exists so the
@@ -3973,9 +4055,10 @@ That principle earned its place immediately, and against the template itself:
   correct build. Check by shape, and re-derive every inherited assertion
   against what this repo actually produces.
 - **Assert against a derived number, never a literal.** The test-count check
-  compares cargo's result against the count of `#[test]` attributes in `src/`,
-  so it cannot rot. A hardcoded floor that nothing keeps in sync is itself a
-  false green.
+  compares cargo's result against a count of `#[test]` attributes derived from
+  the Rust tree, so it cannot rot. A hardcoded floor that nothing keeps in sync
+  is itself a false green. Read the workflow for which paths it walks — naming
+  them here would be a second copy that drifts.
 
 **Deliberately not built, each with its re-entry condition** (recorded at the
 foot of the workflow too):
