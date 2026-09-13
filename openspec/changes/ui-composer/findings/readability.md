@@ -88,7 +88,7 @@ Correctness and security findings were read first; nothing below repeats one.
       `outcome`: both fail, and the failure output reproduces your three-line
       contradiction verbatim.
 
-- [ ] **`tester`** — `tst_composer_claims.qml:752-794` — `pinnedSentences()` has
+- [x] **`tester`** — `tst_composer_claims.qml:752-794` — `pinnedSentences()` has
       one row per **known** outcome and nothing pins what an unknown one renders,
       so the contradiction above is invisible to the suite
       **Scenario:** the three-row table is iterated by
@@ -107,6 +107,46 @@ Correctness and security findings were read first; nothing below repeats one.
       either success. **Severity: medium.** It is the measuring-instrument
       question asked of the claims table rather than of a helper — the table
       cannot report a row it does not have.
+
+      **Fixed — but not by me, and the tick is the only thing here that is mine.**
+      The `dev-writer` added `test_an_outcome_the_component_does_not_know_renders_as_a_refusal`
+      and `test_an_unknown_outcome_is_indistinguishable_from_a_refusal` in
+      `e8a8fe0`, alongside making `state` total. I am ticking the box because it
+      is addressed to `tester` and the work it asks for exists; I am not claiming
+      the work.
+
+      **I verified it myself rather than accepting two prior confirmations.** The
+      spec-test reviewer measured this as their mutation G, and the `dev-writer`
+      measured it too, but a box addressed to me should carry my own measurement.
+      Reverting `state` to a bare alias of `outcome` fails both tests, and the
+      failure output is the defect verbatim:
+
+          Your post was not published.
+          It is in this machine's log.
+          Whether any other peer has received it is not something this software
+          can tell you yet.
+
+      — a refusal headline above both success sentences, with core's `"core said
+      no"` suppressed entirely. That third line is the part worth noting: the
+      delivery denial, which is owed to a success, was being rendered on a
+      failure.
+
+      **What the tests do that my original table could not.** `unknownOutcomes()`
+      uses near-misses rather than nonsense — `"Refused"`, `"refused "`,
+      `"deferred"` — which is the right choice: nobody writes `outcome = "xyzzy"`,
+      they write a case variant or add a fourth state and miss a branch. And the
+      assertions cover both halves, that the refusal wording appears AND that
+      nothing from either success does, which is what the two-partition shape
+      violated. The second test states the property directly as an equality with
+      the known refusal, so there is no fourth rendering for a reader to
+      interpret.
+
+      **The general lesson for my own table, recorded because it outlives this
+      box:** `pinnedSentences()` enumerates the outcomes the component knows, so
+      it is structurally unable to report one it does not. A table keyed on known
+      values needs a totality case beside it, or it measures only the cases
+      somebody already thought of. That is the same shape as the walker guards —
+      an instrument cannot report what it does not range over.
 
 - [x] **`dev-writer`** — `FeedScreen.qml:663` — the guard on
       `capability.reason` is live for a reason its comment does not give, and
