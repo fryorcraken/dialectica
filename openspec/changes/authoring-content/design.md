@@ -53,12 +53,11 @@ by construction.
 
 ### The reshape this leaves on the table, and why it is a precondition of a fourth operation
 
-Two sequences are copied three times: the parse prologue (`parsed_object`,
-`reject_forbidden_fields`, `required_stoa`, then the per-kind fields) and the
-append-then-deliver tail (`deliver` on the `Ok` arm, `error_json` on the `Err`).
-What is common in both is a **sequence**, which is what a shape can hold and a copy
-cannot — so three requirements this document calls structural are in fact each
-true of three copies independently.
+The **parse prologue** is copied three times (`parsed_object`,
+`reject_forbidden_fields`, `required_stoa`, then the per-kind fields). What is
+common is a **sequence**, which is what a shape can hold and a copy cannot — so
+requirements this document calls structural are in fact each true of three copies
+independently.
 
 The evidence that this costs something is in the change's own history rather than
 in principle: `tasks.md` §7's mutation 8 had to be re-run per handler, and one of
@@ -66,17 +65,24 @@ the three turned out to be caught only by a sink-call *count* — which would mi
 hoist that replaced the later call instead of adding to it. A per-handler mutation
 is only writable because there are three independent places to write it.
 
-The shapes: a `deliver_and_reply(Result<Published, Refusal>, &mut dyn FnMut(&OpId))`
-owning the tail, so `deliver` is named once on one success arm and a handler has no
-op id to hoist; and a request type whose single constructor runs the prologue, so a
-fourth operation inherits `reject_forbidden_fields` by taking the type rather than
-by its author remembering to copy three lines. "Is the guard called everywhere?"
-then becomes a question the type system answers instead of one a test loop answers
-— and `tasks.md` §9 already notes the guard being forgotten in one handler is
-invisible without checking all three. CLAUDE.md's rule is that the fourth
-slightly-different copy of a guard is the signal to reshape rather than to add a
-fourth test; this change added the looping test, which is the right test and is not
-a reshape.
+**The tail's `deliver` call is no longer one of the three copies**, and it was not
+this reshape that closed it. Settling the panicking-sink question (below) put the
+handoff in one function, `delivered_and_published`, called from all three success
+arms — so `deliver` is now named once and a handler has no op id to hoist. That
+was motivated by a correctness defect rather than by this entry, which is why the
+reshape below is described as the prologue's and not the tail's. What remains
+copied three times in the tail is only the `match`'s shape itself: the `Err` arm's
+`error_json(&refusal.to_string())`, which carries no sequence and no guard.
+
+The shape still wanted: a request type whose single constructor runs the prologue,
+so a fourth operation inherits `reject_forbidden_fields` by taking the type rather
+than by its author remembering to copy three lines. "Is the guard called
+everywhere?" then becomes a question the type system answers instead of one a test
+loop answers — and `tasks.md` §9 already notes the guard being forgotten in one
+handler is invisible without checking all three. CLAUDE.md's rule is that the
+fourth slightly-different copy of a guard is the signal to reshape rather than to
+add a fourth test; this change added the looping test, which is the right test and
+is not a reshape.
 
 **A second reason to want it, found by the security review.** The adapter runs a
 full Argon2id keystore unlock (64 MiB, RFC 9106 option 2) and opens SQLite
@@ -121,18 +127,20 @@ three near-copies.
 
 ```rust
 match authoring::post(log, key, stoa, body) {   // appended by the Ok arm
-    Ok(published) => {
-        deliver(&published.id);                 // returns (), nothing to discard
-        published_json(&published)
-    }
+    Ok(published) => delivered_and_published(&published, deliver),
     Err(refusal) => error_json(&refusal.to_string()),
 }
 ```
 
+`delivered_and_published` is the handoff and the reply in one place — it calls
+`deliver(&published.id)`, whose `()` return there is nothing to discard, and then
+`published_json`. It holds the panic guard described two entries below.
+
 Three requirements land on that shape at once. "The append completes before
-delivery is invoked" is the statement order inside the `Ok` arm. "Delivery is not
-invoked on a refusal" is that `deliver` is named only on the `Ok` arm, so no
-refusal path can reach it. "A publish returns while delivery is still
+delivery is invoked" is that `authoring::post` has already returned before the `Ok`
+arm is entered, and `delivered_and_published` calls the sink after that. "Delivery
+is not invoked on a refusal" is that the sink is reachable only through the `Ok`
+arm, so no refusal path can reach it. "A publish returns while delivery is still
 outstanding" is the sink's `()` return type — there is no outcome to wait for, so
 a call that waited on one cannot be written.
 
@@ -159,6 +167,57 @@ value* something inside `publish` could later be tempted to read.
 **`deliver` is also not invoked on a refusal, and that is structural rather than
 guarded**: it is called only on the success arm of the `Result`, so there is no
 refusal path that reaches it.
+
+### A panicking delivery sink is caught at the handoff, and the publish still reports success
+
+Two reviewers found the same live contradiction (`findings/design-review.md` F6,
+`findings/spec-test.md` entry 1): `deliver` was called inside `guarded`, so a sink
+that panics produced `{"error":"panic in publish_post: …"}` with no `opId` for an
+op that **is** in the log. Measured at the time: 530 passed / 1 failed when the
+reply was asserted. That is precisely what the requirement forbids — "a publish
+SHALL NOT be reported as having failed on the strength of a delivery outcome" —
+and the scenario's condition is "delivery **refuses or errors** on the handoff",
+of which a panic is the most violent form.
+
+**The decision, taken by the owner: catch the panic at the handoff and report the
+publish as successful.** The op is in the log and the requirement says so;
+delivery belongs to the transport. Implemented as `wire::delivered_and_published`,
+wrapping only the sink call in its own `catch_unwind`, called from all three
+handlers.
+
+**The alternative of moving `deliver` outside `guarded` is rejected, and the
+measurement is why.** PHASE0-FINDINGS §3 measured what an unguarded panic costs:
+the module process aborts (`failed to initiate panic, error 5`, SIGABRT), the
+caller waits out a 20-second timeout, and every later call reports
+`MODULE_NOT_LOADED`. A dead module is a worse answer than an unreported delivery
+failure, so the outer guard stays and the handoff gets its own — two nested
+guards being the cheap way to keep a panic contained *and* the reply truthful.
+
+**The other alternative — contracting the error reply as an infrastructure fault —
+was ruled out by the delivery contract, which inverted the premise the question
+rested on.** `delivery_module.lidl` carries `channelMessageSent`,
+`channelMessageError` and `messagePropagated`: the outcome arrives
+**asynchronously, after the publish call has returned**. A return value could not
+carry it even if the API wanted it to. So the synchronous reply was never the
+place to learn about delivery, and was a *worse* signal rather than a missing one
+— a sink that accepts an op tells you the transport took it, which is
+`channelMessageSent` and says nothing about whether any peer received it.
+`messagePropagated` is the fact a user cares about. Publishing and delivering are
+two events at two times, and this keeps the API from pretending they are one.
+
+**The cost, and where it lands.** A caught panic reaches stderr and nothing else;
+there is no field in the reply for it, by the argument above. Making an op that
+reaches `channelMessageError`, or that never reaches `messagePropagated` within
+some bound, visible is therefore **`op-transport`'s obligation** — recorded in
+`docs/PLAN.md` §9.2. Without that, this decision converts a loud failure into a
+silent one, and `docs/UI-BRIEF.md` will need the rendering obligation once that
+capability specifies the bound.
+
+Pinned by `a_panicking_delivery_sink_still_reports_the_op_as_published_on_all_three_handlers`,
+which fails before the fix with exactly the error shape above. Its sibling
+`a_publish_whose_delivery_panics_leaves_the_op_in_the_log` is kept rather than
+replaced: one reads the reply and the other reads the log, and an implementation
+that reported success while rolling the op back would satisfy the first alone.
 
 ### `Refusal` is a typed enum, not a `String`
 

@@ -1,5 +1,24 @@
 # Tasks
 
+## Stages
+
+Added after the fact: this change predates the stage block, so the rows below are
+ticked against what the branch's history shows actually ran rather than against a
+list that guided it. The six review rows each have a findings file and a
+cherry-picked commit on `piece/authoring`.
+
+- [x] spec — `spec-writer`
+- [x] design + code — `dev-writer`
+- [x] tests — `tester`
+- [x] review: correctness — `code-reviewer`
+- [x] review: security — `code-reviewer`
+- [x] review: readability — `code-reviewer`
+- [x] review: architecture — `code-reviewer`
+- [x] review: spec-test — `spec-test-reviewer`
+- [x] review: design — `design-reviewer`
+- [ ] findings all ticked, `findings/` deleted — runner
+- [ ] `openspec validate --strict`, then `archive` — runner
+
 ## 1. Settle the approach before writing it
 
 - [x] Read the spec's fourteen requirements, `op-format`, `op-log`,
@@ -171,22 +190,37 @@ on a post.
 
 `publish_*` took `deliver: impl FnOnce(&OpId)` in the first draft, because
 "called at most once" is the honest bound on a sink. **It does not survive the
-adapter**, and the failure is invisible to every gate that can be run in this
-repo.
+test that pins all three handlers as one function-pointer type**, and the failure
+is invisible to every gate that can be run in this repo.
 
-The adapter assembles the keystore, key, store and sink once and dispatches over
-the three handlers through one function-pointer type. A generic `impl FnOnce`
-monomorphises per call site, so the three are three types; coercing them fails
-on a higher-ranked lifetime, because a `&mut dyn FnMut(&OpId)` argument is not
-the `for<'d> fn(…, &'d mut dyn …)` pointer the dispatch needs.
+**Say precisely whose constraint that is, because an earlier version of this
+section named the wrong one** (`findings/architecture.md` A1). It claimed the
+requirement came from the *adapter*. It does not: `Dialectica::publishing` is
+generic over the handler (`F: FnOnce(…)`), so it monomorphises per call site and
+would accept a generic sink perfectly well.
+
+The pin belongs to
+`the_three_handlers_share_one_signature_the_adapter_can_dispatch_over`, via its
+`type Handler = fn(…)`. A generic `impl FnOnce` monomorphises per call site, so
+the three are three types; coercing them fails on a higher-ranked lifetime,
+because a `&mut dyn FnMut(&OpId)` argument is not the
+`for<'d> fn(…, &'d mut dyn …)` pointer that one pointer type needs.
+
+That the constraint is a test's rather than the adapter's is what makes
+**recovering `FnOnce` a live option**: it costs changing that test's `Handler`
+type, not a redesign. The note matters because a wrong impossibility claim is
+what stops the next reader from retrying.
 
 - [x] Changed to `&mut dyn FnMut(&OpId)`. **Nothing a requirement rests on is
       lost**: the return type `()` is what makes a delivery outcome unwaitable,
       and `FnOnce` only added at-most-once, which no requirement asks for.
 - [x] Added `the_three_handlers_share_one_signature_the_adapter_can_dispatch_over`,
-      which is what caught it. The adapter is behind `cfg(logos_scaffold)`, which
-      no `cargo test` sets, so without that test the error would have surfaced in
-      the builder's build — the one that runs last and reports worst.
+      which is what caught it — and which is also the thing imposing the
+      constraint, not merely detecting it. Pinning the three signatures as
+      interchangeable *in this crate* is worth its cost because the adapter is
+      behind `cfg(logos_scaffold)`, which no `cargo test` sets: a signature that
+      drifted would otherwise surface only in the builder's build, the one that
+      runs last and reports worst.
 
 ## 9. Unspecified behaviour, marked
 
@@ -336,18 +370,23 @@ covered by the marker above.
   variant, so there is nothing to enforce yet. Named in `design.md` rather than
   left to be discovered.
 
-## 11. Three requirements this change does not discharge, and why each is different
+## 11. Two requirements this change does not discharge, and one it now does
 
 These are **not** ticked as tested, because ticking them would be the failure
 `.claude/agents/README.md` names: a scenario that cannot be tested, satisfied on
 paper.
 
-The three are different in kind, and the difference is the point. One is a gap this
-change's **design** creates and could close (the no-identity trigger). One is a
-**contradiction** between the code and the scenario that someone must resolve
-either way (the declined handoff). One is satisfied **structurally**, which is
-stronger than a test and would be weakened by recording it as coverage (no key
-material).
+The two are different in kind, and the difference is the point. One is a gap this
+change's **design** creates and could close (the no-identity trigger). One is
+satisfied **structurally**, which is stronger than a test and would be weakened by
+recording it as coverage (no key material).
+
+**The third was a contradiction and is now discharged.** "A declined handoff
+leaves the op published" was a live disagreement between the code and the
+scenario; the owner settled it, the code was changed to match, and it is tested.
+Its section is kept below because the reasoning — in particular what ruled the two
+alternative routes out — is what a later reader needs, and because the measurement
+that proved the defect is the only evidence the fix was necessary.
 
 ### "A publish requires a usable identity and says so when there is none" — not discharged here, and the reason is this change's design rather than the spec
 
@@ -403,44 +442,70 @@ shape only when the builder's build has compiled the adapter.
 What the spec should **not** be told is that it asks for something unobservable.
 It does not; this change chose a shape that cannot observe it.
 
-### "A declined handoff leaves the op published" — the code contradicts the scenario, and the spec must pick
+### "A declined handoff leaves the op published" — settled, and the code now honours the scenario
 
 Found by review, and by two reviewers independently (`findings/design-review.md`
-F6, `findings/spec-test.md` entry 1). **This is a live contradiction, not a
-coverage gap.**
+F6, `findings/spec-test.md` entry 1). It was a live contradiction rather than a
+coverage gap, and **the owner has now settled it.**
 
-`deliver` is called *inside* `guarded` in all three handlers, so a sink that
-panics is caught and the reply becomes `{"error":"panic in publish_post: …"}`
-with **no `opId`** — for an op that is in the log. The requirement says a publish
-"SHALL NOT be reported as having failed on the strength of a delivery outcome"
-and the scenario's condition is "delivery **refuses or errors** on the handoff",
-which a panic is the most violent form of.
+The defect as measured: `deliver` was called *inside* `guarded` in all three
+handlers, so a sink that panics was caught and the reply became
+`{"error":"panic in publish_post: …"}` with **no `opId`** — for an op that is in
+the log. The requirement says a publish "SHALL NOT be reported as having failed
+on the strength of a delivery outcome" and the scenario's condition is "delivery
+**refuses or errors** on the handoff", which a panic is the most violent form of.
 
-Measured: adding "no `error` key" and "`opId` equals the expected id" to the test
-fails, 530 passed / 1 failed, with the reply printed as the error shape.
+Measured before the fix: adding "no `error` key" and "`opId` equals the expected
+id" to the test failed, 530 passed / 1 failed, with the reply printed as the
+error shape.
 
-The user-visible cost, which is what makes this worth settling rather than
+The user-visible cost, which is what made it worth settling rather than
 documenting: a view is told the post failed, shows "posting failed", and the user
 retypes and resubmits — while the first op is already in the log and will be
 handed to delivery again. They are told the opposite of the truth, which is what
 the requirement's second paragraph exists to prevent.
 
-**For the spec-writer**, three routes and they are not equivalent:
+**The decision: catch the panic at the handoff and report the publish as
+successful.** The op is in the log, the requirement says so, and delivery belongs
+to the transport. Of the three routes review offered, this is (3) in outcome but
+not in reasoning — it is *not* "an infrastructure fault reported as one", because
+the reply carries no fault at all.
 
-1. Move the `deliver` call outside `guarded`, so a sink's panic cannot overwrite a
-   success reply. Honours the scenario as written; needs care that the panic still
-   cannot abort the module process.
-2. Scope the requirement to a sink that *returns* rather than unwinds, and say so
-   — noting that nothing in this API distinguishes the two, which is why the
-   ambiguity exists at all.
-3. Keep the behaviour and contract it: a delivery panic is an infrastructure fault
-   reported as one, with the op still published. This needs the retry path spelled
-   out, because a caller that sees `{"error":…}` and retries publishes nothing new
-   and is told so only by `wasNew`.
+**What ruled route (1) out**, and it is the measurement that matters: moving
+`deliver` outside `guarded` leaves the panic unguarded, and PHASE0-FINDINGS §3
+measured what that costs — the module process aborts (`failed to initiate panic,
+error 5`, SIGABRT), the caller waits out a 20-second timeout, and every later
+call reports `MODULE_NOT_LOADED`. A dead module is a worse answer than an
+unreported delivery failure.
 
-The test is renamed `a_publish_whose_delivery_panics_leaves_the_op_in_the_log`,
-which is what it actually pins — it asserted the log and never the reply, while
-its old name claimed the requirement in English.
+**What ruled route (2) out** is the delivery contract, and it inverted the
+premise the whole question rested on. `delivery_module.lidl` carries
+`channelMessageSent`, `channelMessageError` and `messagePropagated` — the outcome
+arrives **asynchronously, after the publish call has returned**. A return value
+could not carry it even if we wanted it to. So the synchronous reply was never
+the place to learn about delivery: accepting an op is `channelMessageSent` and
+says nothing about whether a peer received it. Scoping the requirement to
+"returns rather than unwinds" would have contracted a distinction that carries no
+information.
+
+Implemented as `wire::delivered_and_published`, one function called from all
+three handlers, wrapping only the sink call in its own `catch_unwind`. The outer
+`guarded` stays. A caught panic goes to stderr, because a transport defect no
+operator can see is the cost this decision incurs.
+
+Pinned by `a_panicking_delivery_sink_still_reports_the_op_as_published_on_all_three_handlers`,
+which fails before the fix with exactly the error shape quoted above, and covers
+all three handlers because the sink is called from three places.
+
+**The obligation this hands on, recorded in `docs/PLAN.md` §9.2:** `op-transport`
+must make an op that reaches `channelMessageError`, or that never reaches
+`messagePropagated` within some bound, visible somewhere. Without that, this
+decision converts a loud failure into a silent one.
+
+The sibling test is named `a_publish_whose_delivery_panics_leaves_the_op_in_the_log`,
+which is what it actually pins — the log, not the reply. Both are kept: an
+implementation that reported success while rolling the op back would satisfy the
+reply assertion alone.
 
 ### "A refused publish creates no key material" — satisfied structurally, not covered
 

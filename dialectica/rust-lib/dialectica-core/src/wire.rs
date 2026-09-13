@@ -542,6 +542,63 @@ fn published_json(published: &crate::authoring::Published) -> String {
     .to_string()
 }
 
+/// Hand the published op to delivery, then report it as published — and do not
+/// let delivery's failure become the publish's.
+///
+/// # Why the handoff gets its own `catch_unwind` inside an already-guarded handler
+///
+/// The op is in the log before this is called, and the spec says so: *"WHEN
+/// delivery refuses or errors on the handoff, THEN the reply reports the op as
+/// published and names its op id"*. A panicking sink is the most violent form of
+/// "errors on the handoff", so it must not change the reply.
+///
+/// Without this, it changed the reply completely. [`guarded`] wraps the whole
+/// handler, so a panic in the sink unwound past the `published_json` that had
+/// already been computed and the caller received
+/// `{"error":"panic in publish_post: …"}` — no `opId`, for an op that **is**
+/// published. That is the one thing the requirement forbids: a publish reported
+/// as having failed on the strength of a delivery outcome.
+///
+/// **The outer guard stays.** Moving `deliver` outside it was the other candidate
+/// and is rejected: PHASE0-FINDINGS §3 measured what an unguarded panic costs —
+/// the module process aborts (`failed to initiate panic, error 5`, SIGABRT), the
+/// caller waits out a 20-second timeout, and every later call reports
+/// `MODULE_NOT_LOADED`. Two nested guards is the cheap way to keep a panic
+/// contained *and* keep the reply truthful.
+///
+/// # A caught panic is not swallowed silently
+///
+/// It goes to stderr, because the alternative is a transport defect that no
+/// operator can see. It deliberately does **not** reach the reply: there is no
+/// field for it. Per `delivery_module.lidl` the real outcome is asynchronous —
+/// `channelMessageSent`, `channelMessageError`, `messagePropagated` all arrive
+/// after this call has returned — so a synchronous reply could not carry a
+/// delivery outcome even if the contract wanted one. Accepting an op is
+/// `channelMessageSent` and says nothing about whether a peer received it.
+///
+/// Making an op that errors or never propagates visible is therefore
+/// `op-transport`'s obligation, not this function's. Until it lands, this
+/// conversion of a loud failure into a logged one is the known cost, recorded in
+/// `docs/PLAN.md` §9.2.
+fn delivered_and_published(
+    published: &crate::authoring::Published,
+    deliver: &mut dyn FnMut(&crate::op::OpId),
+) -> String {
+    if let Err(payload) = catch_unwind(AssertUnwindSafe(|| deliver(&published.id))) {
+        let detail = payload
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_string())
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "non-string panic payload".to_string());
+        eprintln!(
+            "dialectica: delivery panicked handing off {} — the op is published and stays published: {}",
+            published.id.to_hex(),
+            detail
+        );
+    }
+    published_json(published)
+}
+
 /// The wire reply for a publish that never reached a handler, because no identity
 /// was available to sign with.
 ///
@@ -749,10 +806,7 @@ pub fn publish_post<L: crate::log::OpLog>(
         };
 
         match crate::authoring::post(log, key, stoa, body) {
-            Ok(published) => {
-                deliver(&published.id);
-                published_json(&published)
-            }
+            Ok(published) => delivered_and_published(&published, deliver),
             Err(refusal) => error_json(&refusal.to_string()),
         }
     })
@@ -793,10 +847,7 @@ pub fn publish_reply<L: crate::log::OpLog>(
         };
 
         match crate::authoring::reply(log, key, stoa, parent, body) {
-            Ok(published) => {
-                deliver(&published.id);
-                published_json(&published)
-            }
+            Ok(published) => delivered_and_published(&published, deliver),
             Err(refusal) => error_json(&refusal.to_string()),
         }
     })
@@ -836,10 +887,7 @@ pub fn publish_vote<L: crate::log::OpLog>(
         };
 
         match crate::authoring::vote(log, key, stoa, target, direction) {
-            Ok(published) => {
-                deliver(&published.id);
-                published_json(&published)
-            }
+            Ok(published) => delivered_and_published(&published, deliver),
             Err(refusal) => error_json(&refusal.to_string()),
         }
     })
@@ -2744,17 +2792,22 @@ mod tests {
         // handoff". What this pins is that the op STAYS: the append completed
         // before delivery was reached and nothing rolls it back.
         //
-        // What it deliberately does NOT pin is the reply, and that gap is a known
-        // open question rather than an oversight. `guarded` wraps the `deliver`
-        // call, so a panicking sink turns a successful publish into
-        // `{"error":"panic in publish_post: …"}` carrying no `opId` — while the op
-        // is in the log. The requirement says a publish "SHALL NOT be reported as
-        // having failed on the strength of a delivery outcome" and its scenario
-        // says the reply "names its op id", so either the spec means something
-        // narrower than "refuses or errors" or the `deliver` call belongs outside
-        // the guard. Nothing in this API distinguishes "declined" from "panicked",
-        // which is why this is the spec-writer's call and not settled here; see
-        // `findings/design-review.md` F6 and `findings/spec-test.md` entry 1.
+        // The reply is pinned by
+        // `a_panicking_delivery_sink_still_reports_the_op_as_published_on_all_three_handlers`,
+        // which is the other half of this and covers all three handlers. This one
+        // is kept because the two assert different things: that one reads the
+        // reply, this one reads the LOG, and an implementation that reported
+        // success while rolling the op back would satisfy the reply assertion
+        // alone.
+        //
+        // This was an open question when the reviewers found it — `guarded` wrapped
+        // the `deliver` call, so a panicking sink turned a successful publish into
+        // `{"error":"panic in publish_post: …"}` with no `opId` while the op was in
+        // the log, against "a publish SHALL NOT be reported as having failed on the
+        // strength of a delivery outcome". The owner settled it: catch the panic at
+        // the handoff and report the publish as successful. See
+        // `delivered_and_published` for why the outer guard stays, and `docs/PLAN.md`
+        // §9.2 for the obligation this hands to `op-transport`.
         //
         // This test was named `…_still_reports_the_op_as_published` and asserted
         // no such thing — the name claimed the requirement while the body checked
@@ -2782,14 +2835,88 @@ mod tests {
             &key,
             &mut |_: &crate::op::OpId| panic!("delivery refused the handoff"),
         );
-        // The guard caught it, so this is an error shape rather than an aborted
-        // process — but the op is published either way.
+        // The handoff guard caught it, so this is a reply rather than an aborted
+        // process. Parsed for well-formedness only; what the reply SAYS is the
+        // sibling test's assertion, and what this test is named for is the log.
         as_json(&out);
         assert!(
             log.get(&expected).unwrap().is_some(),
             "a declined handoff must leave the op in the log, got {out}"
         );
+        // The op the publish created, and nothing the panic added or rolled back.
         assert_eq!(log.len().unwrap(), 1);
+    }
+
+    #[test]
+    fn a_panicking_delivery_sink_still_reports_the_op_as_published_on_all_three_handlers() {
+        // "A declined handoff leaves the op published": WHEN delivery refuses or
+        // errors on the handoff, THEN the reply reports the op as published and
+        // names its op id. A panicking sink is the most violent form of "errors",
+        // so the reply must still be the success shape.
+        //
+        // This is the assertion the sibling test
+        // `a_publish_whose_delivery_panics_leaves_the_op_in_the_log` deliberately
+        // did NOT make while the question was open. It fails before the fix: with
+        // the sink call inside `guarded`, a panic discards the already-computed
+        // reply and yields `{"error":"panic in publish_post: …"}` with no `opId`
+        // for an op that IS in the log.
+        //
+        // Asserted on all three handlers because the sink is called from three
+        // places, so one fixed and two missed is the failure a single-handler
+        // test could not see.
+        let key = publish_key();
+
+        // A parent to reply to and a target to vote on, published with a sink
+        // that does not panic, so the fixtures are not themselves under test.
+        let mut log = MemoryOpLog::new();
+        let seed = as_json(&publish_post(
+            &publish_request(r#""body":"the parent""#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        let parent = seed["opId"].as_str().unwrap().to_string();
+
+        type Handler = fn(
+            &str,
+            &mut MemoryOpLog,
+            &crate::identity::SecretKey,
+            &mut dyn FnMut(&crate::op::OpId),
+        ) -> String;
+
+        let cases: [(String, Handler); 3] = [
+            (
+                publish_request(r#""body":"a post""#),
+                publish_post as Handler,
+            ),
+            (
+                publish_request(&format!(r#""parent":"{parent}","body":"a reply""#)),
+                publish_reply as Handler,
+            ),
+            (
+                publish_request(&format!(r#""target":"{parent}","direction":"up""#)),
+                publish_vote as Handler,
+            ),
+        ];
+
+        for (request, handler) in &cases {
+            let out = handler(request, &mut log, &key, &mut |_: &crate::op::OpId| {
+                panic!("delivery refused the handoff")
+            });
+            let v = as_json(&out);
+            assert!(
+                v.get("error").is_none(),
+                "a panicking sink must not be reported as a failed publish, got {out}"
+            );
+            let id = v["opId"]
+                .as_str()
+                .unwrap_or_else(|| panic!("the reply must name its op id, got {out}"));
+            let id = crate::op::OpId::from_hex(id).expect("the reply's op id must parse");
+            assert!(
+                log.get(&id).unwrap().is_some(),
+                "the op the reply names must be readable from the log, got {out}"
+            );
+        }
     }
 
     #[test]
