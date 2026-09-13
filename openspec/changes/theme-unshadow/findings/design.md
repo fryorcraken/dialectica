@@ -67,7 +67,7 @@ change acted on nothing PLAN.md explained.
 
 ---
 
-- [ ] **`dev-writer`** — `design.md:52-62` records a **decision** — that the
+- [x] **`dev-writer`** — `design.md:52-62` records a **decision** — that the
       static gate is the instrument, because the component layer is
       "structurally unable to see this defect" — and the second half of that
       premise is false, so the decision was made on a false premise and the
@@ -122,7 +122,38 @@ change acted on nothing PLAN.md explained.
       the decision record behind them. **Verified:** both qmllint bounds run in
       this worktree.
 
-- [ ] **`dev-writer`** — `design.md:145` says 17 and `.github/workflows/ci.yml:660`
+      **Fixed.** Both edits made, as asked, and no rewrite.
+
+      The claim is narrowed to what was measured: "structurally unable to see
+      **the collision**, because under `qmltestrunner` the host is absent and
+      there is no competitor to lose to." That sentence is true, is no longer
+      than the false one, and still justifies the static name gate. A short
+      paragraph below it says explicitly that the overbroad wording read as the
+      whole class, is false of the undefined tokens the collision produces, and
+      is the reason no third instrument was sought.
+
+      The missing alternative is now its own subsection, **"`qmllint
+      --missing-property`, considered and taken"** — what it covers (every
+      member, statically, in every file including ones no spec instantiates),
+      what it does **not** (the collision, and a wrong-but-defined value), and
+      that this piece **takes** it rather than deferring.
+
+      On the limit, which I deliberately did not overstate: I re-derived it
+      rather than relaying it. `dialectica-ui/src/qml/qmldir:1` declares
+      `singleton DTheme 1.0 DTheme.qml` in the very directory CI passes as
+      `-I`, so qmllint resolves `DTheme` to our own file where every member
+      exists — a different resolution than the app performs. The document says
+      a green from it is evidence about members **and about nothing else**, and
+      the pre-existing bullet at "What actually checks the rename" already says
+      the member gate must not be read as covering the collision. Both kept.
+
+      Both bounds re-run here rather than taken from the finding:
+      `check_qml_members.sh` → `ok: 13 QML file(s) checked`, exit 0;
+      `tst_check_qml_members.sh` → four cases pass, including the rejection
+      direction. The escalation the `tester` landed is real, so this box was
+      the record only.
+
+- [x] **`dev-writer`** — `design.md:145` says 17 and `.github/workflows/ci.yml:660`
       says sixteen, of the same set of files, so one of the two is wrong and a
       reader cannot tell which
       `design.md:145-147` — "checks the rename's completeness statically, across
@@ -149,7 +180,30 @@ change acted on nothing PLAN.md explained.
       arithmetic disagreement in the change and leaving it costs more in
       re-derivation than fixing it.
 
-- [ ] **`dev-writer`** — `design.md:90-95` defers renaming `Core` to `DCore` to
+      **Fixed**, though the disagreement had already dissolved and the citation
+      no longer lands — the drift this branch was flagged for. `ci.yml:660` is
+      not that comment any more: the gate became `check_qml_names.py`, and the
+      justification the box quotes left `ci.yml` with it.
+      `grep -rni "sixteen\|four of the module"` over `.github/`,
+      `dialectica-ui/`, `docs/` and `CLAUDE.md` returns **nothing**, so there is
+      no stale count left to correct.
+
+      I took the finding's better suggestion instead, which still applied.
+      `design.md` hardcoded "across all 17 QML files in the module", and per
+      CLAUDE.md's "do not write down anything a command can answer" that is a
+      figure the gate prints on every run. It now reads "across every QML file
+      in the module — `tests/` included, which is the widening that mattered;
+      the count is printed on every run rather than recorded here." The
+      arithmetic claim is gone rather than re-pinned.
+
+      Left alone deliberately: the two remaining figures at `design.md:194` and
+      `:274`, and `tst_check_qml_names.py:144`. Each records the **output of a
+      past run** — the pre-fix gate over a mutated qmldir, and a mutation
+      result — not a claim about today's tree, so they are the self-invalidating
+      form that section asks for. Re-running the gate here gives `ok: 17 QML
+      file(s) and 12 qmldir entries checked`.
+
+- [x] **`dev-writer`** — `design.md:90-95` defers renaming `Core` to `DCore` to
       "a piece of its own", and nothing outside this change records that, so the
       deferral is deleted when `findings/` and the change are archived
       `design.md:95`: "`DCore` is the right end state and belongs to a piece of
@@ -173,7 +227,40 @@ change acted on nothing PLAN.md explained.
       here that gets *harder* to fix later, since after archive nobody will know
       the deferral was deliberate rather than overlooked.
 
-- [ ] **`dev-writer`** — `design.md:136-140` records "fail on any QWARN" as the
+      **Fixed**, in `CLAUDE.md` rather than `docs/PLAN.md`.
+
+      The gap is confirmed: `git grep -n "DCore\|Core singleton\|D-prefix"
+      origin/main -- docs/PLAN.md docs/UI-BRIEF.md` returns nothing, and
+      PLAN.md has no QML-naming section at all — `grep -n "DTheme\|QML\|
+      singleton"` over it hits the core/UI split, the Rust singleton and
+      `createNode`, none of which is this.
+
+      I put it in `CLAUDE.md`, beside the gate's own description, rather than
+      PLAN.md. The reasoning, offered for rejection if you disagree: every
+      other fact about this collision already lives in that entry — the host
+      namespace measurement, the `Core` resolution counts, the grandfather
+      rule, what the gate cannot see — and the deferral is a note to whoever
+      next touches a QML type name, which is exactly that entry's audience.
+      Splitting it into PLAN.md would put the end state a screen away from the
+      `GRANDFATHERED` set it describes. PLAN.md carries architecture; this is a
+      naming convention's unfinished edge.
+
+      What landed: the grandfathered names are the deferred work, `DCore` and
+      `DIdenticon`/`DFlatButton` and the rest are the intended names, they were
+      left **deliberately** because eleven renames across every view file would
+      have made the shadowing fix unreviewable, and the note says it is recorded
+      there *because* the change that deferred it is archived. It is
+      self-invalidating in the way that section asks: prefix one name and the
+      gate's set is visibly shorter than the sentence claims.
+
+      **The `Core` measurement now lives there too** — 27 resolutions into the
+      plugin's own `Core.qml`, zero into the host namespace, `Core` absent from
+      the host's 29 registered types — stated as evidence it does not collide
+      *today*, with "basecamp has no `Core` carries no expiry date" kept beside
+      it so the measurement cannot be read as a licence. `design.md` now points
+      at that home rather than being the only copy.
+
+- [x] **`dev-writer`** — `design.md:136-140` records "fail on any QWARN" as the
       rejected alternative for the runner check, but not `QT_FATAL_WARNINGS`,
       which is the alternative a reader actually reaches for and which
       `run-qml-tests.sh:100-105` already explains
@@ -196,6 +283,22 @@ change acted on nothing PLAN.md explained.
       does exist in the tree. Worth closing because this is the entry most likely
       to be re-litigated — "why not just set the env var" is the first question
       anyone asks of `check_bindings`.
+
+      **Fixed.** The `check_bindings` entry now names `QT_FATAL_WARNINGS` as the
+      second rejected alternative, with what ruled it out: it aborts on the
+      **first** warning of any kind, so the run dies with a crash rather than a
+      diagnosis and takes the remaining specs with it — blunt in exactly the way
+      "fail on any QWARN" was already rejected for being — and `qmltestrunner`
+      has no flag that escalates a warning to a failure, so reading the runner's
+      output is the mechanism actually available. That completes the four-part
+      entry: choice, constraint, alternatives, cost.
+
+      The reasoning is the shell comment's, verified at source rather than
+      paraphrased from the finding — `run-qml-tests.sh:100-105`, which is where
+      the citation still lands. I left it there and added a pointer instead of
+      moving it: it is right at the point of use, and `CLAUDE.md:383` carries it
+      for the repo. The direction of travel the box objects to is fixed by the
+      Decisions section no longer being the thinnest of the three.
 
 ## What I could not check
 

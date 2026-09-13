@@ -66,10 +66,46 @@ wording is the sentence that told the next person not to look, and it is why
 qmllint's `missing-property` went unexamined for a change about undefined
 tokens — a cost, not a pedantic distinction.
 
-So a QML test is not merely absent here; it is **structurally unable to see this
-defect**, and writing one would be the false green CI is built against. The gate
-is therefore the static `no QML type name collides with the host` step, which
-runs `dialectica-ui/tests/check_qml_names.py`.
+So a QML test is not merely absent here; it is **structurally unable to see the
+collision**, because under `qmltestrunner` the host is absent and there is no
+competitor to lose to. That is the whole of the impossibility, and it is what
+makes the name check static: the gate for *the collision* is therefore the
+`no QML type name collides with the host` step, which runs
+`dialectica-ui/tests/check_qml_names.py`.
+
+**The narrow wording is the point.** An earlier version of this paragraph said
+the component layer was structurally unable to see "this defect", which reads as
+the whole class and is false of the **undefined tokens the collision produces**.
+That is a different class, it is statically visible, and the overbroad sentence
+is the reason nobody looked for an instrument that sees it.
+
+### `qmllint --missing-property`, considered and taken
+
+The alternative the paragraph above should have weighed, recorded here because
+"considered and rejected" and "never looked" were indistinguishable until it
+was: the design review found `qmllint` named nowhere in this document, while
+twenty lines above argued a name check was all that remained. An unrecorded
+alternative is re-litigated from scratch by the next reader, which is the cost
+this section exists to pay off.
+
+**What it covers.** Every member read off one of our own types, statically, in
+every file — including the ones no spec instantiates, which is precisely where
+the suite's `check_bindings` stops. `Main.qml` is the case that matters: it
+paints the screen's ground and no spec constructs it.
+
+**What it does not cover, and this must not be blurred.** Not the collision. CI
+passes `-I dialectica-ui/src/qml`, and `qmldir` declares `singleton DTheme 1.0
+DTheme.qml` in that very directory — so qmllint resolves `DTheme` to our own
+file, where every member genuinely exists. **It checks a different resolution
+than the app performs**, and a green from it is evidence about members and about
+nothing else. Nor does it see a wrong-but-defined value.
+
+**This piece takes it rather than deferring it**, because the instrument was
+already in CI, already pointed at these files, and already printing the defect —
+as a `Warning:` into a green log, since the step gated on the exit code alone.
+The escalation is `dialectica-ui/tests/check_qml_members.sh`, run from the `qml`
+job with `tst_check_qml_members.sh` beside it pinning both directions. See "What
+actually checks the rename" below for the three-way division it completes.
 
 **It was proven to fail before it was trusted.** Run against `main` — the tree
 carrying the defect — it exits 1 reporting the `qmldir` declaration as
@@ -186,6 +222,13 @@ every plausible name. That is also why these are grandfather clauses and not a
 precedent — "basecamp has no `Core` today" is exactly the kind of fact the prefix
 rule exists to stop depending on. `DCore` and the eleven are the right end state
 and belong to a piece of their own.
+
+**That deferral is recorded in `CLAUDE.md`, beside the gate's description, and
+not only here.** This document is archived when the change closes, and the
+`GRANDFATHERED` set that survives states what is unprotected without stating
+that anyone intended it — so after archive a reader could not tell deliberate
+from overlooked. The `Core` measurement that makes the exemption evidence rather
+than hope lives there too, for the same reason.
 
 ### The stale-reference check derives its names from `qmldir`
 
@@ -311,12 +354,24 @@ optional: a missing token on a correctly-named singleton (`DTheme.noSuchToken`)
 raises **no `ReferenceError` at all**, reporting `Unable to assign [undefined]`
 instead, so a `ReferenceError`-only check would have passed it.
 
+**`QT_FATAL_WARNINGS` was the other rejected alternative**, and it is the one a
+reader reaches for first — "why not just set the env var" is the first question
+anyone asks of `check_bindings`. It aborts the process on the **first** warning
+of any kind, so the run dies with a crash rather than a diagnosis and takes the
+remaining specs with it; it is blunt in exactly the way failing on any QWARN was
+rejected for being. `qmltestrunner` has no flag that escalates a warning to a
+failure — `-help` lists none — so reading the runner's output is the mechanism
+actually available. `run-qml-tests.sh` carries the same reasoning at the point
+of use.
+
 That leaves the honest division, which is now genuinely two directions rather
 than one:
 
-- **The CI gate** checks the rename's completeness statically, across all 17 QML
-  files in the module. It reads source, so it catches the old name wherever it
-  appears, including in files no spec touches.
+- **The CI gate** checks the rename's completeness statically, across every QML
+  file in the module — `tests/` included, which is the widening that mattered;
+  the count is printed on every run rather than recorded here. It reads source,
+  so it catches the old name wherever it appears, including in files no spec
+  touches.
 - **The suite** now fails on any binding that evaluates to `undefined` at
   runtime, **in the components a spec instantiates** — including defects the
   gate cannot see, since a D-prefixed typo (`DThemeTypo`) and a missing token

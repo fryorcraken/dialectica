@@ -422,6 +422,22 @@ These are structural and bite at build time, not review time.
   add the `D`; do not add an exemption** — the list is the enumeration of what
   is unprotected, not a place to put the twelfth.
 
+  **The grandfathered names are not yet `D`-prefixed, and that is deferred work
+  rather than a settled end state.** `DCore` and `DIdenticon`, `DFlatButton` and
+  the rest are the intended names; they were left alone deliberately, because
+  renaming eleven components across every view file is a piece of its own and
+  bundling it would have made the shadowing fix unreviewable. Recorded here
+  because the change that deferred it is archived, and after that the only trace
+  is the exemption set itself — which says what is unprotected but not that
+  anyone meant it. The line is self-invalidating: the moment a name is prefixed,
+  the gate's `GRANDFATHERED` set is visibly shorter than this sentence claims.
+
+  What makes the deferral safe rather than hopeful is that `Core`'s exemption is
+  measured — 27 resolutions into the plugin's own `Core.qml`, zero into the host
+  namespace, and `Core` absent from the host's 29 registered types. That is
+  evidence it does not collide **today**; "basecamp has no `Core`" carries no
+  expiry date, which is the shape the prefix rule exists to stop depending on.
+
   The gate is `dialectica-ui/tests/check_qml_names.py`, run from the `lint` job
   (it needs no Qt), with `tst_check_qml_names.py` beside it pinning both
   directions — including that breaking its corpus-builder makes it fail rather
