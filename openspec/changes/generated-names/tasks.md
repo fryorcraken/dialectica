@@ -19,7 +19,7 @@
       `feed.rs:292` cites a test that does not exist, and neither the scheme
       version nor a wordlist removal can be varied without widening the API for
       tests alone.
-- [ ] review: correctness — `code-reviewer`
+- [x] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
 - [x] review: readability — `code-reviewer` — 15 findings in
       `findings/readability.md`. The module's numeric claims are the problem: the
