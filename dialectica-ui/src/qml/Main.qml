@@ -16,6 +16,13 @@ import QtQuick.Layouts
 // for the one value these screens exist to supply — a build shipping a hardcoded
 // Stoa, and a Stoa on screen the membership does not record. Removing them is
 // what makes that unrepresentable: there is no longer anywhere to put one.
+//
+// The feed carries, behind the posting gate, a composer for a top-level post
+// plus a vote control on each row. There is still no THREAD view, and that is
+// why there is no reply box: this feed lists thread heads, so a reply box under
+// a row would be a thread-view affordance on a screen that is not one.
+// `Composer.qml` supports replying and is tested in that mode; the
+// instantiation arrives with the thread screen.
 Item {
     id: root
 

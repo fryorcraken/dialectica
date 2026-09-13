@@ -10,6 +10,8 @@ ApparatusColumn 1.0 ApparatusColumn.qml
 FlatButton 1.0 FlatButton.qml
 ScreenFrame 1.0 ScreenFrame.qml
 SanitisedText 1.0 SanitisedText.qml
+PublishOutcome 1.0 PublishOutcome.qml
+Composer 1.0 Composer.qml
 FeedScreen 1.0 FeedScreen.qml
 ClipboardSink 1.0 ClipboardSink.qml
 StoaListScreen 1.0 StoaListScreen.qml
