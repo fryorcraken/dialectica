@@ -16,3 +16,4 @@ FeedScreen 1.0 FeedScreen.qml
 DClipboardSink 1.0 DClipboardSink.qml
 DStoaListScreen 1.0 DStoaListScreen.qml
 DJoinScreen 1.0 DJoinScreen.qml
+DOnboardingScreen 1.0 DOnboardingScreen.qml
