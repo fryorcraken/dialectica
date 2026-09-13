@@ -32,13 +32,42 @@ being deleted by accident. Line numbers are `origin/main`'s.
 | Note | The obligation | Where it survives |
 |---|---|---|
 | `ON WHAT YOU HOLD` | every count is what this machine holds; no global total is knowable | **Brief constraint 1**, `UI-BRIEF.md:86-88`: "a count of *anything* global — members, total posts — is unknowable. Do not show one." And in the **interface already**: `FeedScreen.qml`'s empty state says "This is a fact about your copy, not about the Stoa." |
-| `ON THE MARK` | the mark is recognition, never proof; the address is printed beside it | **Brief obligation 6, layer 2**, `UI-BRIEF.md:584-593`: "the identicon must never be rendered as a verification mark, a badge, or anything that reads as 'checked'." And **structurally in the interface**: `PostHeader.qml` and the Stoa header both render `AddressLabel` beside `Identicon`, unconditionally. |
+| `ON THE MARK` | **two propositions** — see below; they do not survive equally | **Brief obligation 6, layer 2**, `UI-BRIEF.md:584-593`, carries both. In the **interface**, only the pairing half survives. |
 | `ON THIS ORDERING` | this feed is **not** newest-first | **Brief Feed section**, `UI-BRIEF.md:331-375` — but see §3. The brief's half survived; the interface's half did not, so it was moved rather than deleted. |
 
-Two of the three discharge **structurally**, which is the stronger form: the
-address is beside every mark whether or not any text says it should be. A note
-asserting the same thing adds nothing a reader acts on, which is part of why the
-column was never load-bearing.
+### `ON THE MARK` carried two propositions, and only one survives on screen
+
+Narrowed after review, which found the original wording here claimed more than it
+supports. The note said the mark is "a shortcut for recognition, **never a proof
+of anything** — which is why the address is printed beside it". Two claims:
+
+- **The pairing claim — the address is beside the mark.** This survives
+  **structurally**, which is the stronger form: `PostHeader.qml:35-38` renders
+  `AddressLabel` with no `visible:` binding and no empty-string collapse, while
+  the `Identicon` at `:21-26` *is* conditional (`visible: markSize >=
+  Theme.markMinDraw`). The asymmetry runs the safe way — an address can appear
+  without a mark, a mark cannot appear without an address. Same at the Stoa
+  header, `FeedScreen.qml:143`. The review verified this rather than trusting it.
+- **The non-proof claim — the mark proves nothing.** This has **no surviving
+  rendered text**: `grep -rn "proof"` over `dialectica-ui/src/qml/` returns
+  nothing.
+
+**The second is accepted as undischarged in the interface, deliberately.** The
+brief states it (obligation 6 and its four-layer list, which is explicit that the
+identicon "is nonetheless forgeable in exactly the way the name is"), and the
+protection a reader actually needs is the address being *present* — which the
+structural half delivers. A line of prose telling a reader that a glyph is not
+proof is not something they act on; showing them the address is.
+
+So the claim this row supports is **"the address is beside the mark"**, not "the
+non-proof proposition is discharged somewhere". Anyone citing this table for the
+latter is citing it wrongly, which is why the distinction is written out.
+
+The `ON WHAT YOU HOLD` row has a related narrowing that is **not** mine to make —
+review found both of its carriers sit inside the empty-feed branch, so a feed
+showing thirty posts makes no locality claim. That is filed as a `spec-writer`
+box in `findings/correctness.md`: whether a non-empty feed owes a locality line is
+a requirement question, not a QML one.
 
 ## 3. The one obligation that would have vanished, and the decision taken
 
@@ -95,14 +124,71 @@ this has been true since the screen was written.
 
 With one column there is nothing else that could know the card's height, so the
 reshape cannot avoid answering: `implicitHeight` is now
-`body.implicitHeight + 2 * Theme.cardPaddingY`, and the layout anchors to three
-edges rather than filling, so content packs to the top as
-`Layout.alignment: Qt.AlignTop` used to make it.
+`body.implicitHeight + 2 * Theme.cardPaddingY`.
 
 **This is a behaviour change beyond the apparatus question and is deliberately
 not presented as one of the removals.** It is recorded here rather than fixed
 silently. A reviewer should read it as: the two-column form concealed a missing
 height source, and a one-column form cannot.
+
+Review measured the defect and it was **worse than this section first claimed**:
+on `origin/main` the feed's `implicitHeight` was **0 with thirty rows**, and
+`Main.qml`'s `Flickable.contentHeight` was **56** — the two padding spacers and
+nothing else. **The feed did not scroll at any row count.** After the change,
+`contentHeight` and the laid-out content agree exactly (331), and the value tracks
+content monotonically: 275 empty → 1030 at five rows → 4805 at thirty.
+
+### The anchor choice also changed what `fillHeight` means, which this section missed
+
+Added after review. The first version of this reshape anchored `body` to **three**
+edges — top, left, right — reasoning that `implicitHeight` above already carried
+the card's height and the column should size itself. That is correct for the
+height, and it **silently broke a case no screen on this branch exercises**.
+
+A `ColumnLayout` with no bottom constraint has height equal to its own implicit
+height, so it has **no spare space to distribute**, and a child declaring
+`Layout.fillHeight: true` falls back to its `implicitHeight` — 0 for a bare
+`Rectangle`. Measured at Qt 6.10.3, same markup: **544 high on `origin/main`, 0 on
+the three-edge form.** No warning, no binding loop, qmllint exit 0, 41/41 green.
+The failure mode is a blank region on a screen where every gate passes.
+
+`FeedScreen` uses no `fillHeight`, so the branch was honestly green — but #60, #62
+and #63 are all building screens on this shell, and a body that fills the card is
+the ordinary case. The text those screens owe a reader (a seed-phrase permanence
+warning, a closed-gate reason, a publish outcome that must not claim delivery) is
+exactly what would have vanished. **An obligation discharged by a zero-height
+element is an obligation not discharged.**
+
+**Taken: bind `body.height` to `Math.max(implicitHeight, root.height - 2 *
+cardPaddingY)`.** A `fillHeight` child gets the real slack (544 again), and the
+binding reads `root.height` while `implicitHeight` reads `body.implicitHeight`, so
+the two touch disjoint properties and cannot loop. Qt reports none.
+
+**Two alternatives were tried and measured before being rejected**, which is the
+only reason the trade below is stated with confidence rather than asserted:
+
+- **Anchor the bottom edge.** Fixes `fillHeight` identically, and is the same
+  trade — it is not a *better* answer, just a less explicit one.
+- **Add a trailing `Item { Layout.fillHeight: true }` spacer to absorb slack.**
+  Worse on two counts, both measured: it **splits the space with a genuine
+  `fillHeight` child** (544 → 262), and its `spacing` gap enters
+  `body.implicitHeight`, inflating the card by 20px so the `Flickable` scrolls
+  past the end of the content — re-breaking the very thing `implicitHeight` fixed.
+
+**The trade this accepts, stated plainly.** A `ColumnLayout` taller than its
+content distributes slack *among its children*. So in a card given an **explicit
+height** with no child claiming that slack, two 40px rows land at y=111 and y=393
+rather than stacked at y=0 and y=60 — the top-packing the three-edge form gave
+away for free, which this binding does not recover.
+
+It is accepted rather than solved because **no caller here gives a card an
+explicit height**: `Main.qml` sets `Layout.preferredWidth` and alignment only
+(verified — the file contains no `height` assignment to the frame), so the card is
+always sized from `implicitHeight`, where content and card agree and nothing
+scatters (measured: y=0 and y=60). The scattering needs a caller that does not
+exist; the `fillHeight` collapse was going to be hit by the next screen written.
+`ScreenFrame.qml` carries the escape hatch in a comment, so a screen that does set
+an explicit height is told what to add rather than left to diagnose it.
 
 ## 5. `Theme.paperDeep` stays; `Theme.apparatusWidth` goes
 

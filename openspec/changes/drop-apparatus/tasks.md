@@ -158,3 +158,49 @@ reported to the runner rather than fixed here.
       there is nothing on this branch to preserve it into and no publish path to
       attach it to. The obligation is contracted in `UI-BRIEF.md` obligation 9 and
       in `composer-view`, and belongs to the composer screen.
+
+## 8. Correctness and security findings
+
+Five boxes across `findings/correctness.md` and `findings/security.md` — **three
+for `dev-writer`, all closed**. The measurements live beside the reviewer's own
+text in those files; this section records only what was done. The remaining two
+boxes are one `spec-writer`'s and one `tester`'s and are deliberately untouched.
+
+- [x] 8.1 Close the `fillHeight` collapse, filed as one defect in both files.
+      **Reproduced first**, which is what made the fix checkable: a bare
+      `Rectangle` with `Layout.fillHeight` in a `ScreenFrame { width: 1000;
+      height: 600 }` measured `filler.h=0`. `body.height` is now bound to
+      `Math.max(implicitHeight, root.height - 2 * Theme.cardPaddingY)` and the
+      same probe measures **544**, matching `origin/main`. No binding loop: the
+      binding reads `root.height` while `implicitHeight` reads
+      `body.implicitHeight`.
+- [x] 8.2 Measure the two alternatives rather than asserting the choice. A
+      trailing `fillHeight` spacer **splits the slack with a genuine `fillHeight`
+      child** (544 → 262) and adds a `spacing` gap to `body.implicitHeight`,
+      inflating the card 20px so the `Flickable` scrolls past the content —
+      re-breaking what `implicitHeight` fixed. Anchoring the bottom edge measures
+      identically to the `Math.max` binding, which is chosen only for being
+      explicit. Both rejections are recorded in `design.md` §4 with their numbers.
+- [x] 8.3 Name the trade the fix accepts instead of hiding it. A card given an
+      **explicit height** with no `fillHeight` child scatters its rows (two 40px
+      rows at y=111 and y=393 rather than y=0 and y=60). Accepted because no
+      caller does that — `Main.qml` assigns the frame no height at all, so the
+      card is always sized from `implicitHeight`, where the probe measures y=0
+      and y=60. `ScreenFrame.qml` carries the escape hatch in a comment.
+- [x] 8.4 Extend `design.md` §4, which the review correctly found discussed only
+      the `implicitHeight` half of the anchor choice and never mentioned that the
+      same choice changed what `fillHeight` means for every future child. It now
+      carries both halves, the review's re-measurement of the original defect
+      (`implicitHeight` 0 at thirty rows, `contentHeight` 56 — the feed did not
+      scroll at all), and the two rejected alternatives.
+- [x] 8.5 Narrow `design.md` §2's `ON THE MARK` row to the claim it supports.
+      The note carried **two** propositions; the pairing half survives
+      structurally (with the review's asymmetry measurement written in) and the
+      "never a proof" half has no rendered text and is accepted as undischarged
+      in the interface, with the reason stated. The note is not restored — the
+      reviewer explicitly did not ask for it back.
+- [x] 8.6 Gates re-run after every edit above: `run-qml-tests.sh` **41 passed**,
+      0 failed across 4 spec files; `qmllint` exit 0 on `ScreenFrame.qml`,
+      `FeedScreen.qml` and `Main.qml`, with no binding-loop warning. The probe
+      harness was a temporary `tst_zzprobe.qml`; it is deleted and the suite is
+      back to its four spec files.

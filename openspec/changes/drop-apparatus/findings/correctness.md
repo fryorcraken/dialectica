@@ -46,7 +46,7 @@ and the Feed-section clause names the specific trap.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `ScreenFrame.qml:28-37` — `Layout.fillHeight` inside a
+- [x] **`dev-writer`** — `ScreenFrame.qml:28-37` — `Layout.fillHeight` inside a
       `ScreenFrame` now silently collapses the child to zero height
       **Scenario:** `ScreenFrame { width: 1000; height: 600; Rectangle {
       Layout.fillWidth: true; Layout.fillHeight: true } }`. On `origin/main` the
@@ -71,6 +71,41 @@ and the Feed-section clause names the specific trap.
       screen. `design.md` §4 discusses the `implicitHeight` half of the reshape
       and is right about it, but does not mention that the same anchor choice
       changes what `fillHeight` means for every future child.
+
+      **Fixed.** Reproduced first: a bare `Rectangle` with `Layout.fillHeight`
+      in a `ScreenFrame { width: 1000; height: 600 }` measured `filler.h=0`
+      against `frame.h=600`, exactly as filed.
+
+      `body.height` is now bound to
+      `Math.max(implicitHeight, root.height - 2 * Theme.cardPaddingY)` rather
+      than left to the column. Same probe after the fix: **`filler.h=544`**,
+      matching `origin/main` and the two-column shell it replaced. 41/41 green,
+      qmllint exit 0, no binding-loop warning — the binding reads `root.height`
+      while `implicitHeight` reads `body.implicitHeight`, so the two touch
+      disjoint properties.
+
+      **Your second suggested fix was measured and is worse**, which is worth
+      recording so nobody re-proposes it: a trailing
+      `Item { Layout.fillHeight: true }` spacer **splits the slack with a real
+      `fillHeight` child** (544 → 262) and adds a `spacing` gap to
+      `body.implicitHeight`, inflating the card by 20px so the `Flickable`
+      scrolls past the end of the content — re-breaking what `implicitHeight`
+      had just fixed. Anchoring the bottom edge gives the identical result to
+      the `Math.max` binding; the binding is chosen only for being explicit
+      about what it does.
+
+      **One trade is accepted rather than solved, and it is named in the file.**
+      A ColumnLayout taller than its content spreads slack among its children,
+      so a card given an **explicit height** with no `fillHeight` child lays two
+      40px rows at y=111 and y=393 instead of y=0 and y=60. No caller here does
+      that — `Main.qml` sets `Layout.preferredWidth` and alignment only, with no
+      height assignment anywhere in the file, so the card is always sized from
+      `implicitHeight`, where the same probe measures y=0 and y=60. The
+      scattering needs a caller that does not exist; the collapse you found was
+      going to be hit by the next screen written. `ScreenFrame.qml` now carries
+      the escape hatch in a comment so a screen that *does* set a height is told
+      what to add. Recorded in `design.md` §4, which you correctly noted
+      discussed only the `implicitHeight` half.
 
 - [ ] **`spec-writer`** — `FeedScreen.qml:302-351` — the `ON WHAT YOU HOLD`
       obligation now holds only on the empty screen
@@ -112,7 +147,7 @@ and the Feed-section clause names the specific trap.
       needs no rendering, and would have failed on `main`.
       **Severity: medium.**
 
-- [ ] **`dev-writer`** — `design.md` §2 / commit message — the `ON THE MARK`
+- [x] **`dev-writer`** — `design.md` §2 / commit message — the `ON THE MARK`
       "never a proof" proposition has no surviving rendered text
       **Scenario:** `grep -rn "proof"` over `dialectica-ui/src/qml/` returns
       nothing. The structural half of the claim is genuinely sound and I verified
@@ -131,6 +166,27 @@ and the Feed-section clause names the specific trap.
       it actually supports (the address is beside the mark), so the next reader
       does not cite this row as evidence that the non-proof claim is discharged
       somewhere.
+
+      **Fixed, as asked and no further.** `design.md` §2's table row for
+      `ON THE MARK` no longer asserts a single surviving obligation; it now says
+      the note carried **two propositions** and points at a new subsection that
+      separates them:
+
+      - the **pairing** claim survives structurally, with your asymmetry
+        measurement written in (`AddressLabel` has no `visible:` binding; the
+        `Identicon` is the conditional element, so a mark cannot appear without
+        an address);
+      - the **non-proof** claim has no rendered text, is accepted as
+        undischarged in the interface deliberately, and the reason is stated —
+        the protection a reader acts on is the address being present, not prose
+        telling them a glyph is not evidence.
+
+      The subsection closes by naming the misreading to prevent: the row
+      supports "the address is beside the mark" and not "the non-proof
+      proposition is discharged somewhere". The note is not restored, per your
+      "I am not asking for the note back".
+
+      No code change — this box is a documentation defect and is closed as one.
 
 ## Areas that were clean
 

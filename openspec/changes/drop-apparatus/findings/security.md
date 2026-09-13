@@ -47,7 +47,7 @@ path, a key, or an internal identifier.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `ScreenFrame.qml:28-37` — a shared-shell layout change
+- [x] **`dev-writer`** — `ScreenFrame.qml:28-37` — a shared-shell layout change
       whose failure mode is an invisible element, on the shell every future screen
       uses
       **Scenario:** a child declaring `Layout.fillHeight: true` inside a
@@ -67,6 +67,21 @@ path, a key, or an internal identifier.
       **Severity: medium (latent).** Full measurement and the mechanism are in
       `findings/correctness.md`; this box and that one are the same defect and
       only one fix is needed — tick both when it lands.
+
+      **Fixed — one fix, both boxes, as you directed.** `body.height` is now
+      bound to `Math.max(implicitHeight, root.height - 2 * Theme.cardPaddingY)`,
+      so a `fillHeight` child measures **544** where it measured **0**
+      (reproduced before the fix, re-measured after, same markup and Qt 6.10.3).
+      The outcome, the two rejected alternatives and the one trade accepted are
+      written up against the correctness box rather than duplicated here.
+
+      **On your framing, which is the reason this was worth filing twice:** the
+      latent exposure is closed for the screens queued on this shell. A
+      seed-phrase warning, a closed-gate reason or a publish outcome placed in a
+      `fillHeight` body will now render at a real height instead of vanishing
+      with every gate green. The repo's rule that a warning the user cannot see
+      is not a warning is what made this a security box and not only a layout
+      one, and that reading was right.
 
 ## Not findings, recorded so the absence is legible
 
