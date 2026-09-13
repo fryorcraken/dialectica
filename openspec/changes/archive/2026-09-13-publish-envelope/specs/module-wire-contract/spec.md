@@ -1,10 +1,82 @@
-# module-wire-contract Specification
+## ADDED Requirements
 
-## Purpose
+### Requirement: A request is bounded, and the bound is checked before the request is parsed
 
-Defines the shape of every call across the module's surface — what a reply looks like, what a failure looks like, and what happens to a handler that panics or to a reply from another module — so that a view has exactly one error branch and no failure on this path can take the module down or be read as a value.
+Every method that reads a field of its request SHALL refuse a request larger than
+a single stated limit, and SHALL refuse it **before** the request is parsed. The
+refusal SHALL be the error shape, and its message SHALL say that the request is
+over that limit — distinguishable from the three refusals it otherwise resembles:
+a request that is not valid JSON, a request that is not an object, and an object
+omitting a required field.
 
-## Requirements
+**The ordering is the requirement, not an optimisation of it.** Parsing a request
+allocates on the order of twice its length before any check can run, so a limit
+enforced after the parse bounds nothing: the cost the limit exists to refuse has
+already been paid by the time it is consulted. The observable consequence of
+failing to pay it is not an error reply — it is the module process aborting, the
+caller waiting out its call timeout, and every later call to the module reporting
+it as not loaded. That is why this is stated as a contract obligation rather than
+left to an implementation to size.
+
+**It is one limit for the surface, not a limit per method.** A per-method limit is
+a second thing every new handler must declare, and the shape of that is a guard
+whose presence at each call site has to be re-established. The tighter bounds that
+matter are per *field*, and those belong to the field's own capability rather than
+to the envelope.
+
+**The limit's value is not fixed by this contract**, which would put a number in a
+document no gate reads. What this contract fixes is that a limit exists, that it
+is one number, that it is checked first, and that it is bounded from both sides:
+it SHALL admit the largest request this surface can legitimately carry — a
+composed op with its attachments, whose size `op-format`'s field bounds already
+determine — and SHALL be materially below the size at which a request costs the
+module its process. An implementation SHALL record where its number sits between
+those two bounds, so that raising or lowering it is visibly a change to both.
+
+**The limit is what buys the surface's leniency about unknown fields.** This
+contract accepts a request carrying a field no method reads, which is a
+forward-compatibility choice stated elsewhere in this capability. That leniency is
+also what lets an oversized request be *valid*: every byte of the padding sits in
+a field nothing reads. The two decisions are therefore one, and weakening the
+limit weakens the leniency's price rather than only the limit.
+
+#### Scenario: A request over the limit is refused
+
+- **WHEN** a method that reads a field of its request is called with a request
+  larger than the limit
+- **THEN** the reply carries an error saying the request is over the limit
+- **AND** the reply carries no result field
+
+#### Scenario: Every field-reading method on the surface is bounded
+
+- **WHEN** each method that reads a field of its request is called in turn with a
+  request larger than the limit
+- **THEN** every one of them refuses it for its size
+- **AND** no method is exempted by which fields it happens to require
+
+#### Scenario: The bound is checked before the parse
+
+- **WHEN** a method is called with a request that is both over the limit and not
+  valid JSON
+- **THEN** the reply says the request is over the limit, rather than that it
+  failed to parse
+- **AND** the message is therefore the one refusal that could only have been
+  reached without parsing
+
+#### Scenario: A request within the limit is still served
+
+- **WHEN** a method is called with a well-formed request far below the limit
+- **THEN** the reply carries no error, so the bound refuses an oversized request
+  rather than any request
+
+#### Scenario: The limit admits the largest legitimate request
+
+- **WHEN** the limit is compared against the size of a composed op carrying the
+  largest payload `op-format`'s field bounds permit, encoded as a request
+- **THEN** the limit exceeds it, so no request this surface can legitimately
+  carry is refused for its size
+
+## MODIFIED Requirements
 
 ### Requirement: Every method takes JSON and returns JSON
 
@@ -264,249 +336,3 @@ particular view, and it is what keeps dependency churn behind a wall.
   field
 - **AND** which outcome a field produces is predictable from its declared type and
   whether it is required, rather than from which method reads it
-
-### Requirement: Failure is always the error shape, and never a partial success
-
-Every failure SHALL be reported as an object carrying an `error` field holding a
-human-readable message. A reply SHALL NOT carry both an error and a result.
-
-This is the single convention the whole error-handling model rests on: a view
-has exactly one error branch precisely because there is exactly one failure
-shape. A partial success — an error field alongside a result field, or a result
-field holding a value invented to stand in for a failure — puts the view in the
-position of deciding which half to believe.
-
-The message SHALL survive being embedded in the reply whatever it contains.
-Messages are built from attacker-influenced material the moment a handler
-formats a request into one, so a reply whose message contains a quote or a
-newline must still be valid JSON rather than a parse failure at the view.
-
-#### Scenario: A malformed request is the error shape
-
-- **WHEN** a method is called with a request that is not valid JSON
-- **THEN** the reply carries an error
-
-#### Scenario: A missing field is refused rather than defaulted
-
-- **WHEN** a request omits a field the method requires
-- **THEN** the reply carries an error
-- **AND** the reply carries no result field
-
-#### Scenario: A field of the wrong type is distinguishable from a missing one
-
-- **WHEN** a request carries a required field holding the wrong type
-- **THEN** the reply's message says the field is the wrong type, not that it is
-  missing
-
-#### Scenario: An error message containing JSON metacharacters stays valid JSON
-
-- **WHEN** a failure's message contains quotes, backslashes or newlines
-- **THEN** the reply still parses as JSON
-
-### Requirement: A panic in a handler becomes the error shape and the module keeps serving
-
-No handler SHALL be able to unwind out of the module's surface. A panic in any
-handler SHALL be converted into the error shape, and the module SHALL continue
-to serve subsequent calls.
-
-**This is load-bearing rather than hardening, and the cost was measured.** The
-generated dispatch calls straight into handler code across an `extern "C"`
-frame, and the SDK catches nothing. An unguarded panic does not fail the call —
-the module process aborts, the caller waits out a twenty-second timeout and is
-then told its call timed out, every later call reports the module as not loaded,
-and nothing restarts it. The word "panic" appears only in a daemon log.
-
-The guard SHALL therefore cover **every** handler, including ones that look
-incapable of panicking and including cross-module calls. The damage is to the
-process rather than to the call, so there is no handler too trivial to guard and
-no subset where it matters less.
-
-The converted error SHALL carry the panic's own message and SHALL name the
-handler that panicked. With one failure shape shared by every method, the
-handler name is the only thing distinguishing which one died.
-
-The surface SHALL carry a **panic probe** — a method that panics on purpose —
-because a guard nothing exercises is a claim no gate can see. The probe SHALL
-treat its request as **opaque text**: it SHALL reach its panic for every request
-it is given, including one that is not a JSON object and one that is not valid
-JSON at all, and SHALL NOT refuse a request for its shape. Its message SHALL
-carry the request it was given, which is the observable difference between
-passing the text through and decoding it.
-
-That is the whole of the probe's contract, and it is what places the probe outside
-the request-envelope rule stated under "Every method takes JSON and returns JSON".
-A probe that can refuse a request is a probe there are requests the guard is not
-exercised against — so the two rules cannot both reach it, and this one wins.
-
-The probe is apparatus rather than forum surface, and removing it is a change to
-this requirement rather than to the code alone: whatever removes it SHALL put
-another method in its place that exercises the guard, or this requirement loses
-the only thing that proves it.
-
-#### Scenario: A panicking handler answers with the error shape
-
-- **WHEN** a handler panics
-- **THEN** the reply carries an error rather than unwinding
-
-#### Scenario: The panic's message reaches the caller
-
-- **WHEN** a handler panics with a message
-- **THEN** that message appears in the reply
-- **AND** this holds whether the message was a literal or was formatted
-
-#### Scenario: The reply names the handler that panicked
-
-- **WHEN** a handler panics
-- **THEN** the reply names that handler
-
-#### Scenario: A successful reply passes through the guard untouched
-
-- **WHEN** a handler returns normally
-- **THEN** the guard returns that reply unchanged
-
-#### Scenario: The guard is exercised rather than merely asserted
-
-- **WHEN** the module is asked to panic on purpose
-- **THEN** the reply is the error shape
-- **AND** the module answers subsequent calls
-
-#### Scenario: The probe panics on every request shape it is given
-
-- **WHEN** the panic probe is called with an object, with an array, with a scalar,
-  and with text that is not valid JSON
-- **THEN** every reply is the panic guard's error naming the probe
-- **AND** no reply is a refusal of the request's shape or a parse complaint
-
-#### Scenario: The probe's message carries the request it was given
-
-- **WHEN** the panic probe is called with a request that is not a JSON object
-- **THEN** that request's text appears in the reply's message, which is the
-  observable difference between passing the text through and decoding it
-
-### Requirement: A reply from another module is decoded, never guessed at
-
-A reply from a module this one calls SHALL be recognised as that module's own
-failure before it is interpreted as a value, and that module's message SHALL
-reach the caller unchanged rather than quoted inside a complaint about our
-failure to parse it.
-
-A callee's happy path and its failure path are separate contracts, and only the
-happy one is visible in a generated signature: a module declining a call answers
-successfully at the language level with a failure envelope in the body. A
-decoder that knows only the success shapes reads that as junk.
-
-A value that is not recognised SHALL be an error. It SHALL NOT be mapped onto
-any recognised value — coercing an unrecognised reply to a negative answer
-reports something the callee never said, which is the partial-success shape this
-contract forbids, with the failure disguised as a successful negative.
-
-Recognising a failure envelope SHALL key off the error field alone rather than a
-callee's additional fields, because a callee spelling its envelope with only
-that field is the expensive direction to miss. Recognition SHALL require the
-reply to be an object and the message to be a string, so that a legitimate value
-is not misread as a failure.
-
-#### Scenario: A callee's own failure reaches the caller unchanged
-
-- **WHEN** a called module answers with a failure envelope
-- **THEN** the reply carries that module's message verbatim
-- **AND** the reply carries no result field
-
-#### Scenario: A failure envelope is recognised without its callee's extra fields
-
-- **WHEN** a reply is an object carrying an error message and nothing else
-- **THEN** it is recognised as a failure
-
-#### Scenario: A legitimate value is not misread as a failure
-
-- **WHEN** a reply is not an object, or carries an error field that is not a
-  string
-- **THEN** it is not recognised as a failure
-
-#### Scenario: An unrecognised value is an error rather than a default
-
-- **WHEN** a called module answers with a value this contract does not recognise
-- **THEN** the reply carries an error
-- **AND** the reply carries no result field
-
-#### Scenario: Both spellings of a boolean answer are accepted
-
-- **WHEN** a called module answers a boolean question with either a JSON boolean
-  or its string spelling
-- **THEN** both are normalised to the same boolean result
-
-### Requirement: A request is bounded, and the bound is checked before the request is parsed
-
-Every method that reads a field of its request SHALL refuse a request larger than
-a single stated limit, and SHALL refuse it **before** the request is parsed. The
-refusal SHALL be the error shape, and its message SHALL say that the request is
-over that limit — distinguishable from the three refusals it otherwise resembles:
-a request that is not valid JSON, a request that is not an object, and an object
-omitting a required field.
-
-**The ordering is the requirement, not an optimisation of it.** Parsing a request
-allocates on the order of twice its length before any check can run, so a limit
-enforced after the parse bounds nothing: the cost the limit exists to refuse has
-already been paid by the time it is consulted. The observable consequence of
-failing to pay it is not an error reply — it is the module process aborting, the
-caller waiting out its call timeout, and every later call to the module reporting
-it as not loaded. That is why this is stated as a contract obligation rather than
-left to an implementation to size.
-
-**It is one limit for the surface, not a limit per method.** A per-method limit is
-a second thing every new handler must declare, and the shape of that is a guard
-whose presence at each call site has to be re-established. The tighter bounds that
-matter are per *field*, and those belong to the field's own capability rather than
-to the envelope.
-
-**The limit's value is not fixed by this contract**, which would put a number in a
-document no gate reads. What this contract fixes is that a limit exists, that it
-is one number, that it is checked first, and that it is bounded from both sides:
-it SHALL admit the largest request this surface can legitimately carry — a
-composed op with its attachments, whose size `op-format`'s field bounds already
-determine — and SHALL be materially below the size at which a request costs the
-module its process. An implementation SHALL record where its number sits between
-those two bounds, so that raising or lowering it is visibly a change to both.
-
-**The limit is what buys the surface's leniency about unknown fields.** This
-contract accepts a request carrying a field no method reads, which is a
-forward-compatibility choice stated elsewhere in this capability. That leniency is
-also what lets an oversized request be *valid*: every byte of the padding sits in
-a field nothing reads. The two decisions are therefore one, and weakening the
-limit weakens the leniency's price rather than only the limit.
-
-#### Scenario: A request over the limit is refused
-
-- **WHEN** a method that reads a field of its request is called with a request
-  larger than the limit
-- **THEN** the reply carries an error saying the request is over the limit
-- **AND** the reply carries no result field
-
-#### Scenario: Every field-reading method on the surface is bounded
-
-- **WHEN** each method that reads a field of its request is called in turn with a
-  request larger than the limit
-- **THEN** every one of them refuses it for its size
-- **AND** no method is exempted by which fields it happens to require
-
-#### Scenario: The bound is checked before the parse
-
-- **WHEN** a method is called with a request that is both over the limit and not
-  valid JSON
-- **THEN** the reply says the request is over the limit, rather than that it
-  failed to parse
-- **AND** the message is therefore the one refusal that could only have been
-  reached without parsing
-
-#### Scenario: A request within the limit is still served
-
-- **WHEN** a method is called with a well-formed request far below the limit
-- **THEN** the reply carries no error, so the bound refuses an oversized request
-  rather than any request
-
-#### Scenario: The limit admits the largest legitimate request
-
-- **WHEN** the limit is compared against the size of a composed op carrying the
-  largest payload `op-format`'s field bounds permit, encoded as a request
-- **THEN** the limit exceeds it, so no request this surface can legitimately
-  carry is refused for its size
