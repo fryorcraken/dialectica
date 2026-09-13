@@ -503,6 +503,122 @@ This is reported as a field on `whoAmI` rather than as its own method. A separat
 method would be one more thing a view must remember to call, and the fact is
 about the identity being reported, so it belongs beside it.
 
+### Disk content is refused, never coerced — one principle, three applications
+
+The store refuses rather than repairs in three places, and they are one decision
+rather than three:
+
+| what is wrong | refused as |
+|---|---|
+| a stored path outside the writable range | `PathOutOfRange` |
+| a stored Stoa key that is not 32 bytes | `StoaNotAnAddress` |
+| a second choice for a Stoa that has one | `ChoiceAlreadyRecorded` |
+
+**The principle: coercing disk content names an identity nobody chose.** A clamped
+path derives a perfectly valid key, a padded or truncated address names a different
+Stoa, and a replaced choice strands every op the previous identity signed. In each
+case the user is handed something that *works* and is not theirs, with no error
+anywhere — and the spec calls storing an identity the user did not choose
+unrecoverable, *"because the choice cannot be recomputed"*.
+
+Recorded here because the first two were argued only in `#[cfg(test)]` comments and
+in the error variants' own docs. That is not nothing — but `findings/` is deleted
+before merge and the tracker is scaffolding, while a later reader reaching for
+`INSERT OR REPLACE` or a `try_into().unwrap()` reads the archive, not the variant
+docs. Design review made the point and it is right: both refusals turn on one
+principle, and stating it once where decisions live is stronger than stating it
+twice where they do not.
+
+**The `NO SPEC:` markers stay in the tests.** They mark that the *spec is silent*,
+which is a different claim from "here is why we chose this" and is addressed to a
+different reader — the spec/test reviewer enumerating unspecified behaviour. Moving
+the reasoning here does not make the silence go away, and `spec-writer` still owns
+deciding whether the contract should say something.
+
+### Minting a key is fallible, because it is now on a handler path
+
+`SecretKey::generate` and `Keystore::generate` return a `Result`.
+
+They did not. `SecretKey::generate` carried an `expect` on `getrandom`, and its doc
+comment justified it with *"not reachable from a dispatch handler — key generation
+happens at keystore setup, not while serving an inbound op."* That was true when
+written and **this change made it false**: on a fresh install every
+`generateIdentitySlate` and `keepIdentity` mints, so every one of them reached the
+`expect`. Correctness review found it, and found it in the worst arrangement — the
+mint was in the adapter, *outside* `core::guarded`, so `catch_unwind` never saw it
+and PHASE0-FINDINGS §3's measured consequence applied in full: the module process
+aborts, the caller waits out its 20s timeout, every later call reports
+`MODULE_NOT_LOADED`.
+
+Two fixes were available and both were taken, because they answer different halves:
+
+- Moving the mint into `core` put it **inside `guarded`**, so the panic would now be
+  caught and converted. That alone closes the abort.
+- Making the signature fallible removes the panic rather than catching it. This is
+  the one that matters structurally: reverting it is a compile error at
+  `Keystore::generate`, not a silent change of failure mode. `SlateNonce::generate`
+  had already taken this shape for exactly this reason and its comment cited the
+  contrast with `SecretKey::generate`; rather than update that comment to preserve
+  the asymmetry, the asymmetry is gone.
+
+`RandomnessUnavailable` is its own type rather than a `KeyError` arm — every other
+arm there says "these bytes are not the thing you claimed", and this says "the
+machine could not give me entropy". It converts into `KeystoreError::NoRandomness`,
+also a new arm rather than the existing `Io`, whose message is *"keystore could not
+be read"* and would send a reader to check a file that does not exist yet.
+
+**What no test can show, said plainly:** `getrandom` cannot be made to fail from a
+test without installing a seccomp policy, and a test that installed one would be
+testing the sandbox. `minting_a_key_is_fallible_rather_than_a_panic` pins the
+*shape* — the signature, the message naming a fix, the conversion — which is what
+would have to be undone to reintroduce the panic. The failure itself is unobservable
+and is not claimed.
+
+**A gap this exposed, and closed:** `every_error_message_names_a_fix` enumerates
+`KeystoreError`'s variants **by hand** and, unlike its sibling
+`every_reason_is_distinguishable_from_every_other`, had **no count guard** — so
+`NoRandomness` went in silently uncovered. It now carries the same hardcoded
+`assert_eq!(all.len(), …)` the sibling already used, which is what would have caught
+it. An exhaustive `match` would be stronger (a compile error rather than a failing
+assertion) and was written and then dropped: the file already had the count idiom in
+one of the two tests, and adding a second mechanism for one rule is the duplication
+this codebase argues against more than it is worth the extra strength.
+
+### Two comments and a helper corrected rather than left to rot
+
+Grouped because they are one class — a document or comment that outlived the code —
+and because CLAUDE.md treats that class as a defect rather than tidiness.
+
+- **`parse_stoa` now has six call sites, not three.** It was extracted for this
+  change's three handlers while the three pre-existing inline copies were left.
+  They were behaviourally identical, which is why nothing failed and why it was
+  worth fixing anyway: the bill arrives on the next change that tightens the parse,
+  which lands in one place while three handlers keep the old behaviour and all their
+  tests keep passing. Converting them is a no-behaviour-change refactor that
+  should have preceded the feature.
+- **`parse_index` uses `usize::try_from`, not `as usize`.** On a 64-bit target the
+  cast is lossless; on a 32-bit one it truncates, so `{"index": 4294967296}` would
+  become `0` and keep candidate 0 — the exact coercion the spec forbids, reached by
+  a cast rather than by a decision. CI builds no 32-bit target, so this is
+  unreachable today; the point is that the property stops depending on the target.
+  Its doc comment also now names all three callers and argues from the **severe**
+  one: it previously explained the refusal entirely in pagination terms, so a reader
+  arriving from `keep_identity` was told about serving the wrong page of a feed.
+- **The slate reply's key set is asserted exactly.** The test's name and
+  `slate_json`'s doc comment both claimed "the exact shape" while the test checked
+  only that each expected key was *present*. The spec-test reviewer measured it: a
+  `displayName` added to every candidate left all 553 tests green, which is precisely
+  the scenario "A generated name and a mark are not settled by this capability"
+  exists to prevent. Now an **added** key fails too — verified by re-applying that
+  mutation.
+
+**`path` in the three replies is marked `NO SPEC:`.** No requirement or scenario
+names a reply field for it; exposing it is a decision (it is not secret, and a view
+that can show which path is about to be kept can render the recovery warning
+truthfully). Marked so a later reader can decide whether it was right rather than
+inheriting it by silence — readability review noted that a reviewer grepping
+`NO SPEC` would otherwise conclude the wire replies carry nothing unspecified.
+
 ## Risks / Trade-offs
 
 **A crash between the keystore write and the path write leaves a keystore with
@@ -542,6 +658,32 @@ secret; the spec says so explicitly ("The record SHALL NOT be required to be
 secret"). Knowing which paths were offered reveals nothing the kept identity's
 published address does not already reveal, and the master key is what the
 candidates actually need.
+
+**`derive_stoa_key_at_path` leaves a derived per-Stoa seed on the stack unwiped,
+and now does so five times per slate** → Residual memory, not a reachable leak:
+nothing reads those bytes back, and `identity.rs` is explicit that memory lifetime
+is *"`crate::keystore`'s to own"*. What changed is that the layer up no longer owns
+it for this path. That deferral was written when `derive_stoa_key` ran once at
+keystore setup; it now runs five times per `generateIdentitySlate`, on a method a
+caller may invoke without limit — and regeneration being unbounded is itself a
+pinned requirement, so 200 rounds in a test is 1000 unwiped seeds.
+
+Not fixed here, and the reason is scope rather than judgement: `zeroize` would have
+to reach into `identity.rs`, which currently has no such import and whose whole
+posture is that it holds no memory obligations. That is a change to `identity`'s
+contract and belongs in its own. What **is** fixed is the comment in
+`onboarding.rs` that asserted the obligation was discharged — security review found
+it claiming *"there is no plain copy of the seed to wipe, because none is made"* on
+the line above a `to_bytes()` call.
+
+**`Keystore::stoa_key`, `stoa_public_key` and `stoa_address` now have no production
+caller** → The probe was the last one, and it moved to the path-taking trio. They
+stay because `identity.rs`'s non-collision test needs the primitive and because
+deleting three public methods from the secret-holding type widens this change into
+a contract `proposal.md` declares untouched. Recorded rather than done silently:
+architecture review flagged the *path* trio as speculatively added when only one of
+its three had a caller, and this is the same observation arriving from the other
+direction. A later change should retire them or say why they stay.
 
 **Two SQLite files where there was one** → One more open on the keep path, and
 one more file for a backup to remember. Accepted against bricking every existing

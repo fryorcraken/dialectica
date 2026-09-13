@@ -507,6 +507,16 @@ pub enum KeystoreError {
     /// well-formed parameter that is an allocation attack. See
     /// [`MAX_ACCEPTED_M_COST_KIB`].
     CostTooHigh,
+    /// The OS random source was unavailable, so no key could be minted.
+    ///
+    /// Its own arm rather than [`KeystoreError::Io`], whose message is *"keystore
+    /// could not be read"* — which names the wrong operation for a mint, and would
+    /// send a reader to check a file that does not exist yet. `fill_random` inside
+    /// this module still folds a randomness failure into `Io` when generating a
+    /// salt or nonce *for a write*, where "could not be read" is closer to true;
+    /// this arm is for [`Keystore::generate`], where there is no file in the
+    /// picture at all.
+    NoRandomness,
 }
 
 impl std::fmt::Display for KeystoreError {
@@ -602,7 +612,19 @@ impl std::fmt::Display for KeystoreError {
                  attempt; the file has been tampered with — restore it from a \
                  backup"
             ),
+            // Delegated rather than restated, so the guidance lives in one place —
+            // the argument `capability_for` makes about not maintaining the same
+            // advice twice, applied to an error that wraps another's.
+            KeystoreError::NoRandomness => {
+                write!(f, "{}", crate::identity::RandomnessUnavailable)
+            }
         }
+    }
+}
+
+impl From<crate::identity::RandomnessUnavailable> for KeystoreError {
+    fn from(_: crate::identity::RandomnessUnavailable) -> Self {
+        KeystoreError::NoRandomness
     }
 }
 
@@ -662,13 +684,21 @@ impl Keystore {
     /// CLAUDE.md's rule applied to a security property: prefer reshaping state
     /// so the invariant holds by construction over adding a line that
     /// maintains it. A line must be remembered; a shape cannot be forgotten.
-    pub fn generate() -> Self {
+    /// # Fallible, because the mint is now on a handler path
+    ///
+    /// This returned `Self` and let `SecretKey::generate`'s `expect` carry the
+    /// randomness failure. `identity-onboarding` put the mint behind
+    /// `generateIdentitySlate` and `keepIdentity` on every fresh install, which
+    /// made that `expect` reachable from a dispatch handler — and a panic there
+    /// aborts the module process rather than failing one call. See
+    /// [`crate::identity::SecretKey::generate`] for the measurement.
+    pub fn generate() -> Result<Self, crate::identity::RandomnessUnavailable> {
         // Through `SecretKey` rather than `getrandom` directly, so there is one
         // place in this crate that decides where key entropy comes from.
-        let sk = SecretKey::generate();
-        Keystore {
+        let sk = SecretKey::generate()?;
+        Ok(Keystore {
             root: Zeroizing::new(sk.to_bytes()),
-        }
+        })
     }
 
     /// A keystore with a **fixed** root, for tests in other modules of this crate.
@@ -2117,7 +2147,7 @@ mod tests {
         let verbs = [
             "create", "restrict", "check", "upgrade", "restore", "supply", "remove", "needs",
         ];
-        for e in [
+        let all = [
             KeystoreError::NotFound,
             KeystoreError::PermissionsTooOpen { mode: 0o644 },
             KeystoreError::DirectoryWritableByOthers { mode: 0o777 },
@@ -2135,7 +2165,20 @@ mod tests {
             KeystoreError::KeyDerivation,
             KeystoreError::CostTooHigh,
             KeystoreError::Locked,
-        ] {
+            KeystoreError::NoRandomness,
+        ];
+        // Hardcoded, copying `every_reason_is_distinguishable_from_every_other`'s
+        // guard in this file, because this sweep did not have one and a variant
+        // added later was therefore silently uncovered — `NoRandomness` went in that
+        // way with `identity-onboarding` and this assertion is what would have
+        // caught it. Two hand-maintained lists of one enum's variants is not ideal;
+        // a guard on each is what makes forgetting either one loud.
+        assert_eq!(
+            all.len(),
+            18,
+            "a variant was added without extending this sweep"
+        );
+        for e in all {
             let msg = e.to_string();
             // The guidance clause: everything after the first `;` or em dash.
             // A message with neither is a bare fault statement and fails here
@@ -2259,8 +2302,8 @@ mod tests {
         //
         // A view shows the reason and nothing else, so two variants that
         // render alike are one variant as far as a user is concerned — and the
-        // whole argument for seventeen of them is that each names a different
-        // fix.
+        // whole argument for having this many of them is that each names a
+        // different fix.
         let all = [
             KeystoreError::NotFound,
             KeystoreError::PermissionsTooOpen { mode: 0o644 },
@@ -2279,11 +2322,16 @@ mod tests {
             KeystoreError::KeyDerivation,
             KeystoreError::CostTooHigh,
             KeystoreError::Locked,
+            KeystoreError::NoRandomness,
         ];
 
         // Hardcoded, so that adding a variant without adding it here fails
         // rather than silently shrinking the sweep.
-        assert_eq!(all.len(), 17, "a variant was added without extending this sweep");
+        assert_eq!(
+            all.len(),
+            18,
+            "a variant was added without extending this sweep"
+        );
 
         for (i, a) in all.iter().enumerate() {
             for b in all.iter().skip(i + 1) {

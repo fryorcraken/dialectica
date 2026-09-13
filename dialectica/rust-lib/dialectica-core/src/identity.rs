@@ -203,8 +203,8 @@ impl PublicKey {
     /// can never verify a signature is not a key worth holding.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, KeyError> {
         let bytes: &[u8; 32] = bytes.try_into().map_err(|_| KeyError::NotAValidPublicKey)?;
-        let key =
-            ed25519_dalek::VerifyingKey::from_bytes(bytes).map_err(|_| KeyError::NotAValidPublicKey)?;
+        let key = ed25519_dalek::VerifyingKey::from_bytes(bytes)
+            .map_err(|_| KeyError::NotAValidPublicKey)?;
         if key.is_weak() {
             return Err(KeyError::WeakPublicKey);
         }
@@ -290,16 +290,32 @@ impl SecretKey {
     /// no longer supplies an `OsRng` for. Identical result, one dependency
     /// instead of the `rand` stack.
     ///
-    /// Panics if the OS random source fails. That is the right response and not
-    /// a shortcut: there is no safe fallback for "I could not get entropy", and
-    /// continuing with a predictable key would forge every signature this
-    /// identity ever makes. It is also not reachable from a dispatch handler —
-    /// key generation happens at keystore setup, not while serving an
-    /// inbound op.
-    pub fn generate() -> Self {
+    /// **Fallible, because this IS reachable from a dispatch handler.**
+    ///
+    /// There is no safe fallback for "I could not get entropy" — continuing with a
+    /// predictable key would forge every signature this identity ever makes — so
+    /// the failure must stop the operation. What it must not do is `panic`.
+    ///
+    /// This doc comment used to say the opposite: *"not reachable from a dispatch
+    /// handler — key generation happens at keystore setup, not while serving an
+    /// inbound op."* That was true when it was written and `identity-onboarding`
+    /// made it false. On a fresh install — the only install onboarding exists for —
+    /// every `generateIdentitySlate` and `keepIdentity` call mints a master key, so
+    /// every one of them reached the `expect` this function used to carry. Review
+    /// found it, and found it in the worst arrangement: the mint was in the adapter,
+    /// *outside* `core::guarded`, so `catch_unwind` never saw it and
+    /// PHASE0-FINDINGS §3's measured consequence applied in full — the module
+    /// process aborts, the caller waits out its 20s timeout, and every later call
+    /// reports `MODULE_NOT_LOADED`.
+    ///
+    /// `SlateNonce::generate` had already taken the fallible shape for exactly this
+    /// reason, and its comment cited the contrast with *this* function. Rather than
+    /// update that comment to keep the asymmetry, the asymmetry is removed: both
+    /// randomness calls on the onboarding path return a `Result`.
+    pub fn generate() -> Result<Self, RandomnessUnavailable> {
         let mut seed = [0u8; 32];
-        getrandom::fill(&mut seed).expect("the OS random source must be available to mint a key");
-        SecretKey(ed25519_dalek::SigningKey::from_bytes(&seed))
+        getrandom::fill(&mut seed).map_err(|_| RandomnessUnavailable)?;
+        Ok(SecretKey(ed25519_dalek::SigningKey::from_bytes(&seed)))
     }
 
     /// Rebuild a key from stored bytes — what [`crate::keystore`] calls.
@@ -432,6 +448,34 @@ pub fn derive_stoa_key_at_path(root: &[u8; 32], stoa: &Address, path: u32) -> Se
     SecretKey(ed25519_dalek::SigningKey::from_bytes(&seed))
 }
 
+/// The OS random source was unavailable.
+///
+/// Its own type rather than a [`KeyError`] arm, because it is not a fact about a
+/// key: every other arm there says "these bytes are not the thing you claimed",
+/// and this says "the machine could not give me entropy". Collapsing them would
+/// make `NotAValidSecretKey` mean two things, one of which is not about the
+/// secret key at all.
+///
+/// A unit struct rather than an enum with one arm: there is one way for this to
+/// happen and nothing to carry. `getrandom`'s own error is deliberately not
+/// wrapped — it names an OS errno that no caller of this can act on differently,
+/// and the fix ("the OS random source is unavailable") is the same in every case.
+#[derive(Debug, PartialEq, Eq)]
+pub struct RandomnessUnavailable;
+
+impl std::fmt::Display for RandomnessUnavailable {
+    /// Names the fix, following `KeystoreError::Display`'s documented obligation —
+    /// this string can reach a view through a slate or keep reply.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "the operating system's random source is unavailable, so no key can be \
+             minted; check that /dev/urandom is reachable and that no sandbox policy \
+             is blocking getrandom"
+        )
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum KeyError {
     NotAValidPublicKey,
@@ -448,7 +492,10 @@ impl std::fmt::Display for KeyError {
         match self {
             KeyError::NotAValidPublicKey => write!(f, "not a valid public key"),
             KeyError::WeakPublicKey => {
-                write!(f, "low-order public key, which can never verify a signature")
+                write!(
+                    f,
+                    "low-order public key, which can never verify a signature"
+                )
             }
             KeyError::NotAValidSecretKey => write!(f, "not a valid secret key"),
             KeyError::NotAValidSignature => write!(f, "not a valid signature"),
@@ -648,9 +695,57 @@ pub fn stoa_address(genesis_bytes: &[u8]) -> Address {
 mod tests {
     use super::*;
 
+    /// A fresh key, or a test failure.
+    ///
+    /// `SecretKey::generate` returns a `Result` because it is reachable from a
+    /// dispatch handler, where a panic aborts the module process. In a test a panic
+    /// IS the reporting mechanism, and a machine with no working random source
+    /// cannot run this suite meaningfully anyway — so the unwrap is concentrated
+    /// here rather than repeated at twenty call sites, where it would be twenty
+    /// chances to write something subtler than "this cannot fail in a test".
+    fn a_fresh_key() -> SecretKey {
+        SecretKey::generate().expect("a test host has a working random source")
+    }
+
+    #[test]
+    fn minting_a_key_is_fallible_rather_than_a_panic() {
+        // The regression test for the review finding that `SecretKey::generate`'s
+        // `expect` became reachable from a dispatch handler while its doc comment
+        // still said it was not. A panic on a handler path aborts the module process
+        // (PHASE0-FINDINGS §3), which is a dead module rather than a failed call.
+        //
+        // What is checkable is the SHAPE, not the failure: `getrandom` cannot be made
+        // to fail from a test without a seccomp sandbox, and a test that installed
+        // one would be testing the sandbox. So this pins that the signature is
+        // fallible and that its error names a fix — the two things that would have to
+        // be undone to reintroduce the panic.
+        //
+        // A `Result` is what makes the fix structural: reverting to `-> Self` is a
+        // compile error at `Keystore::generate`, not a silent change of failure mode.
+        let minted: Result<SecretKey, RandomnessUnavailable> = SecretKey::generate();
+        assert!(
+            minted.is_ok(),
+            "a test host must have a working random source"
+        );
+
+        // The message names the fix rather than only the fault, which is what lets it
+        // reach a view through a slate or keep reply and still be actionable.
+        let reason = RandomnessUnavailable.to_string();
+        assert!(
+            reason.contains("getrandom") && reason.contains("check"),
+            "the randomness failure must name what to check: {reason}"
+        );
+        // And it converts into the keystore's own error, so the handler path has one
+        // error type rather than two.
+        assert_eq!(
+            crate::keystore::KeystoreError::from(RandomnessUnavailable),
+            crate::keystore::KeystoreError::NoRandomness
+        );
+    }
+
     #[test]
     fn a_signature_verifies_against_its_own_key() {
-        let sk = SecretKey::generate();
+        let sk = a_fresh_key();
         let sig = sign_op_bytes(&sk, b"an op");
         assert!(verify_op_bytes(&sk.public_key(), b"an op", &sig));
     }
@@ -659,8 +754,8 @@ mod tests {
     fn a_signature_does_not_verify_against_a_different_key() {
         // The property moderation rests on (§6): a forged op is one signed by
         // somebody who is not who they claim to be.
-        let author = SecretKey::generate();
-        let impostor = SecretKey::generate();
+        let author = a_fresh_key();
+        let impostor = a_fresh_key();
         let sig = sign_op_bytes(&impostor, b"an op");
         assert!(!verify_op_bytes(&author.public_key(), b"an op", &sig));
     }
@@ -669,7 +764,7 @@ mod tests {
     fn a_signature_does_not_verify_over_different_bytes() {
         // Tamper with the op and the signature must stop matching, or "signed"
         // means nothing.
-        let sk = SecretKey::generate();
+        let sk = a_fresh_key();
         let sig = sign_op_bytes(&sk, b"an op");
         assert!(!verify_op_bytes(&sk.public_key(), b"a different op", &sig));
     }
@@ -723,9 +818,7 @@ mod tests {
             "op signing digest changed"
         );
         assert_eq!(
-            hex::encode(
-                derive_stoa_key(&[7u8; 32], &stoa_address(b"a genesis record")).to_bytes()
-            ),
+            hex::encode(derive_stoa_key(&[7u8; 32], &stoa_address(b"a genesis record")).to_bytes()),
             "b62b6b592aeb0779541bbe8beac60d8f505342c37c6a9bc990920d93e68026cf",
             "per-Stoa key derivation changed"
         );
@@ -764,8 +857,8 @@ mod tests {
 
     #[test]
     fn different_keys_get_different_addresses() {
-        let a = SecretKey::generate();
-        let b = SecretKey::generate();
+        let a = a_fresh_key();
+        let b = a_fresh_key();
         assert_ne!(a.public_key().address(), b.public_key().address());
     }
 
@@ -776,7 +869,7 @@ mod tests {
         // is the test that stops someone "simplifying" that away — it is the
         // only thing distinguishing the two, since both produce 32 plausible
         // bytes.
-        let sk = SecretKey::generate();
+        let sk = a_fresh_key();
         let bare = {
             let mut h = Sha256::new();
             h.update(sk.public_key().to_bytes());
@@ -797,7 +890,7 @@ mod tests {
         //
         // Without this, one byte string could be valid as both an author and a
         // Stoa address, and either could be presented as the other.
-        let sk = SecretKey::generate();
+        let sk = a_fresh_key();
         let mut author_preimage = vec![1u8];
         author_preimage.extend_from_slice(&sk.public_key().to_bytes());
         assert_ne!(
@@ -816,7 +909,7 @@ mod tests {
 
     #[test]
     fn an_address_survives_a_hex_round_trip() {
-        let sk = SecretKey::generate();
+        let sk = a_fresh_key();
         let addr = sk.public_key().address();
         assert_eq!(Address::from_hex(&addr.to_hex()).unwrap(), addr);
     }
@@ -858,7 +951,7 @@ mod tests {
 
         // And through the wire-level entry point, where it must be `false`
         // rather than a panic.
-        let sk = SecretKey::generate();
+        let sk = a_fresh_key();
         let sig = sign_op_bytes(&sk, b"a post");
         assert!(!verify_authored_op(
             &sk.public_key().address(),
@@ -870,7 +963,7 @@ mod tests {
 
     #[test]
     fn a_public_key_survives_a_byte_round_trip() {
-        let sk = SecretKey::generate();
+        let sk = a_fresh_key();
         let pk = sk.public_key();
         assert_eq!(PublicKey::from_bytes(&pk.to_bytes()).unwrap(), pk);
     }
@@ -878,7 +971,7 @@ mod tests {
     #[test]
     fn a_secret_key_survives_a_byte_round_trip() {
         // What the keystore does on unlock: bytes in, same identity out.
-        let sk = SecretKey::generate();
+        let sk = a_fresh_key();
         let restored = SecretKey::from_bytes(&sk.to_bytes()).unwrap();
         assert_eq!(restored.public_key(), sk.public_key());
     }
@@ -887,7 +980,7 @@ mod tests {
     fn a_signature_survives_a_byte_round_trip() {
         // Signatures cross the wire as 64 bytes, so this is the path every
         // inbound op takes.
-        let sk = SecretKey::generate();
+        let sk = a_fresh_key();
         let sig = sign_op_bytes(&sk, b"an op");
         let restored = Signature::from_bytes(&sig.to_bytes()).unwrap();
         assert!(verify_op_bytes(&sk.public_key(), b"an op", &restored));
@@ -964,7 +1057,7 @@ mod tests {
             "a low-order key must verify nothing, including a signature under its own seed"
         );
 
-        let honest = SecretKey::generate();
+        let honest = a_fresh_key();
         assert!(
             !verify_op_bytes(&low_order, b"an op", &sign_op_bytes(&honest, b"an op")),
             "a low-order key must verify nothing, including an honest signature"
@@ -1006,7 +1099,7 @@ mod tests {
         // still pass.
         for _ in 0..16 {
             assert!(
-                PublicKey::from_bytes(&SecretKey::generate().public_key().to_bytes()).is_ok(),
+                PublicKey::from_bytes(&a_fresh_key().public_key().to_bytes()).is_ok(),
                 "a generated key must still parse"
             );
         }
@@ -1072,7 +1165,7 @@ mod tests {
 
     #[test]
     fn an_authored_op_verifies_when_the_key_matches_the_claimed_author() {
-        let sk = SecretKey::generate();
+        let sk = a_fresh_key();
         let pk = sk.public_key();
         let sig = sign_op_bytes(&sk, b"a post");
         assert!(verify_authored_op(
@@ -1089,8 +1182,8 @@ mod tests {
         // the steps by hand would miss: the signature is perfectly valid, the
         // bytes are untampered, and the op is still not from the author it
         // claims. Only re-deriving the address from the key catches it.
-        let victim = SecretKey::generate();
-        let attacker = SecretKey::generate();
+        let victim = a_fresh_key();
+        let attacker = a_fresh_key();
         let sig = sign_op_bytes(&attacker, b"a post");
 
         // The attacker signs with their own key but claims the victim's address.
@@ -1103,16 +1196,12 @@ mod tests {
 
         // And the signature itself is genuinely valid — so a caller who checked
         // only the signature would have accepted this.
-        assert!(verify_op_bytes(
-            &attacker.public_key(),
-            b"a post",
-            &sig
-        ));
+        assert!(verify_op_bytes(&attacker.public_key(), b"a post", &sig));
     }
 
     #[test]
     fn an_authored_op_is_rejected_when_the_bytes_were_tampered_with() {
-        let sk = SecretKey::generate();
+        let sk = a_fresh_key();
         let pk = sk.public_key();
         let sig = sign_op_bytes(&sk, b"a post");
         assert!(!verify_authored_op(
@@ -1129,16 +1218,26 @@ mod tests {
         // attacker-controlled. A panic would abort the module process
         // (PHASE0-FINDINGS §3), so wrong lengths and junk must be a plain
         // `false` on every field independently.
-        let sk = SecretKey::generate();
+        let sk = a_fresh_key();
         let pk = sk.public_key();
         let sig = sign_op_bytes(&sk, b"a post");
         let addr = pk.address();
 
         for bad_key in [vec![], vec![0u8; 31], vec![0u8; 33], vec![9u8; 64]] {
-            assert!(!verify_authored_op(&addr, &bad_key, b"a post", &sig.to_bytes()));
+            assert!(!verify_authored_op(
+                &addr,
+                &bad_key,
+                b"a post",
+                &sig.to_bytes()
+            ));
         }
         for bad_sig in [vec![], vec![0u8; 63], vec![0u8; 65], vec![9u8; 32]] {
-            assert!(!verify_authored_op(&addr, &pk.to_bytes(), b"a post", &bad_sig));
+            assert!(!verify_authored_op(
+                &addr,
+                &pk.to_bytes(),
+                b"a post",
+                &bad_sig
+            ));
         }
     }
 

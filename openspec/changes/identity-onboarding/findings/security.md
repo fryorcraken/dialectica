@@ -120,7 +120,7 @@ constrain indirectly. Recorded in `design.md` under Decisions.
 
 ---
 
-## S2 — `getCapabilities` reports a *different* author address than `whoAmI` and than the identity the user kept (HIGH)
+- [x] **S2 — `getCapabilities` reports a *different* author address than `whoAmI` and than the identity the user kept (HIGH)**
 
 **For: `spec-writer` first, then `dev-writer`.**
 
@@ -180,9 +180,53 @@ So no test in the project compares the probe's identity to `whoAmI`'s, and none
 can as currently shaped. A test asserting the two agree has to live in `core`,
 which means the choice of derivation has to move out of `lib.rs`.
 
+**Fixed.** The last paragraph is the fix, and it was followed exactly: the choice of
+derivation moved out of `lib.rs` into `core::wire::posting_identity`, and the test
+asserting the two agree now lives in `core`.
+
+`getCapabilities` consults the path record and derives at the recorded path.
+`get_capabilities_from_stores` is the shape the adapter forwards to — two openers in,
+the derivation decided inside — and the adapter keeps only the part that cannot move,
+which is where the directory is.
+
+Two consequences taken on purpose, both recorded in `design.md`:
+
+- **A master key with no recorded choice for this Stoa is now `canPost: false`**,
+  with a reason naming the missing choice. It was `true`, with a pathless address —
+  which, as the finding says, asserted posting ability for an identity whose path is
+  recorded nowhere. `whoAmI` reports the same state through the same
+  `NO_CHOICE_FOR_THIS_STOA` constant, so the two methods cannot describe one
+  situation in two vocabularies.
+- **The lookup's error widened to `String`.** Adding an `Other(String)` arm to
+  `KeystoreError` so it could keep that type was the obvious alternative and is
+  rejected: those arms are documented as distinguishable *so a reason can name a
+  fix*, and a catch-all carrying another module's failure is the collapse that
+  doctrine exists to prevent.
+
+Two tests, both asserting between methods rather than against a constant:
+
+- `the_probe_and_whoami_report_the_same_identity_for_one_user_and_stoa` — and its
+  strongest assertion is not the comparison. It signs an op with the key at the
+  recorded path and requires it to verify against the address the probe reported,
+  which is `posting-capability`'s own wording ("derived from the key that would
+  actually sign it") rather than two derivations that could both be wrong.
+- `the_probe_and_whoami_give_one_reason_when_no_choice_is_recorded_for_this_stoa`.
+
+Measured: returning `keystore.stoa_address(stoa)` — the old pathless call — fails the
+first test and **nothing else in 563**, which confirms this finding's "why the suite
+cannot see it" section exactly.
+
+**For `spec-writer`, and not closed by this fix.** The finding is addressed to
+`spec-writer` *first*, and rightly. `proposal.md:30` and `:58` still say
+`posting-capability` is "not modified, deliberately — the probe's shape, its reasons
+and its derivation are untouched". Its derivation is now modified, and the paragraph
+that declares otherwise is how this went unnoticed: the distinction it exists to draw
+is the one it got backwards. That is a proposal correction I have not made, because
+the proposal is `spec-writer`'s file.
+
 ---
 
-## S3 — On a fresh install the candidate the user picks is not the identity they get (HIGH)
+- [x] **S3 — On a fresh install the candidate the user picks is not the identity they get (HIGH)**
 
 **For: `dev-writer`.**
 
@@ -236,9 +280,42 @@ refuse when the key it is about to write is not that one — or the fresh key mu
 be minted once and held for the lifetime of the live slate, which is the state
 `live_slate` already spans.
 
+**Fixed** — the second of the two shapes this finding offers, and the finding's own
+framing is why. It ends with both options as though they were alternatives of equal
+standing; they are not, and choosing between them is the one substantive judgement
+in this fix.
+
+**Committing to the key detects the divergence without repairing it.** The keep
+would refuse, correctly, and the user would be unable to do anything about it: the
+key that produced their slate was dropped when that handler returned. A refusal the
+user cannot act on is a worse outcome than the one it replaces only in the sense
+that it is honest — it still does not give them the identity they chose.
+
+So the key is minted once and held, in `core::wire::OnboardingSession`, which holds
+it alongside the nonce precisely because — as this finding says — *"`live_slate`
+already spans"* that lifetime. The two are one value: a slate is a
+`(master key, nonce)` pair, and holding half of it was the defect.
+
+**What holding costs, stated rather than glossed:** a root secret in memory for the
+module's lifetime instead of one call. That is the same lifetime a *kept* keystore's
+root already has, so the window widens only on the fresh-install path and only until
+the user keeps or the module stops. Nothing is written — the mint writes no file,
+which the spec requires of a slate — and `Keystore`'s root is `Zeroizing`.
+
+Regression test:
+`on_a_fresh_install_the_identity_kept_is_the_candidate_the_slate_showed`, which
+supplies **no** master key (its opener returns `NotFound`, so minting happens) and
+asserts a relationship between the two replies. It also re-opens the written keystore
+and checks it derives the shown address at the recorded path, so a session that
+reported its held key while writing another is caught too. Measured failing before
+the fix with this finding's signature: same path, different addresses, `kept: true`.
+
+Restoring the per-call mint fails that test plus two others and **nothing else in
+563**.
+
 ---
 
-## S4 — `check_layout` does not prove the PRIMARY KEY, so "one path per Stoa" is not structural on read-back (MEDIUM)
+- [ ] **S4 — `check_layout` does not prove the PRIMARY KEY, so "one path per Stoa" is not structural on read-back (MEDIUM)**
 
 **For: `dev-writer`, with a scenario for `tester`.**
 
@@ -280,9 +357,40 @@ path, not only in the schema.
 reasoning (`cargo mutants` does not mutate `const`s) — that part is correct and
 worth keeping as the model for whatever guard S1 and S4 add.
 
+**OPEN — not fixed, and this box stays empty deliberately.** The finding is correct
+in every particular; I re-read `check_layout` and `path_for` and confirmed the
+mechanism. `LIMIT 0` proves two column *names* and nothing about keys, so a replaced
+file whose `chosen_paths` lacks the `PRIMARY KEY` opens `Ok`, and
+`query_row(...).optional()` then returns whichever row SQLite hands back first — an
+identity selected by physical row order.
+
+**Why it is not fixed here rather than why it does not matter:**
+
+- It is a **different fix from S1's**, despite being the same disk-content family.
+  S1's is a value range, checkable with a comparison. This one needs a constraint
+  check at open — reading `sqlite_master`'s DDL or `PRAGMA index_list`, deciding what
+  counts as "the right constraint", and deciding what a legitimate older file may
+  look like. That is a schema-verification design, not a guard.
+- The commit that closes it should also decide about `all_paths` returning two rows
+  for one Stoa, which the finding notes makes an export unrestorable. That is a
+  second behaviour question in the same area.
+- This change's blast radius is already large. A schema check bolted on at the end,
+  in the commit that also reshapes the session and moves two derivations, is the
+  diff nobody can review for either.
+
+**Where it now lives, so it is deferred rather than dropped:** `design.md`'s
+Risks/Trade-offs carries it, in the entry that replaces the old (and false)
+"`identity.sqlite` has no `check_layout` equivalent". That entry states what
+`check_layout` does prove, what it does not, and the measured consequence — so the
+next reader knows the one-path-per-Stoa invariant holds for files *this build* wrote
+and not for every file it will open.
+
+It is left unticked because that is a record, not a fix, and a ticked box here would
+tell a reviewer the read path refuses a constraint-less table. It does not.
+
 ---
 
-## S5 — `onboarding.rs:266-270`'s zeroize comment claims coverage the code does not have (MEDIUM)
+- [x] **S5 — `onboarding.rs:266-270`'s zeroize comment claims coverage the code does not have (MEDIUM)**
 
 **For: `dev-writer`.**
 
@@ -327,9 +435,40 @@ up. What is wrong is that the layer up no longer owns it for this path, and the
 wipe its own `seed`, or the two comments should stop claiming the obligation is
 discharged.
 
+**Fixed — the second of the two remedies, and the first is deferred with a place to
+live.** The finding offers them as alternatives; they close different halves, and
+only one of them is this change's business.
+
+**The comment is fixed**, which is the half the finding is actually about. Its own
+framing makes the case: the sentence describes *"a different correct shape"*, so *"a
+later reader who trusts the sentence and binds a local first would be told by this
+comment that no local exists."* It now says `to_bytes()` **is** called and that what
+makes it safe is the absence of an intermediate binding — the temporary is consumed
+by the `Zeroizing`, which is `Keystore::generate`'s shape and argued at length there
+after review found that deleting an explicit wipe left the whole suite green. The
+comment also now names what it does **not** cover, which is the other half.
+
+**`derive_stoa_key_at_path`'s `seed` is still unwiped**, and that is recorded in
+`design.md`'s Risks rather than fixed. The reason is scope: `zeroize` would have to
+reach into `identity.rs`, which has no such import and whose stated posture is that
+it holds no memory obligations — *"those copies are `crate::keystore`'s to own"*.
+Changing that is a change to `identity`'s contract about who owns secret lifetime,
+and it belongs in a change that says so. The finding's own assessment is that this is
+residual memory and not a reachable leak, which is why deferring the code half and
+fixing the comment half is the right split rather than a convenient one.
+
+The `design.md` entry records the part the finding makes that is easy to lose: the
+deferral to `keystore` was written when `derive_stoa_key` ran **once at setup**, and
+it now runs five times per slate on a method whose unbounded regeneration is itself a
+pinned requirement — so 200 rounds in a test is 1000 unwiped seeds.
+
+**No test.** A stack local after its function returns is not observable from a test;
+`keystore.rs`'s own review established that, and it is the same reason task 3.5 is
+deliberately untested. I am not writing one that pretends otherwise.
+
 ---
 
-## S6 — `parse_index`'s `v as usize` truncates on a 32-bit target (LOW)
+- [x] **S6 — `parse_index`'s `v as usize` truncates on a 32-bit target (LOW)**
 
 **For: `dev-writer`.**
 
@@ -344,6 +483,29 @@ above `usize::MAX`-on-32-bit.
 A `usize::try_from(v)` with an explicit refusal costs nothing and makes the
 property hold on every target rather than on the one currently shipped.
 `dialectica` targets Linux x86-64, which is why this is LOW and not higher.
+
+**Fixed** — `usize::try_from` with an explicit refusal, exactly as recommended.
+Correctness review raised the same thing independently as its closing note, which is
+part of why it was worth taking now rather than leaving as a comment for a future
+port.
+
+The sentence that decided it is *"makes the property hold on every target rather than
+on the one currently shipped"*. The refusal is unreachable on any target CI builds,
+so its value is not that it catches something — it is that the guarantee stops being a
+consequence of `usize` happening to be 64 bits and becomes a decision in the source.
+
+**No test, and none is possible on a 64-bit host**: `usize::try_from(u64)` is
+infallible there, so the refusal branch cannot be reached. Not ticking this as
+"fixed with a test" — the existing `parse_index` test still covers `-1`, `1.5` and
+`"two"`, and `no_onboarding_handler_panics_whatever_it_is_given_or_whatever_fails`
+carries `18446744073709551616` (which exceeds `u64` and is refused earlier, by
+`as_u64`). Cross-compiling to a 32-bit target to reach it is a CI change, not a test.
+
+While in that function I also fixed readability's R3, which is about the same lines:
+the doc comment named two callers when there are three, and argued the refusal
+entirely in pagination terms — so a reader arriving from `keep_identity` was told
+about serving the wrong page of a feed rather than about storing an identity nobody
+chose.
 
 ---
 

@@ -283,11 +283,24 @@ impl Slate {
             // extends `keystore`'s clearing obligation to slate material, and
             // this is where that material exists.
             //
-            // `SecretKey` itself has no `to_bytes` call here — there is no plain
-            // copy of the seed to wipe, because none is made. What is wrapped is
-            // the derived key, whose own drop `ed25519-dalek` zeroizes; the
-            // wrapper is what makes the intent legible and survives someone
-            // replacing the inner type.
+            // `to_bytes()` IS called, on the next line, and what makes that safe is
+            // that its `[u8; 32]` is moved straight into the wrapper with **no
+            // intermediate binding** — the temporary is consumed, so there is no
+            // second copy to forget. That is `Keystore::generate`'s shape, argued at
+            // length there after review found that deleting an explicit wipe left
+            // the whole suite green.
+            //
+            // An earlier version of this comment said there was no `to_bytes` call
+            // at all. Security review caught it: the shape described was a different
+            // correct shape, so a reader who trusted the sentence and bound a local
+            // first would have been told by this comment that no local exists.
+            //
+            // What this does NOT cover is one layer down. `derive_stoa_key_at_path`
+            // builds a `seed` on the stack and does not wipe it, and `identity.rs`
+            // defers memory lifetime to `keystore` — which owned it when derivation
+            // ran once at setup, and does not own this path, which runs five times
+            // per slate. Residual memory, not a reachable leak: nothing reads those
+            // bytes back. Recorded in `design.md` rather than fixed here.
             let key: Zeroizing<[u8; 32]> =
                 Zeroizing::new(candidate_key(master_key, stoa, path).to_bytes());
             let public_key = SecretKey::from_bytes(&*key)

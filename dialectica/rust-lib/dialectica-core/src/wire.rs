@@ -219,13 +219,9 @@ pub fn get_capabilities(
             Ok(v) => v,
             Err(e) => return error_json(&format!("invalid JSON: {e}")),
         };
-        let stoa = match parsed.get("stoa") {
-            Some(serde_json::Value::String(s)) => match crate::identity::Address::from_hex(s) {
-                Ok(a) => a,
-                Err(e) => return error_json(&format!("stoa: {e}")),
-            },
-            Some(_) => return error_json("stoa must be a string"),
-            None => return error_json("missing field: stoa"),
+        let stoa = match parse_stoa(&parsed) {
+            Ok(s) => s,
+            Err(e) => return e,
         };
         capability_for(&stoa, lookup).to_json()
     })
@@ -345,12 +341,26 @@ pub fn get_capabilities_from_stores(
 // shapes is in that change's `design.md`. What is repeated here is only what a
 // reader of THIS code needs in order not to undo it.
 
-/// The `stoa` field, parsed. One job, because three handlers below need it and a
-/// fourth copy would eventually disagree with the first three about whether a
-/// missing field and a wrong-typed one are the same mistake.
+/// The `stoa` field, parsed. One job, because **every** handler that takes a Stoa
+/// needs it and a second copy would eventually disagree with the first about whether
+/// a missing field and a wrong-typed one are the same mistake.
 ///
 /// The `Err` arm is already the wire reply, following `parse_channel_id`: a caller
 /// cannot accidentally invent a second error shape while converting one.
+///
+/// # Six call sites, and for a while it was three
+///
+/// This was extracted for the three handlers `identity-onboarding` added, and the
+/// three that already existed — `get_capabilities`, `list_threads_inner`,
+/// `list_threads_from_request` — were left on their own inline copies. Architecture
+/// review named the cost precisely: they were behaviourally identical, so nothing
+/// failed, and the bill arrives on the next change that tightens the parse (a length
+/// bound, a lowercase-hex rule), which would land in one place while three handlers
+/// kept the old behaviour and every one of their tests kept passing.
+///
+/// CLAUDE.md's rule is that the fourth slightly-different copy of a guard is the
+/// signal to reshape. The signal was read — the helper exists — and then the reshape
+/// stopped at the new call sites. All six now use it.
 fn parse_stoa(parsed: &serde_json::Value) -> Result<crate::identity::Address, String> {
     match parsed.get("stoa") {
         Some(serde_json::Value::String(s)) => {
@@ -463,9 +473,12 @@ impl OnboardingSession {
             }
             Err(crate::keystore::KeystoreError::NotFound) => {
                 if self.keystore.is_none() {
-                    // `Keystore::generate` may not fail, and the fallible shape is
-                    // what this returns anyway, so there is no `expect` added here.
-                    self.keystore = Some(crate::keystore::Keystore::generate());
+                    // `?` rather than an `expect`. Minting asks the OS for entropy,
+                    // and this function is reached from a dispatch handler on every
+                    // fresh-install slate and keep — so a panic here aborts the
+                    // module process rather than failing one call. See
+                    // `identity::SecretKey::generate` for what that measured.
+                    self.keystore = Some(crate::keystore::Keystore::generate()?);
                 }
             }
             Err(e) => return Err(e),
@@ -567,10 +580,19 @@ pub fn generate_identity_slate(
 
 /// A slate as the view receives it.
 ///
-/// Pinned by a test against hardcoded key names, for the reason
+/// Pinned by `the_slate_json_is_pinned_to_the_exact_shape_a_view_is_written_against`
+/// against a hardcoded **key set**, for the reason
 /// `the_capability_json_is_pinned_to_the_exact_shape_the_plan_specifies` gives: a
 /// view is written against these exact names and renaming one is a breaking change
 /// no type checker would catch.
+///
+/// The key *set*, not merely each key's presence — an added field fails that test as
+/// well as a removed one. This comment previously cited the capability test's reason
+/// while the slate test checked only presence, which invited a reader to expect the
+/// sibling's strength; the spec-test reviewer measured the gap by adding a
+/// `displayName` to every candidate and watching the suite stay green. The spec
+/// requires that no candidate carry a display name or a visual mark, so presence-only
+/// could not fail on the one scenario this shape most needs to be held to.
 ///
 /// **`path` is present**, and its presence is a decision rather than an oversight.
 /// It is not secret — the spec says the record *"reveals nothing that a published
@@ -1128,13 +1150,9 @@ fn list_threads_inner<L: crate::log::OpLog>(
             Err(e) => return error_json(&format!("invalid JSON: {e}")),
         };
 
-        let stoa = match parsed.get("stoa") {
-            Some(serde_json::Value::String(s)) => match crate::identity::Address::from_hex(s) {
-                Ok(a) => a,
-                Err(e) => return error_json(&format!("stoa: {e}")),
-            },
-            Some(_) => return error_json("stoa must be a string"),
-            None => return error_json("missing field: stoa"),
+        let stoa = match parse_stoa(&parsed) {
+            Ok(s) => s,
+            Err(e) => return e,
         };
 
         // The Stoa asked for must be the one the genesis record names, or the
@@ -1206,13 +1224,9 @@ pub fn list_threads_from_request<L: crate::log::OpLog>(
             Ok(v) => v,
             Err(e) => return error_json(&format!("invalid JSON: {e}")),
         };
-        let stoa = match parsed.get("stoa") {
-            Some(serde_json::Value::String(s)) => match crate::identity::Address::from_hex(s) {
-                Ok(a) => a,
-                Err(e) => return error_json(&format!("stoa: {e}")),
-            },
-            Some(_) => return error_json("stoa must be a string"),
-            None => return error_json("missing field: stoa"),
+        let stoa = match parse_stoa(&parsed) {
+            Ok(s) => s,
+            Err(e) => return e,
         };
         let genesis = match genesis_for(&parsed, &stoa) {
             Ok(g) => g,
@@ -1232,18 +1246,54 @@ pub fn list_threads_from_request<L: crate::log::OpLog>(
 
 /// A non-negative integer field, absent, or a refusal already in the wire shape.
 ///
-/// Separated out because `page` and `perPage` are the same parsing job with the
-/// same three failure modes, and a second copy would eventually disagree with
-/// the first about whether `-1` is an error or a zero.
+/// Separated out because its **three** callers are the same parsing job with the
+/// same three failure modes, and a second copy would eventually disagree with the
+/// first about whether `-1` is an error or a zero. The callers are `page` and
+/// `perPage` in the feed, and `index` in [`keep_identity`].
+///
+/// # The three callers do not have the same stakes, and the severe one governs
+///
+/// This comment used to name only the two pagination callers and argue entirely in
+/// their terms — *"a page of -1 is not a page"*. Readability review pointed out
+/// what that costs: a reader arriving from `keep_identity` asks why this refuses
+/// rather than coerces and is told about serving the wrong page of a feed.
+///
+/// The real answer is the `index` caller's, and it is much stronger. A coerced
+/// index keeps the **first candidate** for a caller who named something else, which
+/// stores an identity nobody chose — an outcome the spec calls unrecoverable,
+/// *"because the choice cannot be recomputed"*. CLAUDE.md's named tell is "do not
+/// let a function quietly acquire a second caller with different needs"; the needs
+/// here differ in consequence, and the shared guard has to be written for the worst
+/// of them.
+///
+/// The name is also now wrong in a small way worth flagging rather than churning:
+/// `index` is what the slate caller's *field* is called, meaning a slate position,
+/// while this function's name came from pagination. Renaming it touches three
+/// handlers for no behaviour change and is left for whoever next has a reason to
+/// touch them.
 fn parse_index(parsed: &serde_json::Value, field: &str) -> Result<Option<usize>, String> {
     match parsed.get(field) {
         None | Some(serde_json::Value::Null) => Ok(None),
         Some(serde_json::Value::Number(n)) => match n.as_u64() {
             // `as_u64` refuses a negative and a fractional number, which is
-            // exactly the set that should be refused: a page of -1 is not a
-            // page, and silently clamping it to 0 would serve the first page to
-            // a caller who asked for something impossible.
-            Some(v) => Ok(Some(v as usize)),
+            // exactly the set that should be refused. For `page`, clamping -1 to 0
+            // would serve the first page to a caller who asked for something
+            // impossible; for `index`, it would keep the first candidate, which is
+            // storing an identity the user did not choose.
+            //
+            // `try_from` rather than `as usize`. On a 64-bit target the cast is
+            // lossless and this is belt-and-braces; on a 32-bit one it TRUNCATES,
+            // so `{"index": 4294967296}` would arrive as `0` and keep candidate 0 —
+            // exactly the coercion the paragraph above forbids, reached by a cast
+            // rather than by a decision. CI builds no 32-bit target, so the refusal
+            // is unreachable today and the point is that the property no longer
+            // depends on which target it is built for.
+            Some(v) => match usize::try_from(v) {
+                Ok(i) => Ok(Some(i)),
+                Err(_) => Err(error_json(&format!(
+                    "{field} is larger than this build can represent"
+                ))),
+            },
             None => Err(error_json(&format!(
                 "{field} must be a non-negative whole number"
             ))),
@@ -1944,9 +1994,25 @@ mod tests {
 
     /// A fresh temporary directory, and its guard.
     ///
-    /// Same shape as `keystore.rs`'s and `log/sqlite.rs`'s, for the reason they
-    /// record: one need, in tests, is not worth a `tempfile` dependency. The guard
-    /// must be held for the test's lifetime.
+    /// Copied in shape from `log/sqlite.rs`'s `TempDir`, for the reason it records:
+    /// one need, in tests, is not worth a `tempfile` dependency. The guard must be
+    /// held for the test's lifetime.
+    ///
+    /// **`log/sqlite.rs`'s and not `keystore.rs`'s**, which this comment used to
+    /// credit as well. They are two different collision strategies: this one and
+    /// `log/sqlite.rs`'s put `std::process::id()` in the name and so need the
+    /// pre-emptive `remove_dir_all` below, because a name is reused within one run;
+    /// `keystore.rs`'s takes 8 random bytes from `getrandom` and needs no removal.
+    /// A reader told they are "the same shape" and asked to change one has been
+    /// pointed at the wrong precedent — readability review caught it, and noted that
+    /// `identity_store.rs`'s equivalent comment gets this right, in the same change.
+    ///
+    /// This is the **fourth** near-copy of the helper in the crate (`keystore.rs`,
+    /// `log/sqlite.rs`, `identity_store.rs`, here). Four is where CLAUDE.md's "the
+    /// fourth slightly-different copy of a guard" starts to apply, and "one need, in
+    /// tests" was the argument for hand-rolling the first. Flagged rather than
+    /// unified: whoever needs a fifth should decide deliberately instead of adding
+    /// it, and unifying four test fixtures is not this change's business.
     struct OnboardingDir(std::path::PathBuf);
 
     impl OnboardingDir {
@@ -2033,17 +2099,61 @@ mod tests {
         // `the_capability_json_is_pinned_to_the_exact_shape_the_plan_specifies`:
         // a view reads these exact names and renaming one is a breaking change no
         // type checker would catch.
+        //
+        // # The key set is asserted EXACTLY, not merely for presence
+        //
+        // This checked `is_some()` per expected field and nothing about extra ones,
+        // while its name and its doc comment both claimed "the exact shape" — so it
+        // had one fewer guarantee than the three sibling reply shapes, which pin
+        // their whole serialised string, and the difference was invisible from
+        // either. The spec-test reviewer measured the hole: adding a `displayName`
+        // to every candidate left all 553 tests green.
+        //
+        // That matters here specifically because of what the spec says about it. The
+        // scenario "A generated name and a mark are not settled by this capability"
+        // requires that **no candidate carries a display name or a visual mark**, on
+        // the reasoning that a caller written against one "would be written against a
+        // name this capability never defined". A presence-only check cannot fail on
+        // that scenario at all.
+        //
+        // The key set rather than the whole string, because a candidate's values are
+        // derived and a whole-string pin would be asserting on the derivation too.
+        // `assert_eq!` on a sorted `Vec` rather than `contains` per name, so an
+        // ADDED key fails and not only a removed one.
+        //
+        // NO SPEC: `path` is in this set, and no requirement or scenario in
+        // `specs/identity-onboarding/spec.md` names a reply field for it — every
+        // mention of "path" there is about derivation, recording, or the record's
+        // readability. Exposing it is a decision: it is not secret (the spec says
+        // the record "reveals nothing that a published identity does not already
+        // reveal"), and a view that can show which path is about to be kept is one
+        // that can render the recovery warning truthfully. Marked because it is a
+        // widening of the core API that the contract does not require, so a later
+        // reader can decide whether it was right rather than inheriting it by
+        // silence. It appears in the keep and whoami replies too.
         let (v, _) = slate_through_the_wire();
-        for field in ["slate", "count", "candidates"] {
-            assert!(v.get(field).is_some(), "the reply is missing {field}: {v}");
-        }
+        let mut top: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
+        top.sort_unstable();
+        assert_eq!(
+            top,
+            ["candidates", "count", "slate"],
+            "the slate reply's top-level key set changed: {v}"
+        );
         for candidate in v["candidates"].as_array().unwrap() {
-            for field in ["index", "path", "address", "publicKey"] {
-                assert!(
-                    candidate.get(field).is_some(),
-                    "a candidate is missing {field}: {v}"
-                );
-            }
+            let mut keys: Vec<&str> = candidate
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect();
+            keys.sort_unstable();
+            assert_eq!(
+                keys,
+                ["address", "index", "path", "publicKey"],
+                "a candidate's key set changed. An ADDED key fails here too, which \
+                 is the point: the spec requires no candidate carry a display name \
+                 or a visual mark, and this capability does not define either. {v}"
+            );
         }
         // And the candidates are indexed 0..5 in order, because a caller selects
         // by index and an index that did not match the position would select the

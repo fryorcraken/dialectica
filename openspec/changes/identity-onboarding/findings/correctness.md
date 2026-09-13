@@ -10,7 +10,7 @@ was confirmed clean with `git status` before committing.
 
 ---
 
-## 1. On a fresh install, the identity kept is not the candidate the user chose
+- [x] **1. On a fresh install, the identity kept is not the candidate the user chose**
 
 **For:** `dev-writer` (and `spec-writer`, for the scenario that would have caught it)
 **Severity:** high — silently stores an identity the user did not choose, which
@@ -92,9 +92,47 @@ existing master key, and a candidate from it is then kept / **THEN** the
 identity kept is the one the slate displayed at that index" would be failed by
 the current code.
 
+**Fixed** in `63133c9`. The diagnosis is exactly right, including that the
+`live_slate` field "only pins *which paths* were offered, never which master key
+they were offered under" — that sentence is the fix, stated as a defect.
+
+`core::wire::OnboardingSession` now holds `(keystore, live_slate)` together and
+mints at most once per module lifetime; the mint-or-open decision moved out of the
+adapter into `core`. Carrying a *commitment* to the key in the slate reply instead
+was considered and rejected in `design.md`: it detects the divergence without
+giving the user the identity they chose, because by then the key that produced
+their slate is gone.
+
+The regression test is
+`on_a_fresh_install_the_identity_kept_is_the_candidate_the_slate_showed`, and it is
+built around this finding's "why no existing test sees it" section. It supplies
+**no** master key — its opener returns `NotFound`, so minting actually happens —
+and asserts a relationship between the two replies rather than a comparison
+against a constant, so it cannot be satisfied by a fixture handing the same value
+to both sides. Measured failing before the fix with the same signature the finding
+reports: identical path, different addresses, `kept: true`.
+
+Restoring the per-call mint fails that test plus
+`refreshing_a_slate_offers_candidates_of_one_master_key` and
+`keeping_an_identity_in_a_second_stoa_succeeds_and_reuses_the_master_key`, **and
+nothing else in 562** — which independently confirms this finding's claim that the
+whole question was untested by construction.
+
+Three consequences of the same seam, found by other reviewers, are fixed in the
+same commit: the second-Stoa dead end, the unrecoverable partial state, and the
+probe/`whoAmI` disagreement. See `design.md`.
+
+**For `spec-writer`:** the "Note for the spec" section is a live gap and is **not**
+closed by this fix. The spec still has no scenario asserting that the kept identity
+is the candidate the slate *displayed* across two calls with the master key not
+held fixed; every keep scenario remains satisfiable by a slate and a keep that
+agree with each other. The scenario this finding drafts is the right one, and a
+test for it now exists — but the contract does not require it, which is the thing
+that let the defect through.
+
 ---
 
-## 2. `SecretKey::generate`'s `expect` is reachable from a dispatch handler, outside the panic guard, and its doc comment says it is not
+- [x] **2. `SecretKey::generate`'s `expect` is reachable from a dispatch handler, outside the panic guard, and its doc comment says it is not**
 
 **For:** `dev-writer`
 **Severity:** medium — a reachable abort on the two most-called onboarding
@@ -139,9 +177,48 @@ denied by a seccomp/container policy, or called before the pool is initialised.
 Low probability; it is the reachability that is the defect, and it is the class
 of thing this file's own comments are written to keep off handler paths.
 
+**Fixed** in the commit that follows this file's update. Both halves of the finding
+are addressed, and they needed different fixes:
+
+- **Outside the guard.** Closed as a side effect of the defect-1 fix: the mint moved
+  from the adapter into `core::wire::OnboardingSession::keystore_for`, which is
+  called inside both `guarded("generate_identity_slate", …)` and
+  `guarded("keep_identity", …)`. A panic there would now be caught and converted
+  rather than aborting the process.
+- **The `expect` itself.** `SecretKey::generate` now returns
+  `Result<Self, RandomnessUnavailable>` and `Keystore::generate` propagates it. This
+  is the half that matters structurally: catching a panic is a backstop, while a
+  `Result` means reverting is a compile error at `Keystore::generate` rather than a
+  silent change of failure mode.
+
+The finding's strongest observation is the one that decided the shape: *"the same
+mitigation was already applied next door and missed here"* — `SlateNonce::generate`
+took the fallible shape and its comment cited the contrast with this function. So
+rather than update that comment to preserve an asymmetry that had stopped being
+true, the asymmetry is gone.
+
+`RandomnessUnavailable` is a new type in `identity.rs` and
+`KeystoreError::NoRandomness` a new arm, rather than reusing `KeyError` or
+`KeystoreError::Io` — `Io`'s message is "keystore could not be read", which names
+the wrong operation for a mint and would send a reader to check a file that does not
+exist yet.
+
+**What no test can show, and is not claimed.** `getrandom` cannot be made to fail
+from a test without installing a seccomp policy, and a test that installed one would
+be testing the sandbox. `minting_a_key_is_fallible_rather_than_a_panic` pins the
+*shape* — the fallible signature, the message naming a fix, the conversion into
+`KeystoreError` — which is what would have to be undone to reintroduce the panic.
+The failure itself is unobservable from the suite and the test says so.
+
+**A second gap this opened and closed:** `every_error_message_names_a_fix` lists
+`KeystoreError`'s variants by hand and, unlike its sibling
+`every_reason_is_distinguishable_from_every_other`, had no count guard — so
+`NoRandomness` went in silently uncovered. It now carries the same hardcoded
+`assert_eq!(all.len(), 18)`.
+
 ---
 
-## 3. The slate's distinctness walk can be deleted with the whole suite green
+- [ ] **3. The slate's distinctness walk can be deleted with the whole suite green**
 
 **For:** `tester`
 **Severity:** low — a documented-as-unreachable guard, reported as a measured
@@ -166,6 +243,20 @@ manufacture one. Recorded because the walk is the mechanism behind the spec's
 carried by argument rather than by a gate. Testing it would need
 `derive_path` injectable, which is a larger change than the guard is worth —
 worth a note in `design.md` rather than a test.
+
+**Open — `tester`'s, and the reviewer's own recommendation is not to test it.**
+`dev-writer` is leaving this box empty rather than ticking it, because the finding
+asks for a `design.md` note and I do not want to record "noted" as though the
+coverage gap were closed. The measurement stands: the `paths.contains` skip can be
+deleted with 563 green.
+
+The reviewer's judgement that this is not a defect is right and I am not arguing
+with it. What is worth deciding rather than inheriting is whether the note belongs
+in `design.md` — `tester` owns whether any test is written here, and the existing
+`design.md` entry on `from_nonce`'s walk already argues the reproducibility
+constraint that makes `derive_path` non-injectable. If `tester` agrees no test is
+warranted, this box should be ticked as **rejected, with the argument** rather than
+fixed.
 
 ---
 
@@ -233,7 +324,7 @@ is a second independent observation of it.
   renames no file, both roots exist, and the `#[test]` count matches the 553
   reported. The gate is intact.
 
-## One note that is not a finding today
+- [x] **One note that is not a finding today**
 
 `parse_index` at `wire.rs:918-933` ends `Ok(Some(v as usize))`, where `v` is a
 `u64`. On a 32-bit target that cast **truncates**, so `{"index": 4294967296}`
@@ -241,6 +332,16 @@ would become `0` and keep candidate 0 — the "stores an identity the user did n
 choose" outcome. Not reachable: CI builds no 32-bit target. Mentioned only so a
 future 32-bit port does not have to rediscover it; a `usize::try_from` would
 close it.
+
+**Fixed** anyway, in the same commit, and ticked because it was actioned rather
+than because it was a defect. `usize::try_from` with an explicit refusal, exactly as
+suggested. Security review raised the same thing independently as S6.
+
+It costs nothing and the reason to take it now rather than leave the note is that
+the property stops depending on which target the code is built for — the refusal is
+a decision in the source rather than a consequence of `usize` happening to be 64
+bits. The refusal itself is unreachable on any target CI builds, so **no test
+exercises it**, and I am not claiming one does.
 
 ---
 
