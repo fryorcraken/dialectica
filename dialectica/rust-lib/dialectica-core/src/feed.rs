@@ -706,6 +706,63 @@ mod tests {
     }
 
     #[test]
+    fn two_identities_sharing_a_name_are_both_served_unchanged() {
+        // The collision case, with two REAL colliding keys rather than a stubbed
+        // derivation — the pair was found by searching the shipped scheme (see
+        // `names::tests_support::COLLIDING_SEED_A`).
+        //
+        // What is under test is the FEED's handling of a collision: both rows
+        // carry the name exactly as derived, neither is numbered or suffixed,
+        // and the two author addresses differ — which is what tells them apart.
+        // Numbering would require agreeing which identity was second, which is
+        // arrival order, a per-peer fact, so two peers would number the same
+        // pair oppositely and each be sure the other was the impostor.
+        let ka = SecretKey::from_bytes(&crate::names::tests_support::COLLIDING_SEED_A).unwrap();
+        let kb = SecretKey::from_bytes(&crate::names::tests_support::COLLIDING_SEED_B).unwrap();
+
+        let post = |key: &SecretKey, body: &str| {
+            Op {
+                stoa: a_stoa(),
+                author: key.public_key(),
+                kind: OpKind::Post {
+                    thread: None,
+                    parent: None,
+                    body: body.to_string(),
+                    attachments: vec![],
+                },
+            }
+            .sign(key)
+        };
+
+        let log = a_log(vec![post(&ka, "from a"), post(&kb, "from b")]);
+        let rows = all_of(&log, false);
+        assert_eq!(rows.len(), 2, "the fixture must produce two rows");
+
+        for row in rows.iter() {
+            // Exactly as derived — no number, no suffix, no added mark.
+            assert_eq!(
+                row.display_name,
+                crate::names::tests_support::COLLIDING_NAME,
+                "a colliding row's name must be served unchanged"
+            );
+        }
+
+        // And the addresses DO differ, which is the whole of what distinguishes
+        // them. Without this the test would pass on a feed that had collapsed
+        // the two identities into one.
+        assert_ne!(
+            rows[0].author, rows[1].author,
+            "the two rows must carry different author addresses"
+        );
+        assert_eq!(
+            rows[0].author,
+            ka.public_key().address().to_hex(),
+            "each row's address must be its own signer's"
+        );
+        assert_eq!(rows[1].author, kb.public_key().address().to_hex());
+    }
+
+    #[test]
     fn two_posts_by_one_author_render_one_name() {
         let first = a_thread(4, "one");
         let key = a_key(4);

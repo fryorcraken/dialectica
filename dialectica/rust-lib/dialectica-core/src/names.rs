@@ -394,6 +394,40 @@ fn is_refused(noun_index: u16, place_index: u16) -> bool {
 pub mod tests_support {
     pub const PINNED_NAME_FOR_KEY_4: &str = "quipful ismene of korykos";
     pub const PINNED_NAME_FOR_KEY_5: &str = "periculous kreios of narthakion";
+
+    /// Two distinct secret-key seeds whose keys derive the SAME display name.
+    ///
+    /// **Found by search, not constructed by stubbing the derivation**, so the
+    /// collision is a real property of the shipped scheme and wordlists rather
+    /// than of a test double. The search walked seeds with a counter in the
+    /// first four bytes and indexed by rendered name until one repeated; at a
+    /// space of 2^33 a repeat arrives after roughly 2^16.5 keys, and this pair
+    /// turned up well inside three million.
+    ///
+    /// They are written down rather than re-searched at test time because a
+    /// search in the suite would be slow and, worse, would agree with whatever
+    /// the derivation did — the point of a collision fixture is that it was
+    /// fixed BEFORE the code ran.
+    ///
+    /// **If a test using these fails, the pair has stopped colliding**, which
+    /// means the derivation or a wordlist changed. That is a scheme change; do
+    /// not go and find a new pair to paper over it.
+    pub const COLLIDING_SEED_A: [u8; 32] = {
+        let mut s = [0u8; 32];
+        s[1] = 0x00;
+        s[2] = 0xc6;
+        s[3] = 0x13;
+        s
+    };
+    pub const COLLIDING_SEED_B: [u8; 32] = {
+        let mut s = [0u8; 32];
+        s[1] = 0x00;
+        s[2] = 0xff;
+        s[3] = 0xb1;
+        s
+    };
+    /// The name both of the seeds above derive.
+    pub const COLLIDING_NAME: &str = "plurative archilochos of kyrrhos";
 }
 
 #[cfg(test)]
@@ -539,6 +573,80 @@ mod tests {
 
     /// The name the reserve bytes `(7, 7, 7)` select: index 7 of each list.
     const PINNED_REDRAW_NAME: &str = "aberrative aedon of acherousia";
+
+    /// SHA-256 over every entry of each list, in order, each followed by `\n`.
+    ///
+    /// **Produced by `sha256sum` over the source text files, never by hashing
+    /// the arrays.** The three commands, which a reviewer can re-run:
+    ///
+    /// ```text
+    /// sha256sum tmp/adj-final-sorted.txt      # adjectives
+    /// sha256sum tmp/nouns-normalized.txt      # nouns, blank first line dropped
+    /// sha256sum tmp/places-final-sorted.txt   # places
+    /// ```
+    ///
+    /// `tmp/nouns-normalized.txt` is `grep . tmp/nouns-final-sorted.txt`; that
+    /// file carries a leading blank line, which `tmp/gen.rs` and `tmp/pin.rs`
+    /// both filter, so dropping it is what makes the file and the array the same
+    /// sequence. Each file ends in a trailing newline, so the concatenation
+    /// `entry + "\n"` reproduces the file's bytes exactly.
+    const PINNED_ADJECTIVES_SHA256: &str =
+        "8c998df498623340f706c3b8a3cc8be42c1126cf2f98d17efc14695fe94de8b2";
+    const PINNED_NOUNS_SHA256: &str =
+        "9c082a491ebba9e3459b62d717ea897de87d0732c94704470ee6557d93230c79";
+    const PINNED_PLACES_SHA256: &str =
+        "bed083891cd6262152d0e1371709dc9f9d14f4704b1b74b3684ab8bea9f815f1";
+
+    #[test]
+    fn every_wordlist_is_pinned_entry_by_entry_and_in_order() {
+        // **A REORDERING is the consensus change the three name pins cannot
+        // see**, and this test exists because that gap was measured rather than
+        // supposed: exchanging `araden` and `araithyrea` — places 100 and 101 —
+        // changes no entry's spelling, no list's size and no entry's uniqueness,
+        // so the character sweep, the dedup sweep and the size assertions all
+        // pass, and neither name pin draws either index. The full suite ran
+        // green with the two swapped.
+        //
+        // That is exactly the silent divergence the spec's versioning
+        // requirement is about: the derivation maps digest bytes to list
+        // INDICES, so moving one entry renames every identity drawing at or
+        // after it — on peers that have updated and not on peers that have not,
+        // with no error anywhere, each peer internally consistent and agreeing
+        // with nobody.
+        //
+        // A name pin covers the handful of indices it happens to draw. A hash
+        // over the whole list covers all 8,192 and all 1,024, which is the only
+        // shape that matches the requirement: ANY reorder, ANY substituted
+        // entry, ANY added or removed one.
+        //
+        // The expected values were produced by `sha256sum` over the text files
+        // the arrays were generated from — never by hashing the arrays and
+        // writing down the answer, which would be the implementation agreeing
+        // with itself. The doc comment above carries the three commands.
+        //
+        // If this fails, do NOT update the expected values to match. A wordlist
+        // change is a scheme change: it needs a new version in `NAME_PREFIX`,
+        // not a new constant here.
+        for (list, which, expected) in [
+            (ADJECTIVES, "adjectives", PINNED_ADJECTIVES_SHA256),
+            (NOUNS, "nouns", PINNED_NOUNS_SHA256),
+            (PLACES, "places", PINNED_PLACES_SHA256),
+        ] {
+            let mut hasher = Sha256::new();
+            for entry in list {
+                hasher.update(entry.as_bytes());
+                hasher.update(b"\n");
+            }
+            let digest: [u8; 32] = hasher.finalize().into();
+            assert_eq!(
+                hex::encode(digest),
+                expected,
+                "the {which} list changed: an entry was edited, added, removed \
+                 or MOVED. Every identity drawing at or after the affected index \
+                 now renders differently from every peer that has not updated."
+            );
+        }
+    }
 
     #[test]
     fn a_name_is_the_same_every_time_and_across_a_rebuild() {
@@ -1167,6 +1275,61 @@ mod tests {
                 NOUNS.contains(&figure),
                 "{figure} was excluded; no figure is kept out for whom it names"
             );
+        }
+    }
+
+    #[test]
+    fn two_distinct_keys_can_share_a_name_and_neither_is_marked() {
+        // "A name is never unique, never an identifier, and never numbered."
+        //
+        // Uniqueness is UNAVAILABLE rather than merely unbuilt: there is no
+        // registry and no authority to hold a namespace, so two peers can each
+        // believe a name is free. Numbering would be worse than leaving a
+        // collision alone — appending a suffix requires agreeing which identity
+        // was second, which is arrival order, a per-peer fact, so two peers
+        // would number the same pair oppositely and each be certain the other
+        // was the impostor.
+        //
+        // The pair was found by SEARCHING the real derivation (see
+        // `tests_support::COLLIDING_SEED_A`), so this exercises the shipped
+        // scheme rather than a stub. A stubbed derivation would prove the feed
+        // handles a collision but say nothing about whether one is reachable.
+        let a = SecretKey::from_bytes(&tests_support::COLLIDING_SEED_A).unwrap();
+        let b = SecretKey::from_bytes(&tests_support::COLLIDING_SEED_B).unwrap();
+
+        // The fixture must actually be two DIFFERENT identities, or "both are
+        // served unchanged" is satisfied by one key compared with itself.
+        assert_ne!(
+            a.public_key().to_bytes(),
+            b.public_key().to_bytes(),
+            "the fixture must be two distinct keys"
+        );
+        assert_ne!(
+            a.public_key().address(),
+            b.public_key().address(),
+            "two distinct keys must have distinct addresses — the addresses are \
+             what tells a colliding pair apart"
+        );
+
+        let name_a = display_name(&a.public_key()).unwrap();
+        let name_b = display_name(&b.public_key()).unwrap();
+
+        // They collide, and on the WRITTEN-DOWN name rather than merely on each
+        // other: `assert_eq!(name_a, name_b)` alone would pass on a derivation
+        // that returned one constant for every key.
+        assert_eq!(name_a.render(), tests_support::COLLIDING_NAME);
+        assert_eq!(name_b.render(), tests_support::COLLIDING_NAME);
+
+        // Neither carries a number, a suffix or any other distinguishing mark.
+        // Checked as a character class over the whole rendered name, so a `#2`,
+        // a ` (2)` or a trailing digit all fail.
+        for name in [name_a, name_b] {
+            let rendered = name.render();
+            assert!(
+                rendered.chars().all(|c| c.is_ascii_lowercase() || c == ' '),
+                "a colliding name must carry no added mark: {rendered}"
+            );
+            assert_eq!(name.words().len(), 3, "still three drawn words");
         }
     }
 
