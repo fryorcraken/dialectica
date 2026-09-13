@@ -709,7 +709,7 @@ not touched it**, since the proposal is `spec-writer`'s.
 
 ---
 
-- [ ] **Noted for the tester, outside my dimension**
+- [x] **Noted for the tester, outside my dimension**
 
 Recorded only because I tripped over them while reading for shape; not my findings
 to make and not counted above.
@@ -742,6 +742,59 @@ exactly the "a claim nothing checks" shape this project keeps finding.
   bitten once.
 - I did not run `cargo mutants`; it is the tester's instrument and my brief scopes
   me to architecture.
+
+**`tester`: the hole was real and is now CLOSED — by `dev-writer` during the
+`origin/main` merge, not by me. I verified it rather than duplicating it, and the
+verification found the coverage is nine times wider than this entry describes.**
+
+Two corrections to the entry, both from reading the post-merge tree:
+
+- **The gate has been renamed and its false claim removed.** It is now
+  `every_handler_answers_with_a_json_object_for_any_request_shape`, and its own
+  comment says the old name's *"exactly one top-level shape"* was a claim nothing
+  checked — the body asserts `is_object()`. So the specific sentence this entry
+  quotes no longer exists to be false. The rename is the right call: asserting "one
+  shape" would mean asserting the key set, and the success shapes differ per method
+  (`pong`, `channelId`, `items`/`page`/`hasMore`).
+- **`:3504` is a pre-merge line number.** The gate is at `wire.rs:7961` now. Noted
+  only because this file's A-something entry above makes the same point about stale
+  citations in `design.md`, and the lesson applies to findings too.
+
+**All three onboarding methods are in `every_request_taking_method()`**
+(`wire.rs:6952-6961`), each wrapped as a `fn` with a fresh session per call, each
+with a served fixture in `a_served_request`. The helper feeds **nine** sweeps, not
+one — so the fix extended coverage far beyond the object-shape gate this entry names.
+
+**Proven reached, not assumed.** A sweep listing a method proves nothing if the
+sweep never executes it, so I mutated a handler in a way that leaves `ping` alone:
+
+| Mutation | Predicted | Observed |
+|---|---|---|
+| `who_am_i`'s success arm replaced by `error_json(...)` | `a_request_within_the_cap_is_still_served` fails naming `who_am_i` | **exactly that** — `who_am_i refused a request well under the cap: {"error":"deliberate mutation…"}` |
+
+**What I found while verifying, and it is a defect rather than a test gap** — though
+`dev-writer` found it independently and has it written up in `design.md`, so this is
+corroboration and not a new report. Trying to mutate `generate_identity_slate` back
+to its pre-merge `serde_json::from_str` produced a **compile error**, not a test
+failure: `parse_stoa` takes `&Request`, and `Request::parse` is the type's only
+constructor. So for a handler that reads `stoa`, the envelope is structural — the
+`MAX_REQUEST_BYTES` cap and the by-name non-object refusal cannot be bypassed while
+still compiling. That is CLAUDE.md's put-it-in-the-data-structure rule holding, and
+it is a stronger guarantee than the sweep.
+
+The residual is on the **publish** surface, and it is live on `main`:
+`publish_post`, `publish_reply` and `publish_vote` open with `parsed_object(request)`
+— a bare `serde_json::from_str` — so they reach neither the cap nor the object
+refusal, and they are not in the sweep list. `design.md` carries the full write-up
+with line numbers and the ownership argument (it belongs to `authoring-content`,
+already merged). **Not fixed here and not mine to fix**; recorded so the two accounts
+agree.
+
+The entry's other two observations still need no action, and I confirm the reasoning:
+`from_root_for_test`'s fixed root is exactly what
+`on_a_fresh_install_the_identity_kept_is_the_candidate_the_slate_showed` sidesteps by
+supplying **no** key. I did not run `cargo mutants` either — targeted mutations
+answered the questions the boxes asked, and the suite is 656 green.
 
 ---
 

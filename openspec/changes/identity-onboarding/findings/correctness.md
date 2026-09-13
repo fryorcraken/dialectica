@@ -218,7 +218,7 @@ The failure itself is unobservable from the suite and the test says so.
 
 ---
 
-- [ ] **3. The slate's distinctness walk can be deleted with the whole suite green**
+- [x] **3. The slate's distinctness walk can be deleted with the whole suite green**
 
 **For:** `tester`
 **Severity:** low — a documented-as-unreachable guard, reported as a measured
@@ -257,6 +257,69 @@ in `design.md` — `tester` owns whether any test is written here, and the exist
 constraint that makes `derive_path` non-injectable. If `tester` agrees no test is
 warranted, this box should be ticked as **rejected, with the argument** rather than
 fixed.
+
+**`tester`: the coverage gap is REJECTED as untestable, and a DIFFERENT hole in the
+same five lines is FIXED. Both were measured on the post-merge tree.**
+
+**First, the finding reproduces.** Baseline after the two `origin/main` merges is
+**655**, not 563 — the merges brought in the request envelope and
+`authoring-content`. With the `paths.contains` skip deleted:
+
+| Mutation at `onboarding.rs:275-279` | Predicted | Observed |
+|---|---|---|
+| `if paths.contains(&path) { continue; }` deleted | 655 pass, 0 fail | **655 pass, 0 fail** |
+
+**Why it is inert, which the brief asked be established before any replacement was
+written.** Not "guaranteed elsewhere" and not "unreachable" — the third option:
+**reachable in principle, not manufacturable in a test.** `SlateNonce`'s field is
+private but this module's own tests construct one directly (`a_nonce()` does), so a
+colliding nonce *would* work as a fixture. There simply is not one to be had: a
+collision needs two of indices 0..4 to agree on 31 masked bits, ~10 pairs at 2⁻³¹,
+so ~2.7×10⁸ nonces to expect one. At ~10⁶ nonces/sec that is minutes *optimised* and
+hours in a debug test binary — a one-off search whose answer could be hardcoded, but
+not a test, and not worth the compute for a guard the reviewer already agrees is not
+a defect.
+
+The spec settles it. *"**WHEN** a slate is requested, **THEN** no two candidates in
+it share a public key"* scopes the requirement to slates **as actually requested**,
+which `every_candidate_in_a_slate_is_distinct` does test faithfully. The mechanism
+behind it is not what the scenario names. Writing a test that manufactured a
+collision would be testing a state the spec does not describe, and per `tester.md`
+the honest move is to report rather than weaken. **Rejected, no test.**
+
+**Second — and this is the part worth the reviewer's time — probing that walk turned
+up a hole in it that IS reachable, and it was open.** Nothing connected a slate's
+paths to the indices they come from:
+
+| Mutation at `onboarding.rs:271` | Predicted | Observed |
+|---|---|---|
+| `for step in 0..MAX_PATH_WALK` → `1..MAX_PATH_WALK` | 655 pass, 0 fail | **655 pass, 0 fail** |
+
+An off-by-one in the walk offers five candidates that are still perfectly distinct
+and still derived by the correct function, so every existing assertion in the file
+held — `the_slate_constants_are_pinned_to_known_answers` pins `derive_path` but says
+nothing about which indices a *slate* uses, and
+`every_candidate_in_a_slate_is_distinct` pins that the five differ from each other.
+Two tests either side of the property, and the property itself unheld. That is this
+project's defect family again: two explanations — "the walk starts at 0" and "the
+walk starts anywhere and the candidates are distinct" — producing the same answer.
+
+It matters in the silent direction the pinning test exists for: the walk's index is
+the entire input to a candidate's path, so an off-by-one changes which identity every
+user of the build is offered and keeps, with no error anywhere.
+
+**Fixed** by `onboarding.rs::a_slates_paths_are_the_derivation_at_indices_zero_to_four`.
+Expectations are the five OpenSSL digests masked **by hand**, not read back from
+`derive_path` — indices 0 and 1 reproduce the two values the existing pinning test
+already carries, which is the cross-check that the method is independent. Index 4 is
+the one digest whose top bit is already clear (`7b51f060`), so it also pins that the
+mask leaves an in-range value alone.
+
+| Mutation | Predicted | Observed |
+|---|---|---|
+| `for step in 1..MAX_PATH_WALK` | the vector shifts one place: index 0's 52,135,370 drops off the front | **exactly that** — `left: [1652162698, 1112410086, 378410041, 2068967520, 899711034]` against `right: [52135370, 1652162698, 1112410086, 378410041, 2068967520]` |
+
+Suite **656 passed, 0 failed** with the test in and the tree restored.
 
 ---
 
