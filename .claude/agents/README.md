@@ -274,11 +274,44 @@ does not reach you is its *report*, which returns to the runner; so anything an
 agent needs passed on must be in a file, not in a report.
 
 **A brief points at the work; it does not contain it.** A dispatch is which piece,
-which worktree, which file:
+which worktree, which file — and it tells the agent to enter that worktree first:
 
 > Act on the findings for `dev-writer` in
 > `openspec/changes/wire-request-envelope/findings/`. Piece branch
-> `piece/wire-request`, worktree `.claude/worktrees/piece-wire`.
+> `piece/wire-request`, worktree `.claude/worktrees/piece-wire` — enter it with
+> `EnterWorktree(path: "…/.claude/worktrees/piece-wire")` before anything else,
+> then use plain relative paths.
+
+**Say that in every brief, because it is what keeps an agent out of the shapes
+that cost a permission click.** An agent that never moves its working directory
+reaches for `cd <dir> && …` or `git -C <dir> …` on every call — the first is the
+single biggest source of prompts here, and the second spreads an absolute path
+through every git command an agent writes. `EnterWorktree` moves the session into
+the tree once, and everything after is an ordinary relative-path command in the
+right place.
+
+Two things about the tool that decide how it is used here:
+
+- **`path` enters an existing worktree; `name` creates one.** The runner has
+  already made the piece's worktree with `git worktree add`, so a dispatched agent
+  passes `path` and never `name` — `name` would branch from `origin/main` and
+  strand the agent in an empty tree with none of the piece's commits.
+- **It only moves the agent that calls it.** From an agent whose directory was
+  pinned at launch, the switch affects that agent alone. So the runner cannot
+  enter a worktree on an agent's behalf; the instruction has to be in the brief,
+  which is why it belongs in the dispatch shape above rather than in a setup step.
+
+The runner itself stays in the main checkout. It dispatches and reads; it is the
+agents that need to be somewhere specific.
+
+**A reviewer has to step out before it deletes its tree.** `git worktree remove`
+cannot remove the directory you are standing in, so the last two acts are
+`ExitWorktree(action: "keep")` — which returns the session to where it started and
+leaves the tree alone — and then the `git worktree remove <absolute-path> --force`
+its own file already specifies. `keep` is the right action there rather than
+`remove`: `ExitWorktree` only removes worktrees it created itself, and these were
+made by the runner with `git worktree add`, so asking it to remove one does
+nothing and the tree would survive.
 
 **If you are writing out what a finding says, you have the wrong shape.** The
 reviewer already wrote it with the measurement behind it; a restatement puts a
