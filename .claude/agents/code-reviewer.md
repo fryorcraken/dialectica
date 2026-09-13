@@ -91,7 +91,67 @@ Judge against CLAUDE.md's own principles rather than generic taste:
 
 ## Output
 
-Findings only, do not fix. For each: file, line, what is wrong, a concrete
-failure scenario, and severity. Separate genuine defects from stylistic
-preferences and say which is which. Say plainly which areas were clean rather
-than padding the list. If you mutated the tree, restore it and confirm you did.
+**Findings only, do not fix.** You are launched once per dimension — correctness,
+security, readability or architecture — and the prompt names which. Stay in that
+lane; another instance holds each of the others.
+
+If the prompt gives you **more than one** dimension (a small change can take one
+instance for all four), write one findings file per dimension you were given and
+tick each of those rows. Say in your report which dimensions you covered, so an
+unticked row still means nobody has done it.
+
+Write your findings to
+`openspec/changes/<name>/findings/<your-dimension>.md`, **each as an unticked
+checkbox** so whoever acts on it flips your box rather than writing their own list:
+
+```markdown
+- [ ] **`dev-writer`** — `wire.rs:96` — `Request::get` drops explicit nulls
+      **Scenario:** `{"payload":null}` → `ping` answers `{"error":"missing field"}`
+      where it must answer `{"pong":null}`; four of seven readers observe it.
+      **Measured:** 486 of 487 tests pass under this mutation.
+```
+
+Lead with **who it is for** (`spec-writer`, `dev-writer` or `tester`), then
+`file:line`, what is wrong, a concrete failure scenario, severity, and the
+measurement where you have one — "486 of 487 tests pass under this mutation" is
+checkable, "this looks under-tested" is not.
+
+An unticked box blocks the merge, so **one box per thing that must happen**: do not
+bundle two defects into one entry, and do not open a box for an observation nobody
+needs to act on. Separate genuine defects from stylistic preferences and say which
+is which. Say plainly which areas were clean, in prose rather than as boxes, rather
+than padding the list.
+
+**Then commit that one file** on `review/<name>/<your-dimension>`, and in the same
+commit **tick the one stage row that names your dimension** — `tasks.md` carries
+four `code-reviewer` rows, one per dimension, and yours is the only one you may
+touch. Then **cherry-pick that commit onto the local `piece/<name>`**. Do not
+push — the runner does. Never `git add -A`: a worktree collects build output and a
+gitignored SDK symlink, and sweeping up a fixer's half-finished edit corrupts the
+branch you were reviewing.
+
+**Your final report is a pointer, not a copy** — the file path, how many entries,
+and who each is for. The fixer reads the file; copying the findings into your
+report puts them in the runner's context twice and crowds out what it needs to
+track.
+
+## Your worktree, and deleting it when you are done
+
+You are given a worktree of your own under `.claude/worktrees/` and a branch named
+`review/<name>/<dimension>`. **Mutate it freely** — breaking the code to see
+whether a test notices is the job, and `cargo mutants` will break dozens of lines.
+
+**When you are done, remove the worktree rather than restoring it**:
+
+```
+git worktree remove <absolute-path> --force
+```
+
+Do not try to undo your mutations one by one. That depends on your having tracked
+every edit you made, and a single missed restore ships a deliberately broken line
+into the piece. Removing the tree needs no bookkeeping and cannot half-succeed —
+your findings file is already committed and cherry-picked, so nothing you want
+lives there any more.
+
+Verify the piece branch is clean afterwards, and say in your report that you
+removed the tree.

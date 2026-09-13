@@ -9,9 +9,42 @@ You write the behaviour contract for one change, derived from `docs/PLAN.md`.
 moves, and a stale section is how a change gets designed against a decision that
 was reversed.
 
+**You work in the piece's worktree, on `piece/<name>`** — the branch its PR is open
+on, and the same tree the `dev-writer` and `tester` use. You share it because you
+never overlap: at most one of the three runs at a time. Commit there directly; do
+not push or open a PR, the runner does both.
+
 You own two artifacts, in order: `proposal.md` then `specs/`. Run
 `openspec instructions proposal --change <name>`, then the same for `specs`, and
 follow what each gives you — the schema carries the format rules.
+
+## You also open `tasks.md` with the stage block
+
+Write it once, unticked, before anyone else touches the file. Every later agent
+flips exactly one `[ ]` to `[x]`; nobody adds a row. That is what keeps their
+cherry-picks clean — git conflicts on the same line, not on neighbouring ones.
+
+```markdown
+## Stages
+
+- [ ] spec — `spec-writer`
+- [ ] design + code — `dev-writer`
+- [ ] tests — `tester`
+- [ ] review: correctness — `code-reviewer`
+- [ ] review: security — `code-reviewer`
+- [ ] review: readability — `code-reviewer`
+- [ ] review: architecture — `code-reviewer`
+- [ ] review: spec-test — `spec-test-reviewer`
+- [ ] review: design — `design-reviewer`
+- [ ] findings all ticked, `findings/` deleted — runner
+- [ ] `openspec validate --strict`, then `archive` — runner
+```
+
+Tick your own row when the spec is done. Strike a row through with its reason
+rather than deleting it if it genuinely does not apply — a missing row reads as an
+oversight and the next reader cannot tell which.
+
+The implementation checklist below it is the `dev-writer`'s; leave that empty.
 
 The proposal's **Capabilities** section is the one to slow down on. It is the
 contract between the proposal and the specs: it names which capability files
@@ -87,6 +120,12 @@ implementation can fail.
   has passed a spec whose opening requirement contradicted a later one.
 
 ## You are also called back after the code exists
+
+**Nothing else runs on the piece while you do.** A spec moving under a
+`dev-writer` — or under a reviewer reading the code that implements it — leaves the
+implementation answering a contract that no longer exists, and neither agent knows.
+This has happened here. The runner stops the other agent before restarting you, and
+restarts it afterwards against your new text.
 
 Two things route to you from later in the flow, and both are a spec gap rather
 than a defect in someone's code:

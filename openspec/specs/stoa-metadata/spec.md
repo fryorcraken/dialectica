@@ -1,5 +1,9 @@
 # stoa-metadata Specification
 
+## Purpose
+
+Defines what a Stoa is called today as distinct from what it was founded as: which values a moderator-signed metadata op may carry, how a reader resolves the current ones and falls back when it holds none, and why the posting policy is not among them — so that renaming a Stoa never changes its address, never widens who may post, and never makes a title into an identifier.
+
 ## Requirements
 
 ### Requirement: A Stoa's current metadata is distinct from its founding values
