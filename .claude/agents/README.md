@@ -5,6 +5,16 @@ schema: OpenSpec supplies the artifacts and their ordering, Claude Code the
 agents. No custom tooling — subagents already give isolated context windows,
 per-role models and tool limits.
 
+> **If you are the session dispatching these agents, read
+> [`RUNNER.md`](RUNNER.md) first — it is written for you, and this file is not.**
+>
+> Everything below is addressed to the agent it names. The runner's own
+> obligations used to live here only as asides, which is why three of them were
+> missed repeatedly: the runner did the work itself instead of dispatching, lost
+> track of whether an agent was still running, and opened eleven PRs for four
+> pieces. A rule in a file its reader has no reason to open is a rule that does
+> not bind.
+
 ## The documents, and what each is for
 
 | Document | Question | Where it ends up |
@@ -322,20 +332,15 @@ approach impossible has produced a result worth as much as the review, and
 unwritten the next agent spends the same afternoon. It goes in `design.md`, beside
 the decision it rules out.
 
-**The runner owns dispatching, and should set a 5–10 minute reminder to ensure at
-least one agent is working; the `dev-writer` opens the PR; the `closer` owns the
-last three stage rows.** `tasks.md`'s stage block is the list — read it to see
-what is left, because an unticked row with no agent running is a stage nobody is
-doing.
-Dispatch by naming the findings files rather than carrying their content, and
-re-run only the reviewers whose findings led to changes.
+**The runner owns dispatching; the `dev-writer` opens the PR; the `closer` owns
+the last three stage rows.** `tasks.md`'s stage block is the list — read it to
+see what is left, because an unticked row with no agent running is a stage nobody
+is doing.
 
-**The runner's last dispatch is the `closer`.** Watching a CI run is the cheapest
-work in this flow and the runner is the most expensive context to spend on it, so
-the tail is delegated like every other stage. What does not delegate is authority:
-the `closer` reports a red run, a stale branch or an unticked box back rather than
-repairing it, and it does not dispatch anyone. See
-[`closer.md`](closer.md).
+**How the runner does that is [`RUNNER.md`](RUNNER.md), not this section** — how
+to tell whether an agent is still running, how many to launch at once, and why
+one piece is one PR. It is kept there rather than restated here because two
+copies of a rule drift and the wrong one gets read.
 
 The reviewers run in parallel and ask different questions:
 
