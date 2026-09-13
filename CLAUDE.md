@@ -317,11 +317,42 @@ These are structural and bite at build time, not review time.
   imports, purely because basecamp has no `Core` — so **"our other singleton
   works" is not evidence that a name is safe.**
 
+  **Read the launch log; it answers this in two commands.** It is at
+  `.scaffold/basecamp/profiles/<profile>/xdg-data/Logos/LogosBasecampDev/logs/basecamp_<timestamp>.log`
+  — a timestamped file, **not** `basecamp.log`, and several directories deeper
+  than you would guess. The wrong path was in `docs/PHASE0-FINDINGS.md` for
+  months and is part of why nobody read one while diagnosing this defect.
+
+  `grep -c "qrc:/qt/qml/Logos/Theme/Theme.qml"` against
+  `grep -c "dialectica_ui/qml/<Name>.qml"` is the whole diagnosis: on the broken
+  branch, 209 and **0**. And `grep -oh "qrc:/qt/qml/Logos/[A-Za-z0-9_/]*\.qml"
+  <log> | sort -u` enumerates what the host actually registers — 29 types, all
+  `Logos`-prefixed except five under `Theme/`, reproducible across launches.
+  That measurement is what makes the `D` prefix a reasoned defence rather than a
+  hopeful one: it does not collide with the host's own naming convention.
+
+  Two things that log also settles, recorded so they are not re-argued.
+  **`Core` does not collide** — 27 resolutions into the plugin's own `Core.qml`,
+  zero into the host namespace. And **`qmllint --missing-property error` cannot
+  see this defect**: CI passes `-I dialectica-ui/src/qml`, which puts our own
+  `Theme.qml` on the import path, so qmllint resolves to the correct singleton
+  where every member exists. It checks a different resolution than the app
+  performs, and a green from it says nothing about the collision.
+
   **A component test cannot catch this**, and that is the durable part. Under
-  `qmltestrunner` the host is simply absent, so any
-  `verify(DTheme.x !== undefined)` passes no matter what. The gate is therefore
-  the static `no QML type name collides with the host` step in `ci.yml`, proven
-  to fail on a tree carrying the old name.
+  `qmltestrunner` the host is simply absent, so `verify(DTheme.x !== undefined)`
+  cannot fail *on the collision* — there is no competitor for it to lose to.
+
+  Say it that precisely: the broader "passes no matter what" is **false**,
+  measured with a probe spec. That assertion does fail if the singleton is
+  renamed, if its `qmldir` entry is dropped, or if its file goes missing; an
+  undeclared name throws rather than resolving. It is blind to the collision and
+  to nothing else — and the overbroad version of the sentence is what left
+  qmllint's `--missing-property error` unexamined, so the imprecision cost
+  coverage rather than being pedantic.
+
+  The gate is therefore the static `no QML type name collides with the host`
+  step, proven to fail on a tree carrying the old name.
 
   **`qmltestrunner` does not fail on a broken binding, and `run-qml-tests.sh`
   has to make it.** Out of the box the runner reports a `ReferenceError` inside
@@ -352,9 +383,25 @@ These are structural and bite at build time, not review time.
   earlier version banned five names basecamp was known to occupy, which is the
   `hand-maintained sweep lists go stale silently` trap: correct only until the
   host registers a sixth, with nothing able to notice. A prefix rule is total
-  over registrations that have not happened yet. `Core` is grandfathered with
-  its reason in the step — if you add a singleton, add the `D`, do not add an
-  exemption.
+  over registrations that have not happened yet.
+
+  **The rule covers every `qmldir` entry, not only the singletons** — a
+  component name registers in the same directory namespace and is shadowable
+  the same way. The host's own launch log registers `LogosButton.qml`, which is
+  a component. A version of this gate that read only `singleton` lines passed
+  green over a `qmldir` declaring `Theme 1.0 Identicon.qml`, measured.
+
+  `Core` and the eleven component names predating the convention are
+  grandfathered, each listed in the gate with its reason. **If you add a type,
+  add the `D`; do not add an exemption** — the list is the enumeration of what
+  is unprotected, not a place to put the twelfth.
+
+  The gate is `dialectica-ui/tests/check_qml_names.py`, run from the `lint` job
+  (it needs no Qt), with `tst_check_qml_names.py` beside it pinning both
+  directions — including that breaking its corpus-builder makes it fail rather
+  than report clean. It was a heredoc in `ci.yml`, and both defects above
+  shipped through review because a heredoc cannot be run without pushing a
+  branch.
 
 ## Scaffold: what `lgs` does and does not do
 

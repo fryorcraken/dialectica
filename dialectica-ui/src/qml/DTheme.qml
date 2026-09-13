@@ -32,9 +32,19 @@ import QtQuick
 //
 // WHAT NO COMPONENT TEST CAN SEE follows from where the collision lives. Under
 // `qmltestrunner` the host is simply absent, so `verify(DTheme.paper !==
-// undefined)` passes whatever this file is called — a check that cannot fail.
+// undefined)` cannot fail ON THE COLLISION — there is no competitor present for
+// it to lose to.
+//
+// Be precise about that, because the broader claim is false and was measured:
+// the assertion is NOT a check that cannot fail. It fails if this singleton is
+// renamed, if its `qmldir` entry is dropped, or if this file goes missing — a
+// probe spec confirms `DTheme.paper` resolves while an undeclared `Theme.paper`
+// throws. It is blind to the host collision specifically, and to nothing else.
+// The overbroad version of this sentence is what stopped anyone examining
+// qmllint's `missing-property`, so it cost something.
+//
 // The gate is therefore the static `no QML type name collides with the host`
-// step in `.github/workflows/ci.yml`.
+// step, which runs `dialectica-ui/tests/check_qml_names.py`.
 QtObject {
     // ---- surfaces -------------------------------------------------------
     readonly property color desk:      "#d9d2c2"   // behind the cards

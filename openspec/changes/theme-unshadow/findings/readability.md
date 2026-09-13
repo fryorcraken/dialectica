@@ -41,7 +41,7 @@ that must happen:
 
 ---
 
-- [ ] **`dev-writer`** — `openspec/changes/theme-unshadow/tasks.md:91` — a ticked
+- [x] **`dev-writer`** — `openspec/changes/theme-unshadow/tasks.md:91` — a ticked
       task cites a `design.md` section that no longer exists
       **Scenario:** task 2.4 ends "Also in `design.md` under *Why the gate
       excludes comment lines*". `grep -n "Why the gate excludes comment lines"`
@@ -53,7 +53,14 @@ that must happen:
       repo names: the rewrite corrected the *content* of 4.6 and left 2.4's
       cross-reference pointing at the pre-rewrite shape.
 
-- [ ] **`dev-writer`** — `openspec/changes/theme-unshadow/tasks.md:73-83` — tasks
+      **Fixed.** 2.4 now carries a "**Superseded**" note saying the false
+      positive is gone rather than documented, and points at the live section,
+      which after this pass is "Two comment-strippers, and the claim narrowed to
+      match" — that heading absorbed the old 4.6 content plus the fix for the
+      fourth architecture box, so pointing 2.4 at the heading you found missing
+      would have stranded it a second time.
+
+- [x] **`dev-writer`** — `openspec/changes/theme-unshadow/tasks.md:73-83` — tasks
       2.1 and 2.3 describe a gate that no longer exists, with no correction note,
       while 4.4–4.7 carry the corrections
       **Scenario:** 2.1 says the step has "Three arms: a `.qml` file named after a
@@ -71,7 +78,26 @@ that must happen:
       archive step read. Three of its ticked rows describe a mechanism the piece
       deliberately replaced, and two of them say so nowhere.
 
-- [ ] **`dev-writer`** — `.github/workflows/ci.yml:571-745` — the step carries
+      **Fixed.** 2.1 and 2.3 now carry "**Superseded**" notes in the same style
+      as 4.1/4.2/4.5, kept rather than rewritten — a ticked row that quietly
+      changes its meaning is worse than one that says what it used to claim and
+      where the truth now lives.
+
+      2.1's note states the specific thing you verified: **there was never a
+      filename arm.** I checked the same way and agree — the script reads
+      `qmldir` and the `.qml` bodies, never a `.qml` basename. The row also
+      claimed the `qml` job, which the third architecture box has now moved.
+
+      2.3's note separates its mechanism from its finding: `grep -v` is gone
+      (your `grep -n "grep -v"` returning nothing is correct), but the
+      observation it recorded — that `DTheme.qml`'s header would redden a
+      correct tree without comment handling — still holds, and is now pinned as
+      a test case from the accepting side rather than confirmed by hand.
+
+      Six new rows (4.9–4.14) record this pass, so the same decay does not
+      recur: they describe the shipped gate, not the one being replaced.
+
+- [x] **`dev-writer`** — `.github/workflows/ci.yml:571-745` — the step carries
       roughly 108 lines of comment for ~50 lines of code, and most of it is a
       fourth copy of a narrative already in three other files
       **Scenario:** the preamble (571–636, 66 lines) plus in-script comments
@@ -92,7 +118,30 @@ that must happen:
       replacing 571–594 with a one-line pointer to the `CLAUDE.md` trap entry
       would lose nothing a reader of a red needs.
 
-- [ ] **`dev-writer`** — `.github/workflows/ci.yml:686` — the grandfather clause
+      **Fixed, and further than you asked**, because the architecture boxes
+      forced the same conclusion from a different direction: the Python is no
+      longer in `ci.yml` at all. It is
+      `dialectica-ui/tests/check_qml_names.py`, which makes the narrative
+      question moot for the workflow and testable for the gate.
+
+      What remains in `ci.yml` is 32 lines of comment (221–252) over two steps
+      of two lines each — down from ~108 over ~50 — and
+      it carries only the four things you identify as load-bearing *for a CI
+      step*: why static rather than a test, why a prefix rather than a list, why
+      a script rather than a heredoc, and why it is in `lint`. The mechanism,
+      the withdrawn precedence premise and the measurements now live in
+      `CLAUDE.md`'s trap entry, which the step points at by name — your
+      reasoning that this is where a person ADDING a singleton meets it is the
+      reason, and I have quoted it in the comment.
+
+      That takes the copies from four to three (`CLAUDE.md`, `DTheme.qml`,
+      `design.md`). `DTheme.qml`'s header is the one I did not cut: it is what a
+      person editing the singleton reads, and it is the file whose *name* is the
+      fix. If you think three is still one too many, that is a fair follow-up
+      and I would take `DTheme.qml` down to a pointer too — but I would rather
+      not do it in the same pass that rewrote the gate.
+
+- [x] **`dev-writer`** — `.github/workflows/ci.yml:686` — the grandfather clause
       is written so the next person adds a `D`, but the *code* does not say which
       of the three arms the exemption applies to
       **Scenario:** `GRANDFATHERED = {"Core"}` is preceded by 18 lines (668–685)
@@ -108,3 +157,21 @@ that must happen:
       **Severity: low.** The reasoning is well written; it is the blast radius of
       the exemption that is unstated, and an unexplained-scope exemption is the
       shape that decays into a second one.
+
+      **Fixed**, with your sentence essentially as written. The set now carries
+      a "SCOPE OF THE EXEMPTION" paragraph stating that it exempts a name from
+      the prefix rule **only** — not a missing file, and not a bare reference —
+      and it says so at the point the wrong move is made, i.e. at the set
+      itself, framed for the reader who arrived from a reference-arm red.
+
+      Your prediction that an unexplained-scope exemption "decays into a second
+      one" came true during this pass, in a way worth recording: the first
+      architecture box's fix required adding **eleven** names to that set. The
+      comment now distinguishes the two kinds — `Core`'s original reason, and
+      the eleven components which are there because the widened rule would
+      otherwise fail on them — and states that the list is the enumeration of
+      what is unprotected rather than a place to put the twelfth. The "do not
+      add a name here — add the `D` instead" line you liked is kept verbatim.
+
+      Pinned: adding `Theme` to the set fails three test cases, so the tuning
+      move that turns a red green is itself red.

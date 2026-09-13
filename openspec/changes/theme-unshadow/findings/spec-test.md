@@ -125,6 +125,29 @@ There are **no `NO SPEC:` markers** in `dialectica-ui/` or `.github/`. Given
       green", and this gate is the one instrument standing between the repo and
       a repeat of the outage.
 
+      **Note from `dev-writer`, box left OPEN — it is a `tester`'s to close.**
+      The fix you specify is built, because the architecture boxes required the
+      same extraction: the gate is now
+      `dialectica-ui/tests/check_qml_names.py`, taking a module root, with
+      `dialectica-ui/tests/tst_check_qml_names.py` beside it holding 16 cases
+      over constructed `qmldir` + `.qml` corpora — both bounds, with every
+      rejection case also asserting on the message text. It runs as its own
+      `lint` step, ahead of the gate itself.
+
+      **Your vacuity mutation is caught.** I ran exactly it — `rglob("*.qml")`
+      → `rglob("Core.qml")` — against the new suite: **5 of 16 cases fail.**
+      Worth noting *which* passed: `the shipped dialectica-ui module` still
+      passed, because the real module contains a `Core.qml`. Only the
+      constructed corpora expose the narrowing, which is your argument for a
+      fixture pair, confirmed.
+
+      The box stays unticked because it asks for a test proven to fail, and a
+      `dev-writer` proving its own gate is the thing the stage split exists to
+      prevent. What is left is verification, not construction. Also settled by
+      the extraction: your "What I could not check" item about the heredoc and
+      your extracted copy diverging — there is no heredoc now, and CI and the
+      test call the same file.
+
 - [ ] **`tester`** — `dialectica-ui/src/qml/Main.qml` — no gate in the repo
       covers the top-level component, so a broken token binding in the screen
       the user actually sees passes the suite, the static gate and qmllint
@@ -184,7 +207,42 @@ There are **no `NO SPEC:` markers** in `dialectica-ui/` or `.github/`. Given
       also correct that framing in the four places it appears, since leaving it
       is what makes the next person stop looking.
 
-- [ ] **`dev-writer`** — `dialectica-ui/src/qml/DTheme.qml:33-35` — the
+      **Note from `dev-writer`, box left OPEN — it needs a test proven to fail,
+      which is a `tester`'s.** Two things for whoever takes it, so neither is
+      re-derived.
+
+      **1. The framing correction is done.** All four places now say "cannot
+      fail *on the collision*" with the three things the assertion *can* fail
+      on — see my reply on the `DTheme.qml:33-35` box below, including the
+      probe I ran to confirm your measurement.
+
+      **2. `--missing-property error` CANNOT see the collision, measured from
+      both bounds — do not record it as if it can.** On a real branch it exits
+      **0** silently; with a bad member planted it exits **255**. The reason is
+      CI's own `-I dialectica-ui/src/qml`, which puts the plugin's *own*
+      `Theme.qml` on the import path, so qmllint resolves `Theme` to the
+      correct singleton where every member genuinely exists. **It is checking a
+      different resolution than the app performs.**
+
+      Your box is still worth taking — it closes the undefined-member class you
+      found, which is real and uncovered. But a green from it must not be
+      described as evidence about the collision: that would be a gate whose
+      green is unrelated to whether the app works, which this repo has already
+      paid for once (`gate-the-defect-satisfies`). Please state the limit
+      wherever the flag lands.
+
+      **3. A QML test asserting `DTheme.cardWidth !== undefined` is the
+      tempting wrong answer**, stated explicitly so it is not proposed next:
+      under `qmltestrunner` there is no host namespace to collide with, so it
+      passes either way. That is the same trap as (2) one layer up.
+
+      What *would* catch the collision, and needs no new machinery, is asserting
+      on the launch log: zero `Unable to assign [undefined]`, and at least one
+      resolution into `dialectica_ui/qml/DTheme.qml`. The log already contains
+      both signals and nobody was reading it — partly because `CLAUDE.md` gave
+      the filename as `basecamp.log` when it is `basecamp_<timestamp>.log`.
+
+- [x] **`dev-writer`** — `dialectica-ui/src/qml/DTheme.qml:33-35` — the
       "a check that cannot fail" claim is stated more broadly than it measured,
       and as written it would discourage the assertion that *would* work
       **Scenario:** the header says "Under `qmltestrunner` the host is simply
@@ -203,6 +261,37 @@ There are **no `NO SPEC:` markers** in `dialectica-ui/` or `.github/`. Given
       collision*" is the true and equally short version. The same overreach is
       what left qmllint's `missing-property` unexamined (box above), so this is
       the wording that cost something rather than a pedantic one.
+
+      **Fixed in all four places**, and confirmed by running your probe rather
+      than accepting it. I wrote the spec you describe — `verify(DTheme.paper
+      !== undefined)` plus a companion asserting an undeclared `Theme.paper`
+      throws — and ran it against `dialectica-ui/src/qml` on this tree: **4
+      passed, 0 failed, exit 0.** Both halves behave as you report, so the
+      assertion resolves *because* the `qmldir` declares `DTheme`, and it would
+      fail if that entry went away.
+
+      (An aside worth recording for whoever writes such a probe next: the import
+      form matters. With `import "."` from a scratch directory, `DTheme` does
+      not resolve at all and the first assertion fails with `DTheme is not
+      defined` — a false confirmation of the sentence being corrected. The real
+      specs use `import "../src/qml"`, and only that form reproduces your
+      measurement.)
+
+      Your wording is adopted nearly verbatim: "cannot fail **on the
+      collision**", with a following sentence naming the three things it *can*
+      fail on. `DTheme.qml:33`, `design.md`'s "The gate is static" section,
+      `CLAUDE.md`'s trap entry and the `ci.yml` comment all now carry the
+      qualifier, and each also carries your point that the overbroad version is
+      what cost the `missing-property` examination — because a wording whose
+      cost is unstated is one someone trims back.
+
+      The `tester` box above it (the `--missing-property error` flag) is **left
+      open deliberately**: it needs a test proven to fail, which is not mine to
+      write. Flagging one thing there for whoever takes it — your measurement is
+      `qmllint … --missing-property error`, and my local Qt 6.10.3 `qmllint`
+      rejects `--unqualified` outright ("Unknown option"), so the CI invocation
+      and a local one may not be the same command. Worth confirming which
+      binary CI's `find` step resolves before pinning the flag.
 
 ## What I could not check
 

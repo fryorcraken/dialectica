@@ -38,7 +38,7 @@ it does not yet cover its own subject.
 
 ---
 
-- [ ] **`dev-writer`** — `.github/workflows/ci.yml:693` — the prefix rule covers
+- [x] **`dev-writer`** — `.github/workflows/ci.yml:693` — the prefix rule covers
       only `singleton` lines, so a `qmldir` entry declaring a non-singleton type
       named exactly `Theme` passes the gate green
       **Scenario:** measured in this worktree. Add one line to
@@ -68,7 +68,34 @@ it does not yet cover its own subject.
       That trades one silent gap for eleven named ones, which is the honest
       state and makes the twelfth visible.
 
-- [ ] **`dev-writer`** — `.github/workflows/ci.yml:731` — arm 3 hardcodes the
+      **Fixed**, taking the second shape you name. Confirmed before fixing
+      rather than inherited: I reconstructed the pre-fix arm verbatim, added
+      `Theme 1.0 Identicon.qml` to `qmldir`, and reproduced your measurement —
+      **exit 0, `ok: 17 QML file(s) checked`** over a `qmldir` declaring a type
+      called `Theme`. The widened gate exits 1 at `line=13` on that same tree.
+
+      `qmldir_entries` now yields every declaration — `singleton`, `internal`
+      and plain component — skipping only the command lines (`module`,
+      `depends`, `import`, …) that declare no type. The eleven component names
+      are in `GRANDFATHERED` explicitly, with the comment saying they are the
+      enumeration of what is *unprotected* rather than a place to put a twelfth.
+      `Core` keeps its stronger reason, stated separately.
+
+      On your "two shapes" framing: the eleven renames are the shape that makes
+      the invariant hold by construction, and I did not take it — it is eleven
+      renames across every view file, which is a piece of its own. `design.md`
+      records that under "The rule covers every `qmldir` entry", including the
+      gap that remains by name.
+
+      The gate is also no longer a heredoc, which is why both of your findings
+      could ship through review at all: it is
+      `dialectica-ui/tests/check_qml_names.py` with `tst_check_qml_names.py`
+      beside it, 16 cases, both bounds. Three of them fail if the entry walk is
+      narrowed back to `singleton`; one of them is that the gate must still
+      ACCEPT a `qmldir` carrying `module`/`depends`/`import` lines, which is the
+      regression the narrowing would otherwise be a fix for.
+
+- [x] **`dev-writer`** — `.github/workflows/ci.yml:731` — arm 3 hardcodes the
       single name `Theme`, so the gate detects the collision that already
       happened and no other
       **Scenario:** arm 1 is the general rule (every singleton carries a `D`);
@@ -88,7 +115,31 @@ it does not yet cover its own subject.
       instead of over the one name someone remembered, and it removes the
       hardcoded literal that a future rename will strand.
 
-- [ ] **`dev-writer`** — `.github/workflows/ci.yml:637` — the gate is placed in
+      **Fixed**, exactly as you specify. `stale` is now built from `qmldir`:
+      for each type declared `DX`, a bare `X` in any `.qml` body is reported,
+      with the message naming both the bare name found and the declared name it
+      should be. Your `Core` scenario measured before the fix, so the cost is
+      concrete rather than hypothetical: renaming `Core` to `DCore` leaves **33
+      stale `Core.` references** across `FeedScreen.qml` and three spec files,
+      and the pre-fix gate reports **exit 0** on all 33.
+
+      One thing the fix surfaced that neither of us predicted, recorded because
+      it changes what a red looks like. Deriving *only* from `D`-prefixed names
+      made the gate go quiet on `main`: `main` declares no `D`-prefixed type at
+      all, so the derived set was empty and the gate reported the one `qmldir`
+      line and nothing else — losing the 116 bare references that are this
+      change's proof-of-failure figure. So the set is seeded from two
+      directions: the `D`-prefixed declarations, and the names arm 1 has just
+      *rejected*, since a type declared without the `D` is one we are asking to
+      be renamed and every reference to it must change with it. Against `main`
+      the gate now reports **117 lines = 1 `qmldir` + the same 116** (113 under
+      `src/qml/`, 3 in `tests/tst_identicon.qml`), matching `design.md` exactly.
+
+      Pinned by `a tree mid-rename`, which fails if that seeding is removed —
+      and it asserts on the message, so "rejected for the wrong reason" does not
+      pass it.
+
+- [x] **`dev-writer`** — `.github/workflows/ci.yml:637` — the gate is placed in
       the `qml` job behind a full Qt6 `apt-get install`, while its three sibling
       static QML checks live in the `lint` job with no Qt at all
       **Scenario:** the step is pure `python3` — `pathlib`, `re`, and reading
@@ -107,7 +158,18 @@ it does not yet cover its own subject.
       shadow check puts the two "no QML type of ours may be named X" gates in one
       place, which is where someone adding the third will look.
 
-- [ ] **`dev-writer`** — `.github/workflows/ci.yml:661` vs `:365` — the two gates
+      **Fixed**, to exactly the position you name — it now sits immediately
+      after `no QML component shadows a Qt built-in`, and the comment states the
+      pairing: that check covers names QtQuick claims, this one covers names
+      basecamp claims. Verified by re-parsing the workflow with `yaml.safe_load`
+      and printing both jobs' step lists, so the placement is what the file
+      reads as rather than what the diff looks like.
+
+      The move came free with the extraction the first box needed: a step that
+      is one `run:` line has nothing job-specific left in it. Both jobs are
+      otherwise unchanged — `qml` keeps its five Qt-dependent steps.
+
+- [x] **`dev-writer`** — `.github/workflows/ci.yml:661` vs `:365` — the two gates
       converged in style but each still owns its own definition of a comment, so
       they are not yet maintainable together
       **Scenario:** the prompt asks whether this piece's adoption of
@@ -128,3 +190,23 @@ it does not yet cover its own subject.
       decision to make is whether these become one helper the workflow's Python
       steps share, or whether the claim in `design.md` is narrowed to "one place
       per step". Either is fine; leaving the claim broader than the code is not.
+
+      **Fixed by taking the second option: the claim is narrowed, not the code
+      unified.** `design.md` has a new section, "Two comment-strippers, and the
+      claim narrowed to match", which states plainly that there are two
+      implementations for two languages, that neither knows the other exists,
+      and that the surviving principle is the per-step one — strip once up front
+      so every check *within a step* inherits one answer, rather than bolting a
+      filter onto the one arm that needs it.
+
+      The reasoning for choosing that over unifying, since you left it open: the
+      two strip different syntaxes because they read different languages, so a
+      shared helper would need a language parameter, and it would have to be
+      importable from two jobs — which for a workflow means a third file
+      existing to be shared by two callers that disagree about what it should
+      do. That costs more than it buys at two. `design.md` names the point to
+      reconsider: a third gate needing stripping.
+
+      Your framing that this is "an observation about direction rather than a
+      defect" is right, and the defect was the sentence rather than the code —
+      which is why the fix is in prose.

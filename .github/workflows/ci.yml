@@ -218,6 +218,50 @@ jobs:
           done
           [ "$fail" -eq 0 ] && echo "ok: no shadowed component names"
 
+      # The second half of "no QML type of ours may be named X", and it sits
+      # beside the first on purpose: the check above covers names QtQuick
+      # claims, this one covers names BASECAMP claims, and someone adding a
+      # third will look here rather than in two jobs.
+      #
+      # It is in `lint` and not in `qml` because it needs no Qt — it is
+      # `pathlib` and `re` over the checkout — and `lint` installs nothing, so
+      # the cheapest check in the repo now also reports the fastest. It used to
+      # sit in the `qml` job behind a full Qt6 apt-get for no reason.
+      #
+      # WHY IT IS A SCRIPT AND NOT A HEREDOC. It was a heredoc, and a heredoc
+      # cannot be tested: the only way to exercise it was to push a branch and
+      # read a log. Both of the defects the architecture review found — a
+      # prefix rule that read only `singleton` lines, and a reference arm
+      # hardcoded to one name — shipped through review for that reason.
+      #
+      # The gate is now `dialectica-ui/tests/check_qml_names.py`, and its own
+      # tests run FIRST, in the step immediately below: a gate is part of the
+      # measurement, and one narrowed until it matches nothing passes exactly
+      # as quietly as a correct one. That is the standard this repo already
+      # holds `check_bindings` to. The tests pin both directions and require a
+      # FAILURE when the gate's corpus is empty, so a walk that silently stops
+      # matching cannot report clean.
+      #
+      # WHY IT IS A NAME CHECK AT ALL, in one paragraph with a pointer rather
+      # than the fourth copy of the narrative: the collision lives in the host's
+      # C++ type registration, so no component test in this repo can see it —
+      # `qmltestrunner` runs with the host absent, so an assertion like
+      # `verify(DTheme.paper !== undefined)` cannot fail ON THE COLLISION. Note
+      # the qualifier: that assertion is not a check that cannot fail, it is one
+      # blind to this defect specifically, and the overbroad version of the
+      # claim is what left qmllint's `missing-property` unexamined. The
+      # mechanism, the withdrawn precedence premise and the measurements are in
+      # CLAUDE.md's "Module contract traps", which is where a person ADDING a
+      # singleton meets them.
+      #
+      # A red here is diagnosed from the error message alone; it names the file,
+      # the line, the offending name and what to rename it to.
+      - name: the QML type-name gate's own tests
+        run: dialectica-ui/tests/tst_check_qml_names.py
+
+      - name: no QML type name collides with the host
+        run: dialectica-ui/tests/check_qml_names.py dialectica-ui
+
       - name: every QML file importing layouts declares the import
         run: |
           set -eu
@@ -567,194 +611,6 @@ jobs:
             exit 1
           fi
           echo "ok: qmllint clean"
-
-      # No QML type of ours may be named something the HOST also registers.
-      #
-      # This is the gate for the defect that stopped the screen rendering at
-      # all: our theme singleton was called `Theme`, basecamp registers a type
-      # of the same name, and basecamp's won. Every `Theme.x` in the view
-      # resolved to basecamp's object, every token came back `undefined`, and
-      # QML fell back to its defaults. One name collision took the entire
-      # visual system out at once.
-      #
-      # WHERE THE COLLISION LIVES, which is the load-bearing fact: in the HOST's
-      # C++ type registration, which no file-based import path can reach.
-      #
-      # A PREMISE THIS PROJECT HELD AND WITHDREW, named because it is the
-      # intuitive wrong answer and will otherwise be re-derived: that a host
-      # registration "outranks a plugin directory's `qmldir` entry", i.e. that
-      # the two compete and the host wins on precedence. Measured on Qt 6.10.3
-      # and FALSE. A competing `Theme` singleton staged in a second directory
-      # and handed to the runner via `-import` does NOT shadow the plugin
-      # directory's own `qmldir` entry; neither does making that directory a
-      # named module on the import path. Directory `qmldir` entries are not in
-      # a precedence contest a file-based competitor can enter and lose. So
-      # "stage a competitor and watch it win" is not a reproduction, and an
-      # afternoon spent building one produces two green runs and no finding.
-      #
-      # WHY THIS IS STATIC AND NOT A QML TEST follows directly from where the
-      # collision lives. Under `qmltestrunner` the host is simply absent, so
-      # `DTheme` always resolves to our own file and an assertion like
-      # `verify(DTheme.paper !== undefined)` passes no matter what — a check
-      # that cannot fail is worth nothing by this project's own standard. The
-      # component layer is structurally blind here, and a static check is the
-      # honest gate rather than a second-best one.
-      #
-      # THE SUITE IS NOW A SECOND LINE OF DEFENCE, BUT IT WAS NOT BY DEFAULT,
-      # and the difference is worth knowing before trusting a green run.
-      # `qmltestrunner` reports a `ReferenceError` raised inside an instantiated
-      # component as a QWARN, not a failure: a stale `Theme` reference in
-      # `MarginNote.qml` printed `ReferenceError: Theme is not defined` dozens
-      # of times across the `FeedStates` spec and the runner still reported 0
-      # failed, exit 0. Out of the box the suite only catches a stale reference
-      # sitting inside a `compare()`, so this step and the suite shared a blind
-      # spot rather than covering each other.
-      #
-      # `check_bindings` in run-qml-tests.sh closes that half: the runner now
-      # fails on any binding that evaluated to `undefined` at runtime. The two
-      # checks are genuinely independent, which is measurable rather than
-      # asserted — a D-prefixed typo (`DThemeTypo.note`) and a missing token
-      # (`DTheme.noSuchToken`) both contain no bare `Theme`, so THIS STEP EXITS
-      # 0 on both while the runner exits 1. Conversely this step reads source,
-      # so it catches the old name in files no spec instantiates.
-      #
-      # Neither sees the collision itself — under qmltestrunner the host is
-      # absent — so that remains this step plus a real basecamp launch.
-      #
-      # WHAT A STATIC CHECK CAN SEE, and the shape it took after review.
-      #
-      # The first version of this gate ENUMERATED host names — a list of five
-      # that basecamp was known to occupy. The security review rejected that as
-      # the `hand-maintained sweep lists go stale silently` pattern this project
-      # has already been bitten by: the list is correct only until basecamp
-      # registers a sixth name, and nothing in CI can detect that it has. The
-      # verified launch log for this change shows the host registering
-      # `LogosButton.qml` under `qrc:/qt/qml/Logos/`, so the namespace
-      # demonstrably holds component-shaped names beyond any five.
-      #
-      # So the gate enforces THE CONVENTION instead, which is what actually
-      # defends us: every singleton we declare carries a `D` prefix. That is
-      # total over host registrations that have not happened yet, where a list
-      # is total over none of them. `design.md` already named the prefix as the
-      # defence; this makes the gate check the thing the design relies on.
-      #
-      # COMMENTS ARE STRIPPED ONCE, UP FRONT, rather than filtered per-check.
-      # This is `piece/publish-envelope`'s shape and it is better than the
-      # `grep -v` this step used to bolt onto the one arm that needed it: there
-      # is one place to be right about what a comment is, and the next check
-      # added here inherits it instead of re-deriving it. The old form also had
-      # two false negatives and one false positive that the stripping approach
-      # simply does not have — see below.
-      - name: no QML type name collides with the host
-        run: |
-          python3 - <<'PY'
-          import pathlib, re, sys
-
-          status = 0
-          qml_root = pathlib.Path("dialectica-ui")
-
-          # EVERY .qml in the module, not just `src/qml/*.qml`. The previous
-          # form globbed `src/qml/*.qml`, which left `dialectica-ui/tests/`
-          # outside the gate entirely — a correctness finding, since the step is
-          # written as the authority on "no surviving bare `Theme.` reference in
-          # the view" and did not read four of the module's sixteen QML files.
-          # rglob also reaches a subdirectory under `src/qml/`, should one ever
-          # be added; the old glob could not.
-          qml_files = sorted(qml_root.rglob("*.qml"))
-          if not qml_files:
-              print("::error::no QML files found — this gate measured nothing")
-              sys.exit(1)
-
-          # `//` to end of line, and `/* */` however many lines it spans.
-          # Replacing a block comment with a blank line per line it covered
-          # keeps every subsequent line number honest, so an error message
-          # cites the line a human will find in the file.
-          def strip_comments(src):
-              src = re.sub(r"/\*.*?\*/",
-                           lambda m: "\n" * m.group(0).count("\n"),
-                           src, flags=re.S)
-              return re.sub(r"//.*$", "", src, flags=re.M)
-
-          # ---- 1. every singleton we declare is D-prefixed --------------------
-          #
-          # `Core` is grandfathered, and the exemption is written here with its
-          # reason rather than left as a bare name in a list.
-          #
-          # It predates this convention and `piece/theme-unshadow` deliberately
-          # did not rename it: that piece's scope was the one collision that
-          # stopped the screen rendering, and a diff doing two things cannot be
-          # reviewed for either. `Core` is also the evidence that the host does
-          # NOT claim every plausible name — it resolved correctly throughout
-          # the outage, in the same files, under the same imports, purely
-          # because basecamp has no `Core`.
-          #
-          # That is exactly why the exemption is a grandfather clause and not a
-          # precedent: "basecamp has no `Core` TODAY" is a fact with no
-          # expiry date attached, and the whole point of the prefix rule is to
-          # stop depending on such facts. Renaming it to `DCore` is the right
-          # end state and belongs to a piece of its own. Do not add a second
-          # name here — add the `D` instead.
-          GRANDFATHERED = {"Core"}
-
-          qmldir = qml_root / "src/qml/qmldir"
-          for n, line in enumerate(qmldir.read_text().splitlines(), 1):
-              if line.startswith("#") or not line.strip():
-                  continue
-              parts = line.split()
-              if parts[0] == "singleton" and len(parts) >= 2:
-                  name = parts[1]
-                  if name in GRANDFATHERED:
-                      continue
-                  if not re.fullmatch(r"D[A-Z][A-Za-z0-9]*", name):
-                      print(f"::error file={qmldir},line={n}::singleton '{name}' "
-                            "is not D-prefixed. Basecamp registers its own QML "
-                            "types in the host's C++ type registration, and a "
-                            "name it also uses resolves to ITS object — every "
-                            "property then reads undefined at runtime. The `D` "
-                            "is what makes the name unclaimable. Rename to "
-                            f"'D{name}'.")
-                      status = 1
-
-          # ---- 2. the file backing each singleton exists ----------------------
-          # A qmldir naming a file that is not there fails at load, not here,
-          # and the load failure is the one basecamp makes hard to see.
-          for line in qmldir.read_text().splitlines():
-              parts = line.split()
-              if len(parts) == 4 and parts[0] == "singleton":
-                  target = qmldir.parent / parts[3]
-                  if not target.exists():
-                      print(f"::error file={qmldir}::declares '{parts[3]}', "
-                            "which does not exist")
-                      status = 1
-
-          # ---- 3. no binding reaches a bare, unprefixed `Theme` ---------------
-          #
-          # ANCHORED AT LINE START, which the previous regex was not. It used
-          # `[^A-Za-z]Theme\.`, requiring a character before `Theme` — so a
-          # binding split across two lines, with `Theme.note` at column 0, was
-          # invisible to it. That is not a hypothetical: it is a genuinely
-          # broken binding (the property resolves `undefined` at runtime, the
-          # exact defect this piece exists to prevent) and it passed this gate,
-          # qmllint AND the QML suite all green. Measured on this tree.
-          #
-          # `\b` on the trailing side catches `Theme` split from `.ink`, the
-          # other line-break form that escaped the old regex.
-          pattern = re.compile(r"(?<![A-Za-z])Theme\b")
-          for path in qml_files:
-              code = strip_comments(path.read_text())
-              for n, line in enumerate(code.splitlines(), 1):
-                  if pattern.search(line):
-                      print(f"::error file={path},line={n}::references a bare "
-                            "'Theme' — dialectica's tokens are 'DTheme'. A bare "
-                            "Theme resolves to basecamp's singleton, so every "
-                            "token read from it is undefined at runtime.")
-                      status = 1
-
-          if status == 0:
-              print(f"ok: {len(qml_files)} QML file(s) checked, "
-                    "every singleton D-prefixed, no bare Theme reference")
-          sys.exit(status)
-          PY
 
       # The runner's own undefined-binding check, tested before the suite that
       # relies on it. `check_bindings` is what turns a QML binding evaluating to

@@ -68,10 +68,16 @@ so neither is re-done from scratch:**
 
 ## 2. The gate
 
-- [x] 2.1 Add `no QML type name collides with the host` to the `qml` job in
-      `.github/workflows/ci.yml`, after the `qmllint` step. Three arms: a `.qml`
-      file named after a host type, a `qmldir` entry declaring one, and a bare
-      `Theme.` reference surviving in the view.
+- [x] 2.1 Add `no QML type name collides with the host` to
+      `.github/workflows/ci.yml`.
+      **Superseded — this row describes a gate that no longer exists**, and is
+      kept rather than rewritten because a ticked row that quietly changes its
+      meaning is worse than one that says what it used to claim. It said "three
+      arms: a `.qml` file named after a host type, a `qmldir` entry declaring
+      one, and a bare `Theme.` reference". There was never a **filename** arm —
+      the script reads `qmldir` and the `.qml` bodies, never a `.qml` basename.
+      It also placed the step in the `qml` job. The shipped arms and their home
+      are in 4.7, 4.9, 4.10 and 4.11 below; `design.md` carries the reasoning.
 - [x] 2.2 **Prove it fails.** Run against `/home/fryorcraken/src/rad/dialectica`
       (the `main` checkout, which carries the defect): exit 1, with all three arms
       firing — `'Theme' is a type name basecamp also registers`, `qmldir declares
@@ -80,7 +86,14 @@ so neither is re-done from scratch:**
       seen green proves nothing, which is why this was measured both ways.
 - [x] 2.3 Confirm the comment-exclusion arm is exercised rather than dead —
       `grep -n "[^A-Za-z]Theme\."` over `DTheme.qml` returns two comment lines, so
-      without the `grep -v` the gate would be permanently red on a correct tree.
+      without the comment handling the gate would be permanently red on a correct
+      tree.
+      **Superseded in its mechanism, not its finding.** This row said "without
+      the `grep -v`"; `grep -n "grep -v"` over `ci.yml` now returns nothing,
+      because 4.6 replaced that filter with `strip_comments`. The observation
+      still holds and is now pinned from the accepting side as a test case
+      ("a bare Theme inside //, /* */ and trailing comments") rather than
+      confirmed by hand.
 - [x] 2.4 Document the third arm's known false positive rather than leaving it to
       be rediscovered: only a **leading** `//` is excluded, so a bare `Theme.` in a
       `/* */` block comment or in a trailing comment after code fails the arm while
@@ -88,7 +101,13 @@ so neither is re-done from scratch:**
       which is the elaborate thing this gate deliberately is not. The step's
       comment now says a red should be checked against the cited line first, so a
       comment-style failure is diagnosed in seconds rather than investigated as a
-      collision. Also in `design.md` under "Why the gate excludes comment lines".
+      collision.
+      **Superseded: the false positive is gone rather than documented.** 4.6
+      replaced the leading-`//` exclusion with `strip_comments`, which handles
+      block and trailing comments too, so there is no longer a correct tree this
+      arm reddens. The cross-reference this row used to carry pointed at a
+      `design.md` heading the 4.6 rewrite renamed; the live section is
+      "Two comment-strippers, and the claim narrowed to match".
 
 ## 3. Making the failure visible, and what could not be made visible
 
@@ -194,6 +213,57 @@ so neither is re-done from scratch:**
       see. Against this tree: exit 0, `ok: 17 QML file(s) checked`. Suite still
       41 passed; `qmllint` still clean; working tree confirmed byte-clean after
       every mutation via `git status --short`.
+
+## 4c. Closing the architecture and readability findings
+
+- [x] 4.9 **The prefix rule reads every `qmldir` entry, not only `singleton`
+      lines** — the high-severity architecture box. Confirmed before fixing
+      rather than inherited: `Theme 1.0 Identicon.qml` added to `qmldir`, the
+      pre-fix gate re-run from a verbatim copy of its logic, **exit 0, `ok: 17
+      QML file(s) checked`** over a `qmldir` declaring a type named `Theme`.
+      The widened gate exits 1 at `line=13` on the same tree. The eleven
+      existing component names enter `GRANDFATHERED` explicitly, which trades
+      one silent gap for eleven enumerated ones; `design.md` records why that,
+      and not eleven renames, is this piece's scope.
+- [x] 4.10 **The stale-reference arm derives its names from `qmldir`** rather
+      than hardcoding `Theme`. Measured: renaming `Core` to `DCore` leaves 33
+      bare `Core.` references across `FeedScreen.qml` and three specs, and the
+      pre-fix gate reports **exit 0** on every one. The set is seeded from the
+      rejected names too — without that the gate against `main` reported the
+      `qmldir` line and fell silent about the bodies. Re-measured against
+      `main` after both changes: **117 error lines = 1 qmldir + 116 bare
+      references, 3 of them in `tests/tst_identicon.qml`**, which is exactly
+      the figure and split `design.md` has carried throughout.
+- [x] 4.11 **The gate is a script with its own tests, and moved to `lint`.**
+      `dialectica-ui/tests/check_qml_names.py` takes a module root;
+      `tst_check_qml_names.py` beside it holds 16 cases. It needs no Qt, so it
+      sits in `lint` next to `no QML component shadows a Qt built-in` — the
+      same question asked of a different namespace — instead of behind a Qt6
+      `apt-get`. Workflow re-parsed with `yaml.safe_load` to confirm both jobs
+      are intact and the step order is what it reads as.
+- [x] 4.12 **Prove the test can fail, in the ways a tuner would break it.**
+      Six mutations, each applied and reverted: entry walk narrowed back to
+      `singleton` → 3 fail; file walk narrowed to `src/qml/*.qml` → 1 fails;
+      reference arm hardcoded back to `Theme` → 2 fail; `Theme` added to
+      `GRANDFATHERED` → 3 fail; rejected-name seeding removed → 1 fails; and
+      **`qmldir_entries` stubbed to return nothing → 12 of 16 fail**, which is
+      the one that matters. Seven of those twelve fail *because* each rejection
+      case also asserts on the message text: without that assertion they would
+      have counted as correctly-rejected while the gate measured nothing. That
+      is the defect family this repo has shipped before — a filter pinned from
+      both sides whose corpus-builder was then emptied with every test green.
+- [x] 4.13 **Scope the grandfather clause where the wrong move is made.** The
+      set is consulted by the prefix rule alone, so a reader hitting a red from
+      the reference arm could add a name to it and change nothing, silently.
+      The comment now states that it exempts a name from the prefix rule only,
+      and that nothing exempts a missing file or a bare reference.
+- [x] 4.14 **Cut the fourth copy of the narrative.** The step carried ~108
+      lines of comment for ~50 of code, retelling what `CLAUDE.md`,
+      `DTheme.qml` and `design.md` already say — four copies that must change
+      together. `ci.yml` now carries what a reader of a red needs (why static,
+      why a prefix, why it is a script, why it is in `lint`) and points at
+      `CLAUDE.md`'s trap entry for the mechanism, which is where a person
+      adding a singleton meets it.
 
 ## 5. Documentation
 
