@@ -650,6 +650,55 @@ mod tests {
         (channels, MemoryOpLog::new(), identity)
     }
 
+    /// A [`MemoryOpLog`] whose `append` refuses.
+    ///
+    /// **The only route by which a test reaches [`Refusal::Storage`] and
+    /// [`PublishError::NotStored`].** Both variants are constructed by the
+    /// implementation and neither was reachable from a test before this existed,
+    /// because `MemoryOpLog::append` cannot fail — so the assertions naming them
+    /// were checking a `Display` impl and a variant nothing produced, not the
+    /// spec's requirement that a store failure be distinguishable from the other
+    /// causes.
+    ///
+    /// Every read delegates to the real log rather than failing too. A fake that
+    /// failed on read as well could not witness "the op is NOT in the log", which
+    /// is the half of the store-failure contract that distinguishes it from
+    /// [`PublishError::NoChannel`] — where the op IS stored.
+    struct AppendFailsLog {
+        inner: MemoryOpLog,
+        why: &'static str,
+    }
+
+    impl AppendFailsLog {
+        fn new(why: &'static str) -> Self {
+            Self {
+                inner: MemoryOpLog::new(),
+                why,
+            }
+        }
+    }
+
+    impl OpLog for AppendFailsLog {
+        fn append(&mut self, _op: SignedOp, _arrival: Arrival) -> Result<Appended, OpLogError> {
+            Err(OpLogError::Storage(self.why.to_string()))
+        }
+        fn get(&self, id: &OpId) -> Result<Option<crate::log::Entry>, OpLogError> {
+            self.inner.get(id)
+        }
+        fn iter(&self) -> Result<Vec<crate::log::Entry>, OpLogError> {
+            self.inner.iter()
+        }
+        fn iter_stoa(&self, stoa: &Address) -> Result<Vec<crate::log::Entry>, OpLogError> {
+            self.inner.iter_stoa(stoa)
+        }
+        fn iter_target(&self, target: &OpId) -> Result<Vec<crate::log::Entry>, OpLogError> {
+            self.inner.iter_target(target)
+        }
+        fn len(&self) -> Result<usize, OpLogError> {
+            self.inner.len()
+        }
+    }
+
     /// An inbound message carrying `payload` on `channel_id`, with values in the
     /// two fields that must not be believed.
     ///
@@ -1492,6 +1541,44 @@ mod tests {
         all
     }
 
+    #[test]
+    fn a_store_failure_on_receive_is_refused_as_a_store_failure_and_not_as_a_forgery() {
+        // The spec requires the five causes be "each reported distinguishably
+        // from the others" because they call for five different responses. A
+        // disk error reported as `FailsVerification` tells the reader a peer
+        // forged an op, which sends them looking at the network for a fault on
+        // their own disk — and `every_refusal_variant()` cannot catch it,
+        // because it constructs `Refusal::Storage` by hand and so proves only
+        // that the variant renders distinctly, never that `receive` returns it.
+        //
+        // The payload here is a VALID, verifying op naming the right Stoa, so
+        // every earlier guard passes and the append is the only thing that can
+        // refuse. That is what makes the assertion specific: it fails if the
+        // append's error is mapped to any other variant.
+        let stoa = a_stoa("Agora");
+        let identity = ChannelIdentity::of(&stoa);
+        let mut channels = OpenChannels::new();
+        channels.open(&identity);
+        let mut log = AppendFailsLog::new("database is locked");
+
+        let op = signed_post_in(stoa, "arrives while the disk is unwritable");
+        assert!(op.verify(), "the fixture op must pass every earlier guard");
+        let bytes = op.to_bytes();
+        let refusal =
+            receive(inbound(identity.channel_id(), &bytes), &channels, &mut log).unwrap_err();
+
+        assert!(
+            matches!(refusal, Refusal::Storage(OpLogError::Storage(_))),
+            "a store failure was reported as {refusal:?}, which sends the reader \
+             looking in the wrong place"
+        );
+        assert!(
+            refusal.to_string().contains("database is locked"),
+            "the store's own reason must survive so it can be named: {refusal}"
+        );
+        assert_eq!(log.len().unwrap(), 0, "a refused op must not be in the log");
+    }
+
     // ─── The Stoa comparison ──────────────────────────────────────────────
 
     #[test]
@@ -1973,6 +2060,89 @@ mod tests {
     }
 
     #[test]
+    fn a_publish_that_could_not_store_is_not_reported_as_a_missing_channel() {
+        // The other side of `publishing_without_an_open_channel_fails_and_opens_
+        // nothing`'s `!matches!(err, NotStored(_))`, which could not fail while
+        // nothing in a test's reach produced `NotStored`.
+        //
+        // The two failures are opposites and the spec requires they be
+        // distinguishable: `NoChannel` means the op EXISTS and did not go out —
+        // do not retry, do not discard — while `NotStored` means it does not
+        // exist at all. A caller told the wrong one either loses a stored post or
+        // keeps a post that was never written. The channel is OPEN here, so
+        // `NoChannel` is not a possible answer and the append is the only
+        // failure left.
+        let stoa = a_stoa("Agora");
+        let identity = ChannelIdentity::of(&stoa);
+        let mut channels = OpenChannels::new();
+        channels.open(&identity);
+        let mut log = AppendFailsLog::new("no space left on device");
+
+        let op = signed_post_in(stoa, "the store is full");
+        let id = op.op.id();
+        let err = publish(op, &channels, &mut log).unwrap_err();
+
+        assert!(
+            matches!(err, PublishError::NotStored(OpLogError::Storage(_))),
+            "a store failure was reported as {err:?}"
+        );
+        assert!(
+            !matches!(err, PublishError::NoChannel { .. }),
+            "a store failure reported as a missing channel claims the op exists"
+        );
+        assert!(
+            err.to_string().contains("no space left on device"),
+            "the store's reason must survive: {err}"
+        );
+        assert!(
+            log.get(&id).unwrap().is_none(),
+            "nothing may be in the log after the append that would have put it \
+             there failed"
+        );
+    }
+
+    #[test]
+    fn the_two_ways_a_publish_fails_disagree_about_whether_the_op_exists() {
+        // Pins the distinction itself rather than each variant separately, since
+        // what a caller acts on is which of the two it got. One op, one Stoa, two
+        // peers differing only in whether the channel is open and whether the
+        // store works — and the two answers must differ in their variant AND in
+        // whether the op is afterwards readable.
+        let stoa = a_stoa("Agora");
+        let identity = ChannelIdentity::of(&stoa);
+        let op = signed_post_in(stoa, "one body, two failures");
+        let id = op.op.id();
+
+        // No channel, working store: stored, not sent.
+        let mut stored_log = MemoryOpLog::new();
+        let no_channel = publish(op.clone(), &OpenChannels::new(), &mut stored_log).unwrap_err();
+
+        // Channel open, broken store: not stored.
+        let mut channels = OpenChannels::new();
+        channels.open(&identity);
+        let mut broken_log = AppendFailsLog::new("database is locked");
+        let not_stored = publish(op, &channels, &mut broken_log).unwrap_err();
+
+        assert_ne!(
+            no_channel, not_stored,
+            "the two failures a caller must respond to differently compare equal"
+        );
+        assert_ne!(
+            no_channel.to_string(),
+            not_stored.to_string(),
+            "the two failures render identically, so a view cannot tell them apart"
+        );
+        assert!(
+            stored_log.get(&id).unwrap().is_some(),
+            "a missing channel must not lose the op"
+        );
+        assert!(
+            broken_log.get(&id).unwrap().is_none(),
+            "a store failure must not leave the op readable"
+        );
+    }
+
+    #[test]
     fn publishing_on_another_stoas_open_channel_still_fails() {
         // A peer with SOME channel open is not a peer with THIS Stoa's channel
         // open. A boundary that checked "is any channel open" rather than "is
@@ -2021,23 +2191,19 @@ mod tests {
 
     #[test]
     fn a_send_that_the_transport_accepted_is_not_a_delivery() {
-        // NO SPEC: the spec does not say what happens when a published op never
-        // reaches a peer. The owner's decision — that a publish reports success
-        // once the op is in the log, because delivery's outcome arrives
-        // asynchronously after the call returns — makes surfacing a failed
-        // delivery an obligation SOMEWHERE, and no requirement places it here.
+        // The requirement "A successful publish is a statement about the local
+        // log and nothing more", which contracts what this test pins: a publish
+        // reports the handoff and no field of what it reports may carry, imply or
+        // be documented as carrying a delivery outcome.
         //
-        // Chosen: `publish` reports the HANDOFF and claims nothing about
-        // delivery. `channelMessageSent` means the transport took the message;
-        // `messagePropagated` is the fact a user cares about; and both arrive on
-        // separate events keyed by the `requestId` that `channelSend` returns.
-        // Surfacing an undelivered op therefore needs state outliving this call,
-        // a requestId-to-op-id map, and a timeout with a clock — a component,
-        // not a branch here. `design.md` records that dead end.
-        //
-        // This test pins the chosen behaviour so it does not become permanent by
-        // accident: a successful publish is a statement about the local log and
-        // about nothing else.
+        // This was a `NO SPEC:` marker until that requirement existed. The
+        // behaviour is now specified rather than chosen, so what remains worth
+        // knowing at the call site is where the delivery outcome went: the
+        // requirement names three things owed and not supplied here — the bound,
+        // what a peer records for an op in flight, and what it records for one
+        // that never propagated — because `channelMessageSent` and
+        // `messagePropagated` arrive on separate events keyed by the `requestId`
+        // that `channelSend` returns, after this call is over.
         let stoa = a_stoa("Agora");
         let (channels, mut log, _) = peer_in(stoa);
         let op = signed_post_in(stoa, "may never arrive");
