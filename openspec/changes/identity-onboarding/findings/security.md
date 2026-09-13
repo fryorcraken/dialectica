@@ -388,8 +388,9 @@ and not for every file it will open.
 It is left unticked because that is a record, not a fix, and a ticked box here would
 tell a reviewer the read path refuses a constraint-less table. It does not.
 
-**Deferred, and now ticked — with the entry above extended to carry the two things it
-was missing.** This is the one of my three boxes whose deferral *had* been written:
+**Deferred** in `0c99b87`, **and now ticked — with the entry above extended to carry
+the two things it was missing.** This is the one of my three boxes whose deferral
+*had* been written:
 `design.md`'s Risks / Trade-offs entry beginning *"`identity.sqlite`'s `check_layout`
 proves its columns exist and nothing about their constraints"* already stated the
 mechanism, the measured consequence, and that the fix is its own change. The pass

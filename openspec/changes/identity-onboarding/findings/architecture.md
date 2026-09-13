@@ -450,7 +450,7 @@ Left open because a reviewer reading a ticked box here would reasonably conclude
 duplication was addressed. One table in it was corrected; the eight rows of duplicated
 machinery are all still there.
 
-**Deferred — and now actually written down, which the previous pass did not do.** The
+**Deferred** in `0c99b87` — **and now actually written down, which the previous pass did not do.** The
 pass above reasoned the deferral correctly and then left it only here, in a directory
 the runner deletes before merge. That is a drop, not a defer: the eight rows of
 duplicated machinery would have gone unrecorded the moment `findings/` went.
@@ -542,8 +542,8 @@ paragraph argues about; the **type's API** is not"* — is exactly the distincti
 Left open because the API surface question is unresolved either way: one item gained a
 caller, three lost theirs, and the proposal still says none of it happened.
 
-**Deferred, with the full count written into `design.md` so it is not recounted a
-third time.** The pass above was right that the deletion is not this change's, and it
+**Deferred** in `0c99b87`, **with the full count written into `design.md` so it is not
+recounted a third time.** The pass above was right that the deletion is not this change's, and it
 did record the pathless trio — but only the pathless trio. A6's own subjects,
 `stoa_key_at_path` and the proposal's `keystore — unchanged` claim, had no durable
 home, and `findings/` is deleted at merge.
