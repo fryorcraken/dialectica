@@ -45,16 +45,34 @@ grep -rn "^- \[ \]" openspec/changes/<name>/findings/
 ```
 
 Lines means unticked findings, which block the merge. **But an empty result is
-not enough** — the gate only sees checkboxes, and a findings file written as
-headings reads as clean. Forty findings including four high-severity defects
-once read as done that way. So also run:
+never the whole answer**, and it fails in two directions.
+
+**The gate only sees checkboxes.** A findings file written as headings reads as
+clean; forty findings including four high-severity defects once read as done that
+way. So also run:
 
 ```
 grep -rc "^- \[" openspec/changes/<name>/findings/
 ```
 
 Every file must be non-zero. A file with zero boxes is a file the gate cannot
-see, and it goes back to the runner naming the file — not to you to interpret.
+see.
+
+**And it only sees files that exist.** `grep` over a *missing* `findings/`
+returns nothing, exactly as it does when every box is ticked — so a piece with
+**no review at all** is indistinguishable from a piece with every finding closed.
+This is the worse of the two, because nothing looks wrong: an absent directory
+has no stale content to notice. It was found on a piece that had `design.md`,
+`proposal.md`, `specs/` and `tasks.md`, six unticked review rows, no agent on any
+of them, and a gate reporting clean.
+
+So check the other direction too: **a findings file must exist for every review
+row ticked in `tasks.md`.** A ticked row with no findings file is a reviewer that
+reported nothing, which is not the same as a reviewer that found nothing — the
+second writes a file saying so.
+
+Either failure goes back to the runner naming the file or the row, not to you to
+interpret.
 
 **The stage block** in `tasks.md`: every row ticked or struck through with a
 reason, except your own. An unticked row with no agent running is a stage

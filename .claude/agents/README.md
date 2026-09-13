@@ -238,7 +238,8 @@ to) — without editing the reviewer's text. The `closer` deletes the directory
 before merge, once no box is empty.
 
 So "blocks the merge" is literal and checkable: `grep -rn "^- \[ \]"` over the
-directory either returns lines or it does not.
+directory either returns lines or it does not — with the two caveats below, which
+are what stop that grep from being the whole gate.
 
 Three consequences worth knowing whatever your role:
 
