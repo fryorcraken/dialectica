@@ -593,7 +593,19 @@ jobs:
         run: |
           set -eu
           echo "QT_ROOT_DIR=${QT_ROOT_DIR:-<unset>}"
-          for tool in qmllint qmlformat qmltestrunner; do
+          # `qmltestrunner` is deliberately NOT in this loop, and must not be
+          # added back. It is a QGuiApplication with no `--version` flag, so it
+          # fails two different ways and neither says anything about which Qt
+          # is on PATH: with no display it aborts (134) in QGuiApplication
+          # construction before the parser sees the argument, and with one it
+          # exits 1 on `Unknown option: '--version'`. So `QT_QPA_PLATFORM=
+          # offscreen` does not rescue it — that only swaps the first failure
+          # for the second. `-help`, the flag it does have, exits 0 without a
+          # display but prints no version at all: a probe that passes on every
+          # Qt is worse than no probe, because it closes the question this step
+          # exists to ask. The component-suite step below runs qmltestrunner
+          # for real, which is where a wrong one shows up.
+          for tool in qmllint qmlformat; do
             path=$(command -v "$tool") || {
               echo "::error::$tool is not on PATH — the pinned Qt did not install it"
               exit 1
