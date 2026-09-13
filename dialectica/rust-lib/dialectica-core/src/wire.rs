@@ -5722,6 +5722,105 @@ mod tests {
     }
 
     #[test]
+    fn no_method_accepts_a_display_name_where_an_identity_is_required() {
+        // "A name is never unique, never an identifier": no lookup, no
+        // moderation target, no vote target and no request naming an author may
+        // resolve a name to any identity. The address is the identity.
+        //
+        // A name reaching an identity field is not a hypothetical: it is what a
+        // view does when someone pastes what they see on screen, and resolving
+        // it would mean acting on whichever of a colliding pair was found first.
+        //
+        // **The names used are the REAL derived names for real keys**, not
+        // name-shaped strings. A test using `"not hex"` would pass on a handler
+        // that happened to reject that particular string while still resolving
+        // something name-shaped — and the three-word form with its spaces and
+        // its `of` is the shape a user would actually paste.
+        let real_name = crate::names::display_name(&feed_key(2).public_key())
+            .expect("a well-formed key derives a name")
+            .render();
+        let colliding = crate::names::tests_support::COLLIDING_NAME.to_string();
+        // The connector may be dropped by a cramped caller, so that form is a
+        // plausible paste too.
+        let without_connector = real_name.replace(" of ", " ");
+
+        let stoa = publish_stoa().to_hex();
+        let names = [real_name, colliding, without_connector];
+
+        for name in names.iter() {
+            // Every field that names an identity or a target, across the methods
+            // that take one. A table rather than four near-identical tests, and
+            // each case says which method and which field it exercised.
+            let mut log = MemoryOpLog::new();
+            let key = publish_key();
+
+            let cases: Vec<(&str, String)> = vec![
+                (
+                    "publish_vote/target",
+                    format!(r#"{{"stoa":"{stoa}","target":"{name}","direction":"up"}}"#),
+                ),
+                (
+                    "publish_vote/stoa",
+                    format!(r#"{{"stoa":"{name}","target":"{stoa}","direction":"up"}}"#),
+                ),
+                (
+                    "publish_reply/parent",
+                    format!(r#"{{"stoa":"{stoa}","body":"hi","parent":"{name}"}}"#),
+                ),
+                (
+                    "publish_reply/stoa",
+                    format!(r#"{{"stoa":"{name}","body":"hi","parent":"{stoa}"}}"#),
+                ),
+                (
+                    "publish_post/stoa",
+                    format!(r#"{{"stoa":"{name}","body":"hi"}}"#),
+                ),
+            ];
+
+            for (which, request) in cases {
+                let out = if which.starts_with("publish_vote") {
+                    publish_vote(&request, &mut log, &key, &mut ignored_delivery)
+                } else if which.starts_with("publish_reply") {
+                    publish_reply(&request, &mut log, &key, &mut ignored_delivery)
+                } else {
+                    publish_post(&request, &mut log, &key, &mut ignored_delivery)
+                };
+                let v = as_json(&out);
+                assert!(
+                    v.get("error").is_some(),
+                    "{which} resolved a display name {name:?} instead of \
+                     refusing it: {out}"
+                );
+                // Refused rather than resolved: no op was published, so nothing
+                // was acted on. A handler that errored AFTER writing would pass
+                // the check above and fail this one.
+                assert!(
+                    v.get("opId").is_none(),
+                    "{which} published an op for a display name: {out}"
+                );
+
+                // **Refused AT THE PARSE, naming the field — not refused later
+                // for some unrelated reason.** This is the half that makes the
+                // test fail for the reason it claims: a handler that RESOLVED
+                // the name to some identity and then failed because that
+                // identity was absent also returns an error and no `opId`, so
+                // the two checks above pass on exactly the behaviour the spec
+                // forbids. Measured, not supposed — a mutation resolving a
+                // name-shaped string by hashing it to an op id passed both of
+                // them and fails this one.
+                let message = v["error"].as_str().unwrap_or_default();
+                let field = which.split('/').nth(1).expect("each case names a field");
+                assert!(
+                    message.starts_with(field),
+                    "{which} refused {name:?} but not as an unparseable {field}: \
+                     the error was {message:?}, which suggests the name was \
+                     resolved to an identity and rejected for some later reason"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn a_sanitised_string_is_always_an_object_even_when_nothing_was_found() {
         // A shape that was sometimes a string and sometimes an object would
         // make every view branch on the type before rendering.
