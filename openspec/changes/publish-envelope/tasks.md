@@ -25,7 +25,7 @@
 - [x] review: readability — `code-reviewer`
 - [x] review: architecture — `code-reviewer`
 - [x] review: spec-test — `spec-test-reviewer`
-- [ ] review: design — `design-reviewer`
+- [x] review: design — `design-reviewer`
 - [ ] findings all ticked, `findings/` deleted — `closer`
 - [ ] CI green, PR merged — `closer`. **Watch `Build LGX` by name, not "CI
       green".** It is the ONLY gate that compiles `dialectica/rust-lib/src/lib.rs`
