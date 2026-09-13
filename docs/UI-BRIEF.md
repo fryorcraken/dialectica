@@ -367,6 +367,13 @@ and it resolves when an upstream gap closes, but until then:
 - **Do not label an ordering "new", "latest" or "recent"** unless it is one.
 - A neutral label is honest and available now. Consider what the control should
   say when the thing it names is not yet true.
+- **A neutral label is not by itself enough, and this is the part that is easy to
+  miss.** A reader meeting a forum feed assumes newest-first unless told
+  otherwise, and a label that merely declines to claim recency does not correct
+  that assumption — it leaves the interface relying on the reader not to make the
+  ordinary one. So the screen must **say plainly that this is not newest first**,
+  somewhere the reader actually reads. That sentence is currently in the feed's
+  own body, under the heading rule.
 - Whatever you design, **the labels must be able to change** when the real
   ordering arrives, without the layout changing around them.
 
@@ -457,6 +464,25 @@ Moderators see a hide control on any post. **See the irreversibility warning.**
 These exist because the core's honest answer is *incomplete* without something
 the interface does. Each was discovered while building the core, and the gap is
 invisible from inside it.
+
+> **Where these belong on screen, and one way it has already gone wrong.** An
+> obligation here is a thing the interface must *do* — omit a hidden post, show an
+> address beside a name, refuse to claim delivery. It is **not** a licence to
+> print the obligation's own text at the reader.
+>
+> The design bundle's right-hand `APPARATUS` column — the italic marginal notes
+> headed `ON THIS ORDERING`, `ON WHAT YOU HOLD`, `ON THE MARK` — is **annotation
+> explaining the design to whoever is reading it, and is not part of the
+> interface.** It was nonetheless built into the shipped QML, so the running app
+> showed users a column of commentary written for a designer. It has been removed.
+>
+> Read the apparatus notes in the bundle as you would read this brief: as
+> statements of what the screen owes its reader. Then discharge each in the
+> screen itself — **structurally where you can, in the screen's own body where a
+> sentence is genuinely required**, and in neither case in a margin addressed to
+> somebody else. Most discharge structurally: "the mark is never proof" is met by
+> printing the address beside every mark, which is obligation 6, and a note saying
+> so would add nothing a reader acts on.
 
 **1. Sanitise display text, because the core deliberately does not — and this
 applies to every string, not just titles.**

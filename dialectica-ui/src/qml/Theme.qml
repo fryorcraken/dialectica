@@ -5,7 +5,7 @@ QtObject {
     // ---- surfaces -------------------------------------------------------
     readonly property color desk:      "#d9d2c2"   // behind the cards
     readonly property color paper:     "#efe9dc"   // card
-    readonly property color paperDeep: "#e7dfcd"   // apparatus column
+    readonly property color paperDeep: "#e7dfcd"   // a deeper paper, for panels inset in a card
     readonly property color field:     "#f7f3ea"   // inset panels, inputs
 
     // ---- interface inks: three, and only three --------------------------
@@ -15,7 +15,7 @@ QtObject {
     readonly property color inkSoft:   "#3a362e"
     readonly property color inkMuted:  "#6f685a"
     readonly property color inkFaint:  "#8c8577"
-    readonly property color accent:    "#a33a2b"   // red: caveats, destructive, apparatus rules
+    readonly property color accent:    "#a33a2b"   // red: caveats, destructive
     readonly property color accent2:   "#4a6b74"   // teal: second fill ink, secondary marks
 
     // ---- mark inks: SEVEN, and they are NOT the interface palette --------
@@ -114,7 +114,6 @@ QtObject {
 
     // ---- metrics --------------------------------------------------------
     readonly property int cardWidth:      1000
-    readonly property int apparatusWidth: 244
     readonly property int cardPaddingX:   34
     readonly property int cardPaddingY:   28
     readonly property int blockGap:       20

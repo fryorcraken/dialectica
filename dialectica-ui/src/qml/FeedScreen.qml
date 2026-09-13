@@ -208,6 +208,30 @@ ScreenFrame {
         Rectangle { Layout.fillWidth: true; Layout.preferredHeight: Theme.hairline; color: Theme.ink }
     }
 
+    // ---- what this ordering is, and what it is not ----------------------
+    //
+    // This sentence used to live in the apparatus column's ON THIS ORDERING
+    // note, which was annotation explaining the design rather than interface.
+    // The column is gone; the obligation is not, so the sentence moves into the
+    // screen's own body rather than into `docs/UI-BRIEF.md` alone.
+    //
+    // It is load-bearing in a way the ordering LABEL is not. "Same order for
+    // everyone" is honest and satisfies UI-BRIEF's rule against labelling an
+    // ordering "new", "latest" or "recent" — but it is NEUTRAL, and a reader
+    // meeting a forum feed assumes newest-first unless told otherwise. The
+    // denial is the part the label cannot carry, so removing it would leave the
+    // interface silently relying on the reader not to make the ordinary
+    // assumption.
+    Text {
+        text: "Not newest first. Timestamps do not reach this machine yet, so posts are ordered by a rule every peer computes identically. When real times arrive this label changes and nothing else does."
+        font: Theme.note
+        color: Theme.inkSoft
+        wrapMode: Text.WordWrap
+        lineHeight: 1.4
+        textFormat: Text.PlainText
+        Layout.fillWidth: true
+    }
+
     // ---- state: the store could not be read -----------------------------
     //
     // Screen 07's failed half. An accent border, the failure named, and a
@@ -442,24 +466,4 @@ ScreenFrame {
             Layout.fillWidth: true
         }
     }
-
-    apparatus: [
-        MarginNote {
-            label: "ON THIS ORDERING"
-            // copy.json `feed.orderingNote`
-            body: "Not newest first. Timestamps do not reach this machine yet, so posts are ordered by a rule every peer computes identically. When real times arrive this label changes and nothing else does."
-        },
-        MarginNote {
-            label: "ON WHAT YOU HOLD"
-            caveat: false
-            body: "Every number here counts what this machine has received. No peer can see the whole of a Stoa, so there is no total to show."
-        },
-        MarginNote {
-            label: "ON THE MARK"
-            caveat: false
-            // The identicon is a second forgeable channel, and saying so is
-            // part of not letting it stand in for the address.
-            body: "The hatched shape is drawn from the address and is identical on every peer. It is a shortcut for recognition, never a proof of anything — which is why the address is printed beside it."
-        }
-    ]
 }
