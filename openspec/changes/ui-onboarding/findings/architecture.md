@@ -39,8 +39,35 @@ Baseline: **99 QML tests across 6 spec files, all passing**.
       superseded shape. Note the probabilities are not merely stale prose: they
       are arithmetic over a vocabulary size, so correcting the count without
       recomputing them would leave a worse artefact than either.
+      **Deferred — box left OPEN**, to `docs/name-shape-sweep` (PR #64), which
+      already contains the fix. Partially mitigated here; the argument follows.
+      Your closing sentence is why I did not correct the count. I read
+      `d3e7579` and it **already rewrites `UI-BRIEF.md` in the same commit** —
+      provenance block, the register sentence, the truncation rule relaxed by
+      one word since "of" reads no hash bytes, and the collision figures
+      recomputed by hand: **0.006% at a thousand and 0.15% at five thousand**
+      against the 0.003% / 0.07% now on disk, from S = 2^33 over 8,192
+      adjectives × 1,024 nouns × 1,024 places. Writing my own replacements would
+      mean either duplicating that or deriving probabilities a second time from
+      vocabulary sizes I would have to read off the same commit — and then
+      conflicting with a PR awaiting the owner.
+      **Checked before deciding**, because the live-brief rule turns on whether
+      *this change* made the file wrong: `git diff main...HEAD -- docs/UI-BRIEF.md`
+      shows this piece added exactly one paragraph, the count-neutral "core
+      serves no name" bullet. All three four-word sites predate it. So the rule
+      is satisfied by the sweep rather than by me, and duplicating it is the
+      more expensive mistake.
+      **What I did fix** is the half that is mine: my paragraph tells a designer
+      to leave room for a name, and it sat adjacent to a four-word claim sizing
+      that room. `a2e508d` adds a pointer beside it — do not size the space from
+      the count stated elsewhere in this file, naming the three stale sites and
+      `d3e7579` as what supersedes them, and directing the reader to PLAN.md
+      §5.2.1, which wins any disagreement. It self-invalidates: once the sweep
+      lands, the pointer is visibly about sites that no longer say four.
+      **The box stays open** because the three sites are still wrong on disk,
+      and it should close when #64 merges rather than on my say-so.
 
-- [ ] **`dev-writer`** — `Core.qml:38-45` — the seam's own comment promises
+- [x] **`dev-writer`** — `Core.qml:38-45` — the seam's own comment promises
       exactly the property `ok:true` does not have, and the three callers that
       must not believe it are outside the file
       **Scenario:** `call()`'s contract comment reads: *"A caller that has to
@@ -72,6 +99,33 @@ Baseline: **99 QML tests across 6 spec files, all passing**.
       caller looks. The cheap fix is a sentence at the `ok:true` return naming the
       three refusal-carrying shapes; the structural fix, if `dev-writer` prefers
       it, is to stop calling the field `ok`.
+      **Fixed** in `a2e508d`, taking the cheap fix. The note sits at the
+      `ok: true` return, opens with "**`ok: true` means THE MODULE ANSWERED. It
+      does not mean the thing you asked for happened**", lists all three shapes
+      you cite with their wire lines, and names the consequence for each — an
+      identity reported that was never stored, a composer opened for a user who
+      cannot post, and silently, because nothing failed. `call()`'s contract
+      comment got the matching half, since it was the half promising the
+      property the seam does not have.
+      It also says why this is **not** a defect in the normalisation, which the
+      note needs or a reader arrives at the wrong fix: `{"error":…}` is the
+      wire's one failure shape and `ok:false` reports exactly that; a refusal is
+      a different thing from a failure and the contract is right to keep them
+      apart. What the caller owes is the second branch.
+      **I considered and rejected the structural fix** of renaming `ok`. It
+      would be a breaking edit to every existing call site across four in-flight
+      pieces to fix a problem that is one comment wide, and your own "what was
+      clean" section is the argument against it: four pieces extended this seam
+      additively without needing to widen it, which is evidence the shape is
+      right. `ok` is also accurate for what it reports — the call reached the
+      module and the module answered. The gap was that nothing said so where it
+      mattered.
+      **No test.** A comment is not assertable, and I would rather say that than
+      tick a box implying otherwise. What is assertable — that this screen
+      distinguishes the three keep outcomes — is already pinned by
+      `test_a_refusal_is_neither_the_kept_state_nor_the_failed_state`, which
+      fails 4 tests under the `kept !== true` mutation. This finding is about the
+      *next* caller, and nothing in this piece's suite can reach them.
 
 - [ ] **`dev-writer`** — `Main.qml:26`, `:48`, `:77-121` — the launch branch and
       `piece/ui-stoa-list` have each rewritten `Main.qml` around an incompatible
@@ -100,8 +154,37 @@ Baseline: **99 QML tests across 6 spec files, all passing**.
       mechanically — and because whichever lands second will otherwise be
       reviewed as if the reconstruction were incidental. The correctness review
       did not see this; it reviewed the file in isolation.
+      **Deferred — box left OPEN**, to the coordinator, who has taken the
+      sequencing and has independently verified the collision (that branch's
+      `Main.qml` carries neither `stoaAddress` nor `identityState`). I have not
+      touched `piece/ui-stoa-list` and have changed nothing in this piece's
+      `Main.qml` in response, deliberately: a unilateral accommodation of a
+      branch that may itself move is a guess at a decision that is not mine, and
+      it would make this piece's `Main` answer to a navigator that does not
+      exist here.
+      Recording what the reconstruction needs, since I am the one who knows this
+      half and that knowledge should not leave with me:
+      **The launch branch is per-Stoa, not per-app.** `whoAmI(stoa)` takes a
+      Stoa, and the spec's requirement that the branch be re-asked rather than
+      remembered means the question is asked at each point a Stoa becomes
+      current — not once at startup. So after `ui-stoa-list`, `askWhoAmI()`
+      belongs where a Stoa is chosen, and `identityState` becomes a property of
+      the chosen-Stoa screen rather than of `Main`. The `"unknown"` state exists
+      precisely for "not asked yet", so a navigator that has not chosen a Stoa
+      is already representable.
+      **What must not be lost in the reconstruction**, whichever lands second:
+      the module answers on every ask and no flag is remembered
+      (`test_the_second_answer_decides_the_branch_and_the_first_does_not`); both
+      absent cases route to onboarding with the reason held unparsed
+      (`test_an_unloadable_identity_also_shows_onboarding_with_its_own_reason`);
+      and a failed report shows neither branch
+      (`test_a_failed_report_shows_neither_branch`). Those three tests are the
+      contract, and they will fail loudly if the reconstruction drops one — which
+      is the good outcome, and the reason to run
+      `dialectica-ui/tests/run-qml-tests.sh` after the merge rather than trusting
+      that a conflict-free rebase preserved the behaviour.
 
-- [ ] **`dev-writer`** — `OnboardingScreen.qml:707-747` — the screen's three
+- [x] **`dev-writer`** — `OnboardingScreen.qml:707-747` — the screen's three
       `MarginNote` entries sit in an `apparatus` property that
       `piece/drop-apparatus` deletes, and the uniqueness obligation is spec'd
       only into that block
@@ -126,6 +209,28 @@ Baseline: **99 QML tests across 6 spec files, all passing**.
       column.
       **Severity: low-medium.** The gate catches it, so this is about who makes
       the placement choice rather than about a silent loss.
+      **Fixed** in `a2e508d`, and I agree this piece is the one to make the
+      placement call — the other piece would be choosing where a requirement it
+      has not read should live.
+      The uniqueness statement is now a body `Text` gated on the same phases as
+      the permanence warning, which was already duplicated out of the margin for
+      exactly this reason; the asymmetry between the two was the actual defect
+      and it is now gone. The margin note stays: same text, in the place a
+      reader of the mockup expects it, and duplication is cheap because neither
+      copy is computed.
+      `test_the_uniqueness_obligation_survives_without_the_apparatus_column`
+      requires **two** elements to carry the statement and reports 1 when the
+      body copy is removed. Worth noting it is not redundant with the existing
+      count test: under that same mutation
+      `test_the_uniqueness_note_states_the_obligation_without_a_word_count`
+      still passes, because the margin note satisfies it — which is precisely
+      the gap you identified, measured.
+      `design.md` records the general rule rather than only this instance:
+      **apparatus may repeat an obligation, never carry it alone**, because the
+      column is removable by a change that has no reason to read this spec.
+      Your two survivors check out — the permanence note is duplicated at what
+      is now line 504, and the mark note is explanatory only, so neither needs
+      moving.
 
 ## What was clean
 

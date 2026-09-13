@@ -60,7 +60,7 @@ Baseline: **99 QML tests across 6 spec files, all passing**
       **Severity: medium** — the false claim here is over-warning rather than
       under-warning, which is the safer direction, unlike the finding above.
 
-- [ ] **`dev-writer`** — `tasks.md:42` — the implementation checklist states the
+- [x] **`dev-writer`** — `tasks.md:42` — the implementation checklist states the
       opposite of what shipped, on the one line the copy history makes most
       load-bearing
       **Scenario:** the line reads "Copy: the cross-Stoa unlinkability clause is
@@ -77,8 +77,19 @@ Baseline: **99 QML tests across 6 spec files, all passing**
       recorded instance in this repo of a stale record about this exact count,
       and the one place a reader is most likely to trust it, since a ticked box
       reads as verified.
+      **Fixed** in `a2e508d`. My miss: I removed the count from the screen and
+      from `design.md` in `1d91627` and left the task line asserting it, which
+      is the orphaned-citation failure this repo has a standing memory about —
+      in the record rather than the doc this time.
+      The line now says the note states its obligation with no word count at
+      all, and why (the count has moved three times), pointing at `design.md`
+      rather than restating the reasoning. No test covers a task list, so this
+      is a documentation fix with no accompanying assertion — the code half is
+      already pinned by
+      `test_the_uniqueness_note_states_the_obligation_without_a_word_count`,
+      which sweeps eight spellings and would fail if any number returned.
 
-- [ ] **`dev-writer`** — `tasks.md:51` — two test counts in a ticked box are
+- [x] **`dev-writer`** — `tasks.md:51` — two test counts in a ticked box are
       both wrong, in a repo whose CLAUDE.md forbids writing down what a command
       can answer
       **Scenario:** the line reads "Tests: `tst_onboarding_states.qml` (36) and
@@ -94,8 +105,18 @@ Baseline: **99 QML tests across 6 spec files, all passing**
       standing memory that it fabricates figures in comments, and because a
       count in a ticked box is the shape that gets copied into the next piece's
       task list.
+      **Fixed** in `a2e508d`, by the durable route you name rather than by
+      correcting the numbers: the line now names
+      `dialectica-ui/tests/run-qml-tests.sh` and states no count, so it cannot
+      go stale on the next test added.
+      Your diagnosis of how the 36 arose is right — I wrote it from the runner's
+      totals at one moment and did not re-derive it after adding tests in
+      `1d91627`, which is exactly the failure mode the CLAUDE.md rule describes.
+      I have also dropped the "five mutations" count from the same line for the
+      same reason; the findings files record which mutation reaches which test,
+      and that is the durable record.
 
-- [ ] **`dev-writer`** — `tst_onboarding_states.qml:362` — a shipped test
+- [x] **`dev-writer`** — `tst_onboarding_states.qml:362` — a shipped test
       comment quotes `design.md` saying something `design.md` no longer says
       **Scenario:** the comment opens *"The guard `design.md` calls "the guard
       that actually guards" was unprotected"*. That phrase was removed from
@@ -112,6 +133,14 @@ Baseline: **99 QML tests across 6 spec files, all passing**
       The comment's substance is otherwise accurate and worth keeping; only the
       attribution is stale.
       **Severity: low.**
+      **Fixed** in `a2e508d`, keeping the substance and changing only the
+      attribution, as you recommend. The comment now states the two-guard
+      history in its own words and cites `design.md`'s heading "Selection is a
+      candidate's own index, and the sentinel is unaddressable" — verified to
+      resolve, rather than a phrase I hoped was still there.
+      `grep -rn "actually guards"` over `dialectica-ui/` and `openspec/` now
+      returns only the two findings files quoting it as history, which is the
+      correct place for a phrase that was removed.
 
 ## What was clean
 
