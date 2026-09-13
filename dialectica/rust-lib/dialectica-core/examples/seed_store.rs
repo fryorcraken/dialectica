@@ -85,6 +85,17 @@
 //! store behaves exactly as one the module built: creator from `identity_*`, ops
 //! signed with `stoa_key`, and a path recorded so the probe has one to read.
 //!
+//! **`keystore.rs`'s own docstrings disagree with the adapter, and this file
+//! follows the adapter.** `Keystore::stoa_key` says it is "built and, in the MVP,
+//! not called by any handler"; `Keystore::identity_key` says "there is exactly one
+//! derivation position, so a creator and a poster cannot be two keys". The adapter
+//! *does* call `stoa_key` (`dialectica/rust-lib/src/lib.rs`), so both sentences are
+//! false of the code as it stands. This file copies the adapter because a seeder
+//! that agreed with the docstrings instead would build stores the module does not —
+//! but do not read it as having invented the divergence. Whoever resolves this
+//! should fix those two docstrings in the same change
+//! (`findings/security.md` entry 4).
+//!
 //! **The visible consequence, and the reason it is printed rather than hidden:**
 //! every seeded post's `author` in the feed is the *signing* address, and
 //! `getCapabilities` reports a *different* one. A UI developer who saw only the
@@ -201,7 +212,12 @@ fn usage() -> String {
          startup: \"dialectica ready: instance ... (persistence: ...)\".\n\
          \n\
          --fresh deletes the four files this tool writes ({}) before seeding.\n\
-         Without it, an existing store is REFUSED and nothing is written.",
+         Without it, an existing store is REFUSED and nothing is written.\n\
+         \n\
+         --fresh DELETES FIRST AND CHECKS AFTERWARDS. The assertions that make a\n\
+         bad run fail run at the end, over ops already written, so a run that\n\
+         fails one leaves a half-seeded directory and the old store is gone. The\n\
+         no---fresh path promises \"nothing was written\"; this one cannot.",
         store_files(Path::new(""))
             .iter()
             .map(|(_, p)| p.display().to_string())
@@ -278,6 +294,30 @@ fn main() -> Result<(), String> {
             );
             std::process::exit(1);
         }
+        // BEFORE the first deletion, not during it. The four names are generic
+        // enough to collide with unrelated data — `identity.key`, `ops.sqlite` —
+        // and a mistyped path would otherwise destroy four arbitrary files. Naming
+        // each as it goes is honest but after the fact; this refuses first.
+        //
+        // Only `identity.key` is checked, and only it is worth checking: it is the
+        // one file here whose loss is UNRECOVERABLE, because the root secret exists
+        // in exactly one place. The three SQLite stores are rebuildable content.
+        //
+        // `Keystore::is_encrypted` is the check rather than a magic-byte comparison
+        // written here, and that is the difference between reusing a parser and
+        // copying a constant. `MAGIC` is private to `keystore.rs`; spelling `0xD4`
+        // in this file would be a second copy of a format constant that no test
+        // covers, which is the defect family this repo records. `is_encrypted`
+        // parses the real header and answers `NotAKeystore` for anything else.
+        let keystore_path = keystore::default_path_in(&dir);
+        if keystore_path.exists() {
+            why(
+                "refusing --fresh: identity.key is not a keystore, so this is \
+                 probably not a dialectica store and nothing was deleted",
+                Keystore::is_encrypted(&keystore_path).map(|_| ()),
+            )?;
+        }
+
         for (what, path) in &existing {
             // Named one at a time as they go, so a person who passed --fresh by
             // mistake can see in the scrollback exactly what they lost.
@@ -296,10 +336,35 @@ fn main() -> Result<(), String> {
     // set passphrase would produce a keystore the module then refuses to open.
     let keystore_path = keystore::default_path_in(&dir);
     let keystore = why("minting a root secret", Keystore::generate())?;
+    let protection = keystore::protection_from_env();
     why(
         "writing the keystore",
-        keystore.create(&keystore_path, &keystore::protection_from_env()),
+        keystore.create(&keystore_path, &protection),
     )?;
+
+    // ── Read the keystore straight back, and fail on what the module would ──
+    //
+    // **Writing a keystore is not the same as writing one the module will open**,
+    // and the gap between those is silent. `create` checks only that the file does
+    // not exist; the directory-permission guard lives on the READ path, in
+    // `read_checked`. So `create_dir_all` under a permissive umask, or a directory
+    // the user made `chmod 777` earlier, produces a real root secret in a place any
+    // local user can replace it — with every assertion here passing and the full
+    // report printing, while the module refuses the result with
+    // "the keystore's directory is writable by others (mode 0777)".
+    //
+    // Measured, not supposed: seeding a `mkdir -m 777` directory succeeded and
+    // printed a full report, and `keystore::open_in` on the result then refused it
+    // (`findings/security.md` entry 1).
+    //
+    // This ASKS THE KEYSTORE rather than re-implementing the check. A mode test
+    // written here would be a second copy of a guard that already exists and is
+    // already tested, and the two would eventually disagree about which bits matter
+    // — with this copy being the one no test covers. `open_in` is the same call the
+    // adapter makes, so what it accepts is exactly what the module accepts.
+    why("the keystore this wrote is not one the module can open", {
+        keystore::open_in(&dir).map(|_| ())
+    })?;
 
     // The creator, as `createStoa` names it. `identity_public_key` and not a
     // per-Stoa derivation: a Stoa's creator is its sole moderator and the creator is
@@ -379,11 +444,19 @@ fn main() -> Result<(), String> {
             "What does it mean for a forum to be decentralized?".to_string(),
         ),
     )?;
+    // **The second root is the VISITOR's, and that is what makes the two-identity
+    // claim visible.** Both roots were the founder's, so both feed rows carried one
+    // author — which made the author assertion below index `items[0]` as though the
+    // choice mattered when `items[1]` asserted the identical thing, and left the
+    // visitor signing only replies and votes, neither of which `list_threads`
+    // returns. So a docstring promising "two identities so that author attribution
+    // is visible" described output where it was not visible at all
+    // (`findings/correctness.md` entry 3). One root each fixes both.
     let second_root = why(
         "publishing the second root",
         authoring::post(
             &mut log,
-            &founder,
+            &visitor,
             address,
             "On the difference between moderation and censorship".to_string(),
         ),
@@ -478,20 +551,100 @@ fn main() -> Result<(), String> {
         ops, 9,
         "two roots, three replies and four votes is nine ops, not {ops}"
     );
-    // The founder must be a moderator of the Stoa they founded. This is the check
-    // that catches the derivation trap head-on: the creator named in the record comes
-    // from `identity_public_key` and the ops are signed with `stoa_key`, and if those
-    // two ever have to be one key, this fails here rather than as a hide button that
-    // silently does nothing.
+
+    // ── The nesting, which the two counts above cannot see ────────────────
+    //
+    // `list_threads` returns thread HEADS, so no assertion over it observes the
+    // reply structure at all: a store where `nested` hung off the wrong parent, or
+    // where all three replies hung off `first_root`, satisfies both counts
+    // (`findings/correctness.md` entry 2). The indented tree in the report is
+    // presentation, not a check — and the nesting is the one thing this tool exists
+    // to produce, because a UI cannot render a tree that is not there.
+    //
+    // **Read back through `OpLog::get`, not from the `Published` values above.** The
+    // publish calls returned ids; asking the store what it actually holds under each
+    // is what makes this a check on the store rather than on local variables.
+    //
+    // NOT through a thread read, because `dialectica-core` has none: `feed.rs`
+    // exposes `list_threads` and nothing else, and the thread read is `piece/thread-read`,
+    // still in flight. When it lands, this is the assertion to move onto it.
+    for (what, id, expected_parent, expected_thread) in [
+        ("reply", reply.id, first_root.id, first_root.id),
+        // The one that discriminates. At two levels "the parent's id" and "the
+        // parent's thread" are the same value, so a `thread: parent` bug is
+        // invisible; three levels separate them — `nested`'s parent is `reply`, and
+        // its thread is the ROOT's.
+        ("nested", nested.id, reply.id, first_root.id),
+        (
+            "other_reply",
+            other_reply.id,
+            second_root.id,
+            second_root.id,
+        ),
+    ] {
+        let entry = why(&format!("reading {what} back"), log.get(&id))?
+            .ok_or_else(|| format!("reading {what} back: the store does not hold it"))?;
+        match &entry.op.op.kind {
+            dialectica_core::op::OpKind::Post { parent, thread, .. } => {
+                assert_eq!(
+                    *parent,
+                    Some(expected_parent),
+                    "{what} must name its parent"
+                );
+                assert_eq!(
+                    *thread,
+                    Some(expected_thread),
+                    "{what} must belong to the root's thread, not its parent's id"
+                );
+            }
+            other => panic!("{what} must be a post, got {other:?}"),
+        }
+    }
+    // ── The moderation gap, asserted as it actually is ────────────────────
+    //
+    // This used to be `assert!(moderators.contains(&genesis.creator))`, with a
+    // comment claiming it caught the derivation trap head-on. **It caught nothing.**
+    // `Moderators::of` sets `creator: genesis.creator.clone()` and `contains` is
+    // `&self.creator == key`, so the assertion reduced to
+    // `genesis.creator == genesis.creator` and held for any value in that field —
+    // this repo's recorded "asks the implementation what it did and agrees" defect,
+    // in a file whose whole job is to be evidence (`findings/correctness.md` entry 1).
+    //
+    // What the assertion claimed to rule out is TRUE TODAY, and asserting the real
+    // property is what makes it visible. `Moderators::authorises` gates on
+    // `entry.op.op.author` — the SIGNING author — and the adapter signs every publish
+    // with `keystore.stoa_key(&stoa)` while the record names `identity_public_key`.
+    // Those are two keys, so:
     assert!(
         moderators.contains(&genesis.creator),
-        "the creator must moderate the Stoa it founded"
+        "the record's creator must moderate its own Stoa"
     );
+    assert!(
+        !moderators.contains(&founder.public_key()),
+        "the signing key has BECOME a moderator — the three-derivations gap is \
+         closed, which is good news. Delete this assertion, the `moderation` line \
+         in the report, and the paragraph in design.md that documents the gap."
+    );
+    // **So a hide published through the module against a seeded Stoa is REFUSED.**
+    // That is the outcome `design.md` says the real keystore was adopted to prevent,
+    // and adopting it did not prevent this half: the creator is a key the peer holds,
+    // but not the key it signs with. Measured, not inferred — pointing the first
+    // assertion at `founder.public_key()` fails, which was run.
+    //
+    // The tool cannot fix it. WHICH key a publish signs with is the spec question
+    // `ci.yml` carries a named exemption for, and closing it here would mean the
+    // seeder disagreeing with the module — which is the one thing that would make a
+    // seeded store stop being evidence of anything. So it is asserted, reported and
+    // left, in the shape that cannot rot: the day it is fixed, this fails and says
+    // what to delete.
+
     // The probe's half: the address `getCapabilities` will report for this Stoa must
     // be one the store has a path for. Read back from the record rather than reusing
     // the constant, so a path that cannot be read fails here instead of on screen.
-    let recorded = why("reading the chosen path back", paths.path_for(&address))?
-        .expect("the path just recorded must read back");
+    let recorded =
+        why("reading the chosen path back", paths.path_for(&address))?.ok_or_else(|| {
+            "reading the chosen path back: the path just recorded is absent".to_string()
+        })?;
     let posting_address = keystore.stoa_address_at_path(&address, recorded);
     let signing_address = keystore.stoa_public_key(&address).address();
 
@@ -503,10 +656,19 @@ fn main() -> Result<(), String> {
     // fails, the gap has been CLOSED — that is good news — and the thing to do is
     // delete this assertion along with the paragraph in the report below, not to
     // adjust the comparison until it passes again.
-    assert_eq!(
-        feed.items[0].author,
-        signing_address.to_hex(),
-        "a seeded post's author must be the key it was signed with"
+    // Over BOTH rows, by looking each up rather than indexing. `items[0]` used to
+    // carry this alone, and while the two roots shared an author that was an
+    // assertion whose index could not matter — `items[1]` said the same thing. Now
+    // the roots have one author each, so this checks two different values and the
+    // feed's ordering is not baked in either.
+    let authors: Vec<&str> = feed.items.iter().map(|r| r.author.as_str()).collect();
+    assert!(
+        authors.contains(&signing_address.to_hex().as_str()),
+        "the founder's root must be attributed to the key it was signed with; got {authors:?}"
+    );
+    assert!(
+        authors.contains(&visitor.public_key().address().to_hex().as_str()),
+        "the visitor's root must be attributed to the visitor; got {authors:?}"
     );
     assert_ne!(
         posting_address, signing_address,
@@ -527,6 +689,24 @@ fn main() -> Result<(), String> {
     println!("threads    {}", feed.items.len());
     println!("ops        {ops}");
     println!("stoas      {stoas}");
+    // WHICH of the two protections was written, because the default writes a real
+    // Ed25519 root secret in the clear and the run otherwise says nothing about it.
+    // The default is correct — it is `protection_from_env`'s own contract, inherited
+    // rather than reinvented — but `keepIdentity` reports protection precisely so
+    // that plaintext is a state a caller can NAME rather than a silent default, and
+    // a developer seeding a laptop should be able to tell from the scrollback.
+    //
+    // Matched on the value actually used to write the file, not re-read from the
+    // environment: a second `var_os` here could disagree with the first.
+    println!(
+        "protection {}",
+        match protection {
+            keystore::Unlock::Unencrypted =>
+                "UNENCRYPTED — the root secret is in the clear \
+                 (set DIALECTICA_PASSPHRASE to encrypt)",
+            keystore::Unlock::Passphrase(_) => "encrypted with DIALECTICA_PASSPHRASE",
+        }
+    );
     println!();
     // BOTH author addresses, because they DISAGREE and a reader who saw only one
     // would spend an afternoon on it. `getCapabilities` reports the first, and every
@@ -540,6 +720,20 @@ fn main() -> Result<(), String> {
     println!("author addresses, which do not agree — this is the known gap:");
     println!("  getCapabilities reports  {}", posting_address.to_hex());
     println!("  every seeded op is by    {}", signing_address.to_hex());
+    println!(
+        "  record names as creator  {}",
+        genesis.creator.address().to_hex()
+    );
+    // THE CONSEQUENCE, because the three addresses above are only interesting for
+    // what they cause. `Moderators::authorises` gates on the signing author, the
+    // record names a different key, so no moderation this peer publishes binds.
+    // A UI developer whose hide button does nothing needs to read this line rather
+    // than debug their own screen.
+    println!(
+        "  => MODERATION DOES NOT WORK on a seeded Stoa: a hide published through\n\
+         \x20    the module is refused, because the signing key is not the creator\n\
+         \x20    the record names. Not a defect of this tool; see design.md."
+    );
     println!();
     println!("thread  {}", first_root.id.to_hex());
     println!("  reply  {}", reply.id.to_hex());

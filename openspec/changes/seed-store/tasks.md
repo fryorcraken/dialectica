@@ -83,3 +83,41 @@ is the correct outcome; the file says so at the top.
 - [x] Confirm zero `#[test]` in the example, so CI's count gate stays balanced.
 - [x] Gates: `rustfmt --check` clean on this file, `clippy --all-targets -D
       warnings` clean, full suite green.
+
+### Acting on review (correctness + security, 10 findings, all `dev-writer`)
+
+- [x] **The tautological moderator assertion.** Reproduced the real property
+      first: `contains(&founder.public_key())` panics, so the signing key is not a
+      moderator and a hide against a seeded Stoa is refused. Replaced with both
+      halves asserted as they are, the negative one self-invalidating; report gains
+      the consequence in words; `design.md` gains a section.
+- [x] **Nesting unasserted.** Added `parent`/`thread` assertions over all three
+      replies, read back through `OpLog::get`. The reviewer's suggested route — a
+      thread read — does not exist in core (`feed.rs` has `list_threads` only;
+      `piece/thread-read` is in flight), so that correction is recorded in the
+      finding. Measured discriminating.
+- [x] **Both feed rows had one author.** `second_root` is now the visitor's, so
+      the docstring's two-identity claim is true in the feed; the assertion checks
+      both rows by lookup rather than indexing `items[0]`.
+- [x] **`--fresh` deletes before asserting.** Documented in the help text; not
+      fixed by reordering, because the assertions are about the store the run
+      writes. The staging-and-rename alternative is named and declined as widening.
+- [x] **`identities.sqlite` typo** in `proposal.md`.
+- [x] **`expect` on the recorded path** → `ok_or_else(…)?`, so every failure in
+      `main` is a one-line message.
+- [x] **Root secret into a world-writable directory.** `keystore::open_in` after
+      writing, reusing the existing guard rather than copying it. Reproduced: the
+      `chmod 777` case now exits 1 naming the mode.
+- [x] **Protection never reported.** One report line, matched on the `Unlock`
+      value actually used to write the file rather than re-reading the environment.
+- [x] **`--fresh` deletes by name without checking.** Guard before the first
+      deletion, over `identity.key` only, via `Keystore::is_encrypted` rather than a
+      copied `MAGIC` byte. Reproduced both ways; the decoy file survives.
+- [x] **No pointer to the contradicting docstrings.** Added to the module
+      docstring, naming both and saying the adapter disagrees with them. The
+      docstrings themselves are left for whoever resolves the gap — editing
+      `keystore.rs` would widen this piece.
+- [x] Re-ran all gates after the fixes: `rustfmt --check` clean, clippy clean for
+      both packages, suite 733 + 26 unchanged, seeder exercised on a fresh
+      directory, an existing store, `--fresh`, a world-writable directory and a
+      non-dialectica directory.

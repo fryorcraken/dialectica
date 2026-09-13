@@ -93,6 +93,33 @@ file — a check placed after would be checking a file this program had just mad
 passed the flag by mistake can see in the scrollback exactly what they lost. It is
 the only path here that removes anything.
 
+### Moderation does not work on a seeded Stoa, and the tool says so
+
+**This was found by review and the assertion that should have caught it could
+not.** The original assertion was `moderators.contains(&genesis.creator)`, whose
+comment claimed it caught the derivation trap head-on. `Moderators::of` sets
+`creator: genesis.creator.clone()` and `contains` is `&self.creator == key`, so it
+reduced to `genesis.creator == genesis.creator` — true for any value in that
+field. It is this repo's recorded "asks the implementation what it did and agrees"
+defect, in the one file whose entire job is to be evidence.
+
+**The property it claimed to rule out is true today.** `Moderators::authorises`
+gates on `entry.op.op.author` — the *signing* author — and the adapter signs with
+`stoa_key` while the record names `identity_public_key`. Measured: pointing the
+assertion at `founder.public_key()` fails. So a hide published through the module
+against a seeded Stoa is **refused**, which is the outcome the "real keystore"
+section below says the real keystore was adopted to prevent. Adopting it fixed the
+half where the creator must be a key the peer *holds*; it did not make the creator
+the key the peer *signs with*.
+
+The tool cannot close that — which key a publish signs with is the spec question
+`ci.yml` exempts, and a seeder that disagreed with the module would stop being
+evidence of anything. So both halves are now asserted as they really are: the
+record's creator does moderate, and the signing key does **not**. The second
+assertion fails the day the gap closes and says what to delete. The report prints
+the consequence in words, because a UI developer whose hide button does nothing
+needs to read a line rather than debug their own screen.
+
 ### Both author addresses are printed, and their disagreement is asserted
 
 The module derives a posting identity at one position (`stoa_address_at_path`, the
@@ -167,7 +194,36 @@ correctly, because a test that cannot run is worse than no test. `core-e2e`
 measured exactly this with a probe. The file says so at the top; verified zero
 here.
 
-### Counts are asserted, not merely printed
+### The keystore is read straight back through `open_in`
+
+**Writing a keystore is not the same as writing one the module will open**, and
+review measured the gap: seeding a `chmod 777` directory succeeded, printed a full
+report with every assertion passing, and produced a keystore the module then
+refused with *"the keystore's directory is writable by others (mode 0777)"*. A real
+root secret in a directory any local user can replace, reported as success.
+
+The cause is that `Keystore::create` checks only that the file does not exist,
+while the directory-permission guard lives on the **read** path in `read_checked`.
+So the fix asks the keystore rather than re-implementing it: `keystore::open_in`
+after writing, which is the same call the adapter makes. A mode check written in
+the example would be a second copy of a guard that already exists and is already
+tested, and the copy no test covers is the one that drifts.
+
+### `--fresh` checks that `identity.key` is a keystore before deleting anything
+
+The four filenames are generic enough to collide with unrelated data, and printing
+each deletion as it happens is after the fact. Only `identity.key` is checked,
+because it is the only file here whose loss is unrecoverable — the other three hold
+rebuildable content.
+
+**`Keystore::is_encrypted` is the check, not a magic-byte comparison.** `MAGIC` is
+private to `keystore.rs`, so spelling `0xD4` here would be a second copy of a
+format constant no test covers — the defect family this repo records. `is_encrypted`
+parses the real header and answers `NotAKeystore` for anything else. Verified: a
+directory holding a 0600 non-keystore `identity.key` is refused with *"that file is
+not a dialectica keystore; check the path"*, and the file survives.
+
+### The nesting is asserted, because the counts cannot see it
 
 A seeder that printed an address without checking the store serves it is the one
 failure mode that makes the output worse than nothing: a caller would trust a
@@ -175,6 +231,35 @@ store that does not work and go looking for the bug in the UI. So the feed is re
 back through `feed::list_threads` — the same function the wire handler calls — and
 two hardcoded numbers are asserted against it: two thread heads, nine ops. Both
 come from the writes above rather than from the call being checked.
+
+**Those two counts are blind to the reply structure**, which review named:
+`list_threads` returns thread *heads*, so a store where `nested` hung off the wrong
+parent satisfies both. The nesting is the one thing this tool exists to produce,
+because a UI cannot render a tree that is not there — and the indented tree in the
+report is presentation, not a check.
+
+So each reply is read back through `OpLog::get` and its `parent` and `thread`
+asserted. **The `nested` row is the one that discriminates**: at two levels "the
+parent's id" and "the parent's thread" are the same value, so a `thread: parent`
+bug is invisible; three levels separate them. Measured — pointing `nested`'s
+expected parent at `first_root` fails.
+
+**Not through a thread read, because core has none.** `feed.rs` exposes
+`list_threads` and nothing else; the thread read is `piece/thread-read`, still in
+flight. When it lands, this is the assertion to move onto it.
+
+### One root each, so the two-identity claim is visible
+
+Both roots were the founder's, which made two claims false at once. The author
+assertion indexed `items[0]` as though the index mattered when `items[1]` asserted
+the identical thing; and the visitor signed only replies and votes, neither of
+which `list_threads` returns — so the module docstring promising "two identities so
+that author attribution is visible" described output where it was not visible at
+all.
+
+The second root is now the visitor's. The assertion checks both rows by lookup
+rather than by index, so it compares two different values and does not bake in the
+feed's ordering.
 
 **The printed request was verified end to end by execution**, not by inspection:
 the exact `{"stoa":…,"genesis":…}` line the program emits was fed to

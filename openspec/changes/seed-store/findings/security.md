@@ -10,7 +10,7 @@ directories under the worktree's gitignored `tmp/`.
 
 ---
 
-- [ ] **`dev-writer`** — `seed_store.rs:255` — the seeder writes a root secret
+- [x] **`dev-writer`** — `seed_store.rs:255` — the seeder writes a root secret
       into a world-writable directory without complaint, producing a keystore the
       module itself then refuses to open
       **Scenario:** `std::fs::create_dir_all(&dir)` creates the directory under
@@ -47,7 +47,34 @@ directories under the worktree's gitignored `tmp/`.
       written to a location the codebase's own guard classifies as unsafe, with
       no diagnostic.
 
-- [ ] **`dev-writer`** — `seed_store.rs:297-302` — the keystore is written
+      **FIXED**, taking the suggested fix unchanged: `keystore::open_in(&dir)`
+      immediately after `create`, failing on its error.
+
+      Reproduced before and after. `mkdir -m 777 tmp/openperm` then seeding it
+      previously printed a full success report; it now exits 1 with
+
+      ```
+      Error: "the keystore this wrote is not one the module can open: the
+      keystore's directory is writable by others (mode 0777); restrict it to
+      owner-only (chmod 700) — the key can be replaced there whatever its own
+      permissions say"
+      ```
+
+      **Asking the keystore rather than re-implementing the check is the whole
+      point of the fix and is now stated at the call site.** A mode test written
+      in the example would be a second copy of a guard that already exists and is
+      already tested, and the copy no test covers is the one that drifts — the
+      two would eventually disagree about which bits matter. `open_in` is
+      literally the call the adapter makes, so what the seeder accepts is what the
+      module accepts, by construction rather than by agreement.
+
+      It also closes the second harm you name, which was the more insidious one:
+      the tool can no longer report success over a store the module will refuse.
+      That was the exact failure the read-back section exists to prevent, reached
+      by a route that section did not cover — it checked the *content* of the
+      store and not whether the store was *openable*.
+
+- [x] **`dev-writer`** — `seed_store.rs:297-302` — the keystore is written
       unencrypted by default and the run says nothing about it
       **Scenario:** `keystore::protection_from_env()`
       (`keystore.rs:365-370`) returns `Unlock::Unencrypted` whenever
@@ -67,7 +94,27 @@ directories under the worktree's gitignored `tmp/`.
       One line in the report — `protection  unencrypted (set DIALECTICA_PASSPHRASE
       to encrypt)` — closes it. **Severity: medium.**
 
-- [ ] **`dev-writer`** — `seed_store.rs:262-288` — `--fresh` deletes by name
+      **FIXED**, essentially as worded. The report now carries:
+
+      ```
+      protection UNENCRYPTED — the root secret is in the clear (set DIALECTICA_PASSPHRASE to encrypt)
+      ```
+
+      and `encrypted with DIALECTICA_PASSPHRASE` in the other case.
+
+      One implementation detail worth recording, because the obvious version is
+      subtly wrong: the line is produced by matching on the `Unlock` value that was
+      **actually used to write the file**, which is now bound to a variable and
+      passed to `create`. Re-reading the environment at print time would be a
+      second `var_os` call that could disagree with the first — a narrow window,
+      but the failure would be a report claiming encryption over a plaintext file,
+      which is the one direction that must not happen.
+
+      Your framing that the default is correct and is not the finding was right and
+      is preserved: `protection_from_env` remains the source of the decision, and
+      nothing here second-guesses it.
+
+- [x] **`dev-writer`** — `seed_store.rs:262-288` — `--fresh` deletes by name
       without confirming the directory is a dialectica store, so a mistyped path
       destroys four arbitrary files
       **Scenario:** the deletion loop removes any existing file at the four
@@ -88,7 +135,40 @@ directories under the worktree's gitignored `tmp/`.
       would cost a four-byte read and would refuse the case that actually hurts.
       **Severity: medium.**
 
-- [ ] **`dev-writer`** — `seed_store.rs:361` — `stoa_key` is documented as
+      **FIXED**, with one deliberate substitution in the mechanism.
+
+      A guard now runs **before the first deletion**, and only over `identity.key`
+      — your reasoning that it is the one file whose loss is unrecoverable is the
+      reason the other three are not checked; they hold rebuildable content.
+
+      **The check is `Keystore::is_encrypted`, not a magic-byte comparison.**
+      `MAGIC` is `const`, private to `keystore.rs` (`:81`), so a byte check here
+      would mean writing `0xD4` in the example — a second copy of a format constant
+      that no test covers, which is this repo's recorded defect family and exactly
+      the shape the `ops.sqlite` comment in this file already apologises for.
+      `is_encrypted` is public, parses the real header through `parse_header`, and
+      returns `NotAKeystore` for anything else. Same protection, nothing copied.
+
+      Reproduced both ways. A directory holding a hand-written `identity.key` at
+      0600:
+
+      ```
+      Error: "refusing --fresh: identity.key is not a keystore, so this is
+      probably not a dialectica store and nothing was deleted: that file is not a
+      dialectica keystore; check the path"
+      ```
+
+      — and the file was read back afterwards, intact. A real store still deletes
+      and reseeds normally.
+
+      One limitation, stated rather than left to be discovered: because
+      `is_encrypted` goes through `read_checked`, it checks permissions *before*
+      parsing, so a non-keystore file with loose permissions is refused with a
+      permissions message rather than a "not a keystore" one. The refusal is
+      correct and nothing is deleted either way; only the wording is less direct in
+      that case.
+
+- [x] **`dev-writer`** — `seed_store.rs:361` — `stoa_key` is documented as
       called by no handler, so "matching the module" pins a derivation the MVP
       does not use
       **Scenario:** the seeder signs with `keystore.stoa_key(&address)`, which
@@ -110,6 +190,28 @@ directories under the worktree's gitignored `tmp/`.
       that disagree with the adapter, so the next reader does not conclude the
       seeder invented the divergence. **Severity: low — documentation**, but it
       bears directly on the moderation defect in `correctness.md`.
+
+      **FIXED** as asked — the module docstring now carries the pointer, naming
+      both docstrings, quoting what each claims, stating plainly that the adapter
+      does call `stoa_key` so both sentences are false of the code as it stands,
+      and saying why this file follows the adapter anyway. It ends by directing
+      whoever resolves the gap to fix those two docstrings in the same change, and
+      cites this entry.
+
+      **The two docstrings are NOT edited here, and that is a deliberate
+      boundary.** They are in `keystore.rs`, a file this piece otherwise does not
+      touch; correcting them is a behaviour-free edit to a core module that would
+      turn a tool piece into a change that also edits the crate's documentation,
+      and the coordinator's instruction on this piece is not to widen it. The
+      entry's own severity — low, documentation — supports leaving it as a
+      pointer.
+
+      Your reading of the interaction with the inequality assertion is right and is
+      why this is not merely cosmetic: that assertion guarantees the program fails
+      if anyone resolves the derivations in the direction `keystore.rs` already
+      claims is true. Someone hitting it needs to know, at that moment, that the
+      docstrings and the adapter disagreed *before* this tool existed. The pointer
+      is what tells them.
 
 ## What was clean
 

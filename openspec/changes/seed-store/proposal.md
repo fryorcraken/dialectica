@@ -34,7 +34,7 @@ identity now comes from a real keystore instead of `SecretKey::generate()`.
   argument with no default, because Basecamp's persistence directory is
   `module_data/dialectica/<instance-id>` and the instance id is host-assigned.
 - **It builds a whole peer state, not just an op log.** A keystore
-  (`identity.key`), an identity record (`identities.sqlite`), a membership store
+  (`identity.key`), an identity record (`identity.sqlite`), a membership store
   and an op log (`ops.sqlite`) — the same four files the adapter opens, under the
   same names, through the same `core` functions that derive them.
 - **It signs with the keystore's real identity**, so the seeded Stoa's creator is
