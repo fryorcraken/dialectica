@@ -440,10 +440,20 @@ stays narrow. `proposal.md`'s scope section records the blind spot itself.
 
 ## Risks / Trade-offs
 
-- **[The gate catches a file vanishing, not work vanishing]** → Both known blind
-  spots are this: an addition from a textual merge, and a reversion from a stale
-  index, neither of which deletes a path. Stated in `proposal.md` and
-  deliberately not guarded against — see §13.
+- **[The gate catches a file vanishing, not work vanishing]** → Two of the three
+  known blind spots are this: an addition from a textual merge, and a reversion
+  from a stale index, neither of which deletes a path. Stated in `proposal.md`
+  and deliberately not guarded against — see §13.
+- **[It measures against the fork point, never against current `main`]** → The
+  third blind spot, and the mirror of the other two: a branch behind `main` has
+  a genuinely clean three-dot diff and passes, while its deletions are real from
+  a vantage point the range excludes by definition. Fired on this change's own
+  PR. **Deliberately not a second arm** — `"strict": true` branch protection
+  already refuses such a merge, and a CI arm would go red on every open PR for a
+  window after every merge, which is the false alarm §Context argues the
+  three-dot form exists to avoid. It is in `closer.md` step 2 instead, as
+  `git merge-base --is-ancestor`, where a human knows whether the merge is
+  imminent. `proposal.md` records this so it is not reopened as a CI change.
 - **[A `Deletes:` line is an assertion, not a review]** → Intended, and stated in
   `proposal.md`. The gate converts a silent deletion into a stated one. The
   failure message says which paths need claiming, not that claiming them is

@@ -113,9 +113,11 @@ that this check ran at all.
 
 ## What it does not catch, stated plainly
 
-**The gate catches a file vanishing, not work vanishing.** That one sentence
-covers both known blind spots, and stating it once is more use than listing
-cases, because the next case will be a third shape of the same thing.
+**The gate catches a file vanishing, not work vanishing — and it measures that
+only against the fork point, never against current `main`.** Those two sentences
+cover all three known blind spots. Stating the properties is more use than
+listing the cases, because a fourth case will be another shape of one of them;
+the cases below are the evidence, not the definition.
 
 **Seven of the eight firings, not eight.** The exception is the duplicate
 `storage_dir` on `piece/ui-stoa-list`: a textual merge that kept *both* copies of
@@ -142,19 +144,81 @@ still exist, so `--diff-filter=D` returns nothing and the gate reports
 hard to see — `git merge-base --is-ancestor` on the reverted commit still exits
 0, because the *commit* remains reachable while its *content* is gone.
 
-The two cases differ in direction and share a shape: `storage_dir` was an
-**addition** from a textual merge, this is a **reversion** from a staged index.
-Neither is the deletion of a path.
+### The third case: a clean three-dot diff on a branch that is behind `main`
 
-Naming this is the point rather than an apology for it. A gate whose limits are
+**This one fired twice in one session, and once on this change's own pull
+request.** #69 (`deletion-gate`) and #60 (`ui-onboarding`) both had a clean
+three-dot diff while `git merge-base --is-ancestor origin/main HEAD` exited 1.
+Two-dot showed ~2,250 and 4,949 deletions respectively — `transport.rs`, the
+whole `2026-09-13-op-transport` archive, `openspec/specs/op-transport/spec.md`.
+Both were fixed by merging `main` in.
+
+**The gate passed both, correctly.** The branch really does delete nothing
+relative to where it forked; the gate's claim is true and simply does not reach
+this. It is unlike the first two cases in that files *do* disappear — but only
+relative to a `main` the gate never looks at, because the three-dot range is
+defined to exclude exactly that.
+
+**That #69 was carrying an instance of its own documented blind spot is the
+argument for this section, not a footnote to it.** The author of the gate, with
+the blind spot written down in front of them, did not notice their own branch
+had it. Its spec-test reviewer caught it. A limit that is understood is still a
+limit that gets missed.
+
+### Why this is not a second arm on the gate
+
+`git merge-base --is-ancestor origin/main HEAD` is one command and would have
+caught both. It is still the wrong place, for two measured reasons.
+
+**GitHub already enforces it.** `gh api repos/<owner>/<repo>/branches/main/protection`
+reports `"strict": true` on the required status checks, which is precisely the
+rule that a branch must not be behind its base before merging. A CI arm would
+duplicate a protection rule that already blocks the merge — and duplicate it
+*worse*, because CI runs at push time while the protection is evaluated at merge
+time, which is the moment that actually matters.
+
+**And every branch is behind for a window after any merge.** Adding this arm
+would have gone red on all ten open pull requests the moment `468e716` landed —
+the same ten-PR false alarm this change argues the three-dot form exists to
+avoid. A gate that cries wolf is a gate someone disables, and it would be
+peculiar to ship that failure inside the change whose central argument is
+against it.
+
+**One correction worth recording, because the obvious mechanism is not the real
+one.** A genuine squash-merge does *not* revert what `main` gained: reconstructed
+both ways, `git merge --squash` of a behind-branch keeps `main`'s later content
+intact, because it is a three-way merge against the merge base. What reverts
+`main` is the branch's *tree* being recorded against it — the stale-index shape
+of the second case above. So being behind `main` is a **risk factor** that makes
+the reversion possible and a review harder to read, not the reversion itself.
+This repo squash-merges (`git log -1 --format=%P` on any `main` commit returns
+one parent), so the protection rule is what stands between the two.
+
+**So it belongs in the closer's checklist, where the human context lives**, and
+`closer.md` step 2 already has it: *"The files touched must be the files the PR
+claims."* The `--is-ancestor` check is a cheap addition there because the closer
+knows the answer to "is this about to merge?", which is the question that decides
+whether being behind matters at all. **Recorded here so the next person who
+notices this does not reopen it as a CI change.**
+
+### What the three cases share
+
+`storage_dir` was an **addition** from a textual merge; the staged index was a
+**reversion** inside surviving files; this is a **stale base** whose deletions
+are real but measured against a ref the gate does not consult. The first two are
+"work vanishing, not a file vanishing". The third is the mirror: a file
+vanishing, from a vantage point the gate does not have.
+
+Naming them is the point rather than an apology for it. A gate whose limits are
 unwritten gets trusted past them, which is how "exit 0 on a gate that measured
-nothing" happens in the first place. **No guard is added for either**: detecting
-"this merge reverted work" is a substantially harder problem than the one this
-change solves, and folding it in would cost the piece the clarity that makes it
-reviewable. The generalisation the second case does yield — check the base you
-are committing against is still the base you computed against — is in
-`design.md`, because it is a working practice rather than a property of this
-gate.
+nothing" happens in the first place. **No guard is added for any of the three**:
+the first two need a model of what a merge should have contained, which is a
+substantially harder problem than the one this change solves, and the third is
+already enforced by branch protection and belongs to the closer. Folding any of
+them in would cost the piece the clarity that makes it reviewable. The
+generalisation the second case yields — check the base you are committing against
+is still the base you computed against — is in `design.md`, because it is a
+working practice rather than a property of this gate.
 
 **It also does not replace the closer's hand-run diff.** This gate proves a
 branch deletes nothing unclaimed; it does not prove the branch's diff is the

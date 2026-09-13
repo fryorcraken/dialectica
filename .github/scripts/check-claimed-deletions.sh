@@ -40,9 +40,18 @@
 #     assertion by whoever wrote the body. This converts a silent deletion into
 #     a stated one, never into a reviewed one — closer.md step 2 is still the
 #     reader.
-#   * IT CATCHES A FILE VANISHING, NOT WORK VANISHING. That one line covers both
-#     known blind spots, and it is the more useful form because the next case
-#     will be a third shape of the same thing:
+#   * IT MEASURES AGAINST THE FORK POINT, NEVER AGAINST CURRENT `main`. A branch
+#     that is BEHIND main has a clean three-dot diff and passes here, correctly —
+#     the deletions are real but only visible from a vantage point this gate does
+#     not have. Fired twice in one session, once on this change's own PR (#69),
+#     which its spec-test reviewer caught and this author did not. NOT added as a
+#     second arm: `gh api .../branches/main/protection` reports `"strict": true`,
+#     so GitHub already refuses to merge a behind-branch, and an arm here would
+#     go red on every open PR for a window after every merge — the ten-PR false
+#     alarm this gate's own three-dot argument exists to avoid. It belongs in
+#     closer.md step 2, where a human knows whether the merge is imminent.
+#   * IT CATCHES A FILE VANISHING, NOT WORK VANISHING. That one line covers the
+#     other two known blind spots:
 #       - anything a branch ADDS. A textual merge that kept two copies of one
 #         refactor is invisible here.
 #       - a merge that silently REVERTS content. A staged resolution whose index

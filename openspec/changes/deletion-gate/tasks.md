@@ -131,6 +131,28 @@
       `--continue` and a cherry-pick as well as a merge. **No guard added** —
       deliberately, with the argument for why in the same section.
 
+## 4d. The third blind spot, and the arm not added
+
+- [x] 4d.1 Record that a branch behind `main` has a clean three-dot diff and
+      passes correctly, while its deletions are real against a ref the range
+      excludes. Reconstructed: three-dot empty, gate exits 0,
+      `--is-ancestor` exits 1, two-dot names the file.
+- [x] 4d.2 Decide against a second gate arm, with the argument in
+      `proposal.md` so it is not reopened. Two measured reasons: branch
+      protection reports `"strict": true` (`gh api .../branches/main/protection`),
+      so GitHub already refuses the merge at the moment that matters; and an arm
+      would fire on all ten open PRs for a window after every merge — the false
+      alarm this change's own three-dot argument exists to avoid.
+- [x] 4d.3 Correct the mechanism rather than transcribing it: a genuine
+      squash-merge does NOT revert what `main` gained (measured both ways —
+      `git merge --squash` keeps `main`'s content, since it is a three-way merge
+      against the merge base). Being behind is a risk factor that makes the
+      stale-index reversion possible, not the reversion itself.
+- [x] 4d.4 Put the check where the human context is: `closer.md` step 2 gains
+      `git merge-base --is-ancestor origin/main origin/piece/<name>` as the cheap
+      form to run before reading a diff stat, with why exit 1 makes every number
+      in that stat ambiguous.
+
 ## 5. The documentation edits
 
 - [x] 4.1 Add the closer-authoring rule to `closer.md`'s "What you never do",

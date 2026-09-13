@@ -97,6 +97,27 @@ unrelated to the change are the signal, and they are the only signal. The fix
 is a rebase onto current `main` — which is the runner's call to make, because a
 rebase rewrites a pushed branch and only the runner pushes.
 
+**The one-command form of the same question**, and run it first because it is
+cheaper to read than a diff stat:
+
+```
+git merge-base --is-ancestor origin/main origin/piece/<name>
+```
+
+Exit 0 means the branch contains current `main` and the diff above means what it
+appears to. **Exit 1 means it does not**, and every large number in that diff
+stat is then ambiguous — you cannot tell the branch's own deletions from what
+`main` gained while it sat. Fix it by merging `main` in before reading anything
+else.
+
+This fired twice in one session, on #69 and #60, and #69 was the deletion gate's
+own pull request — its author had that blind spot written down and still did not
+notice their branch had it. Both had a *clean* three-dot diff, so the `Lint`
+deletion gate passed them correctly: that gate measures against the fork point
+and never against current `main`, by design. This check is the half it does not
+cover, and it lives here rather than in CI because every branch is behind for a
+window after any merge, so a CI arm would go red on every open PR at once.
+
 `main`'s protection has `strict: true` on its required checks, so GitHub will
 refuse a merge from a branch that is behind — but that refusal is about the
 *head commit*, not about what the diff contains, and it arrives at merge time
