@@ -392,6 +392,59 @@ TestCase {
         screen.destroy()
     }
 
+    function test_the_sentinel_addresses_no_candidate_the_screen_will_hold() {
+        // The PREMISE the single guard rests on, pinned in its own right rather
+        // than inherited from the two tests that happen to exercise it.
+        //
+        // `keepSelected()` has one guard — `candidateAt(selectedIndex) === null`
+        // — and that is sufficient only while the sentinel addresses nothing. If
+        // `isCandidate()` ever admitted a negative index again, the sentinel
+        // would name a real candidate, `candidateAt()` would return it, and the
+        // one guard would wave a keep through for a candidate nobody selected.
+        // The two tests above would still pass: the first asserts a slate is
+        // refused, the second asserts a keep is not sent — both hold as long as
+        // the refusal happens SOMEWHERE, which is why neither pins the reason.
+        //
+        // So drive the invariant itself, over the sentinel's value and over
+        // every negative spelling of a position. `candidateAt` is asserted to
+        // find nothing at the sentinel BOTH on a slate that was accepted and on
+        // one whose negative candidate was refused, so the assertion cannot pass
+        // merely because the list is empty.
+        var good = makeScreen({ "generate_identity_slate": spec.twoCandidateSlate })
+        good.requestSlate()
+        compare(good.phase, "slate", "the fixture's own precondition")
+        compare(good.candidates.length, 2,
+                "and the list is NOT empty, so finding nothing below is a fact "
+                + "about the sentinel rather than about an empty screen")
+        compare(good.candidateAt(good.nothingSelected), null,
+                "the sentinel must address no candidate of an accepted slate")
+        compare(good.candidateAt(0), good.candidates[0],
+                "while a real position still finds its own candidate — without "
+                + "this, a candidateAt() that always returned null would pass")
+        good.destroy()
+
+        // And no negative index survives the boundary at all, whatever its
+        // spelling. `-0` is excluded deliberately: it is `0` in JavaScript and a
+        // legitimate first position, so listing it would be a case that must
+        // NOT be refused.
+        var negatives = [-1, -2, -7, -1.5]
+        for (var i = 0; i < negatives.length; i++) {
+            var hostile = makeScreen({
+                "generate_identity_slate":
+                    '{"slate":"s1","count":1,"candidates":[{"index":' + negatives[i]
+                    + ',"path":0,"address":"' + "11".repeat(32) + '","publicKey":"aa"}]}'
+            })
+            hostile.requestSlate()
+            compare(hostile.phase, "failed",
+                    "a candidate carrying index " + negatives[i] + " must be refused "
+                    + "at the boundary; the one keep guard is only sufficient while "
+                    + "no candidate can carry the sentinel")
+            compare(hostile.candidateAt(hostile.nothingSelected), null,
+                    "and the sentinel addresses nothing afterwards either")
+            hostile.destroy()
+        }
+    }
+
     // Counts the rows that are VISIBLY marked as chosen, by walking the live
     // object tree for a shown Text reading SELECTED. `visible` is checked up
     // the chain, because an element is only on screen if every ancestor is.
@@ -750,32 +803,101 @@ TestCase {
 
     // ---- the encryption and recovery reports -----------------------------
 
-    function test_the_two_encryption_replies_produce_different_text() {
-        // Not "the screen says something" but "the screen says something
-        // DIFFERENT", which is the property that makes the state readable
-        // rather than implied.
-        var encrypted = makeScreen({
+    // Drives a screen to the kept phase and returns the text that is ACTUALLY
+    // SHOWN there, so the encryption and recovery assertions below are about
+    // what a user reads rather than about the field the fixture supplied.
+    //
+    // `recovery` is the value `Main` would have set from the identity report;
+    // it is assigned unconditionally, so passing `undefined` is the module
+    // having omitted the field rather than this helper skipping a step.
+    function keptScreenShowing(keepReply, recovery) {
+        var screen = makeScreen({
             "generate_identity_slate": spec.twoCandidateSlate,
-            "keep_identity": '{"kept":true,"address":"ab","publicKey":"pk","path":0,"encrypted":true}'
+            "keep_identity": keepReply
         })
-        encrypted.requestSlate()
-        encrypted.select(0)
-        encrypted.keepSelected()
-        compare(encrypted.keptIdentity.encrypted, true)
+        screen.recoveryNeedsTheRecord = recovery
+        screen.requestSlate()
+        screen.select(0)
+        screen.keepSelected()
+        compare(screen.phase, "kept", "the fixture's own precondition: the keep reported a keep")
+        return screen
+    }
 
-        var plain = makeScreen({
-            "generate_identity_slate": spec.twoCandidateSlate,
-            "keep_identity": '{"kept":true,"address":"ab","publicKey":"pk","path":0,"encrypted":false}'
-        })
-        plain.requestSlate()
-        plain.select(0)
-        plain.keepSelected()
-        compare(plain.keptIdentity.encrypted, false)
+    function test_the_two_encryption_replies_produce_different_visible_text() {
+        // Review finding (readability): the previous version of this test
+        // compared `encrypted.keptIdentity.encrypted` to
+        // `plain.keptIdentity.encrypted` — two reads of the value THE FIXTURE
+        // SUPPLIED. It never looked at the Text its name promises, so
+        // collapsing the render site's three-way conditional to the encrypted
+        // arm alone left 99 of 99 tests green while the screen told a user
+        // whose master key sits in the clear that it is encrypted. The spec
+        // singles this out: "protection that reads as strong while being absent
+        // is worse than visible plaintext".
+        //
+        // So this reads the RENDERED, VISIBLE text and pins each reply to its
+        // own hardcoded phrase. Asserting only that the two differ would not be
+        // enough — three refusals on a sibling piece were asserted to be three
+        // DIFFERENT strings and stayed green when one was reworded to actively
+        // misinform. Different is necessary; correct is the requirement.
+        var encrypted = spec.keptScreenShowing(
+            '{"kept":true,"address":"ab","publicKey":"pk","path":0,"encrypted":true}')
+        var encryptedText = spec.visibleTextMatching(encrypted, "master key on this machine")
+        var plain = spec.keptScreenShowing(
+            '{"kept":true,"address":"ab","publicKey":"pk","path":0,"encrypted":false}')
+        var plainText = spec.visibleTextMatching(plain, "master key on this machine")
 
-        verify(encrypted.keptIdentity.encrypted !== plain.keptIdentity.encrypted,
-               "the two replies must not collapse to one state")
+        // Each reply's own claim, hardcoded here rather than read back off the
+        // screen. A reply reporting encryption must not produce the in-the-clear
+        // sentence, and — the safety-relevant direction — a reply reporting NO
+        // encryption must never produce the reassuring one.
+        verify(encryptedText.indexOf("stored encrypted") >= 0,
+               "a reply reporting an encrypted key must say so; the screen shows: \""
+               + encryptedText + "\"")
+        verify(encryptedText.indexOf("in the clear") < 0,
+               "and must not also say the key is in the clear: \"" + encryptedText + "\"")
+
+        verify(plainText.indexOf("in the clear") >= 0,
+               "a reply reporting an UNENCRYPTED key must say so plainly; the screen "
+               + "shows: \"" + plainText + "\"")
+        verify(plainText.indexOf("stored encrypted") < 0,
+               "and must NEVER tell a user whose key is in the clear that it is "
+               + "encrypted — that is the one false reassurance this screen could "
+               + "make; the screen shows: \"" + plainText + "\"")
+
+        // No lock, no shield, no "secure" — the spec forbids protection that
+        // reads as strong while being absent.
+        var plainWords = spec.visibleTextsOn(plain).join(" ").toLowerCase()
+        verify(plainWords.indexOf("secure") < 0,
+               "an unencrypted key must not be described as secure")
+
+        verify(encryptedText !== plainText,
+               "and the two replies must not collapse to one state")
         encrypted.destroy()
         plain.destroy()
+    }
+
+    function test_an_omitted_encryption_field_shows_no_claim_on_screen() {
+        // The third case, and the one a two-armed conditional silently swallows:
+        // a reply that OMITTED the field must produce NO sentence at all, not
+        // the negative one. An absent `false` and a reported `false` mean
+        // different things.
+        var screen = spec.keptScreenShowing(
+            '{"kept":true,"address":"ab","publicKey":"pk","path":0}')
+
+        var shown = spec.visibleTextsOn(screen)
+        // Both bounds. The corpus must be non-trivial (or "nothing is shown"
+        // would satisfy the absence half vacuously) and must reach the kept
+        // card, proving the walk got as far as the sentence it says is absent.
+        verify(shown.length > 5, "the visible sweep must be finding text, got " + shown.length)
+        verify(shown.join(" ").indexOf("This is who you are here now.") >= 0,
+               "and must reach the kept card, or its silence proves nothing")
+
+        for (var i = 0; i < shown.length; i++) {
+            verify(shown[i].indexOf("master key on this machine") < 0,
+                   "a reply that said nothing about protection must produce no claim "
+                   + "about it, but the screen shows: \"" + shown[i] + "\"")
+        }
+        screen.destroy()
     }
 
     function test_an_omitted_encryption_field_is_not_read_as_a_negative_answer() {
@@ -798,16 +920,52 @@ TestCase {
         screen.destroy()
     }
 
-    function test_an_omitted_recovery_field_produces_no_claim() {
-        var screen = makeScreen({})
-        compare(screen.recoveryNeedsTheRecord, undefined)
-        // Set as the module would report it, and then as it would omit it.
-        screen.recoveryNeedsTheRecord = true
-        compare(screen.recoveryNeedsTheRecord, true)
-        screen.recoveryNeedsTheRecord = undefined
-        verify(screen.recoveryNeedsTheRecord !== false,
-               "an absent recovery field must not read as a reported false")
-        screen.destroy()
+    function test_the_backup_gap_is_stated_only_when_the_module_reported_it() {
+        // Review finding (readability): the previous version of this test set
+        // `recoveryNeedsTheRecord` and read it back, which is a property
+        // round-trip and not a claim about the screen. Replacing the render
+        // site's `visible: screen.recoveryNeedsTheRecord === true` with
+        // `visible: true` left 99 of 99 tests green while the backup-gap
+        // sentence was shown to every kept user, including one whose module
+        // never reported the field. The spec: "A reply omitting either field
+        // SHALL produce no claim about it."
+        //
+        // Table rather than three near-identical functions, and each row states
+        // what must be SHOWN — the sentence is a claim only when a user can
+        // read it.
+        var cases = [
+            { reported: true,      expect: true,
+              why: "the module said recovery needs more than the master key, so the "
+                   + "screen must say the record lives on this device" },
+            { reported: false,     expect: false,
+              why: "the module said it does not, so no gap may be claimed" },
+            { reported: undefined, expect: false,
+              why: "the module said nothing, so the screen may claim nothing" }
+        ]
+        var gap = "recorded only on this machine"
+        for (var i = 0; i < cases.length; i++) {
+            var screen = spec.keptScreenShowing(
+                '{"kept":true,"address":"ab","publicKey":"pk","path":0,"encrypted":true}',
+                cases[i].reported)
+
+            var shown = spec.visibleTextsOn(screen)
+            // Both bounds again: prove the walk reaches the kept card before
+            // trusting what it says is missing from it.
+            verify(shown.join(" ").indexOf("This is who you are here now.") >= 0,
+                   "the visible sweep must reach the kept card")
+
+            var stated = shown.join(" ").indexOf(gap) >= 0
+            compare(stated, cases[i].expect, cases[i].why)
+
+            if (cases[i].expect) {
+                // And where the gap IS stated, nothing beside it may present a
+                // saved key as sufficient.
+                var joined = spec.visibleTextsOn(screen).join(" ")
+                verify(joined.indexOf("not enough to get back in") >= 0,
+                       "the gap must say the master key alone is not enough")
+            }
+            screen.destroy()
+        }
     }
 
     // ---- what the screen must never say ---------------------------------
@@ -986,28 +1144,53 @@ TestCase {
         screen.destroy()
     }
 
-    function test_no_row_presents_a_derivation_path_or_an_index_as_a_name() {
-        // Core carries no generated name and the view cannot compute one. A row
-        // must leave the name UNSHOWN rather than substituting the path, the
-        // index, a position number or a truncated address — each would be read
-        // as the thing being chosen, and none of them is.
+    function test_a_row_shows_its_address_and_its_mark_and_nothing_else() {
+        // Review finding (correctness): this was a BLOCKLIST over "7", "0",
+        // "1", "#1" and the public key, and a blocklist cannot catch a
+        // name-shaped value nobody anticipated. The reviewer measured it: a
+        // `Text` reading "Key H", derived from the fixture's `path:7`, passed
+        // all 38 tests including this one, because "Key H" is on no list. The
+        // blunter `String(path)` mutation was caught only by the coincidence
+        // that the fixture's path is 7 and "7" happened to be listed.
+        //
+        // The spec states the property structurally — "The row SHALL leave the
+        // name unshown rather than substituted" — and the row is built so its
+        // only text is the address, plus SELECTED on the chosen one. So assert
+        // the SET, not a list of exclusions: any value added in a name's
+        // position then fails whether or not its spelling was anticipated, and
+        // when the generated name lands, the expected set gains a member
+        // deliberately rather than a blocklist silently admitting one.
+        var addrOne = "44".repeat(32)
+        var addrTwo = "55".repeat(32)
         var screen = makeScreen({
             "generate_identity_slate":
-                '{"slate":"s1","count":1,"candidates":[{"index":0,"path":7,"address":"'
-                + "44".repeat(32) + '","publicKey":"pk"}]}'
+                '{"slate":"s1","count":2,"candidates":['
+                + '{"index":0,"path":7,"address":"' + addrOne + '","publicKey":"pk"},'
+                + '{"index":1,"path":8,"address":"' + addrTwo + '","publicKey":"qk"}]}'
         })
         screen.requestSlate()
+        screen.select(0)
 
-        var texts = spec.everyTextOn(screen)
-        for (var i = 0; i < texts.length; i++) {
-            var t = texts[i]
-            // The full address is legitimately on screen; nothing else derived
-            // from the candidate may be.
-            if (t === "44".repeat(32))
-                continue
-            verify(t !== "7" && t !== "0" && t !== "1" && t !== "#1",
-                   "a path or an index must not stand where a name would: \"" + t + "\"")
-            verify(t !== "pk", "nor the public key")
+        var rows = spec.candidateRowsOn(screen)
+        // The walker's UPPER bound as well as its lower one. Narrowed to
+        // nothing, it would satisfy every per-row assertion below vacuously;
+        // widened past the delegates it would drag the rest of the screen's
+        // copy in and fail against correct code. Two candidates, two rows.
+        compare(rows.length, 2,
+                "the row walker must find exactly the rows the reply carried")
+
+        // The addresses THIS TEST wrote into the reply, in the order it wrote
+        // them — compared against what each row renders, so a row showing the
+        // wrong candidate's address fails here too.
+        var expected = [[addrOne, "SELECTED"], [addrTwo]]
+        for (var r = 0; r < rows.length; r++) {
+            var shown = spec.visibleTextsOn(rows[r]).slice().sort()
+            var want = expected[r].slice().sort()
+            compare(shown.join(" | "), want.join(" | "),
+                    "row " + r + " may show its address and, when chosen, the word "
+                    + "SELECTED — and nothing else. Any further string is a value "
+                    + "standing where the generated name will go, which is read as "
+                    + "the thing being chosen and is not it.")
         }
         screen.destroy()
     }
@@ -1060,6 +1243,68 @@ TestCase {
                 texts.push(String(items[i].text))
         }
         return texts
+    }
+
+    // `everyTextOn` deliberately IGNORES `visible`, which is what makes it the
+    // right instrument for "this string appears nowhere in the file" and the
+    // WRONG one for "the screen currently says this". A phase-gated sentence is
+    // present in the tree in every phase; only `visible` up the chain decides
+    // whether a user reads it. So every assertion about what the screen states
+    // NOW goes through this one instead.
+    function visibleTextsOn(item) {
+        var items = spec.everyTextItemOn(item)
+        var texts = []
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].text === undefined || String(items[i].text) === "")
+                continue
+            if (spec.isShown(items[i]))
+                texts.push(String(items[i].text))
+        }
+        return texts
+    }
+
+    // The one visible string containing `needle`, or "" if none. Returns the
+    // string rather than a boolean so a caller can assert what it says as well
+    // as that it is there — and fails loudly on two matches, because an
+    // assertion written against "the" sentence must not silently pick one of a
+    // pair.
+    function visibleTextMatching(item, needle) {
+        var texts = spec.visibleTextsOn(item)
+        var hits = []
+        for (var i = 0; i < texts.length; i++) {
+            if (texts[i].indexOf(needle) >= 0)
+                hits.push(texts[i])
+        }
+        compare(hits.length, 1,
+                "expected exactly one visible string containing \"" + needle
+                + "\", got " + hits.length + ": " + JSON.stringify(hits))
+        return hits[0]
+    }
+
+    // Every candidate row currently built by the Repeater.
+    //
+    // Identified by carrying BOTH `chosen` and `modelData`: `modelData` alone
+    // is not enough, because a delegate's children inherit the context property
+    // and a helper narrowed by one loose property has already excluded the
+    // wrong subtree once in this repo. Callers pin the count as well as the
+    // contents — a walker that finds nothing passes an "each row shows only X"
+    // assertion just as well as a correct one does.
+    function candidateRowsOn(item) {
+        var found = []
+        spec.collectRows(item, found)
+        return found
+    }
+
+    function collectRows(item, out) {
+        if (item === null || item === undefined)
+            return
+        if (item.chosen !== undefined && item.modelData !== undefined)
+            out.push(item)
+        var kids = item.children
+        if (kids === undefined)
+            return
+        for (var i = 0; i < kids.length; i++)
+            spec.collectRows(kids[i], out)
     }
 
     function collectText(item, out) {

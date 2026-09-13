@@ -68,7 +68,7 @@ Baseline before any mutation: 91 QML tests across 6 spec files, all passing
       Recorded in `design.md` under "Selection is a candidate's own index, and
       the sentinel is unaddressable", with both rejected alternatives.
 
-- [ ] **`tester`** — `tst_onboarding_states.qml` — the `selectedIndex < 0` guard
+- [x] **`tester`** — `tst_onboarding_states.qml` — the `selectedIndex < 0` guard
       in `keepSelected()` is untested; removing it leaves the whole suite green
       **Scenario:** replace `if (screen.selectedIndex < 0) return` with
       `if (false) return` at `OnboardingScreen.qml:146`. Every candidate in every
@@ -103,6 +103,37 @@ Baseline before any mutation: 91 QML tests across 6 spec files, all passing
       measured is closed, but **I am not ticking your box** — whether the
       coverage is now adequate is your call, not mine, and you may want a test
       that pins the collapse itself rather than inheriting mine.
+      **Fixed by `tester`.** I re-ran your mutation as `dev-writer` restated it
+      — `if (candidate === null)` → `if (false)` — and confirm **2 of 49 fail**
+      (`test_keeping_is_refused_by_the_view_while_nothing_is_selected` and
+      `test_the_keep_guard_refuses_at_the_sentinel_even_when_a_row_carries_it`).
+      So the guard is reached. But both fail by **throwing** at
+      `OnboardingScreen.qml:237` ("Value is null and could not be converted to
+      an object") rather than by an assertion, which is detection by accident of
+      the next line's dereference — and neither test names *why* one guard is
+      enough.
+      That premise is what I have added, because it is the part that can rot
+      silently: **`keepSelected()`'s single guard is sufficient only while the
+      sentinel addresses no candidate.** Both existing tests hold as long as the
+      refusal happens somewhere, so neither notices if the refusal moves from
+      the boundary to nowhere. `test_the_sentinel_addresses_no_candidate_the_
+      screen_will_hold` asserts the invariant directly: on an ACCEPTED,
+      NON-EMPTY slate, `candidateAt(nothingSelected)` is null while
+      `candidateAt(0)` still returns candidate 0 — the second half is there
+      because a `candidateAt()` that always returned null would satisfy the
+      first — and then every negative spelling (`-1`, `-2`, `-7`, `-1.5`) is
+      refused at the boundary.
+      **Mutation, measured:** dropping `value.index < 0` from `isCandidate()`
+      (so the sentinel is addressable again) fails **4 of 49**, my new test
+      among them, naming the premise: *"a candidate carrying index -1 must be
+      refused at the boundary; the one keep guard is only sufficient while no
+      candidate can carry the sentinel"*. Under that same mutation
+      `test_the_keep_guard_refuses_at_the_sentinel...` measures **1 keep
+      reaching the bridge where 0 is required** — so the collapse's premise is
+      load-bearing for a real write, not only for a dead button.
+      I kept both of `dev-writer`'s tests unchanged. The collapse is right and I
+      am not asking for a third guard; what was missing was an assertion on the
+      fact that makes one enough.
 
 - [x] **`dev-writer`** — `OnboardingScreen.qml:302-360` — a candidate that is
       not an object throws in the delegate and still reaches the slate phase
@@ -316,7 +347,7 @@ be unsure of it — it cannot catch a name-shaped value nobody anticipated. A
 structural assertion is available and is strictly stronger, and I have written it
 as a finding for the `tester` rather than leaving it as a remark:
 
-- [ ] **`tester`** — `tst_onboarding_states.qml:719` — replace the blocklist with
+- [x] **`tester`** — `tst_onboarding_states.qml:719` — replace the blocklist with
       an assertion on the row's structure
       **Scenario:** the current test enumerates forbidden strings, so a row that
       began showing, say, the candidate's `path` formatted as `m/44'/0'/7'`, or a
@@ -345,6 +376,33 @@ as a finding for the `tester` rather than leaving it as a remark:
       coincidence of the fixture rather than by covering the property.
       **Severity: medium** as a test-strength finding; no defect in the shipped
       row today.
+      **Fixed.** `test_no_row_presents_a_derivation_path_or_an_index_as_a_name`
+      is gone and `test_a_row_shows_its_address_and_its_mark_and_nothing_else`
+      replaces it, taking the set-equality shape you specify. Two candidates,
+      one selected: each row's set of VISIBLE strings must equal exactly
+      `{that candidate's full address}`, plus `"SELECTED"` on the chosen one —
+      compared against the addresses the fixture wrote, so a row rendering the
+      wrong candidate's address also fails.
+      **Mutation, measured:** your exact probe — a `Text` reading
+      `"Key " + String.fromCharCode(65 + (row.modelData.path % 26))` above the
+      `AddressLabel`, rendering `"Key H"` for the `path:7` fixture — now fails,
+      and the message shows the intruder in place:
+      `Actual: 4444…4444 | Key H | SELECTED` against
+      `Expected: 4444…4444 | SELECTED`. Under the blocklist it passed.
+      **On the instrument, because it is the part that could go wrong
+      silently.** The row walker identifies a delegate by carrying BOTH `chosen`
+      and `modelData`. `modelData` alone is not enough — a delegate's children
+      inherit the context property, and this repo has already had a helper
+      narrowed by one loose property exclude the wrong subtree and fail against
+      correct code. So the test pins the walker's **upper bound as well as its
+      lower one**: `compare(rows.length, 2)` before any per-row assertion.
+      Narrowed to nothing, the set-equality loop would pass vacuously; widened
+      past the delegates it would drag the screen's copy in and fail against a
+      correct row. Two candidates, two rows, measured.
+      One thing your finding does not claim and I will not either: the test
+      reads `visible` and `text`, so it cannot see that the mark is not
+      *presented* as a badge — only that no extra string sits where a name
+      would.
 
 ## What I could not check
 

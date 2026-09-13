@@ -12,7 +12,7 @@ Baseline: **99 QML tests across 6 spec files, all passing**
 
 ## Defects
 
-- [ ] **`tester`** — `tst_onboarding_states.qml:748` —
+- [x] **`tester`** — `tst_onboarding_states.qml:748` —
       `test_the_two_encryption_replies_produce_different_text` asserts on the
       property feeding the binding, never on the rendered text its name promises
       **Scenario:** the test drives two screens to the kept phase and compares
@@ -37,8 +37,62 @@ Baseline: **99 QML tests across 6 spec files, all passing**
       clear" for the other, and that the two rendered strings differ.
       **Severity: high** as a test gap — no defect in the shipped render today,
       but this is the screen's one safety-relevant claim and nothing pins it.
+      **Fixed.** The test is now
+      `test_the_two_encryption_replies_produce_different_visible_text` and reads
+      the RENDERED, VISIBLE text through a new `visibleTextsOn()` sweep, never
+      `keptIdentity.encrypted`.
+      I did not stop at "the two differ", which your fix suggests and which
+      would have been the third recorded instance of this repo's
+      pinning-distinctness variant — three refusals on a sibling piece were
+      asserted to be three *different* strings and stayed green when one was
+      reworded to actively misinform. So each reply is pinned to its own
+      hardcoded phrase, in both directions: the encrypted reply's text must
+      contain "stored encrypted" and must NOT contain "in the clear"; the
+      unencrypted reply's must contain "in the clear" and must NEVER contain
+      "stored encrypted". The distinctness check stays as the last line rather
+      than as the whole test. The unencrypted screen is also swept for "secure",
+      which the spec forbids.
+      **Mutation, measured — your exact one.** Collapsing
+      `OnboardingScreen.qml:652-654` to
+      `text: "The master key on this machine is stored encrypted."` fails
+      **1 of 49**, and it fails naming the wrong text rather than merely
+      differing:
+      *'a reply reporting an UNENCRYPTED key must say so plainly; the screen
+      shows: "The master key on this machine is stored encrypted."'* — the false
+      reassurance is printed verbatim in the failure, so a fixer reads what the
+      user would have read.
+      **A second gap the same collapse opens, which your finding does not name
+      and which I found while building the fixture.** A two-armed conditional
+      also has no third case: the spec's "a reply omitting either field SHALL
+      produce no claim about it" rests on the `visible: reported !== undefined`
+      binding one line above, and nothing asserted the *rendered* consequence of
+      that either. `test_an_omitted_encryption_field_shows_no_claim_on_screen`
+      now does. **Mutation:** `visible: reported !== undefined` → `visible: true`
+      fails it, naming the sentence shown to a user whose module said nothing:
+      *"a reply that said nothing about protection must produce no claim about
+      it, but the screen shows: 'The master key … in the clear …'"*. The
+      pre-existing `test_an_omitted_encryption_field_is_not_read_as_a_negative_
+      answer` is kept and left alone — it pins the property, which is a
+      different and still-worthwhile fact.
+      **On the instrument, since it is new.** `everyTextOn()` deliberately
+      ignores `visible`, which is what makes it right for "this string appears
+      nowhere" and wrong for "the screen says this". `visibleTextsOn()` filters
+      by the existing `isShown()` walk. Its bounds are pinned in the tests that
+      use it, not assumed: each asserts the corpus is non-trivial AND that it
+      reaches the kept card ("This is who you are here now.") before trusting
+      what it reports as absent — a sweep narrowed to nothing satisfies an
+      absence assertion just as well as a correct one does. Instrumented against
+      a live screen in the kept phase: of the 30 Text items the walk reaches, it
+      reports 12 as shown — the heading pair, the kept card's three, the
+      apparatus header and its six labels and bodies — and correctly reports the
+      slate's
+      phase-gated copy, the refused card and the failed card as hidden. That is
+      the discrimination the two defects above needed and did not have.
+      **Your corpus finding held up and I did not manufacture one.** The
+      35-Text, visible-agnostic walk is the right instrument for the absence
+      sweeps that use it, and I left those alone.
 
-- [ ] **`tester`** — `tst_onboarding_states.qml:796` —
+- [x] **`tester`** — `tst_onboarding_states.qml:796` —
       `test_an_omitted_recovery_field_produces_no_claim` never checks that the
       claim is absent from the screen; it only round-trips the property
       **Scenario:** the test sets `screen.recoveryNeedsTheRecord` to `true`,
@@ -59,6 +113,37 @@ Baseline: **99 QML tests across 6 spec files, all passing**
       already exist in the file.
       **Severity: medium** — the false claim here is over-warning rather than
       under-warning, which is the safer direction, unlike the finding above.
+      **Fixed**, and fixed as the family you name rather than twice: both this
+      and the box above go through the one new `visibleTextsOn()` sweep.
+      `test_an_omitted_recovery_field_produces_no_claim` is gone;
+      `test_the_backup_gap_is_stated_only_when_the_module_reported_it` replaces
+      it, and it is a **table of three rows** rather than three near-identical
+      functions — `reported: true` must show the sentence, `false` must not,
+      `undefined` must not. Each row states what the screen must SHOW, because
+      the sentence is a claim only when a user can read it. The `true` row also
+      requires "not enough to get back in", so the gap cannot be satisfied by a
+      sentence that mentions the machine without stating the consequence.
+      **Mutations, measured — both directions, because a one-sided test here is
+      how the family survives.**
+      `visible: screen.recoveryNeedsTheRecord === true` → `visible: true` (your
+      exact mutation) fails, on the `false` row:
+      *"the module said it does not, so no gap may be claimed — Actual: true,
+      Expected: false"*.
+      The inverse, `visible: false`, fails on the `true` row: *"the module said
+      recovery needs more than the master key, so the screen must say the record
+      lives on this device — Actual: false, Expected: true"*. Without the second
+      mutation an assertion that only forbade the sentence would pass against a
+      screen that never showed it, which is the same defect pointing the other
+      way.
+      The helper assigns `recoveryNeedsTheRecord` unconditionally, so passing
+      `undefined` is the module having omitted the field rather than the helper
+      skipping a step — a guard there would have made the third row untestable
+      while looking like it tested something.
+      Note QtTest reports the first failure per test, so a mutation breaking
+      more than one row names only the first. That is acceptable here because
+      the rows assert one property over three inputs and the message identifies
+      which input — unlike a test asserting three unrelated things, which is the
+      shape this repo's principles forbid.
 
 - [x] **`dev-writer`** — `tasks.md:42` — the implementation checklist states the
       opposite of what shipped, on the one line the copy history makes most
