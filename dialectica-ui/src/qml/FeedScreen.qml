@@ -42,6 +42,11 @@ ScreenFrame {
     // outlives the key that justified it."
     property var capability: ({ canPost: false, reason: "" })
 
+    // Whether the closed gate's guidance is revealed. A view-local disclosure,
+    // reset on nothing — it says nothing about the world, so there is nothing
+    // for it to go stale against.
+    property bool showFix: false
+
     // ---- the ordering row -----------------------------------------------
     //
     // Built from a model, as the bundle requires, so that an ordering can
@@ -64,6 +69,52 @@ ScreenFrame {
     ]
     property string ordering: "convergent"
 
+    // ---- the viewer's own votes -----------------------------------------
+    //
+    // A map from the op a vote targeted to the direction published: -1 or +1.
+    //
+    // **Keyed by the post, so marking the wrong post is unrepresentable.** There
+    // is no code path that could write one post's vote into another's slot,
+    // because the key IS the post — which is the "a vote on one post does not
+    // mark another" rule held by construction rather than checked at a call
+    // site.
+    //
+    // **Session-only, and it must stay that way.** No call returns the viewer's
+    // earlier votes, so after a reload this is empty and every control renders
+    // neutral — which is honest about a peer that cannot read votes back. A
+    // control that appeared to remember across a reload would be the view
+    // inventing state core never reported. Nothing persists this and nothing
+    // should.
+    property var ownVotes: ({})
+
+    // Written ONLY on a successful publish, so a refused vote leaves the control
+    // showing exactly what it showed before the attempt — nothing was recorded,
+    // so there is nothing to reflect.
+    //
+    // A NEW object rather than a mutation: QML's property-change detection does
+    // not fire when an object's contents change in place, so mutating would
+    // update the map and repaint nothing. That is the failure where the feature
+    // looks broken in the way hardest to attribute.
+    function recordVote(op, direction) {
+        var next = {}
+        for (var k in screen.ownVotes)
+            next[k] = screen.ownVotes[k]
+        next[op] = direction
+        screen.ownVotes = next
+    }
+
+    function voteOn(op, direction) {
+        var reply = Core.publishVote(screen.stoaAddress, op,
+                                     direction > 0 ? "up" : "down")
+
+        // The same success test the composer applies, and for the same reason: a
+        // reply the view could not interpret must not be recorded as a vote that
+        // happened. `wasNew` is not consulted — a vote published twice is the
+        // same vote, and both answers mean the viewer's vote is on record.
+        if (reply.ok && typeof reply.value.opId === "string" && reply.value.opId !== "")
+            screen.recordVote(op, direction)
+    }
+
     Component.onCompleted: screen.reload()
 
     function reload() {
@@ -73,11 +124,32 @@ ScreenFrame {
             return
         }
 
-        // The posting gate is re-probed with every render of the feed.
+        // The posting gate is re-probed with every render of the feed, never
+        // read from a build flag, a configuration value, or an answer obtained
+        // before this render.
+        //
+        // **Fail closed, and `=== true` is what makes that structural.** A probe
+        // that could not be reached, answered with something that is not a probe
+        // reply, or answered with an object carrying neither an affirmative
+        // capability nor a reason must all reach the SAME state as a probe
+        // reporting "not possible" — because the gate's whole point is that a
+        // box the user can type into can actually submit. `canPost !== true`
+        // covers every one of those without a branch per shape: absent,
+        // `undefined`, `"true"`, `1` and `null` are all not-`true`.
         var probe = Core.getCapabilities(screen.stoaAddress)
-        screen.capability = probe.ok
+        screen.capability = (probe.ok && probe.value.canPost === true)
             ? probe.value
-            : ({ canPost: false, reason: probe.error })
+            : ({
+                canPost: false,
+                // A reason from whichever source has one. A probe that supplied
+                // no reason leaves this empty rather than inventing text: the
+                // spec forbids substituting a reason of the view's own, and an
+                // empty reason is a visible gap in core's answer rather than a
+                // plausible sentence covering for one.
+                reason: probe.ok
+                    ? (typeof probe.value.reason === "string" ? probe.value.reason : "")
+                    : probe.error
+            })
 
         var reply = Core.listThreads({
             stoa: screen.stoaAddress,
@@ -332,53 +404,88 @@ ScreenFrame {
     Repeater {
         model: screen.readState === "ok" ? screen.rows : []
 
-        delegate: ColumnLayout {
+        delegate: RowLayout {
+            id: row
             required property var modelData
             Layout.fillWidth: true
             spacing: Theme.itemGap
 
-            PostHeader {
-                identityAddress: modelData.author
-                // There is no generated name on the wire: core sends an
-                // address, and the name is the address's shadow. Until the
-                // name derivation lands the address carries the row alone,
-                // which is the honest half of the pair.
-                generatedName: ""
-                edited: modelData.isRevised === true
-                Layout.fillWidth: true
-            }
-
-            // A hidden row is visible only in the show-hidden view, and it must
-            // not render indistinguishably from a visible one — a reader who
-            // asked to see what was hidden is owed knowing which those were.
-            Text {
-                visible: modelData.isHidden === true
-                text: "HIDDEN BY A MODERATOR · SHOWN BECAUSE YOU ASKED TO SEE HIDDEN POSTS"
-                font: Theme.label
-                color: Theme.accent
-                textFormat: Text.PlainText
-            }
-
-            SanitisedText {
-                value: modelData.body
-                Layout.fillWidth: true
-            }
-
-            Repeater {
-                model: modelData.attachments
-                delegate: SanitisedText {
-                    required property var modelData
-                    value: modelData
-                    bodyFont: Theme.address
-                    bodyColor: Theme.inkMuted
-                    Layout.fillWidth: true
+            // The arrows, with NO number. `showScore` is left at its default
+            // false, which is the decision rather than an omission: no call in
+            // the contract returns a score, and the control's own default would
+            // otherwise print "0" — a tally core never reported.
+            //
+            // `vote` reads the session map. A post with no recorded vote gets
+            // `undefined`, and `|| 0` renders it in the same neutral state as a
+            // post before any vote — which is what an unknown vote state must
+            // look like, since the view has no way to say "you have not voted".
+            //
+            // The gate governs this as it governs every other posting
+            // affordance: publishing a vote is publishing an op.
+            VoteControl {
+                visible: screen.capability.canPost === true
+                vote: screen.ownVotes[row.modelData.currentVersion] || 0
+                interactive: screen.capability.canPost === true
+                Layout.alignment: Qt.AlignTop
+                onVoted: function (direction) {
+                    // Direction 0 is the control's "undo" press. Core has no
+                    // vote retraction, so publishing something for it would be
+                    // publishing an op that does not mean what the press meant.
+                    // Nothing is sent and nothing changes — which is honest, and
+                    // is the reason this is a branch rather than a mapping.
+                    if (direction !== 0)
+                        screen.voteOn(row.modelData.currentVersion, direction)
                 }
             }
 
-            Rectangle {
+            ColumnLayout {
                 Layout.fillWidth: true
-                Layout.preferredHeight: Theme.hairline
-                color: Theme.rule
+                spacing: Theme.itemGap
+
+                PostHeader {
+                    identityAddress: row.modelData.author
+                    // There is no generated name on the wire: core sends an
+                    // address, and the name is the address's shadow. Until the
+                    // name derivation lands the address carries the row alone,
+                    // which is the honest half of the pair.
+                    generatedName: ""
+                    edited: row.modelData.isRevised === true
+                    Layout.fillWidth: true
+                }
+
+                // A hidden row is visible only in the show-hidden view, and it
+                // must not render indistinguishably from a visible one — a
+                // reader who asked to see what was hidden is owed knowing which
+                // those were.
+                Text {
+                    visible: row.modelData.isHidden === true
+                    text: "HIDDEN BY A MODERATOR · SHOWN BECAUSE YOU ASKED TO SEE HIDDEN POSTS"
+                    font: Theme.label
+                    color: Theme.accent
+                    textFormat: Text.PlainText
+                }
+
+                SanitisedText {
+                    value: row.modelData.body
+                    Layout.fillWidth: true
+                }
+
+                Repeater {
+                    model: row.modelData.attachments
+                    delegate: SanitisedText {
+                        required property var modelData
+                        value: modelData
+                        bodyFont: Theme.address
+                        bodyColor: Theme.inkMuted
+                        Layout.fillWidth: true
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: Theme.hairline
+                    color: Theme.rule
+                }
             }
         }
     }
@@ -410,7 +517,51 @@ ScreenFrame {
         Item { Layout.fillWidth: true }
     }
 
-    // ---- posting gate: a reason, never a dead text field -----------------
+    // ---- posting gate: open ---------------------------------------------
+    //
+    // The composer exists ONLY on this branch, and the two branches are driven
+    // by one expression against its complement — so no probe answer can render
+    // both, and none can render neither.
+    //
+    // The probe is re-run by `reload()` on every render and never cached across
+    // one: a gate decided from a stale answer is a button that outlives the key
+    // that justified it.
+    ColumnLayout {
+        visible: screen.capability.canPost === true
+        Layout.fillWidth: true
+        spacing: Theme.itemGap
+
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: Theme.hairline; color: Theme.ink }
+
+        Text {
+            text: "Post to this Stoa"
+            font: Theme.heading
+            color: Theme.ink
+            textFormat: Text.PlainText
+        }
+
+        Composer {
+            id: composer
+            kind: "post"
+            stoaAddress: screen.stoaAddress
+            Layout.fillWidth: true
+
+            // **No optimistic row.** The feed is re-read and shows what core
+            // reports; nothing composed by the view is inserted. A row the view
+            // built would carry the sanitiser's counts and a revision flag it
+            // would have to invent, and inventing them is how a view comes to
+            // render something core never said.
+            //
+            // If the re-read does not show the post — which happens for a reply,
+            // since a reply is not a thread head and has no row in a feed of
+            // thread heads — the success message stays. It is still correct
+            // about what occurred, which is why it never says "your post is now
+            // below".
+            onPublished: screen.reload()
+        }
+    }
+
+    // ---- posting gate: shut ----------------------------------------------
     //
     // There is no disabled composer here and no text field behind the gate. A
     // box the user could type into and not send would lose what they wrote.
@@ -421,19 +572,71 @@ ScreenFrame {
 
         Rectangle { Layout.fillWidth: true; Layout.preferredHeight: Theme.hairline; color: Theme.ink }
 
+        // **NOT copy.json's `compose.blockedTitle`.** That string is "You cannot
+        // reply in this Stoa yet", and it is wrong twice over: the gate
+        // withholds posting AND voting as well as replying, so a heading naming
+        // only replying misdescribes what is blocked; and the bundle pairs it
+        // with a reason ending "the reply box comes back when a reply would
+        // actually send", which promises a delivery outcome nothing in this
+        // system checks. The probe establishes whether a publish would be
+        // accepted and stored LOCALLY. Publishing and delivering are two events
+        // at two times, and the second is not wired.
         Text {
-            // copy.json `compose.blockedTitle`
-            text: "You cannot reply in this Stoa yet."
+            text: "You cannot post, reply or vote in this Stoa yet."
             font: Theme.heading
             color: Theme.ink
+            wrapMode: Text.WordWrap
             textFormat: Text.PlainText
+            Layout.fillWidth: true
         }
 
-        // The reason comes from core and already names a fix — that is a
-        // documented obligation on the keystore errors, with a test. Rewording
-        // it here would mean maintaining the same guidance twice.
+        // The reason comes from core and already names a fix — a documented
+        // obligation on the keystore errors, with a test.
+        //
+        // **Verbatim, and nothing here branches on its text.** The reason's
+        // wording is deliberately not part of the contract, so a view selecting
+        // what it shows by matching on that prose would turn every improvement
+        // to it into a silent breaking change. The bundle's own `noKeystore` and
+        // `badPermissions` strings are not used at all: a view-supplied reason is
+        // one nobody checked against what the probe can actually establish, and
+        // both of those make the delivery promise described above.
         Text {
             text: screen.capability.reason !== undefined ? screen.capability.reason : ""
+            font: Theme.bodySmall
+            color: Theme.inkSoft
+            wrapMode: Text.WordWrap
+            lineHeight: 1.55
+            textFormat: Text.PlainText
+            Layout.fillWidth: true
+        }
+
+        // The route to acting on it, so the reader gets a reason AND somewhere
+        // to go rather than the reason alone.
+        //
+        // It reveals guidance rather than navigating: there is nowhere to
+        // navigate to, and a button that changed nothing would read as a working
+        // control — which is the reason the ordering row above deliberately has
+        // no click handler. This one has something to do.
+        FlatButton {
+            // copy.json `compose.fix` — verbatim, and it carries no guarantee
+            // claim, which is why this one survived the audit that dropped two.
+            text: "Show me how to fix it"
+            kind: "secondary"
+            visible: !screen.showFix
+            onClicked: screen.showFix = true
+        }
+
+        // **Guidance about the shape of the problem, never a second reason.**
+        // Core's reason above is the one that names the fix; this says where to
+        // act and what the gate is actually about, and it deliberately makes no
+        // claim about what happens after — in particular not that anything will
+        // then send.
+        Text {
+            visible: screen.showFix
+            text: "This is settled on your machine, not by anyone else. The gate above reports what "
+                + "the core module found when it looked for a usable key just now, and the line "
+                + "before it is that report word for word. Resolve what it names and reopen this "
+                + "Stoa; the gate is checked again every time this feed is read."
             font: Theme.bodySmall
             color: Theme.inkSoft
             wrapMode: Text.WordWrap
@@ -444,6 +647,33 @@ ScreenFrame {
     }
 
     apparatus: [
+        // Why there is no box on screen when the gate is shut — so the absence
+        // reads as a decision rather than as a missing feature.
+        //
+        // copy.json `compose.apparatus`, verbatim. It survived the audit that
+        // dropped two other compose strings because it is a statement about this
+        // interface's own design, and true of it: there IS no disabled composer
+        // here.
+        MarginNote {
+            label: "ON THE MISSING BOX"
+            body: "There is no disabled composer here. A box you could type into and not send would lose what you wrote."
+            visible: screen.capability.canPost !== true
+        },
+        // What a published post is, and is not. It sits beside the composer
+        // because the success message's claim is deliberately weaker than a
+        // reader expects, and the weakness is the honest part.
+        MarginNote {
+            label: "ON PUBLISHING"
+            body: "Publishing writes the post to this machine's log and signs it. Whether any other peer receives it happens later and is not reported back here, so nothing in this interface will tell you a post was delivered."
+            visible: screen.capability.canPost === true
+        },
+        // Why the arrows carry no number. Without this the absence reads as a
+        // count that failed to load.
+        MarginNote {
+            label: "ON THE ARROWS"
+            body: "No number is shown beside them because nothing here counts votes. The arrows record yours on this machine for as long as this view is open; a zero would be a claim that nobody voted, which is not something this peer can know."
+            visible: screen.capability.canPost === true
+        },
         MarginNote {
             label: "ON THIS ORDERING"
             // copy.json `feed.orderingNote`

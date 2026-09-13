@@ -418,9 +418,18 @@ someone deliberately writing "agreed" twice in one thread, which is ordinary
 forum behaviour. The core reports which of the two happened; **the interface
 decides what the person sees**, and the failing design is the one that reports
 success and shows nothing new, because the person concludes their post vanished.
-Reasonable answers: say so plainly ("you already posted this"), or scroll to and
-highlight the existing post. **Do not** show a spinner that resolves to nothing,
-and do not show a generic error — nothing failed.
+**Do not** show a spinner that resolves to nothing, and do not show a generic
+error — nothing failed.
+
+**What `composer-view` settled, and why the other option was dropped.** This
+section used to offer two reasonable answers: say so plainly, or scroll to and
+highlight the existing post. Only the first ships. The second is a behaviour the
+view can perform for a post and **not** for a reply — the feed lists thread
+heads, so a deduplicated reply has no row to scroll to — and requiring a
+behaviour half the surface cannot meet is how a spec acquires a requirement no
+test can satisfy honestly. So the spec requires a third message, distinguishable
+from both the fresh-success and the refusal messages, saying the content was
+already published.
 
 This is a known gap with a known fix (a timestamp or nonce inside the post), and
 it is deliberately not fixed yet. Design for the behaviour that exists.
