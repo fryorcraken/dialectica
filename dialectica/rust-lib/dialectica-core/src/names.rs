@@ -6,7 +6,7 @@
 //! pseudonymity in any useful sense (PLAN.md §5.2.1) — a reader who cannot tell
 //! two participants apart at a glance cannot follow an argument between them,
 //! which is the one thing this forum is named for. So every identity renders
-//! under three drawn words: *measured aporia of lampsacus*.
+//! under three drawn words: *pensive aporia of lampsakos*.
 //!
 //! # Derived from the PUBLIC KEY, not the address, and the difference matters
 //!
@@ -17,12 +17,24 @@
 //! and keeps "does a name change when a key does?" a question that arrives
 //! loudly rather than one pre-answered by which value happened to be hashed.
 //!
-//! **The consequence is the reason [`crate::feed::FeedRow`] carries a name at
-//! all.** A reply reporting an author reports an *address*, from which no key is
-//! recoverable — so a view holding one cannot compute the name. Core holds the
-//! key, because the signed op carries it, so core renders the name. `feed.rs`
-//! carried a doc comment asserting the opposite for as long as the field was
-//! missing, which is why the field was missing.
+//! **The consequence decides which value a reply owes, and it is the KEY.** A
+//! reply reporting an author by *address* alone has handed its caller a hash
+//! from which no key is recoverable, so that caller cannot compute the name —
+//! which is a real gap, and [`crate::feed::FeedRow`] currently has it.
+//!
+//! **The fix is to carry the key, never the name.** A name beside the key it
+//! derives from is two values that must agree and could disagree, with no way
+//! for a recipient to tell which is wrong, and the one on the wire is the one a
+//! relay could strip or forge. So no reply carries a name — not a feed row, not
+//! a thread item, not a slate candidate — and core exposes this derivation
+//! instead, so that a caller holding a key never has to reimplement a
+//! consensus-critical scheme it holds no wordlists for.
+//!
+//! An earlier pass put a `displayName` on the feed row, reasoning correctly from
+//! the address-only gap to the wrong remedy. Putting the public key on that row
+//! is a change to its `author` contract across several merged specs, so it is
+//! filed as its own piece; until it lands the feed path cannot render a name and
+//! `docs/UI-BRIEF.md` obligation 6 records the obligation.
 //!
 //! # Determinism is the whole contract
 //!
@@ -59,12 +71,10 @@ use crate::identity::{KeyError, PublicKey};
 use sha2::{Digest, Sha256};
 
 mod adjectives;
-mod denylist;
 mod nouns;
 mod places;
 
 pub use adjectives::ADJECTIVES;
-pub use denylist::TRUE_ATTRIBUTION_PAIRS;
 pub use nouns::NOUNS;
 pub use places::PLACES;
 
@@ -102,24 +112,32 @@ const NAME_PREFIX: &[u8; 32] = b"/dialectica/1/Name/Display\0\0\0\0\0\0";
 /// slot — the natural reading of "three words plus a connector" is that there
 /// are four, and there are three. It carries no entropy and never varies with
 /// the key, which is exactly what makes it the one part of a name a cramped
-/// caller may drop: *measured aporia lampsacus* has identical information
+/// caller may drop: *pensive aporia lampsakos* has identical information
 /// content and misleads no reader about who published something.
 pub const CONNECTOR: &str = "of";
 
 /// The first byte past the name's slice of the digest.
 ///
-/// Six bytes for the first draw of three 16-bit slots, six more as the one
-/// complete redraw the denylist requires. **Beyond this the derivation fails
-/// rather than reading on**: reading without bound is what lets two
-/// implementations disagree about how far to read and so produce different names
-/// for one key, which is the failure the whole scheme exists to prevent. A
-/// bounded slice is also what makes the derivation checkable against a fixed
-/// expected value at all.
+/// Six bytes: three 16-bit slots, one unconditional draw each. **This names no
+/// byte the derivation does not read**, which is the point of it being 6 rather
+/// than a wider figure with an unread tail. A bound stated wider than the draws
+/// records a boundary nothing enforces — a range read by nothing, which the next
+/// reader takes as load-bearing and designs around. That is the byte reservation
+/// this scheme has already had to retract once.
 ///
-/// The number of bytes a name actually consumes is **data-dependent** — the
-/// reserve is touched only on a refusal — and this bound is what keeps it
-/// finite.
-const NAME_DIGEST_BOUND: usize = 12;
+/// **It bounds by being what the derivation slices, not by being asserted.** An
+/// earlier version of this constant was compared to its own literal in a
+/// `debug_assert_eq!` — a tautology that compiled out in release and could not
+/// fail under any edit to the draws. [`name_from_digest`] now takes its six
+/// bytes as `digest[..NAME_DIGEST_BOUND]`, so moving the bound moves the read
+/// and a draw past it does not compile.
+///
+/// The number of bytes a name consumes is therefore fixed rather than
+/// data-dependent: no input makes the derivation read a seventh byte. Reading
+/// without bound is what lets two implementations disagree about how far to read
+/// and so produce different names for one key, which is the failure this whole
+/// scheme exists to prevent.
+const NAME_DIGEST_BOUND: usize = 6;
 
 /// A generated display name: three drawn words.
 ///
@@ -150,7 +168,7 @@ impl DisplayName {
         [self.adjective, self.noun, self.place]
     }
 
-    /// The rendered name: *measured aporia of lampsacus*.
+    /// The rendered name: *pensive aporia of lampsakos*.
     ///
     /// Every drawn word appears complete. Nothing here truncates, abbreviates or
     /// elides — the three drawn words are the whole of the name's space, and
@@ -171,14 +189,19 @@ impl std::fmt::Display for DisplayName {
 
 /// Why a name could not be derived.
 ///
+/// **Malformed key material is the only failure this capability has**, and the
+/// single arm below is the whole of it. There is deliberately no second arm: an
+/// error variant no input can produce is an unreachable branch that a reader
+/// takes as evidence the failure exists, and a caller then handles a case that
+/// cannot arrive. An earlier version carried a `ReserveExhausted` arm for a
+/// denylist that no longer exists; with every draw now a single unconditional
+/// reduction there is nothing left that can fail after the key parses.
+///
 /// **There is no arm meaning "unknown key".** A name is a function of the key
 /// alone, consulting no moderator set, no genesis record and no stored state, so
 /// there is nothing to look up and nothing that could fail to be found. A name
 /// is derivable for any well-formed public key including one belonging to no
 /// identity this peer has seen.
-///
-/// Both arms below are about the *input* or the *scheme*, never about
-/// recognition.
 #[derive(Debug, PartialEq, Eq)]
 pub enum NameError {
     /// The bytes given are not a well-formed public key.
@@ -190,15 +213,6 @@ pub enum NameError {
     /// not loaded, which makes a derivation that panics on a short slice a
     /// remotely triggerable denial of service.
     NotAValidPublicKey(KeyError),
-    /// Both the first draw and the one reserved redraw landed on refused
-    /// combinations, so the budget is spent.
-    ///
-    /// Arrives about once in 1.2 million identities: a first draw is refused
-    /// about once in 1,090, and this needs two consecutive refusals. **Failing
-    /// is correct and reading on is not** — reading past the bound makes the
-    /// name's consumption unbounded, and two implementations disagreeing about
-    /// how far to read produce different names for one key.
-    ReserveExhausted,
 }
 
 impl std::fmt::Display for NameError {
@@ -207,21 +221,26 @@ impl std::fmt::Display for NameError {
             NameError::NotAValidPublicKey(e) => {
                 write!(f, "cannot derive a display name: {e}")
             }
-            NameError::ReserveExhausted => write!(
-                f,
-                "cannot derive a display name: the denylist reserve is exhausted"
-            ),
         }
     }
 }
 
 /// The display name for a public key.
 ///
-/// **Total for every well-formed key except the exhausted-reserve case**, which
-/// is a property of the scheme rather than of the key being unrecognised. Takes
-/// a parsed [`PublicKey`], so malformed bytes cannot reach here at all — see
-/// [`display_name_from_bytes`] for the entry point that parses.
-pub fn display_name(key: &PublicKey) -> Result<DisplayName, NameError> {
+/// **Total, and the return type says so.** Every well-formed key yields a name:
+/// three unconditional reductions over six digest bytes, with nothing that can
+/// refuse, retry or run out. There is no `Result` here because there is no
+/// failure to report — a [`PublicKey`] cannot be constructed from malformed
+/// bytes, so the one failure this capability has is already behind us by the
+/// time this is called. See [`display_name_from_bytes`] for the entry point that
+/// parses, which is where that failure lives.
+///
+/// **This totality is load-bearing rather than tidy.** While this returned a
+/// `Result`, `feed.rs` carried an `else { continue }` that dropped a post whose
+/// author's name could not be derived — a name failure censoring content in a
+/// censorship-resistant forum, on a branch no input could reach. Making the
+/// derivation total deletes the branch rather than testing it.
+pub fn display_name(key: &PublicKey) -> DisplayName {
     name_from_digest(&name_digest(key))
 }
 
@@ -238,7 +257,7 @@ pub fn display_name(key: &PublicKey) -> Result<DisplayName, NameError> {
 /// nobody presented as one attributable to somebody.
 pub fn display_name_from_bytes(bytes: &[u8]) -> Result<DisplayName, NameError> {
     let key = PublicKey::from_bytes(bytes).map_err(NameError::NotAValidPublicKey)?;
-    display_name(&key)
+    Ok(display_name(&key))
 }
 
 /// The name's digest for a key: `SHA256(NAME_PREFIX || public_key)`.
@@ -256,119 +275,61 @@ pub fn name_digest(key: &PublicKey) -> [u8; 32] {
 /// Turn a digest into three words.
 ///
 /// **Public, and separately callable from hashing a key, because the spec makes
-/// that a testability obligation rather than a convenience.** A refused first
-/// draw, an exhausted reserve and the bound are all reachable through a chosen
-/// digest; through a chosen *key* they are reachable only by grinding for one.
-/// A scheme whose failure paths can only be reached by grinding is a scheme
-/// whose failure paths no test covers.
+/// that a testability obligation rather than a convenience.** Reaching a chosen
+/// slot combination through a chosen *key* means grinding for one, so the
+/// pinning and uniformity requirements are checkable only if a digest can be
+/// supplied directly.
+///
+/// **Total, and infallible by construction.** Every draw is a single
+/// unconditional reduction: nothing refuses a combination, nothing retries, and
+/// there is no budget to exhaust. So the bytes a name consumes are fixed rather
+/// than data-dependent, every index of every list is reachable, and the `2^33`
+/// space is reached exactly rather than approximately.
 ///
 /// # The byte budget
 ///
 /// | bytes | slot |
 /// |---|---|
-/// | `0..2` | adjective, first draw |
-/// | `2..4` | noun, first draw |
-/// | `4..6` | place, first draw |
-/// | `6..8` | adjective, redraw |
-/// | `8..10` | noun, redraw |
-/// | `10..12` | place, redraw |
+/// | `0..2` | adjective |
+/// | `2..4` | noun |
+/// | `4..6` | place |
 ///
-/// Bytes `12..32` are **never read**, which is what makes the derivation
-/// checkable against a fixed value and what keeps two implementations from
-/// disagreeing about how far to read.
+/// Bytes `6..32` are **never read**. The slice below is taken at
+/// [`NAME_DIGEST_BOUND`] rather than indexed past it, so the bound is what the
+/// derivation reads rather than a figure a comment asserts: widening a draw past
+/// it does not compile.
 ///
 /// Each slot takes its index from bytes no other slot reads, so the three words
 /// are independent draws rather than three views of the same bits.
-pub fn name_from_digest(digest: &[u8; 32]) -> Result<DisplayName, NameError> {
-    // The first draw. If it is not refused, the reserve is never consulted —
-    // which a test pins by varying bytes 6..11 alone and expecting no change.
-    if let Some(name) = draw_at(digest, 0) {
-        return Ok(name);
-    }
-    // Refused, so REDRAW ALL THREE SLOTS from the reserve, not merely the
-    // offending pair. A refused pair is refused for the combination, so changing
-    // one half can land on a second refused pair and the loop's termination
-    // becomes a property of the denylist's shape rather than of the byte budget.
-    // Whole-name redraw keeps termination arithmetic: there is exactly one
-    // retry, and it either lands or fails.
-    if let Some(name) = draw_at(digest, 6) {
-        return Ok(name);
-    }
-    // The bound. Reading on from here is the failure this bound exists to
-    // prevent, so this is an error and not a third draw.
-    debug_assert_eq!(NAME_DIGEST_BOUND, 12, "the budget is two draws of six");
-    Err(NameError::ReserveExhausted)
-}
+pub fn name_from_digest(digest: &[u8; 32]) -> DisplayName {
+    // The bound, applied rather than asserted. Everything below reads from this
+    // slice, so there is no path that reaches a seventh byte.
+    let drawn: &[u8; NAME_DIGEST_BOUND] = digest[..NAME_DIGEST_BOUND]
+        .try_into()
+        .expect("a 32-byte digest always yields its first NAME_DIGEST_BOUND bytes");
 
-/// One draw of all three slots from six bytes at `offset`, or `None` if the
-/// noun–place pair it selects is refused.
-///
-/// Separate from [`name_from_digest`] because the first draw and the redraw are
-/// the identical operation at two offsets — writing it twice is how the two
-/// quietly stop matching, and a redraw that differed from a first draw would
-/// break determinism in the one case hardest to notice.
-///
-/// # Why a 16-bit draw reduced by `%` is exactly uniform
-///
-/// `65,536 / 8,192 = 8` and `65,536 / 1,024 = 64`, both whole numbers, so every
-/// index of every list is produced by the same number of 16-bit values as every
-/// other. There is no modulo bias to trade off and no word is favoured.
-///
-/// **This is what makes the power-of-two list sizes load-bearing rather than
-/// incidental.** A list of 1,000 would introduce a real if tiny bias; a list of
-/// a different power of two would reindex every draw. The spec forbids changing
-/// a size without a version bump for exactly this reason.
-///
-/// Big-endian so the bytes read in the order a hand-computed test vector is
-/// written.
-fn draw_at(digest: &[u8; 32], offset: usize) -> Option<DisplayName> {
-    let word = |i: usize| u16::from_be_bytes([digest[offset + i], digest[offset + i + 1]]);
+    // Big-endian so the bytes read in the order a hand-computed test vector is
+    // written.
+    let word = |i: usize| u16::from_be_bytes([drawn[i], drawn[i + 1]]);
 
+    // Why a 16-bit draw reduced by `%` is exactly uniform: 65,536 / 8,192 = 8
+    // and 65,536 / 1,024 = 64, both whole numbers, so every index of every list
+    // is produced by the same number of 16-bit values as every other. There is
+    // no modulo bias to trade off and no word is favoured.
+    //
+    // This is what makes the power-of-two list sizes load-bearing rather than
+    // incidental. A list of 1,000 would introduce a real if tiny bias; a list of
+    // a different power of two would reindex every draw. The spec forbids
+    // changing a size without a version bump for exactly this reason.
     let adjective_index = word(0) % ADJECTIVES.len() as u16;
     let noun_index = word(2) % NOUNS.len() as u16;
     let place_index = word(4) % PLACES.len() as u16;
 
-    if is_refused(noun_index, place_index) {
-        return None;
-    }
-
-    Some(DisplayName {
+    DisplayName {
         adjective: ADJECTIVES[adjective_index as usize],
         noun: NOUNS[noun_index as usize],
         place: PLACES[place_index as usize],
-    })
-}
-
-/// Whether this noun–place pair spells a real figure's canonical name.
-///
-/// **The refusal is on the PAIR and never on either word.** The adjective is
-/// irrelevant to this family, and both halves stay in their lists — so
-/// *straton of abdera* and *measured aporia of lampsacus* both draw normally
-/// while *straton of lampsacus* does not. A word-level exclusion would cost two
-/// entries per figure and buy nothing.
-///
-/// # Why this family is mandatory rather than discretionary
-///
-/// The *X of Y* shape can produce exactly how a historical figure is
-/// conventionally cited — *straton of lampsacus* is how Straton of Lampsacus is
-/// actually referred to — so a user drawing that pair has every post they make
-/// signed with a real person's full canonical identifier. That is a structural
-/// property of the shape and not the separate exclusion of a handful of figures.
-///
-/// The arithmetic is what makes it a requirement rather than a nicety: roughly
-/// 800 of the 1,024 nouns are named Greeks, each with about 1.2 canonically
-/// associated places, so about 960 pairs against `1024 * 1024` = 1,048,576 is
-/// about 0.092% of draws — roughly 4.6 identities in every 5,000. A handful per
-/// Stoa arriving steadily, not a corner case.
-///
-/// `binary_search` over a sorted array rather than a `HashSet`: a hash set's
-/// iteration order is unstable, which invites a future change that iterates it
-/// into something observable, and a sorted array's sortedness is a property a
-/// test can assert — which is exactly the property the search needs.
-fn is_refused(noun_index: u16, place_index: u16) -> bool {
-    TRUE_ATTRIBUTION_PAIRS
-        .binary_search(&(noun_index, place_index))
-        .is_ok()
+    }
 }
 
 /// Written-down names, shared with the modules whose rows must carry them.
@@ -380,13 +341,9 @@ fn is_refused(noun_index: u16, place_index: u16) -> bool {
 /// error anywhere — each peer stays internally consistent while agreeing with
 /// nobody. A check that asks the implementation what it produced and agrees with
 /// the answer cannot see that. These were produced independently, by
-/// `tmp/pin.rs`, which reads the wordlists from the text files and does the
-/// index arithmetic itself rather than calling [`name_from_digest`].
-///
-/// `feed.rs` uses them for the same reason: a row built by calling the
-/// derivation and then checked by calling the derivation agrees with itself
-/// whatever either does, and would pass on a row that named the wrong author's
-/// key.
+/// `examples/pin_name.rs`, which reads the wordlists from the text files in
+/// `wordlists/` and does the index arithmetic itself rather than calling
+/// [`name_from_digest`] — it does not link the derivation at all.
 ///
 /// **If one of these fails, do not update it to match.** Work out what changed
 /// and whether the network can survive it.
@@ -463,7 +420,7 @@ mod tests {
         //
         // If this fails, do NOT update the expected values to match. Work out
         // what changed and whether the network can survive it.
-        let name = display_name(&a_key(7).public_key()).expect("a well-formed key derives a name");
+        let name = display_name(&a_key(7).public_key());
         assert_eq!(
             name.render(),
             PINNED_NAME_FOR_KEY_7,
@@ -484,7 +441,8 @@ mod tests {
     /// Derived from `PINNED_DIGEST_FOR_KEY_7` by hand, so that this is an
     /// independent statement and not the implementation agreeing with itself:
     /// see `the_pinned_name_is_derivable_by_hand_from_the_pinned_digest`, which
-    /// does the index arithmetic in the test rather than by calling `draw_at`.
+    /// does the index arithmetic in the test rather than by calling
+    /// `name_from_digest`.
     const PINNED_NAME_FOR_KEY_7: &str = "expatiative karpos of pythion";
     const PINNED_DIGEST_FOR_KEY_7: &str =
         "09c2b1c9373894cc7c47ee573ca06a8d9950a834d0dbb69a35ffcbcb0cdf7e74";
@@ -494,13 +452,14 @@ mod tests {
         // The pin above is only independent if it can be reached WITHOUT the
         // function under test. This does the index arithmetic here, from the
         // digest's bytes, and indexes the lists directly — so it fails if
-        // `draw_at` reads different bytes, reduces differently, orders the slots
-        // differently, or emits a different connector.
+        // `name_from_digest` reads different bytes, reduces differently, orders
+        // the slots differently, or emits a different connector.
         //
         // `PINNED_NAME_FOR_KEY_7` and `PINNED_DIGEST_FOR_KEY_7` were produced by
-        // `tmp/pin.rs`, which reads the wordlists from the TEXT FILES the
-        // modules were generated from. So three independent routes — that
-        // program, this arithmetic, and `display_name` — must agree.
+        // `examples/pin_name.rs`, which reads the wordlists from the TEXT FILES
+        // in `wordlists/` that the modules were generated from, and which does
+        // not link the derivation. So three independent routes — that program,
+        // this arithmetic, and `display_name` — must agree.
         let digest = hex::decode(PINNED_DIGEST_FOR_KEY_7).expect("the pin is hex");
 
         // Bytes 0..2, 2..4, 4..6, big-endian, reduced into each list.
@@ -515,14 +474,6 @@ mod tests {
         assert_eq!(noun_index, 457);
         assert_eq!(place_index, 824);
 
-        // The first draw must not be refused, or the pinned name would be the
-        // REDRAW and this arithmetic would be the wrong story about it.
-        assert!(
-            !is_refused(noun_index, place_index),
-            "the pinned key's first draw must be permitted, or the pin is \
-             pinning the redraw path by accident"
-        );
-
         assert_eq!(
             format!(
                 "{} {} {CONNECTOR} {}",
@@ -535,61 +486,75 @@ mod tests {
     }
 
     #[test]
-    fn the_redraw_path_is_pinned_to_a_written_down_name() {
-        // The spec requires the redraw path be pinned and not only the common
-        // one, because a scheme that redrew wrongly would pass every pin above.
+    fn the_pinned_cases_span_each_list_rather_than_clustering() {
+        // The spec requires pinned cases to reach **a low and a high index in
+        // each of the three slots**, so that a pin is evidence about the index
+        // arithmetic and not only about one region of one list. A pin drawn from
+        // a key reaches whatever index that key's digest happens to select —
+        // key 7 lands at (2498, 457, 824) — and no key can be chosen to land on
+        // a wanted index without grinding for one. So the span is reached
+        // through CONSTRUCTED DIGESTS, which is the testability seam
+        // `name_from_digest` is public for.
         //
-        // Reached through a CONSTRUCTED DIGEST rather than a key: a refused first
-        // draw is reachable through a chosen key only by grinding for one.
+        // This replaces a pin on the redraw path. There is no redraw to pin:
+        // every draw is now one unconditional reduction, so the only thing a
+        // second pinned case can add is coverage of the index arithmetic at the
+        // ends of each list — which is what the spec asks for and what the old
+        // reserve pin, clustered at index 7 of all three lists, did not give.
         //
-        // The digest's first six bytes select `TRUE_ATTRIBUTION_PAIRS[0]`, which
-        // is `(11, 436)` = `agatharchides of knidos` — a real figure's canonical
-        // name, which is exactly what the family refuses. The reserve selects
-        // index 7 of each list.
-        let refused = (11u16, 436u16);
-        assert_eq!(
-            TRUE_ATTRIBUTION_PAIRS[0], refused,
-            "this fixture names the first denylist pair explicitly, so a change \
-             to the denylist's head fails here rather than silently retargeting"
-        );
-        assert_eq!(
-            format!("{} {CONNECTOR} {}", NOUNS[11], PLACES[436]),
-            "agatharchides of knidos",
-            "the refused pair is the one this test claims it is"
-        );
+        // Both names below are WRITTEN DOWN, produced by `examples/pin_name.rs`
+        // reading the text files, not read back from `name_from_digest`.
+        //
+        // Index 0 of each list. A digest of six zero bytes draws (0, 0, 0)
+        // because `0 % n == 0` for every n, so this fixture needs no arithmetic
+        // to justify the indices it claims.
+        let low = name_from_digest(&digest_drawing(0, 0, 0));
+        assert_eq!(low.render(), PINNED_NAME_AT_LOW_INDICES);
 
-        let digest = digest_drawing((3, refused.0, refused.1), (7, 7, 7));
-        let name = name_from_digest(&digest).expect("the reserve draw is permitted");
+        // The last index of each list: 8,191 and 1,023. Reached by drawing the
+        // 16-bit value equal to the index itself, which is below every list's
+        // length and so survives the reduction unchanged.
+        let high = name_from_digest(&digest_drawing(8_191, 1_023, 1_023));
+        assert_eq!(high.render(), PINNED_NAME_AT_HIGH_INDICES);
 
-        // WRITTEN DOWN, from `tmp/pin.rs`'s reading of the text files, not read
-        // back from `name_from_digest`.
-        assert_eq!(name.render(), PINNED_REDRAW_NAME);
-
-        // And it is the RESERVE's draw, not the refused one with a slot swapped.
-        assert_ne!(name.noun, NOUNS[refused.0 as usize]);
-        assert_ne!(name.place, PLACES[refused.1 as usize]);
-        assert_ne!(name.adjective, ADJECTIVES[3]);
+        // The two must actually differ in every slot, or "spanning" is one name
+        // written twice. This is what makes the pair evidence about the
+        // arithmetic across each list rather than about one region of it.
+        assert_ne!(low.adjective, high.adjective);
+        assert_ne!(low.noun, high.noun);
+        assert_ne!(low.place, high.place);
     }
 
-    /// The name the reserve bytes `(7, 7, 7)` select: index 7 of each list.
-    const PINNED_REDRAW_NAME: &str = "aberrative aedon of acherousia";
+    /// Index 0 of each list: the first entry of adjectives, nouns and places.
+    const PINNED_NAME_AT_LOW_INDICES: &str = "abandonable acheron of abai";
+    /// The last index of each list: adjective 8,191, noun 1,023, place 1,023.
+    const PINNED_NAME_AT_HIGH_INDICES: &str = "zygopterous zythos of zone";
 
     /// SHA-256 over every entry of each list, in order, each followed by `\n`.
     ///
     /// **Produced by `sha256sum` over the source text files, never by hashing
-    /// the arrays.** The three commands, which a reviewer can re-run:
+    /// the arrays.** The three commands, which a reviewer can re-run from the
+    /// repository root:
     ///
     /// ```text
-    /// sha256sum tmp/adj-final-sorted.txt      # adjectives
-    /// sha256sum tmp/nouns-normalized.txt      # nouns, blank first line dropped
-    /// sha256sum tmp/places-final-sorted.txt   # places
+    /// sha256sum dialectica/rust-lib/dialectica-core/wordlists/adjectives.txt
+    /// sha256sum dialectica/rust-lib/dialectica-core/wordlists/nouns.txt
+    /// sha256sum dialectica/rust-lib/dialectica-core/wordlists/places.txt
     /// ```
     ///
-    /// `tmp/nouns-normalized.txt` is `grep . tmp/nouns-final-sorted.txt`; that
-    /// file carries a leading blank line, which `tmp/gen.rs` and `tmp/pin.rs`
-    /// both filter, so dropping it is what makes the file and the array the same
-    /// sequence. Each file ends in a trailing newline, so the concatenation
-    /// `entry + "\n"` reproduces the file's bytes exactly.
+    /// **These paths are tracked, and that is load-bearing rather than tidy.**
+    /// The files lived under a gitignored `tmp/` and the three commands failed
+    /// on every checkout but their author's — so the provenance chain that
+    /// justifies generating these arrays rather than parsing a data file had no
+    /// artefact behind it, and the pins below degraded to values a reader could
+    /// only believe. `examples/gen_wordlists.rs` reads exactly these files.
+    ///
+    /// Each file holds one entry per line and ends in a trailing newline, so the
+    /// concatenation `entry + "\n"` reproduces the file's bytes exactly. That is
+    /// what lets a hash over the shipped array be compared against a hash over
+    /// the source file, which is the only shape in which this pin is evidence
+    /// about anything: hashing the array and writing down the answer would be
+    /// the implementation agreeing with itself.
     const PINNED_ADJECTIVES_SHA256: &str =
         "8c998df498623340f706c3b8a3cc8be42c1126cf2f98d17efc14695fe94de8b2";
     const PINNED_NOUNS_SHA256: &str =
@@ -665,7 +630,7 @@ mod tests {
         // The derivation must depend on its input. Without this, a scheme
         // returning one constant name passes every determinism test above.
         let names: Vec<String> = (1u8..40)
-            .map(|s| display_name(&a_key(s).public_key()).unwrap().render())
+            .map(|s| display_name(&a_key(s).public_key()).render())
             .collect();
         let mut distinct = names.clone();
         distinct.sort();
@@ -708,8 +673,8 @@ mod tests {
         // is precisely why core must return it. Feed the address bytes in where
         // the DIGEST goes and the name differs from the key's real name.
         let key = a_key(11).public_key();
-        let real = display_name(&key).unwrap();
-        let from_address = name_from_digest(key.address().as_bytes()).unwrap();
+        let real = display_name(&key);
+        let from_address = name_from_digest(key.address().as_bytes());
         assert_ne!(
             real, from_address,
             "an address must not reach the same name as its key"
@@ -722,11 +687,11 @@ mod tests {
     fn a_name_is_three_drawn_words_and_a_fixed_connector() {
         // **Counted by SLOT, not by space-separated token.** A place entry may
         // be a two-word toponym, so `rendered.split(' ').count()` is 4 for
-        // `measured aporia of lampsacus` and 5 for `measured aporia of
-        // alexandria troas` — both correct, and a test asserting 4 would fail
-        // the multi-word entries the spec requires the list to accept.
+        // `pensive aporia of lampsakos` and 5 for `pensive aporia of lokroi
+        // epizephyrioi` — both correct, and a test asserting 4 would fail the
+        // multi-word entries the spec requires the list to accept.
         for seed in 1u8..30 {
-            let name = display_name(&a_key(seed).public_key()).unwrap();
+            let name = display_name(&a_key(seed).public_key());
             let rendered = name.render();
 
             assert_eq!(name.words().len(), 3, "three drawn words: {rendered}");
@@ -749,7 +714,7 @@ mod tests {
     #[test]
     fn the_slots_draw_from_the_lists_they_are_specified_to_draw_from() {
         for seed in 1u8..40 {
-            let name = display_name(&a_key(seed).public_key()).unwrap();
+            let name = display_name(&a_key(seed).public_key());
             assert!(ADJECTIVES.contains(&name.adjective), "{}", name.adjective);
             assert!(NOUNS.contains(&name.noun), "{}", name.noun);
             assert!(PLACES.contains(&name.place), "{}", name.place);
@@ -760,7 +725,7 @@ mod tests {
     fn a_name_without_the_connector_names_the_same_identity() {
         // The one permitted relaxation: the connector may be dropped because it
         // is the only part not derived from the key.
-        let name = display_name(&a_key(9).public_key()).unwrap();
+        let name = display_name(&a_key(9).public_key());
         assert_eq!(name.words(), [name.adjective, name.noun, name.place]);
         assert_eq!(
             name.render().replace(&format!(" {CONNECTOR} "), " "),
@@ -786,8 +751,8 @@ mod tests {
             b[i] = 0xff;
         }
         assert_eq!(
-            name_from_digest(&a).unwrap(),
-            name_from_digest(&b).unwrap(),
+            name_from_digest(&a),
+            name_from_digest(&b),
             "bytes past the bound must not participate"
         );
     }
@@ -798,13 +763,13 @@ mod tests {
         // scheme feeding one byte to two slots fails this, and would have made
         // the three words three views of the same bits.
         let base = [0u8; 32];
-        let reference = name_from_digest(&base).unwrap();
+        let reference = name_from_digest(&base);
 
         for (slot, bytes) in [("adjective", 0usize), ("noun", 2), ("place", 4)] {
             let mut varied = base;
             varied[bytes] = 0x5a;
             varied[bytes + 1] = 0xa5;
-            let moved = name_from_digest(&varied).unwrap();
+            let moved = name_from_digest(&varied);
 
             match slot {
                 "adjective" => {
@@ -859,49 +824,22 @@ mod tests {
         }
     }
 
-    // ─── The denylist and the redraw ───────────────────────────────────────
+    // ─── Nothing filters a drawn name ──────────────────────────────────────
 
-    #[test]
-    fn the_denylist_is_sorted_deduplicated_and_in_range() {
-        // The property `binary_search` needs and which nothing else checks. An
-        // unsorted array makes the search miss entries SILENTLY — refusing some
-        // pairs and admitting others, with no error anywhere.
-        for window in TRUE_ATTRIBUTION_PAIRS.windows(2) {
-            assert!(
-                window[0] < window[1],
-                "the denylist must be sorted and deduplicated: {:?} then {:?}",
-                window[0],
-                window[1]
-            );
-        }
-        for &(noun, place) in TRUE_ATTRIBUTION_PAIRS {
-            assert!(
-                (noun as usize) < NOUNS.len(),
-                "noun index {noun} out of range"
-            );
-            assert!(
-                (place as usize) < PLACES.len(),
-                "place index {place} out of range"
-            );
-        }
-        assert!(
-            !TRUE_ATTRIBUTION_PAIRS.is_empty(),
-            "the true-attribution family is mandatory, not optional"
-        );
-    }
-
-    /// A digest whose first draw selects `(noun, place)` and whose reserve
-    /// selects `(reserve_noun, reserve_place)`.
+    /// A digest whose three draws select exactly `(adjective, noun, place)`.
     ///
-    /// Constructing the digest is the whole point: a refused draw is reachable
-    /// through a chosen digest and reachable through a chosen KEY only by
-    /// grinding for one.
-    fn digest_drawing(first: (u16, u16, u16), reserve: (u16, u16, u16)) -> [u8; 32] {
+    /// Constructing the digest is the whole point and is the reason
+    /// [`name_from_digest`] is public: reaching a chosen slot combination
+    /// through a chosen KEY means grinding for one, so a requirement about
+    /// *which* words come back is checkable only if a digest can be supplied
+    /// directly.
+    ///
+    /// Each index is written big-endian into its slot's two bytes. An index
+    /// below its list's length survives the `%` unchanged, so the digest this
+    /// builds selects the indices it names.
+    fn digest_drawing(adjective: u16, noun: u16, place: u16) -> [u8; 32] {
         let mut d = [0u8; 32];
-        for (i, v) in [first.0, first.1, first.2, reserve.0, reserve.1, reserve.2]
-            .iter()
-            .enumerate()
-        {
+        for (i, v) in [adjective, noun, place].iter().enumerate() {
             d[i * 2] = (v >> 8) as u8;
             d[i * 2 + 1] = *v as u8;
         }
@@ -909,121 +847,122 @@ mod tests {
     }
 
     #[test]
-    fn a_refused_pair_redraws_every_slot_from_the_reserve() {
-        // Not "the refused pair is not returned", which a scheme substituting one
-        // slot also satisfies. The digest is built so that the two differ in ALL
-        // THREE slots, so a single-slot substitution fails here.
-        let (noun, place) = TRUE_ATTRIBUTION_PAIRS[0];
-        // A reserve draw that is deliberately different in every slot.
-        let reserve_noun = (noun + 1) % NOUNS.len() as u16;
-        let reserve_place = (place + 1) % PLACES.len() as u16;
-        assert!(
-            !is_refused(reserve_noun, reserve_place),
-            "the fixture's reserve draw must itself be permitted"
-        );
+    fn every_combination_the_draws_select_is_returned() {
+        // The requirement is that NOTHING is refused, substituted, suppressed or
+        // redrawn — for what the words are, what they mean, whom they name, or
+        // what they spell together. A previous version of this scheme held a
+        // denylist of noun–place pairs and redrew all three slots when one was
+        // hit; the owner deleted it, and this is the test that the deletion is
+        // real rather than merely current.
+        //
+        // Swept over many combinations rather than asserted at one point,
+        // because a filter is exactly the kind of thing that applies to some
+        // inputs and not others — a single sample can miss it by landing
+        // outside whatever the filter covered.
+        //
+        // `zenon of kition` is swept deliberately: it is a real historical
+        // figure's canonical citation, it is the example the spec uses, and it
+        // is precisely what the deleted denylist existed to refuse. It must now
+        // come back like any other draw.
+        let zenon = NOUNS
+            .iter()
+            .position(|&n| n == "zenon")
+            .expect("zenon is in the noun list") as u16;
+        let kition = PLACES
+            .iter()
+            .position(|&p| p == "kition")
+            .expect("kition is in the place list") as u16;
 
-        let digest = digest_drawing((0, noun, place), (500, reserve_noun, reserve_place));
-        let name = name_from_digest(&digest).unwrap();
+        // Indices chosen to sweep each list rather than to name particular
+        // words: both ends, the middles, and the one combination that matters
+        // by meaning. Every value is below its list's length, so each survives
+        // the `%` unchanged and the digest selects the index it names.
+        let cases: [(u16, u16, u16); 6] = [
+            (0, 0, 0),
+            (8_191, 1_023, 1_023),
+            (5_136, zenon, kition),
+            (100, 500, 700),
+            (4_096, 512, 512),
+            (2_498, 457, 824),
+        ];
 
-        assert_eq!(
-            name.adjective, ADJECTIVES[500],
-            "the adjective was not redrawn"
-        );
-        assert_eq!(name.noun, NOUNS[reserve_noun as usize]);
-        assert_eq!(name.place, PLACES[reserve_place as usize]);
-
-        // And the refused combination really is not what came back.
-        assert_ne!(
-            (name.noun, name.place),
-            (NOUNS[noun as usize], PLACES[place as usize]),
-            "the refused pair was returned"
-        );
-        // The adjective moved too, which is what distinguishes a whole-name
-        // redraw from a pair substitution.
-        assert_ne!(name.adjective, ADJECTIVES[0]);
-    }
-
-    #[test]
-    fn a_redraw_is_deterministic() {
-        let (noun, place) = TRUE_ATTRIBUTION_PAIRS[0];
-        let digest = digest_drawing((0, noun, place), (500, 1, 1));
-        assert_eq!(
-            name_from_digest(&digest).unwrap(),
-            name_from_digest(&digest).unwrap()
-        );
-    }
-
-    #[test]
-    fn an_unrefused_draw_never_consults_the_reserve() {
-        // Two digests differing ONLY in bytes 6..11. If the first draw is
-        // permitted the reserve must be untouched, so the names must be equal.
-        let a = digest_drawing((10, 20, 30), (0, 0, 0));
-        assert!(
-            !is_refused(20, 30),
-            "the fixture's first draw must be permitted"
-        );
-        let mut b = a;
-        b[6..12].fill(0xff);
-        assert_ne!(a, b, "the fixture must actually differ in the reserve");
-        assert_eq!(name_from_digest(&a).unwrap(), name_from_digest(&b).unwrap());
-    }
-
-    #[test]
-    fn exhausting_the_reserve_fails_rather_than_reading_on() {
-        // Both draws refused. The derivation must report a failure and return no
-        // name — reading a third draw from bytes 12.. is the unbounded read this
-        // bound exists to prevent.
-        let (n1, p1) = TRUE_ATTRIBUTION_PAIRS[0];
-        let (n2, p2) = TRUE_ATTRIBUTION_PAIRS[1];
-        let digest = digest_drawing((0, n1, p1), (0, n2, p2));
-        assert_eq!(
-            name_from_digest(&digest),
-            Err(NameError::ReserveExhausted),
-            "two refused draws must exhaust the reserve"
-        );
-    }
-
-    #[test]
-    fn a_refused_pair_is_refused_on_the_pair_and_not_on_either_word() {
-        // Both halves stay in their lists. The same noun with a different place
-        // must draw normally, or the refusal has cost a word rather than a pair.
-        let (noun, place) = TRUE_ATTRIBUTION_PAIRS[0];
-        assert!(is_refused(noun, place));
-
-        let mut found_permitted_place = false;
-        for candidate in 0..PLACES.len() as u16 {
-            if !is_refused(noun, candidate) {
-                found_permitted_place = true;
-                break;
-            }
+        for (a, n, p) in cases {
+            let name = name_from_digest(&digest_drawing(a, n, p));
+            assert_eq!(
+                name.adjective, ADJECTIVES[a as usize],
+                "the adjective slot did not return the word its draw selected"
+            );
+            assert_eq!(
+                name.noun, NOUNS[n as usize],
+                "the noun slot did not return the word its draw selected"
+            );
+            assert_eq!(
+                name.place, PLACES[p as usize],
+                "the place slot did not return the word its draw selected"
+            );
         }
-        assert!(
-            found_permitted_place,
-            "the noun must still pair with some place"
-        );
+    }
 
-        let mut found_permitted_noun = false;
-        for candidate in 0..NOUNS.len() as u16 {
-            if !is_refused(candidate, place) {
-                found_permitted_noun = true;
-                break;
-            }
-        }
-        assert!(
-            found_permitted_noun,
-            "the place must still pair with some noun"
+    #[test]
+    fn a_real_figures_canonical_citation_is_returned_like_any_other_draw() {
+        // The withdrawn screen, pinned as WITHDRAWN rather than merely absent.
+        //
+        // The deleted denylist refused noun–place pairs that spell how a real
+        // historical figure is conventionally cited. The owner's ruling is that
+        // drawing such a name is a coincidence rather than a harm: the system
+        // asserts nothing about a name's bearer, and the address is the
+        // identity. So this asserts the pair is RETURNED.
+        //
+        // Pinned positively for the same reason `the_lists_carry_no_exclusion_of_any_kind`
+        // is: a later pass that quietly reintroduced a refusal would otherwise
+        // leave every test green. An assertion that something is absent cannot
+        // fail when the thing comes back.
+        let zenon = NOUNS.iter().position(|&n| n == "zenon").unwrap() as u16;
+        let kition = PLACES.iter().position(|&p| p == "kition").unwrap() as u16;
+        let pensive = ADJECTIVES.iter().position(|&a| a == "pensive").unwrap() as u16;
+
+        // The indices are asserted as literals as well as looked up, so this
+        // fails if a list is reordered rather than silently following the move.
+        // They were produced by `examples/pin_name.rs` — digest
+        // `141003f701af…` draws (5136, 1015, 431) — not read back from here.
+        assert_eq!((pensive, zenon, kition), (5_136, 1_015, 431));
+
+        let name = name_from_digest(&digest_drawing(pensive, zenon, kition));
+        assert_eq!(
+            name.render(),
+            "pensive zenon of kition",
+            "a real figure's canonical citation must draw like any other name"
         );
     }
 
     #[test]
-    fn no_name_a_key_can_reach_is_a_refused_combination() {
-        for seed in 1u8..=255 {
-            let name = display_name(&a_key(seed).public_key()).unwrap();
-            let noun = NOUNS.iter().position(|&n| n == name.noun).unwrap() as u16;
-            let place = PLACES.iter().position(|&p| p == name.place).unwrap() as u16;
-            assert!(
-                !is_refused(noun, place),
-                "key {seed} rendered a refused pair: {name}"
+    fn a_name_is_a_function_of_six_bytes_and_nothing_else() {
+        // Two digests agreeing on bytes 0..6 and differing on every byte after.
+        // Equal names, WHATEVER the words drawn are — so no property of the
+        // drawn words feeds back into the derivation, which is what forbids a
+        // filter reading its own output.
+        //
+        // Distinct from `the_derivation_reads_no_byte_past_its_bound` in what it
+        // rules out: that one is about the BOUND, this one about the absence of
+        // FEEDBACK. A scheme that read only six bytes but redrew on a refused
+        // pair would pass that test and fail this one, because the redraw would
+        // have to read further to redraw from anywhere.
+        for (a, n, p) in [
+            (0u16, 0u16, 0u16),
+            (5_136, 1_015, 431),
+            (8_191, 1_023, 1_023),
+        ] {
+            let mut x = digest_drawing(a, n, p);
+            let mut y = digest_drawing(a, n, p);
+            for i in NAME_DIGEST_BOUND..32 {
+                x[i] = 0x00;
+                y[i] = 0xff;
+            }
+            assert_ne!(x, y, "the fixture must actually differ past the bound");
+            assert_eq!(
+                name_from_digest(&x),
+                name_from_digest(&y),
+                "a name must be a function of bytes 0..6 alone"
             );
         }
     }
@@ -1090,8 +1029,21 @@ mod tests {
     fn an_unknown_key_still_derives_a_name() {
         // There is nothing to look up, so there is nothing that could fail to be
         // FOUND. A freshly generated key this peer has never seen must derive.
+        //
+        // **This is now satisfied by the return TYPE**, which is the strongest
+        // form it could take: `display_name` returns a `DisplayName` and not a
+        // `Result`, so "an unrecognised key is refused" is not expressible. What
+        // is left to assert is that the name is a real, complete one rather than
+        // an empty or partial value the type would also permit.
         let stranger = SecretKey::generate().unwrap().public_key();
-        assert!(display_name(&stranger).is_ok());
+        let name = display_name(&stranger);
+        assert_eq!(name.words().len(), 3);
+        for word in name.words() {
+            assert!(!word.is_empty(), "a stranger's name has an empty slot");
+        }
+        assert!(ADJECTIVES.contains(&name.adjective));
+        assert!(NOUNS.contains(&name.noun));
+        assert!(PLACES.contains(&name.place));
     }
 
     #[test]
@@ -1100,8 +1052,8 @@ mod tests {
         // the pair as one claim. Nothing in a name distinguishes a moderator's
         // from anyone else's — the rendered form is three words and a connector
         // either way, with no marker to carry standing.
-        let moderator = display_name(&a_key(1).public_key()).unwrap();
-        let participant = display_name(&a_key(2).public_key()).unwrap();
+        let moderator = display_name(&a_key(1).public_key());
+        let participant = display_name(&a_key(2).public_key());
         for name in [moderator, participant] {
             let rendered = name.render();
             // Three slots — counted by slot rather than by token, since a place
@@ -1229,14 +1181,26 @@ mod tests {
     #[test]
     fn no_noun_entry_carries_the_connector_as_a_word() {
         // The `X of Y` shape is what makes this reachable. A source supplying
-        // named historical Greeks supplies them already QUALIFIED — `zenon
-        // kitieus`, `straton lampsakenos` — and such an entry renders
-        // *measured zeno of citium of lampsacus*, which reads as two places
-        // attached to one name and leaves a reader unable to tell which of them
-        // the place slot supplied.
+        // named historical Greeks supplies them already QUALIFIED, so an entry
+        // spelled `zenon of kition` would render *pensive zenon of kition of
+        // lampsakos* — two places attached to one name, leaving a reader unable
+        // to tell which of them the place slot supplied.
+        //
+        // Both halves of that example are real entries under the kappa rule —
+        // `zenon` at noun index 1015, `kition` at place index 431 — which is
+        // what makes it a demonstration rather than an illustration: the
+        // collision is with list contents rather than with invented words.
+        //
+        // (Those are ARRAY indices, not file line numbers. The literals start
+        // at line 27 of `nouns.rs` and line 23 of `places.rs`, so a grep's line
+        // number is the index plus that offset — a trap worth naming, because
+        // reading a grep hit as an index is how a wrong index gets written
+        // down confidently.)
         //
         // This is a rule about ONE LITERAL SUBSTRING and not a semantic screen:
-        // what the noun means is still no part of whether it is in.
+        // what the noun means is still no part of whether it is in. The bare
+        // `zenon` is in the list and draws normally — see
+        // `a_real_figures_canonical_citation_is_returned_like_any_other_draw`.
         let connector_as_word = format!(" {CONNECTOR} ");
         for entry in NOUNS {
             assert!(
@@ -1264,7 +1228,18 @@ mod tests {
         // Pinned as PRESENT rather than merely "not asserted absent", because a
         // curation pass that quietly dropped them would otherwise reintroduce
         // the withdrawn screen with every test still green.
-        for term in ["stoa", "agora", "archon", "tyrannos", "genesis"] {
+        // `strategos` is in this loop because the comment above names it as one
+        // of the five the deleted tests asserted absent, and it was pinned by
+        // nothing — the exact gap this test says it closes, left open for the
+        // one term the prose singled out.
+        for term in [
+            "stoa",
+            "agora",
+            "archon",
+            "strategos",
+            "tyrannos",
+            "genesis",
+        ] {
             assert!(
                 NOUNS.contains(&term),
                 "{term} was excluded; there is no exclusion screen"
@@ -1311,8 +1286,8 @@ mod tests {
              what tells a colliding pair apart"
         );
 
-        let name_a = display_name(&a.public_key()).unwrap();
-        let name_b = display_name(&b.public_key()).unwrap();
+        let name_a = display_name(&a.public_key());
+        let name_b = display_name(&b.public_key());
 
         // They collide, and on the WRITTEN-DOWN name rather than merely on each
         // other: `assert_eq!(name_a, name_b)` alone would pass on a derivation
@@ -1330,23 +1305,6 @@ mod tests {
                 "a colliding name must carry no added mark: {rendered}"
             );
             assert_eq!(name.words().len(), 3, "still three drawn words");
-        }
-    }
-
-    #[test]
-    fn a_refused_pair_leaves_both_of_its_words_drawing_freely() {
-        // The denylist refuses a COMPOSITION, never a word. Both halves of every
-        // refused pair must still be in their lists — this is what distinguishes
-        // the true-attribution family from the exclusions the contract forbids.
-        for &(noun, place) in TRUE_ATTRIBUTION_PAIRS {
-            assert!(
-                NOUNS.contains(&NOUNS[noun as usize]),
-                "a refused pair cost a noun its place in the list"
-            );
-            assert!(
-                PLACES.contains(&PLACES[place as usize]),
-                "a refused pair cost a place its place in the list"
-            );
         }
     }
 }
