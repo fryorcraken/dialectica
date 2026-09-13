@@ -328,6 +328,30 @@ pub enum OpKind {
         /// **derived**: its own `thread` when it has one, its own op id when it
         /// does not. [`crate::authoring`] does that on the publish path and
         /// records what the derivation trusts.
+        ///
+        /// # THIS FIELD IS THE AUTHOR'S CLAIM, AND THE READ SIDE NEVER BELIEVES IT
+        ///
+        /// The derivation above is correct **only where the op is this peer's
+        /// own**, which is the publish path and nowhere else. An op arriving from
+        /// a peer carries whatever its author chose, and the log stores it
+        /// unexamined because the log decides nothing. A reader that placed posts
+        /// by this field would let any peer inject a post into any thread it
+        /// names — authentically signed, verifying perfectly, and rendered inside
+        /// a conversation it was never part of.
+        ///
+        /// So there are **two** derivations in this crate with opposite rules,
+        /// and which one is correct depends on where the op came from:
+        ///
+        /// - [`crate::authoring`]'s reads this field and trusts it. Right, for
+        ///   ops this peer creates.
+        /// - [`crate::thread::thread_of`] never reads it at all, and derives
+        ///   membership by following `parent` to a root. **That is the rule for
+        ///   anything that arrived over the network**, which is every op a read
+        ///   renders.
+        ///
+        /// Reach for the second unless you are on the publish path. The field
+        /// stays in the op because it is what a future per-thread routing split
+        /// needs, not because a reader may rely on it.
         thread: Option<OpId>,
         /// The post being replied to, if any. `None` is a top-level post.
         parent: Option<OpId>,

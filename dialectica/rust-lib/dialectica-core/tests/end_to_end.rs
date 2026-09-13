@@ -2038,6 +2038,187 @@ fn a_request_naming_a_stoa_on_disk_comes_back_as_the_feed_in_json() {
 }
 
 #[test]
+fn a_thread_read_over_a_store_on_disk_returns_the_root_and_its_replies() {
+    // The thread read's first run against a FILE. Security review found that
+    // every one of this file's tests drove `feed::list_threads` or its wire
+    // handler, while `thread.rs` cites `SqliteOpLog` behaviour as load-bearing
+    // and never runs against it.
+    //
+    // This file's own header records why that gap matters here specifically: a
+    // defect was once invisible to the `feed::list_threads`-level test and
+    // visible only to the wire-layer-over-SQLite one — *"the
+    // `feed::list_threads`-level test one layer down stayed green, which is why
+    // that layer could not cover this seam."* The thread read has the identical
+    // two-layer shape, and until now only the upper layer over `MemoryOpLog` was
+    // covered.
+    //
+    // What a file can break that a `HashMap` cannot: the parent chain walk does
+    // an `OpLog::get` per link, so every link is a SELECT round-tripping through
+    // `op_bytes` and back through `SignedOp` decoding. A store that lost a byte,
+    // reordered a row, or answered `get` from a different column would place
+    // nothing — and every in-memory test would stay green.
+    let dir = TempDir::new("thread-on-disk");
+    let author = a_key(1);
+    let replier = a_key(2);
+    let genesis = a_genesis(&author.public_key(), "Agora");
+    let stoa = genesis.address().expect("a short title encodes");
+
+    let root = a_post(&stoa, &author, "the opening post");
+    let root_id = root.op.id();
+    let reply = a_reply(&stoa, &replier, &root_id, "a reply from the file");
+    let deep = a_reply(&stoa, &author, &reply.op.id(), "two links deep");
+
+    let mut store = dir.store();
+    for op in [root.clone(), reply.clone(), deep.clone()] {
+        store.append(op, Arrival::unordered()).expect("storable");
+    }
+    drop(store);
+
+    // Reopened from the path INSIDE the handler, so the open is part of what is
+    // under test rather than something the test did beforehand.
+    let path = dir.file(TempDir::CONVENTIONAL_STORE);
+    let request = format!(
+        r#"{{"stoa":"{}","thread":"{}","genesis":"{}"}}"#,
+        stoa.to_hex(),
+        root_id.to_hex(),
+        hex::encode(genesis.canonical_bytes().expect("a short title encodes"))
+    );
+    let reply_json = wire::read_thread_from_request(&request, || SqliteOpLog::open(&path));
+
+    let v: serde_json::Value =
+        serde_json::from_str(&reply_json).expect("every reply is valid JSON, whatever happened");
+    assert!(
+        v.get("error").is_none(),
+        "a readable store must not produce the error shape, got {reply_json}"
+    );
+
+    let items = v["items"].as_array().expect("items is an array");
+    assert_eq!(items.len(), 3, "got {reply_json}");
+    // The root leads, which is the one position the read fixes.
+    assert_eq!(items[0]["id"], root_id.to_hex());
+    assert_eq!(items[0]["body"]["text"], "the opening post");
+    assert!(
+        items[0].get("parent").is_none(),
+        "the root reports no parent: {reply_json}"
+    );
+
+    // The replies are in the order the ordering rule places them, which for
+    // unordered arrivals is ascending op id — derived HERE from the op ids rather
+    // than read back from the reply, so this is an independent expectation rather
+    // than the implementation agreeing with itself.
+    let mut expected_replies = [reply.op.id(), deep.op.id()];
+    expected_replies.sort();
+    let got_replies: Vec<&str> = items[1..]
+        .iter()
+        .map(|i| i["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        got_replies,
+        expected_replies
+            .iter()
+            .map(|id| id.to_hex())
+            .collect::<Vec<_>>(),
+        "the replies come back in the ordering rule's order: {reply_json}"
+    );
+
+    // And the chain was WALKED across the file: the deep reply is two links from
+    // the root, so it is placed only if `get` answered correctly for its parent
+    // as well as for itself.
+    let deep_item = items
+        .iter()
+        .find(|i| i["id"] == deep.op.id().to_hex())
+        .expect("the two-link reply must be placed");
+    assert_eq!(
+        deep_item["parent"],
+        reply.op.id().to_hex(),
+        "it names its own parent, not the root: {reply_json}"
+    );
+    assert_eq!(deep_item["body"]["text"], "two links deep");
+    assert_eq!(deep_item["thread"], root_id.to_hex());
+}
+
+#[test]
+fn a_hidden_reply_stays_hidden_across_a_restart_of_the_store() {
+    // Moderation resolved on READ, over a file, through the thread read. The
+    // in-memory suite pins this; what a restart adds is that the moderation op's
+    // own bytes survived the round trip well enough to still verify and still
+    // authorise — a stored op that decoded to a different target, or whose
+    // signature no longer checked, would silently stop binding and the reply
+    // would reappear.
+    //
+    // Both halves are asserted because "the reply is absent" alone would pass
+    // against a store that lost the reply rather than hid it.
+    let dir = TempDir::new("thread-hide-restart");
+    let moderator = a_key(1);
+    let replier = a_key(2);
+    let genesis = a_genesis(&moderator.public_key(), "Agora");
+    let stoa = genesis.address().expect("a short title encodes");
+
+    let root = a_post(&stoa, &moderator, "the opening post");
+    let root_id = root.op.id();
+    let visible = a_reply(&stoa, &replier, &root_id, "still here");
+    let hidden = a_reply(&stoa, &replier, &root_id, "moderated away");
+    let hide = a_moderation(&stoa, &moderator, &hidden.op.id(), ModerationAction::Hide);
+    let hide_id = hide.op.id();
+
+    let mut store = dir.store();
+    for op in [root.clone(), visible.clone(), hidden.clone(), hide] {
+        store.append(op, Arrival::unordered()).expect("storable");
+    }
+    drop(store);
+
+    let path = dir.file(TempDir::CONVENTIONAL_STORE);
+    let genesis_hex = hex::encode(genesis.canonical_bytes().expect("a short title encodes"));
+    let ask = |include_hidden: bool| {
+        let request = format!(
+            r#"{{"stoa":"{}","thread":"{}","genesis":"{}","includeHidden":{}}}"#,
+            stoa.to_hex(),
+            root_id.to_hex(),
+            genesis_hex,
+            include_hidden
+        );
+        let out = wire::read_thread_from_request(&request, || SqliteOpLog::open(&path));
+        let v: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+        assert!(v.get("error").is_none(), "got {out}");
+        v
+    };
+
+    let default_view = ask(false);
+    let default_ids: Vec<&str> = default_view["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["id"].as_str().unwrap())
+        .collect();
+    assert!(
+        !default_ids.contains(&hidden.op.id().to_hex().as_str()),
+        "the hidden reply must be omitted after a restart"
+    );
+    assert!(
+        default_ids.contains(&visible.op.id().to_hex().as_str()),
+        "the reply nobody moderated must survive — without this the test passes \
+         against a store that lost BOTH replies"
+    );
+
+    // Asked for: returned, marked, and naming the op that decided it — which is
+    // the moderation op read back from the file.
+    let wide = ask(true);
+    let hidden_item = wide["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["id"] == hidden.op.id().to_hex())
+        .expect("a reader who asked for hidden content is owed which");
+    assert_eq!(hidden_item["moderation"]["state"], "hidden");
+    assert_eq!(
+        hidden_item["moderation"]["decidedBy"],
+        hide_id.to_hex(),
+        "the deciding op is named from the row that was read back off disk"
+    );
+    assert_eq!(hidden_item["body"]["text"], "moderated away");
+}
+
+#[test]
 fn the_json_envelope_reports_the_page_that_was_asked_for_and_whether_more_follows() {
     // THE ENVELOPE, over a store that can tell a real answer from a constant.
     //

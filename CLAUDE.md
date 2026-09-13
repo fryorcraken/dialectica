@@ -79,6 +79,14 @@ project a stalled session.
   you spawn an agent, tell it this rule explicitly, or it will inherit the
   habit and stall on its first sweep.
 
+  **The exception is `EnterWorktree`, which moves the session rather than
+  prefixing a command.** An agent working in a worktree enters it once with
+  `EnterWorktree(path: <absolute path>)` and then uses ordinary relative paths:
+  there is no `cd` for the checker to defeat it, and no `git -C <dir>` on every
+  call. That is the shape to put in an agent's brief — see
+  [`.claude/agents/README.md`](.claude/agents/README.md). Absolute paths remain
+  the rule for anything reaching *outside* the tree you are in.
+
   **Before sending an agent somewhere, check the directory is in scope.**
   Absolute paths fix the *analysability* problem; they do nothing for a
   directory that was never added. An agent pointed at a path outside every
