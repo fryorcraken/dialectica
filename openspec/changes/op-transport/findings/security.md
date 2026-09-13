@@ -203,6 +203,31 @@ on reachability I say so in the entry.
       is the `tester`'s, not mine; the suite is **742 before and after** this edit,
       which is the whole of what a spec edit should do to it.
 
+      **Picked up by the `tester`, and the three are renamed.** Your scope note is
+      the routing, so this is a reply rather than a new box. The three now read:
+
+      | Was | Now |
+      |---|---|
+      | `leaving_a_stoa_closes_its_channel_and_no_other` | `closing_one_stoas_channel_closes_that_one_and_no_other` |
+      | `shutdown_closes_every_open_channel` | `closing_every_open_channel_yields_each_channels_identifier` |
+      | `a_stoa_can_be_rejoined_without_a_restart` | `a_channel_closed_can_be_reopened_under_the_same_identifier` |
+
+      **No assertion changed**, as you left them: these are names and comments only,
+      and the suite is **744 before and after the renames** (744 rather than your 742
+      because of the two tests the `tester` findings added, not because of these).
+
+      Each keeps the old name *in a comment* saying what it claimed and why the claim
+      had no site — a shutdown handler that closed nothing, or a leave-Stoa handler
+      that closed the wrong channel, would have left the old names reading as
+      satisfied. That is the same defect as the `readability.md` box routed to me: a
+      test named for something it does not witness. Worth noting the pattern, since
+      it is now three instances in this file plus that one.
+
+      **Nothing to prove-can-fail here**, and I am not claiming otherwise — a rename
+      changes no behaviour, so there is no mutation that these renames catch and the
+      old names did not. What the renames fix is what a reader concludes, which is
+      why the finding was yours to route and not a defect.
+
 ---
 
 ## What I attacked and could not break

@@ -101,7 +101,7 @@ means nothing.
       with it instead of leaving it passing off the boundary — the defect family
       `the_publish_body_cap_is_the_format_field_cap` exists to prevent.
 
-- [ ] **`tester`** — `transport.rs:266` — `OpenChannels::is_empty` can be
+- [x] **`tester`** — `transport.rs:266` — `OpenChannels::is_empty` can be
       replaced by `true` and the whole suite still passes
       **Scenario:** `cargo mutants` reports `replace OpenChannels::is_empty ->
       bool with true` as **MISSED**. Both call sites
@@ -116,6 +116,39 @@ means nothing.
       load-bearing assertion two lines down (`!channels.is_open(...)`, line 2052)
       does catch the real property, and that one is killed by its own mutants. What
       is missing is any test that asserts `is_empty()` is false after an `open`.
+
+      **Fixed**, and your diagnosis was exactly right: both call sites asserted the
+      `true` direction, so the predicate had one observed value, which makes it a
+      constant. The new test is
+      `emptiness_tracks_what_is_open_in_both_directions` (`transport.rs`, in the
+      Channel lifecycle section), and it asserts the **false** direction that
+      nothing previously did.
+
+      **Can-it-fail, predicted versus observed — they matched.** Predicted: with
+      `is_empty`'s body replaced by `true`, the new test fails at its first
+      `!channels.is_empty()` after one `open`, and it is the *only* failure, since
+      the two pre-existing call sites both expect `true`. Observed exactly that:
+      61 of 62 transport tests passed, the sole failure being
+      `emptiness_tracks_what_is_open_in_both_directions` at the assertion message
+      "one channel is open, so this peer is not empty". Implementation restored.
+
+      **`cargo mutants` re-run confirms the survivor is gone.** Same invocation you
+      used — the core crate's own manifest, `--file dialectica-core/src/transport.rs`
+      — now reports **32 mutants, 27 caught, 5 unviable, 0 missed** in 8m, against
+      your 26/5/1. The one newly-caught mutant is the `is_empty -> true` you found.
+
+      **Two fixture choices worth naming, both aimed at this repo's recurring defect
+      family** (a fixture where two explanations give the same answer):
+
+      - **Two channels, not one.** With a single channel, "not empty" and "nothing
+        has been closed yet" are the same state, so a single-channel fixture could
+        not tell those two readings apart. Closing one of two and asserting still
+        not empty separates them.
+      - **`len()` asserted against hardcoded counts beside each `is_empty` claim**,
+        rather than one being taken as the other's authority. `len` is derived from
+        the same `HashMap` but is a different function, so the pair disagreeing is
+        what catches either going constant — and the expectation each is compared
+        against is a literal the implementation did not produce.
 
 ---
 

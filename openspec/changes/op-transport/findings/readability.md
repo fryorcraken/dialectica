@@ -99,7 +99,7 @@ Baseline confirmed: **626 tests passing**.
       refuses it at publish. A green gate that could not see that is exactly what §7
       is for.
 
-- [ ] **`tester`** — `transport.rs:819` — **the test name
+- [x] **`tester`** — `transport.rs:819` — **the test name
       `identity_does_not_vary_with_local_state` states a falsifiable claim the test
       does not establish**, and the requirement it answered no longer carries that
       wording.
@@ -122,6 +122,69 @@ Baseline confirmed: **626 tests passing**.
       **Severity: medium** — the strongest claim in the file sits on the weakest
       witness, and the file's other names are honest about their mechanism, which
       makes this one read as stronger than its neighbours rather than weaker.
+
+      **Fixed — as a rename *and* a new test, because the rename alone leaves the
+      property unguarded.** I reproduced the mutation before deciding, as the
+      dispatch asked, rather than treating this as a naming task.
+
+      **The reproduction, predicted versus observed — matched.** Appending
+      `std::process::id()` to the channel id in `ChannelIdentity::of`: predicted
+      that `identity_does_not_vary_with_local_state` passes (a process has one pid,
+      so it agrees with itself across every assertion) and that only
+      `the_derivation_is_pinned_to_a_known_answer` fails. Observed exactly that —
+      59 of 60 transport tests passed, the pin the sole failure, reporting *"the
+      channel id derivation changed"*. Your reading of `findings/spec-test.md`
+      mutation 4b is confirmed to the character.
+
+      **What the rename alone would have left behind.** The pin does catch this, and
+      the spec's scenario "The derivation is pinned against silent change" now says
+      so outright in its third clause. But the pin catches it as *one* address's
+      strings moving, reported as "the derivation changed" — a reader chasing that
+      failure is told the format moved, not that a per-peer value entered. And the
+      construction half of the requirement ("The derivation takes the Stoa address
+      and nothing else") had **no** test at all: it was discharged by reading `of`'s
+      signature, which is a sound argument but not a witness that survives someone
+      editing the body.
+
+      So there are now two tests where there was one:
+
+      - **`identity_does_not_vary_with_the_peers_history`** — renamed to the
+        surviving scenario, as you prescribed. Its comment now states what it cannot
+        witness and names the pid mutation that passes it, so the next reader
+        calibrating this test is told the limit rather than inferring it.
+      - **`the_derivation_is_a_pure_function_of_the_address`** (new) — reassembles
+        both names from the address's hex plus the two affixes, for four addresses,
+        and asserts equality. The expectation is a function of the **address**, not
+        of anything the derivation computed, so any per-peer or per-session value
+        entering makes the output differ from it whether or not that value is stable
+        within the asking process.
+
+      **Can-it-fail for the new test, predicted versus observed — matched on both
+      mutations I ran.**
+
+      - Pid mutation: predicted the new test and the pin both fail, the renamed test
+        still passes. Observed exactly that (60 of 62 passed), and the new test's
+        message — *"the channel id for Agora is not the address and the prefix
+        alone"* — names the property rather than reporting drift, which was the
+        point.
+      - `CHANNEL_PREFIX` changed to `/dialectica/2/chan/`: run to check the new test
+        was not merely mirroring `of`'s own `format!`. Predicted three failures — the
+        new test, the pin, and `the_content_topic_keeps_the_prefix_autosharding_reads`
+        — and predicted that `two_channels_sharing_an_id_prefix_are_not_confused`
+        would survive, since it constructs its own ids. Observed all four, exactly.
+
+      Implementation restored after each mutation, verified by diff rather than from
+      memory: `git diff` on `transport.rs` shows test-module content only.
+
+      **One point where I read the file over the summary, and they agree.** The
+      dispatch said to check the current spec text rather than the reviewer's
+      description of the old requirement. The spec at
+      `specs/op-transport/spec.md:93-115` now carries three scenarios where the old
+      one stood, and the split is what made the second test obvious: the history
+      half and the construction half are separate obligations, and only the first
+      had a witness. Your prescribed rename addresses the first; the new test
+      addresses the second. Both were needed, which is why this box is fixed with two
+      changes rather than one.
 
 - [x] **`dev-writer`** — `transport.rs:841` — **a dead binding standing in for an
       assertion.** `let _another_peers_key = a_key(200).public_key();` with the

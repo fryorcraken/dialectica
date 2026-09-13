@@ -4,7 +4,7 @@
 
 - [x] spec — `spec-writer`
 - [x] design + code — `dev-writer`
-- [ ] tests — `tester`
+- [x] tests — `tester`
 - [x] review: correctness — `code-reviewer`
 - [x] review: security — `code-reviewer`
 - [x] review: readability — `code-reviewer`
@@ -279,3 +279,59 @@ Recorded because a passing suite here proves less than it appears to.
       and both call it unbuilt. The `spec-writer` had already done this check in
       `b81ce46` and found one contradiction against `content-authoring`, which it
       fixed there.
+
+## 11. The `tester` stage: the two findings routed here
+
+Two boxes, both fixed, both with predicted-versus-observed recorded in the finding
+itself rather than summarised here.
+
+- [x] `findings/correctness.md`'s `tester` entry — the **one surviving mutant** of
+      the 32 on this file. `emptiness_tracks_what_is_open_in_both_directions` added,
+      asserting the `false` direction of `OpenChannels::is_empty`, which no test had
+      ever observed. Two channels rather than one, because with a single channel
+      "not empty" and "nothing has been closed yet" are the same state.
+- [x] `findings/readability.md`'s `tester` entry — the name
+      `identity_does_not_vary_with_local_state`. Fixed as a **rename plus a new
+      test**, the rename alone being the weaker half: the renamed
+      `identity_does_not_vary_with_the_peers_history` witnesses the history scenario
+      honestly, and the new `the_derivation_is_a_pure_function_of_the_address`
+      witnesses the construction scenario, which had no test and was discharged by
+      reading `of`'s signature.
+- [x] The pid mutation the spec-test reviewer reported was **reproduced before
+      deciding the fix**, rather than the box being read as a naming task. It
+      behaved exactly as reported: the old test passed, only the known-answer pin
+      failed, and it failed as "the derivation changed" rather than as local state
+      participating.
+- [x] **`cargo mutants` re-run against the core crate's own manifest** (the
+      workspace manifest finds 0 and exits 0, so a clean result that way means
+      nothing): **32 mutants, 27 caught, 5 unviable, 0 missed**, from 26/5/1. The
+      survivor is gone and no new one appeared.
+- [x] Every mutation reverted, and the implementation proved untouched **by diff
+      rather than from memory**: `git diff` on `transport.rs` shows test-module
+      content only, no line outside `mod tests` altered.
+- [x] Three further renames, routed by the `spec-writer`'s scope note in
+      `findings/security.md` when `9669ddf` moved three scenario titles off the
+      events they named:
+      `leaving_a_stoa_closes_its_channel_and_no_other` →
+      `closing_one_stoas_channel_closes_that_one_and_no_other`,
+      `shutdown_closes_every_open_channel` →
+      `closing_every_open_channel_yields_each_channels_identifier`,
+      `a_stoa_can_be_rejoined_without_a_restart` →
+      `a_channel_closed_can_be_reopened_under_the_same_identifier`. No assertion
+      changed. Each keeps its old name in a comment saying what the claim was and
+      why it had no site, so the rename does not erase the reason for it.
+- [x] Gates: `rustfmt --check` with `skip_children=true` on the one changed file
+      clean, `clippy --all-targets -D warnings` clean, suite green. **744 tests
+      passing, from 742** — exactly the two new tests, none ignored and no doc-test
+      registered, so the count gate's `ran == declared` still holds.
+
+**One process note, because it cost a verification step rather than nothing.** A
+`spec-writer` committed `9669ddf` to this branch **while this `tester` stage was
+running in the same worktree**, which the flow forbids: at most one of the three
+writers holds a piece at a time, precisely because a `tester` mutates
+implementation code it does not own. Nothing was lost — the collision was caught by
+diffing rather than trusting the tree, every mutation had already been reverted, and
+the two agents' files did not overlap — but the tip moved from `654a396` to `9669ddf`
+mid-stage and the uncommitted spec delta was visible in this tree as though it were
+this stage's own work. Recorded so the next dispatch does not read a clean outcome as
+evidence the overlap was safe.

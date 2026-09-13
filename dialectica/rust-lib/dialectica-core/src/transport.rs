@@ -848,15 +848,27 @@ mod tests {
     }
 
     #[test]
-    fn identity_does_not_vary_with_local_state() {
-        // The property has no runtime check available, because there is no
-        // parameter for local state to enter through — which is the design. What
-        // a test CAN witness is that the derivation is stable across a peer's
-        // history changing around it: channels opened and closed, ops stored,
-        // time passing between calls.
+    fn identity_does_not_vary_with_the_peers_history() {
+        // Named for the scenario it answers — "Identity does not vary with the
+        // peer's history" — and NOT for the stronger claim that local state does
+        // not participate at all. This test cannot witness that, and was once
+        // named as though it could: a derivation appending
+        // `std::process::id()` — local state, stable within a peer and different
+        // between peers, which is exactly the silent permanent partition the
+        // requirement exists to prevent — passes every assertion below, because
+        // a process has one pid and agrees with itself every time it is asked.
         //
-        // A derivation that consulted a count of prior opens or a clock would
-        // differ between the first and last assertion here.
+        // The stronger half is held in two places, neither of them here:
+        // `the_derivation_is_a_pure_function_of_the_address` reassembles the
+        // expected strings from the address alone, and
+        // `the_derivation_is_pinned_to_a_known_answer` pins them against a value
+        // this crate did not produce. Both fail under that mutation.
+        //
+        // What this test DOES witness is the half a single peer can vary: the
+        // derivation is stable across its own history changing around it —
+        // channels opened and closed, ops stored, time passing between calls. A
+        // derivation consulting a count of prior opens, a session counter or a
+        // clock would differ between the first and last assertion here.
         let stoa = a_stoa("Agora");
         let first = ChannelIdentity::of(&stoa);
 
@@ -879,6 +891,43 @@ mod tests {
             first,
             "the derivation consulted something local"
         );
+    }
+
+    #[test]
+    fn the_derivation_is_a_pure_function_of_the_address() {
+        // The scenario "The derivation takes the Stoa address and nothing else",
+        // witnessed for SEVERAL addresses rather than for the one the
+        // known-answer pin fixes.
+        //
+        // Both names are reassembled here from the address's hex and the two
+        // literal affixes, so the expectation is a function of the ADDRESS and of
+        // nothing the derivation computed. A per-peer or per-session value
+        // entering — a pid, a device id, an install counter, an epoch — makes the
+        // derivation's output differ from a string derived this way, whether or
+        // not that value is stable within the process asking. That is the half
+        // `identity_does_not_vary_with_the_peers_history` cannot reach.
+        //
+        // The affixes are written as literals and not as the constants, for the
+        // reason `the_content_topic_keeps_the_prefix_autosharding_reads` gives:
+        // the constant is the thing that could change, so asserting against it
+        // would agree with a change to it. This is deliberately weaker than the
+        // known-answer pin — it does not fix the hex — and stronger in the one
+        // way that matters here: it holds for every address rather than for one.
+        for title in ["Agora", "Lyceum", "Academy", "The Zzyzx Assembly"] {
+            let stoa = a_stoa(title);
+            let hex = stoa.to_hex();
+            let identity = ChannelIdentity::of(&stoa);
+            assert_eq!(
+                identity.channel_id(),
+                format!("/dialectica/1/c/{hex}"),
+                "the channel id for {title} is not the address and the prefix alone"
+            );
+            assert_eq!(
+                identity.content_topic(),
+                format!("/dialectica/1/s/{hex}/proto"),
+                "the content topic for {title} is not the address and the affixes alone"
+            );
+        }
     }
 
     #[test]
@@ -2462,7 +2511,14 @@ mod tests {
     // ─── Channel lifecycle ────────────────────────────────────────────────
 
     #[test]
-    fn leaving_a_stoa_closes_its_channel_and_no_other() {
+    fn closing_one_stoas_channel_closes_that_one_and_no_other() {
+        // Named for the OPERATION, not for the event. There is no leave-Stoa
+        // handler in this application, so a test named
+        // `leaving_a_stoa_closes_its_channel_and_no_other` described something no
+        // site does — and would have kept reading as satisfied once a handler
+        // landed that closed the wrong channel or none. The obligation that some
+        // handler must eventually call this is the spec's, named as owed; what is
+        // checkable here is that the operation closes the one channel it names.
         let one = a_stoa("Agora");
         let two = a_stoa("Lyceum");
         let mut channels = OpenChannels::new();
@@ -2480,7 +2536,56 @@ mod tests {
     }
 
     #[test]
-    fn shutdown_closes_every_open_channel() {
+    fn emptiness_tracks_what_is_open_in_both_directions() {
+        // `is_empty` had two call sites and both asserted it returns TRUE, so
+        // replacing its body with `true` passed the whole suite — the one
+        // surviving mutant of 32 on this file. A predicate no test ever observes
+        // returning false is a predicate with one observed value, which is a
+        // constant.
+        //
+        // So this asserts the FALSE direction, and asserts it against `len`,
+        // which is derived from the same map but is a different function: the two
+        // disagreeing is the shape that catches either one going constant. A
+        // hardcoded count is what each is compared against, rather than the other
+        // being taken as the authority.
+        let stoas = [a_stoa("Agora"), a_stoa("Lyceum")];
+        let mut channels = OpenChannels::new();
+        assert!(channels.is_empty(), "a fresh peer has no channel open");
+        assert_eq!(channels.len(), 0);
+
+        channels.open(&ChannelIdentity::of(&stoas[0]));
+        assert!(
+            !channels.is_empty(),
+            "one channel is open, so this peer is not empty"
+        );
+        assert_eq!(channels.len(), 1);
+
+        channels.open(&ChannelIdentity::of(&stoas[1]));
+        assert!(!channels.is_empty());
+        assert_eq!(channels.len(), 2);
+
+        // Closing one leaves the other, so emptiness is not "anything was ever
+        // closed" — the reading a single-channel fixture could not tell apart.
+        assert!(channels.close(&ChannelIdentity::of(&stoas[0])));
+        assert!(
+            !channels.is_empty(),
+            "one channel remains open, so this peer is still not empty"
+        );
+        assert_eq!(channels.len(), 1);
+
+        assert!(channels.close(&ChannelIdentity::of(&stoas[1])));
+        assert!(channels.is_empty(), "every channel was closed");
+        assert_eq!(channels.len(), 0);
+    }
+
+    #[test]
+    fn closing_every_open_channel_yields_each_channels_identifier() {
+        // Named for the operation rather than for shutdown, which has no handler
+        // in this application: `shutdown_closes_every_open_channel` claimed a
+        // shutdown path this test never exercises. What it does check is the half
+        // the absent handler will need — that `close_all` empties the record AND
+        // reports each closed channel's identifier, so a caller can act on each at
+        // the transport.
         let stoas = [a_stoa("Agora"), a_stoa("Lyceum"), a_stoa("Academy")];
         let mut channels = OpenChannels::new();
         let mut expected: Vec<String> = stoas
@@ -2502,9 +2607,14 @@ mod tests {
     }
 
     #[test]
-    fn a_stoa_can_be_rejoined_without_a_restart() {
+    fn a_channel_closed_can_be_reopened_under_the_same_identifier() {
         // In the same session, under the SAME channel identifier. Nothing is
         // reset and no epoch distinguishes the second open from the first.
+        //
+        // Named for the close-then-open operations rather than for "rejoining a
+        // Stoa", which is an event with no site here — joining and leaving belong
+        // to the Stoa-lifecycle capability. The derivation is done afresh below, as
+        // a rejoin would, which is the part of a rejoin this file can witness.
         let stoa = a_stoa("Agora");
         let mut channels = OpenChannels::new();
         let identity = ChannelIdentity::of(&stoa);
