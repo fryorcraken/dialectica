@@ -6,7 +6,11 @@
       because "does not apply" and "nobody did this" are different states and the
       block exists to tell them apart.
 - [x] design + code — `dev-writer`
-- [x] tests — `tester`
+- [ ] ~~tests — `tester`~~ — **deliberately not done, and the runner accepts it.**
+      See the note below: this piece's code *is* tests, and a `tester` stage asks a
+      question it cannot answer here. Struck rather than ticked, so the row stays
+      honest, and struck rather than left bare, so a reader can tell a decision
+      from an oversight.
 - [x] review: correctness — `code-reviewer`
 - [x] review: security — `code-reviewer`
 - [x] review: readability — `code-reviewer`
@@ -35,6 +39,26 @@ alongside the target. That does not discharge the `tester` stage, which asks a
 different question — do the tests pin what the spec requires, and can they fail —
 and answers it from the spec rather than from the code. Ticking it here would be
 the false statement the row exists to prevent.
+
+**The runner's ruling, 2026-09-13: struck through, not ticked, and the piece
+merges anyway.** The argument above is right and is honoured rather than
+overruled. Two things make the absence acceptable here and would not elsewhere:
+
+- **The question has no spec to ask it from.** A `tester` works from the
+  contract, and this piece declares `skip_specs: true` because it adds no
+  requirement. The one spec gap it *did* surface — the feed read having no
+  promoted contract at all — is recorded in `docs/PLAN.md` §9.1 as a named debt
+  with an owner, which is the honest place for it.
+- **The `spec-test` reviewer asked the tester's question from the other side and
+  it failed loudly.** It hardcoded the feed reply's `page` and `hasMore` and
+  watched all 25 tests pass, which is exactly the "can these fail?" measurement
+  the stage exists to force. That defect is closed (§9.1 above). A stage answered
+  by a different role is still answered; a stage answered by nobody is the thing
+  the block catches.
+
+Recorded here rather than left as a ticked row contradicting its own note,
+because the contradiction was the real defect: two agents each declined to resolve
+it and left it for the runner, correctly.
 
 ## 1. The integration target
 
