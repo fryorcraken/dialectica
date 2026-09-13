@@ -14,13 +14,14 @@ argument between positions.
 > reconciled against **PLAN.md §7.2-§7.3** (votes and vouching), **§9.1**
 > (the Phase 3 API) and **§5.2.1** (what an identity is called).
 >
-> **The generated name's vocabulary is settled as of §5.2.1**: four words — two
-> adjectives and two nouns — drawn from Greek philosophy and letters, derived
-> from the key and never typed. An earlier version of this block called the
-> wordlist provisional and the shape "adjectives plus a noun"; both are
-> superseded. The *word counts* remain curation work, but the shape, the sizes
-> and the source are decided. `git log docs/PLAN.md` answers what has landed;
-> this block does not try to.
+> **The generated name's shape is settled as of §5.2.1**: three words —
+> **adjective + Greek noun + "of" + Greek place**, as in *measured aporia of
+> lampsacus* — derived from the key and never typed. Earlier versions of this
+> block said "adjectives plus a noun" and then "four words — two adjectives and
+> two nouns"; both are superseded, and the four-word version was the one this
+> brief was designed against for a while. The *word lists* remain curation work,
+> but the shape, the sizes and the sources are decided. `git log docs/PLAN.md`
+> answers what has landed; this block does not try to.
 >
 > Also reconciled against **§9.2** (the first release's scope), which suspends
 > one property this brief previously stated as fact — see the box below.
@@ -119,28 +120,36 @@ switched on, and switching it on later is not a redesign.
   will need reopening.
 
 **Identities have generated names, and this is new.** An identity renders as
-**two adjectives and two nouns drawn from Greek philosophy and letters** —
-something like *measured attic thales praxis* or *sober ionic stoic kairos* —
+**an adjective, a Greek noun, the word "of", and a Greek place** — something like
+*measured aporia of lampsacus*, *brittle kairos of abdera* or *luminous stasis of
+delos* —
 computed from the key itself. Nobody types a name; there is no registry to hold
 one, and a typed name carried between Stoas would undo the unlinkability above
 with a text field — which is a reason that outlives the first release's
 suspension of it, since a name field would make the property unrestorable rather
 than merely switched off.
 
-**The register is deliberate and it is the point: sober, plain, adult.** The
-adjectives are geographic and temperamental (`attic`, `ionic`, `doric`,
-`measured`, `sober`, `patient`, `laconic`); the nouns pool the vocabulary of
-Greek thought (`logos`, `praxis`, `techne`, `aporia`, `kairos`) with thinkers
-and writers (`thales`, `hypatia`, `solon`, `sappho`). **If a name reads like a
-fantasy handle, something has gone wrong** — an earlier draft drew on science
-fiction and produced *vermilion patient sandworm*, which is why this note
-exists.
+**The register is deliberate and it is the point: sober, plain, adult — but only
+two of the three words carry it.** The **noun** pools the vocabulary of Greek
+thought (`logos`, `praxis`, `techne`, `aporia`, `kairos`) with thinkers and
+writers (`thales`, `hypatia`, `solon`, `sappho`), and the **place** is a Greek
+place, real or mythological (`lampsacus`, `abdera`, `delos`, `elea`). The
+**adjective is any English adjective** and is not screened for register at all, so
+`brittle`, `luminous` and `damp` draw alongside `measured` and `attic`. What
+carries the classical register is the *X of Y* shape and the two Greek words in
+it. **If a name reads like a fantasy handle, something has gone wrong** — an
+earlier draft drew on science fiction and produced *vermilion patient sandworm*,
+which is why this note exists.
 
-**It is four words, and they all matter.** This is longer than a typical
-username and the length is not decorative: it is what makes accidental
-collisions rare (see below). **Do not truncate or elide it** — dropping the tail
-removes one of the two nouns, which is most of what distinguishes one name from
-another.
+**Three content words, and they all matter — but the `of` is free.** The
+adjective, the noun and the place are each an independent draw and each is part of
+what makes accidental collisions rare (see below), so **do not truncate or elide
+any of them, and never cut one mid-word**: dropping the tail removes the place,
+which is a third of what distinguishes one name from another and is often the only
+part that differs between two similar names. **The one thing a cramped row may
+drop is the connector** — *measured aporia lampsacus* loses nothing, because "of"
+is fixed literal text and carries no information. If a row cannot hold three
+words, the row is wrong.
 
 **An identicon is intended alongside the name, and designing it is part of your
 work.** A small visual glyph derived from the same key, giving recognition a
@@ -180,12 +189,21 @@ Two consequences for you:
   answers afterwards. Refreshing is unlimited and is never refused for having
   been pressed too often.
 - **A name is not unique and not an identifier** — see obligation 6 below.
-  Accidental collisions are now rare: in a Stoa of a thousand the chance two
-  people share a name is **about 0.003%**, and at five thousand **about 0.07%**.
-  (The superseded science-fiction scheme — three words, 2²⁴ — gave 3% at a
-  thousand and better than even at five thousand. The fourth word is what bought
-  the change.) **Rare is not never**, and none of it touches deliberate
-  impersonation — which is the whole of obligation 6.
+  Accidental collisions are rare: in a Stoa of a thousand the chance two people
+  share a name is **about 0.006%**, and at five thousand **about 0.15%**. (The
+  superseded science-fiction scheme — three words over much smaller lists — gave
+  3% at a thousand and better than even at five thousand. Far larger word lists
+  are what bought the change, not more words.) **Rare is not never**, and none of
+  it touches deliberate impersonation — which is the whole of obligation 6.
+
+  Two caveats worth having, because they both bear on what a row must show.
+  **These figures are a floor, not a prediction**: users refresh until they like a
+  name, so the names actually kept cluster, and PLAN.md's plausible worst case is
+  roughly **0.29%** at five thousand. And **an exact collision is not the only way
+  two names get confused** — the place list deliberately keeps entries most
+  readers cannot pronounce or tell apart, so two names differing only in the place
+  can read as one. Neither is fixed by anything you can do to the name; both are
+  fixed by the address being on screen.
 
 ### 3. Posts are never edited in place
 
@@ -381,6 +399,55 @@ A reply is just a post that names a parent, so threads nest naturally.
 Each post shows: author identity, body, attachments, whether it was edited, the
 up/down control, and a report action.
 
+**What core hands you is a flat list, and nesting is yours to compute** (the
+`thread-read` spec). Each item names its parent; nothing reports a depth or an
+indent level. That is deliberate and it costs you nothing: depth is a count of
+parents, and you hold the parents. Two consequences worth designing for.
+
+- **An item's parent may not be on screen.** It can fall on an earlier page, or
+  be hidden while the reader has not asked to see hidden posts. So a reply can
+  arrive with nothing to attach it to. Do not drop it, and do not render it as a
+  root — it is a reply to something not shown, and saying so is honest.
+- **Hiding a post does not hide the replies under it.** One hide binds one post.
+  A subtree that vanished because its top was hidden would apply a moderation to
+  ops no moderator acted on.
+
+**The root is always the first item of the first page and never repeats.** Later
+pages are replies only.
+
+**A hidden root behaves unlike a hidden reply, and the asymmetry is deliberate.**
+A hidden *reply* is simply absent from the default view. A hidden *root* is still
+returned, marked hidden, with its body withheld — because a thread read that
+dropped its own subject would be indistinguishable from a thread this machine
+has never received, and those mean opposite things. So a thread screen must have
+a state for "this thread's opening post was hidden", and it must not look like
+the not-found state or the empty state.
+
+**The thread screen is told more about moderation than the feed screen is, and
+today you have to handle both.** A feed row says only *hidden or not*. A thread
+item says one of **three** things — nothing binding was found, a moderator hid
+it, or a moderator deliberately **restored** it — and names the decision when
+there was one.
+
+That third state is the one worth designing for, because a boolean cannot carry
+it: a post nobody ever moderated and a post a moderator looked at and put back
+read identically under "not hidden", and they mean different things to a reader
+deciding whether to trust what they are seeing. You are not obliged to render the
+restored state differently — but if you do, the thread screen is the only place
+the information exists.
+
+**This asymmetry is a known gap in the core, not a design intent.** Both screens
+are computing from the same underlying answer and the feed flattens it; the
+thread's richer shape is the correct one. Expect the feed to catch up, and do not
+build a layout that depends on the two staying different.
+
+**A post whose thread this machine cannot place does not appear.** A reply
+whose parent has not arrived yet cannot be positioned, so it is not shown
+anywhere rather than being shown at the root. It appears when the parent does.
+Nothing is lost and nothing is wrong; it is the ordinary condition of a
+peer-to-peer forum, and it is the same fact the reply composer already has to
+explain.
+
 **Attachments are not in the first release** — posts are text (PLAN.md §9.2
 excludes Logos Storage, which is where attachment bytes live). Design the post so
 an attachment area can appear later without the layout changing; do not design a
@@ -398,6 +465,12 @@ to owner-only and replace the key".
 
 **Never gate on a build flag, and never show a compose box that cannot be
 submitted** — it loses whatever the user typed. Surface the reason instead.
+
+**What a successful submit does and does not establish: see rendering obligation
+7.** It means the post is in this device's log, and nothing more — not that it
+was sent, and not that anyone else can see it. That governs the wording on the
+button's success state and whether there is a pending state at all, so read it
+before designing the submit flow rather than after.
 
 **Two obligations the core creates and cannot meet itself.** Both come from the
 publish contract (`content-authoring`), and neither is visible from a screenshot.
@@ -524,14 +597,23 @@ This is obligation 2b again, now applying to the thing **every post is
 attributed to**, which is a far larger surface than Stoa titles: a feed renders
 an attribution on every row.
 
-*(One thing to know about where the name comes from, and an earlier version of
-this paragraph had it wrong. The core returns the author as an **address**, not
-a name — PLAN §9.1 lists the feed's author field as "the author, as the per-Stoa
-address (§5.2) — never a name, because there are no names". But the name is
-**not** derived from that address: §5.2.1 derives it from the **public key**, on
-purpose, so that a name tracks the key that signs. So a view holding only an
-address **cannot** compute the name itself, and core must return the rendered
-name alongside the address. Treat both as things you are given.)*
+*(One thing to know about where the name comes from, and this paragraph has been
+wrong twice. The name is **not** derived from the address: it is derived from the
+**public key**, on purpose, so that a name tracks the key that signs — while the
+**mark** is derived from the address. Two independent digests, two different
+inputs. So a view holding only an address **cannot** compute the name.*
+
+*The correction to the previous version: core does **not** hand you a rendered
+name, and should not — a name is a pure function of the key, so sending both
+would put a derived value on the wire beside the material it comes from, where
+the two could disagree. **Core gives you the address and the public key**, and
+deriving the name from the key is the interface's job, as deriving the mark from
+the address already is.*
+
+*The thread read does this (the `thread-read` spec). **The feed read does not
+yet** — it returns an address per row and drops the key, which is why the feed
+screen renders an empty name today. That is a known gap with an owner, not a
+design decision to build around.)*
 
 **Uniqueness is not merely unbuilt — it is unavailable.** A uniqueness check
 needs agreement about who holds which name, and there is no authority to hold
@@ -545,7 +627,8 @@ never cross Stoas, so the privacy property in constraint 2 is not what rules
 this out — do not reach for it here.)*
 
 And a bigger name space is not the lever it appears to be: **the space was
-enlarged roughly a thousandfold and this paragraph did not change.** It lengthens
+enlarged about five-hundredfold against the earliest scheme, then halved again in
+a later revision, and this paragraph did not change either time.** It lengthens
 the odds of an *accidental* collision, which is worth doing and is all it does;
 it costs a deliberate impersonator only a constant factor, because refresh is
 unlimited. Treat "two identities can present the same name" as permanent.
@@ -578,7 +661,9 @@ the numbers. Does nothing else, and nothing at all about impersonation.
 **2. The identicon** — intended, and yours to design. A glyph derived from the
 same key, shown with the name. It earns its place on *accidental* collisions:
 two people who happen to share a name still look different at a glance, because
-name and glyph come from separate parts of the hash and vary independently.
+name and glyph come from **two separate hashes** of the same key and so vary
+independently — not from separate parts of one hash, which an earlier version of
+this line said and which is a different and weaker claim.
 **It is nonetheless forgeable in exactly the way the name is.** An attacker
 grinds for a key whose name *and* glyph both read close — a two-channel search
 instead of a one-channel search, which raises their cost by a factor and changes
@@ -658,6 +743,38 @@ no key and reports the protection the existing file *has*. Both answers are true
 the same single secret, so do not render them as two independent facts — "this
 identity is encrypted, that one is not" is not a state that can occur.
 
+**9. A successful publish means "saved here", not "posted". Do not render it as
+sent, delivered, or seen by anyone.**
+
+When someone presses submit and the core reports success, **the only thing that
+has been established is that the post is in this device's own log.** It has not
+been established that the network accepted it, that it left the machine, or that
+any other person can see it. The core is explicit that no field of that reply
+carries a delivery outcome, and that a view rendering a successful publish as
+delivered is relying on a guarantee nothing provides.
+
+This is not pedantry about wording — it is the difference between two states a
+person acts on differently. A post saved locally and never propagated looks, to
+its author, exactly like a post everyone is reading and ignoring. One of those
+calls for retrying or worrying about connectivity; the other does not.
+
+So: a submit that succeeds may say the post was **saved**, and may show it in the
+author's own feed, because it is genuinely there. It must not say *sent*,
+*posted*, *published to the Stoa*, *delivered*, or show a sent-style checkmark,
+and it must not show a recipient or reach count. **The honest affordance is the
+one that describes the local fact**, because that is the only fact there is.
+
+**What is missing, and what it changes when it arrives.** The core does not yet
+tell you the difference between an op still in flight and one that never
+propagated — the spec names three things owed and unbuilt: a bound on how long to
+wait, what a peer records for an op in flight, and what it records for one that
+never propagated. **Until those exist there is no in-flight state to render**, so
+do not design a spinner, a pending badge, or a retry control that waits on a
+signal no call produces; a spinner that can never resolve is worse than no
+spinner. Design the saved state to be correct on its own, and leave room beside it
+for a later "not yet propagated" marker — that marker is additive when the three
+are answered, which is the point of not inventing one now.
+
 ---
 
 ## The vote control — settled, and smaller than it was
@@ -680,11 +797,11 @@ it.** The design is:
 > - **Safe:** showing the reader their own vote back, as state on the button. That
 >   is real, immediate and true — they voted, and the interface remembers.
 > - **Not available yet, though it would be safe:** a plain count of votes on a
->   post. No call returns one — there is no thread read at all, and the publish
->   reply carries only an op id — so a count cannot be rendered today. Design for
->   its absence. If a later change exposes one, it is safe only presented as a
->   count, never as a position, a rank, or a reason this post appears where it
->   does.
+>   post. No call returns one — the thread read carries no score or tally, and the
+>   publish reply carries only an op id — so a count cannot be rendered today.
+>   Design for its absence. If a later change exposes one, it is safe only
+>   presented as a count, never as a position, a rank, or a reason this post
+>   appears where it does.
 > - **Not safe:** anything suggesting the vote moved the post, changed what anyone
 >   else sees, or fed an ordering. It did not. No "trending", no arrow, no implied
 >   effect on the feed.
