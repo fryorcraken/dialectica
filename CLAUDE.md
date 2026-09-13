@@ -15,6 +15,7 @@ from a table here, so that this file stays the thing worth reading in full:
 | [`docs/UI-BRIEF.md`](docs/UI-BRIEF.md) | Before any change that alters what the UI must show, hide or refuse to claim. It is a **live document derived from PLAN.md**, written for an external designer who cannot read the code — so it states rendering obligations the core deliberately does not meet. **If a change makes it wrong, fix it in the same change**; a stale brief is worse than none, because it is designed against. PLAN.md wins any disagreement. |
 | [`.claude/agents/README.md`](.claude/agents/README.md) | **Before starting a change.** The spec-driven flow: which document answers which question, and the role agents. Also the test defects that have shipped here and what prevents them. |
 | [`docs/OPENSPEC-ARCHIVE.md`](docs/OPENSPEC-ARCHIVE.md) | **Before archiving a change**, which is the last step in closing it and runs after its PR merges — not before starting one. The traps that lose a requirement silently, and why `validate --strict` passes a spec that contradicts itself. |
+| [`docs/SCAFFOLD.md`](docs/SCAFFOLD.md) | **Before changing a value in `scaffold.toml`**, or when a build, `install` or `launch` misbehaves. Every entry whose purpose is not visible from its value — why two `[repos.*]` tables exist for a zone we do not use, which pairs of `attr` values deadlock `install`, and what the settings under `[basecamp.env]` and `[basecamp.profiles.*]` are each preventing. It lives here because `lgs` deletes every comment in that file. |
 
 ### Keeping this file true
 
@@ -269,11 +270,18 @@ These are structural and bite at build time, not review time.
 - **On Linux, set `runtime_dir` to the session's real one** (e.g.
   `/run/user/1000`) in `[basecamp.profiles.<n>]`. The in-profile `xdg-tmp`
   default overflows the 108-byte `sun_path` cap and **every module segfaults**
-  at "Failed to register module for remote access".
+  at "Failed to register module for remote access". Short is not enough — it
+  must be the real one, or basecamp starts with no display; `docs/SCAFFOLD.md`
+  says why.
 - **`lgs basecamp` rewrites `scaffold.toml` and strips every comment — and
   not only on `setup`.** A plain `lgs basecamp modules`, which reads like a
   query, deleted 77 lines of comments. Assume **any** `lgs basecamp` verb
-  rewrites the file, and run `git diff scaffold.toml` after every one.
+  rewrites the file, and run `git diff scaffold.toml` after every one — a verb
+  can change a value too, not just drop a comment.
+
+  **Do not answer this by re-adding comments.** That was the workaround, it
+  failed repeatedly, and it cost a permission click per verb to maintain.
+  The reasoning lives in `docs/SCAFFOLD.md`, where nothing strips it.
 
 - **`lgs` builds whichever checkout it is run from, worktrees included.**
   `[modules.*]` uses **relative** flake refs (`path:./dialectica#lgx`),
@@ -306,6 +314,13 @@ module's flake ref, orders builds by dependency, and derives the sibling
 `lgs basecamp build` does **not** need `lgs basecamp setup` — a hand-authored
 `[modules.*]` table builds in a fresh checkout with no `.scaffold/` at all.
 Only `install` and `launch` need `setup`.
+
+**`install` is also where a wrong pairing first shows.** `[repos.basecamp].attr`
+and `[repos.lgpm].attr` select a dev or a portable stack, and the two halves
+must match; `nix flake show` cannot tell them apart, because both attrs build
+the same version and the split is in the build rather than the version string.
+`docs/SCAFFOLD.md` carries the pairing and the error it fails with — along with
+the rest of the reasoning `lgs` strips out of `scaffold.toml`.
 
 ## How to shape a change
 
