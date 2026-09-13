@@ -320,11 +320,36 @@ abbreviation is a recognition aid rather than a basis for a decision. The
 component that renders addresses already distinguishes the two forms; the full
 one is required here.
 
-The preview MUST render the founding title, and MUST label it as the **founding**
-title rather than as the Stoa's name or current title. `stoa-membership`'s
-requirement "A listed title is a founding title, and is identified as such" is
-what puts the distinction on the wire; rendering it unlabelled would discard it
-at the last step.
+**Where a founding title is available for the previewed Stoa**, the preview MUST
+render it, and MUST label it as the **founding** title rather than as the Stoa's
+name or current title. `stoa-membership`'s requirement "A listed title is a
+founding title, and is identified as such" is what puts the distinction on the
+wire; rendering it unlabelled would discard it at the last step.
+
+**Whether one is available is not the view's choice, and on the current core API
+it is not.** A preview happens before a join, and `stoa-membership` contracts no
+call that answers a founding title for a `(address, record)` pair this peer has
+not joined — joining is what answers one. The title is inside the record the
+reader was handed, so this is a gap in the module surface rather than in the
+data, and closing it inside the view would mean decoding the genesis record
+there, which "What is shared carries the founding record, not the address alone"
+forbids for the same reason it forbids reconstructing one. **This conditional
+binds for exactly as long as that gap does**: when a core call answers a founding
+title for an un-joined reference — `getStoa` in `docs/PLAN.md` §9.1's shape, or a
+narrower call that describes a pair without recording membership — the condition
+is satisfied at preview time and the requirement reads unconditionally again.
+
+**Where no founding title is available, the preview MUST NOT render a title
+caption over an empty value, and MUST state that no title is available and that
+joining is what would supply one.** The absence is the honest rendering and is
+not an error state. Leaving the position captioned and blank is the one option
+that misinforms: an empty founding title is a **legal** value — "Creating a Stoa
+asks for a title and nothing else" requires an empty title be accepted, and the
+listing renders such a row — so a caption over blank space asserts that this
+Stoa's founding title *is* blank, on the screen where the reader is deciding
+whether to trust an address, and the reader has no way to tell that from "not
+known here". The address, which this screen does hold in full, is what the
+decision rests on meanwhile.
 
 #### Scenario: Opening an address previews rather than joins
 
@@ -350,6 +375,18 @@ at the last step.
 
 - **WHEN** the preview renders a Stoa's founding title
 - **THEN** what is rendered identifies that title as the founding value
+
+#### Scenario: A preview with no founding title available captions nothing and says why
+
+- **WHEN** the preview is rendered for a pasted reference and no founding title is
+  available for it
+- **THEN** no title caption is rendered over an empty value
+- **AND** the screen states that no title is available here and that joining is
+  what would supply one
+- **AND** what it states does not claim the Stoa has no founding title, the title
+  being unknown here rather than known to be absent
+- **AND** nothing is rendered as an error for the missing title
+- **AND** the address is still rendered in full
 
 ### Requirement: No current title is rendered until one has been resolved
 
@@ -549,9 +586,31 @@ warning, or a collision to resolve.
 
 ### Requirement: A Stoa already held whose title matches is shown as a distinct Stoa, not as a duplicate
 
-Where the preview is for a Stoa whose founding title equals that of a Stoa this
-peer already holds, and whose address differs, the screen MUST render the
-already-held Stoa alongside the one being previewed, each with its own address.
+Where a founding title is available for the previewed Stoa and it equals that of
+a Stoa this peer already holds, at a different address, the screen MUST render
+the already-held Stoa alongside the one being previewed, each with its own
+address.
+
+**Where no founding title is available, the comparison cannot run, and the screen
+MUST say so rather than let its silence be read as the comparison's result.**
+The comparison is over titles; the requirement "Joining shows what is being
+joined, and joins nothing until the user acts" records why the current core API
+supplies none before a join, and the same `getStoa`-shaped call closes both. This
+is the half of the deferral that is not cosmetic. An absent warning reads as
+"checked, nothing found", so a reader handed an impersonating Stoa would be
+misled by a check that never ran — the impersonation arriving *through* the
+defence rather than around it. The screen MUST therefore state that the
+same-title comparison against the Stoas already held has not been made, and MUST
+NOT present the unrun comparison as a clean result. It MUST NOT substitute any
+other title for the missing one, from a previous preview or otherwise: comparing
+a title the user already trusts against an untrusted address is the impersonation
+this requirement exists to expose, performed by the interface.
+
+The comparison is **late, not absent**: once a title is available for the
+previewed Stoa, it runs and the already-held Stoa is rendered as above. What this
+costs while the gap lasts is the warning's timing — it becomes a record of what
+happened rather than a warning about what is about to — and that cost is stated
+here rather than left to be discovered.
 
 This is the concrete case the whole title-is-not-an-identifier rule exists for,
 and it is the one an impersonating Stoa produces on purpose. A reader who holds
@@ -565,10 +624,12 @@ to the first.
 
 **Consulting the held Stoas for this comparison is not the inference the
 idempotence requirement forbids**, and the two are worth telling apart because
-they read alike. Both comparisons this screen makes before the user acts are
-permitted and one of them is required: comparing *titles* to surface a lookalike,
-and comparing *addresses* to tell a lookalike apart from the very Stoa being
-previewed — the second scenario below cannot be satisfied any other way.
+they read alike. Both comparisons this screen makes are permitted and one of them
+is required: comparing *titles* to surface a lookalike, and comparing *addresses*
+to tell a lookalike apart from the very Stoa being previewed — the second
+scenario below cannot be satisfied any other way. Neither is forbidden by when it
+runs; the title comparison running only once a title is available is the API
+constraint above, not a restriction this paragraph imposes.
 
 What is forbidden is narrower, and it is a comparison made **after** a join, for
 one particular purpose: deciding whether a completed join was *new*. That is a
@@ -589,6 +650,22 @@ not on address comparison as such.
 
 - **WHEN** the preview is for a Stoa the peer already holds, at the same address
 - **THEN** no second Stoa is rendered beside it as though it were a different one
+
+#### Scenario: With no title available the comparison does not run and the screen says so
+
+- **WHEN** the preview is rendered for a reference no founding title is available
+  for, while the peer holds a Stoa whose founding title equals the previewed
+  Stoa's
+- **THEN** no already-held Stoa is rendered beside the preview
+- **AND** the screen states that the same-title comparison against the Stoas
+  already held has not been made
+- **AND** no title from any other Stoa is rendered as this reference's title
+
+#### Scenario: The comparison runs once a title is available
+
+- **WHEN** a founding title becomes available for the previewed Stoa and equals
+  that of a Stoa the peer already holds, at a different address
+- **THEN** the already-held Stoa is rendered alongside it, with both addresses
 
 ### Requirement: Creating a Stoa asks for a title and nothing else, and is always offered
 

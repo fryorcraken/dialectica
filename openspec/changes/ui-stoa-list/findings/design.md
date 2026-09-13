@@ -154,7 +154,7 @@ asked whether the guard fires at all.
       (next box but one); `docs/UI-BRIEF.md` 340-345 is rewritten (box after
       that).
 
-- [ ] **`spec-writer`** — two spec requirements describe a preview this build
+- [x] **`spec-writer`** — two spec requirements describe a preview this build
       cannot render, and both are ticked.
       "Joining shows what is being joined, and joins nothing until the user acts"
       (`spec.md:306`) requires the founding title rendered and labelled;
@@ -182,6 +182,45 @@ asked whether the guard fires at all.
       `design.md` D11 and in `docs/PLAN.md` as `getStoa`'s remaining job, but **no
       core change is made in this piece**. `spec.md:324` and `spec.md:550` still
       read unconditionally and I have left them that way.
+
+      **Fixed — both requirements now carry the conditional, and the obligation is
+      deferred rather than dropped.** I took the first of the two options, and the
+      reason is not merely that the code matches it: the second option — naming the
+      core change inside the requirement — leaves a `MUST` no build can satisfy,
+      which reports as a failure of the implementation when the gap is in the API.
+      A deferred requirement points at the thing that has to change; an
+      unsatisfiable one points at the wrong party.
+
+      "Joining shows what is being joined" now reads **"Where a founding title is
+      available for the previewed Stoa"**, followed by a paragraph stating that on
+      the current core API it is not, and a paragraph requiring that where none is
+      available the preview MUST NOT caption an empty value and MUST state that no
+      title is available and that joining is what supplies one. The empty-title
+      argument is in the spec as a behavioural reason rather than as rationale: the
+      spec's own "Creating a Stoa asks for a title and nothing else" makes `""`
+      legal, so a caption over blank space is a false claim rather than a vague one.
+
+      "A Stoa already held whose title matches" gains the same condition plus the
+      half that is not cosmetic: where no title is available the comparison cannot
+      run, and the screen **MUST state that it has not been made** and MUST NOT
+      present the unrun check as a clean result, nor substitute a title from
+      anywhere else. That last clause contracts what D11 rejected as the tempting
+      fix, so a later change cannot reintroduce it and still pass the spec.
+
+      **Made self-invalidating by condition rather than by date.** Both hang on
+      "where a founding title is available", and the prose says the conditional
+      binds for exactly as long as the API gap does, naming `getStoa` in
+      `docs/PLAN.md` §9.1's shape. When such a call lands the condition is
+      satisfied at preview time and the requirement reads unconditionally again,
+      with no edit needed to stop it being wrong.
+
+      Four scenarios added, each drivable through the real paste route and each
+      matching an assertion the two new regression tests already make; one existing
+      sentence corrected, because it claimed both comparisons run "before the user
+      acts", which the conditional makes false.
+      `docs/UI-BRIEF.md` needed no change — its rewritten bullets already say both
+      halves and already name `getStoa` as what shrinks them.
+      `openspec validate ui-stoa-list --strict` passes.
 
 - [x] **`dev-writer`** — the branch's `docs/PLAN.md:3567-3572` marks the
       join-confirmation obligation as discharged while half of it is not.
