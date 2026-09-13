@@ -31,6 +31,19 @@ Restored to 531 at the end; `git status --porcelain` on the worktree is empty.
       Reasoning moved to `design.md` Decisions and `docs/PLAN.md` §9.2, the latter
       carrying the obligation this hands to `op-transport`.
 
+      **Amended by the `spec-writer` while closing entry 2 (2026-09-13).** The substance
+      above stands — the code was wrong and the requirement's normative content did not
+      move. But "no half of the spec moved" is no longer true of the *wording*, and the
+      reason is this entry's own finding: the scenario's condition was "delivery
+      **refuses or errors** on the handoff", and nothing in `&mut dyn FnMut(&OpId)`
+      expresses a refusal. It is now *"A handoff that fails outright leaves the op
+      published"* — "fails at the handoff in the most abrupt way the interface permits" —
+      with an added **AND the reply carries no error**, which is the assertion this entry
+      measured as failing (530 passed / 1 failed) before the fix. The requirement's
+      "Where delivery declines the handoff" is likewise now "Where the handoff to
+      delivery fails". Same behaviour contracted; a condition a test can actually set up.
+      Full reasoning under entry 2.
+
 **For:** `spec-writer` (to decide which half moves) and `dev-writer` (if the
 spec wins).
 **Requirement:** *Publishing signs, appends, and hands off — in that order.*
@@ -106,7 +119,7 @@ contract question rather than a bug to patch.
 
 ---
 
-- [ ] **`spec-writer`** — **entry 2** — `A publish returns while delivery is still outstanding` — untestable as written
+- [x] **`spec-writer`** — **entry 2** — `A publish returns while delivery is still outstanding` — untestable as written
       **Still open, verified on conversion** (2026-09-13): the sink is still
       `&mut dyn FnMut(&crate::op::OpId)` returning `()`, so "reports no outcome" and
       "reports an outcome promptly" remain states the API cannot be in, and the scenario
@@ -117,6 +130,74 @@ contract question rather than a bug to patch.
       outcomes asynchronously via `channelMessageSent`/`channelMessageError`/
       `messagePropagated`, so a synchronous reply could never have carried one, which is
       the argument for restating or dropping this scenario.
+
+      **Fixed — the scenario is gone, replaced by one the API can exhibit.** Accepted in
+      full: I re-checked the signature (`wire.rs:585`, `:789`, `:826`, `:866` — all
+      `&mut dyn FnMut(&crate::op::OpId)`, returning `()`), so "reports no outcome" versus
+      "reports an outcome promptly" are not two states, and your *"second explanation that
+      also passes it: every possible implementation"* is exactly right.
+
+      I took **neither** of your two options literally. Dropping the scenario would have
+      lost the property it was reaching for, and restating it "in terms the API can
+      exhibit" tempts a scenario about a slow sink — which would need a sink that can be
+      pending, and inventing one to make a scenario testable is designing the API from
+      the spec. Instead I contracted the **decision** the situation rests on, which
+      `docs/PLAN.md` §9.2 records as the owner's:
+
+      > **The reply SHALL carry no delivery outcome at all**, successful or otherwise, and
+      > this capability does not require the interface to delivery to be able to express
+      > one.
+
+      The scenario is now *"The reply describes no delivery outcome"* — the reply carries
+      the op id and whether the op was newly stored, and **no** field describing whether
+      the op was sent, accepted, delivered or propagated. That is checkable against the
+      reply shape, it fails if anyone adds such a field, and it needs nothing of the sink.
+
+      **Your cross-reference to entry 1 is what made this decidable, and you were right
+      that one API decision resolves both.** It has now been taken in the direction your
+      note pointed: the sink's `()` return is not a gap to be closed but the contract.
+      Consequences for the neighbouring text, which I would not have found without your
+      framing:
+
+      - The requirement said the reply "SHALL NOT be deferred until delivery reports an
+        outcome" — presupposing the outcome this change says does not exist. Now: "SHALL
+        NOT wait on anything delivery does with the op."
+      - It said "Where delivery **declines** the handoff". Nothing in the interface
+        expresses a decline, which was your entry-1 point. Now: "Where the handoff to
+        delivery fails."
+      - Entry 1's scenario *"A declined handoff leaves the op published"* had the same
+        defect and is now *"A handoff that fails outright leaves the op published"* —
+        "fails at the handoff in the most abrupt way the interface permits", which is the
+        panic the code now catches (`0020c6a`), plus an explicit **AND the reply carries
+        no error**. Entry 1's box was already ticked for the code fix; this is the
+        contract catching up to it, and it is the assertion you measured as failing
+        (530 passed / 1 failed) before that fix.
+
+      **Route (i) is now closed off deliberately, and the spec says so** — "this capability
+      does not require the interface to delivery to be able to express one" — with the
+      visibility obligation named as `op-transport`'s and out of scope here, per §9.2.
+      Without that clause, the next reader would have read the missing outcome as an
+      oversight, which is what your entry warned against from the other direction.
+
+      **Two stale scenario citations left behind, for the `tester` or `dev-writer` — I have
+      not touched code.** Renaming these two scenarios orphaned the comments that quote
+      them by name:
+
+      - `wire.rs:2852` — `// "A declined handoff leaves the op published": WHEN delivery
+        refuses or …`. The scenario is now *"A handoff that fails outright leaves the op
+        published"*, and the comment's "refuses or" is the very wording this entry showed
+        the interface cannot express.
+      - `wire.rs:2924` — `// "A publish returns while delivery is still outstanding" — the
+        reply is …`. That scenario no longer exists. The test below it is
+        `a_delivery_that_reports_nothing_and_one_that_reports_promptly_give_one_reply`,
+        which this entry identified as vacuous; the spec no longer asks for it, so it is
+        now a test with no requirement behind it rather than a weak test of a real one.
+        Whoever takes it should decide between deleting it and repointing it at *"The reply
+        describes no delivery outcome"*, which is a genuinely checkable assertion about the
+        reply's fields.
+
+      `tasks.md:445`'s heading also still quotes the old name. Left alone: that section is
+      the `dev-writer`'s and the finding it records is correctly about the name as it stood.
 
 **For:** `spec-writer`.
 **Requirement:** *Publishing signs, appends, and hands off — in that order.*
@@ -174,12 +255,40 @@ claim and belongs in the spec's own revision rather than in a change's tracker.
       defined as it, and `the_publish_body_cap_is_the_format_field_cap` pinning them as
       one number. Same fix as correctness C1 and security S1.
 
-- [ ] **`spec-writer`** — **entry 3's spec half** — the cap is chosen rather than contracted
+- [x] **`spec-writer`** — **entry 3's spec half** — the cap is chosen rather than contracted
       **Still open, verified on conversion** (2026-09-13): the spec delta has no
       upper-bound requirement. This reviewer found the gap from the spec's asymmetry
       alone — the empty end of the body is argued at length and the other end is silent —
       which is the same gap correctness C1 and security S1 route from the code side.
       Three findings now point at one missing requirement.
+
+      **Fixed** (`spec-writer`). The asymmetry you found is closed where you found it:
+      the upper bound now sits in the same requirement as the empty-body paragraph, so
+      the two ends of the body are argued in one place. Wording and the choice of option
+      are in `findings/correctness.md` C1; not duplicated here.
+
+      Two things your route — spec-only, blind to the code — got that the code-side
+      findings could not:
+
+      - **You said it is worth a requirement either way, "because the empty end got
+        one."** That is the argument I used to decide the *shape*: the bound is stated as
+        a property of the body in the requirement that owns the body, rather than as a
+        new standalone requirement about lengths. A reader who reaches the empty-body
+        clause now cannot leave without meeting the other end.
+      - **Your note that the tests hardcode `150 * 1024` because `MAX_FIELD_LEN` was
+        private** is now a scenario rather than only a fixed constant: *"The publish cap
+        and the format's field cap are one value"* — the largest body a publish accepts
+        compared with the largest variable-length field `op-format` decodes, and they are
+        the same number. That is the contract behind
+        `the_publish_body_cap_is_the_format_field_cap`, so the pairing cannot be dropped
+        as an implementation detail.
+
+      **For the `tester`, and deliberately not ticked by me:** these four scenarios are
+      contracted but I have not checked each against an existing test beyond the two the
+      `dev-writer` names (`a_body_one_byte_over_the_cap_is_refused_rather_than_signed`,
+      `the_publish_body_cap_is_the_format_field_cap`). The reply-body scenario in
+      particular asserts a refusal for a reply whose parent *is* held, which is a
+      different fixture from the post case.
 
 **For:** `spec-writer` (a gap to decide), then `tester`.
 **Requirement:** *A post names a Stoa and carries a body* / *A publish answers

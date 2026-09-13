@@ -27,10 +27,35 @@ is clean at the time of writing and the only file added is this one.
       choice explicitly, so it is a recorded scope decision rather than an unmet
       claim.
 
-- [ ] **`spec-writer`** — **S1's missing requirement** — no requirement bounds a body from above
+- [x] **`spec-writer`** — **S1's missing requirement** — no requirement bounds a body from above
       **Still open, verified on conversion** (2026-09-13): the same gap as C1's spec
       note and `findings/spec-test.md` entry 3. The spec has a behaviour to ratify
       and has not ratified it.
+
+      **Fixed** (`spec-writer`). The upper bound is now contracted in "A post names a
+      Stoa and carries a body", with four scenarios; the full account of the wording and
+      why the "contract `op-format`'s cap" option was taken over inventing a second
+      number is in `findings/correctness.md` C1, and I have not duplicated it here.
+
+      The two halves of your finding that shaped the spec text specifically:
+
+      - **Your total-versus-per-field distinction is preserved in the spec, not just in
+        the code.** The requirement bounds *the body* against the cap `op-format`
+        enforces on *a variable-length field*. It says nothing about a total across
+        fields, so `op.rs:105-127`'s argument that the total belongs at the transport
+        boundary stays untouched and uncontradicted by the contract.
+      - **Your measured consequence is what the requirement's rationale states**, in the
+        one clause a spec should carry: publishing an op this peer's own decoder would
+        refuse leaves the store holding an entry no conforming reader — including this
+        peer after a restart — can decode. The persistence and the `ordered_read`
+        propagation you measured are the reasoning behind that and stay in the findings
+        and `design.md`, not in the spec.
+
+      **Scope note ratified, with a boundary.** Your S1 entry records that the guard sits
+      at the `authoring` layer and `op.rs`'s `put_bytes` still writes any length. The spec
+      now matches that scope exactly: it constrains **a publish**, not the encoder. A
+      caller building an `Op` directly is outside `content-authoring` and the spec does
+      not claim otherwise, so the recorded scope decision and the contract agree.
 
 **For:** `dev-writer` (the fix), `spec-writer` (the missing requirement),
 `tester` (the boundary tested on one side only)
@@ -353,10 +378,52 @@ treats the module wire as untrusted.
       precedent, and records that `actual` is the field to drop first. No code change,
       which is what the finding recommends.
 
-- [ ] **`spec-writer`** — **S4's spec note** — whether the disclosure is intended is undecided
+- [x] **`spec-writer`** — **S4's spec note** — whether the disclosure is intended is undecided
       **Still open, verified on conversion** (2026-09-13): the spec has no line saying
       the disclosure is deliberate and scoped to a same-privilege caller. The finding
       asked the `spec-writer` to decide; nothing has decided it.
+
+      **Decided: the disclosure is intended, and the spec now says so and says what
+      revokes it.** Verified the behaviour first — `Refusal::WrongStoa { what, requested,
+      actual }` at `authoring.rs:105` and its `Display` at `:149`, which names `actual`
+      then `requested`.
+
+      Your suggestion was "a one-line note". I have written it as two placed clauses
+      rather than one, because the oracle you describe has two different owners in the
+      spec and a single note would have sat on only one of them:
+
+      - On *"A reply to a parent the peer does not hold is refused"*, which already
+        contracts held-versus-not-a-post: the distinguishability "is disclosed on purpose,
+        and is scoped to a caller already entitled to read the store" — the local view,
+        which can read both facts from the store directly, so the refusal reveals nothing
+        it could not already obtain.
+      - On *"A reply and its parent belong to one Stoa"*, which is where `actual` is
+        actually disclosed: the refusal **SHALL** name both the Stoa requested and the
+        Stoa the parent belongs to, and naming the second is the deliberate part.
+
+      **Two places I went further than the finding, both deliberate:**
+
+      1. **I made naming both Stoas a requirement rather than a permission.** Your entry
+         treats `actual` as a disclosure to justify; I checked why it is there and it earns
+         its place — it is what lets a view *correct* a mismatch rather than merely report
+         one. A `MAY` would also have been the optional-requirement shape this repo's spec
+         rules forbid.
+      2. **The trigger condition you named is now normative, not advisory.** The spec says
+         that should any publish operation become reachable by a caller that cannot read
+         the store, the Stoa actually holding the op **SHALL NOT** be named, and the
+         refusal **SHALL** remain distinguishable from the other publish refusals. That
+         second clause is the one your finding implies and does not state: dropping
+         `actual` must not be allowed to collapse the refusals into one, because their
+         distinguishability is a separate genuine requirement. So the future change has
+         both obligations in front of it instead of one.
+
+      **Your "worth recording rather than fixing" grading is the one I followed** — no
+      behaviour change requested, and `design.md`'s entry stays where the `dev-writer` put
+      it. What the spec adds is the thing a findings file cannot: the note survives the
+      archive, so the next person to make a handler remotely reachable meets the
+      constraint in the contract rather than in a deleted directory. Your `log/sqlite.rs`
+      cross-Stoa-leak precedent stays in `design.md` as the evidence; the spec carries the
+      obligation, not the argument.
 
 **For:** `spec-writer` (decide whether this is intended), `dev-writer` if not
 

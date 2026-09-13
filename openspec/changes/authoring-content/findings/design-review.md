@@ -176,6 +176,53 @@ neither of which exists.
       unchanged — handlers still take `&crate::identity::SecretKey` — so the requirement
       remains undischarged in core, which is what the unticked box records.
 
+      **Still open after the `spec-writer` pass of 2026-09-13, and this is the one box I
+      am leaving unticked on purpose.** I could have closed it unilaterally by taking
+      route 2 or 3 — both are spec-only edits I own outright — and that would have been
+      the wrong move, because either one narrows or relocates the contract in order to
+      make an unticked box go away, which is the cost hidden in doing it alone. What a
+      decision costs, having verified each route rather than reading it off §11.1:
+
+      - **Route 1 (fallible key-supplier in core)** is the only route that discharges the
+        requirement as written, and it is **not mine to take** — it changes three handler
+        signatures. It also trades a real property for a testable one:
+        `a_refused_publish_creates_no_key_material` is currently true *structurally* —
+        `authoring` cannot create key material because it never holds anything that could
+        — and a key-supplier closure replaces "cannot" with "does not, and here is a test
+        saying so". Confirmed the shape exists and works: `get_capabilities` takes
+        `lookup: impl Fn(&Address) -> Result<String, KeystoreError>` and `capability_for`
+        is tested against a *failing* lookup, so F2's counter-example to the old
+        "structurally cannot" claim holds. The gap is a consequence of the chosen shape,
+        exactly as this finding says.
+      - **Route 2 (scope the requirement to the wire shape)** costs the trigger. The spec
+        would then contract the *wording and shape* of a refusal that only the adapter can
+        raise, and nothing would require that a publish with no identity be refused at
+        all — a module built without the guard would satisfy the narrowed requirement. That
+        is a weaker contract bought with a tickable box, and this repo has just spent a
+        review pass on the converse mistake (a requirement satisfied by defective
+        behaviour — see `findings/correctness.md` C1's closing sentence).
+      - **Route 3 (move it to `posting-capability` or `keystore`)** has the strongest claim
+        of the three and is still not free. I checked: `posting-capability` already owns
+        eight requirements about exactly this question, including "The answer carries an
+        identity or a reason, never both and never neither" and "The reason names the fix".
+        So the generality is arguably demonstrated. But an extraction is `ADDED` in one
+        capability and `REMOVED` in the other **with Reason and Migration, in one change**,
+        and it must move the requirement text verbatim — which would put a cross-capability
+        spec reorganisation inside a change whose six reviews are already complete and
+        whose other five spec edits are behaviour ratifications. The two should not ride
+        together; neither half would be reviewable.
+
+      **What I did instead: nothing to this requirement.** It stands as written, undischarged
+      in core, with `tasks.md` §11.1's honest narrower claim in front of whoever takes it.
+      That is the state a reader can act on; a ticked box with route 2 applied would not be.
+
+      **My recommendation, for whoever decides** — route 3, and as its own change after this
+      one merges, with route 1 considered on its merits separately rather than as the price
+      of testability. Route 3 is the only one that neither weakens the contract nor trades a
+      structural security property; it relocates a requirement to the capability that
+      already answers the same question one step earlier. It needs a `spec-writer` with
+      both capabilities in scope, which this piece is not.
+
 **For:** `dev-writer` (and `spec-writer` for the routing question §11.1 already raises)
 
 **Prose:**
@@ -316,12 +363,52 @@ requirement they were reading already said.
       A2/A3; (d) the double-`stoa`-read is now a named decision rather than only a code
       comment.
 
-- [ ] **`spec-writer`** — **F4 (c)** — no requirement owns `Refusal::Storage`
+- [x] **`spec-writer`** — **F4 (c)** — no requirement owns `Refusal::Storage`
       **Still open, verified on conversion** (2026-09-13): `design.md` has the
       `Refusal::Storage` entry and routes the question, but grepping the spec delta for
       storage finds **nothing** — no requirement says a storage failure is a
       distinguishable refusal rather than an absent parent. The behaviour is implemented
       and tested; it is simply uncontracted.
+
+      **Fixed, in the shape you proposed.** Confirmed the gap independently before writing
+      (grep for `storage`/`store`/`unreadable` over the delta: nothing), and confirmed the
+      behaviour exists to ratify — `Refusal::Storage(OpLogError)` at `authoring.rs:127`,
+      the `From<OpLogError>` at `:172` routing every `?`, `Display` at `:165` forwarding
+      the store's own reason, and `a_store_that_cannot_be_read_is_a_refusal_and_not_an_absent_parent`
+      at `:1560` covering post, reply and vote.
+
+      New requirement, *"A publish that cannot reach the store is refused
+      distinguishably"*:
+
+      > A publish that fails because the store cannot be read or written SHALL be refused,
+      > and the refusal SHALL be distinguishable from a refusal for a parent or target the
+      > peer does not hold. The underlying reason the store gave SHALL survive into the
+      > message.
+
+      Your suggested wording was *"refused distinguishably from one whose parent or target
+      is not held"*, which I kept. Two additions, both from things in your entry rather
+      than from me:
+
+      - **"The underlying reason the store gave SHALL survive into the message"**, because
+        the test you cite asserts exactly that (`"the disk is on fire"` survives) and it
+        was otherwise uncontracted — a `Display` that dropped the inner error would still
+        have satisfied the distinguishability clause alone.
+      - **"A storage failure SHALL NOT be reported as a success"**, which is the
+        write-path half of the read-path rule you name. Your framing — *opposite user
+        responses, wait versus fix the disk* — is the requirement's rationale, stated in
+        one clause.
+
+      Two scenarios: all three operations against a store whose reads and writes fail,
+      each distinguishable from the not-held refusal and each carrying the store's reason;
+      and a reply naming a parent against a failing store, which must not state that the
+      parent is not held.
+
+      **Your point about the PLAN citation is why this needed a spec home and not just a
+      comment.** `authoring.rs:1561` still opens "§11.1 obligation 5 at the write path" —
+      a pointer a spec reader does not have. I have not edited that comment, since code is
+      not mine, but the requirement it was standing in for now exists in a document that
+      archives with the change. Left for the `dev-writer` or a later readability pass:
+      that comment could now cite the requirement by name instead.
 
 **For:** `dev-writer` for a, b and d; `spec-writer` for c.
 

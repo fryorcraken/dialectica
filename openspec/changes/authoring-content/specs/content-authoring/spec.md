@@ -27,34 +27,45 @@ Reading is out of scope. So are revising a post, moderating, and attachments.
 
 Each publish operation SHALL sign an op with the caller's identity for the named
 Stoa, append it to the local op log, and hand it to delivery. The append SHALL
-complete before delivery is invoked, and the reply SHALL NOT be deferred until
-delivery reports an outcome.
+complete before delivery is invoked, and the reply SHALL NOT wait on anything
+delivery does with the op.
 
 A reply therefore states that the op exists locally. It states nothing about
 whether any peer received it.
 
-Where delivery declines the handoff, the op SHALL remain in the log and the
-reply SHALL report the op as published. A publish SHALL NOT be reported as having
-failed on the strength of a delivery outcome, and SHALL NOT remove the op from
+Where the handoff to delivery fails, the op SHALL remain in the log and the reply
+SHALL report the op as published. A publish SHALL NOT be reported as having failed
+on the strength of what delivery did with the op, and SHALL NOT remove the op from
 the log.
+
+**The reply SHALL carry no delivery outcome at all**, successful or otherwise, and
+this capability does not require the interface to delivery to be able to express
+one. Handing an op to delivery states that the transport accepted it and states
+nothing about whether any peer received it, and the fact a caller cares about
+arrives after this call has returned. A reply that carried an outcome would
+therefore be reporting the weaker fact in the place a reader looks for the
+stronger one. Making an op that never propagated visible is `op-transport`'s
+obligation and is out of scope here.
 
 #### Scenario: The op is in the log when the reply is returned
 
 - **WHEN** a publish returns successfully
 - **THEN** the op it names is readable from the log by that op id
 
-#### Scenario: A publish returns while delivery is still outstanding
+#### Scenario: The reply describes no delivery outcome
 
-- **WHEN** a publish is called against a delivery that accepts the handoff and
-  reports no outcome
-- **THEN** the publish returns successfully naming the op id
-- **AND** the result is the same as when delivery reports an outcome promptly
+- **WHEN** a publish succeeds
+- **THEN** the reply carries the op id and whether the op was newly stored
+- **AND** it carries no field describing whether the op was sent, accepted,
+  delivered or propagated
 
-#### Scenario: A declined handoff leaves the op published
+#### Scenario: A handoff that fails outright leaves the op published
 
-- **WHEN** delivery refuses or errors on the handoff
+- **WHEN** delivery fails at the handoff in the most abrupt way the interface
+  permits
 - **THEN** the reply reports the op as published and names its op id
 - **AND** the op is readable from the log
+- **AND** the reply carries no error
 
 #### Scenario: A publish that is refused appends nothing
 
@@ -143,6 +154,16 @@ variable-length field as a value rather than an absence, and refusing it here
 would make the publish path disagree with the format about what an op may
 contain.
 
+**A body SHALL be bounded from above by the same cap `op-format` enforces on a
+variable-length field**, and the two SHALL be one value rather than two that
+agree. A body over that cap SHALL be refused before the op is signed or appended,
+and the refusal SHALL name both the length supplied and the cap. The bound
+applies to the body of a reply as much as to the body of a post.
+
+Publishing an op this peer's own decoder would refuse is the failure this
+forbids: the op is signed and stored, and the store then holds an entry that no
+conforming reader — including this peer after a restart — can decode.
+
 A request omitting the Stoa, or omitting the body, SHALL be refused. A request
 whose Stoa or body is present but of the wrong type SHALL be refused
 distinguishably from one omitting it.
@@ -158,6 +179,33 @@ distinguishably from one omitting it.
 
 - **WHEN** a post is published with an empty body
 - **THEN** the publish succeeds and the op's body is empty
+
+#### Scenario: A body at the cap is published
+
+- **WHEN** a post is published with a body of exactly the cap `op-format`
+  enforces on a variable-length field
+- **THEN** the publish succeeds
+- **AND** the op's canonical bytes decode again to the op the reply named
+
+#### Scenario: A body one byte over the cap is refused before it is signed
+
+- **WHEN** a post is published with a body one byte longer than that cap
+- **THEN** the reply carries an error naming the length supplied and the cap
+- **AND** no op is appended
+- **AND** delivery was not invoked
+
+#### Scenario: A reply's body is bounded by the same cap
+
+- **WHEN** a reply is published with a body one byte over the cap, naming a
+  parent the peer holds in the Stoa named
+- **THEN** the reply carries an error
+- **AND** no op is appended
+
+#### Scenario: The publish cap and the format's field cap are one value
+
+- **WHEN** the largest body a publish accepts is compared with the largest
+  variable-length field `op-format` decodes
+- **THEN** they are the same number
 
 #### Scenario: A post omitting its Stoa is refused
 
@@ -236,6 +284,13 @@ chosen to prevent.
 The refusal SHALL distinguish "no such op is held" from "the op held is not a
 post", so that a caller can tell a propagation gap from a category mistake.
 
+**What that distinguishability tells the caller is disclosed on purpose, and is
+scoped to a caller already entitled to read the store.** These refusals answer, for
+an op id a caller names, whether this peer holds it and whether it is a post. The
+caller contracted here is the local view, which can read both facts from the store
+directly, so the refusal reveals nothing it could not already obtain. This licence
+does not extend to a caller that could not otherwise read the store.
+
 #### Scenario: A reply to an absent parent is refused
 
 - **WHEN** a reply names a parent op id the log holds no op for
@@ -262,16 +317,54 @@ Stoa the parent op belongs to.
 A reply is signed over the Stoa it names, so a reply naming one Stoa and a parent
 in another is an op whose thread is in a Stoa its signature does not cover.
 
+**The refusal SHALL name both the Stoa requested and the Stoa the parent actually
+belongs to**, so that a view can correct a mismatch rather than merely report one.
+
+That second Stoa is a deliberate disclosure, scoped to a caller entitled to read
+the store: it tells the caller which Stoa an op it named is filed under, a fact the
+local view can read directly and a less privileged caller could not. This capability
+contracts the local view as the caller. Should any publish operation become
+reachable by a caller that cannot read the store, the Stoa actually holding the op
+SHALL NOT be named, and the refusal SHALL remain distinguishable from the other
+publish refusals.
+
 #### Scenario: A cross-Stoa reply is refused
 
 - **WHEN** a reply names one Stoa and a parent op belonging to another
 - **THEN** the reply carries an error
 - **AND** no op is appended
+- **AND** the error is distinguishable from the parent being absent and from the
+  parent not being a post
 
 #### Scenario: A reply within one Stoa is published
 
 - **WHEN** a reply names the same Stoa its parent belongs to
 - **THEN** the publish succeeds
+
+### Requirement: A publish that cannot reach the store is refused distinguishably
+
+A publish that fails because the store cannot be read or written SHALL be
+refused, and the refusal SHALL be distinguishable from a refusal for a parent or
+target the peer does not hold. The underlying reason the store gave SHALL survive
+into the message.
+
+A storage failure and an absent parent call for opposite responses from whoever
+reads the refusal — wait for the op to propagate, versus repair the store — so a
+publish reporting the second for the first sends a reader waiting for something
+that will never arrive. A storage failure SHALL NOT be reported as a success.
+
+#### Scenario: An unreadable store is refused as a storage failure
+
+- **WHEN** a post, a reply and a vote are each published against a store whose
+  reads and writes all fail
+- **THEN** each reply carries an error
+- **AND** each is distinguishable from the refusal for a parent that is not held
+- **AND** each carries the reason the store gave
+
+#### Scenario: A storage failure is not reported as an absent parent
+
+- **WHEN** a reply naming a parent is published against a store whose reads fail
+- **THEN** the reply does not state that the parent is not held
 
 ### Requirement: A vote names a target and a direction, and both directions publish
 
@@ -386,10 +479,16 @@ can disagree.
 Publishing a vote SHALL be refused when the Stoa named in the request is not the
 Stoa the target op belongs to.
 
+As for a reply, the refusal SHALL name both the Stoa requested and the Stoa the
+target belongs to, and naming the second is the same deliberate disclosure under the
+same condition: it SHALL NOT be named to a caller that could not otherwise read the
+store.
+
 #### Scenario: A cross-Stoa vote is refused
 
 - **WHEN** a vote names one Stoa and a target op belonging to another
-- **THEN** the reply carries an error
+- **THEN** the reply carries an error naming both the Stoa requested and the Stoa
+  the target belongs to
 - **AND** no op is appended
 
 ### Requirement: Publishing the same content twice publishes one op
@@ -522,6 +621,8 @@ caller supplied.
 - **WHEN** publish requests carrying arbitrary field types, absent fields,
   maximal field lengths and adversarially chosen text are called
 - **THEN** each returns a JSON object rather than panicking
+- **AND** an over-cap body among them is refused rather than published, so that
+  not-a-panic is not read as a licence to accept it
 
 #### Scenario: A body is published exactly as supplied
 

@@ -3752,10 +3752,16 @@ The owner's decision: **catch it and report the publish as successful.** The op 
 published and the requirement says so; delivery is the transport's concern.
 
 **The synchronous reply was never the right place to learn about delivery, and the
-delivery contract already says so.** `delivery_module.lidl` carries three channel
-events — `channelMessageSent`, `channelMessageError` and `messagePropagated` —
-so the outcome arrives **asynchronously, after the publish call has returned**.
-A return value could not carry it even if we wanted it to.
+delivery contract already says so.** ~~Now contracted~~ — `content-authoring`'s
+"Publishing signs, appends, and hands off — in that order" requires that the reply
+carry no delivery outcome at all, and that the capability not require the interface
+to delivery to be able to express one. What remains open is the obligation below,
+not the decision.
+
+`delivery_module.lidl` carries three channel events — `channelMessageSent`,
+`channelMessageError` and `messagePropagated` — so the outcome arrives
+**asynchronously, after the publish call has returned**. A return value could not
+carry it even if we wanted it to.
 
 That also makes the return value a *worse* signal than the events, not merely a
 missing one: a sink that accepts an op tells you the transport took it, which is

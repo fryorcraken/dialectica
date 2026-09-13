@@ -146,11 +146,41 @@ contract that `op-format`'s cap is the publish path's cap — because at present
 "Hostile input is never a panic" is the only requirement in the area and it is
 satisfied by the defective behaviour.
 
-- [ ] **`spec-writer`** — **C1's spec note** — no requirement bounds a body from above
+- [x] **`spec-writer`** — **C1's spec note** — no requirement bounds a body from above
       **Still open, verified on conversion** (2026-09-13): grepped
       `specs/content-authoring/spec.md` for a cap, length or upper bound — there is
       none. The code refuses at `op-format`'s cap, so the behaviour a caller can
       already depend on is unspecified. Same gap as `findings/spec-test.md` entry 3.
+
+      **Fixed** (`spec-writer`). You offered two options and I took the second — "contract
+      that `op-format`'s cap is the publish path's cap" — because it is the one the code
+      implements, and a spec pass exists to ratify behaviour rather than to invent a
+      second number. The requirement "A post names a Stoa and carries a body" now
+      carries, beside the empty-body paragraph whose asymmetry caused this:
+
+      > **A body SHALL be bounded from above by the same cap `op-format` enforces on a
+      > variable-length field**, and the two SHALL be one value rather than two that
+      > agree. A body over that cap SHALL be refused before the op is signed or
+      > appended, and the refusal SHALL name both the length supplied and the cap.
+
+      Four scenarios, each checkable through the API: a body at the cap publishes and
+      its canonical bytes decode again; a body one byte over is refused, appends
+      nothing and does not invoke delivery; a reply's body is bounded by the same cap;
+      and the publish cap and the format's field cap are one number. The last is the
+      scenario for `the_publish_body_cap_is_the_format_field_cap`, so the constant
+      pairing you asked for is now contracted and not only tested.
+
+      **Your closing sentence is the one I acted on.** *"Hostile input is never a panic"
+      is the only requirement in the area and it is satisfied by the defective
+      behaviour* — that was true, and leaving it true would have meant the new bound
+      could still be read as satisfied by a non-panicking success. So that scenario now
+      also asserts that an over-cap body among the hostile inputs is **refused rather
+      than published**, "so that not-a-panic is not read as a licence to accept it".
+      Naming the requirement's own weakness in the requirement is the only part of this
+      that goes beyond ratifying the code.
+
+      No behaviour change requested: the code's choice was right, and `MAX_BODY_LEN`
+      being defined *as* `MAX_FIELD_LEN` is what the fourth scenario contracts.
 
 **Outcome of the `spec-writer` note: routed, still open.** The code now refuses at
 `op-format`'s cap, so the spec has a behaviour to ratify rather than a blank — but the
