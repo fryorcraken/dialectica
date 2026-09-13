@@ -156,17 +156,20 @@ rather than merged shows here even though its content is in, so read the commits
 rather than the count. Say in the closing comment where the work went, and keep
 the branch.
 
-**`piece/<name>` is pushed by whoever holds it, and only one agent ever does.**
-The three writers take the piece's worktree in turn and never overlap, so the one
-holding it is the only one with commits to push — there is no race to lose and no
-force-push to be tempted by. The `dev-writer` pushes at the end of its pass and
-opens the PR there, because reviewers and CI both need one; see
-[`dev-writer.md`](dev-writer.md).
+**The runner pushes `piece/<name>`, except for the push that opens the PR.** With
+one pusher there is no race to lose, no rebase to retry, and no force-push to be
+tempted by.
 
-Reviewers never push: their findings are cherry-picked onto the piece by the agent
-that acts on them. And the `closer` pushes the **archive commit to `main`** after
-the merge, never the piece branch. Two agents pushing one branch at once is the
-race this rule prevents; a branch handed from one agent to the next is not.
+The `dev-writer` makes that one exception: it pushes at the end of its first pass
+and opens the PR there, because reviewers and CI both need one to exist and it is
+the agent that knows what the change does. It is not a second pusher — it pushes
+once, at a moment when it is the only agent holding the piece, and the runner
+pushes everything after. See [`dev-writer.md`](dev-writer.md).
+
+The `closer` is the other exception, and also not a pusher of the piece: it pushes
+the **archive commit to `main`**, after the merge, and never touches the piece
+branch. Two agents pushing one branch at once is the race this rule prevents; a
+branch handed from one agent to the next is not.
 
 **Only reviewers get a side branch**, because only reviewers run genuinely in
 parallel — six at once, while a fixer may still be changing the code they are
@@ -290,10 +293,10 @@ approach impossible has produced a result worth as much as the review, and
 unwritten the next agent spends the same afternoon. It goes in `design.md`, beside
 the decision it rules out.
 
-**The runner owns dispatching; the `dev-writer` pushes the piece and opens its
-PR; the `closer` owns the last three stage rows.** `tasks.md`'s stage block is
-the list — read it to see what is left, because an unticked row with no agent
-running is a stage nobody is doing.
+**The runner owns dispatching and pushing; the `dev-writer` opens the PR; the
+`closer` owns the last three stage rows.** `tasks.md`'s stage block is the list —
+read it to see what is left, because an unticked row with no agent running is a
+stage nobody is doing.
 Dispatch by naming the findings files rather than carrying their content, and
 re-run only the reviewers whose findings led to changes.
 
