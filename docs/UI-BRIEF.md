@@ -5,6 +5,12 @@ never do**. Look, feel and theme are yours to explore; everything here is a
 functional constraint, and most of them come from the fact that this is
 peer-to-peer software with no server.
 
+**Two audiences, and the second one is easy to forget.** This is written for a
+designer, and it is also the contract for whoever implements a screen in QML —
+the obligations below are the ones the code must meet, and *What `ScreenFrame`
+gives you* is addressed to the implementer directly. Read it before writing a
+screen, not after a review finds the screen does not meet it.
+
 The logo is the Greek delta, **Δ**. The name is from *dialectic* — reasoned
 argument between positions.
 
@@ -483,6 +489,31 @@ invisible from inside it.
 > somebody else. Most discharge structurally: "the mark is never proof" is met by
 > printing the address beside every mark, which is obligation 6, and a note saying
 > so would add nothing a reader acts on.
+
+### What `ScreenFrame` gives you, and the one thing it asks
+
+**For whoever implements a screen in QML, not only for the designer.** Every
+screen is a `ScreenFrame` — the card, which decides padding, width and the
+hairline border once. Its contract is short and the failure mode of getting it
+wrong is silent, so it is stated here rather than only in the component:
+
+- **The card reports its own height** from its content. `Main.qml` reads that to
+  size the scroll area, so this is what makes a long feed scroll at all.
+- **A child with `Layout.fillHeight: true` gets real slack** — it grows to fill
+  the card rather than collapsing to nothing. A screen whose body should fill the
+  card says so on the child that fills it.
+- **Do not give a `ScreenFrame` an explicit `height`.** Let it size from its
+  content. A card with an explicit height and no child claiming the slack spreads
+  its rows down the card instead of stacking them at the top.
+- If you must set one, put `Layout.fillHeight: true` on the child that should
+  absorb the slack. A trailing `Item { Layout.fillHeight: true }` looks like the
+  same fix and is not: it inflates the card's reported height by one gap, and the
+  scroll area then runs past the end of the content.
+
+The reason this is here and not only in a code comment: the apparatus column
+shipped because an obligation lived in a document nobody implementing a screen
+had a reason to open. A contract that can only be found by someone who already
+knows to look for it is a contract the next screen will not meet.
 
 **1. Sanitise display text, because the core deliberately does not — and this
 applies to every string, not just titles.**

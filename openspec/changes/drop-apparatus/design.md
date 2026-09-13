@@ -32,7 +32,7 @@ being deleted by accident. Line numbers are `origin/main`'s.
 | Note | The obligation | Where it survives |
 |---|---|---|
 | `ON WHAT YOU HOLD` | every count is what this machine holds; no global total is knowable | **Brief constraint 1**, `UI-BRIEF.md:86-88`: "a count of *anything* global — members, total posts — is unknowable. Do not show one." And in the **interface already**: `FeedScreen.qml`'s empty state says "This is a fact about your copy, not about the Stoa." |
-| `ON THE MARK` | **two propositions** — see below; they do not survive equally | **Brief obligation 6, layer 2**, `UI-BRIEF.md:584-593`, carries both. In the **interface**, only the pairing half survives. |
+| `ON THE MARK` | **two propositions** — see below; they do not survive equally | **Brief obligation 6** — *"A generated name is never unique and never an identifier — the address is."* — and specifically **layer 2, the identicon**, in its four-layer list. Carries both. In the **interface**, only the pairing half survives. |
 | `ON THIS ORDERING` | this feed is **not** newest-first | **Brief Feed section**, `UI-BRIEF.md:331-375` — but see §3. The brief's half survived; the interface's half did not, so it was moved rather than deleted. |
 
 ### `ON THE MARK` carried two propositions, and only one survives on screen
@@ -189,6 +189,66 @@ scatters (measured: y=0 and y=60). The scattering needs a caller that does not
 exist; the `fillHeight` collapse was going to be hit by the next screen written.
 `ScreenFrame.qml` carries the escape hatch in a comment, so a screen that does set
 an explicit height is told what to add rather than left to diagnose it.
+
+### The two escape hatches are not equivalent, and the comment used to offer both
+
+Added after review. The escape hatch originally offered a choice —
+`Layout.fillHeight` on a child, **or** a trailing `Item { Layout.fillHeight:
+true }` — which contradicted this same section's rejection of the trailing
+spacer a few paragraphs earlier. Both fix the scatter; only one is free.
+Measured in one run, two 40px rows in a `ScreenFrame`:
+
+| Form | `implicitHeight` | rows at `height: 600` |
+|---|---|---|
+| no slack-absorbing child | 156 | y=111, y=393 — the scatter |
+| trailing `Item { Layout.fillHeight: true }` | **176** | y=0, y=60 |
+| `Layout.fillHeight` on a real child | **156** | y=0, y=60 |
+
+The 20px delta is `Theme.blockGap` exactly: the spacer is a layout child, so it
+takes a `spacing` gap that enters `body.implicitHeight` and inflates the card —
+re-breaking what `implicitHeight` exists to fix, on a screen where the scatter
+looks solved. The comment now names `fillHeight`-on-a-real-child as the fix and
+says what the spacer costs, rather than presenting them as alternatives.
+
+**The general shape of the defect**: a reader who hits a symptom takes whichever
+remedy needs least judgement. Offering two and warning about neither means the
+cheaper-looking one gets picked.
+
+### Where the shell's contract lives
+
+Also after review. `ScreenFrame`'s contract lived only inside `ScreenFrame.qml` —
+`grep -rn ScreenFrame` over `docs/` returned nothing — so the rule was reachable
+only by someone who already had a reason to open the shell. A screen author
+starting `MyScreen.qml` with `ScreenFrame { … }` has no such reason until
+something has already gone wrong, and the failure mode is silent.
+
+Four new call sites across three in-flight branches happen to satisfy the
+contract, but by what those authors wrote rather than by anything telling them.
+The evidence that the rule was in the wrong place is that a second author
+independently re-derived "the apparatus is annotation, not load-bearing" on
+`piece/ui-onboarding` and, having derived it, kept the margin note anyway — two
+authors, the same conclusion, no shared place to record it.
+
+**Taken: state the contract in `docs/UI-BRIEF.md`**, under *What `ScreenFrame`
+gives you*, which this change already edits and which the repo designates as the
+live statement of what a screen owes. Three supporting edits make it reachable:
+the brief's opening now names the QML implementer as a second audience,
+CLAUDE.md's "Where to look for what" row now sends a screen author there
+**before writing a screen**, and `ScreenFrame.qml`'s header points at the
+section and asks for the two to be kept in step.
+
+**Rejected: leave it in the component's comment block.** That is the arrangement
+that produced the gap. It also hides the rule from anyone reading the brief to
+decide what a screen owes, which is the audience that most needs it.
+
+**Rejected: a spec delta.** The contract is about how a QML shell is used, not
+about observable forum behaviour; `.openspec.yaml` sets `skip_specs: true` for
+this change and nothing here alters that.
+
+The comment block shrank in the same pass: four passages narrated the two-column
+shape this replaced, which `git log` and this section already carry. What is kept
+is the two things neither answers — why `body.height` is bound at all, and what
+to do when a card scatters.
 
 ## 5. `Theme.paperDeep` stays; `Theme.apparatusWidth` goes
 
