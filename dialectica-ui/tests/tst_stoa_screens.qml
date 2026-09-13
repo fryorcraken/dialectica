@@ -20,6 +20,38 @@ import "../src/qml"
 //   3. **A share affordance offered for a Stoa whose record the view has not
 //      got.** What it would produce is a string that fails to verify on somebody
 //      else's machine, as a refusal they cannot explain.
+//
+// ---- the defect family this file kept producing --------------------------
+//
+// **Assert the property the user is affected by, not the value feeding it.**
+// Five instances have now been found in this one file, four of them by someone
+// other than its author, and every one left the whole suite green:
+//
+//   - a title's markup safety asserted via `Text.text`, which is the SOURCE
+//     string and is unchanged by `textFormat` — passed against StyledText;
+//   - a share affordance's absence asserted via `canShare()`, the computation
+//     feeding the `visible:` binding rather than the binding;
+//   - a joined panel's presence asserted via `joinState`, the string feeding it;
+//   - a feed's absence asserted via `screenShown`, a derived string;
+//   - and the subtlest, found here by mutation: the per-Stoa-identity absence
+//     asserted over a FRESH PREVIEW, whose body says nothing whatever about
+//     what joining does. Planting "generates you an identity for it alone" in
+//     the joined panel — the text a user actually reads — left that assertion
+//     PASSING, because the panel was not rendered in the state being scanned.
+//
+// The last one generalises the rule: an absence assertion is only as strong as
+// its corpus, and a corpus with no candidate in it proves nothing. So every
+// absence assertion below states what it IS scanning before saying what is not
+// there, and `test_the_absence_assertions_scan_the_body_and_not_only_the_apparatus`
+// pins that corpus so it cannot silently shrink.
+//
+// One reason it can shrink is already scheduled: the APPARATUS column is
+// annotation explaining the design, not interface, and a separate piece is
+// removing it from the shipped view. It is 747 of the 1371 characters a join
+// screen renders — measured, not estimated — so a whole-screen scan is more
+// than half margin note. `bodyText` exists to scan only what ships. Verified by
+// running this file against a hidden apparatus column: all tests pass, because
+// none of them depends on annotation.
 TestCase {
     id: spec
     name: "StoaScreens"
@@ -107,6 +139,56 @@ TestCase {
         }
         walk(item, true)
         return out.join("\n")
+    }
+
+    // The text of the apparatus column alone.
+    //
+    // **The apparatus is annotation explaining the design, not interface**, and
+    // a separate piece is removing it from the shipped view. That matters to
+    // every absence assertion in this file: `visibleText` walks the whole
+    // ScreenFrame, so more than half of what those assertions scan on the join
+    // screen is margin note rather than anything a user acts on. Measured, not
+    // estimated — 747 of 1371 characters on a rendered preview.
+    //
+    // An absence assertion whose corpus shrinks under it does not fail; it
+    // quietly starts proving less while its name goes on claiming the same
+    // thing. So the two assertions that need a corpus check use this to state
+    // what they are scanning, and `bodyText` below to scan only what ships.
+    // Note it walks each note through `visibleText`, which checks the note's own
+    // ancestors — so a column hidden by its container yields "" here, and
+    // `bodyText` then correctly reports the whole screen as body. That is the
+    // behaviour the apparatus's removal needs, and it was got wrong first time:
+    // an earlier version returned the notes' text whether or not anything
+    // rendered them, which made a hidden column look like a column still there.
+    function apparatusText(screen) {
+        var out = []
+        var app = screen.apparatus
+        if (app === undefined || app === null)
+            return ""
+        for (var i = 0; i < app.length; i++) {
+            var t = visibleText(app[i])
+            if (t !== "")
+                out.push(t)
+        }
+        return out.join("\n")
+    }
+
+    // Everything the screen renders EXCEPT the apparatus column — that is, the
+    // part that survives the apparatus's removal and the part a user reads.
+    //
+    // Derived by subtraction rather than by walking a named child, deliberately:
+    // `ScreenFrame` exposes its body as a default property alias with no
+    // objectName to find, and a lookup keyed on internal structure would break
+    // silently when that structure changes. Subtraction breaks loudly instead —
+    // if the apparatus stops being separable, `bodyText` returns the whole
+    // screen and the corpus assertions below catch it.
+    function bodyText(screen) {
+        var whole = visibleText(screen)
+        var app = apparatusText(screen)
+        if (app === "")
+            return whole
+        var at = whole.indexOf(app)
+        return at < 0 ? whole : (whole.slice(0, at) + whole.slice(at + app.length))
     }
 
     Component { id: listComponent; StoaListScreen {} }
@@ -594,8 +676,32 @@ TestCase {
     }
 
     function test_nothing_on_the_preview_promises_a_per_stoa_identity() {
-        var screen = makeJoin({}, { stoaAddress: "aa".repeat(32), stoaGenesis: "00ff" })
-        var shown = spec.visibleText(screen).toLowerCase()
+        var addr = "aa".repeat(32)
+        var screen = makeJoin({
+            "join_stoa": '{"stoa":"' + addr + '","foundingTitle":"Nym Research","policy":"open"}'
+        }, { stoaAddress: addr, stoaGenesis: "00ff" })
+
+        // **Driven through the JOINED state, and that is the point of the test
+        // rather than incidental setup.** An earlier version asserted over a
+        // fresh preview, whose card body says nothing whatever about what
+        // joining does — the only sentence on that subject lived in the
+        // apparatus column, which is annotation and is being removed. So the
+        // assertion was scanning a screen that could not plausibly have carried
+        // the claim: an absence proved over a corpus with no candidate in it,
+        // which is the same "passes for the wrong reason" shape as asserting a
+        // binding's input instead of its output.
+        //
+        // After a join the body DOES speak about what joining did, so this now
+        // examines the text where the false promise would actually appear.
+        screen.join()
+        compare(screen.joinState, "joined", "the state that says what joining did")
+
+        var body = spec.bodyText(screen)
+        verify(body.indexOf("started collecting") >= 0,
+               "the body must be saying what joining did, or this proves nothing "
+               + "about the screen a user reads: " + body)
+
+        var shown = body.toLowerCase()
 
         // The bundle's apparatus note ends "and generates you an identity for it
         // alone". One key signs in every Stoa in this release, so that sentence
@@ -604,7 +710,64 @@ TestCase {
         verify(shown.indexOf("identity for it alone") < 0,
                "no per-Stoa identity may be promised")
         verify(shown.indexOf("an identity for that stoa") < 0)
+        verify(shown.indexOf("identity for that stoa alone") < 0)
+        // The claim need not use the bundle's exact words to do the harm, so the
+        // word itself is refused anywhere in the body. Nothing this screen
+        // legitimately says uses it.
+        verify(shown.indexOf("identity") < 0,
+               "the body must not raise identity at all, however phrased: " + body)
         verify(shown.indexOf("you moderate") < 0, "no moderator status may be asserted")
+        verify(shown.indexOf("membership list") < 0 || shown.indexOf("no membership list") >= 0,
+               "membership may be denied but never asserted")
+        screen.destroy()
+    }
+
+    // The corpus these absence assertions run over, asserted rather than assumed.
+    //
+    // **An absence assertion cannot tell you its corpus shrank.** The apparatus
+    // column is annotation that a separate piece is removing from the shipped
+    // view, and more than half the text `visibleText` returns for a join screen
+    // comes from it. Without this, that removal would silently narrow two tests
+    // above while their names went on claiming the same coverage — so the
+    // relationship is pinned here, and it fails loudly whichever way it breaks.
+    function test_the_absence_assertions_scan_the_body_and_not_only_the_apparatus() {
+        var addr = "aa".repeat(32)
+        var screen = makeJoin({
+            "join_stoa": '{"stoa":"' + addr + '","foundingTitle":"Nym Research","policy":"open"}'
+        }, { stoaAddress: addr, stoaGenesis: "00ff", foundingTitle: "Nym Research" })
+        screen.join()
+
+        var body = spec.bodyText(screen)
+        var app = spec.apparatusText(screen)
+
+        // The body carries real, on-topic sentences of its own. If the apparatus
+        // were ever the only place a subject was discussed, an absence assertion
+        // over the body would be vacuous — which is exactly the defect this
+        // pins.
+        verify(body.length > 0, "the body must carry text of its own")
+        verify(body.indexOf("started collecting") >= 0,
+               "what joining did is stated in the BODY, not only in a margin note")
+        verify(body.indexOf("Nym Research") >= 0, "as is the founding title")
+
+        // And where an apparatus is rendered at all, the two are disjoint — so
+        // `bodyText` is genuinely subtracting it rather than returning the whole
+        // screen and being believed.
+        //
+        // **Guarded on the apparatus being non-empty, and that guard is the
+        // point rather than a convenience.** The apparatus is annotation a
+        // separate piece is removing; once it is gone `app` is "" and `body` IS
+        // the whole screen, correctly. An unguarded "body must be smaller than
+        // the screen" would fail on that change while the two behaviour tests it
+        // exists to protect kept passing — a guard failing for the one reason
+        // that is not a defect. Verified by running this file against a hidden
+        // apparatus column: the two behaviour tests pass, and only this
+        // assertion had to be taught the difference.
+        if (app !== "") {
+            verify(body.indexOf(app) < 0,
+                   "bodyText must not still contain the apparatus")
+            verify(spec.visibleText(screen).length > body.length,
+                   "and must be strictly smaller than the whole screen")
+        }
         screen.destroy()
     }
 
@@ -693,11 +856,34 @@ TestCase {
         screen.join()
 
         compare(screen.joinState, "joined", "a repeat join is SUCCESS")
-        var shown = spec.visibleText(screen).toLowerCase()
+
+        // The BODY, not the whole frame. The apparatus column is annotation
+        // being removed from the shipped view, and scanning it would let this
+        // assertion quietly narrow when that lands. The corpus is asserted
+        // first so the absence below is over text that exists.
+        var body = spec.bodyText(screen)
+        verify(body.indexOf("Joined.") >= 0,
+               "the outcome must be on screen, or the absences prove nothing: " + body)
+
+        var shown = body.toLowerCase()
         verify(shown.indexOf("already") < 0, "no warning about a repeat")
         verify(shown.indexOf("collision") < 0 && shown.indexOf("duplicate") < 0,
                "and no collision to resolve: " + shown)
-        compare(spec.visibleNamed(screen, "joinFailurePanel").length, 0)
+        // Word-boundary, not a bare substring: a plain `indexOf("again")` fires
+        // on "not checked AGAINst any registry", which is legitimate copy in the
+        // address note. Caught by this assertion failing on first run, which is
+        // the argument for running a new assertion before believing it.
+        verify(!/\bagain\b/.test(shown), "nor any nod to this being a second attempt")
+        verify(!/\bonce more\b/.test(shown))
+
+        // The user-visible consequence, not the state string that feeds it: the
+        // failure panel must not be ON SCREEN. `visibleNamed` checks every
+        // ancestor's visibility, so a panel inside a hidden parent counts as
+        // absent and a panel bound `visible: true` counts as present.
+        compare(spec.visibleNamed(screen, "joinFailurePanel").length, 0,
+                "no failure panel may be rendered for a repeat join")
+        compare(spec.visibleNamed(screen, "joinedPanel").length, 1,
+                "and the joined panel must actually be rendered")
         screen.destroy()
     }
 

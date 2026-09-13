@@ -191,6 +191,36 @@ default buried in the wrapper is a number two screens would silently share.
   and it is the safe direction: a panel that appeared because of a failed read
   would be asserting a comparison nothing performed.
 
+### D7 — Absence assertions scan the card body, never the apparatus column
+
+`tst_stoa_screens.qml` has a `bodyText(screen)` helper, and every "the screen
+does not say X" assertion runs over it rather than over `visibleText(screen)`.
+
+**The apparatus column is annotation explaining the design, not interface.** It
+reached the shipped view by mistake and a separate piece is removing it. On a
+rendered join screen it is 747 of 1371 characters — measured, not estimated — so
+a whole-screen scan is more than half margin note, and an absence assertion over
+it would silently prove less the day the column goes while its name went on
+claiming the same coverage.
+
+Two things follow, and the second is the one that actually bit:
+
+- `bodyText` subtracts the apparatus rather than walking a named body child.
+  `ScreenFrame` exposes its body as a default-property alias with no
+  `objectName`, so a structural lookup would break silently when that structure
+  changed; subtraction breaks loudly instead.
+- **An absence assertion is only as strong as its corpus, and a corpus with no
+  candidate in it proves nothing.** `test_nothing_on_the_preview_promises_a_per_stoa_identity`
+  originally scanned a *fresh preview*, whose body says nothing whatever about
+  what joining does — the only sentence on that subject was in the apparatus.
+  Planting "generates you an identity for it alone" in the joined panel left the
+  assertion passing. It now drives the screen to the joined state and asserts the
+  corpus contains the honest sentence before asserting the false one is absent.
+
+This is the same family as the four instances found in review — assert the
+property the user is affected by, not the value feeding it — with the corpus
+playing the part the binding plays elsewhere.
+
 ## Behaviour the spec did not decide
 
 Four choices below are observable behaviour the spec is silent on. Each has a

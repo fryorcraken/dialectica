@@ -145,6 +145,40 @@
       affordance's conditional availability on a list row, the shape of the
       shareable thing, and what the address does and does not prove.
 
+## 9. Making the absence assertions honest about the apparatus
+
+The apparatus column is annotation, not interface, and a separate piece removes
+it. Re-reading the two whole-screen absence assertions for that change turned up
+a defect that was never about the apparatus at all.
+
+- [x] 9.1 Measure rather than estimate what those assertions scan: **747 of 1371
+      characters** on a rendered join screen are apparatus. Established with a
+      throwaway probe under `tmp/`, since `console.log` is swallowed by the
+      runner and a deliberately-failing `compare` is what surfaces a string.
+- [x] 9.2 Add `bodyText(screen)`, which subtracts the apparatus rather than
+      walking a named body child — `ScreenFrame` exposes its body as a
+      default-property alias with no `objectName`, so a structural lookup would
+      break silently where subtraction breaks loudly. Both absence assertions now
+      run over it.
+- [x] 9.3 **Fix the real defect found by mutation.**
+      `test_nothing_on_the_preview_promises_a_per_stoa_identity` scanned a fresh
+      preview, whose body says nothing whatever about what joining does — the
+      only sentence on the subject was in the apparatus. Planting "generates you
+      an identity for it alone" in the joined panel left it **passing**. Proved
+      by running the original assertion verbatim against the planted claim. It
+      now drives the screen to the joined state, and fails on that mutation.
+- [x] 9.4 Assert each absence's corpus before asserting the absence, so a test
+      cannot go vacuous: `test_the_absence_assertions_scan_the_body_and_not_only_the_apparatus`
+      pins that the body carries on-topic text of its own and that `bodyText` is
+      genuinely subtracting.
+- [x] 9.5 Verify the whole suite against a hidden apparatus column: **54 tests,
+      all green**, so nothing here depends on annotation and the removal piece
+      cannot silently narrow this file.
+- [x] 9.6 A word-boundary regex, not a substring, for the repeat-join wording
+      check — a bare `indexOf("again")` fires on "not checked **again**st any
+      registry", which is legitimate copy. Caught by the assertion failing on its
+      first run.
+
 ## 9. The tester's pass
 
 Six tests added, each proved to fail by a mutation that the 47 tests already
