@@ -14,7 +14,7 @@ from a table here, so that this file stays the thing worth reading in full:
 | [`docs/PLAN.md`](docs/PLAN.md) | **Before any design decision.** It carries the architecture, what was rejected and why, and the traps found before a line was written. |
 | [`docs/UI-BRIEF.md`](docs/UI-BRIEF.md) | Before any change that alters what the UI must show, hide or refuse to claim. It is a **live document derived from PLAN.md**, written for an external designer who cannot read the code — so it states rendering obligations the core deliberately does not meet. **If a change makes it wrong, fix it in the same change**; a stale brief is worse than none, because it is designed against. PLAN.md wins any disagreement. |
 | [`.claude/agents/README.md`](.claude/agents/README.md) | **Before starting a change.** The spec-driven flow: which document answers which question, and the role agents. Also the test defects that have shipped here and what prevents them. |
-| [`docs/OPENSPEC-ARCHIVE.md`](docs/OPENSPEC-ARCHIVE.md) | **Before archiving a change**, which is the last step before it merges — not before starting one. The traps that lose a requirement silently, and why `validate --strict` passes a spec that contradicts itself. |
+| [`docs/OPENSPEC-ARCHIVE.md`](docs/OPENSPEC-ARCHIVE.md) | **Before archiving a change**, which is the last step in closing it and runs after its PR merges — not before starting one. The traps that lose a requirement silently, and why `validate --strict` passes a spec that contradicts itself. |
 
 ### Keeping this file true
 

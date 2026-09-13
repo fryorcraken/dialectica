@@ -23,7 +23,9 @@ past decision means grepping the archive.
 
 **Archiving has enough traps to be worth its own page:
 [`docs/OPENSPEC-ARCHIVE.md`](../../docs/OPENSPEC-ARCHIVE.md). Read it before you
-archive, not before you start.** `openspec` is installed; run
+archive, not before you start.** Archiving runs after the merge, not before, and
+the `closer` is the agent that runs it — [`closer.md`](closer.md) says why that
+ordering. `openspec` is installed; run
 `openspec --version` rather than believing any document about it, this one
 included.
 
@@ -69,6 +71,7 @@ Leave it. It shrinks by attrition as changes touch each area.
 | `spec-test-reviewer` | **spec + tests only** | findings |
 | `design-reviewer` | code, `design.md`, PLAN.md | findings |
 | `code-reviewer` | code | findings |
+| `closer` | `tasks.md`, `findings/`, CI, the PR | deletes `findings/`, the archive commit |
 
 ## One piece of work is one branch and one PR
 
@@ -115,8 +118,9 @@ Every branch rule below follows from that asymmetry.
 
 | Branch | Worktree | Whose | Holds |
 |---|---|---|---|
-| `piece/<name>` | one, shared | the three writers, in turn | **the** task branch, and **the only one pushed**. Spec, code, tests and findings-fixes all commit here directly |
+| `piece/<name>` | one, shared | the three writers in turn, then the `closer` | **the** task branch, and the only branch of the three that is pushed. Spec, code, tests and findings-fixes all commit here directly |
 | `review/<name>/<dimension>` | one each | one reviewer | **local only** — its findings file, nothing else, cherry-picked onto the piece and never pushed |
+| `main` | the main checkout | the `closer`, after the merge | the archive commit, and nothing else an agent writes |
 
 **`spec-writer`, `dev-writer` and `tester` share one worktree, checked out on
 `piece/<name>`.** They can share it precisely because they never run at the same
@@ -151,8 +155,13 @@ rather than merged shows here even though its content is in, so read the commits
 rather than the count. Say in the closing comment where the work went, and keep
 the branch.
 
-**Only the runner pushes.** With one pusher there is no race to lose, no rebase to
-retry, and no force-push to be tempted by.
+**Only the runner pushes `piece/<name>`.** With one pusher there is no race to
+lose, no rebase to retry, and no force-push to be tempted by.
+
+The `closer` is the single exception, and it is not a second pusher of the piece:
+it pushes the **archive commit to `main`**, after the merge, and never touches the
+piece branch. Two agents pushing one branch is the race this rule prevents; one
+agent pushing a branch nobody else is on is not.
 
 **Only reviewers get a side branch**, because only reviewers run genuinely in
 parallel — six at once, while a fixer may still be changing the code they are
@@ -189,8 +198,9 @@ recognise, because everyone reads both.
 - [ ] review: architecture — `code-reviewer`
 - [ ] review: spec-test — `spec-test-reviewer`
 - [ ] review: design — `design-reviewer`
-- [ ] findings all ticked, `findings/` deleted — runner
-- [ ] `openspec validate --strict`, then `archive` — runner
+- [ ] findings all ticked, `findings/` deleted — `closer`
+- [ ] CI green, PR merged — `closer`
+- [ ] `openspec validate --strict`, then `archive` — `closer`
 ```
 
 **One row per agent instance, not per role** — `code-reviewer` runs four times, so
@@ -224,8 +234,8 @@ checkbox**, written unticked by the reviewer:
 
 Whoever acts on it flips the box and appends the outcome — **fixed** (with the test
 that fails without it), **rejected** (with the argument), or **deferred** (and where
-to) — without editing the reviewer's text. The runner deletes the directory before
-merge, once no box is empty.
+to) — without editing the reviewer's text. The `closer` deletes the directory
+before merge, once no box is empty.
 
 So "blocks the merge" is literal and checkable: `grep -rn "^- \[ \]"` over the
 directory either returns lines or it does not.
@@ -275,11 +285,18 @@ approach impossible has produced a result worth as much as the review, and
 unwritten the next agent spends the same afternoon. It goes in `design.md`, beside
 the decision it rules out.
 
-**The runner owns the last two stage rows, plus dispatching and pushing.**
-`tasks.md`'s stage block is the list — read it to see what is left, because an
-unticked row with no agent running is a stage nobody is doing. Dispatch by naming
-the findings files rather than carrying their content, and re-run only the
-reviewers whose findings led to changes.
+**The runner owns dispatching and pushing; the `closer` owns the last three
+stage rows.** `tasks.md`'s stage block is the list — read it to see what is left,
+because an unticked row with no agent running is a stage nobody is doing.
+Dispatch by naming the findings files rather than carrying their content, and
+re-run only the reviewers whose findings led to changes.
+
+**The runner's last dispatch is the `closer`.** Watching a CI run is the cheapest
+work in this flow and the runner is the most expensive context to spend on it, so
+the tail is delegated like every other stage. What does not delegate is authority:
+the `closer` reports a red run, a stale branch or an unticked box back rather than
+repairing it, and it does not dispatch anyone. See
+[`closer.md`](closer.md).
 
 The reviewers run in parallel and ask different questions:
 

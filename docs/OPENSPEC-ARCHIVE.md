@@ -1,8 +1,15 @@
 # Archiving an OpenSpec change
 
-Read this when you are **archiving** — the last step before a change merges.
-`.claude/agents/README.md` is the flow; this is the one step with enough
-mechanical detail to be worth its own page.
+Read this when you are **archiving** — the last step in closing a change, run
+**after** its PR merges, by the `closer`. `.claude/agents/README.md` is the
+flow; this is the one step with enough mechanical detail to be worth its own
+page.
+
+Archiving after the merge rather than before is deliberate: `archive` rewrites
+the live contract in `openspec/specs/`, so running it on the piece branch folds
+a contract promotion and the code into one squashed commit that cannot be
+reverted in halves — and running it before CI is green promotes a contract for
+code that may never land.
 
 `openspec` is installed. **Run `openspec --version` rather than believing any
 document about it** — including this one. This file once recorded the CLI as
