@@ -120,6 +120,61 @@ pub trait DialecticaModule: Send + 'static {
     /// ever collapsed.
     fn list_threads(&mut self, request: String) -> String;
 
+    /// A slate of candidate identities for a Stoa.
+    ///
+    /// Takes `{"stoa":"<hex>"}` and returns
+    /// `{"slate":"<hex>","count":N,"candidates":[…]}` or the error shape.
+    ///
+    /// **There is no count parameter**, and the omission is the `identity-onboarding`
+    /// spec's requirement rather than a simplification: a caller-supplied count is
+    /// a number that decides how much key derivation this module performs. The
+    /// count is reported so a view need not hardcode it.
+    ///
+    /// Each candidate carries an address and a public key and **no secret** — the
+    /// view cannot sign, and a secret that has crossed this boundary cannot be
+    /// recalled.
+    ///
+    /// Nothing is written. A slate that persisted would record a choice the user
+    /// has not made.
+    fn generate_identity_slate(&mut self, request: String) -> String;
+
+    /// Keep one candidate from the slate, making it this user's identity.
+    ///
+    /// Takes `{"stoa":"<hex>","slate":"<hex>","index":N}` and returns
+    /// `{"kept":true,"address":"…","publicKey":"…","path":N,"encrypted":bool}` or
+    /// `{"kept":false,"reason":"…"}` — the two are exclusive.
+    ///
+    /// The `slate` field is the identifier the slate was returned with, and a
+    /// selection against a slate that is no longer the current one is **refused**
+    /// rather than satisfied by the current one's candidate at that index.
+    ///
+    /// `encrypted` reports whether the master key was encrypted at rest, so that an
+    /// unencrypted keystore is a state a view can name rather than a silent
+    /// default.
+    ///
+    /// Keeping is refused where an identity already exists. Replacing one discards
+    /// every identity derived from it while the ops they signed remain published,
+    /// so it is a separate operation this contract does not provide.
+    fn keep_identity(&mut self, request: String) -> String;
+
+    /// Who the user is in a Stoa, or why there is nobody.
+    ///
+    /// Takes `{"stoa":"<hex>"}` and returns
+    /// `{"hasIdentity":true,"address":"…","publicKey":"…","path":N,"recoveryNeedsTheRecord":bool}`
+    /// or `{"hasIdentity":false,"reason":"…"}` — the two are exclusive.
+    ///
+    /// **A different question from `getCapabilities`**, and the two can honestly
+    /// disagree: a stored identity whose keystore permissions are too open is a
+    /// real identity that cannot currently be used. A view with only the posting
+    /// probe would have to render "you are nobody" to a user who has an identity
+    /// and a fixable problem.
+    ///
+    /// `recoveryNeedsTheRecord` is how a view learns that an exported master key is
+    /// not by itself a complete backup — the chosen derivation paths live only in
+    /// local storage, and the view has no filesystem access to discover that for
+    /// itself.
+    fn who_am_i(&mut self, request: String) -> String;
+
     /// Publish a post into a Stoa.
     ///
     /// Takes `{"stoa":"<hex>","body":"…"}` and returns
@@ -228,10 +283,90 @@ include!(concat!(
 /// yet" is a real state a call can arrive in — the dispatch table is live before
 /// the callback in principle — and it must produce an honest error rather than a
 /// read against an empty path.
+///
+/// # The second field, and why it is here rather than in `core`
+///
+/// `live_slate` is the identifier of the slate `generateIdentitySlate` last
+/// returned, and it is what makes a selection against a **superseded** slate
+/// refusable: a keep quotes the slate it was made against, and only something
+/// spanning two calls can say which one is current. `core` is a pure crate with
+/// no ambient state by design, so the one value that has to outlive a call lives
+/// here.
+///
+/// **It holds 32 bytes of public randomness, not key material.** A slate
+/// identifier names which derivation paths were offered, and a path is not secret
+/// — `identity-onboarding` says so outright. That is what makes this field cheap:
+/// it is not a secret held across calls, and there is no clearing obligation on
+/// it. The master key stays in the keystore, which is opened per call.
+///
+/// `Default` still supplies the one genuinely parameterless constructor
+/// `interface: "universal"` requires — `Option` defaults to `None`, so adding
+/// this field adds no constructor parameter.
 #[cfg(logos_scaffold)]
 #[derive(Default)]
 struct Dialectica {
     persistence_path: Option<String>,
+    /// The onboarding state that spans two calls: the master key a slate was
+    /// offered under, and which slate is live.
+    ///
+    /// **A `core` type rather than fields here**, and that is the point rather than
+    /// tidiness. It held only the nonce, with the mint-or-open decision in a helper
+    /// on this struct — and this file is `#[cfg(logos_scaffold)]`, so that decision
+    /// was compiled out of `cargo test` entirely. It minted a fresh key per call, so
+    /// the slate showed one identity and the keep wrote another; no test could see
+    /// it, because there was nothing compiled to see. See
+    /// [`core::wire::OnboardingSession`] for the defect and the fix.
+    onboarding: core::wire::OnboardingSession,
+}
+
+#[cfg(logos_scaffold)]
+impl Dialectica {
+    /// The directory the host gave this instance, or the error to return.
+    ///
+    /// Factored out at the point CLAUDE.md names: this was the same four lines in
+    /// two handlers and would have been in five. A `Result` whose `Err` arm is
+    /// already the wire reply, following `core::parse_channel_id`, so a caller
+    /// cannot invent a second error shape while converting one.
+    ///
+    /// It is not in `core` because `core` has no notion of a host handing it a
+    /// path — that is the whole reason this adapter exists.
+    fn storage_dir(&self) -> Result<std::path::PathBuf, String> {
+        match &self.persistence_path {
+            Some(dir) => Ok(std::path::PathBuf::from(dir)),
+            None => Err(core::error_json(
+                "the host has not yet told this module where its storage is; \
+                 try again once the module is ready",
+            )),
+        }
+    }
+
+    /// The record of chosen paths, in the directory the host gave this instance.
+    ///
+    /// Factored out for the reason [`Dialectica::storage_dir`] was: the same two
+    /// lines were in three handlers. Not in `core` for the same reason either —
+    /// `core` has no notion of a host-supplied directory.
+    fn paths(
+        dir: &std::path::Path,
+    ) -> Result<core::identity_store::IdentityStore, core::identity_store::IdentityStoreError> {
+        core::identity_store::IdentityStore::open(
+            &core::identity_store::IdentityStore::default_path_in(dir),
+        )
+    }
+
+    /// The keystore on disk, or `NotFound`.
+    ///
+    /// **This does not mint.** Minting is `core`'s decision, in
+    /// [`core::wire::OnboardingSession`], because the question "what does no
+    /// keystore mean here" is different for a slate (offer candidates of a key that
+    /// does not exist yet) and for a report (there is nobody), and a helper here
+    /// answering it for both was how a slate and a keep came to see different keys.
+    /// What is left in this file is the part that genuinely cannot move: where the
+    /// file is, and the environment its protection is read from.
+    fn open_keystore(
+        dir: &std::path::Path,
+    ) -> Result<core::keystore::Keystore, core::keystore::KeystoreError> {
+        core::keystore::open_from_env(&core::keystore::default_path_in(dir))
+    }
 }
 
 // The one piece of assembly this file does, and the reason it is here rather
@@ -393,28 +528,31 @@ impl DialecticaModule for Dialectica {
     }
 
     fn get_capabilities(&mut self, request: String) -> String {
-        // The keystore path is derived from the persistence path the host gave
+        // The two stores' paths are derived from the persistence path the host gave
         // us, which is why this is not a bare forward: `core` cannot read the
         // environment or know the host's layout (PLAN.md §2.3), so the adapter
-        // supplies the lookup and `core` decides what its result means.
-        let Some(dir) = self.persistence_path.clone() else {
-            return core::error_json(
-                "the host has not yet told this module where its storage is; \
-                 try again once the module is ready",
-            );
+        // supplies the openers and `core` decides what their results mean.
+        //
+        // The DERIVATION is no longer here. It was — `ks.stoa_address(stoa)`, the
+        // pathless scheme — while `whoAmI` used the path-taking one under a bumped
+        // salt, so the two methods reported two different addresses for one user in
+        // one Stoa. It could not be tested where it was, because this file is not
+        // compiled by `cargo test`; see `core::wire::posting_identity`.
+        let dir = match self.storage_dir() {
+            Ok(d) => d,
+            Err(e) => return e,
         };
-        core::get_capabilities(&request, |stoa| {
-            let path = core::keystore::default_path_in(std::path::Path::new(&dir));
-            core::keystore::open_from_env(&path).map(|ks| ks.stoa_address(stoa).to_hex())
-        })
+        core::wire::get_capabilities_from_stores(
+            &request,
+            || Self::open_keystore(&dir),
+            || Self::paths(&dir),
+        )
     }
 
     fn list_threads(&mut self, request: String) -> String {
-        let Some(dir) = self.persistence_path.clone() else {
-            return core::error_json(
-                "the host has not yet told this module where its storage is; \
-                 try again once the module is ready",
-            );
+        let dir = match self.storage_dir() {
+            Ok(d) => d,
+            Err(e) => return e,
         };
         // The store is opened per call rather than held open, which is the
         // simple thing and the correct one today: the host may hand the same
@@ -423,8 +561,61 @@ impl DialecticaModule for Dialectica {
         // and its failure is exactly the "unreadable store" the view renders as
         // screen 07's failed state.
         core::list_threads_from_request(&request, || {
-            core::log::SqliteOpLog::open(&std::path::Path::new(&dir).join("ops.sqlite"))
+            core::log::SqliteOpLog::open(&dir.join("ops.sqlite"))
         })
+    }
+
+    fn generate_identity_slate(&mut self, request: String) -> String {
+        let dir = match self.storage_dir() {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
+        // The session holds both the master key and the live nonce, so there is no
+        // `Cell` to carry a nonce back out and no way for the two to be set
+        // separately. That pairing is the fix for the defect described on
+        // `OnboardingSession`: a slate is a (key, nonce) pair, and holding half of
+        // it is what let the keep write a different identity from the one shown.
+        core::generate_identity_slate(&mut self.onboarding, &request, || Self::open_keystore(&dir))
+    }
+
+    fn keep_identity(&mut self, request: String) -> String {
+        let dir = match self.storage_dir() {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
+        let paths = match Self::paths(&dir) {
+            Ok(p) => p,
+            Err(e) => return core::error_json(&e.to_string()),
+        };
+        // The keystore's own decision about protection at create time, not a copy
+        // of it here — `protection_from_env` owns the byte handling and the reason
+        // there is no fallback constant. Whichever it returns is recorded in the
+        // file and reported in the reply, so an unencrypted keystore is a state a
+        // view can name rather than a silent default.
+        let unlock = core::keystore::protection_from_env();
+        core::keep_identity(
+            &mut self.onboarding,
+            &request,
+            || Self::open_keystore(&dir),
+            core::KeepTargets {
+                keystore_path: &core::keystore::default_path_in(&dir),
+                unlock: &unlock,
+                paths: &paths,
+            },
+        )
+    }
+
+    fn who_am_i(&mut self, request: String) -> String {
+        let dir = match self.storage_dir() {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
+        // `open_keystore` rather than the session: this method REPORTS, so a
+        // missing keystore is "there is nobody" and must not mint one — and must
+        // not report one the session happens to be holding for an unfinished
+        // onboarding either. Reporting a minted, unwritten key as the user's
+        // identity would name an identity that does not exist yet.
+        core::who_am_i(&request, || Self::open_keystore(&dir), || Self::paths(&dir))
     }
 
     fn publish_post(&mut self, request: String) -> String {

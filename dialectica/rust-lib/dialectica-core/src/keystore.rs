@@ -329,6 +329,46 @@ fn unlock_for(encrypted: bool) -> Result<Unlock, KeystoreError> {
     }
 }
 
+/// The protection to apply when **creating** a keystore, from the environment.
+///
+/// # Why this is separate from `unlock_from_env`
+///
+/// [`unlock_from_env`] asks the *file* first and the environment second, which is
+/// the only order that produces truthful errors when opening. There is no file to
+/// ask when creating one, so that function cannot serve this: it would report
+/// `NotFound` for the very case a keep is about.
+///
+/// # This is not a new policy
+///
+/// It is the keystore's two existing documented paths, applied at create time: a
+/// passphrase in [`PASSPHRASE_ENV`] encrypts, and its absence stores in the clear
+/// as `Protection::None`. **An empty variable is treated as unset**, matching
+/// `unlock_from_env`, `ssh-keygen` and radicle — the alternative would be an
+/// encryption under a key anyone can derive, which is the shape
+/// [`Passphrase::is_empty`] refuses.
+///
+/// **There is deliberately no fallback constant.** A fixed passphrase compiled
+/// into the build would be identical across every install and readable in the
+/// source, so it would defend a stolen file against nobody — while the file
+/// recorded itself as encrypted. `identity-onboarding` refuses that outright, on
+/// the ground that protection which *reads* as strong is worse than recorded
+/// plaintext, because an audit can see plaintext.
+///
+/// Whichever this returns is recorded in the file by
+/// [`Keystore::to_file_bytes`] and is reportable to the caller, which is what
+/// makes an unencrypted keystore a state an interface can name rather than a
+/// silent default.
+///
+/// Exists here rather than in the module crate so that the byte handling — `bytes,
+/// not a lossy conversion`, see [`os_str_bytes`] — is decided once. A second copy
+/// in the adapter would eventually map two different passphrases onto one key.
+pub fn protection_from_env() -> Unlock {
+    match std::env::var_os(PASSPHRASE_ENV) {
+        Some(v) if !v.is_empty() => Unlock::Passphrase(Passphrase::new(os_str_bytes(&v))),
+        _ => Unlock::Unencrypted,
+    }
+}
+
 /// Whether these file bytes describe an encrypted keystore.
 ///
 /// Parses only the header, so it is cheap and says nothing about whether the
@@ -467,6 +507,16 @@ pub enum KeystoreError {
     /// well-formed parameter that is an allocation attack. See
     /// [`MAX_ACCEPTED_M_COST_KIB`].
     CostTooHigh,
+    /// The OS random source was unavailable, so no key could be minted.
+    ///
+    /// Its own arm rather than [`KeystoreError::Io`], whose message is *"keystore
+    /// could not be read"* — which names the wrong operation for a mint, and would
+    /// send a reader to check a file that does not exist yet. `fill_random` inside
+    /// this module still folds a randomness failure into `Io` when generating a
+    /// salt or nonce *for a write*, where "could not be read" is closer to true;
+    /// this arm is for [`Keystore::generate`], where there is no file in the
+    /// picture at all.
+    NoRandomness,
 }
 
 impl std::fmt::Display for KeystoreError {
@@ -562,7 +612,19 @@ impl std::fmt::Display for KeystoreError {
                  attempt; the file has been tampered with — restore it from a \
                  backup"
             ),
+            // Delegated rather than restated, so the guidance lives in one place —
+            // the argument `capability_for` makes about not maintaining the same
+            // advice twice, applied to an error that wraps another's.
+            KeystoreError::NoRandomness => {
+                write!(f, "{}", crate::identity::RandomnessUnavailable)
+            }
         }
+    }
+}
+
+impl From<crate::identity::RandomnessUnavailable> for KeystoreError {
+    fn from(_: crate::identity::RandomnessUnavailable) -> Self {
+        KeystoreError::NoRandomness
     }
 }
 
@@ -622,12 +684,41 @@ impl Keystore {
     /// CLAUDE.md's rule applied to a security property: prefer reshaping state
     /// so the invariant holds by construction over adding a line that
     /// maintains it. A line must be remembered; a shape cannot be forgotten.
-    pub fn generate() -> Self {
+    /// # Fallible, because the mint is now on a handler path
+    ///
+    /// This returned `Self` and let `SecretKey::generate`'s `expect` carry the
+    /// randomness failure. `identity-onboarding` put the mint behind
+    /// `generateIdentitySlate` and `keepIdentity` on every fresh install, which
+    /// made that `expect` reachable from a dispatch handler — and a panic there
+    /// aborts the module process rather than failing one call. See
+    /// [`crate::identity::SecretKey::generate`] for the measurement.
+    pub fn generate() -> Result<Self, crate::identity::RandomnessUnavailable> {
         // Through `SecretKey` rather than `getrandom` directly, so there is one
         // place in this crate that decides where key entropy comes from.
-        let sk = SecretKey::generate();
-        Keystore {
+        let sk = SecretKey::generate()?;
+        Ok(Keystore {
             root: Zeroizing::new(sk.to_bytes()),
+        })
+    }
+
+    /// A keystore with a **fixed** root, for tests in other modules of this crate.
+    ///
+    /// `#[cfg(test)]` and `pub(crate)`, both load-bearing. This exists because
+    /// `wire.rs`'s onboarding tests must assert against values derived
+    /// independently rather than against whatever `generate()` just produced —
+    /// the defect this project has shipped three times is a test agreeing with the
+    /// implementation — and a fixed root is what makes an independent derivation
+    /// possible.
+    ///
+    /// It is **not** a public constructor, and that matters beyond tidiness: a
+    /// public one would be a way for a caller to choose a root, which is a way to
+    /// ship a keystore whose root somebody else picked. `keystore.rs`'s own tests
+    /// build the struct directly because they are inside the module; this is the
+    /// same capability, reachable from a sibling module and from nowhere else.
+    #[cfg(test)]
+    pub(crate) fn from_root_for_test(root: [u8; ROOT_SECRET_LEN]) -> Self {
+        Keystore {
+            root: Zeroizing::new(root),
         }
     }
 
@@ -650,6 +741,65 @@ impl Keystore {
     /// reports, and what an op published now is attributed to.
     pub fn stoa_address(&self, stoa: &Address) -> Address {
         self.stoa_public_key(stoa).address()
+    }
+
+    /// The per-Stoa signing key at a **chosen derivation path**.
+    ///
+    /// The same three hops as [`Keystore::stoa_key`] and its two callers, one
+    /// input wider. `identity-onboarding` adds the path to per-Stoa derivation
+    /// and explicitly does not bypass it: `derive_stoa_key_at_path` is
+    /// `derive_stoa_key`'s scheme with a third input, so a path-derived identity
+    /// is a per-Stoa identity in every sense the `keystore` and `identity`
+    /// contracts use the term.
+    ///
+    /// There is still no accessor for the root, for the reason
+    /// [`Keystore::stoa_key`] gives: nothing outside this type needs it, and it
+    /// is the one value that yields every identity the user has.
+    pub fn stoa_key_at_path(&self, stoa: &Address, path: u32) -> SecretKey {
+        crate::identity::derive_stoa_key_at_path(&self.root, stoa, path)
+    }
+
+    /// The public key this identity presents in a Stoa at a chosen path.
+    pub fn stoa_public_key_at_path(&self, stoa: &Address, path: u32) -> PublicKey {
+        self.stoa_key_at_path(stoa, path).public_key()
+    }
+
+    /// The author address for a chosen path — what a slate candidate shows, and
+    /// what a kept identity posts under.
+    pub fn stoa_address_at_path(&self, stoa: &Address, path: u32) -> Address {
+        self.stoa_public_key_at_path(stoa, path).address()
+    }
+
+    /// A fresh slate of candidate identities for a Stoa.
+    ///
+    /// **This method exists so that the root never leaves this type.** A slate
+    /// needs the master key, and the alternative shape — a root accessor that
+    /// `onboarding.rs` calls — would be exactly the accessor
+    /// [`Keystore::stoa_key`]'s doc comment says must not exist, added for the
+    /// convenience of one caller. Passing the *operation* in rather than the
+    /// secret out keeps the rule intact.
+    ///
+    /// Nothing is written. A slate is a nonce and a derivation; the
+    /// `identity-onboarding` spec requires that generating one write nothing, and
+    /// this method takes no path.
+    pub fn slate_for(
+        &self,
+        stoa: &Address,
+    ) -> Result<crate::onboarding::Slate, crate::onboarding::OnboardingError> {
+        crate::onboarding::Slate::generate(&self.root, stoa)
+    }
+
+    /// The slate a nonce names, reproduced.
+    ///
+    /// What `keep` calls: a selection is checked against the slate it was made
+    /// against, and that slate is recomputed rather than looked up. See
+    /// [`crate::onboarding`]'s module documentation for why.
+    pub fn slate_from_nonce(
+        &self,
+        stoa: &Address,
+        nonce: crate::onboarding::SlateNonce,
+    ) -> Result<crate::onboarding::Slate, crate::onboarding::OnboardingError> {
+        crate::onboarding::Slate::from_nonce(&self.root, stoa, nonce)
     }
 
     /// Load and unlock a keystore.
@@ -1997,7 +2147,7 @@ mod tests {
         let verbs = [
             "create", "restrict", "check", "upgrade", "restore", "supply", "remove", "needs",
         ];
-        for e in [
+        let all = [
             KeystoreError::NotFound,
             KeystoreError::PermissionsTooOpen { mode: 0o644 },
             KeystoreError::DirectoryWritableByOthers { mode: 0o777 },
@@ -2015,7 +2165,20 @@ mod tests {
             KeystoreError::KeyDerivation,
             KeystoreError::CostTooHigh,
             KeystoreError::Locked,
-        ] {
+            KeystoreError::NoRandomness,
+        ];
+        // Hardcoded, copying `every_reason_is_distinguishable_from_every_other`'s
+        // guard in this file, because this sweep did not have one and a variant
+        // added later was therefore silently uncovered — `NoRandomness` went in that
+        // way with `identity-onboarding` and this assertion is what would have
+        // caught it. Two hand-maintained lists of one enum's variants is not ideal;
+        // a guard on each is what makes forgetting either one loud.
+        assert_eq!(
+            all.len(),
+            18,
+            "a variant was added without extending this sweep"
+        );
+        for e in all {
             let msg = e.to_string();
             // The guidance clause: everything after the first `;` or em dash.
             // A message with neither is a bare fault statement and fails here
@@ -2139,8 +2302,8 @@ mod tests {
         //
         // A view shows the reason and nothing else, so two variants that
         // render alike are one variant as far as a user is concerned — and the
-        // whole argument for seventeen of them is that each names a different
-        // fix.
+        // whole argument for having this many of them is that each names a
+        // different fix.
         let all = [
             KeystoreError::NotFound,
             KeystoreError::PermissionsTooOpen { mode: 0o644 },
@@ -2159,11 +2322,16 @@ mod tests {
             KeystoreError::KeyDerivation,
             KeystoreError::CostTooHigh,
             KeystoreError::Locked,
+            KeystoreError::NoRandomness,
         ];
 
         // Hardcoded, so that adding a variant without adding it here fails
         // rather than silently shrinking the sweep.
-        assert_eq!(all.len(), 17, "a variant was added without extending this sweep");
+        assert_eq!(
+            all.len(),
+            18,
+            "a variant was added without extending this sweep"
+        );
 
         for (i, a) in all.iter().enumerate() {
             for b in all.iter().skip(i + 1) {
@@ -2689,6 +2857,69 @@ mod tests {
             KeystoreError::NotFound
         );
 
+        // ─── `protection_from_env`, the CREATE-time counterpart ───────────
+        //
+        // Asserted inside THIS test rather than in its own, for the reason the
+        // section comment above gives: `set_var` is process-global and cargo runs
+        // tests in threads, so a second test touching this variable would race
+        // intermittently — which teaches people to re-run rather than to look.
+        //
+        // There is no file to consult here, which is why this cannot be
+        // `unlock_from_env`: that function reports `NotFound` for exactly the case
+        // a keep is about.
+
+        // No variable set: the clear, explicitly, not a guess.
+        unsafe { std::env::remove_var(PASSPHRASE_ENV) };
+        assert!(
+            matches!(protection_from_env(), Unlock::Unencrypted),
+            "no passphrase must give an explicitly unencrypted store"
+        );
+
+        // An EMPTY variable counts as unset here too, matching `unlock_from_env`.
+        // Treating it as the empty passphrase would encrypt under a key anyone can
+        // derive — the shape `Passphrase::is_empty` refuses — and the file would
+        // record itself as encrypted.
+        unsafe { std::env::set_var(PASSPHRASE_ENV, "") };
+        assert!(
+            matches!(protection_from_env(), Unlock::Unencrypted),
+            "an empty variable must count as unset, not as the empty passphrase"
+        );
+
+        // A real one encrypts, AND the passphrase that reaches the file is the one
+        // that was set — checked by writing under `protection_from_env` and then
+        // opening with that passphrase spelled out by hand. A helper that returned
+        // the right VARIANT with the wrong bytes would pass a `matches!` alone.
+        unsafe { std::env::set_var(PASSPHRASE_ENV, "from-the-environment") };
+        assert!(matches!(
+            protection_from_env(),
+            Unlock::Passphrase(_)
+        ));
+        let created = TempDir::new("env-protection");
+        a_keystore(7)
+            .create(created.path().as_path(), &protection_from_env())
+            .unwrap();
+        assert!(
+            Keystore::is_encrypted(created.path().as_path()).unwrap(),
+            "the file must record itself as encrypted"
+        );
+        assert!(
+            Keystore::open(
+                created.path().as_path(),
+                &a_pass("from-the-environment")
+            )
+            .is_ok(),
+            "the passphrase that reached the file is not the one that was set"
+        );
+        // And a different one does not open it, or the assertion above would hold
+        // for any passphrase.
+        assert_eq!(
+            err_of(Keystore::open(
+                created.path().as_path(),
+                &a_pass("something-else")
+            )),
+            KeystoreError::WrongPassphrase
+        );
+
         unsafe { std::env::remove_var(PASSPHRASE_ENV) };
     }
 
@@ -2890,6 +3121,69 @@ mod tests {
         assert_ne!(
             ks.stoa_address(&crate::identity::stoa_address(b"stoa one")),
             ks.stoa_address(&crate::identity::stoa_address(b"stoa two"))
+        );
+    }
+
+    #[test]
+    fn a_path_taking_stoa_key_from_the_keystore_matches_direct_derivation() {
+        // The same agreement `a_stoa_key_from_the_keystore_matches_direct_derivation`
+        // pins, for the path-taking chain. `identity-onboarding` requires that
+        // per-Stoa derivation stay on the live path rather than being bypassed, so
+        // what has to hold is that the keystore's trio IS the primitive and not a
+        // reimplementation of it.
+        let stoa = crate::identity::stoa_address(b"a genesis record");
+        let ks = a_keystore(7);
+        assert_eq!(
+            ks.stoa_key_at_path(&stoa, 4).public_key(),
+            crate::identity::derive_stoa_key_at_path(&[7u8; 32], &stoa, 4).public_key()
+        );
+        assert_eq!(
+            ks.stoa_public_key_at_path(&stoa, 4),
+            crate::identity::derive_stoa_key_at_path(&[7u8; 32], &stoa, 4).public_key()
+        );
+        assert_eq!(
+            ks.stoa_address_at_path(&stoa, 4),
+            crate::identity::derive_stoa_key_at_path(&[7u8; 32], &stoa, 4)
+                .public_key()
+                .address()
+        );
+    }
+
+    #[test]
+    fn a_path_taking_keystore_identity_is_the_one_that_signs() {
+        // The property `posting-capability` requires of the probe, checked for the
+        // path-taking chain: an op signed by the key the keystore hands back must
+        // be attributable to the address the keystore reported. Every other test
+        // here compares two derivations; this one goes through a real signature,
+        // which is what would catch a trio whose three members disagreed about
+        // which key they were describing.
+        use crate::identity::{sign_op_bytes, verify_authored_op};
+
+        let stoa = crate::identity::stoa_address(b"a genesis record");
+        let ks = a_keystore(7);
+        let key = ks.stoa_key_at_path(&stoa, 4);
+        let sig = sign_op_bytes(&key, b"a post");
+        assert!(
+            verify_authored_op(
+                &ks.stoa_address_at_path(&stoa, 4),
+                &ks.stoa_public_key_at_path(&stoa, 4).to_bytes(),
+                b"a post",
+                &sig.to_bytes()
+            ),
+            "an op signed at this path is not attributed to the address reported for it"
+        );
+
+        // The negative, or the assertion above would hold for any key: a
+        // DIFFERENT path's key must not verify against this path's address.
+        let other = ks.stoa_key_at_path(&stoa, 5);
+        assert!(
+            !verify_authored_op(
+                &ks.stoa_address_at_path(&stoa, 4),
+                &other.public_key().to_bytes(),
+                b"a post",
+                &sign_op_bytes(&other, b"a post").to_bytes()
+            ),
+            "another path's key verified against this path's reported identity"
         );
     }
 }
