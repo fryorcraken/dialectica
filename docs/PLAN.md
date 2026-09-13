@@ -3259,9 +3259,17 @@ is the same: **a partial forum must still be a forum.**
 no moderating, no joining. This is a usable forum for a reader, and it is the
 stage that proves the projection and both resolvers reach a screen.
 
+**Stage A′ — acquire an identity.** ~~Unplaced: the staging below never said
+where onboarding goes.~~ **Built — see the `view-identity-onboarding` spec**,
+which carries the launch branch, the slate states and what the screen must not
+claim. It sits beside Stage A rather than before it, and the reason is the
+dependency direction: a reader needs no key, so A does not need it, while B
+cannot begin without it.
+
 **Stage B — compose.** A compose affordance gated on `getCapabilities()`, a
 reply affordance in a thread, and an edit affordance on the reader's own posts.
-Requires a key; the probe already exists to say whether there is one.
+Requires a key; the probe already exists to say whether there is one, and
+Stage A′ is where the user gets one.
 
 **Stage C — moderate.** A hide affordance for a moderator, and the
 irreversibility warning §11.1 requires. Only meaningful in a Stoa the reader
@@ -3281,12 +3289,13 @@ is not. §4.8 Phase 1 records why "pasting an address is enough to join" was
 wrong: a join takes the address **and** the record.
 
 The ordering is not arbitrary and the dependencies run one way only. B needs A
-because a compose box needs somewhere to put the result; C needs A and B because
-a hide is an op and moderating needs the same publish path composing does; D
-needs A because joining a Stoa you cannot then read accomplishes nothing. **No
-stage needs a later one**, which is the §4.8 property worth preserving: if D
-never ships, dialectica is a single-Stoa forum, which is a smaller thing than
-intended and not a broken one.
+because a compose box needs somewhere to put the result, and B needs A′ because
+signing needs a key; C needs A and B because a hide is an op and moderating
+needs the same publish path composing does; D needs A because joining a Stoa you
+cannot then read accomplishes nothing. A′ needs none of them, which is why it
+can ship alongside A rather than after it. **No stage needs a later one**, which
+is the §4.8 property worth preserving: if D never ships, dialectica is a
+single-Stoa forum, which is a smaller thing than intended and not a broken one.
 
 ~~**What is deliberately not staged here:** votes.~~ **Overridden by the owner's
 MVP scope (§9.2), and publishing a vote is now contracted — see the
