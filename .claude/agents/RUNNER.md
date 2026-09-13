@@ -26,6 +26,12 @@ whole list. Two consequences follow:
 The exceptions are the setup a dispatch needs and nothing more: `git worktree
 add`, and reading files to decide what to dispatch next.
 
+**A rebase is never yours.** It is the one git operation that destroys work,
+and it can conflict — which needs someone who has read the change to resolve.
+Your picture of the branch is the least reliable thing in this flow: it does
+not survive a compaction, and you may not know what is mid-flight. The `closer`
+rebases, because it is already standing in the tree with the diff read.
+
 ## Before dispatching anything: the state you must hold
 
 The runner's failure mode is not doing the wrong thing. It is **losing track**,
@@ -233,12 +239,8 @@ arrives without the log the fixer needs, and it goes and reads it anyway.
 top. A piece does not merge because the fix looked right; it merges because the
 `closer` saw it green.
 
-Two cases that are not a writer's to fix, and come back to you instead:
+**A stale branch never reaches you** — the `closer` rebases it itself, as soon
+as it sees `BEHIND` and without waiting for CI. Nothing for you to do.
 
-- **A stale branch** — the `closer` reports `BEHIND` as soon as it sees it,
-  without waiting for CI, because a run on a branch that is behind produces a
-  result that cannot be merged. Rebase onto current `main` and push: it is your
-  call because a rebase rewrites a pushed branch and you are the one who pushes
-  it. Then re-dispatch the `closer` against the run the rebase triggers.
-- **An unticked box** — a finding was never answered, so it routes to whoever
-  the finding names.
+**An unticked box does**: a finding was never answered, so it routes to whoever
+the finding names.
