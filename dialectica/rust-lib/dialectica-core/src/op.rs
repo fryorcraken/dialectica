@@ -129,7 +129,21 @@ const VERSION_1: u8 = 1;
 /// The value is pinned by `the_field_cap_is_pinned_to_a_known_answer` — a cap
 /// that silently drifted upward would still refuse an absurd prefix and still
 /// pass every test that only probes absurd values.
-const MAX_FIELD_LEN: usize = 150 * 1024;
+///
+/// # Why this is `pub`, and what depends on it
+///
+/// **A writer needs the same number the decoder enforces.** The encode helpers do
+/// not check it — `put_bytes` writes any length — on the reasoning that the cap is
+/// "checked on the way back in". That reasoning holds for ops that *arrive* and not
+/// for ops this peer *creates*: an over-cap field encodes, signs and stores
+/// happily, and is then refused by this module's own decoder, which is a row no
+/// read can get past. So any path that builds an `Op` from caller input must refuse
+/// the field before signing it, and to do that it has to see this value.
+///
+/// `authoring::MAX_BODY_LEN` is that use, and
+/// `the_publish_body_cap_is_the_format_field_cap` pins the two as one number rather
+/// than two that agree today.
+pub const MAX_FIELD_LEN: usize = 150 * 1024;
 
 /// A 32-byte op id: the hash of an op's canonical bytes.
 ///
@@ -300,8 +314,20 @@ pub enum OpKind {
         /// A thread is named by the id of the op that started it. A top-level
         /// post is its own thread's root, which it cannot know at signing time
         /// — its id is the hash of the bytes being signed — so a thread-opening
-        /// post carries `None` and the store fills the thread in as its own id
-        /// on ingest.
+        /// post carries `None`.
+        ///
+        /// **Nothing fills this in later, and nothing can.** An earlier version
+        /// of this comment said the store filled the thread in as the op's own
+        /// id on ingest; it does not, and it could not — the op is signed, so a
+        /// store rewriting a field would invalidate the signature it is stored
+        /// with. The correction matters because a reader who believed it would
+        /// expect `thread` to be non-`None` on every stored root and would
+        /// derive a reply's thread wrongly.
+        ///
+        /// So `None` on a root is permanent, and the thread an op belongs to is
+        /// **derived**: its own `thread` when it has one, its own op id when it
+        /// does not. [`crate::authoring`] does that on the publish path and
+        /// records what the derivation trusts.
         thread: Option<OpId>,
         /// The post being replied to, if any. `None` is a top-level post.
         parent: Option<OpId>,

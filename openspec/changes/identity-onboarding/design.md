@@ -700,6 +700,26 @@ dropped — `main`'s states the null-reading contract and its permissive-default
 `SHALL NOT`, this branch's states the three callers' differing stakes, and neither
 is recoverable from the other.
 
+**`main` moved again mid-merge, and the second merge was clean.** After the first
+merge landed, `origin/main` advanced to the `authoring-content` piece. It merged
+with conflicts only in two re-export lists and the adapter's trait — disjoint
+additions on both sides, no envelope conflict at all, because that piece was
+written against `Request` from the start. Worth recording for the diagnostic it
+almost broke: `git diff origin/main --stat` shows deletions **both** when a merge
+failed to take and when `main` has simply moved ahead of what you merged. The
+check is still the right one; the second reading is `git diff <the commit you
+merged> HEAD --stat`, which is what distinguishes the two.
+
+**Noted, not fixed: the three `publish*` methods are not in
+`every_request_taking_method` either.** They read fields of their requests and
+they route through `Request::parse`, so they are envelope-checked — but they are
+unswept, so the five sweeps say nothing about them. That is the same obligation
+this entry describes being missed a second time, by a different piece, which is
+evidence about the mechanism rather than about either author: a doc comment saying
+"nothing checks this" is load-bearing and has now been walked past twice. It
+belongs to `authoring-content`, which has already merged, so fixing it here would
+put another piece's gap in this diff.
+
 **One test-fixture defect surfaced in the merge and is fixed here**, because it
 would otherwise have been inherited as a flake. `OnboardingDir::new` derives its
 directory name from `std::process::id()` alone and `remove_dir_all`s the path

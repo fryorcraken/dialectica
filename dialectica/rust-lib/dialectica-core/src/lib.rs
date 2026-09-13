@@ -17,6 +17,7 @@
 mod cursor;
 
 pub mod arrival;
+pub mod authoring;
 pub mod feed;
 pub mod identity;
 pub mod identity_store;
@@ -43,6 +44,7 @@ pub mod wire;
 pub use wire::{
     callee_error, channel_exists_reply, error_json, generate_identity_slate, get_capabilities,
     get_capabilities_from_stores, guarded, keep_identity, list_threads, list_threads_from_request,
-    panic_probe, parse_channel_id, ping, posting_identity, version, who_am_i, KeepTargets,
-    OnboardingSession, Request, MAX_REQUEST_BYTES, REQUEST_NOT_AN_OBJECT,
+    no_identity, panic_probe, parse_channel_id, ping, posting_identity, publish_post,
+    publish_reply, publish_vote, version, who_am_i, KeepTargets, OnboardingSession, Request,
+    MAX_REQUEST_BYTES, REQUEST_NOT_AN_OBJECT,
 };

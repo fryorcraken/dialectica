@@ -1476,6 +1476,394 @@ fn feed_page_json(page: &crate::feed::FeedPage) -> String {
     .to_string()
 }
 
+// ─── The publish path ─────────────────────────────────────────────────────
+//
+// The contract is the `content-authoring` spec; the reasoning is in that
+// change's `design.md`. `crate::authoring` decides; this parses, and converts a
+// refusal into §2.5's one failure shape. What is repeated here is only what a
+// reader of THIS code needs in order not to undo it.
+
+/// What a successful publish tells the caller.
+///
+/// # Two fields, and the second is not decoration
+///
+/// An op id is a function of the op's own bytes, which carry no timestamp and no
+/// nonce, so one identity publishing the same content into the same Stoa twice
+/// publishes **one op** and the second call reports the first's id. Both reach a
+/// caller as a success naming one id, and `wasNew` is the only thing that tells
+/// them apart — a double-submitted form deduplicated, against a person
+/// deliberately posting the same reply twice. `op-log`'s append is what knows
+/// the answer, and this passes it on rather than discarding it.
+///
+/// # What is deliberately absent, on every one of the three
+///
+/// **No score, count, tally, rank or position — on a vote reply least of all.**
+/// Nothing in the current contract reads a `Vote` op ([`crate::feed`] says so in
+/// as many words), so a field describing an effect would be a caller inferring
+/// one that does not exist. This is the same shape for a post, a reply and a
+/// vote, which is what makes that absence structural rather than remembered.
+///
+/// It is also **not** a statement that any peer received the op. The append
+/// completed; delivery's outcome arrives later and is not waited on.
+fn published_json(published: &crate::authoring::Published) -> String {
+    serde_json::json!({
+        "opId": published.id.to_hex(),
+        "wasNew": published.was_new(),
+    })
+    .to_string()
+}
+
+/// Hand the published op to delivery, then report it as published — and do not
+/// let delivery's failure become the publish's.
+///
+/// # Why the handoff gets its own `catch_unwind` inside an already-guarded handler
+///
+/// The op is in the log before this is called, and the spec says so: *"WHEN
+/// delivery refuses or errors on the handoff, THEN the reply reports the op as
+/// published and names its op id"*. A panicking sink is the most violent form of
+/// "errors on the handoff", so it must not change the reply.
+///
+/// Without this, it changed the reply completely. [`guarded`] wraps the whole
+/// handler, so a panic in the sink unwound past the `published_json` that had
+/// already been computed and the caller received
+/// `{"error":"panic in publish_post: …"}` — no `opId`, for an op that **is**
+/// published. That is the one thing the requirement forbids: a publish reported
+/// as having failed on the strength of a delivery outcome.
+///
+/// **The outer guard stays.** Moving `deliver` outside it was the other candidate
+/// and is rejected: PHASE0-FINDINGS §3 measured what an unguarded panic costs —
+/// the module process aborts (`failed to initiate panic, error 5`, SIGABRT), the
+/// caller waits out a 20-second timeout, and every later call reports
+/// `MODULE_NOT_LOADED`. Two nested guards is the cheap way to keep a panic
+/// contained *and* keep the reply truthful.
+///
+/// # A caught panic is not swallowed silently
+///
+/// It goes to stderr, because the alternative is a transport defect that no
+/// operator can see. It deliberately does **not** reach the reply: there is no
+/// field for it. Per `delivery_module.lidl` the real outcome is asynchronous —
+/// `channelMessageSent`, `channelMessageError`, `messagePropagated` all arrive
+/// after this call has returned — so a synchronous reply could not carry a
+/// delivery outcome even if the contract wanted one. Accepting an op is
+/// `channelMessageSent` and says nothing about whether a peer received it.
+///
+/// Making an op that errors or never propagates visible is therefore
+/// `op-transport`'s obligation, not this function's. Until it lands, this
+/// conversion of a loud failure into a logged one is the known cost, recorded in
+/// `docs/PLAN.md` §9.2.
+fn delivered_and_published(
+    published: &crate::authoring::Published,
+    deliver: &mut dyn FnMut(&crate::op::OpId),
+) -> String {
+    if let Err(payload) = catch_unwind(AssertUnwindSafe(|| deliver(&published.id))) {
+        let detail = payload
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_string())
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "non-string panic payload".to_string());
+        eprintln!(
+            "dialectica: delivery panicked handing off {} — the op is published and stays published: {}",
+            published.id.to_hex(),
+            detail
+        );
+    }
+    published_json(published)
+}
+
+/// The wire reply for a publish that never reached a handler, because no identity
+/// was available to sign with.
+///
+/// # Why this exists rather than the adapter formatting its own message
+///
+/// The adapter is the only caller — it is the only code that can open a keystore,
+/// which is the only way to discover that there is no usable identity, and
+/// `dialectica-core` structurally cannot reach one. So the refusal can only be
+/// *raised* there.
+///
+/// It must not also be *worded* there. The adapter is behind
+/// `cfg(logos_scaffold)`, which no `cargo test` sets, so a message written in
+/// that file is a message no gate in this repo compiles, let alone asserts on.
+/// The first version of this change had exactly that: [`crate::authoring::Refusal::NoIdentity`]
+/// carried the text and nothing constructed the variant, while a hand-written
+/// `format!` in the adapter carried a second copy of the same sentence. Two
+/// copies of one message with no test tying them, and the copy that shipped was
+/// the one no test could see.
+///
+/// One line here fixes it in the direction that gains coverage rather than losing
+/// it: the text has one home, in `Refusal`'s `Display`, which `cargo test` does
+/// compile and `a_refusal_names_the_id_or_stoa_it_is_about` does assert on.
+pub fn no_identity(why: &str) -> String {
+    error_json(&crate::authoring::Refusal::NoIdentity(why.to_string()).to_string())
+}
+
+/// Field names no publish request may carry, and the reason each is refused.
+///
+/// **Refused rather than ignored**, which is the opposite of what
+/// [`list_threads`] does with an `order` field, and the difference is what the
+/// caller believes. A caller passing `order` believes it is selecting between
+/// orderings that exist; a caller passing `author` believes it is choosing who
+/// signs, and it is not — the identity falls out of the Stoa, so no operation can
+/// be asked to sign as someone it is not. A caller passing `thread` believes it
+/// is filing a reply somewhere, and the thread is derived from the parent.
+///
+/// Silently ignoring either leaves a caller acting on a belief the module has
+/// quietly declined to honour.
+///
+/// NO SPEC: the spec requires `thread` to be refused on a **reply**. Refusing it
+/// on a post and a vote too is chosen here — a caller who sent one has the same
+/// wrong model whichever operation they sent it to — and is marked in
+/// `a_forbidden_field_is_refused_on_every_operation`.
+const FORBIDDEN_FIELDS: [(&str, &str); 5] = [
+    (
+        "author",
+        "the identity that signs is derived from the Stoa and is never a parameter",
+    ),
+    (
+        "identity",
+        "the identity that signs is derived from the Stoa and is never a parameter",
+    ),
+    (
+        "key",
+        "the identity that signs is derived from the Stoa and is never a parameter",
+    ),
+    (
+        "address",
+        "the identity that signs is derived from the Stoa and is never a parameter",
+    ),
+    (
+        "thread",
+        "a reply's thread is derived from its parent and is never a parameter",
+    ),
+];
+
+/// Refuse a request carrying a field that names something the caller may not
+/// choose.
+///
+/// One guard over a list rather than a check per operation: CLAUDE.md keeps a
+/// guard as its own job, so "is it called everywhere?" stays a question with an
+/// answer. There are three callers and the list is the union across all three.
+fn reject_forbidden_fields(parsed: &serde_json::Value) -> Result<(), String> {
+    for (field, why) in FORBIDDEN_FIELDS {
+        if parsed.get(field).is_some() {
+            return Err(error_json(&format!("{field} is not accepted: {why}")));
+        }
+    }
+    Ok(())
+}
+
+/// A required string field, or a refusal that says which mistake was made.
+///
+/// A present-but-wrong-typed field is a different mistake from an absent one and
+/// the message has to say which — "missing field: body" sends someone looking for
+/// a field that is right there, holding a number.
+fn required_string<'a>(parsed: &'a serde_json::Value, field: &str) -> Result<&'a str, String> {
+    match parsed.get(field) {
+        Some(serde_json::Value::String(s)) => Ok(s),
+        Some(_) => Err(error_json(&format!("{field} must be a string"))),
+        None => Err(error_json(&format!("missing field: {field}"))),
+    }
+}
+
+/// The Stoa address every publish names.
+fn required_stoa(parsed: &serde_json::Value) -> Result<crate::identity::Address, String> {
+    let hex_str = required_string(parsed, "stoa")?;
+    crate::identity::Address::from_hex(hex_str).map_err(|e| error_json(&format!("stoa: {e}")))
+}
+
+/// An op id field — a parent, or a vote's target.
+fn required_op_id(parsed: &serde_json::Value, field: &str) -> Result<crate::op::OpId, String> {
+    let hex_str = required_string(parsed, field)?;
+    crate::op::OpId::from_hex(hex_str).map_err(|e| error_json(&format!("{field}: {e}")))
+}
+
+/// A vote's direction, by name.
+///
+/// # The names are on the wire, and an unrecognised one is never mapped
+///
+/// `"up"` raises and `"down"` lowers. Anything else is refused **naming what was
+/// supplied**, and is not defaulted onto a recognised direction: a caller whose
+/// `"upvote"` silently became `"down"` would have published the opposite of what
+/// it asked for, and nothing would error.
+fn required_direction(parsed: &serde_json::Value) -> Result<crate::op::VoteDirection, String> {
+    let name = required_string(parsed, "direction")?;
+    match name {
+        "up" => Ok(crate::op::VoteDirection::Up),
+        "down" => Ok(crate::op::VoteDirection::Down),
+        other => Err(error_json(&format!(
+            "direction must be \"up\" or \"down\", got \"{other}\""
+        ))),
+    }
+}
+
+/// Parse the whole request first, then act. The ordering is the requirement.
+///
+/// Each handler reads every field it needs before [`crate::authoring`] is
+/// reached, so "a refused publish appends nothing and delivery was not invoked"
+/// is structural: there is nothing to append until the last field has parsed.
+/// Under validate-as-you-go that property would be an artefact of the order the
+/// statements happen to be in.
+fn parsed_object(request: &str) -> Result<serde_json::Value, String> {
+    serde_json::from_str(request).map_err(|e| error_json(&format!("invalid JSON: {e}")))
+}
+
+/// `{"stoa":"…","body":"…"}` -> `{"opId":"…","wasNew":bool}`.
+///
+/// # `deliver` is a sink, and its RETURN TYPE carries three requirements at once
+///
+/// It returns **nothing**. So:
+///
+/// - the append has completed before it is called, because it is called after
+///   [`crate::authoring::post`] returns;
+/// - a declined or erroring handoff leaves the op published, because there is no
+///   outcome to inspect and none to act on;
+/// - a publish cannot be deferred until delivery reports, because there is
+///   nothing to report — a call that waited on one could not be written here.
+///
+/// It is also **not called on a refusal**, and structurally rather than by a
+/// guard: it sits on the success arm of the `Result` and no refusal path reaches
+/// it.
+///
+/// # `&mut dyn FnMut` rather than `impl FnOnce`, and the reason is a compile
+/// error nothing else could see
+///
+/// `impl FnOnce(&OpId)` was written first, because "called at most once" is the
+/// honest bound on what a sink is for.
+///
+/// What rules it out is the requirement that all three handlers be usable
+/// through **one** function-pointer type, which
+/// `the_three_handlers_share_one_signature_the_adapter_can_dispatch_over` pins
+/// with a `type Handler = fn(…)`. A generic `impl FnOnce` monomorphises per call
+/// site, so the three would be three types with no shared pointer, and coercing
+/// them fails on a higher-ranked lifetime.
+///
+/// **Be precise about where that constraint comes from, because an earlier
+/// version of this comment was not.** It said the *adapter* needs one pointer
+/// type. It does not: `Dialectica::publishing` is generic over the handler
+/// (`F: FnOnce(…)`), so it monomorphises per call site and would accept a
+/// generic sink. The single-pointer requirement is the test's, deliberately —
+/// the adapter is behind `cfg(logos_scaffold)`, which no `cargo test` sets, so
+/// pinning the three signatures as interchangeable in *this* crate is what stops
+/// a signature drifting into an error that would surface only in the builder's
+/// build, the one that runs last and reports worst.
+///
+/// So recovering `FnOnce` is a live option, not a closed one: it costs changing
+/// that test's `Handler` type, and buys back the at-most-once bound.
+///
+/// Nothing is lost that a requirement rests on. The return type `()` is what
+/// makes a delivery outcome unwaitable; `FnOnce` only added that the sink could
+/// not be called twice, which no requirement asks for and which the one call
+/// site makes true anyway.
+pub fn publish_post<L: crate::log::OpLog>(
+    request: &str,
+    log: &mut L,
+    key: &crate::identity::SecretKey,
+    deliver: &mut dyn FnMut(&crate::op::OpId),
+) -> String {
+    guarded("publish_post", || {
+        let parsed = match parsed_object(request) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        if let Err(e) = reject_forbidden_fields(&parsed) {
+            return e;
+        }
+        let stoa = match required_stoa(&parsed) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        let body = match required_string(&parsed, "body") {
+            Ok(v) => v.to_string(),
+            Err(e) => return e,
+        };
+
+        match crate::authoring::post(log, key, stoa, body) {
+            Ok(published) => delivered_and_published(&published, deliver),
+            Err(refusal) => error_json(&refusal.to_string()),
+        }
+    })
+}
+
+/// `{"stoa":"…","parent":"…","body":"…"}` -> `{"opId":"…","wasNew":bool}`.
+///
+/// **There is no `thread` parameter**, and one supplied is refused rather than
+/// ignored. The thread is derived from the parent, which makes "a reply filed
+/// under a thread its parent does not belong to" unrepresentable rather than
+/// checked — see [`crate::authoring::reply`] for the derivation and what it
+/// trusts.
+pub fn publish_reply<L: crate::log::OpLog>(
+    request: &str,
+    log: &mut L,
+    key: &crate::identity::SecretKey,
+    deliver: &mut dyn FnMut(&crate::op::OpId),
+) -> String {
+    guarded("publish_reply", || {
+        let parsed = match parsed_object(request) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        if let Err(e) = reject_forbidden_fields(&parsed) {
+            return e;
+        }
+        let stoa = match required_stoa(&parsed) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        let parent = match required_op_id(&parsed, "parent") {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        let body = match required_string(&parsed, "body") {
+            Ok(v) => v.to_string(),
+            Err(e) => return e,
+        };
+
+        match crate::authoring::reply(log, key, stoa, parent, body) {
+            Ok(published) => delivered_and_published(&published, deliver),
+            Err(refusal) => error_json(&refusal.to_string()),
+        }
+    })
+}
+
+/// `{"stoa":"…","target":"…","direction":"up"|"down"}` ->
+/// `{"opId":"…","wasNew":bool}`.
+///
+/// The reply carries an op id and nothing that describes an effect. Nothing in
+/// the current contract reads a `Vote` op, so there is no score to report and
+/// reporting one would be a falsehood a caller would act on.
+pub fn publish_vote<L: crate::log::OpLog>(
+    request: &str,
+    log: &mut L,
+    key: &crate::identity::SecretKey,
+    deliver: &mut dyn FnMut(&crate::op::OpId),
+) -> String {
+    guarded("publish_vote", || {
+        let parsed = match parsed_object(request) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        if let Err(e) = reject_forbidden_fields(&parsed) {
+            return e;
+        }
+        let stoa = match required_stoa(&parsed) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        let target = match required_op_id(&parsed, "target") {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        let direction = match required_direction(&parsed) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+
+        match crate::authoring::vote(log, key, stoa, target, direction) {
+            Ok(published) => delivered_and_published(&published, deliver),
+            Err(refusal) => error_json(&refusal.to_string()),
+        }
+    })
+}
+
 // ─── The two halves of the delivery bridge that CAN be tested ─────────────
 //
 // `modules().delivery_module` cannot appear in this file: it calls `lp_*`
@@ -4739,6 +5127,1677 @@ mod tests {
         );
     }
 
+    // ─── The publish path ─────────────────────────────────────────────────
+
+    /// The root secret a keystore would hold, fixed so derived addresses are
+    /// reproducible.
+    const PUBLISH_ROOT: [u8; 32] = [7u8; 32];
+
+    fn publish_stoa() -> Address {
+        feed_genesis().address().unwrap()
+    }
+
+    /// The per-Stoa signing key, derived exactly as the keystore derives it.
+    fn publish_key() -> crate::identity::SecretKey {
+        crate::identity::derive_stoa_key(&PUBLISH_ROOT, &publish_stoa())
+    }
+
+    /// A publish request naming this Stoa plus whatever else is given.
+    fn publish_request(extra: &str) -> String {
+        let stoa = publish_stoa().to_hex();
+        if extra.is_empty() {
+            format!(r#"{{"stoa":"{stoa}"}}"#)
+        } else {
+            format!(r#"{{"stoa":"{stoa}",{extra}}}"#)
+        }
+    }
+
+    /// A delivery sink that records nothing — for tests not about delivery.
+    ///
+    /// A plain `fn` item, so `&mut ignored_delivery` at a call site is a fresh
+    /// temporary whose borrow ends with the statement. A shared
+    /// `let mut sink = |_| {}` would borrow for the rest of the test and collide
+    /// with the handler's `&mut` log.
+    fn ignored_delivery(_id: &crate::op::OpId) {}
+
+    fn as_json(out: &str) -> serde_json::Value {
+        serde_json::from_str(out)
+            .unwrap_or_else(|e| panic!("a handler must emit valid JSON ({e}): {out}"))
+    }
+
+    #[test]
+    fn a_published_post_reply_names_the_op_and_whether_it_was_new() {
+        // Pinned by key name and by value. A view is written against these exact
+        // names, and `wasNew` is the only thing that tells a deduplicated
+        // publish from a first one.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+
+        let out = publish_post(
+            &publish_request(r#""body":"First""#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        );
+        let v = as_json(&out);
+        assert!(v.get("error").is_none(), "got {out}");
+        assert_eq!(v["wasNew"], true);
+
+        // The op id names the op now in the log, read back through the log
+        // rather than compared against itself.
+        let id = crate::op::OpId::from_hex(v["opId"].as_str().unwrap()).unwrap();
+        let entry = log.get(&id).unwrap().expect("the op must be in the log");
+        assert_eq!(entry.id(), id);
+        match &entry.op.op.kind {
+            OpKind::Post { body, parent, .. } => {
+                assert_eq!(body, "First");
+                assert_eq!(*parent, None, "a post names no parent");
+            }
+            other => panic!("expected a post, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_second_publish_of_one_body_says_it_was_not_new_and_names_the_same_op() {
+        // The contracted duplication behaviour, at the wire, where a caller has
+        // no other way to tell the two apart.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+        let request = publish_request(r#""body":"twice""#);
+
+        let first = as_json(&publish_post(
+            &request,
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        let second = as_json(&publish_post(
+            &request,
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+
+        assert_eq!(first["opId"], second["opId"]);
+        assert_eq!(first["wasNew"], true, "the first publish stored it");
+        assert_eq!(
+            second["wasNew"], false,
+            "the second must report already-present rather than failing"
+        );
+        assert!(
+            second.get("error").is_none(),
+            "a repeated publish is not a refusal: it is the retried-submission case"
+        );
+        assert_eq!(log.len().unwrap(), 1, "one op");
+    }
+
+    #[test]
+    fn a_published_reply_is_derived_into_its_parents_thread_through_the_wire() {
+        // End to end, three levels deep, because at two levels "the parent's id"
+        // and "the parent's thread" are the same value and a copy-the-parent
+        // implementation would agree.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+
+        let root = as_json(&publish_post(
+            &publish_request(r#""body":"the head""#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        let root_id = root["opId"].as_str().unwrap().to_string();
+
+        let middle = as_json(&publish_reply(
+            &publish_request(&format!(r#""parent":"{root_id}","body":"a reply""#)),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        let middle_id = middle["opId"].as_str().unwrap().to_string();
+        assert_ne!(root_id, middle_id, "the fixture needs distinct ops");
+
+        let leaf = as_json(&publish_reply(
+            &publish_request(&format!(r#""parent":"{middle_id}","body":"and again""#)),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        assert!(leaf.get("error").is_none(), "got {leaf}");
+
+        let id = crate::op::OpId::from_hex(leaf["opId"].as_str().unwrap()).unwrap();
+        let entry = log.get(&id).unwrap().unwrap();
+        match &entry.op.op.kind {
+            OpKind::Post { thread, parent, .. } => {
+                assert_eq!(
+                    parent.map(|p| p.to_hex()),
+                    Some(middle_id),
+                    "the parent is the one named"
+                );
+                assert_eq!(
+                    thread.map(|t| t.to_hex()),
+                    Some(root_id),
+                    "the thread is the ROOT's, derived rather than copied from the parent"
+                );
+            }
+            other => panic!("expected a post, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_request_supplying_a_thread_is_refused_and_not_ignored() {
+        // A caller passing `thread` believes it is filing the reply somewhere.
+        // Ignoring the field would leave that belief unhonoured and unreported —
+        // which is the opposite of the `order` field's treatment, deliberately.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+        let root = as_json(&publish_post(
+            &publish_request(r#""body":"the head""#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        let root_id = root["opId"].as_str().unwrap();
+        let before = log.len().unwrap();
+
+        let out = publish_reply(
+            &publish_request(&format!(
+                r#""parent":"{root_id}","thread":"{root_id}","body":"filed by hand""#
+            )),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        );
+        let v = as_json(&out);
+        assert!(v.get("error").is_some(), "got {out}");
+        assert!(
+            v["error"].as_str().unwrap().contains("thread"),
+            "the message must name the field, got {out}"
+        );
+        assert!(v.get("opId").is_none(), "a refusal carries no op id — §2.5");
+        assert_eq!(
+            log.len().unwrap(),
+            before,
+            "a refused publish appends nothing"
+        );
+    }
+
+    #[test]
+    fn a_forbidden_field_is_refused_on_every_operation() {
+        // NO SPEC: the spec's requirement names `author`, `identity`, `key` AND
+        // `address` as never-a-parameter on any publish, so four of the five are
+        // specified. (Its scenario one screen down names only the first three;
+        // the requirement is the contract.) `thread` is the unspecified one — the
+        // spec requires it refused on a REPLY only, and refusing it on a post and
+        // a vote too is chosen here, because a caller who sent one has the same
+        // wrong model whichever operation it reached. That choice is what this
+        // test pins.
+        //
+        // The trap avoided: a guard called from one handler and forgotten in the
+        // other two. That is invisible without checking all three.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+        let victim = as_json(&publish_post(
+            &publish_request(r#""body":"the subject""#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        let target = victim["opId"].as_str().unwrap().to_string();
+        let before = log.len().unwrap();
+
+        for field in ["author", "identity", "key", "address", "thread"] {
+            let forged = format!(r#""{field}":"00ff""#);
+            let requests = [
+                publish_request(&format!(r#""body":"x",{forged}"#)),
+                publish_request(&format!(r#""parent":"{target}","body":"x",{forged}"#)),
+                publish_request(&format!(r#""target":"{target}","direction":"up",{forged}"#)),
+            ];
+            let outs = [
+                publish_post(&requests[0], &mut log, &key, &mut ignored_delivery),
+                publish_reply(&requests[1], &mut log, &key, &mut ignored_delivery),
+                publish_vote(&requests[2], &mut log, &key, &mut ignored_delivery),
+            ];
+            for (out, request) in outs.iter().zip(requests.iter()) {
+                let v = as_json(out);
+                assert!(
+                    v.get("error").is_some(),
+                    "{field} must be refused, not ignored, for {request}: got {out}"
+                );
+                assert!(v.get("opId").is_none(), "got {out}");
+            }
+        }
+        assert_eq!(
+            log.len().unwrap(),
+            before,
+            "no refused publish appended anything"
+        );
+    }
+
+    #[test]
+    fn a_publish_requests_missing_field_is_named_and_is_not_defaulted() {
+        // Each of the six required fields, absent. A handler that defaulted a
+        // body to empty or a direction to `up` would publish something the
+        // caller never asked for.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+        let target = as_json(&publish_post(
+            &publish_request(r#""body":"the subject""#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ))["opId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let stoa = publish_stoa().to_hex();
+        let before = log.len().unwrap();
+
+        let cases: [(&str, String, &str); 6] = [
+            ("post", r#"{"body":"x"}"#.to_string(), "stoa"),
+            ("post", format!(r#"{{"stoa":"{stoa}"}}"#), "body"),
+            (
+                "reply",
+                format!(r#"{{"stoa":"{stoa}","body":"x"}}"#),
+                "parent",
+            ),
+            (
+                "reply",
+                format!(r#"{{"stoa":"{stoa}","parent":"{target}"}}"#),
+                "body",
+            ),
+            (
+                "vote",
+                format!(r#"{{"stoa":"{stoa}","direction":"up"}}"#),
+                "target",
+            ),
+            (
+                "vote",
+                format!(r#"{{"stoa":"{stoa}","target":"{target}"}}"#),
+                "direction",
+            ),
+        ];
+        for (op, request, field) in cases {
+            let out = match op {
+                "post" => publish_post(&request, &mut log, &key, &mut ignored_delivery),
+                "reply" => publish_reply(&request, &mut log, &key, &mut ignored_delivery),
+                _ => publish_vote(&request, &mut log, &key, &mut ignored_delivery),
+            };
+            let v = as_json(&out);
+            assert!(v.get("error").is_some(), "for {request}, got {out}");
+            let message = v["error"].as_str().unwrap();
+            assert!(
+                message.contains("missing") && message.contains(field),
+                "the message must say WHICH field is missing ({field}), got {out}"
+            );
+            assert!(v.get("opId").is_none());
+        }
+        assert_eq!(log.len().unwrap(), before);
+    }
+
+    #[test]
+    fn a_wrong_typed_direction_is_refused_by_its_type_with_a_valid_stoa_and_target() {
+        // THE GAP `findings/security.md` S2 NAMES, closed with the fixture it says
+        // is missing: a VALID Stoa and a VALID target, so the request survives
+        // parser one and two and the direction parser is actually entered.
+        //
+        // Why the existing coverage did not reach here. `stoa` is parsed first in
+        // all three handlers, and every wrong-typed `direction` fixture in the
+        // repo also malformed `stoa` — so all three handlers refused at parser one.
+        // Measured: `panic!` on `required_string`'s wrong-typed arm for
+        // `direction`, reached only from `required_direction`, left all 566 tests
+        // green.
+        //
+        // What this asserts, and why not merely `error.is_some()`: an array or an
+        // object in `direction` is an error EITHER WAY — `required_direction` would
+        // refuse it, and so would a handler that panicked, and so would one that
+        // read the field as absent. Three explanations, one answer, which is this
+        // repo's recurring defect family. So the assertions are:
+        //
+        //   1. the message is the WRONG-TYPE message, against the hardcoded
+        //      literal `required_string` writes — NOT "differs from the missing
+        //      one", which a panic marker would also satisfy;
+        //   2. it is not a panic marker;
+        //   3. it does not say "missing", because a present-but-wrong-typed field
+        //      reported as missing sends a caller looking for a field that is
+        //      right there.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+        let stoa = publish_stoa().to_hex();
+        let target = as_json(&publish_post(
+            &publish_request(r#""body":"the subject""#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ))["opId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let before = log.len().unwrap();
+
+        // Every JSON type that is not a string, `null` INCLUDED.
+        //
+        // I first excluded null here on the assumption that the envelope collapses
+        // it to absent, which would make it the MISSING mistake. That was wrong,
+        // and `wire/request.rs:229` says so in as many words: *"An explicit `null`
+        // is `Some(Value::Null)` and never `None` … a field holding an explicit
+        // `null` is present, not absent"*, and the envelope deliberately decides
+        // nothing further, leaving the reading to the reader. `required_string` is
+        // that reader here and refuses a null as a wrong TYPE. Confirmed by the
+        // sweep failing on the null fixture under the mutation below, which is what
+        // sent me to read the envelope rather than assume.
+        //
+        // So null belongs in this list, and pinning it here is what keeps the
+        // envelope's "a null is present" rule from being quietly reversed by a
+        // reader that starts treating it as absent — which, for an optional field,
+        // is the defaulting reading `parse_index`'s doc calls out as the half that
+        // can become an authorisation bypass.
+        for wrong in [
+            serde_json::Value::Null,
+            serde_json::json!(true),
+            serde_json::json!(false),
+            serde_json::json!(0),
+            serde_json::json!(-1),
+            serde_json::json!(1.5),
+            serde_json::json!({}),
+            serde_json::json!([]),
+            serde_json::json!(["up"]),
+            serde_json::json!({"direction": "up"}),
+        ] {
+            let request = serde_json::json!({
+                "stoa": stoa, "target": target, "direction": wrong
+            })
+            .to_string();
+            let out = publish_vote(&request, &mut log, &key, &mut ignored_delivery);
+            let v = as_json(&out);
+            let message = v["error"]
+                .as_str()
+                .unwrap_or_else(|| panic!("expected the error shape, got {out}"));
+
+            assert!(
+                !message.starts_with("panic in "),
+                "a wrong-typed direction must be refused, not panicked on, for {request}: {out}"
+            );
+            // The hardcoded literal, not a value read back out of the code.
+            assert_eq!(
+                message, "direction must be a string",
+                "the refusal must name the TYPE mistake, for {request}"
+            );
+            assert!(
+                !message.contains("missing"),
+                "a field that is present must not be reported as missing, for {request}"
+            );
+            assert!(v.get("opId").is_none(), "got {out}");
+        }
+        assert_eq!(
+            log.len().unwrap(),
+            before,
+            "no refused vote appended anything"
+        );
+    }
+
+    #[test]
+    fn a_wrong_typed_field_is_distinguishable_from_a_missing_one() {
+        // Both are errors, and they are different mistakes: "missing field:
+        // body" sends someone looking for a field that is right there holding a
+        // number. Asserted as the two messages DIFFERING and each naming its own
+        // mistake, not merely as two errors.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+        let stoa = publish_stoa().to_hex();
+
+        let missing = as_json(&publish_post(
+            &format!(r#"{{"stoa":"{stoa}"}}"#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        let wrong_typed = as_json(&publish_post(
+            &format!(r#"{{"stoa":"{stoa}","body":7}}"#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+
+        let missing_msg = missing["error"].as_str().unwrap();
+        let wrong_msg = wrong_typed["error"].as_str().unwrap();
+        assert_ne!(missing_msg, wrong_msg);
+        assert!(missing_msg.contains("missing"), "got {missing_msg}");
+        assert!(
+            wrong_msg.contains("must be a string"),
+            "a wrong type must not report as missing, got {wrong_msg}"
+        );
+        assert!(!wrong_msg.contains("missing"), "got {wrong_msg}");
+
+        // The same distinction on the Stoa field.
+        let stoa_missing = as_json(&publish_post(
+            r#"{"body":"x"}"#,
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        let stoa_wrong = as_json(&publish_post(
+            r#"{"stoa":7,"body":"x"}"#,
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        assert!(stoa_missing["error"].as_str().unwrap().contains("missing"));
+        assert!(stoa_wrong["error"]
+            .as_str()
+            .unwrap()
+            .contains("must be a string"));
+        assert_eq!(log.len().unwrap(), 0, "nothing was published");
+    }
+
+    #[test]
+    fn an_empty_body_publishes_through_the_wire() {
+        // `op-format` contracts an empty variable-length field as a value, so
+        // this must be a success and not "missing field: body".
+        let mut log = MemoryOpLog::new();
+        let out = publish_post(
+            &publish_request(r#""body":"""#),
+            &mut log,
+            &publish_key(),
+            &mut ignored_delivery,
+        );
+        let v = as_json(&out);
+        assert!(v.get("error").is_none(), "got {out}");
+        let id = crate::op::OpId::from_hex(v["opId"].as_str().unwrap()).unwrap();
+        match &log.get(&id).unwrap().unwrap().op.op.kind {
+            OpKind::Post { body, .. } => assert_eq!(body, ""),
+            other => panic!("expected a post, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn both_vote_directions_publish_and_an_unrecognised_one_is_refused_naming_it() {
+        // The sharp property: an unrecognised direction must NOT be mapped onto
+        // a recognised one. A caller whose "upvote" silently became "down" would
+        // have published the opposite of what it asked for, with no error.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+        let target = as_json(&publish_post(
+            &publish_request(r#""body":"the subject""#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ))["opId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let mut ids = Vec::new();
+        for (name, expected) in [
+            ("up", crate::op::VoteDirection::Up),
+            ("down", crate::op::VoteDirection::Down),
+        ] {
+            let out = publish_vote(
+                &publish_request(&format!(r#""target":"{target}","direction":"{name}""#)),
+                &mut log,
+                &key,
+                &mut ignored_delivery,
+            );
+            let v = as_json(&out);
+            assert!(v.get("error").is_none(), "for {name}, got {out}");
+            let id = crate::op::OpId::from_hex(v["opId"].as_str().unwrap()).unwrap();
+            match log.get(&id).unwrap().unwrap().op.op.kind {
+                crate::op::OpKind::Vote { direction, .. } => assert_eq!(direction, expected),
+                ref other => panic!("expected a vote, got {other:?}"),
+            }
+            ids.push(id);
+        }
+        assert_ne!(ids[0], ids[1], "the two directions are two ops");
+
+        // Every plausible near-miss, including the casing and pluralisation a
+        // caller would actually get wrong.
+        let before = log.len().unwrap();
+        for bad in ["UP", "Up", "upvote", "raise", "+1", "", "u p", "1", "down "] {
+            let out = publish_vote(
+                &publish_request(&format!(r#""target":"{target}","direction":"{bad}""#)),
+                &mut log,
+                &key,
+                &mut ignored_delivery,
+            );
+            let v = as_json(&out);
+            assert!(v.get("error").is_some(), "for {bad:?}, got {out}");
+            assert!(
+                v["error"].as_str().unwrap().contains(bad),
+                "the refusal must name the direction supplied, got {out}"
+            );
+            assert!(v.get("opId").is_none());
+        }
+        assert_eq!(
+            log.len().unwrap(),
+            before,
+            "no vote was published in either direction by a refused request"
+        );
+    }
+
+    #[test]
+    fn a_vote_reply_carries_no_score_count_tally_rank_or_position() {
+        // Nothing in the current contract reads a `Vote` op, so a field
+        // describing an effect would be a falsehood a caller would act on.
+        // Checked as an exhaustive key list rather than a spot-check of one
+        // name, so a new field cannot slip in unnoticed.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+        let target = as_json(&publish_post(
+            &publish_request(r#""body":"the subject""#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ))["opId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let out = publish_vote(
+            &publish_request(&format!(r#""target":"{target}","direction":"up""#)),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        );
+        let v = as_json(&out);
+        assert!(v.get("error").is_none(), "got {out}");
+        assert!(v["opId"].is_string(), "the reply carries the op id");
+
+        let keys: Vec<&String> = v.as_object().unwrap().keys().collect();
+        assert_eq!(
+            keys,
+            vec!["opId", "wasNew"],
+            "a vote reply must carry the op id and nothing describing an effect, got {out}"
+        );
+        for forbidden in [
+            "score", "count", "tally", "rank", "position", "votes", "total", "weight",
+        ] {
+            assert!(
+                v.get(forbidden).is_none(),
+                "a vote reply must not carry {forbidden}, got {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_vote_leaves_the_feed_row_of_its_target_identical() {
+        // The other half of "nothing reads a vote", at the layer a view actually
+        // reads from. A score computed anywhere would show up here.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+        let posted = as_json(&publish_post(
+            &publish_request(r#""body":"unaffected""#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        let target = posted["opId"].as_str().unwrap().to_string();
+
+        let before = list_threads(&feed_request(""), &log, &feed_genesis());
+        for direction in ["up", "down"] {
+            publish_vote(
+                &publish_request(&format!(r#""target":"{target}","direction":"{direction}""#)),
+                &mut log,
+                &key,
+                &mut ignored_delivery,
+            );
+        }
+        let after = list_threads(&feed_request(""), &log, &feed_genesis());
+        assert_eq!(
+            before, after,
+            "voting must change nothing a reader is told about the post"
+        );
+        // And the fixture really had a row, so this is not two empty feeds
+        // agreeing.
+        assert_eq!(as_json(&before)["items"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn delivery_is_handed_the_published_op_and_is_not_reached_by_a_refusal() {
+        // Two requirements: the sink receives the op that was published, and a
+        // refusal never reaches it at all.
+        //
+        // What this test does not see is the ORDERING — that the append
+        // happened before the sink was called. This test observes only that the
+        // sink got the right id, and that a refusal never reaches it.
+        //
+        // The ordering IS observable, and
+        // `the_append_completes_before_delivery_is_invoked_on_all_three_handlers`
+        // below observes it: a journal shared by a wrapping `OpLog` and the sink
+        // records a hardcoded `["append", "deliver"]`. An earlier version of
+        // this comment claimed no test through this API could see it, on the
+        // grounds that the sink cannot read the log the handler holds mutably.
+        // That is true of the log and false of the ordering — two clones of one
+        // `Rc<RefCell<Vec<_>>>` borrow nothing from each other. The claim was
+        // load-bearing while it stood, because it was the stated reason this
+        // weaker test was accepted as sufficient.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+
+        let mut delivered: Vec<crate::op::OpId> = Vec::new();
+        let out = publish_post(
+            &publish_request(r#""body":"ordered""#),
+            &mut log,
+            &key,
+            &mut |id: &crate::op::OpId| delivered.push(*id),
+        );
+        let v = as_json(&out);
+        let id = crate::op::OpId::from_hex(v["opId"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            delivered.as_slice(),
+            &[id],
+            "delivery must be handed the op that was published, and only it"
+        );
+        assert!(
+            log.get(&id).unwrap().is_some(),
+            "and the op is in the log by the time the call returns"
+        );
+
+        // A refusal must not reach the sink. An absent parent is the cheapest
+        // refusal to construct, and the sink PANICS if reached — so a handler
+        // that delivered on the refusal path fails loudly rather than by a count
+        // nobody reads.
+        let absent = crate::op::OpId::from_hex(&"cc".repeat(32))
+            .unwrap()
+            .to_hex();
+        let out = publish_reply(
+            &publish_request(&format!(r#""parent":"{absent}","body":"x""#)),
+            &mut log,
+            &key,
+            &mut |_: &crate::op::OpId| panic!("delivery was invoked for a refused publish"),
+        );
+        let v = as_json(&out);
+        assert!(v.get("error").is_some(), "got {out}");
+        assert!(
+            !v["error"]
+                .as_str()
+                .unwrap()
+                .contains("delivery was invoked"),
+            "the sink must not have been reached, got {out}"
+        );
+        assert!(
+            v["error"].as_str().unwrap().contains("does not hold"),
+            "the refusal must be the one the fixture built, got {out}"
+        );
+    }
+
+    /// An `OpLog` that records the order in which it was called, in a journal it
+    /// SHARES with a delivery sink.
+    ///
+    /// # Why this exists, when the change's own notes say the ordering is
+    /// unobservable
+    ///
+    /// `tasks.md` §10 records "that the append precedes delivery" as something
+    /// no test through this API can see, on the grounds that the sink cannot read
+    /// the log because the handler holds it mutably for the call's duration. That
+    /// is true of the *log*, and it is not true of the *ordering*: an
+    /// `Rc<RefCell<Vec<_>>>` held by BOTH the log wrapper and the sink is two
+    /// clones of one handle, so neither has to borrow the other. The log appends
+    /// its own name when `append` runs; the sink appends its own when it runs;
+    /// the resulting sequence is evidence, not an argument.
+    ///
+    /// So "sign, append, hand off — **in that order**" becomes a test that can
+    /// fail, which it could not while the only thing pinning it was the order two
+    /// statements happen to be in.
+    struct JournallingLog {
+        inner: MemoryOpLog,
+        journal: std::rc::Rc<std::cell::RefCell<Vec<&'static str>>>,
+    }
+
+    impl crate::log::OpLog for JournallingLog {
+        fn append(
+            &mut self,
+            op: crate::op::SignedOp,
+            arrival: crate::arrival::Arrival,
+        ) -> Result<crate::log::Appended, crate::log::OpLogError> {
+            let out = self.inner.append(op, arrival);
+            // Recorded AFTER the inner append returns, so the journal entry
+            // means "the op is stored", not "an append was attempted".
+            self.journal.borrow_mut().push("append");
+            out
+        }
+        fn get(
+            &self,
+            id: &crate::op::OpId,
+        ) -> Result<Option<crate::log::Entry>, crate::log::OpLogError> {
+            self.inner.get(id)
+        }
+        fn iter(&self) -> Result<Vec<crate::log::Entry>, crate::log::OpLogError> {
+            self.inner.iter()
+        }
+        fn iter_stoa(
+            &self,
+            stoa: &Address,
+        ) -> Result<Vec<crate::log::Entry>, crate::log::OpLogError> {
+            self.inner.iter_stoa(stoa)
+        }
+        fn iter_target(
+            &self,
+            target: &crate::op::OpId,
+        ) -> Result<Vec<crate::log::Entry>, crate::log::OpLogError> {
+            self.inner.iter_target(target)
+        }
+        fn len(&self) -> Result<usize, crate::log::OpLogError> {
+            self.inner.len()
+        }
+    }
+
+    #[test]
+    fn the_append_completes_before_delivery_is_invoked_on_all_three_handlers() {
+        // The spec's ordering requirement, observed rather than argued: "Each
+        // publish operation SHALL sign an op, append it to the local op log, and
+        // hand it to delivery. The append SHALL complete before delivery is
+        // invoked."
+        //
+        // The expected sequence is HARDCODED below and is not read back from
+        // anything the handlers produced. A handler that called the sink first
+        // yields `["deliver", "append"]` and this fails on the comparison.
+        //
+        // All three handlers, because the ordering is a property of each call
+        // site and one of them getting it right says nothing about the other two
+        // — which is the same "is the guard called everywhere?" shape as
+        // `a_forbidden_field_is_refused_on_every_operation`.
+        let key = publish_key();
+        let stoa = publish_stoa().to_hex();
+
+        for which in ["post", "reply", "vote"] {
+            let journal = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+            let mut log = JournallingLog {
+                inner: MemoryOpLog::new(),
+                journal: std::rc::Rc::clone(&journal),
+            };
+
+            // A seed post for the reply and the vote to point at. It goes
+            // through the same log, so the journal is CLEARED afterwards and
+            // only the measured call's sequence is asserted on.
+            let seed = as_json(&publish_post(
+                &publish_request(r#""body":"the subject""#),
+                &mut log,
+                &key,
+                &mut ignored_delivery,
+            ))["opId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            journal.borrow_mut().clear();
+
+            let request =
+                match which {
+                    "post" => serde_json::json!({"stoa": stoa, "body": "ordered"}).to_string(),
+                    "reply" => serde_json::json!({"stoa": stoa, "parent": seed, "body": "ordered"})
+                        .to_string(),
+                    _ => serde_json::json!({"stoa": stoa, "target": seed, "direction": "up"})
+                        .to_string(),
+                };
+            let sink_journal = std::rc::Rc::clone(&journal);
+            let out = match which {
+                "post" => publish_post(&request, &mut log, &key, &mut |_| {
+                    sink_journal.borrow_mut().push("deliver")
+                }),
+                "reply" => publish_reply(&request, &mut log, &key, &mut |_| {
+                    sink_journal.borrow_mut().push("deliver")
+                }),
+                _ => publish_vote(&request, &mut log, &key, &mut |_| {
+                    sink_journal.borrow_mut().push("deliver")
+                }),
+            };
+            assert!(as_json(&out).get("error").is_none(), "for {which}: {out}");
+            assert_eq!(
+                journal.borrow().as_slice(),
+                ["append", "deliver"],
+                "{which} must append before it hands off, and hand off exactly once"
+            );
+        }
+    }
+
+    #[test]
+    fn a_refused_publish_reaches_neither_the_append_nor_delivery() {
+        // The other half of the same requirement: "A publish that is refused
+        // appends nothing — AND delivery was not invoked." Asserted as an EMPTY
+        // journal, so it distinguishes "nothing happened" from "an append was
+        // rolled back", which counting the log afterwards cannot.
+        //
+        // The four refusals sit at three different depths: two fail in the parse
+        // (before `authoring` is reached at all), one in `authoring`'s presence
+        // check, and one in its cross-Stoa check — so a handler that reached the
+        // store or the sink on any of those paths is caught rather than one of
+        // them standing in for all three.
+        //
+        // Each case also asserts the refusal MESSAGE, not just that a refusal
+        // happened. That is what keeps the depths honest: the cross-Stoa fixture
+        // previously named an absent target against an empty log, so it refused at
+        // the presence check and was a second copy of the case above it.
+        let key = publish_key();
+        let stoa = publish_stoa().to_hex();
+        let elsewhere = crate::identity::Address::from_hex(&"4d".repeat(32))
+            .unwrap()
+            .to_hex();
+        let absent = crate::op::OpId::from_hex(&"9b".repeat(32))
+            .unwrap()
+            .to_hex();
+
+        let cases: [(&str, String, &str); 4] = [
+            // Refused in the parse: a forbidden field.
+            (
+                "post",
+                serde_json::json!({"stoa": stoa, "body": "x", "author": "00ff"}).to_string(),
+                "a forbidden field",
+            ),
+            // Refused in the parse: a direction the wire does not recognise.
+            (
+                "vote",
+                serde_json::json!({"stoa": stoa, "target": absent, "direction": "upvote"})
+                    .to_string(),
+                "an unrecognised direction",
+            ),
+            // Refused in `authoring`: the parent is not held.
+            (
+                "reply",
+                serde_json::json!({"stoa": stoa, "parent": absent, "body": "x"}).to_string(),
+                "an absent parent",
+            ),
+            // Refused in `authoring`'s CROSS-STOA check, which is a different
+            // depth from the one above and needs a target that IS held. The
+            // fixture seeds a post into `stoa` and then votes on it naming
+            // `elsewhere`.
+            //
+            // This case used to name an ABSENT target in another Stoa, against an
+            // empty log — so `log.get` returned `None` and it refused at `NotHeld`,
+            // the same path and the same depth as the case above it. The comment
+            // claimed three depths and the fixtures delivered two; a handler that
+            // reached the sink on the cross-Stoa path only would have left this
+            // test green (found by review, findings/correctness.md C2).
+            (
+                "vote-cross-stoa",
+                serde_json::json!({"stoa": elsewhere, "direction": "up"}).to_string(),
+                "a held target in another Stoa",
+            ),
+        ];
+
+        for (which, request, why) in cases {
+            let journal = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+            let mut log = JournallingLog {
+                inner: MemoryOpLog::new(),
+                journal: std::rc::Rc::clone(&journal),
+            };
+
+            // The cross-Stoa case is the only one needing a seeded target, and it
+            // must be seeded BEFORE the journal is cleared, so the seed's own
+            // append does not count as the refusal's.
+            let request = if which == "vote-cross-stoa" {
+                let seed = publish_post(
+                    &publish_request(r#""body":"the target""#),
+                    &mut log,
+                    &key,
+                    &mut ignored_delivery,
+                );
+                let target = as_json(&seed)["opId"].as_str().unwrap().to_string();
+                journal.borrow_mut().clear();
+                serde_json::json!({"stoa": elsewhere, "target": target, "direction": "up"})
+                    .to_string()
+            } else {
+                request
+            };
+            let sink_journal = std::rc::Rc::clone(&journal);
+            let out = match which {
+                "post" => publish_post(&request, &mut log, &key, &mut |_| {
+                    sink_journal.borrow_mut().push("deliver")
+                }),
+                "reply" => publish_reply(&request, &mut log, &key, &mut |_| {
+                    sink_journal.borrow_mut().push("deliver")
+                }),
+                _ => publish_vote(&request, &mut log, &key, &mut |_| {
+                    sink_journal.borrow_mut().push("deliver")
+                }),
+            };
+            let error = as_json(&out)["error"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            assert!(!error.is_empty(), "{why} must be refused, got {out}");
+
+            // Each case must be refused for the reason it was chosen to exercise,
+            // not merely refused. Without this the cross-Stoa fixture silently
+            // degraded into a second copy of the absent-target one, which is
+            // exactly what had happened.
+            let expected_fragment = match why {
+                "a forbidden field" => "author",
+                "an unrecognised direction" => "direction",
+                "an absent parent" => "does not hold",
+                "a held target in another Stoa" => "belongs to Stoa",
+                other => unreachable!("unnamed case: {other}"),
+            };
+            assert!(
+                error.contains(expected_fragment),
+                "{why}: expected a refusal mentioning {expected_fragment:?}, got {out}"
+            );
+
+            assert!(
+                journal.borrow().is_empty(),
+                "{why}: a refused publish must reach neither the store nor delivery, \
+                 and it reached {:?}",
+                journal.borrow()
+            );
+        }
+    }
+
+    #[test]
+    fn a_publish_whose_delivery_panics_leaves_the_op_in_the_log() {
+        // A panicking sink is the most violent form of "delivery errors on the
+        // handoff". What this pins is that the op STAYS: the append completed
+        // before delivery was reached and nothing rolls it back.
+        //
+        // The reply is pinned by
+        // `a_panicking_delivery_sink_still_reports_the_op_as_published_on_all_three_handlers`,
+        // which is the other half of this and covers all three handlers. This one
+        // is kept because the two assert different things: that one reads the
+        // reply, this one reads the LOG, and an implementation that reported
+        // success while rolling the op back would satisfy the reply assertion
+        // alone.
+        //
+        // This was an open question when the reviewers found it — `guarded` wrapped
+        // the `deliver` call, so a panicking sink turned a successful publish into
+        // `{"error":"panic in publish_post: …"}` with no `opId` while the op was in
+        // the log, against "a publish SHALL NOT be reported as having failed on the
+        // strength of a delivery outcome". The owner settled it: catch the panic at
+        // the handoff and report the publish as successful. See
+        // `delivered_and_published` for why the outer guard stays, and `docs/PLAN.md`
+        // §9.2 for the obligation this hands to `op-transport`.
+        //
+        // This test was named `…_still_reports_the_op_as_published` and asserted
+        // no such thing — the name claimed the requirement while the body checked
+        // only the log. Renamed to what it actually pins.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+
+        // The id the publish will produce, computed independently so the
+        // assertion does not depend on a reply the panic prevented.
+        let expected = crate::op::Op {
+            stoa: publish_stoa(),
+            author: key.public_key(),
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: "survives a broken delivery".to_string(),
+                attachments: vec![],
+            },
+        }
+        .id();
+
+        let out = publish_post(
+            &publish_request(r#""body":"survives a broken delivery""#),
+            &mut log,
+            &key,
+            &mut |_: &crate::op::OpId| panic!("delivery refused the handoff"),
+        );
+        // The handoff guard caught it, so this is a reply rather than an aborted
+        // process. Parsed for well-formedness only; what the reply SAYS is the
+        // sibling test's assertion, and what this test is named for is the log.
+        as_json(&out);
+        assert!(
+            log.get(&expected).unwrap().is_some(),
+            "a declined handoff must leave the op in the log, got {out}"
+        );
+        // The op the publish created, and nothing the panic added or rolled back.
+        assert_eq!(log.len().unwrap(), 1);
+    }
+
+    #[test]
+    fn a_panicking_delivery_sink_still_reports_the_op_as_published_on_all_three_handlers() {
+        // "A handoff that fails outright leaves the op published": WHEN delivery
+        // fails at the handoff in the most abrupt way the interface permits, THEN
+        // the reply reports the op as published and names its op id, the op is
+        // readable from the log, and the reply carries no error. A panicking sink
+        // IS the most abrupt way the interface permits — the sink returns `()`, so
+        // there is no error value it could return instead — which is what makes
+        // this test the scenario's own fixture rather than an approximation of it.
+        //
+        // The quoted name was "A declined handoff leaves the op published", which
+        // the spec no longer contains; the wording above is the live scenario's.
+        // The test itself needed no change, only the citation.
+        //
+        // This is the assertion the sibling test
+        // `a_publish_whose_delivery_panics_leaves_the_op_in_the_log` deliberately
+        // did NOT make while the question was open. It fails before the fix: with
+        // the sink call inside `guarded`, a panic discards the already-computed
+        // reply and yields `{"error":"panic in publish_post: …"}` with no `opId`
+        // for an op that IS in the log.
+        //
+        // Asserted on all three handlers because the sink is called from three
+        // places, so one fixed and two missed is the failure a single-handler
+        // test could not see.
+        let key = publish_key();
+
+        // A parent to reply to and a target to vote on, published with a sink
+        // that does not panic, so the fixtures are not themselves under test.
+        let mut log = MemoryOpLog::new();
+        let seed = as_json(&publish_post(
+            &publish_request(r#""body":"the parent""#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        let parent = seed["opId"].as_str().unwrap().to_string();
+
+        type Handler = fn(
+            &str,
+            &mut MemoryOpLog,
+            &crate::identity::SecretKey,
+            &mut dyn FnMut(&crate::op::OpId),
+        ) -> String;
+
+        let cases: [(String, Handler); 3] = [
+            (
+                publish_request(r#""body":"a post""#),
+                publish_post as Handler,
+            ),
+            (
+                publish_request(&format!(r#""parent":"{parent}","body":"a reply""#)),
+                publish_reply as Handler,
+            ),
+            (
+                publish_request(&format!(r#""target":"{parent}","direction":"up""#)),
+                publish_vote as Handler,
+            ),
+        ];
+
+        for (request, handler) in &cases {
+            let out = handler(request, &mut log, &key, &mut |_: &crate::op::OpId| {
+                panic!("delivery refused the handoff")
+            });
+            let v = as_json(&out);
+            assert!(
+                v.get("error").is_none(),
+                "a panicking sink must not be reported as a failed publish, got {out}"
+            );
+            let id = v["opId"]
+                .as_str()
+                .unwrap_or_else(|| panic!("the reply must name its op id, got {out}"));
+            let id = crate::op::OpId::from_hex(id).expect("the reply's op id must parse");
+            assert!(
+                log.get(&id).unwrap().is_some(),
+                "the op the reply names must be readable from the log, got {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_reply_names_the_op_and_whether_it_was_new_and_no_delivery_outcome() {
+        // REPOINTED, and the old test is worth saying what was wrong with it.
+        //
+        // It was `a_delivery_that_reports_nothing_and_one_that_reports_promptly_give_one_reply`,
+        // and its comment quoted a scenario — "A publish returns while delivery is
+        // still outstanding" — that the spec no longer contains (the `spec-writer`
+        // flagged it; `grep` over `specs/content-authoring/spec.md` finds no such
+        // text). So it was a test with no requirement behind it.
+        //
+        // It was also close to vacuous on its own terms. Both sinks were
+        // synchronous and the interface hands delivery a `&mut dyn FnMut` returning
+        // `()`, so "the reply does not depend on what delivery did" was true by the
+        // signature: there is no value a sink could return for a reply to depend
+        // on. Asserting two replies equal proved the sink cannot speak, which the
+        // type already guarantees, and nothing about the reply's CONTENT.
+        //
+        // What the spec does still require, and what had no test at all, is the
+        // scenario "The reply describes no delivery outcome": the reply carries the
+        // op id and whether the op was newly stored, "AND it carries no field
+        // describing whether the op was sent, accepted, delivered or propagated".
+        // That is an assertion about the reply's keys, and it can fail — a future
+        // field named `delivered` would trip it, which is the whole point, since the
+        // requirement's argument is that a reply carrying the weaker fact sits
+        // exactly where a reader looks for the stronger one.
+        //
+        // Not a duplicate of `a_vote_reply_carries_no_score…`, which pins the same
+        // key set: that one is about VOTE semantics (its forbidden list is score /
+        // tally / rank) on `publish_vote`. This one is about the DELIVERY outcome on
+        // `publish_post`. Same shape of assertion, two different requirements, and a
+        // publish-side delivery field would slip past the vote-side test entirely.
+        let key = publish_key();
+        let mut log = MemoryOpLog::new();
+        let out = publish_post(
+            &publish_request(r#""body":"whatever delivery does""#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        );
+        let v = as_json(&out);
+        assert!(v.get("error").is_none(), "got {out}");
+
+        // The keys the reply DOES carry, as an exact set rather than a
+        // `contains_key` pair — an exact set is what makes a NEW key fail this
+        // test, and a new key is the thing the scenario forbids. Hardcoded, not
+        // read back from the reply.
+        let mut keys: Vec<&str> = v
+            .as_object()
+            .expect("a reply is an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            ["opId", "wasNew"],
+            "the reply carries exactly the op id and whether the op was new, got {out}"
+        );
+
+        // And named individually, so the failure says WHICH outcome word appeared
+        // rather than only that the set changed. These are the four the scenario
+        // lists, plus the shapes a delivery outcome would plausibly take.
+        for forbidden in [
+            "sent",
+            "accepted",
+            "delivered",
+            "propagated",
+            "delivery",
+            "peers",
+            "outcome",
+        ] {
+            assert!(
+                v.get(forbidden).is_none(),
+                "the reply must describe no delivery outcome, but carries {forbidden:?}: {out}"
+            );
+        }
+
+        // The two it must carry are the two the requirement names, checked for
+        // type and not merely presence.
+        assert!(v["opId"].is_string(), "got {out}");
+        assert!(v["wasNew"].is_boolean(), "got {out}");
+    }
+
+    #[test]
+    fn a_publish_refused_for_an_absent_parent_says_which_and_not_that_it_is_the_wrong_kind() {
+        // The two refusals the spec requires be told apart, at the wire. A
+        // caller distinguishes a propagation gap it should wait out from a
+        // category mistake it must fix.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+        let post_id = as_json(&publish_post(
+            &publish_request(r#""body":"the subject""#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ))["opId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let vote_id = as_json(&publish_vote(
+            &publish_request(&format!(r#""target":"{post_id}","direction":"up""#)),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ))["opId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let absent = crate::op::OpId::from_hex(&"7f".repeat(32))
+            .unwrap()
+            .to_hex();
+
+        let not_held = as_json(&publish_reply(
+            &publish_request(&format!(r#""parent":"{absent}","body":"x""#)),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        let wrong_kind = as_json(&publish_reply(
+            &publish_request(&format!(r#""parent":"{vote_id}","body":"x""#)),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+
+        let absent_msg = not_held["error"].as_str().unwrap();
+        let kind_msg = wrong_kind["error"].as_str().unwrap();
+        assert_ne!(absent_msg, kind_msg, "the two refusals must be told apart");
+        assert!(absent_msg.contains("does not hold"), "got {absent_msg}");
+        assert!(kind_msg.contains("not a post"), "got {kind_msg}");
+        assert!(
+            !kind_msg.contains("does not hold"),
+            "a held op must not be reported as absent, got {kind_msg}"
+        );
+    }
+
+    #[test]
+    fn the_no_identity_refusal_is_the_error_shape_and_has_one_source_of_its_text() {
+        // The refusal that only the adapter can RAISE, worded in the one place a
+        // gate can read.
+        //
+        // Before this existed, `Refusal::NoIdentity` was constructed by nothing
+        // outside its own `Display` test while the adapter hand-wrote a second
+        // copy of the same sentence — and the adapter is behind
+        // `cfg(logos_scaffold)`, which no `cargo test` sets. So there were two
+        // copies of one message, no test tying them, and the copy that shipped
+        // was the one nothing compiled.
+        //
+        // This asserts the two are ONE string rather than two that happen to
+        // agree: the expected value is built from the variant, so the only way
+        // both sides can pass is by `no_identity` going through it. A
+        // `no_identity` that formatted its own text — even the same text — fails
+        // the moment the variant's wording moves, which is exactly the drift the
+        // old arrangement could not detect.
+        let why = "the keystore file is not there";
+        let out = no_identity(why);
+        let v = as_json(&out);
+        assert_eq!(
+            v["error"]
+                .as_str()
+                .expect("the error shape carries a string"),
+            crate::authoring::Refusal::NoIdentity(why.to_string()).to_string(),
+            "the wire reply must be the VARIANT's wording, not a second copy of it"
+        );
+        assert!(
+            v.get("opId").is_none() && v.get("wasNew").is_none(),
+            "a refusal is never a partial success — §2.5, got {out}"
+        );
+
+        // And the reason it was handed survives into the reply, so a reader is
+        // told what is missing rather than only that something is. A
+        // `no_identity` that discarded its argument passes the equality above.
+        let message = v["error"].as_str().unwrap();
+        assert!(message.contains(why), "the reason must survive, got {out}");
+        // NO SPEC: the spec's "A refused publish creates no key material" scenario
+        // is structural — no keystore or key exists that did not before — and does
+        // not require the refusal to say so. Saying it is chosen; see the matching
+        // marker on `a_refusal_names_the_id_or_stoa_it_is_about` in `authoring.rs`,
+        // and note this pins the sentence rather than the structural claim.
+        assert!(
+            message.contains("no key was created"),
+            "the refusal must say no key material was created, got {out}"
+        );
+    }
+
+    #[test]
+    fn every_publish_refusal_is_the_error_shape_and_carries_no_op_id() {
+        // §2.5: never a partial success. A reply carrying both an error and an
+        // op id would render as a published post in any view that read `opId`
+        // first — and the caller would then link to an op that does not exist.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+        let stoa = publish_stoa().to_hex();
+        let absent = crate::op::OpId::from_hex(&"3a".repeat(32))
+            .unwrap()
+            .to_hex();
+
+        let cases: [(&str, String); 12] = [
+            ("post", "not json".to_string()),
+            ("post", r#"{}"#.to_string()),
+            ("post", r#"{"stoa":"nothex","body":"x"}"#.to_string()),
+            ("post", r#"{"stoa":"00ff","body":"x"}"#.to_string()),
+            ("post", format!(r#"{{"stoa":"{stoa}","body":[]}}"#)),
+            ("reply", "not json".to_string()),
+            (
+                "reply",
+                format!(r#"{{"stoa":"{stoa}","parent":"nothex","body":"x"}}"#),
+            ),
+            (
+                "reply",
+                format!(r#"{{"stoa":"{stoa}","parent":"{absent}","body":"x"}}"#),
+            ),
+            ("vote", "not json".to_string()),
+            (
+                "vote",
+                format!(r#"{{"stoa":"{stoa}","target":"{absent}","direction":"up"}}"#),
+            ),
+            (
+                "vote",
+                format!(r#"{{"stoa":"{stoa}","target":"{absent}","direction":true}}"#),
+            ),
+            (
+                "vote",
+                format!(r#"{{"stoa":"{stoa}","target":7,"direction":"up"}}"#),
+            ),
+        ];
+        for (op, request) in cases {
+            let out = match op {
+                "post" => publish_post(&request, &mut log, &key, &mut ignored_delivery),
+                "reply" => publish_reply(&request, &mut log, &key, &mut ignored_delivery),
+                _ => publish_vote(&request, &mut log, &key, &mut ignored_delivery),
+            };
+            let v = as_json(&out);
+            assert!(v.get("error").is_some(), "for {request}, got {out}");
+            // `error.is_some()` CANNOT TELL A REFUSAL FROM A PANIC, and this test
+            // is the only one that reaches some of these parsers' refusal arms.
+            // `guarded` catches an unwind and returns
+            // `{"error":"panic in <method>: …"}` — which satisfies every other
+            // assertion in this loop — so without this line a handler that
+            // panicked on all twelve fixtures would pass, and the test would
+            // report "every refusal is the error shape" having checked only that
+            // the guard in front of the handler works.
+            //
+            // `findings/security.md` S2 measured exactly this: with a `panic!` on
+            // `required_direction`'s `Err` arm, this test passed. The sweep
+            // `hostile_publish_input_is_never_a_panic` already carries this
+            // assertion; it was missing from the one test that gets here.
+            assert!(
+                !v["error"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .starts_with("panic in "),
+                "a handler panicked rather than refusing, for {request}: {out}"
+            );
+            assert!(
+                v.get("opId").is_none(),
+                "a failure must never also carry an op id — §2.5, got {out}"
+            );
+            assert!(v.get("wasNew").is_none(), "got {out}");
+        }
+        assert_eq!(
+            log.len().unwrap(),
+            0,
+            "no refused publish appended anything"
+        );
+    }
+
+    #[test]
+    fn hostile_publish_input_is_never_a_panic() {
+        // A panic ABORTS the module process (PHASE0-FINDINGS §3), so an
+        // unparseable or adversarial request would be a denial of service
+        // against the peer. Every field type, absent fields, maximal lengths and
+        // adversarially chosen text, through all three handlers.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+        let stoa = publish_stoa().to_hex();
+        let id = crate::op::OpId::from_hex(&"5e".repeat(32))
+            .unwrap()
+            .to_hex();
+
+        let mut requests: Vec<String> = vec![
+            "".to_string(),
+            "not json".to_string(),
+            "null".to_string(),
+            "[]".to_string(),
+            "7".to_string(),
+            r#""a string""#.to_string(),
+            r#"{}"#.to_string(),
+            r#"{"stoa":null,"body":null,"parent":null,"target":null,"direction":null}"#.to_string(),
+            r#"{"stoa":{},"body":{},"parent":{},"target":{},"direction":{}}"#.to_string(),
+            r#"{"stoa":[1],"body":[1],"parent":[1],"target":[1],"direction":[1]}"#.to_string(),
+            r#"{"stoa":true,"body":false,"parent":1.5,"target":-1,"direction":0}"#.to_string(),
+        ];
+        for text in ["\u{202E}\u{202C}\u{200B}", "\0\0\0", "🏛🏛🏛", "Ἀγορά", "\"}]"] {
+            requests.push(
+                serde_json::json!({
+                    "stoa": stoa, "body": text, "parent": id, "target": id, "direction": text
+                })
+                .to_string(),
+            );
+        }
+        // Maximal field lengths: at the format's per-field cap, and past it.
+        for len in [150 * 1024, 150 * 1024 + 1] {
+            requests.push(
+                serde_json::json!({
+                    "stoa": stoa,
+                    "body": "x".repeat(len),
+                    "parent": id,
+                    "target": id,
+                    "direction": "up"
+                })
+                .to_string(),
+            );
+        }
+        // A hex string of every wrong length, since the op-id parser is reached
+        // with attacker-chosen text.
+        for len in [0, 1, 63, 64, 65, 128] {
+            requests.push(
+                serde_json::json!({
+                    "stoa": "a".repeat(len),
+                    "body": "x",
+                    "parent": "b".repeat(len),
+                    "target": "c".repeat(len),
+                    "direction": "up"
+                })
+                .to_string(),
+            );
+        }
+        // The same wrong lengths with a VALID Stoa, which is what actually
+        // reaches the op-id parser.
+        //
+        // Every case above malforms the Stoa too, and `stoa` is parsed first in
+        // all three handlers — so each of them refuses before `parent` or
+        // `target` is ever read, and the op-id parser was reached with nothing
+        // but well-formed hex. Verified: an `expect` on `OpId::from_hex` left the
+        // whole suite green, this test included, until these cases existed.
+        //
+        // Non-hex characters as well as wrong lengths, because "64 characters"
+        // and "64 HEX characters" are different acceptances and only the second
+        // is the parser's.
+        for text in [
+            "".to_string(),
+            "0".to_string(),
+            "z".repeat(64),
+            "g".repeat(64),
+            "0".repeat(63),
+            "0".repeat(65),
+            "0".repeat(128),
+            "ff ".repeat(21),
+            "0x".to_string() + &"0".repeat(64),
+            "\u{200B}".repeat(64),
+            "Ἀγορά".to_string(),
+        ] {
+            requests.push(
+                serde_json::json!({
+                    "stoa": stoa,
+                    "body": "x",
+                    "parent": text,
+                    "target": text,
+                    "direction": "up"
+                })
+                .to_string(),
+            );
+        }
+        // A VALID Stoa and a VALID target with a WRONG-TYPED `direction` and
+        // `body`, which is the only way to reach those parsers' wrong-type arms.
+        //
+        // This is the same ordering hazard the op-id block above exists for, one
+        // parser further along — and it was found the same way. `stoa` is parsed
+        // first in all three handlers, so every wrong-typed fixture earlier in
+        // this sweep malforms `stoa` too and dies at parser one; and the two
+        // blocks that DO carry a valid Stoa both pin `direction: "up"`. The
+        // result was that `required_direction`'s wrong-typed arm was never
+        // entered by any test in the repo.
+        //
+        // Measured, per `findings/security.md` S2: with a `panic!` on that arm
+        // alone, the whole 566-test suite stayed green. With these fixtures it
+        // does not. Note the absent arm was NOT the gap — a missing `direction`
+        // is caught by `a_publish_requests_missing_field_is_named_and_is_not_defaulted`,
+        // which asserts on the message naming the field, and a panic message
+        // does not contain it. The wrong-typed arm is the one nothing reached.
+        //
+        // `null` is included deliberately, and it is a wrong TYPE rather than an
+        // absence: `wire/request.rs:229` keeps an explicit null as
+        // `Some(Value::Null)` on purpose, so `required_string` refuses it by type.
+        // Pinned in the message-level test beside this one.
+        for wrong in [
+            serde_json::Value::Null,
+            serde_json::json!(true),
+            serde_json::json!(0),
+            serde_json::json!(-1),
+            serde_json::json!(1.5),
+            serde_json::json!({}),
+            serde_json::json!([]),
+            serde_json::json!(["up"]),
+            serde_json::json!({"direction": "up"}),
+        ] {
+            requests.push(
+                serde_json::json!({
+                    "stoa": stoa,
+                    "body": wrong,
+                    "parent": id,
+                    "target": id,
+                    "direction": wrong
+                })
+                .to_string(),
+            );
+        }
+
+        for request in &requests {
+            for out in [
+                publish_post(request, &mut log, &key, &mut ignored_delivery),
+                publish_reply(request, &mut log, &key, &mut ignored_delivery),
+                publish_vote(request, &mut log, &key, &mut ignored_delivery),
+            ] {
+                let v = as_json(&out);
+                assert!(
+                    v.is_object(),
+                    "every reply is a JSON object, got {out} for {request}"
+                );
+                // `is_object()` ALONE cannot see a panic, and that is the whole
+                // point of this test. `guarded` catches the unwind and returns
+                // `{"error":"panic in <method>: …"}` — a perfectly well-formed
+                // object — so a handler that panicked on every one of these
+                // inputs would satisfy the assertion above.
+                //
+                // The marker `guarded` writes is what tells the two apart, and it
+                // is the only thing that does. Without this line the requirement
+                // "a publish SHALL NOT panic for any request" has no test, only a
+                // test of the guard that stands in front of it.
+                assert!(
+                    !v["error"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .starts_with("panic in "),
+                    "a handler panicked rather than refusing, for {request}: {out}"
+                );
+            }
+        }
+
+        // Whatever this sweep DID accept must be readable back. "No panic" is not
+        // the only way hostile input can win: an input that succeeds and stores an
+        // op the decoder refuses is worse, because it is reported to the caller as
+        // a publish and then kills every read on the store.
+        //
+        // That is not hypothetical — it is how the over-cap body defect survived
+        // this test. The sweep already fed it `MAX_FIELD_LEN + 1`, asserted "an
+        // object and not a panic", and passed, because the handler *succeeded*.
+        // Asserting the absence of a panic cannot see a wrongful success.
+        for entry in log.iter().expect("the sweep's log must still be readable") {
+            crate::op::SignedOp::from_bytes(&entry.op.to_bytes())
+                .expect("an op a publish accepted must decode again");
+        }
+    }
+
+    #[test]
+    fn a_body_reaches_the_op_through_the_wire_exactly_as_supplied() {
+        // No normalisation, no trimming, no case-folding. `op-format` contracts
+        // an accepted encoding as re-encoding to itself, so a transformation
+        // here would mean the op published is not the content the caller
+        // supplied — and sanitisation is a RENDERING concern `feed.rs` applies
+        // on the way out.
+        let key = publish_key();
+        for body in [
+            "  padded  ",
+            "MiXeD",
+            "caf\u{00E9}",
+            "cafe\u{0301}",
+            "\u{202E}reversed",
+            "zero\u{200B}width",
+            "line\nbreak",
+        ] {
+            let mut log = MemoryOpLog::new();
+            let request =
+                serde_json::json!({ "stoa": publish_stoa().to_hex(), "body": body }).to_string();
+            let out = publish_post(&request, &mut log, &key, &mut ignored_delivery);
+            let v = as_json(&out);
+            assert!(v.get("error").is_none(), "for {body:?}, got {out}");
+            let id = crate::op::OpId::from_hex(v["opId"].as_str().unwrap()).unwrap();
+            match &log.get(&id).unwrap().unwrap().op.op.kind {
+                OpKind::Post { body: stored, .. } => assert_eq!(
+                    stored.as_bytes(),
+                    body.as_bytes(),
+                    "the body must reach the op byte for byte"
+                ),
+                other => panic!("expected a post, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn two_bodies_differing_only_by_normalisation_publish_as_two_ops_through_the_wire() {
+        // The sharp case for "no normalisation": NFC "é" against NFD "e"+U+0301
+        // render identically and are different bytes. A wire layer that
+        // normalised would collapse them into one op.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+        let stoa = publish_stoa().to_hex();
+
+        let composed = as_json(&publish_post(
+            &serde_json::json!({"stoa": stoa, "body": "caf\u{00E9}"}).to_string(),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        let decomposed = as_json(&publish_post(
+            &serde_json::json!({"stoa": stoa, "body": "cafe\u{0301}"}).to_string(),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ));
+        assert_ne!(composed["opId"], decomposed["opId"]);
+        assert_eq!(log.len().unwrap(), 2);
+    }
+
+    #[test]
+    fn the_three_handlers_share_one_signature_the_adapter_can_dispatch_over() {
+        // All three handlers must be interchangeable: same shape, same sink
+        // type, so one can be substituted for another without a signature
+        // change. This test pins that by naming ONE function-pointer type and
+        // requiring all three to coerce into it.
+        //
+        // The single pointer type is THIS TEST'S choice, not a constraint the
+        // adapter imposes — `Dialectica::publishing` is generic over the handler
+        // and would accept three distinct types. The reason to pin it here is
+        // that the adapter lives behind `cfg(logos_scaffold)`, which no
+        // `cargo test` ever sets (`lib.rs` explains why at length), so a
+        // signature that drifted out of line would fail in the BUILDER's build —
+        // the one that runs last and reports worst. This is the only gate that
+        // can catch that drift early, which is why the erased `&mut dyn FnMut`
+        // is worth its cost.
+        type Handler = fn(
+            &str,
+            &mut MemoryOpLog,
+            &crate::identity::SecretKey,
+            &mut dyn FnMut(&crate::op::OpId),
+        ) -> String;
+
+        let key = publish_key();
+        let stoa = publish_stoa().to_hex();
+        let mut log = MemoryOpLog::new();
+        let seed = as_json(&publish_post(
+            &publish_request(r#""body":"the subject""#),
+            &mut log,
+            &key,
+            &mut ignored_delivery,
+        ))["opId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let cases: [(Handler, String); 3] = [
+            (
+                publish_post,
+                serde_json::json!({"stoa": stoa, "body": "through a pointer"}).to_string(),
+            ),
+            (
+                publish_reply,
+                serde_json::json!({"stoa": stoa, "parent": seed, "body": "likewise"}).to_string(),
+            ),
+            (
+                publish_vote,
+                serde_json::json!({"stoa": stoa, "target": seed, "direction": "up"}).to_string(),
+            ),
+        ];
+        let mut delivered = Vec::new();
+        for (handler, request) in cases {
+            let out = handler(&request, &mut log, &key, &mut |id| delivered.push(*id));
+            let v = as_json(&out);
+            assert!(v.get("error").is_none(), "for {request}, got {out}");
+            assert!(v["opId"].is_string(), "got {out}");
+        }
+        assert_eq!(
+            delivered.len(),
+            3,
+            "each dispatched handler must reach the shared sink"
+        );
+    }
+
     // ─── The request envelope ─────────────────────────────────────────────
     //
     // WHY THESE TESTS LOOK OVERBUILT. Every hostile-input fixture already in
@@ -5909,6 +7968,8 @@ mod tests {
         //
         // The wire contract is only useful if it holds for EVERY method, so
         // check the property rather than each method's happy path again.
+        let mut publish_log = MemoryOpLog::new();
+        let key = publish_key();
         for out in [
             version("1.0.0"),
             ping(r#"{"payload":1}"#),
@@ -5920,6 +7981,15 @@ mod tests {
             get_capabilities("garbage", |_| Ok("abcd".to_string())),
             list_threads(&feed_request(""), &log_with_body("hello"), &feed_genesis()),
             list_threads("garbage", &log_with_body("hello"), &feed_genesis()),
+            publish_post(
+                &publish_request(r#""body":"x""#),
+                &mut publish_log,
+                &key,
+                &mut ignored_delivery,
+            ),
+            publish_post("garbage", &mut publish_log, &key, &mut ignored_delivery),
+            publish_reply("garbage", &mut publish_log, &key, &mut ignored_delivery),
+            publish_vote("garbage", &mut publish_log, &key, &mut ignored_delivery),
         ] {
             let v: serde_json::Value = serde_json::from_str(&out)
                 .unwrap_or_else(|e| panic!("handler emitted invalid JSON ({e}): {out}"));
