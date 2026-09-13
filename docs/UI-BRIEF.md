@@ -203,12 +203,13 @@ Two consequences for you:
 
   **Do not size that space from a word count — not the one stated elsewhere in
   this file, and not the one in PLAN.md §5.2.1 either.** The count has moved
-  three times (`git log docs/PLAN.md` is the record), and a change is in flight
-  that moves it again along with the collision figures derived from it, since
-  those are arithmetic over vocabulary sizes rather than prose. This file and
-  PLAN.md currently agree, so there is no disagreement to resolve — they are
-  simply both a count ahead of a decision, and a layout sized to either is a
-  layout that has to be redrawn.
+  three times (`git log docs/PLAN.md` is the record), most recently back to
+  three (#22 made it four, #64 moved it back), and each move carries the
+  collision figures with it, since those are arithmetic over vocabulary sizes
+  rather than prose. This file and PLAN.md
+  agree today, so there is no disagreement to resolve — but agreeing is not the
+  same as being settled, and a layout sized to the current count is a layout
+  that gets redrawn on the next move.
 
   The screen asserts no number for exactly this reason, and the row should be
   built the same way: **size the space from the longest name the row can show
