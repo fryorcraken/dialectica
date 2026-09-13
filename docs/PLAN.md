@@ -1949,9 +1949,23 @@ says, which is that section's general shape:
   and above all wherever a **moderator** is named, the address must be present
   rather than one click away. Anyone can reach any name by pressing refresh.
 - **Never imply a user's names are linked across Stoas**, and never build a
-  screen that puts them side by side without the owner deciding to (below). The
-  names are unlinkable by construction and an interface that groups them has
-  undone §5.2 in the presentation layer.
+  screen that puts them side by side without the owner deciding to (below). An
+  interface that groups them has undone §5.2 in the presentation layer.
+
+  **And never claim the reverse either** — that a user's identities *cannot* be
+  linked. **§5.2 is the authority on what holds today and this bullet does not
+  restate it**, because two copies of a suspended-property rule is how this one
+  drifted: an earlier version of this bullet justified itself with "the names are
+  unlinkable by construction", which contradicted §5.2's own instruction not to
+  describe the MVP as having that property.
+
+  The design instruction is unchanged and does not depend on the property being
+  live — **design as though unlinkability holds**, because a grouping screen is
+  wrong now and becomes wronger when the property is restored. What changes is
+  that the *reason* may not be stated as a promise to the user. A line like "this
+  key cannot be linked to you anywhere else" is exactly the copy this bullet must
+  not generate; that sentence reached a design bundle's `copy.json` and had to be
+  caught and removed from an onboarding screen.
 - **Never present a name as changeable.** It is a function of a permanent key
   (§5.3). Copy that says "pick your username" promises a settings screen that
   cannot exist.
