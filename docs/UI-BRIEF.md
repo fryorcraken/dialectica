@@ -128,24 +128,17 @@ switched on, and switching it on later is not a redesign.
 **Identities have generated names, and this is new.** An identity renders as
 **an adjective, a Greek noun, the word "of", and a Greek place** — something like
 *measured aporia of lampsacus*, *brittle kairos of abdera* or *luminous stasis of
-delos* —
-computed from the key itself. Nobody types a name; there is no registry to hold
+delos* — computed from the key itself. Nobody types a name; there is no registry to hold
 one, and a typed name carried between Stoas would undo the unlinkability above
 with a text field — which is a reason that outlives the first release's
 suspension of it, since a name field would make the property unrestorable rather
 than merely switched off.
 
-**The register is deliberate and it is the point: sober, plain, adult — but only
-two of the three words carry it.** The **noun** pools the vocabulary of Greek
-thought (`logos`, `praxis`, `techne`, `aporia`, `kairos`) with thinkers and
-writers (`thales`, `hypatia`, `solon`, `sappho`), and the **place** is a Greek
-place, real or mythological (`lampsacus`, `abdera`, `delos`, `elea`). The
-**adjective is any English adjective** and is not screened for register at all, so
-`brittle`, `luminous` and `damp` draw alongside `measured` and `attic`. What
-carries the classical register is the *X of Y* shape and the two Greek words in
-it. **If a name reads like a fantasy handle, something has gone wrong** — an
-earlier draft drew on science fiction and produced *vermilion patient sandworm*,
-which is why this note exists.
+**A one-line gloss for the identity selection screen**, on hover or beside the
+slate — the noun and the place are Greek, and a user has no other way to know
+why the words look the way they do:
+
+> The noun and the place are ancient Greek; the adjective is English.
 
 **Three content words, and they all matter — but the `of` is free.** The
 adjective, the noun and the place are each an independent draw and each is part of
