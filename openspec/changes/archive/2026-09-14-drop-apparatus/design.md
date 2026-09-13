@@ -1,0 +1,617 @@
+# Design — dropping the apparatus column
+
+## 1. The brief needed less correcting than the dispatch expected, and why that matters
+
+The dispatch asked me to stop `docs/UI-BRIEF.md` "presenting the apparatus as
+something the interface renders". **It never did.** Measured, not assumed:
+
+```
+git grep -niI "apparatus\|margin note\|marginal\|MarginNote" origin/main -- docs/UI-BRIEF.md
+```
+
+returns nothing. The word does not occur in the file.
+
+That is worth recording rather than quietly skipping, because it locates the
+defect precisely. The apparatus did **not** reach the QML by way of a brief that
+asked for it. It reached the QML directly from the design bundle, whose marginal
+notes look — to someone implementing screen by screen — exactly like every other
+element in the mockup. The brief was silent, and silence was read as permission.
+
+So the correction the brief needs is not a retraction. It is the sentence it was
+missing: **an obligation is a thing the interface must do, not text to print at
+the reader, and the bundle's apparatus column is annotation rather than
+interface.** That is added as a box under *Non-negotiable rendering obligations*,
+which is the section a designer reads when deciding what a screen owes.
+
+## 2. Where each apparatus obligation lives now
+
+The three notes were checked one at a time against the brief **before** deleting
+anything, because a note whose obligation exists nowhere else is a requirement
+being deleted by accident. Line numbers are `origin/main`'s.
+
+| Note | The obligation | Where it survives |
+|---|---|---|
+| `ON WHAT YOU HOLD` | every count is what this machine holds; no global total is knowable | **Brief constraint 1** — "a count of *anything* global — members, total posts — is unknowable. Do not show one" — and **brief rendering obligation 10**, which this change added because the note's wording did not cover the feed's actual claim. In the **interface**, two separate sentences carry it, each beside the claim it qualifies: see below. |
+| `ON THE MARK` | **two propositions** — see below; they do not survive equally | **Brief obligation 6** — *"A generated name is never unique and never an identifier — the address is."* — and specifically **layer 2, the identicon**, in its four-layer list. Carries both. In the **interface**, only the pairing half survives. |
+| `ON THIS ORDERING` | this feed is **not** newest-first | **Brief Feed section**, `UI-BRIEF.md:331-375` — but see §3. The brief's half survived; the interface's half did not, so it was moved rather than deleted. |
+
+### `ON THE MARK` carried two propositions, and only one survives on screen
+
+Narrowed after review, which found the original wording here claimed more than it
+supports. The note said the mark is "a shortcut for recognition, **never a proof
+of anything** — which is why the address is printed beside it". Two claims:
+
+- **The pairing claim — the address is beside the mark.** This survives
+  **structurally**, which is the stronger form: `PostHeader.qml:35-38` renders
+  `AddressLabel` with no `visible:` binding and no empty-string collapse, while
+  the `Identicon` at `:21-26` *is* conditional (`visible: markSize >=
+  Theme.markMinDraw`). The asymmetry runs the safe way — an address can appear
+  without a mark, a mark cannot appear without an address. Same at the Stoa
+  header, `FeedScreen.qml:143`. The review verified this rather than trusting it.
+- **The non-proof claim — the mark proves nothing.** This has **no surviving
+  rendered text**: `grep -rn "proof"` over `dialectica-ui/src/qml/` returns
+  nothing.
+
+**The second is accepted as undischarged in the interface, deliberately.** The
+brief states it (obligation 6 and its four-layer list, which is explicit that the
+identicon "is nonetheless forgeable in exactly the way the name is"), and the
+protection a reader actually needs is the address being *present* — which the
+structural half delivers. A line of prose telling a reader that a glyph is not
+proof is not something they act on; showing them the address is.
+
+So the claim this row supports is **"the address is beside the mark"**, not "the
+non-proof proposition is discharged somewhere". Anyone citing this table for the
+latter is citing it wrongly, which is why the distinction is written out.
+
+### `ON WHAT YOU HOLD` was narrower than it looked, and the gap was not a count
+
+An earlier version of the row above claimed this obligation survived "in the
+**interface already**", citing the empty state's "This is a fact about your copy,
+not about the Stoa." Review found that sentence and the `"STORE READ OK · N POSTS
+HELD"` line both sit inside the `Rectangle` gated on `rows.length === 0`, so a
+feed showing thirty posts made no locality claim at all. The row was overclaiming.
+
+**The obvious repair was the wrong one, and measurement is what showed that.**
+The natural reading — "a locality line wherever a count appears" — has no subject
+on a non-empty feed, because **the non-empty feed renders no number**. `"STORE
+READ OK · N POSTS HELD"` is the screen's only count and it renders only when the
+list is empty, so it only ever reads `0`. There is no page number, no "showing 30
+of", no reply count.
+
+**What is unqualified is the pagination control, and it is an extent claim
+without a numeral.** `hasMore` comes from `feed::list_threads`, computed from this
+peer's log alone, so "Next" means *this machine holds another page* — while a
+reader meeting a full page and a "Next" button reads it as *this Stoa has more*.
+That is precisely the crack the note's own wording left open: it said "every
+**number** here counts what this machine has received", so when the assertion
+stopped being a numeral it stopped being covered.
+
+So the requirement is **triggered by the extent claim rather than by screen
+state**, and it is written as brief rendering obligation 10: never render a
+quantity the core cannot know; where the interface *does* assert extent, that
+assertion must be readable as local; and **a screen asserting no extent owes
+nothing** — the last clause being what keeps this from becoming a disclaimer
+printed once per screen, which is the mistake this whole change undoes.
+
+**Taken: the sentence lives inside the pagination control's own layout.** The
+`RowLayout` became a `ColumnLayout` holding the buttons and the sentence, so one
+`visible:` binding — the one the row already had — decides both. The claim and
+its qualifier cannot render apart, in either direction.
+
+**Rejected: a body-level `Text` with its own visibility condition**, which is the
+shape `ON THIS ORDERING` uses in §3. It would work, but it adds a fourth
+slightly-different `visible:` guard to a screen that computes `readState`
+precisely so at most one state renders by construction — and CLAUDE.md names a
+fourth guard as the signal to reshape rather than to add a fifth. Nesting reuses
+the existing binding instead of duplicating its condition, so there is no second
+place to keep in step.
+
+**Rejected: leaving it as the code comment beside the `RowLayout`**, which is
+where this reasoning already lived and which no user opens. That is the same
+failure as leaving an obligation in the brief alone.
+
+**The architecture review's premise dissolved rather than being answered.** It
+filed this as "whichever answer you choose, the current shape makes it awkward",
+on the assumption the trigger was screen state and a fourth guard was needed. The
+pagination row was always outside `readState`'s three-state invariant and already
+carried its own binding, so the reshape costs no new condition.
+
+**A note for whoever tests this.** `visible` is not a readable signal here: QML
+reports *effective* visibility, and a `TestCase` is itself invisible offscreen, so
+every descendant reads `false` whatever its own binding says. Height is worse than
+useless — the paging-versus-no-paging card height delta was measured identical
+with the sentence present and with it replaced by a one-word string, so a height
+assertion is a gate the defect satisfies. What is readable is the object graph:
+the sentence and the buttons sharing one governing ancestor is the property that
+makes "renders where paging is offered, and only there" true by construction.
+
+### The two framings that were rejected, and what obligation 10 costs
+
+Recorded here after review, which found the decision itself lived only in
+`proposal.md` — and a decision recorded only in the proposal is one `design.md`
+claims did not happen. The alternatives are the substance of it:
+
+**Rejected: "the locality claim must appear once per screen."** That is a
+disclaimer rather than an obligation, and it is the exact mistake this change
+exists to undo: a screen with no count and no paging would be made to print a
+sentence at the reader that corrects nothing. An obligation is a thing the
+interface must **do**.
+
+**Rejected: "the empty-screen-only behaviour is correct as it stands."** It is
+correct about counts and silent about paging, and the paging case is the one where
+a reader is actually misled. Accepting it would leave the interface relying on the
+reader not to make the ordinary assumption — which §3 establishes, on the other
+obligation, is not a thing an interface may rely on. The same test, applied twice.
+
+**What it costs, which is the part that was written down nowhere.** Obligation
+10's second half is the **first brief obligation dischargeable only by prose**, in
+a change whose whole thesis is that an obligation is something the interface
+*does* and that text printed at a reader is what the apparatus column got wrong.
+That tension is real rather than apparent, and naming it is what keeps the next
+author from reading obligation 10 as licence for the disclaimer the same
+obligation forbids.
+
+It is accepted because the two halves fail differently. Most obligations discharge
+structurally because a structure can make the wrong state unreachable — printing
+the address beside every mark means no mark can appear unaddressed. Here the claim
+is made **by a control**, so there is no structure that unmakes it: the only way to
+stop "Next" reading as *this Stoa has more* is to say whose copy it is about. The
+brief states this discriminator itself, at *"the claim is made by a control, so no
+structure can unmake it"*, and pairs it with the explicit non-obligation — a screen
+asserting no extent owes nothing — which is what stops the licence generalising.
+
+So the line between this and the apparatus is not prose-versus-structure. It is
+**who is addressed**: the apparatus explained the design to a designer in a margin,
+where obligation 10 qualifies a claim the interface itself just made, to the reader
+who just met it, only in the state that makes it.
+
+## 3. The one obligation that would have vanished, and the decision taken
+
+`ON THIS ORDERING` is the exception, and it is the case the dispatch warned
+about.
+
+The ordering control's label is `"same order for everyone"`. That label is
+**honest** — it satisfies the brief's rule against labelling an ordering "new",
+"latest" or "recent", and it is true of this fallback specifically. But it is
+**neutral**. It declines to claim recency; it does not deny it.
+
+The denial matters because a reader meeting a forum feed assumes newest-first
+unless told otherwise. A neutral label leaves the interface relying on the reader
+not to make the ordinary assumption — which is not a thing an interface may rely
+on. On `main` the only place that assumption was corrected was the apparatus
+note, so deleting the column would have removed the correction and left nothing.
+
+**Decision: the sentence moves into the feed's own body**, under the heading
+rule, in `Theme.note` — verbatim, since its wording was already reviewed. It is
+now interface addressed to a user rather than margin addressed to a designer,
+which is the distinction this whole change turns on.
+
+**The `copy.json` key moves with it**, which review found had been dropped. The
+deleted `MarginNote` carried `// copy.json \`feed.orderingNote\``, and the `Text`
+that replaced it first carried none — the only bundle-sourced string in the tree
+without one, against seven that keep theirs (six in `FeedScreen.qml`, two in
+`SanitisedText.qml`). The argument for dropping it is real: the text is no longer
+a *margin* note, so `feed.orderingNote` arguably no longer names it. It is
+rejected because **what changed is the presentation and not the string**. The
+wording is the bundle's, unaltered, and the key is how a later reader reconciles
+the QML against the bundle; renaming or dropping it would make this one sentence
+untraceable in a scheme §7 of this document reasons from directly when it hands
+the `compose.apparatus` question to the composer piece.
+
+**Rejected: leaving it to `docs/UI-BRIEF.md` alone.** A brief obligation with no
+interface text is precisely how the apparatus came to ship in the first place —
+the brief said what was owed, the bundle showed a way to say it, and the way got
+built. Discharging an obligation into a document nobody running the app reads is
+not discharging it.
+
+The brief's Feed section gains the matching clause, so the next designer is told
+that a neutral label is not by itself enough.
+
+## 4. Reshaping `ScreenFrame`, and a defect the reshape exposed
+
+`ScreenFrame` was a `RowLayout` of two columns: the content, and the apparatus
+panel at a fixed `Theme.apparatusWidth` of 244px. Removing the panel leaves a
+choice.
+
+**Rejected: keep the `RowLayout`, drop only the panel.** That is a one-column
+`RowLayout`, which is a `ColumnLayout` with a misleading name, and it leaves the
+`apparatus` property alias pointing at nothing. It also keeps the shape the
+change exists to remove.
+
+**Rejected: keep the column but render it empty.** 244px of dead width on every
+screen, and an invitation for the next screen to fill it back up.
+
+**Taken: one anchored `ColumnLayout`**, with the `apparatus` alias gone.
+
+The reshape then forced a question the two-column form had hidden.
+`anchors.fill: parent` on the old `RowLayout` meant the layout's implicit size
+did **not** propagate to the `Rectangle`, so `ScreenFrame` had **no
+`implicitHeight` at all** — while `Main.qml:42` reads exactly that value to set
+the `Flickable`'s `contentHeight`. Both landed in the same commit (`0538c0d`), so
+this has been true since the screen was written.
+
+With one column there is nothing else that could know the card's height, so the
+reshape cannot avoid answering: `implicitHeight` is now
+`body.implicitHeight + 2 * Theme.cardPaddingY`.
+
+**This is a behaviour change beyond the apparatus question and is deliberately
+not presented as one of the removals.** It is recorded here rather than fixed
+silently. A reviewer should read it as: the two-column form concealed a missing
+height source, and a one-column form cannot.
+
+Review measured the defect and it was **worse than this section first claimed**:
+on `origin/main` the feed's `implicitHeight` was **0 with thirty rows**, and
+`Main.qml`'s `Flickable.contentHeight` was **56** — the two padding spacers and
+nothing else. **The feed did not scroll at any row count.** After the change,
+`contentHeight` and the laid-out content agree exactly (331), and the value tracks
+content monotonically: 275 empty → 1030 at five rows → 4805 at thirty.
+
+### The anchor choice also changed what `fillHeight` means, which this section missed
+
+Added after review. The first version of this reshape anchored `body` to **three**
+edges — top, left, right — reasoning that `implicitHeight` above already carried
+the card's height and the column should size itself. That is correct for the
+height, and it **silently broke a case no screen on this branch exercises**.
+
+A `ColumnLayout` with no bottom constraint has height equal to its own implicit
+height, so it has **no spare space to distribute**, and a child declaring
+`Layout.fillHeight: true` falls back to its `implicitHeight` — 0 for a bare
+`Rectangle`. Measured at Qt 6.10.3, same markup: **544 high on `origin/main`, 0 on
+the three-edge form.** No warning, no binding loop, qmllint exit 0, 41/41 green.
+The failure mode is a blank region on a screen where every gate passes.
+
+`FeedScreen` uses no `fillHeight`, so the branch was honestly green — but #60, #62
+and #63 are all building screens on this shell, and a body that fills the card is
+the ordinary case. The text those screens owe a reader (a seed-phrase permanence
+warning, a closed-gate reason, a publish outcome that must not claim delivery) is
+exactly what would have vanished. **An obligation discharged by a zero-height
+element is an obligation not discharged.**
+
+**Taken: bind `body.height` to `Math.max(implicitHeight, root.height - 2 *
+cardPaddingY)`.** A `fillHeight` child gets the real slack (544 again), and the
+binding reads `root.height` while `implicitHeight` reads `body.implicitHeight`, so
+the two touch disjoint properties and cannot loop. Qt reports none.
+
+**Two alternatives were tried and measured before being rejected**, which is the
+only reason the trade below is stated with confidence rather than asserted:
+
+- **Anchor the bottom edge.** Fixes `fillHeight` identically, and is the same
+  trade — it is not a *better* answer, just a less explicit one.
+- **Add a trailing `Item { Layout.fillHeight: true }` spacer to absorb slack.**
+  Worse on two counts, both measured: it **splits the space with a genuine
+  `fillHeight` child** (544 → 262), and its `spacing` gap enters
+  `body.implicitHeight`, inflating the card by 20px so the `Flickable` scrolls
+  past the end of the content — re-breaking the very thing `implicitHeight` fixed.
+
+**The trade this accepts, stated plainly.** A `ColumnLayout` taller than its
+content distributes slack *among its children*. So in a card given an **explicit
+height** with no child claiming that slack, two 40px rows land at y=111 and y=393
+rather than stacked at y=0 and y=60 — the top-packing the three-edge form gave
+away for free, which this binding does not recover.
+
+It is accepted rather than solved because **no caller here gives a card an
+explicit height**: `Main.qml` sets `Layout.preferredWidth` and alignment only
+(verified — the file contains no `height` assignment to the frame), so the card is
+always sized from `implicitHeight`, where content and card agree and nothing
+scatters (measured: y=0 and y=60). The scattering needs a caller that does not
+exist; the `fillHeight` collapse was going to be hit by the next screen written.
+`ScreenFrame.qml` carries the escape hatch in a comment, so a screen that does set
+an explicit height is told what to add rather than left to diagnose it.
+
+### The two escape hatches are not equivalent, and the comment used to offer both
+
+Added after review. The escape hatch originally offered a choice —
+`Layout.fillHeight` on a child, **or** a trailing `Item { Layout.fillHeight:
+true }` — which contradicted this same section's rejection of the trailing
+spacer a few paragraphs earlier. Both fix the scatter; only one is free.
+Measured in one run, two 40px rows in a `ScreenFrame`:
+
+| Form | `implicitHeight` | rows at `height: 600` |
+|---|---|---|
+| no slack-absorbing child | 156 | y=111, y=393 — the scatter |
+| trailing `Item { Layout.fillHeight: true }` | **176** | y=0, y=60 |
+| `Layout.fillHeight` on a real child | **156** | y=0, y=60 |
+
+The 20px delta is `Theme.blockGap` exactly: the spacer is a layout child, so it
+takes a `spacing` gap that enters `body.implicitHeight` and inflates the card —
+re-breaking what `implicitHeight` exists to fix, on a screen where the scatter
+looks solved. The comment now names `fillHeight`-on-a-real-child as the fix and
+says what the spacer costs, rather than presenting them as alternatives.
+
+**The general shape of the defect**: a reader who hits a symptom takes whichever
+remedy needs least judgement. Offering two and warning about neither means the
+cheaper-looking one gets picked.
+
+### Where the shell's contract lives
+
+Also after review. `ScreenFrame`'s contract lived only inside `ScreenFrame.qml` —
+`grep -rn ScreenFrame` over `docs/` returned nothing — so the rule was reachable
+only by someone who already had a reason to open the shell. A screen author
+starting `MyScreen.qml` with `ScreenFrame { … }` has no such reason until
+something has already gone wrong, and the failure mode is silent.
+
+Four new call sites across three in-flight branches happen to satisfy the
+contract, but by what those authors wrote rather than by anything telling them.
+The evidence that the rule was in the wrong place is that a second author
+independently re-derived "the apparatus is annotation, not load-bearing" on
+`piece/ui-onboarding` and, having derived it, kept the margin note anyway — two
+authors, the same conclusion, no shared place to record it.
+
+**Taken: state the contract in `docs/UI-BRIEF.md`**, under *What `ScreenFrame`
+gives you*, which this change already edits and which the repo designates as the
+live statement of what a screen owes. Three supporting edits make it reachable:
+the brief's opening now names the QML implementer as a second audience,
+CLAUDE.md's "Where to look for what" row now sends a screen author there
+**before writing a screen**, and `ScreenFrame.qml`'s header points at the
+section and asks for the two to be kept in step.
+
+**Rejected: leave it in the component's comment block.** That is the arrangement
+that produced the gap. It also hides the rule from anyone reading the brief to
+decide what a screen owes, which is the audience that most needs it.
+
+#### The contract's first draft promised something it cannot deliver
+
+Added after the design review, which measured the two middle bullets against each
+other and found them jointly false. One bullet promised a `Layout.fillHeight`
+child "gets real slack"; another, five lines later, forbade giving a `ScreenFrame`
+an explicit `height`. **An author following the second gets the collapse the first
+says cannot happen.** Re-measured independently here, one probe, Qt 6.10.3:
+
+| Frame | `frame.h` | `filler.h` |
+|---|---|---|
+| `height: 600` — the forbidden form | 600 | **484** |
+| no explicit height — the mandated form | 116 | **0** |
+| inside a `Main.qml`-shaped Flickable + ColumnLayout | 116 | **0** |
+
+The third row is the only call shape in the tree: `Main.qml` assigns the frame
+`Layout.alignment` and `Layout.preferredWidth` and no height. So **in the app as
+shipped, a `fillHeight` child of a `ScreenFrame` is zero-height**, and the brief
+was telling the authors on #60, #62 and #63 the opposite.
+
+The 544 figure §4 records is real and reproduces — what was wrong is the **scope
+claimed for it**. It was measured against `ScreenFrame { width: 1000; height: 600
+}`, closed against the same markup, and written up without the qualifier; the
+brief then turned an unqualified sentence into guidance for callers who, by this
+same section's trade paragraph, never give a card an explicit height.
+
+**Taken: say plainly that a content-sized card has no slack to give**, and tell a
+screen author to design a screen that grows downward rather than one that fills a
+viewport. The `fillHeight` bullet is kept but moved behind the explicit-height
+condition that makes it true.
+
+**Rejected: make `ScreenFrame` fill its parent.** That would make `fillHeight`
+work as the first draft promised, and it would undo `implicitHeight` — the card
+would stop reporting its content height, `Main.qml`'s `contentHeight` would go
+back to reading the viewport, and the feed would stop scrolling. That is the
+defect §4 exists to fix, traded for a convenience no screen has yet asked for.
+
+**Rejected: qualify the bullet and leave it there.** It removes the contradiction
+without answering the question the author actually has, which is what to do
+instead. A brief that says "not this" and stops is how the apparatus shipped.
+
+**What this costs, named because it is a real limit rather than a wording
+choice:** a screen genuinely wanting a full-height region — a two-pane thread
+view, say — cannot get one from the shell as it stands, and will have to pick a
+height or change `ScreenFrame`'s contract deliberately. The brief now says so,
+which is better than a promise that measures zero.
+
+**Rejected: a spec delta.** The contract is about how a QML shell is used, not
+about observable forum behaviour; `.openspec.yaml` sets `skip_specs: true` for
+this change and nothing here alters that.
+
+The comment block shrank in the same pass: four passages narrated the two-column
+shape this replaced, which `git log` and this section already carry. What is kept
+is the two things neither answers — why `body.height` is bound at all, and what
+to do when a card scatters.
+
+## 5. `Theme.paperDeep` stays; `Theme.apparatusWidth` goes
+
+`apparatusWidth` had exactly two readers, both deleted, so it goes with them.
+
+`paperDeep` is now unreferenced but **stays**. It is a surface token in a palette
+— a deeper paper for a panel inset in a card — and the next inset panel will want
+it. What was wrong was only its comment, which named it as *the apparatus
+column*. The same applies to `accent`, whose comment listed "apparatus rules"
+among its uses.
+
+Deleting a palette token because today's screens happen not to use it is a
+different change from this one, and would make the palette a record of current
+usage rather than a designed set.
+
+## 6. What this change does not touch
+
+- **No spec delta.** `.openspec.yaml` sets `skip_specs: true` with the
+  measurement. See §7 for the one spec that *does* name an apparatus string.
+- **No test assertion about the *feed's* apparatus is changed or removed.** When
+  this change was written, no test on `main` asserted apparatus content —
+  measured by grep over `dialectica-ui/tests/`, which returned one line, in
+  `tst_identicon.qml`, and it was the word "mark" inside an unrelated comment.
+  **That was itself a finding**: the column shipped, and no gate could see it.
+
+  **That claim no longer covers the whole tree, and §9 records what changed.**
+  #60 and #63 landed three more screens with eleven margin notes between them,
+  and the tests written alongside them *do* reach into `ScreenFrame.apparatus`.
+  Merging `main` therefore made three test edits unavoidable; each is named and
+  argued in §9 rather than folded in silently.
+- **No core change.** View-only.
+- **No unrelated staleness fixed.** Several things in `UI-BRIEF.md` invite
+  editing; all are left alone. Three branches are editing this file concurrently
+  and one rewrites it wholesale, so a sweep here would be a sweep nobody can
+  review.
+
+## 7. The `compose.apparatus` question, raised here and since settled upstream
+
+**This section is kept because its conclusion was reached independently and then
+confirmed, which is worth more than either half alone.**
+
+When this change was written, `piece/ui-composer` (PR #62) carried an unmerged
+delta requiring the closed gate to state why no compose box is shown *"using the
+bundle's `compose.apparatus` string"*. The worry was obvious: a requirement
+naming an apparatus string, in a change deleting the apparatus column.
+
+The reading taken here was that **the requirement never needed the column**. What
+it requires is that *the closed gate* state why no box is shown; it names
+`compose.apparatus` only as the source of the wording, and a sentence in the
+gate's own body discharges it exactly — the same move §3 makes for the ordering
+note, and better on its own merits, since a statement about why *this* gate is
+closed belongs in the gate rather than in a margin. Changing the contract was
+nonetheless left alone as a `spec-writer`'s job with the owner's call.
+
+**#62 has since merged, and the merged spec settles it the same way and more
+strongly.** `openspec/specs/composer-view/spec.md` now reads:
+
+> The view SHALL state, **in the closed gate's own body**, that no compose box is
+> shown and why … The requirement is on the **statement being present where the
+> gate is rendered**, not on it occupying any particular region of the screen.
+
+and adds that the requirements are *"on what the interface says, not on which
+stored string it says it with"*, because the bundle is not in this repository and
+a verbatim-string requirement would be one no gate can enforce.
+
+So there is no conflict to resolve: the contract requires a statement in the
+gate's body, which is where `FeedScreen` puts it, and
+`test_the_missing_box_statement_is_in_the_gates_own_body` pins it. The residual
+risk this section once listed — an unpushed test demanding the bundle string
+verbatim — did not materialise, and the merged spec explains why such a test
+would have been the wrong instrument.
+
+## 8. The delivery disclaimer, and why it is not this change's to preserve
+
+The dispatch asked that the `ON PUBLISHING` note's obligation — that the
+interface positively denies knowing anything about delivery — be preserved in the
+screen's own body rather than in the brief alone.
+
+**When this change was written that note did not exist on any pushed branch**, and
+`main` had no publish path, no compose box and no submit control at all —
+`FeedScreen` only read. So there was nothing to preserve it into, and writing a
+delivery denial would have meant text about a button that was not on the screen.
+
+**#62 has since merged and answered this better than a preservation would have.**
+Re-measured rather than left as written: `grep -rn "ON PUBLISHING"` over
+`dialectica-ui/` now returns three hits, all in `tst_composer_claims.qml`, all
+comments — and what they record is that the composer piece **deleted its own
+`ON PUBLISHING` note** and discharged the denial in `DPublishOutcome`, beside the
+success it qualifies, where it is pinned character-for-character. The test file
+also deleted the sweep exclusion that had accommodated the note, so the denial is
+now covered by the same sweep as everything else rather than exempted from it.
+
+That is the same move §3 makes for the ordering note, arrived at independently by
+another author: the obligation goes where the reader meets the claim, not into a
+margin. This change therefore inherits nothing to do here.
+
+**The obligation is contracted twice over**, so it never rested on a note:
+
+- `docs/UI-BRIEF.md` obligation 9 — "A successful publish means 'saved here', not
+  'posted'" — unchanged by this change.
+- `composer-view`'s requirement *"A successful publish claims local storage and
+  never delivery"*, with three scenarios, now merged into `openspec/specs/`.
+
+## 9. The eleven notes on the three screens `main` gained, and the decision to delete them
+
+While this piece was in review, #60 and #63 merged three screens that each build
+on `ScreenFrame` and each fill its `apparatus` property. Deleting the component
+breaks them, so the question was put to the owner: migrate these notes into the
+screens' bodies, or leave the screens to do it themselves later?
+
+**The owner's answer was neither — the notes go.** Verbatim: *"marginnote.qml is
+the apparatus right? it can be deleted; I dont want the notes on the screen at
+all."* So the eleven instantiations are removed along with the component, with no
+migration and no rewriting of any note as body copy.
+
+**This section exists so nothing has to be reconstructed from git history.** Six
+of these notes were the only rendered copy of what they said. If an obligation
+below is later wanted in some other form, this is the record of what it said and
+where it was; it is not a task list, and nothing here is deferred work.
+
+### `DOnboardingScreen.qml` — three notes, none of them a sole carrier
+
+| Note | Survives as |
+|---|---|
+| `ON PERMANENCE` | **Body copy, identical string**, at `DOnboardingScreen.qml:511`. Measured, not assumed: the two strings were compared and match character for character. |
+| `ON UNIQUENESS` | **Body copy, identical string**, at `:541`. The screen's own comment recorded why it was duplicated there — a spec'd obligation must not rest on annotation — which is exactly what made this deletion free. |
+| `ON THE MARK` | Nothing rendered. It described how the identicon's three inks are derived and what a curved versus angular contour means. |
+
+The first two are why this screen cost nothing: an earlier author had already
+moved both obligations into the body *because* the apparatus was known to be
+annotation. That foresight is what this change collects on.
+
+### `DJoinScreen.qml` — four notes, all rendered nowhere else
+
+| Note | What it said |
+|---|---|
+| `ON WHAT THE ADDRESS PROVES` | That verification compares two things the user supplied and consults nothing else — not a registry, not a peer, not the network — and does **not** establish that this is the address they were meant to receive. |
+| `ON THE TITLE` | The title is decoration: freely chosen, not unique, matched against nothing, and pickable to resemble another Stoa's. |
+| `ON WHERE THIS CAME FROM` | The screen was opened from a reference somebody handed the user, and nothing was joined by opening it. |
+| `ON WHAT JOINING DOES` | That joining starts collecting the Stoa's records locally — *"There is no membership list, nobody is notified, and **no peer can be stopped from publishing here**."* |
+
+The last clause is the one to notice: **"no peer can be stopped from publishing
+here"** appeared nowhere else in the tree. It states the permissionless half of
+the Stoa design directly to a user at the moment they join.
+
+This note also carried a deliberate correction that dies with it: the bundle's
+wording ended *"and generates you an identity for it alone"*, and the author
+dropped that clause because per-Stoa identity is built but **not switched on** —
+one key signs in every Stoa in this release. The screen's remaining copy is
+pinned by `tst_stoa_screens.qml::test_nothing_on_the_preview_promises_a_per_stoa_identity`,
+so the false claim cannot return through the body; what is gone is only the note
+that positively denied it.
+
+### `DStoaListScreen.qml` — four notes, all rendered nowhere else
+
+| Note | What it said |
+|---|---|
+| `ON TITLES` | *"**A moderator may rename a Stoa to anything, including someone else's name.** Two rows can carry the same title and be entirely different Stoas. The contour and the address differ; the title does not."* |
+| `ON COUNTS` | No row says how many posts are held for a Stoa; such a number would be honest, but nothing computes it — so there is none to show rather than one being withheld. |
+| `ON SHARING` | A shareable reference carries the address and the founding record together, because an address is a hash of the record and cannot rebuild it; a row with no record offers no share, and that is absence rather than breakage. |
+| `ON WHAT THIS LIST IS` | Stoas the user chose, recorded locally — nobody was notified, no peer can see the list, and being in a Stoa does not mean moderating it. |
+
+**`ON TITLES` is the other sentence that existed only here.** The impersonation
+risk it names is real and follows directly from permissionless creation plus
+in-Stoa moderation, which is the pair the whole design turns on.
+
+Four of these obligations do survive as `//` comments in the screen's source —
+which a user never sees. That is recorded as a fact about where the reasoning
+went, not as a claim that the obligation is discharged.
+
+### What this leaves true, stated plainly
+
+Two sentences that stated real properties of the system to a user are no longer
+stated to a user anywhere: **that no peer can be stopped from publishing in a
+Stoa**, and **that a moderator may rename a Stoa to any name at all, including
+one already in use**. Both remain true of the system; neither is now said on
+screen. The owner has decided that is the right trade, and this section is the
+durable record of what the trade was.
+
+### Three test edits the merge forced
+
+`main`'s tests reach into `ScreenFrame.apparatus`, so removing the property
+broke them. Each was fixed on its own argument rather than by whatever turned
+the suite green:
+
+- **`tst_vote_and_gate.qml`** — `test_the_apparatus_walker_actually_excludes_the_column`
+  is **deleted**, along with `renderedTextOutsideApparatus` and
+  `isApparatusColumn`. It was a guard on a guard: it proved the walker actually
+  excluded a subtree, so that the placement assertion was not secretly a
+  presence assertion. With one region left on the screen, the walker is the
+  identity function and the distinction it enforced does not exist. Keeping it
+  would have meant keeping an identity function that reads like coverage. The
+  placement test remains and now pins the gate's own heading and core's reason
+  alongside the required sentence.
+- **`tst_onboarding_states.qml`** — `test_an_omitted_encryption_field_shows_no_claim_on_screen`
+  floored its corpus at `shown.length > 5`; removing three notes took it to 4.
+  The floor was never the property being protected — the named-sentence check on
+  the next line is — so it is replaced by `> 0` with the reasoning written down.
+  A count-pin fails on any re-layout and passes on a corpus collecting the wrong
+  text, which is the trap this repo has already paid for.
+- **`tst_onboarding_states.qml`** — `test_the_uniqueness_obligation_survives_without_the_apparatus_column`
+  threw on `screen.apparatus.length` once the alias was gone. The property is
+  now read defensively; `inApparatus` becomes 0 and the assertion reduces to
+  "the body copy carries the obligation", which is exactly what the test's own
+  comments say must survive. **Proved live by mutation**: replacing the body
+  sentence made it fail with *"Found 0 carrier(s), 0 of them in apparatus"*,
+  and the mutation was reverted.
+
+That last test deserves a note of credit: its author anticipated this change by
+name, rejected an exact-count assertion precisely because it would have made the
+margin copy undroppable, and left the reasoning in the file. Every assertion in
+it survived the column's removal untouched. Only the dereference needed a guard.

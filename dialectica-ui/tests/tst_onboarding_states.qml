@@ -909,7 +909,26 @@ TestCase {
         // Both bounds. The corpus must be non-trivial (or "nothing is shown"
         // would satisfy the absence half vacuously) and must reach the kept
         // card, proving the walk got as far as the sentence it says is absent.
-        verify(shown.length > 5, "the visible sweep must be finding text, got " + shown.length)
+        //
+        // The non-trivial half is asserted by REACHING A NAMED SENTENCE rather
+        // than by a count. It was `shown.length > 5`, and deleting the
+        // apparatus column took the count to 4 — a legitimate change failing a
+        // floor that was never the property being protected. A count-pin fails
+        // on any rewording or re-layout and passes on a corpus that collects
+        // the wrong text; the sentence below is what actually proves the walk
+        // arrived, and it is immune to both.
+        //
+        // **`> 0` rather than a recalibrated number, and that was measured
+        // rather than settled by argument.** Review asked whether the weakening
+        // from `> 5` gave up real coverage. It does not: the failure a floor
+        // exists to catch is a corpus that went empty, and `visibleTextsOn`
+        // stubbed to `return []` fails THIS line — with three other tests in
+        // this file failing beside it. A larger floor would catch the same
+        // single defect and additionally fail on every future re-layout, which
+        // is the count-pin failure mode one line up. The floor and the named
+        // sentence are two assertions doing two jobs: this one says the walk
+        // found anything, the next says it found its way to the kept card.
+        verify(shown.length > 0, "the visible sweep must be finding text at all")
         verify(shown.join(" ").indexOf("This is who you are here now.") >= 0,
                "and must reach the kept card, or its silence proves nothing")
 
@@ -1289,9 +1308,21 @@ TestCase {
         // neutering `everyTextOn` alone produced "Found 0 carrier(s), 1 of them
         // in apparatus", a negative remainder that happened to fail for the
         // right reason by luck rather than by arithmetic.
+        //
+        // **The column is now gone and `apparatus` with it**, so the property
+        // is read defensively rather than assumed: `drop-apparatus` (#70) both
+        // deleted the notes and removed `ScreenFrame`'s `apparatus` alias, and
+        // an unguarded `.length` here threw rather than measuring zero. The
+        // subtraction is what this test is built on and it still holds —
+        // `inApparatus` is simply 0 now, so the assertion reduces to "the body
+        // copy carries the obligation", which is exactly the property the
+        // comments above say must survive the column's removal.
         var apparatusTexts = []
-        for (var a = 0; a < screen.apparatus.length; a++)
-            apparatusTexts = apparatusTexts.concat(spec.everyTextOn(screen.apparatus[a]))
+        var apparatus = screen.apparatus
+        if (apparatus !== undefined && apparatus !== null) {
+            for (var a = 0; a < apparatus.length; a++)
+                apparatusTexts = apparatusTexts.concat(spec.everyTextOn(apparatus[a]))
+        }
 
         var carriesIt = function (s) {
             return s.indexOf("not unique") >= 0 && s.indexOf("not identifiers") >= 0

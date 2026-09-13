@@ -91,14 +91,23 @@ import sys
 # name — it resolved correctly throughout the outage, in the same files, under
 # the same imports, purely because basecamp has no `Core`.
 #
-# The ELEVEN COMPONENT NAMES are here because the architecture review found
-# them silently exempt: the rule read only `singleton` lines, so a plain
-# component re-registering a host name passed green. They are QML type names in
-# the same directory namespace as the singletons and are shadowable in exactly
-# the same way — the host's verified launch log registers `LogosButton.qml`,
-# which is a COMPONENT, not a singleton. Naming them here trades one silent gap
-# for eleven visible ones: nothing new is protected today, but the twelfth
-# entry cannot be added without either a `D` or a deliberate edit to this set.
+# THE COMPONENT NAMES BELOW are here because the architecture review found them
+# silently exempt: the rule read only `singleton` lines, so a plain component
+# re-registering a host name passed green. They are QML type names in the same
+# directory namespace as the singletons and are shadowable in exactly the same
+# way — the host's verified launch log registers `LogosButton.qml`, which is a
+# COMPONENT, not a singleton. Naming them here trades one silent gap for a set of
+# visible ones: nothing new is protected today, but the NEXT entry cannot be
+# added without either a `D` or a deliberate edit to this set.
+#
+# The set is deliberately not described by a count. It said "eleven" and then
+# `piece/drop-apparatus` deleted `MarginNote` and `ApparatusColumn`, leaving a
+# number that was wrong in a comment nothing checks — which is the failure mode
+# this file's own `check` function exists to avoid elsewhere. Read the set.
+#
+# **An entry whose component is deleted should be deleted with it.** A name left
+# here after its file is gone exempts nothing and quietly grows the list a reader
+# is meant to be shrinking.
 #
 # That is why this is a grandfather clause and not a precedent: "basecamp has
 # no `FlatButton` TODAY" is a fact with no expiry date attached, and the whole
@@ -118,8 +127,6 @@ GRANDFATHERED = {
     "AddressLabel",
     "VoteControl",
     "PostHeader",
-    "MarginNote",
-    "ApparatusColumn",
     "FlatButton",
     "ScreenFrame",
     "SanitisedText",

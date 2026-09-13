@@ -630,30 +630,4 @@ ScreenFrame {
 
         Item { Layout.fillWidth: true }
     }
-
-    apparatus: [
-        MarginNote {
-            label: "ON WHAT THE ADDRESS PROVES"
-            body: "That the record shown is the one this address names. That is a comparison between two things you supplied, and it consults nothing else — not a registry, not a peer, not the network. It does not establish that this is the address you were meant to receive."
-        },
-        MarginNote {
-            label: "ON THE TITLE"
-            body: "Decoration. Whoever created the Stoa chose it freely, it is not unique, it is matched against nothing, and it can be picked to resemble another Stoa's."
-        },
-        MarginNote {
-            label: "ON WHERE THIS CAME FROM"
-            body: "You opened this from a reference somebody handed you. Nothing was joined by opening it."
-        },
-        MarginNote {
-            label: "ON WHAT JOINING DOES"
-            caveat: false
-            // The bundle's version of this note ends "and generates you an
-            // identity for it alone". Per-Stoa identity is built in the core and
-            // NOT switched on in this release — one key signs in every Stoa — so
-            // that sentence would tell a user they have an unlinkability
-            // property they do not have. It is the one false claim on these
-            // screens that could actually harm somebody, and it is dropped.
-            body: "It starts collecting this Stoa's records on this machine. There is no membership list, nobody is notified, and no peer can be stopped from publishing here."
-        }
-    ]
 }

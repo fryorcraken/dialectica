@@ -1,0 +1,21 @@
+# `schema` is REQUIRED for this file to be valid change metadata, and without it
+# `skip_specs` is silently NOT HONOURED — `openspec validate --strict` reports
+# the marker as ignored and then fails for having no deltas, which reads as two
+# problems rather than one. It must name a known schema; this project's is the
+# built-in `spec-driven`, set in `openspec/config.yaml`.
+schema: spec-driven
+
+# No spec delta: this change removes a view element that no requirement ever
+# asked for.
+#
+# Measured rather than assumed. `grep -rniI "apparatus\|MarginNote"` over
+# `openspec/specs/` returns exactly one line — `module-wire-contract/spec.md:302`,
+# "The probe is apparatus rather than forum surface" — which is the Phase 0
+# scaffolding sense of the word and has nothing to do with a column of marginal
+# notes in the QML. `docs/UI-BRIEF.md` on `origin/main` does not contain the word
+# at all.
+#
+# So there is no requirement to modify and none to delete. Adding one to satisfy
+# validation would put a clause in the contract describing the *absence* of a
+# design annotation, which is not a behaviour the system has.
+skip_specs: true

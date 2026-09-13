@@ -871,24 +871,26 @@ TestCase {
         screen.destroy()
     }
 
-    // **RESOLVED.** The previous version of this test flagged a decision it
-    // could not make: the required sentence lived in the `APPARATUS` column,
-    // which the owner has said is annotation explaining the design to a reader
-    // of the design, shipped into the real QML by mistake and being removed. So
-    // the test asserted the presence of a string attached to something on its
-    // way out, and hiding `ApparatusColumn` failed exactly this test and nothing
-    // else — the requirement would have gone unmet with nothing failing for the
-    // right reason.
+    // **RESOLVED, then simplified when the apparatus column was deleted.**
     //
-    // The spec-writer picked the second of the two readings that were offered:
-    // the sentence moves into the closed gate's own body, and the requirement is
-    // now on "the statement being present where the gate is rendered", explicitly
-    // NOT discharged by "placing it anywhere a reader of the gate would not
-    // encounter it".
+    // This test once had to distinguish two regions. The required sentence
+    // lived in the `APPARATUS` column — annotation explaining the design to a
+    // reader of the design, shipped into the real QML by mistake — so asserting
+    // mere presence would have passed while the requirement went unmet, the
+    // sentence vanishing silently with the column. The fix was a walker that
+    // swept everything *outside* the column, turning presence into placement.
     //
-    // So this test now asserts **placement**, not mere presence. Sweeping the
-    // whole screen could not tell the two regions apart — which is why the old
-    // version passed both before and after the move.
+    // The column is now gone from the tree entirely, so there is no second
+    // region for a sentence to hide in and the walker had nothing left to
+    // exclude — its own guard test said so by failing. Presence and placement
+    // are the same assertion once the screen has one region, so the walker,
+    // its detector and that guard are deleted rather than kept as an identity
+    // function that reads like coverage.
+    //
+    // **What that costs, named so it is not rediscovered as a gap:** if an
+    // annotation region is ever reintroduced, this test goes back to passing on
+    // a sentence a reader of the gate never meets, and nothing here will say
+    // so. The protection now is that no such region exists to be placed in.
     function test_the_missing_box_statement_is_in_the_gates_own_body() {
         var screen = makeScreen({
             "get_capabilities": '{"canPost":false,"reason":"No keystore found."}',
@@ -901,95 +903,18 @@ TestCase {
         var required = "There is no disabled composer here. A box you could type "
                      + "into and not send would lose what you wrote."
 
-        verify(spec.renderedText(screen).indexOf(required) >= 0,
+        var rendered = spec.renderedText(screen)
+        verify(rendered.indexOf(required) >= 0,
                "the statement must be on screen at all")
 
-        // And still there once every annotation region is disregarded, which is
-        // the scenario the spec spells out. This is the assertion the old test
-        // could not make: it fails if the sentence lives only in the column.
-        verify(spec.renderedTextOutsideApparatus(screen).indexOf(required) >= 0,
-               "the statement must survive the annotation column's removal — it "
-               + "is owed to a reader facing the gate, and an obligation pinned "
-               + "to that column disappears with it, silently")
-        screen.destroy()
-    }
-
-    // The rendered text of everything EXCEPT the apparatus column, found by
-    // skipping any subtree rooted at an `ApparatusColumn`.
-    //
-    // Identified by its `content` alias rather than by a type name, so this does
-    // not depend on how the component is registered — and asserted below to
-    // actually exclude something, because a walker that silently matched nothing
-    // would make every caller pass for the wrong reason.
-    function renderedTextOutsideApparatus(item, acc) {
-        var out = acc === undefined ? "" : acc
-        if (item === null || item === undefined)
-            return out
-        if (spec.isApparatusColumn(item))
-            return out
-        if (typeof item.text === "string" && item.visible !== false)
-            out += item.text + "\n"
-        var kids = item.children
-        if (kids !== undefined) {
-            for (var i = 0; i < kids.length; i++)
-                out = spec.renderedTextOutsideApparatus(kids[i], out)
-        }
-        return out
-    }
-
-    // The column is found by the heading it renders, because that heading is
-    // the thing a reader uses to recognise the region as annotation.
-    //
-    // NOT by a `content` property: `ColumnLayout` carries one too in Qt6, so
-    // that test matched the gate's own body and excluded the very text the
-    // placement assertion was looking for. Caught by the test failing rather
-    // than reasoned about — which is why `test_the_apparatus_walker_actually_excludes_the_column`
-    // asserts the walker trims something AND leaves the gate intact.
-    function isApparatusColumn(item) {
-        var kids = item.children
-        if (kids === undefined)
-            return false
-        for (var i = 0; i < kids.length; i++) {
-            if (kids[i] !== null && kids[i] !== undefined
-                && typeof kids[i].text === "string"
-                && kids[i].text === "APPARATUS")
-                return true
-        }
-        return false
-    }
-
-    function test_the_apparatus_walker_actually_excludes_the_column() {
-        // The guard on the guard. If `isApparatusColumn` never matched, the
-        // placement assertion above would reduce to the presence assertion and
-        // pass whatever the code did — the exact defect family this repo
-        // watches for, where two explanations give the same answer.
-        var screen = makeScreen({
-            "get_capabilities": '{"canPost":false,"reason":"No keystore found."}',
-            "list_threads": spec.twoRows()
-        })
-
-        var all = spec.renderedText(screen)
-        var trimmed = spec.renderedTextOutsideApparatus(screen)
-        verify(trimmed.length < all.length,
-               "the walker must actually skip a subtree; if it skips nothing, "
-               + "the placement test proves nothing")
-
-        // And specifically: an apparatus note's text is gone from the trimmed
-        // rendering. "APPARATUS" is the column's own heading.
-        verify(all.indexOf("APPARATUS") >= 0, "the column is rendered at all")
-        verify(trimmed.indexOf("APPARATUS") < 0,
-               "the column's own heading must be excluded")
-
-        // **And the walker must not over-exclude**, which is the failure the
-        // first version of it actually had: identifying the column by a
-        // `content` property matched `ColumnLayout` too, so the gate's own body
-        // was trimmed away and the placement assertion failed against correct
-        // code. A walker that excluded everything would satisfy both checks
-        // above, so the gate's other text is pinned here as the other bound.
-        verify(trimmed.indexOf("No keystore found.") >= 0,
-               "core's reason is in the gate body and must survive the trim")
-        verify(trimmed.indexOf("You cannot post, reply or vote in this Stoa yet.") >= 0,
-               "the gate's heading must survive the trim")
+        // The gate's own text is pinned alongside it, so this is a statement
+        // about the gate's body rather than about the screen in general: the
+        // sentence and the reason core supplied are rendered together, which is
+        // what "in the gate's own body" now means with no other region to be in.
+        verify(rendered.indexOf("No keystore found.") >= 0,
+               "core's reason is rendered beside it, in the same gate body")
+        verify(rendered.indexOf("You cannot post, reply or vote in this Stoa yet.") >= 0,
+               "as is the gate's heading")
         screen.destroy()
     }
 

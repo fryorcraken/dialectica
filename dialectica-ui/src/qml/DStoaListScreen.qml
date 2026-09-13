@@ -631,24 +631,4 @@ ScreenFrame {
         }
     }
 
-    apparatus: [
-        MarginNote {
-            label: "ON TITLES"
-            body: "A moderator may rename a Stoa to anything, including someone else's name. Two rows can carry the same title and be entirely different Stoas. The contour and the address differ; the title does not."
-        },
-        MarginNote {
-            label: "ON COUNTS"
-            caveat: false
-            body: "No row says how many posts you hold for that Stoa. Such a number would be honest — it counts what this machine has — but nothing computes it, so there is none to show rather than one being withheld."
-        },
-        MarginNote {
-            label: "ON SHARING"
-            body: "A shareable reference carries the address and the founding record together, because an address is a hash of the record and cannot rebuild it. Rows this copy has no record for offer no share; that is the reference being absent, not broken."
-        },
-        MarginNote {
-            label: "ON WHAT THIS LIST IS"
-            caveat: false
-            body: "Stoas you chose, recorded on this machine. Nobody was notified, no peer can see this list, and being in a Stoa does not mean you moderate it."
-        }
-    ]
 }

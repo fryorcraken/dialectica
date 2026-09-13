@@ -517,25 +517,29 @@ ScreenFrame {
         Layout.fillWidth: true
     }
 
-    // The uniqueness obligation, IN THE BODY rather than only in the margin.
+    // The uniqueness obligation, in the body — which is now the only copy.
     //
     // The spec requires this screen to state that generated names are not
     // unique and not identifiers, and that the address is what distinguishes
     // two participants — required *"even though no row shows a name"*, because
     // what the user is choosing is a key whose name follows from it.
     //
-    // It was previously only a `MarginNote` in `apparatus`, which made a spec'd
-    // obligation depend on a column that is not load-bearing: `ScreenFrame`'s
-    // apparatus is annotation explaining the design, and a change that removes
-    // it would delete a requirement as a side effect. The permanence note above
-    // was already duplicated into the body for the same reason — this makes the
-    // two consistent rather than leaving one obligation resting on decoration.
+    // It was once only a `MarginNote` in `apparatus`, which made a spec'd
+    // obligation depend on a column that was not load-bearing: a change
+    // removing the annotation would have deleted a requirement as a side
+    // effect. Moving it here is what made that impossible, and the apparatus
+    // column has since been removed entirely — so this copy is load-bearing
+    // rather than a duplicate. The permanence sentence above is here for the
+    // same reason.
     //
-    // The margin note stays: it is the same text in the place a reader of the
-    // mockup expects it, and duplication here is cheap because neither copy is
-    // computed.
-    //
-    // **No word count**, in either copy. See the apparatus note below.
+    // **No word count.** The bundle's wording said "the same three words";
+    // §5.2.1's count has moved three times, and each move made a copy stating
+    // it wrong and left a test pinning the wrong number. The sentence states
+    // its obligation and no number, because the obligation does not depend on
+    // the count: uniqueness is not merely unbuilt but UNAVAILABLE, since there
+    // is no authority to hold a namespace — so the interface has to stay
+    // correct when two identities present the same name, and the correctness
+    // is that the address is always present.
     Text {
         visible: screen.phase === "slate" || screen.phase === "refused"
         text: "Names are not unique and are not identifiers. Someone else in this Stoa may hold the same name. Your address is what tells you apart, so it is printed beside your name everywhere."
@@ -741,45 +745,4 @@ ScreenFrame {
         }
     }
 
-    apparatus: [
-        MarginNote {
-            label: "ON PERMANENCE"
-            // copy.json `onboarding.apparatus.permanence`, verbatim.
-            body: "There is no settings screen where this can be changed later, because the name is only the key written out. Choosing again means being someone else here."
-        },
-        MarginNote {
-            label: "ON UNIQUENESS"
-            // copy.json `onboarding.apparatus.uniqueness`, with the WORD COUNT
-            // REMOVED rather than corrected.
-            //
-            // The bundle says "the same three words"; a previous revision of
-            // this file said "four", because §5.2.1 had settled four at the
-            // time. The count has now moved three times — three, then four
-            // (merged), now three again on a different basis (adjective + noun
-            // + "of" + place) — and each move made this copy wrong and left a
-            // test pinning the wrong number, which then had to be argued with
-            // before the copy could be corrected.
-            //
-            // So the sentence states its obligation and no number. That
-            // obligation is what actually matters here and it does not depend
-            // on the count: uniqueness is not merely unbuilt but UNAVAILABLE,
-            // since there is no authority to hold a namespace, so the interface
-            // has to stay correct when two identities present the same name —
-            // and the correctness is that the address is always present.
-            //
-            // Required even though no row shows a name yet: what the user is
-            // choosing is a key whose name follows from it, and a screen that
-            // explained the choice without saying the name settles nothing
-            // would have taught the opposite of what is true.
-            body: "Names are not unique and are not identifiers. Someone else in this Stoa may hold the same name. Your address is what tells you apart, so it is printed beside your name everywhere."
-        },
-        MarginNote {
-            label: "ON THE MARK"
-            caveat: false
-            // copy.json `onboarding.apparatus.mark`, verbatim. The mark is a
-            // second recognition channel, never a verification: it is derived
-            // from the same address an impersonator can grind against.
-            body: "The hatched shape is drawn from the same key: two inks for the weave, a third for the outline, all three chosen by the key. A curved contour always means a person; an angular one always means a Stoa."
-        }
-    ]
 }
