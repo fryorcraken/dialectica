@@ -339,8 +339,18 @@ replies, a Stoa's index — rather than scanning every row.
 
 **Op authenticity is dialectica's job, not the transport's** (§6). A forged op
 cannot be prevented from *arriving*: SDS has no membership and `senderId` is
-self-asserted. Verification therefore happens on **read**, filtering unsigned or
-badly-signed ops out. The store may hold junk; the reader never trusts it.
+self-asserted.
+
+~~Verification therefore happens on **read**, filtering unsigned or
+badly-signed ops out. The store may hold junk; the reader never trusts it.~~
+**Specified, and this is not where verification happens — see the
+`op-transport` spec**, whose requirement "Every inbound payload is validated
+before it reaches storage" refuses an unauthentic op at the transport boundary
+rather than storing it for a reader to filter. A reader that does not trust the
+store is still the right posture, and remains why `op-log` verifies nothing on
+append; but "the store may hold junk" was never the design for ops arriving from
+a peer, and reading it as licence to append unverified ops is the forgery-storage
+failure that boundary exists to prevent.
 
 **A generic op decoder may be wanted eventually, and is not built.** Every op
 decodes attacker-controlled bytes with the same failure modes — truncation,
@@ -362,16 +372,24 @@ a signature.
 
 ### 4.1 One reliability channel per Stoa
 
+**Specified — see the `op-transport` spec**, which carries one channel per Stoa,
+channel identity as a pure function of the Stoa address, the sender identifier
+never reaching an authorisation decision, and the receive-side validation
+boundary. The behaviour below is struck through; the reasoning under it is not,
+because it is what the spec deliberately does not carry.
+
 `channelCreate(channelId, contentTopic, senderId)` decouples channel from topic.
 
-- `contentTopic` = the Stoa, hashed and bucketed: `/dialectica/1/s/<hex>/proto`
-- `channelId` = the Stoa, and **the same value for every peer in it** — it is the
-  rendezvous, not a local handle (§4.3)
+- ~~`contentTopic` = the Stoa, hashed and bucketed: `/dialectica/1/s/<hex>/proto`~~
+- ~~`channelId` = the Stoa, and **the same value for every peer in it** — it is the
+  rendezvous, not a local handle~~
 - `senderId` = **one per user per Stoa, permanent** — every participant's is
   different (the API requires it); what is stable is that a given user keeps
   theirs across sessions. A transport self-filter, not an author identity; see
-  below
-- `threadId` and `parentPostId` live in the **payload**, never the topic
+  below. **Not yet built**: §9.2's MVP ships one identity per user, so the
+  per-Stoa scope this bullet assumes is the destination rather than the present
+  state.
+- ~~`threadId` and `parentPostId` live in the **payload**, never the topic~~
 
 **`senderId` is not an author identity, and the plan should not treat it as
 one.** It exists so SDS can tell a participant's own messages from everyone
@@ -381,6 +399,16 @@ is a SHOULD to "ignore the message if it has a `sender_id` matching its own".
 Acknowledgement accounting runs off message ids carried in causal history and
 bloom filters, not off sender ids — so reliability does not depend on a
 `senderId` meaning anything in particular.
+
+**Do not implement that SHOULD.** It describes SDS, one layer below the event
+dialectica receives, and on the reliable-channel path the filter it asks for has
+nothing to filter: `channelMessageReceived` does not fire for a participant's own
+messages, so a self-filter keyed on the sender identifier is a branch that never
+executes — and a dev who writes it will believe their own ops are being
+deduplicated by it rather than by op id. Specified: the `op-transport` spec's "A
+peer's own published op is not received back as an arrival", which is what makes
+storing on publication the only route by which a peer holds its own op. The
+asymmetry itself is in §11's trap list, because it presents as a storage bug.
 
 **The application owns it.** `channelCreate(channelId, contentTopic, senderId)`
 takes it as a parameter, and nothing in the delivery module persists it: the SDS
@@ -475,12 +503,12 @@ immutability SDS assumes is what §5.2's permanent per-user identity supplies.
 same requirement in informal prose — quote the spec, not the tutorial, when the
 strength of the obligation is the point.)
 
-**So the channel id can carry no per-peer state.** Not a session counter, not a
-local sequence number, not anything that varies with one peer's history. A value
-that differs between peers does not produce an error: it produces two Stoas that
-cannot see each other, silently and permanently. §4.5 states the same rule from
-the other direction — derive `channelId` as a pure function of the addressed
-object.
+~~**So the channel id can carry no per-peer state.**~~ **Specified — the
+`op-transport` spec's "Channel identity is a pure function of the Stoa address"
+carries this, including that a deterministic epoch is not a permitted variant of
+it.** Kept in one line because it is the rule the rest of this section reasons
+about: a value that differs between peers produces no error, it produces two
+Stoas that cannot see each other, silently and permanently.
 
 **Set aside, 2026-09-12: `logos-messaging/logos-delivery#4116`.** The issue
 reports that closing a channel which has received a peer message and then
@@ -495,8 +523,12 @@ That argument is below and rests on the shared node, not on any bug.
 
 **What it does change** is recorded at the end of this section.
 
-**Dialectica closes a channel in two places: when a user leaves a Stoa, and on
-shutdown.** Both, and the second is the one that looks optional and is not.
+~~**Dialectica closes a channel in two places: when a user leaves a Stoa, and on
+shutdown.**~~ **Specified — the `op-transport` spec carries both closes, that the
+shared node is never stopped, that closing is best-effort, and that a closed
+channel is reopenable under the same identity.** The argument for why the second
+close is not optional stays below, since the spec states the obligation and not
+the reasoning.
 
 **The delivery node is not ours to stop, and it outlives us.**
 `delivery_module` is a separate, shared process — `createNode` is called once
@@ -530,16 +562,21 @@ only "stops its SDS loops" and does not mention the unsubscribe at all.
 That is why both cases close: leaving a Stoa and shutting down are the same
 situation — a channel that must not outlive the app that opened it.
 
-**Re-creating a channel is allowed.** Close and reopen the same id within one
+~~**Re-creating a channel is allowed.** Close and reopen the same id within one
 node's lifetime — to recover from an error, or because a user left a Stoa and
-rejoined. There is no epoch in the channel id and no restriction on reopening.
+rejoined. There is no epoch in the channel id and no restriction on reopening.~~
+**Specified as a requirement rather than a permission** — the `op-transport`
+spec's channel-lifecycle requirement contracts that a closed channel is
+reopenable under the same identifier and without a restart.
 
 An earlier version of this section forbade all of that to avoid #4116, at the
 cost of one real limitation: **rejoining a Stoa required a restart.** That
 limitation is withdrawn along with the premise.
 
-**The channel id stays a pure function of the addressed object.** No epoch in
-it — not a per-peer one, and not a deterministic one either.
+~~**The channel id stays a pure function of the addressed object.** No epoch in
+it — not a per-peer one, and not a deterministic one either.~~ Specified above.
+**Both exclusions' reasoning stays here, because the spec states the rule and not
+the judgement behind it:**
 
 The per-peer form is ruled out by this section's own rule: peer A reopens at
 `stoa-abc/e8` while peer B is still on `stoa-abc/e7`, and they stop seeing each
@@ -569,7 +606,10 @@ Does not promise:
   own posts.
 - **No membership.** Anyone can join a channel.
 - **No delivery to absent peers.** ACK means "some participants received it".
-- **No ordering metadata reaching the application.** The Lamport total order and
+- **No ordering metadata reaching the application** — ~~and what a receiving peer
+  therefore records~~ **is specified: the `op-transport` spec's "An arrival over
+  this transport carries no ordering metadata" and "The arrival timestamp is a
+  local clock reading and orders nothing".** The Lamport total order and
   the message-id tie-break above are real and are what SDS orders its own log
   by — but they stop below us. What dialectica receives from the delivery
   module is `channelMessageReceived(channelId, senderId, payload, timestamp)`,
@@ -598,10 +638,11 @@ Not built now. Named so the data model does not foreclose it:
 This turns one hot channel into many cold ones and drops the participant set per
 channel to people actually in that conversation.
 
-To keep it cheap: derive `channelId` as a pure function of the addressed object
-— Stoa now, `(stoa, thread)` later — and never let channel identity leak into
-payloads or storage keys. Ops carry `threadId` from day one anyway (the topic
-cannot carry it), so the split becomes a routing change rather than a migration.
+To keep it cheap: ~~derive `channelId` as a pure function of the addressed object~~
+— **specified for the Stoa case in the `op-transport` spec; `(stoa, thread)` is
+the part still ahead** — and never let channel identity leak into payloads or
+storage keys. Ops carry `threadId` from day one anyway (the topic cannot carry
+it), so the split becomes a routing change rather than a migration.
 
 ### 4.6 Images and attachments go to Logos Storage
 
@@ -901,10 +942,10 @@ not already leak") is exactly the premise the MVP removes.
 ### 5.2.1 What an identity is called
 
 **A display name is generated from the identity's public key, never typed.**
-Words drawn from Greek philosophy and letters — *measured attic stoic*, *sober
-ionic thales* — not `user_8f3a` and not a handle someone registered. The shape
-is settled below and is **four words**, for reasons that are arithmetic rather
-than aesthetic.
+An adjective, a Greek noun, and a Greek place — *measured aporia of lampsacus*,
+*brittle kairos of abdera*, *luminous stasis of delos* — not `user_8f3a` and not
+a handle someone registered. The shape is settled below and is **three words
+plus a fixed connector**, for reasons that are arithmetic rather than aesthetic.
 
 **But a user is not handed one.** ~~At onboarding they are shown a slate of five
 generated identities and pick one, and they may refresh the slate as many times
@@ -997,9 +1038,9 @@ Four properties this has to have, each of which decides something:
 - **Distinct domain separation from every address prefix.** `identity.rs`
   already keeps author and Stoa addresses in separate domains so no byte string
   is both. The name domain joins that set for the same reason.
-- **Index extraction is from distinct hash bytes per slot**, so that the two
-  adjectives and the two nouns are independent draws rather than four views of
-  the same bits.
+- **Index extraction is from distinct hash bytes per slot**, so that the
+  adjective, the noun and the place are independent draws rather than three views
+  of the same bits.
 
 ##### The byte budget, and where the name's independence from the mark comes from
 
@@ -1008,14 +1049,18 @@ slice of them:
 
 | Bytes | Use |
 |---|---|
-| `0` | first adjective index (256 entries, 8 bits, one byte exactly) |
-| `1` | second adjective index |
-| `2..4` | first noun index (512 entries needs 9 bits; take 2 bytes and reduce) |
-| `4..6` | second noun index |
+| `0..2` | adjective index (8,192 entries needs 13 bits; take 2 bytes and reduce) |
+| `2..4` | noun index (1,024 entries needs 10 bits; take 2 bytes and reduce) |
+| `4..6` | place index (1,024 entries; same) |
 | `6..12` | **re-derivation reserve** for the denylist, below |
 | `12..32` | unused by the name scheme |
 
 **The name stops at byte 12.** Bytes `12..32` of *this* digest are simply unread.
+
+**The connector `of` reads no bytes**, because it is not a slot — see "`of` is
+literal text" below. The three-word name costs the same six bytes per draw that
+the superseded four-word scheme did, which is why the reserve's size and the
+whole-name-redraw rule below carry over unchanged.
 
 **Correcting the reason an earlier draft of this subsection gave, because the
 conclusion was right and the mechanism was invented.** That draft described
@@ -1056,13 +1101,14 @@ independence claim:
 
 Two notes on the arithmetic:
 
-- **Reducing a 16-bit draw into 512 entries by `% 512` is exactly uniform**,
-  because 512 = 2⁹ divides 2¹⁶ evenly — 128 times. There is no modulo bias to
-  trade off. **This makes the power-of-two list sizes load-bearing rather than
-  incidental**: 512 and 256 were chosen as the honest ceilings of the source
-  material (below), and it is a genuine piece of luck that the honest numbers are
-  also the ones that divide cleanly. A list of, say, 500 would introduce a real
-  if tiny bias and would need this paragraph to say so.
+- **Reducing a 16-bit draw into 1,024 entries by `% 1024` is exactly uniform**,
+  because 1,024 = 2¹⁰ divides 2¹⁶ evenly — 64 times. Likewise `% 8192`, which
+  divides it 8 times. There is no modulo bias to trade off. **This makes the
+  power-of-two list sizes load-bearing rather than incidental**: the sizes below
+  are chosen at powers of two *because* of this paragraph, having been cut down
+  from what the sources yield rather than padded up to reach it. A list of, say,
+  1,000 would introduce a real if tiny bias and would need this paragraph to say
+  so.
 
   *(An earlier draft of this subsection claimed a bias "of about one part in 2¹⁶
   per entry". That was wrong in the safe direction — the instinct that "modulo is
@@ -1071,7 +1117,7 @@ Two notes on the arithmetic:
   The denylist re-derives a refused combination *from the next hash bytes*, so
   the number of bytes a name consumes is **data-dependent, not fixed**.
 
-  **On a refusal, all four slots are redrawn, not only the offending one.** This
+  **On a refusal, all three slots are redrawn, not only the offending one.** This
   is the choice worth stating because it decides the reserve's size: redrawing
   the whole name costs 6 bytes per attempt, so `6..12` buys **one** full
   re-draw, and a second refusal exhausts the reserve. Redrawing only the
@@ -1090,114 +1136,207 @@ Two notes on the arithmetic:
   exists to prevent. A bounded slice is what makes the derivation checkable
   against a test vector at all.
 
-**What the pair is worth, stated without overstating it.** The name space is 2³⁴
+**What the pair is worth, stated without overstating it.** The name space is 2³³
 (below) and `docs/IDENTICON.md` counts the mark at roughly 12,400 perceptually
-distinct results, about 2¹³·⁶. Independent, the bundle is about **2⁴⁷·⁶** — the
+distinct results, about 2¹³·⁶. Independent, the bundle is about **2⁴⁶·⁶** — the
 mark multiplying the name rather than adding to it.
 
-**Two cross-document mismatches to fix wherever the two are next restated
-together**, recorded here because each document is right about its own half and
-wrong about the other's:
+**Two cross-document mismatches with `docs/IDENTICON.md` were recorded here and
+both are now fixed in that document**, so this block keeps the *failure mode*
+rather than the defects:
 
-- `docs/IDENTICON.md` multiplies the mark against **2²⁵**, which was this
-  section's *three-word* space from a superseded draft. Against the four-word
-  2³⁴ the bundle is correspondingly larger, so its 2³⁸·⁶ understates the pair.
-- It also states that "bytes 0..11 are reserved for the generated-name scheme",
-  meaning bytes of the **address**. The name scheme reads no address bytes at
-  all, so nothing is reserved there and nothing needs to be. **Both documents
-  independently invented the same shared-digest story**, which is worth noting as
-  a failure mode rather than a typo: two authors each assumed the other's scheme
-  read the digest they were looking at, and neither checked.
+- It multiplied the mark against **2²⁵**. That figure has now been wrong in two
+  different ways, which is why it is worth keeping. It was a superseded
+  *three-word* space when it merged — and **the word count has since come back to
+  three, without the figure becoming right**: three words is now 2³³, because the
+  adjective slot is uncapped, so a reader checking "three words, 2²⁵" against this
+  section's "three words" would find the shape agreeing and the arithmetic eight
+  doublings apart. IDENTICON.md no longer pins the value at all: it says to read
+  the current space from this section and multiply by 2¹³·⁶, and labels its worked
+  example as possibly stale. **That is the right shape** — a number owned by one
+  document should not be duplicated in another.
+- It also claimed bytes `0..11` of the **address** were "reserved for the
+  generated-name scheme". The name scheme reads no address bytes at all, so
+  nothing was reserved and nothing needed to be. Also corrected there.
 
-**It does not change the threat model.** 2⁴⁷·⁶ is still reachable by a machine
+**Both documents independently invented the same shared-digest story**, which is
+worth keeping as a failure mode rather than deleting as a fixed typo: two authors
+each assumed the other's scheme read the digest they were looking at, and neither
+checked. **The 2²⁵ line above is that trap's second costume**: a word count
+returning to an earlier value makes every superseded figure attached to that word
+count look already-correct. Matching prose is not a checked number.
+
+##### Three-way byte disjointness is required, and it is not yet allocated
+
+**Owner requirement, recorded not argued: no byte of the address may be read by
+more than one of the name, the mark, and the abbreviated address shown on
+screen.** The three must partition, not overlap.
+
+**The security argument is the one the mark's own file already makes.** Grinding
+for a lookalike name and grinding for a lookalike mark are independent searches
+**whose costs multiply rather than add** — but only to the extent that the two
+read different bytes. A byte that is *also* printed in the abbreviation is worse
+than a shared byte between two derived channels: an attacker reads it off the
+screen while they grind, so it contributes nothing an observer could not have
+been handed directly.
+
+**Today the requirement does not hold, and the gap is measured rather than
+suspected.** `dialectica-ui/src/qml/Identicon.qml` records it in full: the mark
+reads bytes `12..19`, and `AddressLabel` abbreviates to head 8 / middle 8 / tail 6
+of the hex body — bytes `0..3`, `14..17` and `29..31`. So `14..17` are **already
+on screen**, half of what the mark reads, and only `{12, 13, 18, 19}` of the 21
+bytes the abbreviation hides reach a reader through the mark. That file calls this
+"a weaker version of the criticism this design makes of the bundle's original,
+reduced rather than eliminated". **The requirement above eliminates it.**
+
+**The allocation itself is not decided here**, and this section must not be read
+as deciding it — the byte ranges are the `generated-names` change's to settle,
+along with whatever consequences fall out for the mark's or the label's ranges.
+What this section fixes is that the disjointness is a **requirement** rather than
+a nice property the current ranges happen to approximate.
+
+**Note this is a separate claim from the digest-separation argument above**, and
+conflating the two is how the invented byte reservation got written twice. Name
+and mark are independent *because they hash different digests*; that holds no
+matter which bytes each reads. This requirement is about a third channel — the
+bytes a reader can see — which domain separation says nothing about.
+
+**It does not change the threat model.** 2⁴⁶·⁶ is still reachable by a machine
 with unlimited regeneration, and the grinding subsection below applies unchanged:
 an attacker hunting *any* lookalike rather than one exact target searches a much
 smaller set. **This raises the cost of casual impersonation and does not defeat a
 motivated attacker. The address remains the identity**, and none of this is a
 reason to show one less often.
 
-#### One source: Greek philosophy and letters
+#### Greek nouns and places, and any English adjective
+
+**The noun and the place are Greek; the adjective slot is open.** That split is
+the whole of the difference between this section and the four-word scheme it
+replaces, and it is the reason the word count came down — see the arithmetic
+below. Stated once, plainly:
+
+| Slot | Source | Screened for |
+|---|---|---|
+| adjective | **any English adjective** | ASCII-transliterable, deduplicated |
+| noun | **Greek only** — the vocabulary of Greek thought, plus named thinkers, writers, mathematicians, physicians and historians | the same two, plus the exclusions below |
+| place | **Greek places, real and mythological** | the same two, plus the exclusions below |
+
+**Only two screens apply to any list, and there are no others:**
+
+1. **ASCII-transliterable** — the name is ASCII by design (see the bidi
+   paragraph below), so a word that cannot be written in ASCII is out.
+2. **Deduplicated** — one entry per place, per person, per word.
+
+**No pronounceability screen, no length screen, no familiarity screen, no
+register screen.** Two earlier drafts of this section imposed a third filter and
+both were withdrawn on challenge — familiarity, which cut the place list by 28%,
+and then "legibility", which cut it by 88%. Neither survives. **If a word is
+being excluded for any reason other than the two above, that is the mistake, not
+the word.**
 
 **An earlier draft of this section drew on ten science-fiction book universes.**
 That is withdrawn entirely — no SF vocabulary survives, and neither do the
 mythological creatures a middle draft added. The register was the reason: the
 owner asked for something more serious, and *vermilion patient sandworm* is a
-fantasy handle where *measured attic stoic* is a name an adult will accept
-being called in an argument. **If a generated name sounds like a gamertag, it
-is wrong.**
+fantasy handle where *measured aporia of lampsacus* is a name an adult will
+accept being called in an argument. **If a generated name sounds like a gamertag,
+it is wrong.**
 
-Two constraints survive the change intact, and one is retired by it:
+**Note what carries that register now, since the adjective slot no longer does.**
+It is the *X of Y* shape and the two Greek words in it. *brittle kairos of abdera*
+has an English adjective a Greek list would never have supplied, and it still does
+not read as a gamertag, because the last three quarters of it are classical.
 
-- **The words must survive being torn out of context.** A wordlist entry is read
-  by people who have not read Diogenes Laertius. `attic`, `stoic`, `praxis` and
-  `thales` work alone; a minor scholiast's name is noise. This constraint did
-  most of the work in the SF selection and does more here, because the Greek
-  corpus has a far longer tail of obscurity available to be wrong about.
+One constraint survives the change intact, and two are retired by it:
+
 - **A name may describe a texture, never a verdict.** Derived in the earlier
-  draft as the rule behind the tone exclusions, and now the load-bearing test
-  for the whole list. `attic` is a texture; `plato` is a verdict.
+  draft as the rule behind the tone exclusions, and still the load-bearing test
+  for the whole list. `attic` is a texture; `plato` is a verdict. Note what this
+  is *not*: it is a screen on what a word says about its bearer, not on how
+  obscure the word is. An unrecognisable word describes nothing and therefore
+  passes.
+- **~~The words must survive being torn out of context.~~ Retired**, and this is
+  the retirement that produced everything else in this revision. It read: a
+  wordlist entry is read by people who have not read Diogenes Laertius, so
+  `attic`, `stoic` and `thales` work alone where a minor scholiast's name is
+  noise. **It is withdrawn because it is the familiarity screen under another
+  name**, and the owner rejected that screen twice — once when it cut the place
+  list by 28% and again when a rebadged version cut it by 88%. The tail is in.
 - **~~No single source may dominate.~~ Retired.** It existed because a name
-  drawn from one universe reads as an allegiance the user did not declare. With
-  one source there is nothing to balance, and the flavour is *Greek thought*
-  on purpose rather than by accident.
+  drawn from one universe reads as an allegiance the user did not declare. The
+  noun and the place have one source, so there is nothing to balance; the
+  adjective has no source at all, being any English adjective.
 
 **Public domain by two and a half thousand years**, which retires the trademark
 paragraph the SF list needed: there is no estate, no mark, and no proprietor.
-The material is also, unlike a novel's coinages, already half-naturalised into
+The material is also, unlike a novel's coinages, often half-naturalised into
 English — `stoic`, `attic`, `praxis`, `ethos` are English words with Greek
-parents, which is exactly why they survive decontextualisation.
+parents. That is a pleasant property of part of the list and **no longer a
+selection criterion**, per the retirement above.
 
-**The nouns pool two kinds of word**, which is the owner's decision taken for
-the size of the resulting list:
+**The nouns pool two kinds of word**, and the pool is wider than the four-word
+scheme's was, because the noun slot now carries more of the space:
 
 | Kind | What it supplies | Examples |
 |---|---|---|
-| the vocabulary of Greek thought | abstractions that have naturalised into English | `logos`, `ethos`, `kairos`, `praxis`, `techne`, `aporia`, `kanon`, `stasis`, `arete`, `episteme` |
-| thinkers, writers and makers | proper names with register | `thales`, `hypatia`, `solon`, `sappho`, `theophrastos`, `eratosthenes`, `kleanthes`, `pyrrhon` |
+| the vocabulary of Greek thought | philosophical and technical abstractions | `logos`, `ethos`, `kairos`, `praxis`, `techne`, `aporia`, `kanon`, `stasis`, `arete`, `episteme` |
+| named Greeks | thinkers, writers, mathematicians, physicians, historians | `thales`, `hypatia`, `solon`, `sappho`, `theophrastos`, `eratosthenes`, `kleanthes`, `pyrrhon` |
 
-**A small number of names are excluded because they read as an argument rather
-than a name** — Plato, Aristotle and Socrates above all, whose mere invocation
-is a move in a debate, so a user rendered *sober ionic plato* is handed standing
-they did not earn. The exclusion is deliberately short: a handful of the most
-invoked figures, and everything arguable is kept, because the pooled list was
-chosen for its size and a cautious sweep would undo that.
+**The place slot is new, and it takes Greek places real and mythological.**
+Poleis, regions, islands and sanctuaries — `lampsacus`, `abdera`, `delos`,
+`elea`, `kyrene`, `dodona` — alongside the mythological geography, which is in on
+the same footing rather than as a supplement. Real and imagined places are not
+distinguished in the list and a reader is not told which they were handed; both
+read as origin, which is the only thing the slot is doing.
 
-**The adjectives carry the register, and this is where the effort went.** A
-proper name and an abstract noun read very differently attached to a person —
-*sober ionic thales* against *sober ionic praxis* — and the list that reconciles
-them is the adjective list. It is therefore uniformly in **one voice, at once
-geographic and temperamental**:
+**A small number of noun entries are excluded because they read as an argument
+rather than a name** — Plato, Aristotle and Socrates above all, whose mere
+invocation is a move in a debate, so a user rendered *sober plato of athens* is
+handed standing they did not earn. The exclusion is deliberately short: a handful
+of the most invoked figures, and everything arguable is kept.
 
-| Kind | Examples |
-|---|---|
-| geographic | `attic`, `ionic`, `doric`, `aeolic`, `delian`, `samian`, `arcadian`, `laconic`, `rhodian`, `theban` |
-| temperamental | `measured`, `sober`, `plain`, `patient`, `quiet`, `steady`, `temperate`, `candid`, `spare`, `lucid` |
-| dispositional (the schools) | `stoic`, `skeptic`, `eclectic`, `peripatetic`, `aporetic`, `zetetic`, `gnomic`, `ascetic` |
+**The adjective slot no longer carries the register, and that is the point of the
+revision.** The four-word scheme spent its effort on an adjective list in one
+voice — geographic and temperamental, `attic`/`ionic`/`measured`/`sober` — because
+a proper name and an abstract noun read very differently attached to a person and
+the adjective was what reconciled them. **That list is now a subset, not the
+list.** Any English adjective is eligible, so `brittle`, `luminous` and `damp`
+draw alongside `attic` and `measured`, and the register is carried instead by the
+noun and the place, which are both Greek and both fixed in position.
 
-A geographic adjective attached to a person reads as origin, which is a texture
-and never a claim; a temperamental one reads as manner, likewise. Both land the
-same way in front of either kind of noun, which is what makes the pooled noun
-list work at all.
+This is a taste judgement and is marked as one: *brittle kairos of abdera* reads
+as a name in the classical manner because two of its three words are classical
+and the shape — *X of Y* — is itself the classical shape. The earlier draft's
+claim that the adjective was load-bearing for register was true of a scheme whose
+nouns were a single unordered pool; it is not true of one whose third word is
+always a place.
 
 #### Transliteration: one convention, applied throughout
 
-A list assembled from three sources reads as assembled from three sources, so
-the convention is fixed and uniform:
+The Greek slots — noun and place — draw on several sources, and a list assembled
+from several sources reads as assembled from several sources, so the convention is
+fixed and uniform. It does not apply to the adjective slot, which is English and
+needs no transliteration:
 
 - **kappa → `k`, never `c`** — `kanon`, `kosmos`, `techne`, `kleanthes`, not
   `canon`, `cosmos`, `Cleanthes`.
 - **`-os` retained, never Latinised to `-us`** — `theophrastos`, `pyrrhon`,
   `chrysippos`, not `Theophrastus`, `Pyrrho`, `Chrysippus`.
 - **upsilon → `y`** — `physis`, `mythos`, `hyle`.
-- **chi → `ch`** — `techne`, `psyche`, `arche`. (`kh` is more faithful and reads
-  as alien; the constraint that a word survive decontextualisation wins.)
+- **chi → `ch`** — `techne`, `psyche`, `arche`. `kh` is more faithful and reads as
+  alien; uniformity with the rest of the list wins. (The earlier draft justified
+  this by "the constraint that a word survive decontextualisation" — that
+  constraint is retired, and the convention stands on consistency alone.)
 - **No diacritics, no Greek script** — see the ASCII rule below, which is a bidi
-  decision rather than a typographic preference.
+  decision rather than a typographic preference. **This is one of the two screens
+  that survive**, and it is the reason a Greek word can be absent from these
+  lists at all.
 
 **The one exception, stated so it does not look like drift:** where English has
 fully settled a form, the settled form wins — `thales`, `solon`, `sappho`,
-`hypatia`, not a stricter transliteration nobody would recognise. The convention
-serves recognisability; it does not outrank it.
+`hypatia`, not a stricter transliteration nobody would recognise. This picks
+between two spellings of a word that is in either way; it is **not** a screen on
+whether the word is in, and must not be read as one.
 
 #### What is excluded from the lists, and why
 
@@ -1211,15 +1350,17 @@ where every row attributes a post to one of these names.
 
 | Excluded | Why |
 |---|---|
-| `stoa` | the core concept (§1). *measured attic stoa kairos* reads as a Stoa rather than a person. **`stoic` survives as an adjective** — in the adjective slot it cannot be misread as naming a place, and it is one of the best words available. It must never be a noun. |
+| `stoa` | the core concept (§1). *measured stoa of abdera* reads as a Stoa rather than a person, and the place slot makes it worse rather than better, because *X of Y* is exactly how a Stoa would be named. **Excluded from the noun list and from the place list.** `stoic` survives as an adjective, where it is one word among eight thousand and cannot be read as naming a thing. |
 | `dialectic`, `dialectical` | the project's name and its method. A user called *dialectic* sounds like the application speaking. |
 | `delta` | the logo (§8.1). Same failure. |
 | `genesis` | names the founding record (§5.1), the most load-bearing term in the address construction. |
 | `agora` | **kept, and flagged first-to-drop.** It is common enough English to survive and is not a term of art in this design — but `docs/UI-BRIEF.md` uses "Join *Agora*?" as its worked example of a forgeable Stoa title. If the picker ever reads ambiguously, this is the first noun to remove. |
 
 **2. Words that assert authority.** `moderator`, `archon`, `ephor`,
-`magistrate`, `strategos`. A non-moderator generated as *calm bronze archon
-telos* has been handed apparent standing **by the wordlist**, which is precisely
+`magistrate`, `strategos` — and, now that the adjective slot is open English,
+`official`, `verified`, `certified`, `admin` and anything else that reads as a
+status. A non-moderator generated as *calm archon of elea* has been handed
+apparent standing **by the wordlist**, which is precisely
 what §5.2.1's rendering obligations exist to prevent — a name is never a
 credential. This is the exclusion most likely to be re-proposed by someone who
 likes the word, and it is also where the authority-name exclusion below comes
@@ -1227,15 +1368,16 @@ from: the two are the same failure reached by different doors.
 
 **3. A few names that are an argument rather than a name.** **Plato, Aristotle,
 Socrates**, and anything else whose invocation is itself a move in a debate: a
-user rendered *sober ionic plato* is signed by Plato on every post, and someone
+user rendered *sober plato of elea* is signed by Plato on every post, and someone
 disagreeing with them is visually disagreeing with Plato. They neither earned it
 nor chose it, but they benefit from it.
 
-**Deliberately a short list.** Everything arguable is **kept** — the pooled noun
-list was chosen for its size, and a cautious sweep through the canon would undo
-exactly what it was chosen for. The long tail is the point: *sober ionic thales*
-is still Greek and still serious, and nobody treats "Thales said so" as an
-argument.
+**Deliberately a short list.** Everything arguable is **kept** — the noun list was
+chosen for its size, and a cautious sweep through the canon would undo exactly
+what it was chosen for. The long tail is the point: *sober thales of miletos* is
+still Greek and still serious, and nobody treats "Thales said so" as an argument.
+**Obscurity is not a reason to exclude**; being an argument is, and only a handful
+of names are.
 
 **4. Connotation.** The name is assigned-then-chosen, so a user cannot be blamed
 for the word they were handed — but **the system can be blamed for generating
@@ -1260,6 +1402,24 @@ category, because the categories outlast the examples:
 - **Sexual and bodily** — `satyr`, `priapic`, `bacchant`. Named so the next
   person adding words does not rediscover it.
 
+**These four exclusions are not the withdrawn screens, and the distinction is the
+whole of what this subsection is for.** A tone exclusion asks *what does this word
+say about the person wearing it*; the withdrawn screens asked *will a reader
+recognise this word*. The first is a claim the system would be making on a user's
+behalf and the system is answerable for it. The second is not a claim at all, and
+withdrawing it is what opened the adjective slot and shrank the name to three
+words.
+
+**The open adjective slot enlarges exclusion 4's job considerably**, and that is
+its real cost. Screening 256 hand-chosen Greek-register adjectives for tone is an
+afternoon; screening English down to 8,192 is not, because English carries slurs,
+bodily words, clinical words and words that are insults only when applied to a
+person — `obese`, `senile`, `deranged`, `pathetic` — none of which the four-word
+scheme's source material could produce. **The headroom is what makes this
+tractable**: the estimate below is 15,000–25,000 candidates for 8,192 slots, so
+the screen can be generous and still fill the list, which is the opposite of the
+position the Greek adjective list was in.
+
 **Two kept after argument, recorded because they are the near-misses.**
 `chimera` and `hydra` are monsters but not insults in English — fully absorbed
 as "a thing of mixed parts" and "a problem that regrows", neither a claim about
@@ -1272,110 +1432,255 @@ rebuilt from scratch: a generated name may describe a texture, never a verdict.*
 `heroic` and `craven` both do, in opposite directions, and both are wrong for the
 same reason. `attic` is a texture; `plato` is a verdict.
 
-#### The arithmetic, and why the name is four words
+#### The arithmetic, and why the name is three words
 
-**The list sizes were derived from what the sources honestly yield, and the word
-count then followed from the arithmetic.** That order matters: the alternative —
-picking a target space and padding the lists to reach it — produces names that
-read as filler, which costs the register this whole revision exists to buy.
-
-**What the sources honestly yield — and these are estimates, not counts.** No
-list has been written; the numbers below come from inventorying candidates by
-category and judging where each category runs out. **The whole four-word decision
-rests on them**, so the honest status matters: the claim "512 adjectives in one
-voice is padding" is a judgement, and the way to falsify it is to write the list
-and count. **The conclusion survives a generous error, which is why it is safe to
-decide on now.** Suppose the estimate is wrong by a fifth and 300 honest
-adjectives exist: `300 × 300 × 512 = 46,080,000`, and
-`12,497,500 / 46,080,000 = 0.27121`, so `1 − e^-0.27121 = 0.2375` — **5,000
-identities still collide at 24% at three words.** Rescuing three words would take
-an adjective list of about **700** — `700 × 700 × 512 = 250,880,000` puts 5,000
-at 4.9% — and 700 sober Greek adjectives in one voice is roughly three times the
-estimate, which is not a plausible error but an entirely different claim about
-the source material.
-
-- **Adjectives: 256.** The single-voice constraint is a real limit. Geographic
-  adjectives of the Greek world give roughly 70 usable; the schools and
-  dispositions give roughly 55 after the tone exclusions; plain English
-  temperament words in the sober register give roughly 90. That is about 215,
-  and reaching 256 is honest work. **512 is not reachable in one voice** — the
-  last two hundred would be either obscure demes or four near-synonyms for
-  *calm*, and a list padded with `placid`/`serene`/`tranquil`/`unruffled` is
-  exactly the filler that loses the register.
-- **Nouns: 512.** The pooled list is deep: roughly 250 terms from the vocabulary
-  of Greek thought, and roughly 250 thinkers, writers and makers once the
-  handful of argument-move names come out. **1,024 is not reachable** without
-  scraping every minor figure in Diogenes Laertius and every technical entry in
-  Liddell–Scott, which reintroduces the "an obscure surname is noise" failure
-  the second constraint forbids.
-
-**So the honest sizes are 256 and 512, and at three words that is not enough.**
-With two adjectives and one noun the space is `256 × 256 × 512` = 2²⁵ =
-**33,554,432**, and birthday collision probability for k identities in one Stoa,
-`1 − exp(−k(k−1)/2S)`, gives:
-
-| Identities in one Stoa | three words, S = 2²⁵ |
-|---|---|
-| 100 | 0.015% |
-| 1,000 | 1.5% |
-| 5,000 | **31%** |
-| 10,000 | **77%** |
-
-By hand at k = 5,000: `k(k−1)/2 = 12,497,500`, and `12,497,500 / 33,554,432 =
-0.37245`, so `1 − e^-0.37245 = 1 − 0.68902 = 0.311`.
-
-**31% fails the bar**, and it is worth being blunt that this is *worse* than the
-space it replaces on every count except register. The superseded SF scheme was
-**256 adjectives × 256 adjectives × 256 nouns = 2²⁴ ≈ 16.8 million** at three
-words, with 5,000 identities colliding at 53%; Greek-only sources are smaller
-than ten SF universes pooled, so the honest noun list grows from 256 to 512
-while the adjective list cannot grow at all, and 2²⁵ at three words leaves
-5,000 at 31%. Better than 53% and still a failure.
-
-**Therefore the name is four words: two adjectives and two nouns.**
+**The shape is adjective + noun + `of` + place**, and the space is 2³³:
 
 ```
-S = 256 × 256 × 512 × 512 = 2³⁴ = 17,179,869,184
+S = 8,192 × 1,024 × 1,024 = 2¹³ × 2¹⁰ × 2¹⁰ = 2³³ = 8,589,934,592
 ```
 
-| Identities in one Stoa | **four words, S = 2³⁴** |
+*measured aporia of lampsacus*, *brittle kairos of abdera*, *luminous stasis of
+delos*.
+
+**The list sizes are powers of two on purpose, and that is a constraint from the
+byte budget above rather than from the sources.** `% 8192` and `% 1024` reduce a
+16-bit draw with exactly zero bias; a list of 1,000 or 15,000 would not. So each
+list is **cut down to the nearest power of two below what the source yields**,
+never padded up to reach one. The direction matters: a list with headroom throws
+away real candidates, which costs nothing but choice, where a padded list ships
+entries that were invented to fill it.
+
+##### Collision probability at 2³³
+
+Birthday collision probability for k identities in one Stoa is
+`1 − exp(−k(k−1)/2S)`:
+
+| Identities in one Stoa | **three words, S = 2³³** |
 |---|---|
-| 100 | 0.00003% |
-| 1,000 | 0.003% |
-| 5,000 | **0.073%** |
-| 10,000 | **0.29%** |
+| 100 | 0.0000576% |
+| 1,000 | 0.0058% |
+| 5,000 | **0.145%** |
+| 10,000 | **0.580%** |
 
-By hand at k = 5,000: `12,497,500 / 17,179,869,184 = 0.00072745`, and for x this
-small `1 − e^-x ≈ x`, so **0.073%**. At k = 10,000: `49,995,000 /
-17,179,869,184 = 0.0029101`, giving `1 − e^-0.0029101 = 0.002906`, so **0.29%**.
+By hand, with `S = 8,589,934,592` throughout and `1 − e^-x ≈ x − x²/2` for small
+x:
 
-**This reverses the recommendation an earlier draft of this section made**, and
-the reversal should be visible rather than quietly corrected. That draft argued
-for three words against a fourth, on the grounds that a name renders on every
-feed row and recognition degrades with length before information content does.
-**That argument is still true and it now loses**, because its premise changed:
-it was made against lists of 512 and 1,024 that a blended SF-and-Greek corpus
-could sustain, and the Greek-only sources do not sustain them. Given a choice
-between a fourth word and a padded list, **the fourth word is the lesser cost**
-— length is a fixed, honest price, where padding degrades every name drawn from
-the padded region and cannot be undone without a scheme version bump.
+- **k = 100.** `k(k−1)/2 = 100 × 99 / 2 = 4,950`. `4,950 / 8,589,934,592 =
+  5.7625 × 10⁻⁷`. The `x²/2` term is `1.7 × 10⁻¹³`, negligible, so the answer is
+  x itself: **0.0000576%**.
+- **k = 1,000.** `1,000 × 999 / 2 = 499,500`. `499,500 / 8,589,934,592 =
+  5.8150 × 10⁻⁵`, and `x²/2 = 1.7 × 10⁻⁹`, so **0.0058%** (0.005815% before
+  rounding).
+- **k = 5,000.** `5,000 × 4,999 / 2 = 12,497,500`. `12,497,500 / 8,589,934,592 =
+  1.45491 × 10⁻³` — check: `8,589,934,592 × 1.455 × 10⁻³ = 12,498,355`, a little
+  over 12,497,500, so x is a shade under 1.455 × 10⁻³. Then `x²/2 = 1.058 × 10⁻⁶`,
+  giving `0.00145491 − 0.00000106 = 0.00145385`: **0.145%**.
+- **k = 10,000.** `10,000 × 9,999 / 2 = 49,995,000`. This is 4× the k = 5,000
+  numerator to within a rounding, so `x = 5.81949 × 10⁻³`. `x²/2 =
+  1.693 × 10⁻⁵`, giving `0.00581949 − 0.00001693 = 0.00580256`: **0.580%**.
 
-Two things make the fourth word cheaper here than it would have been:
+**0.145% at 5,000 passes the bar** — a Stoa of five thousand has about a
+one-in-690 chance of containing any colliding pair at all.
 
-- **The second noun is a noun, not a third adjective.** *measured attic thales
-  praxis* has two content words a reader can latch onto rather than a longer
-  run of modifiers, and the pooled noun list is the one with the range to
-  support two draws.
-- **The register absorbs length better than the old one did.** Four Greek words
-  read as a name in the classical manner; four SF words read as a string of
-  adjectives. This is a genuine difference and not a rationalisation, but it is
-  a taste claim and is marked as one.
+##### This reverses the four-word recommendation, which was right when it was made
 
-**So: collisions are now rare rather than expected — and the interface rule does
-not change.** A Stoa of five thousand has under a one-in-a-thousand chance of
-containing a pair. That is a different world from 53%, and it changes nothing
-about what the interface must do, because the rule was never a response to the
-rate:
+**The merged design was four words at 2³⁴, with 0.073% at 5,000. This replaces it
+with three words at 2³³ and 0.145%** — half the space, twice the collision rate,
+one word shorter. The reversal is recorded rather than quietly applied, which is
+this section's standard, and it is now the **third** position taken on the word
+count: an early draft argued for three words, the merged design overturned it for
+four, and this returns to three on a different basis than the first draft had. All
+three are visible on purpose, because the current answer is not the inevitable one.
+
+**Why four words was right given the constraints then in force.** The four-word
+argument was not a miscalculation; every number in it was correct. It ran: the
+adjective list must be uniformly in one Greek-adjacent register — geographic and
+temperamental, `attic`/`ionic`/`measured`/`sober` — because that register is what
+reconciles a proper name and an abstract noun sitting in the same slot. That
+constraint caps the list at about **256**, and honestly so: the inventory found
+roughly 70 geographic, 55 dispositional and 90 temperamental, about 215, with 256
+reachable and 512 not. With adjectives capped at 256 and nouns at 512, three words
+gives `256 × 256 × 512` = 2²⁵ = 33,554,432, and 5,000 identities collide at **31%**
+— by hand, `12,497,500 / 33,554,432 = 0.37245`, `1 − e^-0.37245 = 0.311`. 31% fails
+any bar. A fourth word was the only lever available, and taking it was correct.
+
+**Why relaxing the adjective slot removed the constraint entirely.** The register
+rule was **self-imposed**. Nothing in the design required the adjective to be
+Greek-adjacent; it was a taste judgement about how a name reads, and once the owner
+withdrew it the slot became *any English adjective* — from a ceiling of 256 to an
+estimated 15,000–25,000 candidates, which is **five to six doublings** of that one
+slot.
+
+**The accounting, against the old three-word 2²⁵ = `2⁸ × 2⁸ × 2⁹`:**
+
+| Slot | Was | Is | Doublings |
+|---|---|---|---|
+| adjective | 2⁸ (256) | 2¹³ (8,192) | **+5** |
+| second adjective → place | 2⁸ (256) | 2¹⁰ (1,024) | **+2** |
+| noun | 2⁹ (512) | 2¹⁰ (1,024) | **+1** |
+
+`2²⁵ × 2⁸ = 2³³`. **Eight doublings, and five of them come from the one slot whose
+cap was a preference.** The other three come from taking the noun and place lists to
+1,024 where the four-word scheme's noun list stopped at 512 — which the provenance
+figures below support, and which was ruled out before only because the retired
+decontextualisation constraint forbade the tail.
+
+So three slots now reach 2³³ where the four-word scheme's four slots reached 2³⁴:
+one slot fewer, one doubling less, and the four-word shape's whole justification
+gone.
+
+**That is the whole story, and it is worth stating flatly: the ceiling was never
+the source material, it was a self-imposed register rule.** The four-word design
+read its own taste constraint as a property of Greek vocabulary and concluded the
+sources could not sustain three words. The sources were never the limit. This is
+the kind of error worth recording because it is invisible from inside — every
+figure checks out, the arithmetic is sound, and the premise is a preference wearing
+the costume of a fact.
+
+**What is lost, stated honestly.** Twice the collision rate, and the register
+argument that justified the four-word shape is no longer available to defend
+anything. What is gained is a name one word shorter on every feed row, which was
+the original three-word argument's point, and it was always a real one.
+
+##### List provenance, and which figures are verified
+
+**Each list's status is different and mixing them up is how a "verified" figure
+gets invented**, so they are marked individually. The word "verified" below means a
+published count was read, not that a list exists — no list is written.
+
+- **Places: ~1,150–1,200 candidates, largely VERIFIED.** The bulk is the **1,035
+  poleis** catalogued in Hansen & Nielsen, *An Inventory of Archaic and Classical
+  Poleis* — a published count, not an estimate. **All 166 unlocated poleis are
+  retained**, which is exactly the kind of entry a familiarity screen would have
+  cut and which the two-screen rule keeps. Added to that: roughly 30 regions,
+  35 islands and 10 sanctuaries, plus a net 40–70 mythological places once
+  duplicates of real ones are removed. Those four addenda are estimates; the 1,035
+  is not. **Taking 1,024 uses essentially all of it** — the headroom here is
+  thin, a little over 10%, and it is the one list where the estimate being wrong
+  would matter.
+- **Nouns: ~1,400–1,800 candidates, MIXED.** One verified anchor: Diogenes
+  Laertius' *Lives* covers about **200 philosophers**, a count from the text.
+  Everything past that is an estimate — extending to mathematicians, physicians and
+  historians, and drawing technical and philosophical vocabulary from
+  Liddell–Scott–Jones, might plausibly yield 1,200–1,600 more. **Taking 1,024
+  leaves comfortable headroom** even against the low end of the estimate.
+- **Adjectives: ~15,000–25,000 candidates, ESTIMATED.** Anchored on WordNet's
+  roughly **21,500 adjective lemmas**, adjusted down for the tone exclusions above
+  and for lemmas that are not usable as a bare modifier. This figure is an estimate
+  and it is **not load-bearing**: taking 8,192 leaves headroom of better than 2:1
+  against the bottom of the range, so the estimate would have to be wrong by more
+  than half before the size became unreachable. The four-word scheme's 256 had no
+  such margin, which is why its estimate *was* load-bearing and this one is not.
+
+##### Three things the figures above do not model
+
+**1. Selection skew — every figure here is an optimistic floor.** The model assumes
+names are drawn uniformly, and they are not: a user refreshes until they like one,
+so the *kept* names concentrate in whatever regions of the space read well, and the
+effective space is smaller than 2³³. **Estimated cost: half to one full doubling**
+— call it 2³²·⁵ to 2³². At one full doubling, S = 2³² = 4,294,967,296 and k =
+5,000 gives `12,497,500 / 4,294,967,296 = 2.9098 × 10⁻³`, less `x²/2 =
+4.2 × 10⁻⁶`, so **0.291%** against the uniform 0.145%.
+
+**This is an unmodelled estimate and is flagged as one.** The half-to-one-doubling
+figure is a judgement, not a measurement; nothing has been observed, because there
+is no deployment to observe. What is solid is the *direction*: skew can only shrink
+the effective space, never enlarge it, so **0.145% is a floor and ~0.29% is the
+plausible worst case.** Both are well inside the bar, which is why this does not
+change the decision — but a future revision that finds itself with less margin must
+model this rather than inheriting the uniform figure.
+
+**2. Some names will be legible but indistinguishable in practice.** With no
+pronounceability, length or familiarity screen, the place list contains entries
+most readers cannot pronounce and cannot tell apart. `Stielanaioi` beside
+`Sileraioi` is the worst case found and **it is in**. Since the name exists to help
+a reader distinguish participants (§5.2.1's opening argument), some fraction of
+names will not do that job.
+
+**This is a consequence of a decision already made, not an argument for a filter.**
+The owner withdrew a familiarity screen at 28% and a "legibility" screen at 88%,
+both after challenge, and the reasoning is recorded above. It is written down here
+so that the cost is visible to whoever reads this next, and so that nobody
+rediscovers it and proposes the screen a third time believing it to be new
+information. **The mitigation is layer 2 and layer 4 below — the identicon and the
+address — not a shorter list.**
+
+**3. Collision is not the only way two names can be confused.** The birthday
+figures count *exact* collisions. Two names differing only in a place nobody can
+distinguish are not a collision by this arithmetic and are one to a reader. No
+figure here bounds that, and the interface rule below — the address is present, not
+one click away — is what covers it, as it covers exact collisions.
+
+#### `of` is fixed literal text, not a hash slot
+
+**The connector carries no entropy and reads no hash bytes.** The space is
+`8,192 × 1,024 × 1,024` and not a factor more; `of` is emitted between the noun and
+the place unconditionally. It is worth a heading of its own because the natural
+reading of "three words plus a connector" is that there are four slots, and there
+are three.
+
+**One consequence, and it is a relaxation.** The four-word scheme imposed a
+no-truncation obligation on the whole string, because every word was a draw and
+eliding the tail destroyed a slot's worth of distinguishing content. Here the
+connector is not a draw, so **the obligation applies to the three content words and
+not to `of`.** A cramped row may render *measured aporia lampsacus* — the
+information content is identical, and no reader is misled about who published
+something. What a row still may **not** do is drop or elide the place, the noun or
+the adjective, or truncate any of them mid-word; those are the 2³³.
+
+This is the only part of the name a layout is permitted to touch, and it is
+permitted precisely because it is the only part that is not derived.
+
+#### The true-attribution denylist, which the three-word shape makes mandatory
+
+**The *X of Y* shape can produce a real historical figure's canonical name.**
+*straton of lampsacus* is how Straton of Lampsacus is actually cited. This is not
+the exclusion for Plato, Aristotle and Socrates above — that one is about a handful
+of names whose invocation is an argument. This is a structural property of the
+shape: pairing a thinker with the place they are conventionally named after signs a
+user's posts with a real person's full canonical identifier.
+
+**The arithmetic, because it decides whether this needs handling.** Of 1,024 nouns,
+roughly **800** are named Greeks rather than abstractions, and each has on average
+about **1.2** canonically associated places — usually one birthplace, sometimes a
+second where they taught or died. So the number of forbidden noun–place pairs is
+about `800 × 1.2 = 960`.
+
+Against `1,024 × 1,024 = 1,048,576` possible noun–place combinations, that is
+`960 / 1,048,576 = 9.155 × 10⁻⁴` — **0.092% of draws.** Per 5,000 identities:
+`5,000 × 9.155 × 10⁻⁴ = 4.58`, so roughly **4.6 identities in every 5,000 would
+otherwise be signed by a real figure's canonical name.** Not a corner case; a
+handful per Stoa, arriving steadily.
+
+**So the denylist is a requirement rather than a nicety**, and it costs nothing:
+
+- **It is a denylist on noun–place pairs, and the adjective is irrelevant to it.**
+  *brittle straton of lampsacus* is refused for the same reason *measured straton of
+  lampsacus* is; the false attribution is in the pair.
+- **It folds into the existing denylist mechanism unchanged** — a refused draw
+  redraws all three slots from the re-derivation reserve at bytes `6..12`,
+  deterministically, so every peer skips identically.
+- **0.092% of draws fits the single-redraw reserve comfortably.** A first draw is
+  refused about once in 1,090; a *second* consecutive refusal — which is what
+  exhausts the reserve and forces the loud failure — has probability about
+  `(9.155 × 10⁻⁴)²` ≈ `8.4 × 10⁻⁷`, once in 1.2 million identities, and that is
+  before the combination denylist's own entries are added. The reserve does not need
+  to grow.
+- **`straton` and `lampsacus` both stay in their lists.** Only the pair is refused,
+  so *straton of abdera* and *measured aporia of lampsacus* both draw normally. A
+  word-level exclusion would cost two entries per figure and buy nothing.
+
+**This list has to be written, and writing it is the real work here.** It needs a
+canonical place for each of ~800 named Greeks, which is a lookup per entry rather
+than a judgement per entry — tedious, checkable, and not something the curation of
+the lists themselves produces as a by-product.
+
+**So: collisions are rare rather than expected — and the interface rule does
+not change.** A Stoa of five thousand has about a one-in-690 chance of containing a
+pair. That is a different world from the superseded SF scheme's 53%, and it changes
+nothing about what the interface must do, because the rule was never a response to
+the rate:
 
 > **A name is never presented as unique, and never used as an identifier.** The
 > address is the identity. This is the same rule §4.8 and §5.7 already state for
@@ -1385,14 +1690,15 @@ rate:
 What the interface does on collision is therefore nothing special: it
 disambiguates the same way it always should, by showing the address alongside
 the name where it matters. **What it must not do is renumber.** Appending `#2`
-to the second `measured attic thales praxis` requires agreeing which one was
+to the second `measured aporia of lampsacus` requires agreeing which one was
 second, which is arrival order — a per-peer fact (§3.3), so two peers would
 number them oppositely and each would be sure the other was the impostor.
 
 **A second collision question the slate introduces: two identical names in one
-picker.** Five draws from 2³⁴ collide with probability about `5·4/2S` = `10/S` —
-roughly one slate in 1.7 billion, against one in 1.7 million at 2²⁴. A user will
-never see it, and at this size arguably no deployment ever will.
+picker.** Five draws from 2³³ collide with probability about `5·4/2S` = `10/S` —
+`10 / 8,589,934,592` is roughly one slate in **859 million**, against one in 1.7
+million at 2²⁴. A user will never see it, and at this size arguably no deployment
+ever will.
 
 ~~**The picker still discards and redraws a duplicate**, because the handling is
 three lines and the alternative is a display that reads as broken in the one case
@@ -1436,8 +1742,8 @@ feature.**
 This is worth stating as plainly as possible because it inverts the usual
 framing. An earlier draft of this section argued that grinding was cheap — about
 S derivations to hit one specific name, seconds on one core — and concluded that
-enlarging the wordlist could not fix it. **The move to 2³⁴ is the interesting
-test of that claim, and it does not overturn it**: 17 billion derivations is
+enlarging the wordlist could not fix it. **The move to 2³³ is the interesting
+test of that claim, and it does not overturn it**: 8.6 billion derivations is
 minutes rather than seconds on one core, and trivially parallel, so the cost
 went from negligible to slightly less negligible. An attacker hunting one
 specific name now waits; an attacker hunting *any* name close enough to mislead
@@ -1479,9 +1785,12 @@ confirmation, and belongs on §11.1's list:**
 > A name is never unique and never an identifier.
 
 **Enlarging the space is the wrong instinct *for this problem*, and the move to
-2³⁴ is not a counter-example.** The space grew because the honest lists were too
-small for three words to hold an acceptable *accidental* collision rate, and for
-no other reason. Against grinding it bought minutes. A space big enough to
+2³³ is not a counter-example.** The space grew — from the superseded SF scheme's
+2²⁴ — to hold an acceptable *accidental* collision rate, and for no other reason.
+Note that this revision *halved* the space against the four-word design it
+replaces, and nothing in this subsection changed, which is the cleanest available
+demonstration that the space is not the lever here. Against grinding it bought
+minutes. A space big enough to
 resist search — say 2⁶⁴ — is a space nobody curated, which forfeits every
 property the source constraints above exist to protect: it would be scraped, and
 it would ship slurs and verdicts. **Curation and search-resistance are in direct
@@ -1498,8 +1807,9 @@ handled. It is not. **Three of the four are recognition aids and the fourth is
 the only guarantee**, and they are set out in that order so the asymmetry is
 visible rather than averaged away.
 
-**1. The name space, at 2³⁴.** Reduces *accidental* collisions, and nothing
-else. Covered in full above.
+**1. The name space, at 2³³.** Reduces *accidental* collisions, and nothing
+else. Covered in full above — including the two things it does not model, of which
+selection skew makes it a floor rather than a figure.
 
 **2. An identicon — designed in `docs/IDENTICON.md`, not here.**
 A visual glyph shown alongside the name, so that two identities sharing a name
@@ -1567,20 +1877,31 @@ touches the control being limited.
 
 #### Word-level failure modes
 
-- **Combinations, not just words.** Two individually innocuous adjectives can
-  compose into a slur or an insult aimed at a real group. Vetting single words
-  is insufficient; the generated *combination* is what ships. **The fourth word
-  makes this materially harder**, and that is the one real cost of the shape
-  chosen above: 256² ordered adjective pairs was already past hand review, and
-  the noun pair adds 512² more, with the adjective–noun and noun–noun junctions
-  on top. A pooled noun list of thinkers and abstractions is also more exposed
+- **Combinations, not just words.** Two individually innocuous words can compose
+  into a slur or an insult aimed at a real group. Vetting single words is
+  insufficient; the generated *combination* is what ships. **Dropping to three
+  words does not make this easier, and the open adjective slot makes it harder.**
+  The four-word scheme had 256² ordered adjective pairs and 512² noun pairs, both
+  already past hand review; this one has `8,192 × 1,024` ≈ **8.4 million**
+  adjective–noun junctions and `1,024 × 1,024` ≈ **1.05 million** noun–place
+  junctions. Fewer slots, a larger product, because the adjective list grew by five
+  doublings. A noun list pooling thinkers and abstractions is also more exposed
   than a list of one kind, because a proper name beside an abstract noun can
-  compose into a reading neither word carries alone. So the practical
+  compose into a reading neither word carries alone — and the place slot adds the
+  true-attribution family above, which is the one part of this that has a bounded,
+  enumerable denylist rather than a judgement call per pair. So the practical
   requirement is a denylist applied at generation — a derived name landing on a
-  refused combination **redraws all four slots** from the next six hash bytes,
+  refused combination **redraws all three slots** from the next six hash bytes,
   deterministically, so every peer skips identically. The byte budget above bounds
-  this at one re-draw and requires a loud failure beyond it; the denylist matters
-  more at four words than it did at three.
+  this at one re-draw and requires a loud failure beyond it.
+
+  **Neither list can be hand-reviewed pairwise at these sizes**, and that is worth
+  saying rather than leaving implied: 8.4 million junctions is not an afternoon.
+  What is tractable is the denylist for the named, bounded families — the
+  true-attribution pairs (about 960, enumerable by lookup) and the tone categories
+  applied at word level — plus whatever a pass over the highest-risk word
+  neighbourhoods turns up. **The residual risk is real and is not closed by this
+  paragraph.**
 - **The lists are versioned and effectively frozen, and a word removal is a
   scheme version bump.** This is the most operationally important line in the
   section, so it is worth spelling out the mechanism rather than asserting the
@@ -1628,9 +1949,23 @@ says, which is that section's general shape:
   and above all wherever a **moderator** is named, the address must be present
   rather than one click away. Anyone can reach any name by pressing refresh.
 - **Never imply a user's names are linked across Stoas**, and never build a
-  screen that puts them side by side without the owner deciding to (below). The
-  names are unlinkable by construction and an interface that groups them has
-  undone §5.2 in the presentation layer.
+  screen that puts them side by side without the owner deciding to (below). An
+  interface that groups them has undone §5.2 in the presentation layer.
+
+  **And never claim the reverse either** — that a user's identities *cannot* be
+  linked. **§5.2 is the authority on what holds today and this bullet does not
+  restate it**, because two copies of a suspended-property rule is how this one
+  drifted: an earlier version of this bullet justified itself with "the names are
+  unlinkable by construction", which contradicted §5.2's own instruction not to
+  describe the MVP as having that property.
+
+  The design instruction is unchanged and does not depend on the property being
+  live — **design as though unlinkability holds**, because a grouping screen is
+  wrong now and becomes wronger when the property is restored. What changes is
+  that the *reason* may not be stated as a promise to the user. A line like "this
+  key cannot be linked to you anywhere else" is exactly the copy this bullet must
+  not generate; that sentence reached a design bundle's `copy.json` and had to be
+  caught and removed from an onboarding screen.
 - **Never present a name as changeable.** It is a function of a permanent key
   (§5.3). Copy that says "pick your username" promises a settings screen that
   cannot exist.
@@ -1638,11 +1973,18 @@ says, which is that section's general shape:
   identicon and a vouch are recognition aids; the address is the only thing that
   settles who published something. A screen that shows name and glyph and calls
   the pair "verified" has said something false.
-- **A four-word name needs room, and must not be truncated to fit.** It is
-  longer than the three-word form earlier drafts assumed, and a layout that
-  elides the tail has removed one of the two nouns — which is most of the
-  distinguishing content, since the adjectives are drawn from the smaller list.
-  If a row cannot hold the name, the row is wrong.
+- **The three content words all need room and none may be truncated — but `of` may
+  be dropped.** The adjective, the noun and the place are the whole of the 2³³, so a
+  layout that elides the tail has removed the place, which is a third of the
+  distinguishing content and the part that most often differs between two similar
+  names. **The connector is the one exception**: it reads no hash bytes and carries
+  no entropy, so a cramped row may render *measured aporia lampsacus* without
+  losing anything. Truncating mid-word, or dropping a content word, is still wrong,
+  and if a row cannot hold three words the row is wrong.
+
+  *(This relaxes an obligation the four-word scheme stated absolutely — "must not be
+  truncated to fit", full stop. The relaxation is exactly one word wide and is not a
+  licence to elide.)*
 
 #### What is not decided here
 
@@ -1652,14 +1994,25 @@ says, which is that section's general shape:
   content is the correlation §5.2 protects, and building it makes that
   correlation one screenshot away. Not decided; it is a real convenience against
   a real hazard, and it wants the owner's judgement rather than a default.
-- **The list contents.** The *sizes* are decided — 256 adjectives and 512 nouns,
-  and the four-word shape follows from them — and so are the source, the
-  transliteration convention and the exclusion rules. What is not written is the
-  768 words themselves, which is curation work rather than design work. **The
-  sizes are load-bearing in a way the earlier draft's were not**: they were
-  derived from what the sources honestly yield, and the word count was chosen to
-  fit them, so a later decision to "just add more adjectives" changes the
-  arithmetic that justified four words and needs a version bump either way.
+- **The list contents.** The *sizes* are decided — **8,192 adjectives, 1,024 nouns,
+  1,024 places** — and so are the sources, the two screens, the transliteration
+  convention and the exclusion rules. What is not written is the **10,240 words**
+  themselves, nor the ~960-entry true-attribution denylist, both of which are
+  curation work rather than design work and both of which are now substantially
+  larger jobs than the four-word scheme's 768.
+
+  **The sizes are load-bearing, but for a different reason than the four-word
+  draft's were.** Those were the honest ceilings of their sources, so touching them
+  broke the arithmetic. These are powers of two below sources with headroom, so they
+  are load-bearing because of the *modulo* argument in the byte budget: adding
+  adjectives to reach 9,000 reintroduces bias and needs a version bump, where going
+  to 16,384 would not — if the source can reach it, which the estimate does not
+  support. Either way any change to a size is a version bump, per the freezing rule
+  above.
+- **The exact byte allocation, now that three-way disjointness is required.** The
+  name, the mark and the abbreviated address must read disjoint bytes (see the byte
+  budget above); which bytes each gets is the `generated-names` change's to settle,
+  and it may move the mark's or the label's ranges rather than only the name's.
 - ~~**The identicon's visual design.**~~ **Settled elsewhere:
   `docs/IDENTICON.md`.** It reads bytes `12..19` of the **address** and counts
   about 12,400 perceptually distinct marks. Nothing in this section constrains
@@ -3349,38 +3702,57 @@ should not pre-empt it.
 
 #### 2. What a thread view is
 
-A thread view renders **current versions** (§5.7), and the design tension is
-that "current" is not the whole truth a reader or a moderator needs.
+~~A thread view renders **current versions** (§5.7), and the design tension is
+that "current" is not the whole truth a reader or a moderator needs.~~
 
-`getThread` returns the root post plus its replies, paginated, each item
-carrying:
+**The thread read is contracted — see the `thread-read` spec.** It says what
+identifies a thread and that the identifier does not move when the root is
+revised; that membership is derived from the parent chain and a post's own
+`thread` field is never trusted; that the items are flat, each naming its
+parent, in the system's order with the root first; that pages tile with no gap
+and no repeat; that a hidden root is returned marked rather than dropped while a
+hidden reply is omitted by default; that an absent thread is refused where an
+empty one is served; that the moderation state is three-valued and names its
+deciding op; and that an author is reported as an address **and** a public key,
+because the generated name derives from the key and the mark from the address.
+The reasoning for each is in the `thread-read` change's `proposal.md` and
+`design.md`.
 
-- the post's id **as a thread position** — the original's op id, which is what a
-  reply names as its parent and what never changes across edits
-- the **current version's** op id, which is what a moderator acts on and what
+~~`getThread` returns the root post plus its replies, paginated, each item
+carrying:~~
+
+- ~~the post's id **as a thread position** — the original's op id, which is what a
+  reply names as its parent and what never changes across edits~~
+- ~~the **current version's** op id, which is what a moderator acts on and what
   changes every time the post is edited. These are two fields because they are
   two facts; `revision::CurrentVersion` carries both for exactly this reason,
-  and collapsing them would force every caller to re-derive one.
-- body and attachments, from the current version
-- `isRevised`
-- the author address
-- the parent post's id, so the view can render the reply structure
-- moderation state
+  and collapsing them would force every caller to re-derive one.~~
+- ~~body and attachments, from the current version~~
+- ~~`isRevised`~~
+- ~~the author address~~ — **superseded**: an address alone cannot produce the
+  generated name, which derives from the public key. The read returns both.
+- ~~the parent post's id, so the view can render the reply structure~~
+- ~~moderation state~~
 
-**The moderation state must name its deciding op, not be a boolean.**
-`moderation::Moderation` is a three-state enum — `Unmoderated`, `Hidden(op)`,
-`Unhidden(op)` — and the API should carry the same three states rather than
-flattening them. A boolean loses two things a view needs: the distinction
-between "nobody moderated this" and "a moderator deliberately restored it",
-which is the difference between an untouched post and a vindicated one; and the
-op id a reversal would have to name.
+~~**The moderation state must name its deciding op, not be a boolean.**~~
+~~**What a reader sees of a hidden post, stated exactly.**~~ **Both contracted —
+see the `thread-read` spec**, which states the three-valued state and its
+deciding op, and that a hidden reply is omitted by default while a hidden root
+is returned marked. Restating either here would give the rule two copies that
+drift, and a reader finding the stale one cannot tell.
 
-**What a reader sees of a hidden post, stated exactly.** In the default view,
-nothing — the post is absent, not greyed out, because §7.2 rule 4 makes
-moderation a filter rather than a penalty and a visible placeholder is a
-penalty with extra steps. In the "show hidden" view, the post renders with its
-moderation state shown. The one thing the view must not do is render a hidden
-post indistinguishably from a visible one in the show-hidden view; a reader who
+**What remains live is a gap the spec cannot close**, because it is a
+divergence between two reads rather than a property of one: **the feed reports
+moderation as a boolean and the thread read reports the three-valued object.**
+Both are built from the same resolver, so a view must currently branch on which
+call produced an item — which §2.5's "JSON shapes are source-independent"
+forbids. The thread read's shape is the correct one; the feed's is the older.
+Until the feed is brought to it, `restored` is a state the feed cannot express
+at all. Recorded in `docs/UI-BRIEF.md` too, since a designer meets it on their
+second screen.
+
+**And one obligation the core does not meet**: a view must not render a hidden
+post indistinguishably from a visible one in the show-hidden view. A reader who
 asked to see what was hidden is owed the knowledge of which ones those were.
 
 **The bidi obligation is wider than §11.1 currently states it, and that is a
@@ -3530,11 +3902,10 @@ listThreads({stoa, order, page, perPage, includeHidden})
                             -> {"items":[{thread, currentVersion, body, attachments,
                                           author, isRevised, replyCount, lastReply}],
                                 page, hasMore}
-getThread({stoa, thread, page, perPage, includeHidden})
-                            -> {"items":[{post, currentVersion, parent, body,
-                                          attachments, author, isRevised,
-                                          moderation:{state, decidedBy}}],
-                                page, hasMore}
+getThread  -- superseded; see the `thread-read` spec for the contracted shape.
+           -- Two departures from the sketch that was here: the author is an
+           -- address AND a public key, since the generated name derives from
+           -- the key; and there is no `order`, as for the feed.
 ```
 
 `isGenesisFallback` is the field worth defending: §5.7 says a reader prefers
@@ -3628,12 +3999,14 @@ being asked for rather than discovering it from a stalled view.
   reading by `Address` rather than by target, and reusing the authority check
   unchanged. `iter_target` cannot serve it, because a metadata op's
   `Entry::target()` is `None` by design.
-- **There is no thread read.** `iter_stoa` returns every op in a Stoa;
-  `iter_target` returns the ops acting on one op. Neither answers "the posts
-  whose `thread` is T", which is what a thread view is. That is a projection
-  index rather than a trait method — §3.3 puts read traffic on the materialised
-  view — but it is the first query the projection must serve and it does not
-  exist yet in any form.
+- ~~**There is no thread read.**~~ **Contracted by the `thread-read` spec**, and
+  the shape it asks the projection for is not the one this bullet assumed. The
+  query is *not* "the posts whose `thread` field is T": that field is the
+  author's own claim, and an inbound op may name a thread its parent does not
+  belong to. Membership is derived by following parents to a root, so what the
+  projection must serve efficiently is a lookup by **parent**, not by thread.
+  Whoever builds it should read that spec's membership requirement before
+  choosing an index.
 - **There is no reply count and no most-recent-reply.** §7.2's `active` ordering
   needs the second, and both are folds over ops the resolvers do not perform.
   Both must also be **of non-hidden replies**, which makes them folds over
@@ -3656,11 +4029,13 @@ being asked for rather than discovering it from a stalled view.
   first instance of that as a feed field is how it gets designed badly. What
   would decide it: a first user reading a Stoa with more than a screenful of
   threads. Until then the question is theoretical.
-- **Whether a thread view paginates by reply order or by reply tree.** A flat
-  chronological list paginates cleanly and renders reply structure poorly; a
-  tree renders well and has no natural page boundary. This plan does not choose,
-  because the choice depends on how deep real threads get, and nobody has run
-  one. What would decide it: Stage A running against a Stoa with real traffic.
+- ~~**Whether a thread view paginates by reply order or by reply tree.**~~
+  **Settled by the `thread-read` spec, in the direction that keeps the question
+  open where it matters.** The read returns a flat page in which each item names
+  its parent, so a view computes the nesting it wants and core reports no depth.
+  The reasoning — including that the design bundle's screen 05 nests by an
+  indent over a linear sequence, which this shape serves — is in that change's
+  `proposal.md`.
 - **What a feed ordering is allowed to be called while no Lamport value
   arrives.** This is the sharpest unresolved thing in the section, and the first
   draft of it was wrong in a way worth recording. §7.2 defines `new` as "Lamport
@@ -3707,9 +4082,10 @@ being asked for rather than discovering it from a stalled view.
 > `content-authoring` spec — written the way this section says a delta should be:
 > alongside the thing it contracts. The argument below is why *this section* was
 > not itself a delta, and it still holds for everything here that remains
-> unbuilt: the feed and thread reads, `revisePost`, `getPostHistory`, the
-> moderation calls, and the two orderings, which are still an open question
-> rather than a requirement.
+> unbuilt: `revisePost`, `getPostHistory`, the moderation calls, and the two
+> orderings, which are still an open question rather than a requirement. **The
+> thread read now has a delta too** — the `thread-read` spec. **The feed read
+> still has none**, and that is the named debt below rather than an oversight.
 
 
 `.claude/agents/README.md` puts PLAN.md and the specs in different jobs: PLAN.md
@@ -3838,7 +4214,9 @@ the costs below were named and accepted.
 7. ~~Join a Stoa by address~~ **Join a Stoa, given its address and its genesis
    record. Built** — see the `stoa-membership` capability. An address alone is
    not joinable; §4.8 Phase 1 records why the original wording was wrong
-8. **Receive ops from other peers**, over delivery's reliable channel
+8. ~~**Receive ops from other peers**, over delivery's reliable channel~~ —
+   **specified: the `op-transport` spec.** Publishing and receiving both, with the
+   receive-side validation boundary.
 9. **View a feed; view a thread**
 10. **Persistence on disk** of Stoas, identities and messages
 
@@ -3941,9 +4319,27 @@ two events at two times, and this decision stops the API pretending they are one
 **The obligation lands on `op-transport`**: an op that reaches
 `channelMessageError`, or that never reaches `messagePropagated` within some
 bound, has to become visible somewhere. Without that this decision converts a loud
-failure into a silent one. The bound, and what a view shows for an op in flight
-versus one that never propagated, are that capability's to specify — and
-`docs/UI-BRIEF.md` will need the rendering obligation once it does.
+failure into a silent one.
+
+~~The bound, and what a view shows for an op in flight versus one that never
+propagated, are that capability's to specify~~ — **the obligation is now stated
+there rather than only here.** The `op-transport` spec's "A successful publish is
+a statement about the local log and nothing more" contracts what a publish may
+claim, and names the three things still owed: the bound, what a peer records for
+an op in flight, and what it records for one that never propagated. **Still not
+built** — meeting it needs state outliving the publish call and a clock, which is
+a component rather than a branch.
+
+**`docs/UI-BRIEF.md` carries the half of the rendering obligation that is true
+today**, as the obligation titled *"A successful publish means 'saved here', not
+'posted'"*: a successful publish must not
+be rendered as sent, delivered or seen, and no in-flight state is to be designed
+because no call produces the signal one would wait on. What the brief still needs
+when the three are answered is the *positive* half — what a view shows for an op
+in flight versus one that never propagated — which is additive to the prohibition
+rather than a replacement for it. The prohibition did not wait on the three,
+because a brief silent about it is one designed against by someone free to render
+success as "posted".
 
 Moving `deliver` outside `guarded` was rejected — PHASE0-FINDINGS §3 measured what
 an unguarded panic costs (the module aborts, the caller waits out a 20-second
@@ -4154,10 +4550,15 @@ at build or run time, not review time.
   it double-counts completions.
 - **`createNode` exactly once per context.** The delivery node is a singleton
   per Logos Core instance; `stop()` kills traffic for every module using it.
+  Contracted in the `op-transport` spec; kept here because it presents as a
+  runtime failure in someone else's module.
 - **`messageReceived`'s timestamp is nanoseconds**; every other event is
   ISO-8601 (delivery bug #26).
 - **`messageReceived` fires for your own messages; `channelMessageReceived` does
-  not** — own sends come back as `channelMessageSent`.
+  not** — own sends come back as `channelMessageSent`. The consequence is
+  contracted in the `op-transport` spec ("A peer's own published op is not
+  received back as an arrival"); the asymmetry itself stays here, because it is
+  what makes a missing-own-post bug look like a storage bug.
 
 ---
 
@@ -4389,14 +4790,16 @@ thing (§2.3).
   > gap about one field; it should have been read as a signal that nobody had
   > opened the file.
 
-  Two findings worth carrying forward. **The `timestamp` we do receive is
-  unusable for ordering** — it is the receiving peer's own `CLOCK_REALTIME`
-  read taken when its callback fires, so it differs per peer for one message.
-  It is not a preference for a local clock over a wire value: **there is no
-  wire timestamp on this event at all.** Exactly one event
-  (`messageReceived`) reads a real wire timestamp, which is why only that one
-  shows §11's units divergence — the two traps are one divergence seen from
-  both ends.
+  Two findings worth carrying forward. ~~**The `timestamp` we do receive is
+  unusable for ordering.**~~ **Specified — the `op-transport` spec's "The
+  arrival timestamp is a local clock reading and orders nothing" contracts
+  what a receiving peer may do with it, and its companion requirement
+  contracts that this transport supplies no ordering metadata to record.**
+  What stays here is the measurement and the pairing: the value is the
+  receiving peer's own `CLOCK_REALTIME` read taken when its callback fires,
+  and exactly one event (`messageReceived`) reads a real wire timestamp —
+  which is why only that one shows §11's units divergence. The two traps are
+  one divergence seen from both ends.
 
   ~~And **a dialectica-side Lamport clock is the one thing not to build**~~
   — **withdrawn, 2026-09-12.** The argument was that SDS's clock advances on
@@ -4409,6 +4812,20 @@ thing (§2.3).
   trying to reconcile with a clock we cannot read and the objection
   disappears. The mistake was letting "we cannot match SDS" stand in for "we
   cannot order".
+
+  **The withdrawal has not reached the spec, and that is an open contradiction
+  rather than a loose end.** `op-ordering`'s leading requirement still states
+  that "A peer SHALL NOT compute a Lamport timestamp of its own, and SHALL NOT
+  maintain a second logical clock alongside the transport's". The plan withdrew
+  that above; the spec has not been changed, so the two disagree today.
+  **Resolving it needs its own change**, because withdrawing the prohibition
+  without the replacement leaves a requirement that forbids nothing and requires
+  nothing in its place — and the replacement is the design this entry says is
+  not done here: an author-set counter is not an ordering until it has a bound,
+  and both adversarial cases below are unaddressed. The `op-transport` spec was
+  written deliberately neutral to how this resolves: it contracts what the
+  transport supplies, which is nothing, and says so without depending on the
+  prohibition being either live or withdrawn.
 
   ### The layering rule, which everything above is a consequence of
 

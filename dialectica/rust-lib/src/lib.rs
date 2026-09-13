@@ -120,6 +120,35 @@ pub trait DialecticaModule: Send + 'static {
     /// ever collapsed.
     fn list_threads(&mut self, request: String) -> String;
 
+    /// One page of a thread: its root post and the replies beneath it.
+    ///
+    /// Takes
+    /// `{"stoa":"<hex>","genesis":"<hex>","thread":"<hex>","page":N,"perPage":N,"includeHidden":bool}`
+    /// and returns the same pagination shape `listThreads` does. `thread` is the
+    /// **root post's** op id, which never moves when the post is edited.
+    ///
+    /// **Which posts are in the thread is computed from the parent chain, never
+    /// from the `thread` field an op carries.** That field is its author's claim:
+    /// a peer can authentically sign a post naming any thread it likes, and a
+    /// reader placing posts by the claim would render it inside a conversation it
+    /// was never part of. A post whose parent chain this peer cannot complete is
+    /// returned under no thread rather than placed by its claim.
+    ///
+    /// **The items are flat and each names its parent.** Nesting is the view's to
+    /// compute — depth is a count of parents, and the view holds the parents. No
+    /// item reports a depth or an indentation level.
+    ///
+    /// **A hidden root is returned, marked, with its body withheld; a hidden
+    /// reply is omitted.** The asymmetry is deliberate: a thread read that
+    /// dropped its own subject would be indistinguishable from a thread this peer
+    /// never received, and those mean opposite things.
+    ///
+    /// A thread this peer holds no root for is an error and never an empty page,
+    /// for the same reason — and the three ways a root can be unreadable (not
+    /// held, not a post, a reply rather than a root) are three different
+    /// messages, because they call for three different responses.
+    fn read_thread(&mut self, request: String) -> String;
+
     /// Create a Stoa this peer is in, and return its address.
     ///
     /// Takes `{"title":"…"}` and returns
@@ -726,6 +755,20 @@ impl DialecticaModule for Dialectica {
         // and its failure is exactly the "unreadable store" the view renders as
         // screen 07's failed state.
         core::list_threads_from_request(&request, || {
+            core::log::SqliteOpLog::open(&dir.join("ops.sqlite"))
+        })
+    }
+
+    fn read_thread(&mut self, request: String) -> String {
+        let dir = match self.storage_dir() {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
+        // The same store opener and the same per-call reasoning as
+        // `list_threads` above: opening is cheap, and a handle held across calls
+        // would have to answer what happens when the host hands the same path to
+        // another instance.
+        core::read_thread_from_request(&request, || {
             core::log::SqliteOpLog::open(&dir.join("ops.sqlite"))
         })
     }

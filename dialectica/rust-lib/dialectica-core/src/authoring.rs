@@ -282,6 +282,15 @@ pub fn post<L: OpLog>(
 /// graph is a read-side question about which ops render where, and answering it
 /// here would be a publish-path check a reader might come to rely on.
 ///
+/// **That audit now exists: [`crate::thread::thread_of`] performs it.** This
+/// paragraph deferred it and the deferral has been discharged, so the sentence
+/// above is a division of labour rather than a gap. Note the two functions share
+/// a name and hold **opposite** rules about this field — the one here reads it
+/// and trusts it, which is right for an op this peer is about to sign; the one
+/// there never reads it at all, and follows `parent` to a root instead, which is
+/// the only safe rule for an op that arrived from somebody else. A reader who
+/// has met one should not assume the other is the same rule at another layer.
+///
 /// # `op.rs`'s doc comment on `thread` was wrong, and this is why it matters
 ///
 /// It said "the store fills the thread in as its own id on ingest". The store

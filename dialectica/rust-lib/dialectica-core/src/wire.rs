@@ -1546,6 +1546,285 @@ fn feed_page_json(page: &crate::feed::FeedPage) -> String {
     .to_string()
 }
 
+// ─── The thread read ──────────────────────────────────────────────────────
+//
+// The contract is the `thread-read` spec; the reasoning is in that change's
+// `design.md`. `crate::thread` decides which posts are in the thread — including
+// the parent-chain rule that is the whole security property — and this parses,
+// pages and converts a refusal into §2.5's one failure shape.
+
+/// An op id field of an already-parsed request.
+///
+/// Takes a `&Request` rather than a `&Value` for the reason [`parse_stoa`] does:
+/// a `Value` answers `None` to `get("thread")` for an **array** exactly as it does
+/// for an object with no `thread`, so a reader over a bare `Value` cannot tell a
+/// missing field from a request that is not an object at all. A `&Request` can
+/// only have come from [`Request::parse`], so the envelope check has already
+/// happened by the time this reads anything.
+///
+/// **Present-but-wrong-typed is refused distinguishably from absent**, which the
+/// wire contract requires: those are two different caller mistakes and a reader
+/// told "missing" for a field it supplied as a number looks in the wrong place.
+///
+/// Deliberately **not** shared with [`required_op_id`], which reads a `&Value` on
+/// the publish path. Merging them would mean one function serving two callers
+/// with different envelope guarantees — CLAUDE.md's named tell — and the publish
+/// path's own migration to `Request` is not this change's to make.
+fn parse_op_id(parsed: &Request, field: &str) -> Result<crate::op::OpId, String> {
+    match parsed.get(field) {
+        Some(serde_json::Value::String(s)) => {
+            crate::op::OpId::from_hex(s).map_err(|e| error_json(&format!("{field}: {e}")))
+        }
+        Some(_) => Err(error_json(&format!("{field} must be a string"))),
+        None => Err(error_json(&format!("missing field: {field}"))),
+    }
+}
+
+/// `{"stoa":"…","thread":"…","page":N,"perPage":N,"includeHidden":bool}` -> one
+/// page of a thread.
+///
+/// The reply is the ecosystem's pagination shape, the same one the feed
+/// established — `{"items":[…],"page":N,"hasMore":bool}` — so a view renders both
+/// reads through one shape rather than branching on which call produced it.
+///
+/// # `thread` names the ROOT POST's op id, and it never moves
+///
+/// A revision is a distinct op with its own id, so the value a caller passes here
+/// is the original post's and stays usable across an edit. Passing a revision's
+/// op id is refused as not-a-post rather than served, because a revision opens no
+/// thread.
+///
+/// # The genesis record is a parameter, because authority cannot be guessed
+///
+/// Inherited from [`crate::moderation::Moderators::of`] exactly as the feed
+/// inherits it: a caller with no genesis record cannot ask for a thread, rather
+/// than getting one with moderation silently not applied. See [`genesis_for`] for
+/// why a caller-supplied record is not a weakening.
+pub fn read_thread<L: crate::log::OpLog>(
+    request: &str,
+    log: &L,
+    genesis: &crate::stoa::Genesis,
+) -> String {
+    guarded("read_thread", || {
+        let parsed = match Request::parse(request) {
+            Ok(r) => r,
+            Err(e) => return e,
+        };
+        read_thread_inner(&parsed, log, genesis)
+    })
+}
+
+/// The thread read, from a request that is already parsed.
+///
+/// **Takes a `&Request` rather than a `&str`** for the reason
+/// [`list_threads_inner`] records: a `&str` here is an invitation to parse, and
+/// the feed's two entry points once paid for two `Value` trees and two nested
+/// `guarded` frames on one call. A `&Request` can only have come from a parse
+/// that already happened, so the second one is unspellable without widening this
+/// signature on purpose.
+///
+/// **No `guarded` frame of its own**, because both public entry points carry one.
+fn read_thread_inner<L: crate::log::OpLog>(
+    parsed: &Request,
+    log: &L,
+    genesis: &crate::stoa::Genesis,
+) -> String {
+    let stoa = match parse_stoa(parsed) {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    let thread = match parse_op_id(parsed, "thread") {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+
+    // The Stoa asked for must be the one the genesis record names, or the
+    // moderator set being applied governs a different Stoa than the posts being
+    // read. That is check 3 of `moderation.rs`'s three, at the one place a caller
+    // could otherwise pair them wrongly.
+    let genesis_address = match genesis.address() {
+        Ok(a) => a,
+        Err(e) => return error_json(&format!("genesis: {e}")),
+    };
+    if genesis_address != stoa {
+        return error_json(
+            "the genesis record does not describe the Stoa this thread was asked for",
+        );
+    }
+
+    let moderators = match crate::moderation::Moderators::of(genesis) {
+        Ok(m) => m,
+        Err(e) => return error_json(&format!("genesis: {e}")),
+    };
+
+    let page = match parse_index(parsed, "page") {
+        Ok(v) => v.unwrap_or(0),
+        Err(e) => return e,
+    };
+    let per_page = match parse_index(parsed, "perPage") {
+        Ok(v) => crate::thread::clamp_per_page(v),
+        Err(e) => return e,
+    };
+
+    // The same reading the feed gives this field, and for the same reason: the
+    // default is the RESTRICTIVE one, so a `null` may read as absent. See
+    // `parse_index`'s doc for the limit — a field whose default widens what a
+    // caller may see must refuse the null instead.
+    let include_hidden = match parsed.get("includeHidden") {
+        None | Some(serde_json::Value::Null) => false,
+        Some(serde_json::Value::Bool(b)) => *b,
+        Some(_) => return error_json("includeHidden must be a boolean"),
+    };
+
+    match crate::thread::read_thread(
+        log,
+        &moderators,
+        &stoa,
+        &thread,
+        page,
+        per_page,
+        include_hidden,
+    ) {
+        Ok(Ok(page)) => thread_page_json(&page),
+        // The three refusals reach the caller as three different messages, which
+        // is the contract's requirement: wait for the op to propagate, correct a
+        // category error, or read the thread this reply belongs to.
+        Ok(Err(not_a_thread)) => error_json(&not_a_thread.to_string()),
+        // §11.1 obligation 5: a storage failure is the error shape and NEVER an
+        // empty page. The two mean opposite things and render identically if this
+        // arm is ever softened.
+        Err(e) => error_json(&e.to_string()),
+    }
+}
+
+/// The thread handler as the module actually calls it: genesis record included.
+///
+/// Thin on purpose — parse, verify, delegate — mirroring
+/// [`list_threads_from_request`]. The `store` closure supplies the log, which
+/// keeps this crate free of any opinion about where storage lives.
+pub fn read_thread_from_request<L: crate::log::OpLog>(
+    request: &str,
+    store: impl FnOnce() -> Result<L, crate::log::OpLogError>,
+) -> String {
+    guarded("read_thread", || {
+        let parsed = match Request::parse(request) {
+            Ok(r) => r,
+            Err(e) => return e,
+        };
+        let stoa = match parse_stoa(&parsed) {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
+        let genesis = match genesis_for(&parsed, &stoa) {
+            Ok(m) => m.genesis,
+            Err(e) => return e,
+        };
+        // Opening the store is itself fallible, and a failure is §2.5's error
+        // shape rather than an empty thread.
+        let log = match store() {
+            Ok(l) => l,
+            Err(e) => return error_json(&e.to_string()),
+        };
+        read_thread_inner(&parsed, &log, &genesis)
+    })
+}
+
+/// One item's moderation state, as the two fields a view renders.
+///
+/// # Three values and not a flag, and a name that is omitted rather than nulled
+///
+/// The resolver answers three things — nothing binding was found, a moderation
+/// hid it, a moderation deliberately restored it — and a boolean collapses the
+/// first and third into one `false`. An untouched post and a vindicated one read
+/// identically under a flag and mean different things, and the difference cannot
+/// be recovered afterwards.
+///
+/// `decidedBy` is **absent** where nothing decided, rather than present holding
+/// `null`: the wire contract requires a field the reply would have no meaning for
+/// to be omitted, so that a reply is never partly a success.
+///
+/// NO SPEC: the three spellings are this change's choice. The spec requires three
+/// distinguishable values and fixes no strings for them. A view branches on these,
+/// so changing one later is a breaking change to the module surface —
+/// `design.md` carries the decision.
+fn moderation_json(moderation: &crate::moderation::Moderation) -> (&'static str, Option<String>) {
+    use crate::moderation::Moderation;
+    match moderation {
+        Moderation::Unmoderated => ("unmoderated", None),
+        Moderation::Hidden(e) => ("hidden", Some(e.id().to_hex())),
+        Moderation::Unhidden(e) => ("unhidden", Some(e.id().to_hex())),
+    }
+}
+
+/// The thread page, built in one place.
+///
+/// # What is omitted rather than nulled, and why the two differ
+///
+/// `parent` on the root, `decidedBy` on an unmoderated item, and `body` and
+/// `attachments` on a withheld hidden root are each **absent** from the object
+/// rather than present holding `null`. That is the wire contract's rule for a
+/// field the reply would have no meaning for.
+///
+/// The body's absence carries more weight than the others, and it is why
+/// [`crate::thread::ThreadItem::body`] is an `Option` rather than a string with a
+/// flag beside it: a body **withheld** because the root is hidden and a body an
+/// author **cleared** are different facts, and the second is `{"text":""}`. A
+/// shape that sent `""` for both would make them indistinguishable at the one
+/// surface that has to tell them apart.
+fn thread_page_json(page: &crate::thread::ThreadPage) -> String {
+    let items: Vec<serde_json::Value> = page
+        .items
+        .iter()
+        .map(|item| {
+            let (state, decided_by) = moderation_json(&item.moderation);
+            let mut object = serde_json::json!({
+                "thread": item.thread,
+                "id": item.id,
+                "currentVersion": item.current_version,
+                "author": item.author,
+                // NO SPEC: the field NAME is this change's choice — the spec
+                // requires the value and names no field. `design.md` carries it.
+                "authorKey": item.author_key,
+                "isRevised": item.is_revised,
+                "moderation": { "state": state },
+            });
+            // `as_object_mut` cannot fail on a value this function just built as
+            // an object, but it is an `if let` rather than an `unwrap` because a
+            // panic aborts the module process (PHASE0-FINDINGS §3) and an
+            // unwrap's reasoning is exactly the kind an edit silently breaks.
+            if let Some(map) = object.as_object_mut() {
+                if let Some(parent) = &item.parent {
+                    map.insert("parent".to_string(), serde_json::json!(parent));
+                }
+                if let Some(body) = &item.body {
+                    map.insert("body".to_string(), sanitised_json(body));
+                }
+                if let Some(attachments) = &item.attachments {
+                    map.insert(
+                        "attachments".to_string(),
+                        serde_json::json!(attachments
+                            .iter()
+                            .map(sanitised_json)
+                            .collect::<Vec<_>>()),
+                    );
+                }
+                if let Some(id) = decided_by {
+                    if let Some(state) = map.get_mut("moderation").and_then(|m| m.as_object_mut()) {
+                        state.insert("decidedBy".to_string(), serde_json::json!(id));
+                    }
+                }
+            }
+            object
+        })
+        .collect();
+    serde_json::json!({
+        "items": items,
+        "page": page.page,
+        "hasMore": page.has_more,
+    })
+    .to_string()
+}
+
 // ─── Creating, joining and listing Stoas ──────────────────────────────────
 //
 // The contract is the `stoa-membership` spec; the reasoning is in that change's
@@ -5798,6 +6077,886 @@ mod tests {
         );
     }
 
+    // ─── The thread handler ───────────────────────────────────────────────
+
+    /// A post in the fixture Stoa, with every field chosen.
+    ///
+    /// The `thread` field is a parameter rather than derived, because the
+    /// handler's whole security property is that it does not believe this field —
+    /// and a fixture builder that could only tell the truth cannot show that.
+    fn a_thread_post(
+        author_seed: u8,
+        thread: Option<crate::op::OpId>,
+        parent: Option<crate::op::OpId>,
+        body: &str,
+    ) -> crate::op::SignedOp {
+        let key = feed_key(author_seed);
+        Op {
+            stoa: feed_genesis().address().unwrap(),
+            author: key.public_key(),
+            kind: OpKind::Post {
+                thread,
+                parent,
+                body: body.to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&key)
+    }
+
+    /// The fixture thread's root: author key 2, body "the opening post".
+    fn a_thread_root() -> crate::op::SignedOp {
+        a_thread_post(2, None, None, "the opening post")
+    }
+
+    /// A log holding the fixture root and one honest reply.
+    fn a_thread_log() -> MemoryOpLog {
+        let root = a_thread_root();
+        let reply = a_thread_post(3, Some(root.op.id()), Some(root.op.id()), "a reply");
+        let mut log = MemoryOpLog::new();
+        log.append(root, Arrival::unordered()).unwrap();
+        log.append(reply, Arrival::unordered()).unwrap();
+        log
+    }
+
+    fn thread_request(extra: &str) -> String {
+        let stoa = feed_genesis().address().unwrap().to_hex();
+        let thread = a_thread_root().op.id().to_hex();
+        if extra.is_empty() {
+            format!(r#"{{"stoa":"{stoa}","thread":"{thread}"}}"#)
+        } else {
+            format!(r#"{{"stoa":"{stoa}","thread":"{thread}",{extra}}}"#)
+        }
+    }
+
+    #[test]
+    fn the_thread_reply_is_the_ecosystems_pagination_shape() {
+        // Pinned by key name. A view is written against these exact names and
+        // renaming one is a breaking change no type checker would catch.
+        let out = read_thread(&thread_request(""), &a_thread_log(), &feed_genesis());
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v["items"].is_array(), "got {out}");
+        assert_eq!(v["page"], 0);
+        assert_eq!(v["hasMore"], false);
+
+        let root = &v["items"][0];
+        for field in [
+            "thread",
+            "id",
+            "currentVersion",
+            "author",
+            "authorKey",
+            "body",
+            "attachments",
+            "isRevised",
+            "moderation",
+        ] {
+            assert!(root.get(field).is_some(), "item is missing {field}: {out}");
+        }
+        assert_eq!(root["body"]["text"], "the opening post");
+        assert_eq!(root["thread"], a_thread_root().op.id().to_hex());
+        // The ROOT reports no parent — omitted, not null.
+        assert!(
+            root.get("parent").is_none(),
+            "the root must omit `parent` rather than send it holding null: {out}"
+        );
+        // And the reply reports one.
+        assert_eq!(v["items"][1]["parent"], a_thread_root().op.id().to_hex());
+    }
+
+    /// Every top-level key of a thread reply, and every key of each item, as
+    /// sorted lists — so an assertion can be about the WHOLE key set rather than
+    /// about names somebody thought to look for.
+    fn thread_reply_key_sets(out: &str) -> (Vec<String>, Vec<Vec<String>>) {
+        let v: serde_json::Value = serde_json::from_str(out).unwrap();
+        let mut top: Vec<String> = v
+            .as_object()
+            .expect("a thread reply is a JSON object")
+            .keys()
+            .cloned()
+            .collect();
+        top.sort();
+        let items = v["items"]
+            .as_array()
+            .expect("a served reply carries items")
+            .iter()
+            .map(|item| {
+                let mut keys: Vec<String> = item
+                    .as_object()
+                    .expect("an item is a JSON object")
+                    .keys()
+                    .cloned()
+                    .collect();
+                keys.sort();
+                keys
+            })
+            .collect();
+        (top, items)
+    }
+
+    #[test]
+    fn a_thread_reply_carries_exactly_its_contracted_keys_and_no_others() {
+        // Two spec scenarios are phrased as ENUMERATIONS and neither can be
+        // discharged by a denylist: "No total is reported" and "no item carries a
+        // derived display name", the latter saying in as many words that "every
+        // field of an item is enumerated".
+        //
+        // A denylist fails on the names somebody thought of and passes on the one
+        // they did not — this repo's hand-maintained-sweep-list defect, in the one
+        // place where the stronger form is actually available. So this asserts the
+        // WHOLE key set, at both levels, and a field added to either object fails
+        // here whatever it is called.
+        //
+        // Three item fields are conditional by contract, so a single fixture
+        // cannot pin them: `parent` is absent on the root, `body` and
+        // `attachments` are absent only on a WITHHELD hidden root, and
+        // `moderation.decidedBy` is absent only when nothing decided. Each case
+        // is built below and its exact key set asserted, rather than allowing a
+        // permissive superset that would let a stray field hide in the slack.
+        let root = a_thread_root();
+        let reply = a_thread_post(3, Some(root.op.id()), Some(root.op.id()), "a reply");
+        let moderator = feed_key(1);
+        let hide_the_root = Op {
+            stoa: feed_genesis().address().unwrap(),
+            author: moderator.public_key(),
+            kind: OpKind::Moderate {
+                target: root.op.id(),
+                action: crate::op::ModerationAction::Hide,
+            },
+        }
+        .sign(&moderator);
+
+        // Case 1: an ordinary served thread — an unmoderated root with no parent,
+        // and an unmoderated reply with one.
+        let plain = read_thread(&thread_request(""), &a_thread_log(), &feed_genesis());
+        let (top, items) = thread_reply_key_sets(&plain);
+        assert_eq!(
+            top,
+            vec!["hasMore", "items", "page"],
+            "the reply carries the pagination shape and NOTHING else — a count of \
+             what this peer holds is not a count of what exists, and the two are \
+             indistinguishable once rendered: {plain}"
+        );
+        assert_eq!(items.len(), 2, "got {plain}");
+        assert_eq!(
+            items[0],
+            vec![
+                "attachments",
+                "author",
+                "authorKey",
+                "body",
+                "currentVersion",
+                "id",
+                "isRevised",
+                "moderation",
+                "thread",
+            ],
+            "the root's complete key set — no parent, and nothing derived from \
+             `authorKey` by any further transformation: {plain}"
+        );
+        assert_eq!(
+            items[1],
+            vec![
+                "attachments",
+                "author",
+                "authorKey",
+                "body",
+                "currentVersion",
+                "id",
+                "isRevised",
+                "moderation",
+                "parent",
+                "thread",
+            ],
+            "a reply's complete key set is the root's plus `parent`: {plain}"
+        );
+
+        // Case 2: a hidden root read WITHOUT hidden content — `body` and
+        // `attachments` withheld, so the key set is two shorter and no longer.
+        let mut hidden_log = MemoryOpLog::new();
+        for op in [root.clone(), reply.clone(), hide_the_root.clone()] {
+            hidden_log.append(op, Arrival::unordered()).unwrap();
+        }
+        let withheld = read_thread(&thread_request(""), &hidden_log, &feed_genesis());
+        let (_, withheld_items) = thread_reply_key_sets(&withheld);
+        assert_eq!(
+            withheld_items[0],
+            vec![
+                "author",
+                "authorKey",
+                "currentVersion",
+                "id",
+                "isRevised",
+                "moderation",
+                "thread",
+            ],
+            "a withheld hidden root omits `body` and `attachments` and gains \
+             nothing in their place: {withheld}"
+        );
+
+        // Case 3: the moderation object itself, both ways round. `decidedBy` is
+        // the one conditional key inside it, and the nested object is enumerated
+        // for the same reason the outer ones are.
+        let hidden_v: serde_json::Value = serde_json::from_str(&withheld).unwrap();
+        let mut decided: Vec<&String> = hidden_v["items"][0]["moderation"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect();
+        decided.sort();
+        assert_eq!(
+            decided,
+            vec!["decidedBy", "state"],
+            "a decided item names the op and carries no third field: {withheld}"
+        );
+        let mut undecided: Vec<&String> = hidden_v["items"][1]["moderation"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect();
+        undecided.sort();
+        assert_eq!(
+            undecided,
+            vec!["state"],
+            "an unmoderated item carries `state` alone — `decidedBy` omitted, not \
+             nulled: {withheld}"
+        );
+    }
+
+    #[test]
+    fn the_wire_reports_the_author_as_an_address_and_a_key_and_no_name() {
+        // Two independent digests: the generated name comes from the KEY, the
+        // mark from the ADDRESS, and an address is a one-way hash — so an item
+        // carrying only an address is one whose name a view cannot compute.
+        let out = read_thread(&thread_request(""), &a_thread_log(), &feed_genesis());
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let root = &v["items"][0];
+
+        assert_eq!(
+            root["author"],
+            feed_key(2).public_key().address().to_hex(),
+            "got {out}"
+        );
+        assert_eq!(
+            root["authorKey"],
+            hex::encode(feed_key(2).public_key().to_bytes())
+        );
+        assert_ne!(root["author"], root["authorKey"]);
+        // And NO name of any kind travels: a name is a pure function of the key,
+        // so sending one would put a derivable identifier on the wire beside the
+        // material it is derived from, where the two could disagree.
+        for absent in ["name", "displayName", "generatedName", "mark"] {
+            assert!(
+                root.get(absent).is_none(),
+                "an item must not carry {absent}: {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_wire_reports_moderation_as_three_values_and_omits_the_deciding_op() {
+        // Three states rather than a flag, and `decidedBy` ABSENT rather than
+        // null where nothing decided — the wire contract's rule for a field the
+        // reply would have no meaning for.
+        let root = a_thread_root();
+        let reply = a_thread_post(3, Some(root.op.id()), Some(root.op.id()), "a reply");
+        let moderator = feed_key(1);
+        let hide = Op {
+            stoa: feed_genesis().address().unwrap(),
+            author: moderator.public_key(),
+            kind: OpKind::Moderate {
+                target: reply.op.id(),
+                action: crate::op::ModerationAction::Hide,
+            },
+        }
+        .sign(&moderator);
+        let mut log = MemoryOpLog::new();
+        for op in [root.clone(), reply.clone(), hide.clone()] {
+            log.append(op, Arrival::unordered()).unwrap();
+        }
+
+        let out = read_thread(
+            &thread_request(r#""includeHidden":true"#),
+            &log,
+            &feed_genesis(),
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let items = v["items"].as_array().unwrap();
+
+        let root_item = items
+            .iter()
+            .find(|i| i["id"] == root.op.id().to_hex())
+            .expect("the root must be returned");
+        assert_eq!(root_item["moderation"]["state"], "unmoderated");
+        assert!(
+            root_item["moderation"].get("decidedBy").is_none(),
+            "an unmoderated item must OMIT decidedBy, not send it as null: {out}"
+        );
+
+        let hidden_item = items
+            .iter()
+            .find(|i| i["id"] == reply.op.id().to_hex())
+            .expect("a hidden reply asked for must be returned");
+        assert_eq!(hidden_item["moderation"]["state"], "hidden");
+        assert_eq!(
+            hidden_item["moderation"]["decidedBy"],
+            hide.op.id().to_hex(),
+            "a hidden item must name the op that decided it"
+        );
+    }
+
+    #[test]
+    fn a_withheld_body_is_absent_and_a_cleared_one_is_an_empty_string() {
+        // THE distinction the `Option` exists to keep, asserted at the wire where
+        // a caller has to tell them apart. A shape sending `""` for both would
+        // make a moderated post look like one its author emptied.
+        let root = a_thread_root();
+        let moderator = feed_key(1);
+        let hide = Op {
+            stoa: feed_genesis().address().unwrap(),
+            author: moderator.public_key(),
+            kind: OpKind::Moderate {
+                target: root.op.id(),
+                action: crate::op::ModerationAction::Hide,
+            },
+        }
+        .sign(&moderator);
+        let mut hidden_log = MemoryOpLog::new();
+        for op in [root.clone(), hide] {
+            hidden_log.append(op, Arrival::unordered()).unwrap();
+        }
+
+        let withheld: serde_json::Value = serde_json::from_str(&read_thread(
+            &thread_request(""),
+            &hidden_log,
+            &feed_genesis(),
+        ))
+        .unwrap();
+        let withheld_root = &withheld["items"][0];
+        assert_eq!(withheld_root["moderation"]["state"], "hidden");
+        assert!(
+            withheld_root.get("body").is_none(),
+            "a withheld body is ABSENT: {withheld}"
+        );
+        assert!(withheld_root.get("attachments").is_none());
+
+        // The other side: an author who cleared their own post.
+        let author = feed_key(2);
+        let cleared = Op {
+            stoa: feed_genesis().address().unwrap(),
+            author: author.public_key(),
+            kind: OpKind::Revise {
+                target: root.op.id(),
+                body: String::new(),
+                attachments: vec![],
+            },
+        }
+        .sign(&author);
+        let mut cleared_log = MemoryOpLog::new();
+        for op in [root.clone(), cleared] {
+            cleared_log.append(op, Arrival::unordered()).unwrap();
+        }
+        let emptied: serde_json::Value = serde_json::from_str(&read_thread(
+            &thread_request(""),
+            &cleared_log,
+            &feed_genesis(),
+        ))
+        .unwrap();
+        let emptied_root = &emptied["items"][0];
+        assert_eq!(
+            emptied_root["body"]["text"], "",
+            "a cleared body is PRESENT and empty: {emptied}"
+        );
+        assert_eq!(emptied_root["moderation"]["state"], "unmoderated");
+    }
+
+    #[test]
+    fn the_wire_never_places_a_post_by_its_claimed_thread() {
+        // The security property, at the boundary a view actually calls. Duplicated
+        // from `thread.rs`'s own suite on purpose: this is the surface an attacker
+        // reaches, and a handler wired to the wrong function would leave the core
+        // test green.
+        let root = a_thread_root();
+        let intruder = a_thread_post(9, Some(root.op.id()), None, "injected");
+        assert!(intruder.verify(), "the attack needs no forgery");
+        let mut log = MemoryOpLog::new();
+        for op in [root.clone(), intruder.clone()] {
+            log.append(op, Arrival::unordered()).unwrap();
+        }
+
+        let out = read_thread(&thread_request(""), &log, &feed_genesis());
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let ids: Vec<&str> = v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            ids,
+            vec![root.op.id().to_hex().as_str()],
+            "a post claiming the thread with no parent in it was served: {out}"
+        );
+    }
+
+    #[test]
+    fn the_three_thread_refusals_are_three_different_messages_on_the_wire() {
+        // Three caller mistakes, three responses: wait for the op to propagate,
+        // correct a category error, or read the thread this reply belongs to.
+        let root = a_thread_root();
+        let reply = a_thread_post(3, Some(root.op.id()), Some(root.op.id()), "a reply");
+        let voter = feed_key(4);
+        let vote = Op {
+            stoa: feed_genesis().address().unwrap(),
+            author: voter.public_key(),
+            kind: OpKind::Vote {
+                target: root.op.id(),
+                direction: crate::op::VoteDirection::Up,
+            },
+        }
+        .sign(&voter);
+        let mut log = MemoryOpLog::new();
+        for op in [root, reply.clone(), vote.clone()] {
+            log.append(op, Arrival::unordered()).unwrap();
+        }
+        let never_seen = a_thread_post(5, None, None, "never received").op.id();
+
+        let stoa = feed_genesis().address().unwrap().to_hex();
+        let ask = |id: crate::op::OpId| {
+            let request = format!(r#"{{"stoa":"{stoa}","thread":"{}"}}"#, id.to_hex());
+            let out = read_thread(&request, &log, &feed_genesis());
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(
+                v.get("items").is_none(),
+                "a refusal must carry no items: {out}"
+            );
+            error_message(&out)
+        };
+
+        let messages = [ask(never_seen), ask(vote.op.id()), ask(reply.op.id())];
+        for (i, a) in messages.iter().enumerate() {
+            for b in messages.iter().skip(i + 1) {
+                assert_ne!(a, b, "two refusals share a message");
+            }
+        }
+    }
+
+    #[test]
+    fn every_non_post_kind_takes_one_refusal_on_the_wire_and_never_the_unheld_one() {
+        // The rule is stated over KINDS, so the wire is swept over kinds: a vote,
+        // a moderation op, a Stoa metadata op and a revision are each an op the
+        // peer holds that is not a post. Every one gets the same answer, and none
+        // of them gets the one that would send a view waiting for propagation of
+        // something that already arrived.
+        //
+        // The expectation for the falsehood is built from `NotAThread::NotHeld`
+        // on the SAME op id — the message the handler would have produced had it
+        // been wrong — so this cannot pass by both messages being reworded
+        // together, nor because two different ids made two different strings.
+        let root = a_thread_root();
+        let stoa = feed_genesis().address().unwrap();
+        let moderator = feed_key(1);
+        let author = feed_key(2);
+        let voter = feed_key(4);
+        let non_posts: Vec<(&str, crate::op::SignedOp)> = vec![
+            (
+                "a vote",
+                Op {
+                    stoa,
+                    author: voter.public_key(),
+                    kind: OpKind::Vote {
+                        target: root.op.id(),
+                        direction: crate::op::VoteDirection::Up,
+                    },
+                }
+                .sign(&voter),
+            ),
+            (
+                "a moderation",
+                Op {
+                    stoa,
+                    author: moderator.public_key(),
+                    kind: OpKind::Moderate {
+                        target: root.op.id(),
+                        action: crate::op::ModerationAction::Hide,
+                    },
+                }
+                .sign(&moderator),
+            ),
+            (
+                "a Stoa metadata op",
+                Op {
+                    stoa,
+                    author: moderator.public_key(),
+                    kind: OpKind::StoaMetadata {
+                        title: "Agora, renamed".to_string(),
+                        description: "today's description".to_string(),
+                    },
+                }
+                .sign(&moderator),
+            ),
+            (
+                "a revision",
+                Op {
+                    stoa,
+                    author: author.public_key(),
+                    kind: OpKind::Revise {
+                        target: root.op.id(),
+                        body: "v2".to_string(),
+                        attachments: vec![],
+                    },
+                }
+                .sign(&author),
+            ),
+        ];
+
+        let mut log = MemoryOpLog::new();
+        log.append(root.clone(), Arrival::unordered()).unwrap();
+        for (_, op) in &non_posts {
+            log.append(op.clone(), Arrival::unordered()).unwrap();
+        }
+
+        let stoa_hex = stoa.to_hex();
+        let mut messages = Vec::new();
+        for (name, op) in &non_posts {
+            let id = op.op.id();
+            assert!(
+                crate::log::OpLog::get(&log, &id).unwrap().is_some(),
+                "{name} must be HELD, or a refusal proves nothing about kinds"
+            );
+            let request = format!(r#"{{"stoa":"{stoa_hex}","thread":"{}"}}"#, id.to_hex());
+            let out = read_thread(&request, &log, &feed_genesis());
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(
+                v.get("items").is_none(),
+                "{name}: a refusal carries no items"
+            );
+
+            let message = error_message(&out);
+            assert_ne!(
+                message,
+                crate::thread::NotAThread::NotHeld(id).to_string(),
+                "{name} is held, so reporting it as not held is false"
+            );
+            assert_eq!(
+                message,
+                crate::thread::NotAThread::NotAPost(id).to_string(),
+                "{name} must take the not-a-post refusal, like every other kind"
+            );
+            messages.push(message);
+        }
+
+        // The outcome does not vary by kind: strip each op id and the four
+        // messages are one message, so a kind this test does not name is not
+        // left with an answer of its own.
+        let shapes: std::collections::HashSet<String> = non_posts
+            .iter()
+            .zip(&messages)
+            .map(|((_, op), m)| m.replace(&op.op.id().to_hex(), "<id>"))
+            .collect();
+        assert_eq!(
+            shapes.len(),
+            1,
+            "four kinds, four different messages: {shapes:?}"
+        );
+    }
+
+    #[test]
+    fn a_thread_read_refuses_a_missing_field_distinguishably_from_a_wrong_typed_one() {
+        let stoa = feed_genesis().address().unwrap().to_hex();
+        let missing = error_message(&read_thread(
+            &format!(r#"{{"stoa":"{stoa}"}}"#),
+            &a_thread_log(),
+            &feed_genesis(),
+        ));
+        let wrong_type = error_message(&read_thread(
+            &format!(r#"{{"stoa":"{stoa}","thread":7}}"#),
+            &a_thread_log(),
+            &feed_genesis(),
+        ));
+        assert!(
+            missing.contains("missing field"),
+            "an absent field must say so, got {missing}"
+        );
+        assert!(
+            !wrong_type.contains("missing field"),
+            "a present-but-wrong-typed field must not read as absent, got {wrong_type}"
+        );
+        assert_ne!(missing, wrong_type);
+    }
+
+    #[test]
+    fn the_include_hidden_flags_absence_and_its_null_both_exclude() {
+        // The contract's worked example for a null-reads-as-absent field. Asserted
+        // against a log where the flag genuinely CHANGES the answer, or both
+        // replies would be identical for the wrong reason.
+        let root = a_thread_root();
+        let reply = a_thread_post(3, Some(root.op.id()), Some(root.op.id()), "a reply");
+        let moderator = feed_key(1);
+        let hide = Op {
+            stoa: feed_genesis().address().unwrap(),
+            author: moderator.public_key(),
+            kind: OpKind::Moderate {
+                target: reply.op.id(),
+                action: crate::op::ModerationAction::Hide,
+            },
+        }
+        .sign(&moderator);
+        let mut log = MemoryOpLog::new();
+        for op in [root.clone(), reply.clone(), hide] {
+            log.append(op, Arrival::unordered()).unwrap();
+        }
+
+        let omitted = read_thread(&thread_request(""), &log, &feed_genesis());
+        let nulled = read_thread(
+            &thread_request(r#""includeHidden":null"#),
+            &log,
+            &feed_genesis(),
+        );
+        assert_eq!(omitted, nulled, "a null must read as absent here");
+
+        let v: serde_json::Value = serde_json::from_str(&omitted).unwrap();
+        assert_eq!(v["items"].as_array().unwrap().len(), 1, "got {omitted}");
+
+        // And the flag genuinely widens the answer when set, so the equality
+        // above is not two copies of an unchanging reply.
+        let asked: serde_json::Value = serde_json::from_str(&read_thread(
+            &thread_request(r#""includeHidden":true"#),
+            &log,
+            &feed_genesis(),
+        ))
+        .unwrap();
+        assert_eq!(asked["items"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_genesis_for_another_stoa_is_refused_rather_than_applied_to_this_one() {
+        // Found by security review, which measured that `if false &&
+        // genesis_address != stoa` left the whole suite green. The check is the
+        // one that stops a caller pairing one Stoa's moderator set with another
+        // Stoa's posts, and `read_thread(request, log, genesis)` — public and
+        // re-exported at the crate root — relies on this line alone.
+        //
+        // **Why the consequence is worse than a wrong answer:** `Moderators::
+        // authorises` leads with `entry.op.op.stoa == self.stoa`, so a set built
+        // for Stoa B binds NOTHING in Stoa A. Every moderation silently stops
+        // applying — a hidden reply reappears and a hidden root renders the body
+        // that was withheld. So this asserts the moderation actually still binds
+        // in the correct pairing, not merely that the mismatch is refused;
+        // without that half, an implementation that refused everything would pass.
+        let root = a_thread_root();
+        let reply = a_thread_post(3, Some(root.op.id()), Some(root.op.id()), "a reply");
+        let moderator = feed_key(1);
+        let hide = Op {
+            stoa: feed_genesis().address().unwrap(),
+            author: moderator.public_key(),
+            kind: OpKind::Moderate {
+                target: reply.op.id(),
+                action: crate::op::ModerationAction::Hide,
+            },
+        }
+        .sign(&moderator);
+        let mut log = MemoryOpLog::new();
+        for op in [root.clone(), reply.clone(), hide.clone()] {
+            log.append(op, Arrival::unordered()).unwrap();
+        }
+
+        // A well-formed genesis record for a DIFFERENT Stoa. Well-formed is the
+        // point: it decodes, it hashes, `Moderators::of` would happily build a
+        // set from it — only the pairing with the requested Stoa is wrong.
+        let elsewhere = Genesis {
+            creator: feed_key(1).public_key(),
+            policy: Policy::Open,
+            title: "Somewhere else".to_string(),
+        };
+        assert_ne!(
+            elsewhere.address().unwrap(),
+            feed_genesis().address().unwrap(),
+            "the fixture must name a genuinely different Stoa"
+        );
+
+        let out = read_thread(&thread_request(""), &log, &elsewhere);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(
+            v.get("error").is_some(),
+            "a genesis record for another Stoa must be REFUSED, not used to build \
+             a moderator set that binds nothing here: {out}"
+        );
+        assert!(
+            v.get("items").is_none(),
+            "a refusal carries no items: {out}"
+        );
+
+        // The other half: with the right pairing the same read succeeds AND the
+        // moderation binds — so the refusal above is the check doing its job
+        // rather than the read being broken for every genesis record.
+        let correct = read_thread(&thread_request(""), &log, &feed_genesis());
+        let cv: serde_json::Value = serde_json::from_str(&correct).unwrap();
+        assert!(cv.get("error").is_none(), "got {correct}");
+        let ids: Vec<&str> = cv["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            ids,
+            vec![root.op.id().to_hex().as_str()],
+            "the hidden reply must be omitted — which is what stops working when \
+             the moderator set governs the wrong Stoa: {correct}"
+        );
+    }
+
+    #[test]
+    fn a_thread_request_carrying_its_genesis_record_reads_the_thread() {
+        let out = read_thread_from_request(
+            &thread_request(&format!(r#""genesis":"{}""#, genesis_hex())),
+            || Ok::<_, crate::log::OpLogError>(a_thread_log()),
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_none(), "got {out}");
+        assert_eq!(v["items"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_thread_genesis_record_that_does_not_hash_to_the_stoa_is_refused() {
+        // Without this the moderator set applied to a thread is whatever the
+        // caller says it is.
+        let attacker = Genesis {
+            creator: feed_key(9).public_key(),
+            policy: Policy::Open,
+            title: "Agora".to_string(),
+        };
+        assert!(attacker.address().is_ok(), "the record is well-formed");
+
+        let out = read_thread_from_request(
+            &thread_request(&format!(
+                r#""genesis":"{}""#,
+                hex::encode(attacker.canonical_bytes().unwrap())
+            )),
+            || Ok::<_, crate::log::OpLogError>(a_thread_log()),
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_some(), "got {out}");
+        assert!(v.get("items").is_none());
+    }
+
+    #[test]
+    fn a_thread_read_against_a_broken_store_is_an_error_and_not_an_empty_page() {
+        // The genesis record is part of the request on this path, and it must be
+        // present or the refusal comes back from the parse and this test passes
+        // for the wrong reason — the store would never have been opened at all.
+        let out = read_thread_from_request(
+            &thread_request(&format!(r#""genesis":"{}""#, genesis_hex())),
+            || {
+                Err::<MemoryOpLog, _>(crate::log::OpLogError::Storage(
+                    "unable to open database file".into(),
+                ))
+            },
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("items").is_none(), "got {out}");
+        assert!(v["error"]
+            .as_str()
+            .unwrap()
+            .contains("unable to open database file"));
+    }
+
+    #[test]
+    fn a_panicking_store_reaches_the_caller_as_the_error_shape() {
+        // The guard, on this handler. A panic in a dispatch handler aborts the
+        // module process (PHASE0-FINDINGS §3), so this is not a tidiness check.
+        struct PanickingLog;
+        impl crate::log::OpLog for PanickingLog {
+            fn append(
+                &mut self,
+                _op: crate::op::SignedOp,
+                _arrival: Arrival,
+            ) -> Result<crate::log::Appended, crate::log::OpLogError> {
+                panic!("the storage layer exploded")
+            }
+            fn get(
+                &self,
+                _id: &crate::op::OpId,
+            ) -> Result<Option<crate::log::Entry>, crate::log::OpLogError> {
+                panic!("the storage layer exploded")
+            }
+            fn iter(&self) -> Result<Vec<crate::log::Entry>, crate::log::OpLogError> {
+                panic!("the storage layer exploded")
+            }
+            fn iter_stoa(
+                &self,
+                _stoa: &crate::identity::Address,
+            ) -> Result<Vec<crate::log::Entry>, crate::log::OpLogError> {
+                panic!("the storage layer exploded")
+            }
+            fn iter_target(
+                &self,
+                _target: &crate::op::OpId,
+            ) -> Result<Vec<crate::log::Entry>, crate::log::OpLogError> {
+                panic!("the storage layer exploded")
+            }
+            fn len(&self) -> Result<usize, crate::log::OpLogError> {
+                panic!("the storage layer exploded")
+            }
+        }
+
+        let out = read_thread(&thread_request(""), &PanickingLog, &feed_genesis());
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_some(), "got {out}");
+        assert!(v.get("items").is_none());
+    }
+
+    #[test]
+    fn an_oversized_thread_page_is_served_at_the_cap_and_zero_at_the_default() {
+        // Both directions of the clamp at the wire, because `perPage` arrives
+        // from a caller and the reply is serialised into one string.
+        let root = a_thread_root();
+        let mut log = MemoryOpLog::new();
+        log.append(root.clone(), Arrival::unordered()).unwrap();
+        for seed in 3..8u8 {
+            log.append(
+                a_thread_post(seed, Some(root.op.id()), Some(root.op.id()), "reply"),
+                Arrival::unordered(),
+            )
+            .unwrap();
+        }
+
+        let huge: serde_json::Value = serde_json::from_str(&read_thread(
+            &thread_request(r#""perPage":100000"#),
+            &log,
+            &feed_genesis(),
+        ))
+        .unwrap();
+        assert!(huge.get("error").is_none(), "an oversized ask is served");
+        assert!(huge["items"].as_array().unwrap().len() <= crate::thread::MAX_PER_PAGE);
+
+        let zero: serde_json::Value = serde_json::from_str(&read_thread(
+            &thread_request(r#""perPage":0"#),
+            &log,
+            &feed_genesis(),
+        ))
+        .unwrap();
+        assert_eq!(
+            zero["items"].as_array().unwrap().len(),
+            6,
+            "a page size of zero is served at the DEFAULT, never as an empty page"
+        );
+    }
+
+    #[test]
+    fn a_thread_page_past_the_end_is_an_empty_page_and_not_an_error() {
+        let out = read_thread(
+            &thread_request(r#""page":18446744073709551615"#),
+            &a_thread_log(),
+            &feed_genesis(),
+        );
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("error").is_none(), "got {out}");
+        assert_eq!(v["items"].as_array().unwrap().len(), 0);
+        assert_eq!(v["hasMore"], false);
+    }
+
     // ─── The publish path ─────────────────────────────────────────────────
 
     /// The root secret a keystore would hold, fixed so derived addresses are
@@ -7748,6 +8907,16 @@ mod tests {
                 Ok::<_, crate::log::OpLogError>(log_with_body("hello"))
             })
         }
+        // The two `thread-read` added. Each reads `stoa` and `thread`, so each is
+        // inside the envelope rule's first case — and each is listed because the
+        // obligation above is an obligation rather than a courtesy: an unlisted
+        // method is silently unswept and every sweep below goes green without it.
+        fn thread_m(r: &str) -> String {
+            read_thread(r, &a_thread_log(), &feed_genesis())
+        }
+        fn thread_req_m(r: &str) -> String {
+            read_thread_from_request(r, || Ok::<_, crate::log::OpLogError>(a_thread_log()))
+        }
         fn channel_m(r: &str) -> String {
             // `parse_channel_id` returns the wire shape on both arms, so an
             // `Ok` is folded into a reply in order to be swept uniformly. The
@@ -7858,6 +9027,8 @@ mod tests {
             ("get_capabilities", caps_m),
             ("list_threads", feed_m),
             ("list_threads_from_request", feed_req_m),
+            ("read_thread", thread_m),
+            ("read_thread_from_request", thread_req_m),
             ("parse_channel_id", channel_m),
             ("generate_identity_slate", slate_m),
             ("keep_identity", keep_m),
@@ -8408,6 +9579,13 @@ mod tests {
             "get_capabilities" => format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex()),
             "list_threads" => feed_request(""),
             "list_threads_from_request" => full_request(),
+            // `thread` is a required field beside `stoa`, so it must be present
+            // or the sweeps asserting a served request see a missing-field error
+            // and attribute it to whatever they were varying.
+            "read_thread" => thread_request(""),
+            "read_thread_from_request" => {
+                thread_request(&format!(r#""genesis":"{}""#, genesis_hex()))
+            }
             "parse_channel_id" => r#"{"channelId":"stoa-abc/e7"}"#.to_string(),
             "generate_identity_slate" | "who_am_i" => {
                 format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex())
