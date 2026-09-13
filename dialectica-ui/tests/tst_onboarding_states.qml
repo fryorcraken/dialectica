@@ -917,6 +917,17 @@ TestCase {
         // on any rewording or re-layout and passes on a corpus that collects
         // the wrong text; the sentence below is what actually proves the walk
         // arrived, and it is immune to both.
+        //
+        // **`> 0` rather than a recalibrated number, and that was measured
+        // rather than settled by argument.** Review asked whether the weakening
+        // from `> 5` gave up real coverage. It does not: the failure a floor
+        // exists to catch is a corpus that went empty, and `visibleTextsOn`
+        // stubbed to `return []` fails THIS line — with three other tests in
+        // this file failing beside it. A larger floor would catch the same
+        // single defect and additionally fail on every future re-layout, which
+        // is the count-pin failure mode one line up. The floor and the named
+        // sentence are two assertions doing two jobs: this one says the walk
+        // found anything, the next says it found its way to the kept card.
         verify(shown.length > 0, "the visible sweep must be finding text at all")
         verify(shown.join(" ").indexOf("This is who you are here now.") >= 0,
                "and must reach the kept card, or its silence proves nothing")

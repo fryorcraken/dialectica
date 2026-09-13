@@ -265,7 +265,7 @@ and the Feed-section clause names the specific trap.
       above, so the next person does not re-derive that height and `visible` are
       blind here.
 
-- [ ] **`tester`** — `dialectica-ui/tests/` — nothing pins the one piece of
+- [x] **`tester`** — `dialectica-ui/tests/` — nothing pins the one piece of
       interface text this change creates, nor the `implicitHeight` it fixes
       **Scenario:** delete `FeedScreen.qml:225-233` (the "Not newest first…"
       `Text`) and the suite is 41/41 green. Revert `ScreenFrame.qml:43`
@@ -304,6 +304,64 @@ and the Feed-section clause names the specific trap.
         That is the defect `findings/readability.md`'s first box filed, and it is
         currently prevented by a comment only. Measured numbers are in
         `design.md` §4.
+
+      **Fixed — `tester`.** Both halves, in two files, with the ordering sentence
+      answering `tasks.md`'s open question rather than being pinned reflexively.
+
+      **The ordering sentence: yes, worth pinning, and the measurement is the
+      argument.** `tst_feed_copy.qml`,
+      `test_the_feed_denies_being_newest_first_rather_than_being_silent`. Your
+      citation has drifted — the `Text` is at **`FeedScreen.qml:411-419`**, not
+      `:225-233`. Two mutations, both run:
+
+      - Replacing the sentence with the neutral label `"Posts are shown in the
+        same order for everyone."` — which is precisely the regression
+        `tasks.md` 2.3 describes, the label being honest but declining to deny
+        recency — fails two tests. Nothing else in the suite notices.
+      - Keeping the prefix and dropping the explanation (`"Not newest first.
+        Posts are shown in the same order for everyone."`) fails one, on the
+        clause asserting the sentence says WHY. **A prefix-only test passes this
+        mutation**, which is why the assertion is a relation and not a pin: a
+        pinned literal fails on an innocent reword and passes on a fluent lie.
+
+      **`implicitHeight`: the more consequential half, as you said, and it needed
+      a stronger assertion than the one you asked for.** `> 0` and "grows with
+      `rows.length`" are not interchangeable here. An unrendered `FeedScreen`
+      reports **385 at 0 rows and 385 at 30** — so the growth assertion needs the
+      parented-and-rendered recipe, and a `> 0` floor written on the light recipe
+      passes with the row `Repeater`'s model replaced by `[]`. I ran that
+      mutation; the growth test is the only failure in the suite. The reasoning
+      and the measurement table are in the `spec-test.md` box on geometry.
+
+      `tst_screen_frame_geometry.qml` therefore asserts monotonic growth across
+      0/1/5/30 rows, plus the hardcoded 156 for a two-row card measured directly.
+      Deleting `ScreenFrame.qml:28` fails four of the five tests in that file —
+      `Actual 0, Expected 156`, `Actual 0, Expected 56`, and the feed floor at
+      `got 0`.
+
+      **Your `dev-writer` pointer note is right and its second bullet's numbers
+      are not.** Line 28 is correct. `body.height` is now at **88**, not 79
+      (`spec-test.md`'s box says the same). And `design.md` §4's recorded growth
+      figures — 275/1030/4805 — do not reproduce: I measure 385/954/3604. The
+      shape holds, the numbers do not, so no feed height is hardcoded anywhere in
+      the new file. Left for `dev-writer` to correct in `design.md`; it gates
+      nothing.
+
+      **Your third assertion — the trailing-spacer inflation — is deliberately
+      NOT added, and this is a rejection rather than an oversight.** The property
+      is real (`implicitHeight` 156 with a real `fillHeight` child, 176 with a
+      trailing spacer; I reproduced both). But a test asserting it would be
+      asserting that a shape **nobody writes** behaves a particular way — there is
+      no trailing spacer in the tree, and the assertion would pin a fact about
+      `ColumnLayout` rather than about `ScreenFrame`. What actually protects
+      against that defect is the escape-hatch comment telling an author not to
+      reach for the spacer, and what a test can protect is the behaviour the
+      comment's ADVICE produces: that is
+      `test_a_sized_card_with_no_claimant_scatters_its_rows` plus
+      `test_a_fillHeight_child_of_a_sized_card_is_given_the_cards_slack`, which
+      together pin both the problem and the recommended fix. Adding a third test
+      for the rejected alternative would pin the repo to a `ColumnLayout`
+      behaviour it does not depend on.
 
 - [x] **`dev-writer`** — `design.md` §2 / commit message — the `ON THE MARK`
       "never a proof" proposition has no surviving rendered text

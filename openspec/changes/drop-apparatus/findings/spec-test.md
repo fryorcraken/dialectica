@@ -49,7 +49,7 @@ edit is owed.
 
 ## Findings
 
-- [ ] **`tester`** — `dialectica-ui/tests/` — the one line this change *added*
+- [x] **`tester`** — `dialectica-ui/tests/` — the one line this change *added*
       to fix a defect it created is itself unpinned, and the whole suite stays
       green when it is deleted
       **Which line:** `ScreenFrame.qml:79`, `height: Math.max(implicitHeight,
@@ -77,7 +77,39 @@ edit is owed.
       `fillHeight` — but the binding's entire purpose is every *future* child,
       and a guard nothing tests is a guard that gets removed.
 
-- [ ] **`tester`** — `dialectica-ui/tests/` — obligation 10's second half is
+      **Fixed — `tester`.** `dialectica-ui/tests/tst_screen_frame_geometry.qml`,
+      `test_a_fillHeight_child_of_a_sized_card_is_given_the_cards_slack`.
+
+      **Your citation has drifted and the binding has not.** `body.height` is at
+      **line 88** now, not 79 — the merge inserted the scope-caveat comment block
+      above it. `implicitHeight` is still at 28, as `dev-writer` said. The two
+      bindings themselves are byte-identical to what you measured, so both your
+      mutations reproduce exactly.
+
+      **Mutation and result.** Replacing line 88 with a comment: the test fails
+      `Actual 0, Expected 544`. Predicted-versus-observed agree. A second test in
+      the same file fails with it —
+      `test_a_sized_card_with_no_claimant_scatters_its_rows`, at `Actual 0,
+      Expected 111` — because deleting the binding also collapses the scatter the
+      escape-hatch comment describes. Both were measured, restored, and
+      `git diff --stat` read back empty.
+
+      **Taken as its own test rather than as a fourth assertion on
+      `correctness.md:201`, and the reason is the defect family.** The assertion
+      is on the CHILD's height, never the frame's: both frames are 600 high with
+      the binding and without it, so any assertion about `frame.height` would
+      have reported green on the exact mutation it exists to catch. Bundling it
+      into a test whose other assertions are about `implicitHeight` would have
+      hidden that distinction — and the file now proves the two bindings are
+      separable, since deleting `implicitHeight` leaves THIS test passing while
+      failing four others.
+
+      **One thing you asked for that is deliberately not here.** The expected 544
+      is hardcoded, not derived from `frame.height - 2 * DTheme.cardPaddingY`. A
+      derived expectation is the implementation told back to itself and would
+      agree with a broken binding as readily as a correct one.
+
+- [x] **`tester`** — `dialectica-ui/tests/` — obligation 10's second half is
       unpinned in both directions, and one direction is a false claim about the
       Stoa rather than a missing sentence
       **Scenario A (the one already filed, restated only to fix its scope):** the
@@ -101,7 +133,45 @@ edit is owed.
       **Severity: medium.** Pre-existing for the empty half, created for the
       paging half by the obligation this change writes.
 
-- [ ] **`tester`** — `dialectica-ui/tests/` — "QtTest cannot measure geometry"
+      **Fixed — `tester`.** `dialectica-ui/tests/tst_feed_copy.qml`, a new file
+      for what the feed SAYS as against what state it is in.
+
+      **Scenario B, your strongest mutation, is now caught twice over.** Your
+      citation for the sentence has drifted from `:328` to **`FeedScreen.qml:514`**
+      — unchanged text, the merge moved it. Re-running your mutation exactly
+      (that sentence replaced by the literal `"This Stoa is empty."`) fails two
+      tests: `test_the_empty_state_says_whose_copy_the_emptiness_is_a_fact_about`
+      at `expected exactly one string containing "The store was read without
+      error", got 0`, and — the one that matters —
+      `test_no_state_of_the_feed_claims_the_stoa_itself_is_empty` reporting
+      `Found: "This Stoa is empty."`.
+
+      **The second is there because the first is not sufficient**, which is the
+      trap in this box. A test that finds the sentence by its opening and checks
+      what it says is defeated by a mutation that keeps the good sentence and adds
+      the forbidden claim beside it. So the sweep is over every string on the
+      screen in three states (empty, a full page with more, a partial page) and
+      asks a grammatical question — can the word "Stoa" appear in a claim about
+      extent — rather than matching a list of phrasings, which would be the
+      hand-maintained-sweep-list trap.
+
+      **Scenario A was already covered and I did not duplicate it.**
+      `tst_feed_extent_claim.qml` (added closing the `dev-writer` box at
+      `correctness.md:167`) asserts the paging sentence structurally, through the
+      shared governing ancestor. A string-level duplicate of it here would be a
+      second assertion of the same property with a weaker instrument. What
+      `tst_feed_copy.qml` adds instead is that the paging sentence is reachable at
+      all, as part of the corpus floor.
+
+      **On your "no geometry is needed for this one" — agreed, and the reason is
+      sharper than convenience.** The walk deliberately ignores `visible`, because
+      a `TestCase` is invisible offscreen and every descendant reads `false`; a
+      walk filtered on it returns nothing and every absence assertion over it
+      passes vacuously. That cost is stated in the file: this instrument cannot
+      tell "the screen says X now" from "X is in the file", which is exactly why
+      the state-dependent property stays in the structural spec next door.
+
+- [x] **`tester`** — `dialectica-ui/tests/` — "QtTest cannot measure geometry"
       is false here, and every test in the suite is still written as though it
       were true
       **Measured, disproving the claim outright.** A probe using
@@ -130,6 +200,60 @@ edit is owed.
       form, and correct the "cannot be tested" comment wherever it is repeated in
       the test files so the next author does not re-derive the false claim.
       **Severity: medium.**
+
+      **Fixed, with one correction to the finding that changes what a future
+      author should do — `tester`.** Your headline is right and I reproduced every
+      figure in your table on the first attempt with the light recipe, no
+      `windowShown` and no `createTemporaryObject`: 156, 176, `blockGap` 20,
+      rows at y=0/60 and y=111/393, and a `fillHeight` child at 544 (your 484 is
+      the same case with a 40px row and a gap above it; both are consistent).
+      `tst_screen_frame_geometry.qml` is written on that recipe throughout.
+
+      **The correction: your recipe is sufficient for `ScreenFrame` and
+      INSUFFICIENT for `FeedScreen`, and the difference is not a detail.** You and
+      `dev-writer` each recommended one recipe; the measurement says which
+      property needs which, and neither of you had the whole picture:
+
+      | recipe | FeedScreen `implicitHeight`, 0/1/5/30 rows |
+      |---|---|
+      | `createObject(null, {width, height})` — yours | **385 385 385 385** |
+      | parented to a shown `TestCase`, no render wait | **385 385 385 385** |
+      | parentless + `wait(50)` | **385 385 385 385** |
+      | parented + `waitForRendering` — `dev-writer`'s | **385 530 954 3604** |
+
+      A polish pass runs only for an item inside a rendered window, so a
+      `Repeater`'s delegates contribute nothing to a layout's implicit height
+      until BOTH hold. Neither ingredient alone does anything.
+
+      **Why that matters more than a performance note.** The box at
+      `correctness.md:268` asks for a test that `implicitHeight` "grows with
+      `rows.length`". Written on your recipe that test reads 385 at every row
+      count — so it would have had to be weakened to `> 0` to pass, and would then
+      have passed **with the row `Repeater`'s model replaced by `[]`**. I ran that
+      mutation: the growth test is the only thing in the suite that fails, and its
+      message prints the flat `385, 385, 385, 385` that is the light recipe's
+      signature. A test that cannot distinguish thirty rows from none is the
+      defect family this review keeps finding, and following your ask literally
+      would have produced one. The file carries the table above in its header so
+      the next author picks by property rather than by habit.
+
+      **`dev-writer`'s recorded figures do not reproduce and theirs are the ones
+      to distrust.** `design.md` §4 records 275 empty / 1030 at five / 4805 at
+      thirty; I measure 385 / 954 / 3604 under the recipe that produces growth at
+      all. The shape of the claim holds — monotonic growth — but the numbers do
+      not, which is why the test asserts the RELATION (strictly increasing) and
+      hardcodes no feed height. Reported rather than fixed: `design.md` is
+      `dev-writer`'s file, the figures are not load-bearing for any gate, and this
+      is the last PR in the queue.
+
+      **On the second half of your ask.** There is no "QtTest cannot measure
+      geometry" comment left to correct — `grep` over `dialectica-ui/tests/`
+      returns nothing of the kind. The claim you met was in the four-file tree you
+      reviewed; `main`'s eleven-file suite does not repeat it. What it does have
+      is the narrower and TRUE claim in `tst_feed_extent_claim.qml`'s header, that
+      height cannot see the paging sentence — measured identical with the sentence
+      and with a one-word string, which is a statement about that sentence and not
+      about QtTest. It is left standing.
 
 - [ ] **`spec-writer`** — the change's central assertion has no gate of any
       kind, and this is worth a line in the record rather than only in a review

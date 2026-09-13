@@ -1132,25 +1132,27 @@ TestCase {
                "what joining did is stated in the BODY, not only in a margin note")
         verify(body.indexOf("Nym Research") >= 0, "as is the founding title")
 
-        // And where an apparatus is rendered at all, the two are disjoint — so
-        // `bodyText` is genuinely subtracting it rather than returning the whole
-        // screen and being believed.
+        // **The apparatus column is GONE, and this assertion now pins that
+        // rather than the subtraction it was written for.** `piece/drop-apparatus`
+        // deleted both components and `ScreenFrame`'s `apparatus` alias, so
+        // `screen.apparatus` is `undefined`, `apparatusText` returns "" for every
+        // screen, and `bodyText` is the identity function.
         //
-        // **Guarded on the apparatus being non-empty, and that guard is the
-        // point rather than a convenience.** The apparatus is annotation a
-        // separate piece is removing; once it is gone `app` is "" and `body` IS
-        // the whole screen, correctly. An unguarded "body must be smaller than
-        // the screen" would fail on that change while the two behaviour tests it
-        // exists to protect kept passing — a guard failing for the one reason
-        // that is not a defect. Verified by running this file against a hidden
-        // apparatus column: the two behaviour tests pass, and only this
-        // assertion had to be taught the difference.
-        if (app !== "") {
-            verify(body.indexOf(app) < 0,
-                   "bodyText must not still contain the apparatus")
-            verify(spec.visibleText(screen).length > body.length,
-                   "and must be strictly smaller than the whole screen")
-        }
+        // That matters more than it sounds. The subtraction below was the guard
+        // that kept these absence assertions honest while half the scanned text
+        // was annotation — and a walker narrowed until it returns nothing passes
+        // every assertion written over it, which is this repo's recorded defect
+        // family. So the branch is asserted CLOSED rather than left as a
+        // conditional nobody notices is dead: if an apparatus-shaped property
+        // ever comes back, this fails and whoever brought it back has to decide
+        // what the body-versus-annotation split means again.
+        compare(app, "",
+                "no screen has an apparatus column any more, so bodyText is the "
+                + "whole screen. If this fails, annotation has returned to the "
+                + "shipped view and every absence assertion in this file is "
+                + "scanning a corpus that is partly margin note again.")
+        compare(body, spec.visibleText(screen),
+                "and with nothing to subtract, the body IS the screen")
         screen.destroy()
     }
 

@@ -17,7 +17,10 @@
       `compose.apparatus` string. It is reported, not touched — a spec change is a
       `spec-writer`'s and needs the owner's call.
 - [x] design + code — `dev-writer`
-- [ ] tests — `tester`
+- [x] tests — `tester` — **the question below is answered: yes, and by
+      measurement rather than by principle.** Two spec files added,
+      `tst_screen_frame_geometry.qml` and `tst_feed_copy.qml`; four review boxes
+      closed; §12 records each mutation and which test it reaches.
 - [x] review: correctness — `code-reviewer`
 - [x] review: security — `code-reviewer`
 - [x] review: readability — `code-reviewer`
@@ -33,14 +36,33 @@
 - [ ] findings all ticked, `findings/` deleted — `closer`
 - [ ] `openspec validate --strict`, then `archive` — `closer`
 
-**On the `tests` row.** It is left unticked deliberately, and a `tester` has a
-real question to ask here even though this change adds no assertion. The
-question is the one §4 of `design.md` raises: **no test on `main` could see the
-apparatus column, and none can see its absence either.** The three notes shipped
-into the running app and all 41 QML tests stayed green throughout. A `tester`
-should decide whether the ordering sentence moved in §3 is worth pinning — it is
-the one piece of interface text this change creates, and the argument for pinning
-it is that it was invisible to the suite in its previous location too.
+**On the `tests` row.** It was left unticked deliberately, with a real question
+attached: §4 of `design.md` records that **no test on `main` could see the
+apparatus column, and none can see its absence either** — the notes shipped into
+the running app with the whole QML suite green throughout. A `tester` was asked
+to decide whether the ordering sentence moved in §3 is worth pinning, given it
+was invisible to the suite in its previous location too.
+
+**Answered: yes.** The argument that it was *already* unpinned cuts the other
+way once it is measured. Replacing the sentence with the neutral ordering label
+— honest, and the exact regression 2.3 describes — leaves every other test in
+the suite green. The sentence is the only thing on the screen that denies
+newest-first, and a reader assumes newest-first unless told otherwise, so the
+screen's honesty about its own ordering rests on one unguarded string. That is
+the definition of worth pinning.
+
+**What the answer is NOT.** It is not "this change creates interface text,
+therefore pin it". Pinning was rejected in one place for exactly that reason:
+the trailing-spacer `implicitHeight` inflation is real, measured, and
+deliberately untested, because no caller writes that shape and a test would pin
+a `ColumnLayout` behaviour this repo does not depend on. The reasoning is in the
+closed `tester` box in `findings/correctness.md`.
+
+**And the more consequential half was the one the row's question did not ask
+about.** `ScreenFrame`'s two height bindings — the `implicitHeight` that decides
+whether the feed scrolls at all, and the `body.height` added mid-review to stop
+a `fillHeight` child collapsing — were both unpinned, both deletable with the
+suite green, and both are now covered. §12 has the mutations.
 
 ## 1. Establish the true extent before changing anything
 
@@ -417,3 +439,83 @@ Six files conflicted. Each resolution below was verified rather than assumed.
       running the same lint against a pristine `origin/main` checkout.
       `qmlformat -n` parses every edited file, and no edited file contains the
       multi-declarator `for` init that Qt 6.8.3 miscompiles.
+
+## 12. The four `tester` boxes
+
+Two new spec files. Every test below was proved able to fail by mutating the
+code it covers, one mutation at a time, each restored immediately; the
+implementation was confirmed untouched with `git diff --stat` reading empty
+before the commit rather than from memory.
+
+- [x] 12.1 **Establish the instrument before writing anything against it.**
+      "QtTest cannot measure geometry" is false: plain
+      `createObject(null, {width, height})` — no `windowShown`, no
+      `createTemporaryObject` — reproduces every figure `ScreenFrame.qml`'s
+      comment block records, first attempt. 156 for two 40px rows, 176 with a
+      trailing spacer, `blockGap` 20, rows at y=0/60 content-sized and y=111/393
+      with an explicit height, a `fillHeight` child at 544.
+- [x] 12.2 **And establish where that instrument stops, which is the half
+      neither review had.** A `Repeater`'s delegates reach a layout's
+      `implicitHeight` only when the subject is BOTH parented to a shown
+      `TestCase` AND given `waitForRendering` — a polish pass runs only inside a
+      rendered window. Measured, `FeedScreen` at 0/1/5/30 rows: light recipe
+      **385 385 385 385**; parented without a render wait **385 385 385 385**;
+      parentless with `wait(50)` **385 385 385 385**; both together
+      **385 530 954 3604**. The table is in the spec file's header so the next
+      author chooses by property rather than by habit.
+- [x] 12.3 `dialectica-ui/tests/tst_screen_frame_geometry.qml` — the two height
+      bindings, five tests. Mutations and what each reaches:
+      **delete `ScreenFrame.qml:88`** (`body.height`) → the `fillHeight` child
+      fails `Actual 0, Expected 544` and the scatter test fails `Actual 0,
+      Expected 111`; **delete `:28`** (`implicitHeight`) → four of the five fail
+      (156→0, 56→0, the feed floor at `got 0`) while the `fillHeight` test
+      correctly still passes, which is what proves the two bindings are
+      separable; **replace the feed's row `Repeater` model with `[]`** → only the
+      growth test fails, printing the flat `385, 385, 385, 385`.
+- [x] 12.4 `dialectica-ui/tests/tst_feed_copy.qml` — what the feed says, five
+      tests, the gap `tst_feed_states.qml` leaves by asserting only the state
+      machine. Mutations: **the empty state's locality sentence replaced by
+      "This Stoa is empty."** — review's strongest, previously surviving the
+      whole suite — fails two tests, one of them a grammatical sweep over every
+      string in three states that no phrasing list could have caught; **the
+      ordering sentence replaced by the neutral label** fails two; **the ordering
+      sentence keeping its opening but losing its reason** fails one, which is
+      the case a prefix-only test passes.
+- [x] 12.5 **Judge the merge's `> 0` weakening rather than restoring a number.**
+      `tst_onboarding_states.qml:920` was `shown.length > 5` and became `> 0`,
+      and the author flagged it as their least-confident change. It is correct
+      and is kept. Decided by mutation, not by argument: stubbing
+      `visibleTextsOn` to `return []` — the neutered-corpus defect this repo has
+      recorded — fails that exact line, along with three other tests in the file.
+      A larger floor catches the same single defect and additionally fails on
+      every future re-layout, which is the count-pin failure mode the comment one
+      line above already names. The measurement is written into the comment so
+      the next reader does not re-litigate it.
+- [x] 12.6 **Close a guard the merge left unreachable.**
+      `tst_stoa_screens.qml`'s `test_the_absence_assertions_scan_the_body_and_not_only_the_apparatus`
+      still carried `if (app !== "") { ... }`. With `ScreenFrame.apparatus` gone
+      `apparatusText` returns "" for every screen and `bodyText` is the identity
+      function, so both assertions inside were dead code — a walker narrowed
+      until it measures nothing, which is the recorded defect family. The branch
+      is now asserted CLOSED (`app` is "", and the body IS the whole screen), so
+      annotation returning to the shipped view fails here instead of silently
+      re-widening a corpus. Proved by making `apparatusText` return a non-empty
+      string: that one test fails, `Actual "ON JOINING", Expected ""`.
+- [x] 12.7 **Gates and suite after all of the above.** `run-qml-tests.sh` exits
+      **0 across 13 spec files, 0 failed** — run it for the figures.
+      `check_qml_names.py` ok (it now reaches 31 QML files, having been 29);
+      `check_qml_members.sh` ok; `tst_check_qml_names.py`,
+      `tst_check_qml_members.sh` and `tst_check_bindings.sh` all pass. CI's
+      spec-count gate derives its floor from the directory, so the two new files
+      are counted without editing it. `qmlformat -n` parses both new files and
+      neither contains the multi-declarator `for` init Qt 6.8.3 miscompiles.
+      `qmllint` warns `missing-property` on `createObject`'s `QObject` return in
+      the new geometry spec; CI's qmllint step lints `src/qml/*.qml` only, so it
+      is not a gate failure — recorded rather than silently accepted.
+- [x] 12.8 **Two things reported and deliberately not fixed**, neither in scope
+      and neither gating. `design.md` §4's recorded growth figures
+      (275/1030/4805) do not reproduce — measured 385/954/3604 — so the new test
+      asserts monotonic growth and hardcodes no feed height; the file is
+      `dev-writer`'s. And `SanitisedText.qml:30` emits `Unable to assign QString
+      to int` on malformed rows, pre-existing on `origin/main` and invisible to
+      `check_bindings`, which matches `[undefined]` rather than this.
