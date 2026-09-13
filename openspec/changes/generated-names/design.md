@@ -196,11 +196,88 @@ already refused for carrying an unknown field. The requirement holds because
 there is nothing to reach, and the test asserts the refusal rather than
 asserting a filter exists.
 
-## The list sizes looked unreachable, and the screen was the defect
+## The screen was a defect, and removing it did not reach 1,024
 
-**RESOLVED — owner decision, recorded because the reasoning below is what made
-the resolution visible, and because the census remains true of the rule it was
-measured against.** The census that follows is sound arithmetic applied to a
+**REOPENED by a second, independent census — this one written *after* the screen
+was removed, with multi-word entries accepted throughout.** The resolution below
+was correct that the single-word rule was a mistake and correct to remove it. It
+was wrong that removing it makes 1,024 reachable. The relief is real and small:
+multi-word entries are **37 of 682** places and **29 of 551** nouns, about 5% of
+each, where the gap to be closed is 33% and 46%.
+
+### What was counted, and how
+
+Written region by region into `tmp/names/places-0*.txt` and
+`tmp/names/nouns-0*.txt`, concatenated, then `sort -u`, then `grep -c .`. The
+counts are from those commands, not from an estimate:
+
+| List | Required | Counted, deduplicated | Short by |
+|---|---|---|---|
+| places | 1,024 | **833** | 191 |
+| nouns | 1,024 | **551** | 473 |
+
+**The place sweep covered every category the design enumerates**: all seventeen
+mainland regions, the Attic demes, Megaris, Crete, the Aegean and Ionian
+islands, Cyprus, the whole Asia Minor coast, Magna Graecia and Sicily, the Black
+Sea colonies, Cyrenaica, the western colonies, sanctuaries, mountains, rivers,
+regions, and mythological geography.
+
+**833 is already the stretched figure and should be read as an upper bound.**
+The first six batches — the poleis, demes, islands and colonies I am confident
+are real, distinct and correctly transliterated — total **682**. The seventh
+batch adds 151 by reaching into rivers, Athenian hills and the Homeric Boeotian
+and Locrian catalogues, which is where the design's third defect begins:
+"descending below the polis/deme level into unlocatable single-inscription
+fragments". A reviewer should treat everything past 682 as the weakest material
+in the list.
+
+**The noun census reproduces the earlier one almost exactly**, which is what
+makes it trustworthy rather than merely another opinion: 252 abstractions
+against that census's predicted 250–270, and 299 named Greeks raw. It also
+reproduces the *mechanism* it predicted — the canon individuates people by name
+plus place, so `zenon` is one entry standing for five philosophers, and
+`apollodoros`, `krates` and `dionysios` each collapsed the same way in my own
+sweep before I disambiguated a handful of them.
+
+### Why the screen removal could not have closed the gap
+
+The census the resolution overturned attributed the shortfall to three
+attritions, and the single-word screen is only the first. Removing it recovers
+attrition 1 and part of 2. **Attrition 3 — cross-regional collision — is
+untouched by it, and it is the one that compounds**: the Greeks reused
+toponyms, so `apollonia`, `herakleia`, `magnesia`, `naxos` and `chersonesos`
+each occur across a dozen regions and dedupe to one entry however many words
+the rule permits. Yield therefore falls as the list grows, which is why the last
+200 entries are far harder than the first 200 and why a sweep that looks
+thorough still lands under 1,000.
+
+Multi-word entries help attrition 3 only where a source supplies a *standard*
+disambiguating epithet (`herakleia pontike`, `magnesia`). Where it does not, the
+disambiguator would have to be invented, which is defect 4.
+
+### This is an owner decision, and the options are the ones already written
+
+**Nothing here is new information about what to do** — options 1 to 4 below were
+written for exactly this position and the reasoning that ruled each in or out is
+unchanged. What is new is that the position is real rather than hypothetical,
+and that the noun list, not the place list, is now the binding constraint: at
+551 it is short by 473, and **512 is the nearest power of two below it**, which
+is what PLAN.md lines 1363–1368 concluded independently and before this spec was
+written.
+
+The place list at 833 also cuts to **512**, since 1,024 is above it and the rule
+is to cut down rather than pad up. So the honest sizes are 8,192 / 512 / 512 and
+the space is 2³¹ — **option 1**, reached by measurement rather than by choice.
+
+**Option 2 is the one that preserves the arithmetic the owner accepted** —
+8,192 → 32,768 adjectives restores 2³³ exactly with no Greek source strained —
+and it remains unassessed. The adjective list was not written, because writing
+8,192 entries against a size that may become 32,768 is work done twice.
+
+### The original resolution follows, as written
+
+**The census below remains true of the rule it was measured against**, and the
+screen removal it argues for was right and has been kept. The census that follows is sound arithmetic applied to a
 screen the design never imposed: an earlier draft of this spec required every
 entry to be a single word with no whitespace, and PLAN.md names exactly two
 screens, ASCII-transliterable and deduplicated, adding that "if a word is being

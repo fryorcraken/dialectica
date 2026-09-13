@@ -3,9 +3,14 @@
 ## Stages
 
 - [x] spec — `spec-writer`
-- [ ] design + code — `dev-writer` — design written; the identicon window move
-      landed (`e62ddde`, rebased). The list-size blocker is **resolved** — see
-      "The list sizes looked unreachable" in `design.md`.
+- [ ] design + code — `dev-writer` — **BLOCKED on an owner decision, and the
+      block is the list sizes again.** The derivation, the module wiring and the
+      screen fix are landed and the branch compiles down to four missing
+      wordlists. Removing the single-word screen was right but did not reach
+      1,024: a second census, written with multi-word entries accepted
+      throughout, counts **833 places and 551 nouns**. See "The screen was a
+      defect, and removing it did not reach 1,024" in `design.md` for the method
+      and the re-runnable counts.
 - [ ] tests — `tester`
 - [ ] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
@@ -18,17 +23,23 @@
 
 ## Implementation
 
-> **Sizes are 8,192 / 1,024 / 1,024 and the earlier blocker is resolved.** The
-> census that put the Greek lists out of reach was measured against a
-> **single-word screen this spec had invented**; PLAN.md names only two screens,
-> and multi-word place entries are now accepted. See `design.md`, "The list
-> sizes looked unreachable, and the screen was the defect".
+> **The Greek lists were counted, and both fall short of 1,024.** The screen
+> removal was right — a single-word rule is the third screen the spec forbids,
+> and multi-word entries are accepted now — but it recovers about 5% where 33%
+> and 46% are needed. Counted, deduplicated: **833 places, 551 nouns**. Method
+> and the re-runnable commands are in `design.md`.
 >
-> **Count, do not estimate.** The place list's headroom is thin — PLAN.md calls
-> it "a little over 10%". If the written list falls short of 1,024, report it
-> rather than padding: near-duplicate transliterations, Latinised doublets and
-> invented toponyms are each a defect the spec names, and a fabricated Greek
-> place name is invisible to a reviewer and uncatchable by any test.
+> **Tasks 2.1, 2.2, 2.3, 3.1 and 4.1 are therefore not startable as written**,
+> and neither is anything downstream of them, because every remaining task needs
+> a list to index into. They stay unticked rather than being satisfied by a
+> padded list: near-duplicate transliterations, Latinised doublets and invented
+> toponyms are each a defect the spec names, and **a fabricated Greek toponym is
+> invisible to a reviewer and uncatchable by any test** — which is why this is
+> reported rather than absorbed.
+>
+> **The adjective list was deliberately not written.** Option 2 in `design.md`
+> would take it from 8,192 to 32,768 to restore 2³³ with the Greek lists at 512;
+> writing 8,192 entries against a size that may quadruple is work done twice.
 
 ## 1. The derivation
 

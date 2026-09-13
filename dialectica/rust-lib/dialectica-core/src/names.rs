@@ -501,16 +501,26 @@ mod tests {
 
     #[test]
     fn a_name_is_three_drawn_words_and_a_fixed_connector() {
+        // **Counted by SLOT, not by space-separated token.** A place entry may
+        // be a two-word toponym, so `rendered.split(' ').count()` is 4 for
+        // `measured aporia of lampsacus` and 5 for `measured aporia of
+        // alexandria troas` — both correct, and a test asserting 4 would fail
+        // the multi-word entries the spec requires the list to accept.
         for seed in 1u8..30 {
             let name = display_name(&a_key(seed).public_key()).unwrap();
             let rendered = name.render();
-            let parts: Vec<&str> = rendered.split(' ').collect();
-            assert_eq!(parts.len(), 4, "three drawn words and one connector: {rendered}");
-            assert_eq!(parts[2], CONNECTOR, "the connector is between noun and place");
-            assert_eq!(name.words().len(), 3);
 
+            assert_eq!(name.words().len(), 3, "three drawn words: {rendered}");
+            assert_eq!(
+                rendered,
+                format!("{} {} {CONNECTOR} {}", name.adjective, name.noun, name.place),
+                "the connector sits between the noun and the place"
+            );
             // The connector never varies with the key, so it carries no entropy.
-            assert_eq!(parts[2], "of");
+            assert!(
+                rendered.contains(&format!(" {CONNECTOR} ")),
+                "the connector is the same literal text every time: {rendered}"
+            );
         }
     }
 
@@ -857,7 +867,9 @@ mod tests {
         let participant = display_name(&a_key(2).public_key()).unwrap();
         for name in [moderator, participant] {
             let rendered = name.render();
-            assert_eq!(rendered.split(' ').count(), 4);
+            // Three slots — counted by slot rather than by token, since a place
+            // may be a two-word toponym.
+            assert_eq!(name.words().len(), 3);
             assert!(
                 rendered.chars().all(|c| c.is_ascii_lowercase() || c == ' '),
                 "a name carries no marking: {rendered}"
@@ -868,38 +880,78 @@ mod tests {
     // ─── The two screens, over every list ──────────────────────────────────
 
     #[test]
-    fn every_entry_of_every_list_is_ascii_lowercase_and_one_word() {
+    fn every_entry_of_every_list_is_ascii_lowercase_and_well_formed() {
         // ASCII is a BIDI decision rather than a typographic preference: these
         // are the one piece of rendered text this project fully composes from a
         // fixed list, so keeping them ASCII means a generated name can never
         // itself carry a bidi override or a homoglyph. It removes the attack from
         // this surface rather than mitigating it.
+        //
+        // **An INTERNAL SPACE is permitted, and that is the point of this
+        // test's history.** An earlier draft of the spec imposed a single-word
+        // screen, and this test enforced it with a `!contains whitespace`
+        // assertion. That screen is exactly the third screen the spec forbids —
+        // only ASCII-transliterable and deduplicated apply — and it is the
+        // costly one: it discards `alexandria troas` and `heraclea pontica`,
+        // and it is what a census blamed for putting the place list out of
+        // reach. What is checked instead is that the spacing is WELL FORMED: no
+        // leading or trailing space, and no double space, so an entry is one
+        // place named in one or more words rather than a formatting accident.
         for (list, which) in [
             (ADJECTIVES, "adjectives"),
             (NOUNS, "nouns"),
             (PLACES, "places"),
         ] {
             for entry in list {
-                assert!(
-                    entry.is_ascii(),
-                    "{which}: {entry:?} is not ASCII"
-                );
+                assert!(entry.is_ascii(), "{which}: {entry:?} is not ASCII");
                 assert_eq!(
                     *entry,
                     entry.to_ascii_lowercase(),
                     "{which}: {entry:?} is not lowercase"
                 );
-                assert!(
-                    !entry.chars().any(|c| c.is_whitespace()),
-                    "{which}: {entry:?} contains whitespace"
-                );
                 assert!(!entry.is_empty(), "{which}: an empty entry");
                 assert!(
-                    entry.chars().all(|c| c.is_ascii_lowercase()),
-                    "{which}: {entry:?} has a non-letter"
+                    !entry.starts_with(' ') && !entry.ends_with(' '),
+                    "{which}: {entry:?} has a leading or trailing space"
+                );
+                assert!(
+                    !entry.contains("  "),
+                    "{which}: {entry:?} has a double space"
+                );
+                assert!(
+                    entry.chars().all(|c| c.is_ascii_lowercase() || c == ' '),
+                    "{which}: {entry:?} has a character that is neither a \
+                     lowercase letter nor a space"
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_multi_word_place_entry_is_accepted_and_renders_as_one_place() {
+        // The screen removal, asserted rather than assumed. A two-word toponym
+        // draws and renders as ONE place, with the connector still preceding
+        // the whole of it — `... of alexandria troas`, never `... of alexandria`
+        // with the second half lost.
+        let multi_word: Vec<&&str> = PLACES.iter().filter(|p| p.contains(' ')).collect();
+        assert!(
+            !multi_word.is_empty(),
+            "the place list must hold at least one multi-word toponym, or the \
+             single-word screen has crept back in"
+        );
+
+        let index = PLACES.iter().position(|p| p.contains(' ')).unwrap() as u16;
+        let name = DisplayName {
+            adjective: ADJECTIVES[0],
+            noun: NOUNS[0],
+            place: PLACES[index as usize],
+        };
+        assert!(
+            name.render().ends_with(&format!("{CONNECTOR} {}", PLACES[index as usize])),
+            "a multi-word place must render whole, after the connector: {}",
+            name.render()
+        );
+        assert_eq!(name.words().len(), 3, "a two-word place is still one slot");
     }
 
     #[test]
