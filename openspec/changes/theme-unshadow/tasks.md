@@ -64,6 +64,14 @@ the point of the row. It is not struck through because this is not a case of
 - [x] 2.3 Confirm the comment-exclusion arm is exercised rather than dead —
       `grep -n "[^A-Za-z]Theme\."` over `DTheme.qml` returns two comment lines, so
       without the `grep -v` the gate would be permanently red on a correct tree.
+- [x] 2.4 Document the third arm's known false positive rather than leaving it to
+      be rediscovered: only a **leading** `//` is excluded, so a bare `Theme.` in a
+      `/* */` block comment or in a trailing comment after code fails the arm while
+      being correct. Not fixed — narrowing to real bindings needs a QML parser,
+      which is the elaborate thing this gate deliberately is not. The step's
+      comment now says a red should be checked against the cited line first, so a
+      comment-style failure is diagnosed in seconds rather than investigated as a
+      collision. Also in `design.md` under "Why the gate excludes comment lines".
 
 ## 3. Making the failure visible, and what could not be made visible
 
@@ -82,6 +90,19 @@ the point of the row. It is not struck through because this is not a case of
       in basecamp's C++ type registration. The test layer covers that every
       reference resolves and that the identicon indexing is unmoved; it cannot
       cover the shadowing itself.
+- [x] 3.4 Make the measured mechanism the **rationale** everywhere, not a later
+      finding. The first draft of this change opened four documents with the
+      premise 3.2 disproved — that a host registration *outranks* a plugin
+      directory's `qmldir` entry — and stated the true mechanism eleven lines
+      further down in the same block. A reader stopping at the first paragraph,
+      which is where a rationale is expected to live, left with the wrong model,
+      and the file looked authoritative in both directions. Found by the closer
+      reviewing PR #67. Fixed in `ci.yml`, `CLAUDE.md`, `DTheme.qml`,
+      `proposal.md` and `design.md`; the premise is kept in each as a
+      **named-and-withdrawn** one, because it is the intuitive wrong answer and
+      acting on it means building a reproduction that cannot work. Verified by
+      `git grep -n "outrank"`, whose every hit in this change is now inside an
+      explicit withdrawal.
 
 ## 4. Gates
 

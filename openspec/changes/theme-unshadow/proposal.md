@@ -3,12 +3,19 @@
 **The screen cannot render, and one identifier is why.**
 
 `dialectica-ui/src/qml/qmldir` declared `singleton Theme 1.0 Theme.qml`.
-Basecamp registers its own `Theme`, and a host registration outranks a plugin
-directory's `qmldir` entry. So every `Theme.x` in every one of our QML files
-resolved to basecamp's object rather than to ours, every token came back
+Basecamp registers a QML type of the same name in its own C++ type
+registration, and basecamp's won. So every `Theme.x` in every one of our QML
+files resolved to basecamp's object rather than to ours, every token came back
 `undefined`, and QML fell back to its defaults: white ground, black system text,
 no spacing, no borders. The reported symptom was 89 errors on a screen with none
 of the supplied design on it.
+
+**The collision lives in that C++ registration**, which is the fact the fix and
+its gate both rest on. A premise held earlier and withdrawn — that a host
+registration *outranks* a plugin directory's `qmldir` entry, the two competing
+on precedence — was measured and is false; `design.md` records the two
+measurements that disproved it, because it is the intuitive wrong answer and
+someone will otherwise re-derive it.
 
 The scale is out of proportion to the cause, and that is the point worth
 recording: this is not a theme that renders badly, it is **the entire visual

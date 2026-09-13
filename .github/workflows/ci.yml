@@ -571,25 +571,34 @@ jobs:
       # No QML type of ours may be named something the HOST also registers.
       #
       # This is the gate for the defect that stopped the screen rendering at
-      # all: our theme singleton was called `Theme`, basecamp registers its own
-      # `Theme`, and the host registration outranks a plugin directory's
-      # `qmldir` entry. Every `Theme.x` in the view resolved to basecamp's
-      # object, every token came back `undefined`, and QML fell back to its
-      # defaults. One name collision took the entire visual system out at once.
+      # all: our theme singleton was called `Theme`, basecamp registers a type
+      # of the same name, and basecamp's won. Every `Theme.x` in the view
+      # resolved to basecamp's object, every token came back `undefined`, and
+      # QML fell back to its defaults. One name collision took the entire
+      # visual system out at once.
       #
-      # WHY THIS IS A GREP AND NOT A QML TEST, which is the part worth keeping.
-      # Under `qmltestrunner` there is no competing singleton, so `DTheme`
-      # always resolves to our own file and an assertion like
+      # WHERE THE COLLISION LIVES, which is the load-bearing fact: in the HOST's
+      # C++ type registration, which no file-based import path can reach.
+      #
+      # A PREMISE THIS PROJECT HELD AND WITHDREW, named because it is the
+      # intuitive wrong answer and will otherwise be re-derived: that a host
+      # registration "outranks a plugin directory's `qmldir` entry", i.e. that
+      # the two compete and the host wins on precedence. Measured on Qt 6.10.3
+      # and FALSE. A competing `Theme` singleton staged in a second directory
+      # and handed to the runner via `-import` does NOT shadow the plugin
+      # directory's own `qmldir` entry; neither does making that directory a
+      # named module on the import path. Directory `qmldir` entries are not in
+      # a precedence contest a file-based competitor can enter and lose. So
+      # "stage a competitor and watch it win" is not a reproduction, and an
+      # afternoon spent building one produces two green runs and no finding.
+      #
+      # WHY THIS IS A GREP AND NOT A QML TEST follows directly from where the
+      # collision lives. Under `qmltestrunner` the host is simply absent, so
+      # `DTheme` always resolves to our own file and an assertion like
       # `verify(DTheme.paper !== undefined)` passes no matter what — a check
-      # that cannot fail is worth nothing by this project's own standard.
-      #
-      # Measured rather than assumed, on Qt 6.10.3: a competing `Theme`
-      # singleton staged in a second directory and handed to the runner via
-      # `-import` does NOT shadow the plugin directory's own `qmldir` entry.
-      # Neither does making that directory a named module on the import path.
-      # The collision lives in the host's C++ type registration, which no
-      # file-based import path can reach — so the component layer is
-      # structurally blind to it, and a static check is the honest gate.
+      # that cannot fail is worth nothing by this project's own standard. The
+      # component layer is structurally blind here, and a static check is the
+      # honest gate rather than a second-best one.
       #
       # What a static check CAN see is whether we reintroduced a name known to
       # collide. The list is names basecamp is known to occupy; add to it
@@ -617,6 +626,16 @@ jobs:
           # the exclusion this gate would be permanently red on a file that is
           # correct, which is the fastest way to get a gate deleted. `grep -v` on
           # a leading `//` is crude but exactly matches how these files comment.
+          #
+          # KNOWN FALSE POSITIVE, so a red here is diagnosed in seconds rather
+          # than investigated as a defect: only a LEADING `//` is excluded, so a
+          # bare `Theme.` inside a `/* */` block comment, or in a trailing
+          # comment after code on the same line, fails this arm while being
+          # perfectly correct. If this goes red, read the cited line first — if
+          # it is prose rather than a binding, the fix is the comment style (move
+          # it to a `//` line of its own), not the code. Narrowing the exclusion
+          # to real bindings needs a QML parser, which is the elaborate thing
+          # this gate deliberately is not.
           if grep -rn "[^A-Za-z]Theme\." dialectica-ui/src/qml/*.qml \
                | grep -v ':[0-9]*: *//' | grep . ; then
             echo "::error::a QML file references a bare 'Theme.' — dialectica's tokens are 'DTheme.'; a bare Theme resolves to basecamp's singleton"

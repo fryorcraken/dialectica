@@ -4,8 +4,10 @@
 
 ### A prefix, not a module URI
 
-The collision is that basecamp registers a type called `Theme` and its
-registration outranks our directory's `qmldir`. Two shapes of fix were
+The collision is that basecamp registers a type called `Theme` in its own C++
+type registration, and that registration is what our `Theme.x` bindings reached.
+See "The gate is static" below for what that does **not** mean — the precedence
+story is the withdrawn premise, not the mechanism. Two shapes of fix were
 available.
 
 Giving our components a module URI (`import Dialectica.Theme 1.0`) scopes the
@@ -38,10 +40,18 @@ test that fails on the shadowing, on Qt 6.10.3 with the repo's own
    mechanism: it proves what happens once `Theme` carries no tokens, and says
    nothing about whether the host can make that happen.
 
-The conclusion from (1) and (2) is the durable part: **nothing on a file-based
-import path can outrank the `qmldir` of the directory a file sits in.** The
-collision lives in basecamp's C++ type registration, which no test harness in
-this repo can reach. Under `qmltestrunner` there is simply no competitor, so
+**(1) and (2) withdrew a premise this change started from.** The brief, and the
+prior commit's message, explained the defect as a host registration that
+*outranks* a plugin directory's `qmldir` entry — the two competing, the host
+winning on precedence. That is the intuitive reading and it is **false**: a
+file-based competitor does not enter the contest at all, so there is no
+precedence for the host to win on. The premise is recorded here rather than
+quietly dropped, because it is what anyone will re-derive from the symptom, and
+because acting on it means building a reproduction that cannot work.
+
+What is true is narrower and is the durable part: **the collision lives in
+basecamp's C++ type registration, which no test harness in this repo can
+reach.** Under `qmltestrunner` there is simply no competitor, so
 `verify(DTheme.paper !== undefined)` passes whatever the singleton is called —
 it is a check that cannot fail, and by this project's standard that is worth
 nothing.
@@ -68,6 +78,16 @@ That exclusion is exercised rather than dead: `grep -n "[^A-Za-z]Theme\."` over
 `DTheme.qml` returns two comment lines today, so the arm is doing work on every
 run.
 
+**It has a known false positive, documented rather than fixed.** Only a *leading*
+`//` is excluded, so a bare `Theme.` inside a `/* */` block comment, or in a
+trailing comment after code on the same line, fails the arm while being
+perfectly correct. Narrowing the exclusion to real bindings needs a QML parser,
+which is the elaborate thing this gate deliberately is not — the whole step is a
+grep whose failure names a file small enough to read. The cost of the limitation
+is therefore a few seconds of diagnosis, and the step's comment says so
+explicitly so that a red is checked against the cited line before anyone goes
+looking for a collision that is not there.
+
 ### The rename's completeness is checked by the existing suite
 
 A missed reference would leave a bare `Theme` in a file, which under
@@ -84,14 +104,19 @@ the identicon's ink indexing still lands on the same seven constants.
 
 ## Dead ends, recorded so they are not re-walked
 
+- **"A host registration outranks a plugin directory's `qmldir` entry" is the
+  withdrawn premise**, and it is the one to know about, because it is what the
+  symptom suggests and what this change was briefed with. It frames the defect
+  as a precedence contest, which invites exactly the reproduction that cannot
+  work. Measured false twice; see "The gate is static" above.
 - **`-import` with a competing singleton does not reproduce host shadowing** —
   two variants tried, both resolved our own file. Anyone reaching for "surely a
   test can stage the competitor" should read the three measurements above before
   spending the afternoon again.
 - **`Core` resolving correctly is not evidence.** It resolves because basecamp
-  has no `Core`, not because directory `qmldir` entries win. The same file, the
-  same imports, and a different outcome purely on whether the host happens to
-  occupy the name.
+  has no `Core` — the host never registers the name, so nothing displaces our
+  file. The same file, the same imports, and a different outcome purely on
+  whether the host happens to occupy the name.
 
 ## What this change deliberately does not do
 

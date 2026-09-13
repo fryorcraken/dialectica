@@ -292,12 +292,25 @@ These are structural and bite at build time, not review time.
 - **The UI's icon must be a 256×256 PNG**, and the UI module must declare core
   in `dependencies` with **matching versions**.
 
-- **Basecamp's registered QML singletons outrank your `qmldir`, so never name a
-  type something the host also has.** Our theme singleton was `Theme`; basecamp
-  registers its own, and its registration won — every `Theme.x` in the view
-  resolved to basecamp's object, every token read `undefined`, and QML fell back
-  to its defaults: white ground, black system text, no spacing, no borders. One
-  name collision took the entire visual system out at once. It is `DTheme` now.
+- **Never name a QML type something basecamp also registers.** Our theme
+  singleton was `Theme`; basecamp registers a type of that name, and basecamp's
+  won — every `Theme.x` in the view resolved to basecamp's object, every token
+  read `undefined`, and QML fell back to its defaults: white ground, black
+  system text, no spacing, no borders. One name collision took the entire visual
+  system out at once. It is `DTheme` now.
+
+  **The collision lives in the host's C++ type registration**, and that fact is
+  what makes the rest of this entry follow.
+
+  *A premise withdrawn, recorded because it is the intuitive wrong answer and
+  will otherwise be re-derived:* that a host registration **outranks** a plugin
+  directory's `qmldir` entry — that the two compete and the host wins on
+  precedence. Measured on Qt 6.10.3 and **false**. Staging a competing `Theme`
+  singleton in a second directory and handing it to `qmltestrunner` via
+  `-import` does not shadow the plugin directory's own `qmldir` entry, and
+  neither does making that directory a named module on the import path. A
+  file-based competitor is not in a contest it can win, so "stage a competitor
+  and watch it win" is not a reproduction — it is two green runs and no finding.
 
   The tell in a launch log is a resolution line pointing at `qrc:/qt/qml/Logos/`
   for a name you own. `Core` resolved correctly in the same files with the same
@@ -305,14 +318,10 @@ These are structural and bite at build time, not review time.
   works" is not evidence that a name is safe.**
 
   **A component test cannot catch this**, and that is the durable part. Under
-  `qmltestrunner` no competing singleton exists, so any
-  `verify(DTheme.x !== undefined)` passes no matter what. Measured rather than
-  assumed, on Qt 6.10.3: staging a competing `Theme` on the runner's `-import`
-  path does not shadow the plugin directory's own `qmldir` entry, and neither
-  does making that directory a named module on the import path. The collision
-  lives in the host's C++ type registration, which no file-based import path can
-  reach. The gate is therefore the static `no QML type name collides with the
-  host` step in `ci.yml`, proven to fail on a tree carrying the old name.
+  `qmltestrunner` the host is simply absent, so any
+  `verify(DTheme.x !== undefined)` passes no matter what. The gate is therefore
+  the static `no QML type name collides with the host` step in `ci.yml`, proven
+  to fail on a tree carrying the old name.
 
 ## Scaffold: what `lgs` does and does not do
 
