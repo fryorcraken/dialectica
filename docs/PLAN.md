@@ -3423,20 +3423,24 @@ carrying:~~
 - ~~moderation state~~
 
 ~~**The moderation state must name its deciding op, not be a boolean.**~~
-**Contracted**; the argument below is kept only where it is still live.
-`moderation::Moderation` is a three-state enum — `Unmoderated`, `Hidden(op)`,
-`Unhidden(op)` — and the API should carry the same three states rather than
-flattening them. A boolean loses two things a view needs: the distinction
-between "nobody moderated this" and "a moderator deliberately restored it",
-which is the difference between an untouched post and a vindicated one; and the
-op id a reversal would have to name.
+~~**What a reader sees of a hidden post, stated exactly.**~~ **Both contracted —
+see the `thread-read` spec**, which states the three-valued state and its
+deciding op, and that a hidden reply is omitted by default while a hidden root
+is returned marked. Restating either here would give the rule two copies that
+drift, and a reader finding the stale one cannot tell.
 
-**What a reader sees of a hidden post, stated exactly.** In the default view,
-nothing — the post is absent, not greyed out, because §7.2 rule 4 makes
-moderation a filter rather than a penalty and a visible placeholder is a
-penalty with extra steps. In the "show hidden" view, the post renders with its
-moderation state shown. The one thing the view must not do is render a hidden
-post indistinguishably from a visible one in the show-hidden view; a reader who
+**What remains live is a gap the spec cannot close**, because it is a
+divergence between two reads rather than a property of one: **the feed reports
+moderation as a boolean and the thread read reports the three-valued object.**
+Both are built from the same resolver, so a view must currently branch on which
+call produced an item — which §2.5's "JSON shapes are source-independent"
+forbids. The thread read's shape is the correct one; the feed's is the older.
+Until the feed is brought to it, `restored` is a state the feed cannot express
+at all. Recorded in `docs/UI-BRIEF.md` too, since a designer meets it on their
+second screen.
+
+**And one obligation the core does not meet**: a view must not render a hidden
+post indistinguishably from a visible one in the show-hidden view. A reader who
 asked to see what was hidden is owed the knowledge of which ones those were.
 
 **The bidi obligation is wider than §11.1 currently states it, and that is a

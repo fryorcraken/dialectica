@@ -136,7 +136,7 @@ Verification SHALL run before an op's parent is followed, so that a forged op ca
 - **WHEN** a thread read names the op id of a post whose signature does not verify
 - **THEN** the reply is the refusal for a thread this peer does not hold, an unverified op being no usable post
 - **AND** it is not the not-a-post refusal, which would tell the caller its identifier named the wrong kind of thing when the kind was never established
-- **AND** the message does not reveal that the store holds bytes under that id
+- **AND** the message is the same one an op id the log holds nothing for produces, so nothing in it reports that bytes were found
 
 #### Scenario: A forgery in the log does not displace genuine posts
 
@@ -154,6 +154,7 @@ Verification SHALL run before an op's parent is followed, so that a forged op ca
 - **WHEN** a thread read names a Stoa and a root op id belonging to a different Stoa
 - **THEN** the reply is the refusal for a thread this peer does not hold in that Stoa
 - **AND** it is not the not-a-post refusal, the op being a perfectly good post of another Stoa
+- **AND** the message is the same one an op id the log holds nothing for produces, so it names neither the Stoa the op belongs to nor the fact that it was found
 - **AND** no post of either Stoa is returned
 
 ### Requirement: An author is reported as both an address and a public key, and never as a name
@@ -190,8 +191,8 @@ The author fields reported SHALL be those of the key that actually signed the op
 #### Scenario: No item carries a derived display name
 
 - **WHEN** a thread is read and every field of an item is enumerated
-- **THEN** the author fields are exactly the address and the public key
-- **AND** no field holds a value derived from either by any further transformation
+- **THEN** the only fields describing the author are the address and the public key
+- **AND** the item carries no third author-describing field, which is what a name or a mark would have to be
 
 ### Requirement: Each returned post renders its current version and says whether it was revised
 
@@ -252,6 +253,8 @@ Each item SHALL report its moderation state as one of three values — that no b
 A flag loses two things a reader needs. The first is the difference between a post nobody moderated and a post a moderator looked at and deliberately restored — an untouched post and a vindicated one, which read identically under a boolean and mean different things. The second is the identity of the decision: a reader shown that something was moderated and not shown by which op has been told a conclusion it cannot examine, and nothing that later wants to name a specific decision has anything to name.
 
 Which moderations bind, and which of several decides, are settled elsewhere and SHALL NOT be re-decided here. This requirement governs only that the answer reaches the caller whole rather than flattened.
+
+**This requirement binds this read alone, and SHALL NOT be read as describing what any other read reports.** The feed currently reports moderation as a boolean built from the same resolver, so an item from a feed and an item from a thread do not carry the same moderation shape, and a view handling both must today tell which call produced which. That divergence is a known gap in core rather than a licence: it is the wire convention that JSON shapes are source-independent, being unmet. Whichever change closes it SHALL bring the other read to this shape rather than bring this one to a flag, because a flag cannot express the restored state at all — a contract narrowing to fit the weaker of two shapes would lose the distinction this requirement exists for.
 
 #### Scenario: An unmoderated post names no deciding op
 
@@ -372,9 +375,11 @@ A thread read SHALL be refused when the peer holds no post under the op id named
 
 **"Holds" here means holds a usable post in the named Stoa**, and the scoping is stated because two cases would otherwise look like exceptions. An op whose signature does not verify, and an op belonging to a different Stoa, are each present in the store as bytes and are each unusable to this read: the first is not established to be anyone's post, and the second is not this Stoa's. Both SHALL therefore take the not-held refusal rather than the not-a-post one, since neither is a post this read may use and the caller's remedy is the same as for an op that never arrived. **This SHALL NOT be read as licence to report a genuine, in-Stoa op as not held** — a revision, a vote, a moderation op or a metadata op in the named Stoa is a usable op of the wrong kind, which is precisely the not-a-post case.
 
-A refusal SHALL NOT disclose whether the store holds bytes that failed verification under an op id it refuses as not held. An unverified op establishes nothing about anybody, so reporting its presence would let a caller learn that *something* arrived under an id while this read is unable to say what — a fact with no remedy attached to it.
+**A not-held refusal SHALL carry no further detail about what the store holds under that op id**, and the three cases it covers — never arrived, failed verification, belongs to another Stoa — SHALL NOT be distinguishable from one another. One refusal, one message, whichever of the three produced it.
 
-**The cross-Stoa refusal is the exception, and it is deliberate**: it MAY name the Stoa the op actually belongs to, which is what lets a view offer to read the thread where it really lives rather than merely reporting a dead end. This is the same disclosure the publish path makes on a cross-Stoa parent and is licensed on the same terms — the caller contracted here is the local view, which can read that fact from the store directly, so the refusal reveals nothing it could not already obtain. Should this read become reachable by a caller that cannot read the store, the Stoa holding the op SHALL NOT be named, and the refusal SHALL remain distinguishable from the other refusals.
+The caller's remedy is identical in all three, which is what makes merging them honest rather than lossy: there is no thread here to read, and the id may become readable if the op arrives. Splitting them would hand a caller a distinction it has no action for, while disclosing what this peer holds: that *something* arrived under an id this read will not describe, or that an op named by an id the caller guessed is filed under some other Stoa. Neither is a fact a thread read owes anyone.
+
+**This is deliberately unlike the publish path**, where a cross-Stoa refusal does name the Stoa the parent belongs to. The difference is which side supplied the mismatch. There, the caller named the Stoa in its own request and can correct it, so naming the other Stoa lets a view fix a request it composed. Here, the caller's Stoa is not in question — it asked for a thread in the Stoa it is reading — and the id simply names something elsewhere, which is a dead end rather than a correctable mistake. The two capabilities therefore answer differently on purpose, and the earlier draft of this requirement, which copied the publish path's disclosure across, was wrong to.
 
 A thread whose root the peer holds and for which it holds no replies SHALL be served: a page carrying the root and nothing else, reporting no further page.
 

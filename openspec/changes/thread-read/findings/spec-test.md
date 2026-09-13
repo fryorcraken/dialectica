@@ -177,7 +177,7 @@ sketch and the settled flat-vs-tree question both struck rather than deleted.
       the later page, so the main assertion cannot pass on a page that happened
       to carry it.
 
-- [ ] **`spec-writer`** — spec.md:373 and spec.md:377 pull in opposite directions
+- [x] **`spec-writer`** — spec.md:373 and spec.md:377 pull in opposite directions
       about the **cross-Stoa refusal**, and the tests pin only one of the two
       readings.
       **The tension:** line 373 says an op belonging to a different Stoa "SHALL
@@ -202,7 +202,37 @@ sketch and the settled flat-vs-tree question both struck rather than deleted.
       or say plainly that the affordance is deferred and the bare not-held refusal
       is what ships — so the next reader is not left reconciling them.
 
-- [ ] **`spec-writer`** — `docs/PLAN.md` §"What a thread view is" still
+      **Fixed — the MAY and the distinguishability sentence are both gone, and
+      the bare not-held refusal is now what the spec says ships.** You are right
+      that it is a spec defect, and right about which of the two readings the code
+      implements. Worth recording that this is the *same error twice*: I created
+      this tension in commit `c6ce3c7`, the commit that resolved the line-46
+      contradiction. Fixing one self-contradiction, I copied `content-authoring`'s
+      cross-Stoa disclosure clause across on the strength of it being the same
+      fact — without checking that it is not the same situation. On the publish
+      path the caller **supplies** the wrong Stoa in its own request and can
+      correct it, so naming the other Stoa helps it fix something it composed.
+      Here the caller's Stoa is not in question; it asked for a thread in the Stoa
+      it is reading, and the id names something elsewhere. That is a dead end, not
+      a correctable mistake, so the disclosure buys the caller nothing and costs
+      it what this peer holds. "SHALL remain distinguishable" came across in the
+      same paste, from a sentence whose subject was a different set of refusals
+      entirely.
+      The requirement now states the opposite and states why: the three not-held
+      cases — never arrived, failed verification, another Stoa — are **one
+      refusal with one message**, because the caller's remedy is identical in all
+      three, and splitting them would disclose what the store holds in exchange
+      for a distinction no view can act on. The divergence from the publish path
+      is called out in the requirement so the next reader meets it as a decision
+      rather than as an inconsistency.
+      Both scenarios now assert message **equality** against the genuinely-absent
+      case, which is a predicate a test can run — the previous wording ("the
+      message does not reveal that the store holds bytes") was the untestable
+      absence shape. Verified against `NotAThread`'s `Display`: all three paths
+      return `NotHeld(id)` and render one string, so **no code change** — the
+      spec now describes what `thread.rs` already does.
+
+- [x] **`spec-writer`** — `docs/PLAN.md` §"What a thread view is" still
       **duplicates** behaviour the spec now states, rather than pointing at it,
       in the two paragraphs the strikethrough deliberately left standing.
       **Where:** PLAN.md:3427-3432 restates the three-state moderation enum and
@@ -222,6 +252,27 @@ sketch and the settled flat-vs-tree question both struck rather than deleted.
       hidden-reply requirement leaves the PLAN copy silently stale.
       **Fix:** strike the duplicated sentences and keep the UI obligation, the way
       the `getThread` sketch above it was handled.
+
+      **Fixed, and your split between the two paragraphs was exactly the right
+      cut.** Both are now struck and replaced by a pointer at the spec; the live
+      UI obligation — that a hidden post must not render indistinguishably from a
+      visible one in the show-hidden view — is kept, because the core does not
+      meet it and no requirement can. My "kept only where it is still live" line
+      had the right instinct and I then failed to apply it, which is how a
+      strikethrough edit leaves a duplicate standing: striking the heading reads
+      as having dealt with the paragraph under it.
+      One addition beyond the finding, because pruning the paragraph would
+      otherwise have lost something true. The moderation paragraph is not purely
+      duplicated — the **feed/thread divergence** is live and belongs in PLAN,
+      since it is a property of two reads rather than of either: the feed reports
+      a boolean, this read reports the three-valued object, both from the same
+      resolver, so a view must branch on which call produced an item, against
+      §2.5's source-independence rule. PLAN now carries that as the live remnant
+      and points at `docs/UI-BRIEF.md`, which the `dev-writer` had already
+      updated. The spec's moderation requirement gained a matching clause saying
+      it binds this read alone and that whatever closes the gap must bring the
+      feed to this shape rather than this read to a flag — a flag cannot carry
+      **restored** at all.
 
 - [x] **`tester`** — `thread.rs:1841-1862`
       `reading_by_a_revisions_op_id_is_not_reading_the_thread` carries a **stale
