@@ -76,6 +76,41 @@ text an earlier `ADDED` produced. Derive the order from
 `git log --name-status --diff-filter=A -- openspec/changes`; do not guess from
 folder names. The archive date is the **merge** date from that commit.
 
+## A change with no spec delta
+
+Not every change contracts module behaviour. A CI gate, a pure refactor, a
+docs-only change asserts nothing about what a peer sends or what core answers,
+so there is no capability to promote — and everything above this section is
+about promoting one. **Such a change archives normally**; the folder moves to
+`openspec/changes/archive/<date>-<name>/` and there is simply no delta-merge
+prompt to take, because there is no delta.
+
+The three things that are not visible from the files:
+
+- **`skip_specs: true` in the change's `.openspec.yaml` is the marker**, and it
+  is what makes `validate --strict` accept zero deltas. Without it the failure
+  is `Change must have at least one delta` — a message that names deltas and
+  never mentions the marker, so the natural response is to go and write a spec
+  the change does not need.
+- **`schema:` must sit beside it or the marker is silently ignored.** That
+  presents as two problems when it is one: the marker reported as ignored, then
+  a validation failure for having no deltas. One cause, two symptoms — fix the
+  missing `schema:` key and both go.
+- **There is also a `--skip-specs` CLI flag** (`openspec archive --help`), whose
+  name collides with the YAML key. It is **not** a substitute and not required:
+  with the marker set correctly, `validate --strict` passes and
+  `openspec show <name> --json --deltas-only` reports `deltaCount: 0` without
+  the flag. The file is the mechanism.
+
+**`core-e2e` is a precedent for the marker and not for the archive commit.** It
+is the only archived zero-delta change, and
+`git log --diff-filter=A -- openspec/changes/archive/2026-09-13-core-e2e/`
+shows it landing *inside* its squash merge `b85111d` rather than as a separate
+post-merge commit. Every earlier change archived that way too, spec-bearing ones
+included, so that is a pre-#59 habit rather than anything about zero-delta
+changes — and it contradicts the ordering the closer now owns, where the archive
+follows the merge as its own commit. Cite it for the marker only.
+
 ## The root comes from the cwd
 
 Every command reports it — `openspec list --json` ends with

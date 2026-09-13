@@ -52,7 +52,69 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
+      # `fetch-depth: 0` — the whole history, and it is LOAD-BEARING for the
+      # deletion gate below, which diffs against the merge base.
+      #
+      # The default is 1. In a clone that shallow the merge base is
+      # unresolvable, and the obvious implementation of that check then finds
+      # no deletions and PASSES — failing in the dangerous direction. The
+      # script guards against it explicitly, but the guard is the safety net
+      # and this line is the fix.
+      #
+      # Not a finite depth: a number large enough for a branch cut yesterday is
+      # wrong for one cut last month, so the gate would fire on branch age
+      # rather than on deletions. Full history costs seconds on this repo.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # THE GATE FOR THE HIGHEST-FREQUENCY FAILURE IN THIS REPO. Eight times in
+      # one day a branch's diff against main carried deletions of files it never
+      # touched, and not one was visible to CI: a branch cut before a change
+      # landed carries "the file without that change" as an intentional-looking
+      # deletion, a squash merge applies it, and there is no conflict because
+      # nobody edited the same lines twice. Three PRs reached the edge of merge
+      # carrying ~700 deletions each. `mergeStateStatus` reported UNKNOWN for
+      # all three — nothing in the PR view showed it.
+      #
+      # The other four jobs are structurally blind to this. They test the merged
+      # result of a branch that is INTERNALLY CONSISTENT: the tree compiles and
+      # the suite passes precisely because the deleted code is genuinely absent
+      # and nothing references it. `cargo test` on a branch missing a module
+      # measures a world where that deletion is correct.
+      #
+      # WHY A SCRIPT AND NOT AN INLINE BLOCK, when every other step here is
+      # inline: this check must be provably able to FAIL, and its most important
+      # failure — a shallow clone — cannot be reached from a workflow without
+      # deliberately misconfiguring the workflow and pushing it. As a file it is
+      # driven against throwaway repositories, shallow clones included, by
+      # .github/scripts/tests/test-check-claimed-deletions.sh.
+      #
+      # PULL REQUESTS ONLY, and the `if:` is on the step rather than inside the
+      # script deliberately. A push to main or a tag has no PR body to read, and
+      # a skipped step is visible as skipped in the GitHub UI where a script
+      # that exited 0 early would look like a check that ran. A green run on
+      # main is not evidence that this gate ran.
+      #
+      # The body reaches the script through a FILE, written from `env:`. A PR
+      # body is attacker-controlled text and this is the only step in this
+      # workflow that handles any; `${{ github.event.pull_request.body }}`
+      # expanded directly into a `run:` block is shell injection.
+      - name: no unclaimed deletions
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -eu
+          printf '%s' "$PR_BODY" > "$RUNNER_TEMP/pr-body.txt"
+          # The base SHA from the event, not `origin/main`: the PR's base is
+          # whatever branch it targets, and reading it from the event means a
+          # PR against a non-main base is measured against its own base rather
+          # than against main.
+          git fetch --no-tags origin "$BASE_SHA"
+          .github/scripts/check-claimed-deletions.sh \
+            "$BASE_SHA" HEAD "$RUNNER_TEMP/pr-body.txt"
 
       # Same shape as radicle's, with two dialectica-specific rules added and
       # one radicle rule dropped.

@@ -186,6 +186,11 @@ are visible from the files; this section does not restate them, because two
 copies drift and the reader who finds the stale one cannot tell. What follows
 is only what is specific to closing.
 
+**A change with no spec delta archives normally.** `skip_specs: true` in its
+`.openspec.yaml` is the marker, there is no delta-merge prompt to take, and the
+`--skip-specs` flag is not needed when the marker is set. The marker is silently
+ignored without a `schema:` key beside it — see `docs/OPENSPEC-ARCHIVE.md`.
+
 Run `openspec --version` first. This page once recorded the CLI as absent, the
 absence was real, the sentence outlived it, and "openspec is not installed"
 reached five agents in one day on that basis. Believe the command, not any
@@ -228,6 +233,13 @@ Each of these is here because the cheap version of it is tempting:
 - **Force-push, or rebase the piece branch.** Only the runner pushes the piece.
   A stale branch is a report, not a repair.
 - **Merge a PR you did not check the diff of**, however green the run.
+- **Approve a PR you wrote any part of.** The closer may author a fix to its own
+  checklist or its own file — that is how a gap in this page gets closed by the
+  agent standing in front of it — and must then treat that PR as one it cannot
+  approve: it goes to the runner like any other. **Say in your report which
+  commits on the PR are your own.** Without that the handoff is correct and
+  unactionable, because "this needs a second reader" does not say which lines
+  lacked one.
 
 ## Your report
 
