@@ -49,7 +49,7 @@ exactly.
 Three entries follow. One is a claim the code does not honour; two are
 unrecorded decisions.
 
-- [ ] **`dev-writer`** — `design.md:155` and `design.md:296` name a type that
+- [x] **`dev-writer`** — `design.md:155` and `design.md:296` name a type that
       does not exist, and the name they use belongs to a *different live type*.
       Both lines cite `Refusal::Undecodable`. The type is `InboundRefusal`
       (`transport.rs:327`), renamed during review precisely to avoid this
@@ -68,7 +68,30 @@ unrecorded decisions.
       This is the third phantom on this piece; the sweep the brief asked for
       found it.
 
-- [ ] **`dev-writer`** — the `#[must_use]` on `Publishable` is a decision with a
+      **Fixed.** Both cited lines now read `InboundRefusal::Undecodable`, and the
+      sweep found **two more instances your grep could not have seen**, because it
+      covered `design.md` only:
+
+      - `design.md:151` rendered the signature as `Result<Admitted, Refusal>`; the
+        real one is `Result<Admitted, InboundRefusal>` (`transport.rs:458`).
+      - `design.md`'s section heading read "One `Refusal` enum".
+      - `tasks.md:84` and `tasks.md:87` both carried the bare name — the same
+        phantom, in the document a reader checks to see what was built.
+
+      All four corrected. Beyond the rename I added a paragraph under that section
+      recording **why** the type is `InboundRefusal`, so the collision argument lives
+      in the design document and not only in the code comment that predicted it —
+      and it names this instance, since a document that demonstrated the confusion it
+      was warned about is the most useful possible illustration of why the bare name
+      is not available. Your framing that a resolving-but-wrong name is worse than a
+      dangling one is the part I carried across verbatim in substance.
+
+      No test pins prose. What makes this checkable rather than asserted is that the
+      corrected names are the ones the compiler accepts: `grep -rn "Refusal::"` over
+      `design.md`, `tasks.md` and the spec now returns only the qualified form plus
+      one line of my own prose describing the defect.
+
+- [x] **`dev-writer`** — the `#[must_use]` on `Publishable` is a decision with a
       real alternative, argued in a 15-line code comment, and `design.md` does
       not mention it anywhere. `transport.rs:553-567` gives the whole argument:
       the attribute is "the only compiler-visible signal separating" a
@@ -94,7 +117,37 @@ unrecorded decisions.
       `transport.rs:2384`, `transport.rs:2400` and `transport.rs:880`. "That one
       site" is a count the code disproves.
 
-- [ ] **`dev-writer`** — `OpenChannels::close_all` returns its ids **sorted**,
+      **Fixed, both halves.**
+
+      The decision is now recorded in `design.md` as a subsection under the
+      delivery-outcome seam — deliberately there rather than in a list of attributes,
+      because the attribute's justification *is* the tracker gap: it exists to keep a
+      dropped `Publishable` distinguishable from a sent-and-never-propagated one, which
+      is one of the three owed things. Placing it anywhere else would have separated the
+      attribute from the only argument that makes it more than a lint preference. The
+      entry carries the two-unpredicted-sites measurement, since as you note that is
+      the part that settles the re-litigation, and it names the re-litigation
+      explicitly: the first real call site is when the attribute starts earning its
+      keep, not when it stops.
+
+      The count is corrected in the code comment too, and I took the numbers from
+      `grep -n "let _ = \|drop(" transport.rs` rather than from the comment. That
+      returns six lines; three are `Publishable` discards (`:880`, `:2384`, `:2400`),
+      two discard `receive` (`:2039`, `:2077`, a different type), and `:2325` is the
+      `drop(publishable)` inside `a_send_failure_does_not_lose_the_op` (which starts
+      at `:2308`). So your count and your site attribution are both exactly right, and
+      the comment was wrong on both. The comment now states the three-site count, says
+      that test uses `drop` and is not one of them, and says to get the count from a
+      `grep` rather than from itself.
+
+      Least confident part: nothing here is test-pinned, because a `#[must_use]`
+      firing is a compile-time warning rather than a runtime assertion, and the
+      discards are already explicit so no current build emits it. The attribute's
+      value is therefore demonstrated by the two sites it caught historically — which
+      is exactly why that measurement needed a durable home before `findings/` is
+      deleted.
+
+- [x] **`dev-writer`** — `OpenChannels::close_all` returns its ids **sorted**,
       and the reason is only in the code. `transport.rs:244-249` sorts so that "a
       caller's sequence of `channelClose` calls does not depend on hash iteration
       order", and the comment is careful to say this "is not a correctness
@@ -107,6 +160,23 @@ unrecorded decisions.
       compares against a sorted `expected`. `grep -n "close_all\|sorted"
       design.md` returns nothing. A thin entry naming the alternative and the
       cost would be enough; this is a suggestion rather than a defect.
+
+      **Fixed** — taken as the suggestion it was labelled, and it landed slightly
+      larger than "thin" for one reason worth naming. Your diagnosis of the failure
+      mode is right (the comment's own concession is what invites the deletion), but
+      while writing the entry I checked the test and the alternative is a little
+      worse than "have the test sort": `closing_every_open_channel_yields_each_channels_identifier`
+      (`transport.rs:2588`) already sorts its `expected` (`:2607`), so moving the sort
+      to the caller means comparing a sorted vector against a sorted copy — which stops
+      distinguishing "returned every id" from "returned every id in some order". The
+      recorded entry therefore names determinism as the property to preserve rather
+      than the specific ordering, and states that a caller must not depend on the order
+      either way, since nothing about closing at the transport is order-sensitive.
+
+      The entry sits under the `OpenChannels` section, beside the map-shape decision it
+      belongs to. It names both alternatives you listed plus insertion order, and says
+      what deleting the sort actually breaks, so the next reader meets the consequence
+      rather than the concession.
 
 ## Two notes that are not findings
 

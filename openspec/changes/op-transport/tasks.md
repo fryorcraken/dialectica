@@ -81,10 +81,10 @@ rule exists to prevent.
 - [x] `InboundMessage` carries **all four** event fields, including `sender_id`
       and `timestamp`. A struct that dropped them would be hiding the fields
       rather than refusing them; neither reaches anything recorded.
-- [x] The five refusals are five `Refusal` variants, plus `Storage` for a write
-      failure — which is not a judgement about the payload and is the only one
+- [x] The five refusals are five `InboundRefusal` variants, plus `Storage` for a
+      write failure — which is not a judgement about the payload and is the only one
       where retrying could work.
-- [x] `Refusal::Undecodable` **carries** `OpError` rather than flattening it:
+- [x] `InboundRefusal::Undecodable` **carries** `OpError` rather than flattening it:
       `op-format` distinguishes eleven ways a byte string is not an op, and
       discarding that one layer later is the same mistake at a smaller scale.
 - [x] Guards run in the spec's order, and the **size check runs before the
@@ -335,3 +335,42 @@ the two agents' files did not overlap — but the tip moved from `654a396` to `9
 mid-stage and the uncommitted spec delta was visible in this tree as though it were
 this stage's own work. Recorded so the next dispatch does not read a clean outcome as
 evidence the overlap was safe.
+
+## 13. Closed the design-review findings, and merged `origin/main` a third time
+
+- [x] **Merged `origin/main` at `733544d`** (two commits: #50 stoa-lifecycle,
+      #59 the closer), for the same staleness reason §9 records. Only `docs/PLAN.md`
+      conflicted, in §9.2's MVP list, and it was the one place the design reviewer
+      predicted: `main` rewrote items 6 and 7 to say joining takes the address **and**
+      the genesis record, while this branch struck through item 8 because
+      `op-transport` now specifies receiving. Resolved by keeping `main`'s 6 and 7
+      verbatim and this branch's 8 — taking either side whole would have dropped the
+      other's correction, and the joining rewrite is the half that regresses
+      *silently*, restoring a wrong claim about what a user needs in order to join.
+- [x] Verified the rest of PLAN.md auto-merged as additions **onto** `main`'s text
+      rather than over it, hunk by hunk against the named commit: §4.8's `#4116`
+      withdrawal and shared-node close argument, and §9.1's publish-obligation
+      rewrite, all survive with this change's strike-throughs layered on top.
+- [x] Verified the diff **naming the merged commit** rather than `origin/main`:
+      `git diff 733544d HEAD --stat` is pure insertions, so the phantom deletions
+      (`membership.rs` −1842, the `stoa-membership` spec −414, `ci.yml` −89) are gone.
+      The `origin/main` form is the one that gives a false alarm once main moves again.
+- [x] **`nix build .#lgx` passed** — run because a clean auto-merge can still produce
+      a tree that compiles nowhere, and `cargo test` cannot see it: `rust-lib/src/lib.rs`
+      is entirely `#[cfg(logos_scaffold)]` and #50 touched that file. The one code
+      file that auto-merged was `dialectica-core/src/lib.rs`, and the merge added a
+      single `pub mod transport;` line, so there was no room for the identical-body
+      duplication that cost the stoa piece 23 compile errors behind four green gates.
+- [x] Gates on the merged tree: **821 tests passing** (795 + 26), from 744 pre-merge.
+      The +77 is `main`'s membership suite arriving, not this change growing.
+      `clippy --all-targets -D warnings` clean, `rustfmt --check` with
+      `skip_children=true` clean on the one changed file,
+      `openspec validate op-transport --strict` valid.
+- [x] `findings/design-review.md`'s three entries closed — all three **fixed**, none
+      rejected or deferred. The phantom-type entry turned up **two instances beyond
+      the two reported**, because the reviewer's grep covered `design.md` only and the
+      bare `Refusal` name was also in `design.md`'s section heading, its rendering of
+      the `receive` signature, and two lines of `tasks.md`. Durable reasoning moved
+      into `design.md` ahead of `findings/` being deleted: why the type is
+      `InboundRefusal`, why `Publishable` is `#[must_use]` with the
+      two-unpredicted-sites measurement, and why `close_all` sorts.

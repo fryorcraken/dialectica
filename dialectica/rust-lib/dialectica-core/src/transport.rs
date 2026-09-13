@@ -562,9 +562,15 @@ impl std::fmt::Display for PublishError {
 ///
 /// Dropping one is still a legitimate operation — `a_send_failure_does_not_lose_the_op`
 /// drops one deliberately, to witness that the log survives — so the attribute is
-/// paired with an explicit `let _ =` at that one site rather than omitted. An
+/// paired with an explicit discard at each such site rather than omitted. An
 /// explicit discard states the intent; a silent one cannot be told from a mistake.
 /// This is the first `#[must_use]` in the crate.
+///
+/// There are three `let _ =` discards of a `Publishable` in this file, and that test
+/// is not one of them: it uses `drop(publishable)`, a different spelling of the same
+/// intent. An earlier version of this comment said the attribute was paired with a
+/// `let _ =` "at that one site" and named that test — wrong on both the count and
+/// the site, and caught in review. Get the count from a `grep`, not from here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[must_use]
 pub struct Publishable {

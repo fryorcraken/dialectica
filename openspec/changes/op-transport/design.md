@@ -144,15 +144,49 @@ produce. The alternative, `open(channel_id: String, stoa: Address)`, lets a call
 register a mismatched pair, and every later Stoa check would then be comparing
 against a lie.
 
-### One `Refusal` enum, and each variant is a spec bullet
+**`close_all` returns its channel ids sorted, and the sort is for the test rather
+than for the close.** Iterating a `HashMap` gives no order, so an unsorted return
+makes `closing_every_open_channel_yields_each_channels_identifier` either compare
+against a sorted copy of its own expectation or assert set equality — both of which
+weaken what the test pins, since a sorted-copy comparison no longer distinguishes
+"returned every id" from "returned every id in some order". Sorting in `close_all`
+puts the normalisation in one place and lets the test assert against a fixed
+expected vector. The alternatives were insertion order, which would mean keeping an
+order the map does not have, and leaving it unsorted for each caller to handle.
+
+This is recorded because the code comment concedes the sort "is not a correctness
+property of the close", which is an accurate statement and an invitation to delete
+it as pointless. It is not pointless: removing it breaks that test, whose `expected`
+is sorted. A caller must still not *depend* on the order — nothing about closing at
+the transport is order-sensitive — so the property to preserve is the determinism,
+not the specific ordering.
+
+### One `InboundRefusal` enum, and each variant is a spec bullet
 
 The spec requires five refusals "each reported distinguishably from the others",
 and gives the reason: five different causes, five different responses. So the
-boundary returns `Result<Admitted, Refusal>` with one variant per cause, in the
-`stoa.rs`/`op.rs` house style — an enum with a `Display` that renders without
+boundary returns `Result<Admitted, InboundRefusal>` with one variant per cause, in
+the `stoa.rs`/`op.rs` house style — an enum with a `Display` that renders without
 Rust syntax, and a test asserting pairwise-distinct rendering.
 
-`Refusal::Undecodable(OpError)` **carries** the decoder's own error rather than
+**The type is `InboundRefusal` and not `Refusal`, because the crate already has a
+`Refusal`.** `authoring::Refusal` is a live type with a disjoint variant set and no
+`Undecodable`, so the bare name is not merely ambiguous — it resolves, to the wrong
+enum. Two public `Refusal`s in one crate would be a collision resolved at whichever
+call site needed both first, and the call site that needs both is the seam this
+change is for: a handler reporting a publish that then hands off to delivery. Every
+variant here describes a payload that **arrived**, so the qualifier names the
+subject rather than disambiguating a suffix.
+
+Worth recording because this document got it wrong: two sections cited
+`Refusal::Undecodable` after the rename, which `findings/design-review.md` caught
+as the third phantom type on this piece. A reader following that name lands on
+`authoring::Refusal`, finds no `Undecodable`, and concludes the variant was
+deleted — strictly worse than a name that resolves to nothing. Use the qualified
+name in prose; the collision the code comment predicted is one this document then
+demonstrated.
+
+`InboundRefusal::Undecodable(OpError)` **carries** the decoder's own error rather than
 flattening it to a string. `op-format` already distinguishes eleven ways a byte
 string is not an op, and collapsing them here would discard the distinction one
 layer after the code that made it — the same "a boundary reporting only 'invalid'
@@ -293,7 +327,7 @@ responses**, and the spec requires a publish with no open channel be
 - `NoChannel { stoa, id }` — **the op exists** and did not go out. Do not retry,
   do not discard.
 - `NotStored(OpLogError)` — **the op does not exist**. It carries the store's own
-  error rather than flattening it, for the same reason `Refusal::Undecodable`
+  error rather than flattening it, for the same reason `InboundRefusal::Undecodable`
   does: the layer below already distinguished the causes.
 
 A boolean could not carry that, and neither could one variant. **Nothing reached
@@ -384,6 +418,39 @@ a scoping decision and not an impossibility. What it attaches to:
   mutable map, which is what makes it a component rather than a branch.
 - **Nothing promises delivery.** No field of `Publishable` carries an outcome, so
   a tracker adds a fact rather than correcting a claim.
+
+#### `Publishable` is `#[must_use]`, because dropping one is indistinguishable from sending one
+
+The tracker above keys a delivery outcome back to an op by `Publishable`'s `id` and
+`channel_id`, so it must observe **every** `Publishable` that was sent. That makes a
+dropped one a real hazard rather than a style question: a `Publishable` dropped on a
+path that forgot to send is, to the tracker, identical to one sent and never
+propagated — and telling those two apart is precisely one of the three things this
+change records as owed. The attribute is therefore the only compiler-visible signal
+separating the two states, which is why it is on the type rather than left to a
+reviewer to notice at each call site. It is the first `#[must_use]` in the crate.
+
+The alternative was to omit it and rely on review, and the measurement is what
+rules that out: the attribute **fired on two sites nobody had predicted** —
+`publish(...).unwrap();` discards where the `unwrap` made the value look consumed —
+rather than on the deliberate drop a reviewer had named in advance. Two unpredicted
+sites in one file is the evidence that call-site review would not have held.
+
+Dropping one stays legitimate: `a_send_failure_does_not_lose_the_op` drops one to
+witness that the log survives. What the attribute buys is that such a discard must
+be written down. Across `transport.rs` there are **three** explicit `let _ =`
+discards of a `Publishable` (`transport.rs:880`, `:2384`, `:2400`), while that
+test discharges the attribute with `drop(publishable)` (`transport.rs:2325`) — a
+different spelling of the same intent, and not one of the three. The type's own
+doc comment said the attribute "is paired with an explicit `let _ =` at that one
+site", naming that test; both halves of that were wrong, and
+`findings/design-review.md` caught it. Counting the sites is a `grep`, which is
+what the claim should have come from.
+
+**What a later reader must not re-litigate:** whether this is a lint preference to
+drop when it becomes inconvenient at the first real call site. That moment is
+exactly when the wiring lands and the discards stop being tests — which is when the
+attribute starts earning its keep rather than when it stops.
 
 **The one thing genuinely ruled out** is that a *publish's reply* could carry the
 answer, and that is a consequence of the event timing rather than of this
