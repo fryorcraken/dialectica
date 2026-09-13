@@ -7,8 +7,8 @@
       block exists to tell them apart.
 - [x] design + code — `dev-writer`
 - [ ] tests — `tester`
-- [ ] review: correctness — `code-reviewer`
-- [ ] review: security — `code-reviewer`
+- [x] review: correctness — `code-reviewer`
+- [x] review: security — `code-reviewer`
 - [x] review: readability — `code-reviewer`
 - [x] review: architecture — `code-reviewer`
 - [ ] review: spec-test — `spec-test-reviewer`
@@ -16,11 +16,18 @@
 - [ ] findings all ticked, `findings/` deleted — runner
 - [ ] `openspec validate --strict`, then `archive` — runner
 
-**On the two ticked review rows:** `findings/readability.md` and
-`findings/architecture.md` exist on the branch, committed in `df91185`, each with
-its own defect list. Those are the evidence. The correctness and security rows are
-unticked because no such file exists — one instance was still running when this
-block was written, so those rows are doing exactly the job an unticked row is for.
+**On the four ticked review rows:** `findings/readability.md` and
+`findings/architecture.md` were committed in `df91185`; `findings/correctness.md`
+and `findings/security.md` followed from the instance that was still running when
+this block was first written. Each carries its own defect list, and those files are
+the evidence. `spec-test` and `design` remain unticked, so those rows are still
+doing the job an unticked row is for.
+
+The correctness and security reviewer measured against `8bfe77d` rather than the
+`9bb2bc1` its dispatch named, and says so in both files: two of the findings it had
+measured at `9bb2bc1` were already closed by `5a1719b`, and are recorded as closed
+rather than as boxes. Its `examples/` measurement was reached independently of
+§3.2's and agrees with it.
 
 **On the `tester` row:** this piece's code *is* tests, written by `dev-writer`
 alongside the target. That does not discharge the `tester` stage, which asks a
