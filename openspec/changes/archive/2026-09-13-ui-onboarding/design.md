@@ -520,6 +520,52 @@ destination wants — identity becomes per-Stoa again, at which point a single
 app-level gate over one arbitrary Stoa is the wrong seam, and the gate belongs
 where a Stoa is already in hand.
 
+**Measured, so the either/or is not a matter of opinion.** The two options were
+each run against the whole QML suite, and the failure count is identical because
+the failures simply change sides:
+
+| `Main.qml` | `tst_launch_branch.qml` | `tst_stoa_screens.qml` |
+|---|---|---|
+| gate above the navigator (option 1) | 13 pass, 0 fail | 57 pass, **10 fail** |
+| `main`'s navigator ungated | 3 pass, **10 fail** | 67 pass, 0 fail |
+
+Every other spec file — nine of them, 189 tests — passes either way. No
+resolution satisfies both files as written, because the two specs contradict
+each other on this one point. That is what makes it the owner's call rather
+than a merge decision.
+
+**Two measurements that rule option 1 out on its own terms**, both found after
+the resolution was first committed:
+
+- **A cold start under the gate reaches the failure screen**, which is the
+  symptom the owner photographed under Basecamp: the whole app renders
+  "Whether you have an identity here could not be determined. / No Stoa address
+  was given to this view." Nothing in the shipped app sets `identityStoa` —
+  only `tst_launch_branch.qml` does — so `askWhoAmI()`'s empty-address guard
+  fires on every launch. Measured with a throwaway probe instantiating `Main`
+  with no properties, exactly as basecamp does; `screenShown` came back
+  `identityFailed` even with a bridge that would have answered `who_am_i`.
+  **No gate catches this**: the guard is valid QML, and the suite passes because
+  the only spec that instantiates `Main.qml` supplies the property itself.
+- **It violates a merged requirement of the other spec.**
+  `stoa-navigation-view`'s "The view holds no Stoa of its own" says the view
+  "MUST NOT carry a Stoa address or genesis record supplied as a property with
+  a default" — which is precisely what `identityStoa` is. That requirement was
+  written against `stoaAddress`, but nothing in its wording exempts a second
+  address property with a different name.
+
+**And one that constrains option 2.** `stoa-navigation-view` requires the create
+affordance to be "offered whatever the keystore's state", with a scenario
+pinning that a peer with **no usable signing key** can act on it and read core's
+refusal. So a keyless peer must be able to reach the Stoa list: any gate that
+hides the list until an identity exists contradicts that requirement too. Option
+2 satisfies it; option 1 cannot without that requirement changing.
+
+The resolution left in the tree is option 1, so the branch's own contract
+arrives intact and reviewable rather than silently dropped. It is **not
+shippable as it stands** — the cold-start dead end above is real, and whichever
+option is chosen, `identityStoa` needs either a supplier or removal.
+
 **`identityStoa` is the seam either way.** Core's `who_am_i`,
 `generate_identity_slate` and `keep_identity` each take a Stoa and refuse a
 request without one (`wire.rs`'s `parse_stoa`), so onboarding cannot ask anything
