@@ -576,6 +576,28 @@ jobs:
       #
       # Named files, absolute intent: never a bare `qmllint` (a bare invocation
       # opens a GUI file picker and hangs a CI runner forever).
+      # The undefined-MEMBER gate, and its own tests first.
+      #
+      # WHAT IT CLOSES, which three steps in this job were green over. With
+      # `color: DTheme.desk` in Main.qml rewritten as `DTheme.noSuchDesk`, the
+      # QML suite passed (no spec instantiates Main.qml, so `check_bindings`
+      # never sees it), the static name gate passed (a D-prefixed typo contains
+      # no bare `Theme`), and the qmllint step below passed WHILE PRINTING the
+      # defect as a warning. `--missing-property error` escalates that one
+      # category and reaches every file in src/qml, not only the ones a spec
+      # constructs.
+      #
+      # It does NOT see the host collision — `-I src/qml` puts our own singleton
+      # on the import path, so qmllint checks a different resolution than the app
+      # performs. A green here says nothing about shadowing. That limit is in the
+      # script's header too, because a gate whose green is mistaken for a broader
+      # guarantee is the failure this repo has already paid for.
+      - name: the QML member gate's own tests
+        run: dialectica-ui/tests/tst_check_qml_members.sh
+
+      - name: every QML member read off our own types exists
+        run: dialectica-ui/tests/check_qml_members.sh
+
       - name: qmllint
         run: |
           set -eu

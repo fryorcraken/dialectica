@@ -111,6 +111,31 @@ with tempfile.TemporaryDirectory() as tmp:
     # in a second, rather than in CI after a Qt install.
     expect_accept("the shipped dialectica-ui module", MODULE)
 
+    # AND that the walk actually REACHED that module, which exit 0 does not say.
+    #
+    # WHY THIS IS SEPARATE FROM THE CASE ABOVE. Narrowing the walker to
+    # `rglob("Core.qml")` fails 5 of the constructed cases — but the shipped
+    # module still passed, because the real module happens to contain a
+    # `Core.qml`. A gate reading one harmless file reports `ok` and the case
+    # above is satisfied. The `if not qml_files` guard catches only a walk that
+    # goes to ZERO; a walk narrowed to one file sails past it.
+    #
+    # The floor is COUNTED FROM DISK here rather than read out of the gate's own
+    # message. Asking the gate how many files it saw and agreeing with the
+    # answer is not a measurement — it is the implementation confirming itself.
+    # Two independent walks of the same tree must agree.
+    on_disk = len(list(MODULE.rglob("*.qml")))
+    code, out = run_gate(MODULE)
+    if code != 0:
+        fails.append(f"the shipped module's file count: gate failed\n{out}")
+    elif f"{on_disk} QML file(s)" not in out:
+        fails.append(
+            f"the shipped module's file count: {on_disk} .qml file(s) on disk "
+            f"but the gate did not report checking that many — the walk is "
+            f"narrower than the tree, so most files went unchecked\n{out}")
+    else:
+        print(f"ok: the shipped module — all {on_disk} QML file(s) reached")
+
     # ---- MUST REJECT: the prefix rule over EVERY entry -------------------
     #
     # THE ARCHITECTURE FINDING, pinned. `Theme 1.0 Identicon.qml` is a plain
@@ -137,7 +162,12 @@ with tempfile.TemporaryDirectory() as tmp:
         must_mention="not D-prefixed",
     )
 
-    # `internal` still registers the name in the directory namespace.
+    # `internal` entries are checked too — for a reason that was measured after
+    # the first version of this comment asserted the wrong one. `internal` does
+    # NOT export the name (a named-module import gets `ProbeInternal is not a
+    # type`), but the name is live INSIDE the directory, resolved by filename
+    # whether or not the qmldir declares it — and the directory is where
+    # basecamp loads the plugin. See `qmldir_entries`' docstring in the gate.
     expect_reject(
         "an internal qmldir entry that is not D-prefixed",
         build_tree(tmp / "internal_theme",

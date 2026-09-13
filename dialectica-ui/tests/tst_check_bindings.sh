@@ -140,6 +140,110 @@ Totals: 12 passed, 0 failed, 0 skipped, 0 blacklisted, 38ms
 EOF
 assert_passes "test names containing the word undefined" "$work/wordy.txt"
 
+# ---- THE CORPUS, END TO END ---------------------------------------------
+#
+# WHY THE SIX CASES ABOVE ARE NOT ENOUGH, which is the finding this case closes.
+# Every one of them supplies its OWN fixture from `mktemp` and calls
+# `check_bindings` directly. So they pin the check and say nothing about the
+# corpus the check runs over in production — the `$out` file `run-qml-tests.sh`
+# captures the runner into. Measured: adding one line to the spec loop,
+#
+#     : > "$out"
+#
+# leaves all six green while the suite goes blind. With a genuinely broken
+# binding in a real component the runner still printed every `--- ` header (so
+# CI's `every QML spec file actually ran` step stayed green), still echoed the
+# log (so a reader saw nothing missing), and exited 0. Three CI steps green over
+# a broken binding.
+#
+# So this case drives the REAL `run-qml-tests.sh` — its discovery, its capture,
+# its check — over a component that is deliberately broken, and requires a
+# non-zero exit. Truncating, redirecting or filtering `$out` fails HERE.
+#
+# Both bounds, because a case that only demands exit 1 is satisfied by a runner
+# that always fails: the same staged module with the binding CORRECT must exit 0.
+# The probe component is staged INSIDE a copy of the real `src/qml`, not beside
+# it. That is not tidiness: a real component resolves `DTheme` implicitly
+# because it sits in the same directory as `DTheme.qml` and its `qmldir`, and a
+# component staged anywhere else raises `ReferenceError: DTheme is not defined`
+# whatever token it names. Measured while writing this case — with the probe in
+# its own directory BOTH spellings, the correct one included, produced that
+# error and exit 1, so the case fired for a reason unrelated to the token and
+# would have passed with `check_bindings` measuring nothing about tokens at all.
+#
+# The real `DTheme.qml` is copied in, not a stand-in: the token names this case
+# asserts on must be the ones the view actually ships, or a token renamed in
+# DTheme.qml would leave this passing over a spelling that no longer exists.
+# Only DTheme is copied, with a qmldir naming just it — copying the whole
+# directory would drag in every component and test the view rather than the
+# check.
+e2e=$work/e2e
+mkdir -p "$e2e"
+cp "$here/../src/qml/DTheme.qml" "$e2e/"
+printf 'singleton DTheme 1.0 DTheme.qml\n' > "$e2e/qmldir"
+
+# `DTheme.paper` exists; `DTheme.noSuchTokenAtAll` does not. Neither spelling
+# contains a bare `Theme`, so the static name gate cannot see either one — this
+# is the runtime half of the measurement and nothing else covers it.
+#
+# The binding must be one the engine EVALUATES. A `property color c:` on an
+# `Item` nobody reads is lazy: Qt never evaluates it and prints nothing, so the
+# case passed silently on a broken token. A `Rectangle`'s own `color` is read
+# when the object is created. Also measured.
+write_e2e_component() {
+    cat > "$e2e/Probe.qml" <<COMPONENT
+import QtQuick
+Rectangle { color: DTheme.$1 }
+COMPONENT
+}
+
+cat > "$e2e/tst_e2e_probe.qml" <<'SPEC'
+import QtQuick
+import QtTest
+// Instantiates Probe and asserts NOTHING about its colour. That is the point:
+// a binding evaluating to undefined in a component no spec asserts against is
+// a QWARN the runner ignores, and `check_bindings` is what turns it into a
+// failure. A spec that compared the colour would fail by itself and would not
+// be measuring check_bindings at all.
+//
+// Created through a `Component`, as the real specs do. A child declared
+// directly under TestCase is not instantiated, so the binding is never
+// evaluated and a broken token prints nothing — measured.
+TestCase {
+    name: "E2EProbe"
+    Component { id: probeComponent; Probe { } }
+    function test_the_component_instantiates() {
+        var o = probeComponent.createObject(null);
+        verify(o !== null);
+        o.destroy();
+    }
+}
+SPEC
+
+run_e2e() {
+    "$here/run-qml-tests.sh" --import "$e2e" "$e2e/tst_e2e_probe.qml" \
+        >/dev/null 2>&1
+}
+
+write_e2e_component "paper"
+if run_e2e; then
+    echo "ok: the real runner over a sound binding — accepted"
+else
+    echo "FAIL: the real runner rejected a sound binding — the end-to-end case" >&2
+    echo "      cannot detect anything if it is red on correct input" >&2
+    fails=$((fails + 1))
+fi
+
+write_e2e_component "noSuchTokenAtAll"
+if run_e2e; then
+    echo "FAIL: the real runner EXITED 0 over a binding that reads undefined." >&2
+    echo "      check_bindings is being handed an empty or filtered corpus —" >&2
+    echo "      look at how \$out is written in run-qml-tests.sh's spec loop." >&2
+    fails=$((fails + 1))
+else
+    echo "ok: the real runner over a binding that reads undefined — rejected"
+fi
+
 if [ "$fails" -ne 0 ]; then
     echo "check_bindings: $fails case(s) failed" >&2
     exit 1

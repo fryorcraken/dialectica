@@ -58,7 +58,7 @@ There are **no `NO SPEC:` markers** in `dialectica-ui/` or `.github/`. Given
 
 ---
 
-- [ ] **`tester`** — `dialectica-ui/tests/run-qml-tests.sh:171` vs
+- [x] **`tester`** — `dialectica-ui/tests/run-qml-tests.sh:171` vs
       `dialectica-ui/tests/tst_check_bindings.sh` — the self-test pins the
       check but not the corpus it runs over, so gutting the corpus-builder
       leaves all six cases green while the suite goes blind
@@ -91,7 +91,51 @@ There are **no `NO SPEC:` markers** in `dialectica-ui/` or `.github/`. Given
       two directions" claim, and this is the mutation that removes it with every
       gate green.
 
-- [ ] **`tester`** — `.github/workflows/ci.yml:648-757` — the static gate is the
+      **FIXED by `tester`, and the fix is larger than the box asked for —
+      because writing the one case you specified exposed a second instance of
+      the same defect, in my own test.**
+
+      *The case.* `tst_check_bindings.sh` now ends with an end-to-end pair that
+      drives the real `run-qml-tests.sh` over a staged component: the same
+      component with `DTheme.paper` (must exit 0) and with
+      `DTheme.noSuchTokenAtAll` (must exit 1). Both bounds, because a case
+      demanding only exit 1 is satisfied by a runner that always fails.
+
+      *Proven to fail, with the mutation you named.* `: > "$out"` in the capture
+      path → **`FAIL: the real runner EXITED 0 over a binding that reads
+      undefined`, exit 1**, while the original six cases stayed green. Predicted
+      and observed agree exactly.
+
+      *The second instance, which is the part worth reading.* Adding the
+      `--import`/named-spec argument path gave the runner **two** capture sites,
+      and my case could only drive one. Measured: `: > "$out"` in the suite loop
+      left **all eight cases green**; the identical mutation in the argument
+      path failed one. So the test I had just written was blind to the
+      production path — the very shape this box is about, reproduced one level
+      down. Fixed structurally rather than with a second case: both paths now go
+      through one `run_spec()`, so there is one place to break and the test
+      covers it. Re-measured after the collapse: the single-site mutation fails
+      the case. One site is one thing for the test to cover, which is cheaper
+      than a test per site and does not go stale when a third site is added.
+
+      *Two things the case had to get right, both found by measurement and both
+      recorded in the file so they are not re-derived.* A `property color c:` on
+      an `Item` nobody reads is **lazy** — Qt never evaluates it, prints nothing,
+      and the case passed over a broken token; a `Rectangle`'s own `color` is
+      evaluated on creation. And a component staged in its own directory raises
+      `ReferenceError: DTheme is not defined` for **every** spelling, correct
+      ones included, so the case fired for a reason unrelated to the token; the
+      probe is now staged inside a directory carrying the real `DTheme.qml` and
+      a qmldir naming it, which is how a real component resolves the singleton.
+      The first version of this case would have passed while measuring nothing
+      about tokens at all.
+
+      *One regression caught on the way out.* `run_spec` prints the
+      `--- <spec>` header, and the suite loop was still printing one too —
+      doubling a line CI's `every QML spec file actually ran` step counts. Fixed;
+      the suite now prints one header per spec, 4 for 4 specs on disk.
+
+- [x] **`tester`** — `.github/workflows/ci.yml:648-757` — the static gate is the
       piece's primary instrument and is the only one in the change with no test,
       so narrowing its walker to near-nothing passes every gate in the repo
       **Scenario:** `check_bindings` got `tst_check_bindings.sh` on the stated
@@ -148,7 +192,39 @@ There are **no `NO SPEC:` markers** in `dialectica-ui/` or `.github/`. Given
       your extracted copy diverging — there is no heredoc now, and CI and the
       test call the same file.
 
-- [ ] **`tester`** — `dialectica-ui/src/qml/Main.qml` — no gate in the repo
+      **VERIFIED and CLOSED by `tester`. The `dev-writer`'s measurement
+      reproduces exactly, and the gap it names is now closed.**
+
+      *Reproduced, not taken on trust.* I ran the vacuity mutation myself —
+      `rglob("*.qml")` → `rglob("Core.qml")` — against the 16-case suite:
+      **5 failed**, and `the shipped dialectica-ui module` **passed**, for the
+      reason given (the real module contains a `Core.qml`). Against the shipped
+      module directly the gate printed `ok: 1 QML file(s) … checked` where 17
+      exist. Exactly as reported.
+
+      *The remaining gap, and why it needed closing.* That case asserted only
+      exit 0, so a walker narrowed to one harmless file satisfied it. The count
+      was printed and nothing compared it to anything — "visible in a log is not
+      the same as gated", which is your original wording and was still true of
+      the rebuilt gate. `tst_check_qml_names.py` now carries a second
+      shipped-module case that **counts the `.qml` files from disk itself** and
+      requires the gate to report that many. The floor is derived independently:
+      asking the gate how many files it saw and agreeing with the answer is the
+      implementation confirming itself, not a measurement — two independent
+      walks of the same tree must agree.
+
+      *Proven to fail.* Re-running the same vacuity mutation now fails **6 of
+      17**, and the sixth is the shipped-module count, with a diagnostic naming
+      the narrowing: `17 .qml file(s) on disk but the gate did not report
+      checking that many — the walk is narrower than the tree, so most files
+      went unchecked`. Predicted 5-plus-the-new-one; observed exactly that.
+
+      *Note on the other corpus-builder.* The `dev-writer`'s `qmldir_entries`
+      result (12 of 16, 7 of them only because the rejection cases assert on
+      message text) is the standard I held the new cases to: every rejection
+      case I added asserts on the message, not merely on a non-zero exit.
+
+- [x] **`tester`** — `dialectica-ui/src/qml/Main.qml` — no gate in the repo
       covers the top-level component, so a broken token binding in the screen
       the user actually sees passes the suite, the static gate and qmllint
       **Scenario:** `design.md:148-151` states the suite "now fails on any
@@ -176,7 +252,31 @@ There are **no `NO SPEC:` markers** in `dialectica-ui/` or `.github/`. Given
       **Severity: high**, and it is the cheapest of the three to close — see the
       next box.
 
-- [ ] **`tester`** — `.github/workflows/ci.yml:561` — `qmllint` already detects
+      **FIXED by `tester`, closed by the gate built for the box below.**
+
+      *Your measurement reproduces in full.* With `Main.qml:36` rewritten as
+      `color: DTheme.noSuchDesk` on this tree: the QML suite **exit 0, 41
+      passed, zero diagnostics**; the static name gate **exit 0, `17 QML
+      file(s)`**; `qmllint` as CI invokes it **exit 0** while printing
+      `Warning: Main.qml:36:23: Member "noSuchDesk" not found on type "DTheme"
+      [missing-property]`. Three gates green over the binding that paints the
+      whole screen's ground.
+
+      *Closed.* `dialectica-ui/tests/check_qml_members.sh` (built for the next
+      box) runs over every file in `src/qml`, needs no spec to instantiate
+      anything, and therefore reaches `Main.qml`. Against the same mutation it
+      **exits 1**, naming file, line and member; `tst_check_qml_members.sh`
+      fails alongside it because its shipped-view case goes red. Restored, both
+      green.
+
+      *The `design.md` qualifier is corrected rather than left to be
+      rediscovered.* "in any component it instantiates" now reads "in the
+      components a spec instantiates", with your `Main.qml` measurement recorded
+      underneath it as the reason the qualifier is load-bearing — and the member
+      gate written up as the third direction that covers what the other two
+      cannot.
+
+- [x] **`tester`** — `.github/workflows/ci.yml:561` — `qmllint` already detects
       every undefined-token defect in this change and is configured to exit 0 on
       all of them; escalating one category closes the `Main.qml` gap in one flag
       **Scenario:** a disproved impossibility, of the kind this repo has paid to
@@ -242,6 +342,47 @@ There are **no `NO SPEC:` markers** in `dialectica-ui/` or `.github/`. Given
       both signals and nobody was reading it — partly because `CLAUDE.md` gave
       the filename as `basecamp.log` when it is `basecamp_<timestamp>.log`.
 
+      **FIXED by `tester`. The flag is now a gate with a test that fails.**
+
+      *Built as a script, not a flag in `ci.yml`.* A gate inline in a workflow
+      `run:` block cannot be called, so it cannot be tested — the defect that
+      let two bugs through the previous name gate, and I was not going to
+      reintroduce it one box after it was fixed.
+      `dialectica-ui/tests/check_qml_members.sh` runs
+      `qmllint --unqualified disable --missing-property error -I src/qml` over
+      every file, with `tst_check_qml_members.sh` beside it and both wired into
+      the `qml` job ahead of the existing `qmllint` step.
+
+      *Both bounds, on the real view and on constructed corpora.* Shipped
+      `src/qml` → **exit 0, 13 files**. A staged component reading
+      `DTheme.noSuchDeskAtAll` → **exit 1**, message naming the member.
+
+      *Three mutations, each predicted then observed.*
+      - Drop `--missing-property error` (i.e. revert to CI's configuration) →
+        **`FAIL: the gate ACCEPTED a member that does not exist on DTheme`**.
+        This is the mutation that matters: it is literally the state the repo
+        was in, and the test now refuses it.
+      - Narrow the corpus glob to one file → **2 cases fail**, the rejection
+        case and the file-count case. The count case was added *because* the
+        first narrowing run left the shipped-view case green — the same
+        one-harmless-file hazard as the name gate, caught by applying that box's
+        lesson here before it was reported.
+      - The real `Main.qml:36` defect → gate **exit 1**, self-test red.
+
+      *Your point 2 is honoured and not quietly dropped.* I re-measured it: with
+      `-I src/qml` the flag exits 0 on a real branch and 255 with a bad member
+      planted, because qmllint resolves `DTheme` to our own file — **a different
+      resolution than the app performs**. The limit is written into the script's
+      header, into `design.md`, and into `CLAUDE.md` beside the existing "cannot
+      see this defect" sentence, each saying the same thing: it covers members,
+      never the collision. Your point 3 (a QML `!== undefined` assertion) was
+      not proposed and is not present.
+
+      *The framing correction the box asks for is done where it had not been.*
+      `CLAUDE.md` previously said only that `--missing-property error` cannot
+      see the defect — true, and exactly the sentence that stops the next person
+      looking. It now carries both halves.
+
 - [x] **`dev-writer`** — `dialectica-ui/src/qml/DTheme.qml:33-35` — the
       "a check that cannot fail" claim is stated more broadly than it measured,
       and as written it would discourage the assertion that *would* work
@@ -292,6 +433,38 @@ There are **no `NO SPEC:` markers** in `dialectica-ui/` or `.github/`. Given
       rejects `--unqualified` outright ("Unknown option"), so the CI invocation
       and a local one may not be the same command. Worth confirming which
       binary CI's `find` step resolves before pinning the flag.
+
+## Settled by `tester`: the `dev-writer`'s least-confident call
+
+The `dev-writer` flagged that it gated `internal Foo Foo.qml` on the assertion
+that such an entry "registers the name in the directory namespace", without
+verifying against Qt's loader, and noted that if wrong the gate would be
+stricter than needed. **It was wrong, and in that direction — but the gate is
+still right, for a reason worth having written down.** Measured on Qt 6.10.3
+with staged probe modules.
+
+- **`internal` does NOT export the name.** A consumer doing `import <Module>`
+  cannot reach it: `ProbeInternal is not a type`. The same probe resolves a
+  normally-declared type from the same qmldir, so it discriminates.
+- **But the name is live inside the directory.** A sibling `.qml` in the same
+  directory instantiates it by that name and loads.
+- **And that resolution is by filename, not by the qmldir line.** Deleting the
+  `internal` entry entirely left the sibling resolving exactly as before.
+
+Since the directory is where basecamp loads the plugin, an
+`internal Theme Theme.qml` line is a reliable witness that a `Theme.qml` sits
+in that directory — so checking these entries is correct, but what it catches
+is the **file**, not an export. The comment in `qmldir_entries` and the test
+case beside it now say that instead of the export claim, and `CLAUDE.md`
+carries the measurement.
+
+**The methodological part, which is why this is written at length.** My first
+probe passed — and passed with the `internal` line deleted. It was measuring
+same-directory filename resolution and would have "confirmed" the export claim
+while testing nothing about it: a fixture where two explanations give the same
+answer, this repo's one recurring test defect, produced while deliberately
+hunting for it. Only import-by-module-name distinguishes the two. Anyone
+re-opening this question should start there.
 
 ## What I could not check
 

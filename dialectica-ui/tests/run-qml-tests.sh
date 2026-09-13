@@ -118,6 +118,38 @@ check_bindings() {
     return 1
 }
 
+# Run ONE spec and check its output. The single place a spec is executed and
+# captured, used by both the named-spec path and the whole-suite loop below.
+#
+# WHY IT IS A FUNCTION rather than the same four lines written twice. The
+# capture is the corpus `check_bindings` reads, and a corpus that silently goes
+# empty makes the check report clean over a genuinely broken binding — the
+# failure `tst_check_bindings.sh`'s end-to-end case exists to catch. That case
+# can only drive ONE path, so with two capture sites a mutation to the other is
+# invisible: measured, `: > "$out"` in the suite loop left every case green
+# while `: > "$out"` in the named-spec path failed one. One site is one thing
+# for the test to cover.
+#
+# Both streams go to the file, because the diagnostics checked below go to
+# stderr while the PASS/FAIL lines go to stdout, and the check must read the
+# same text a human does. The file is echoed straight back out, so the CI log is
+# unchanged from before this check existed.
+run_spec() {
+    spec=$1
+    out=$2
+    rc=0
+    echo "--- $(basename "$spec")"
+    if [ -n "${extra_import:-}" ]; then
+        "$runner" -input "$spec" -import "$qml_dir" -import "$extra_import" \
+            >"$out" 2>&1 || rc=1
+    else
+        "$runner" -input "$spec" -import "$qml_dir" >"$out" 2>&1 || rc=1
+    fi
+    cat "$out"
+    check_bindings "$out" "$(basename "$spec")" || rc=1
+    return "$rc"
+}
+
 no_runner() {
     if [ "$require" = "1" ]; then
         echo "qml tests: $1" >&2
@@ -147,6 +179,42 @@ fi
 
 echo "qml tests: using $runner"
 
+# A named spec, when arguments are given: `run-qml-tests.sh <file.qml> …`.
+#
+# This exists so nobody has to invoke `qmltestrunner` directly for a one-off
+# probe. Doing so means hand-writing `QT_QPA_PLATFORM=offscreen`, and an
+# environment-variable prefix is a shape this repo's permission checker cannot
+# analyse — every such call costs an approval click. It also loses the runner
+# discovery above, which is the difference between a real failure and a Qt5
+# binary exiting 1 with no output.
+#
+# `check_bindings` runs over a named spec too: a probe is exactly where an
+# undefined binding is easiest to write and hardest to notice.
+#
+# `--import <dir>` before the spec paths adds an extra import root, which a
+# probe staging its own named module needs. It is an option rather than an
+# environment variable for the same reason as QT_QPA_PLATFORM above.
+extra_import=""
+while [ "$#" -gt 0 ]; do
+    case $1 in
+        --import) extra_import=$2; shift 2 ;;
+        *) break ;;
+    esac
+done
+
+if [ "$#" -gt 0 ]; then
+    for spec in "$@"; do
+        [ -e "$spec" ] || { echo "qml tests: no such spec: $spec" >&2; exit 1; }
+    done
+    status=0
+    count=0
+    for spec in "$@"; do
+        count=$((count + 1))
+        run_spec "$spec" "$smoke/arg.$count" || status=1
+    done
+    exit "$status"
+fi
+
 # Every tst_*.qml in this directory, so a new spec file is picked up without
 # editing this script.
 #
@@ -162,17 +230,10 @@ for spec in "$here"/tst_*.qml; do
     # complaint would look like a test failure.
     [ -e "$spec" ] || break
     count=$((count + 1))
-    echo "--- $(basename "$spec")"
-    # Both streams are captured to a file, because the diagnostics checked
-    # below go to stderr while the PASS/FAIL lines go to stdout, and the check
-    # must read the same text a human does. The file is echoed straight back
-    # out, so the CI log is unchanged from before this check existed.
-    out="$smoke/out.$count"
-    "$runner" -input "$spec" -import "$qml_dir" >"$out" 2>&1 || status=1
-    cat "$out"
-    if ! check_bindings "$out" "$(basename "$spec")"; then
-        status=1
-    fi
+    # The `--- <spec>` header is printed by run_spec, not here: CI's
+    # `every QML spec file actually ran` step counts those lines, so printing
+    # one in both places doubles the count and reddens that step.
+    run_spec "$spec" "$smoke/out.$count" || status=1
 done
 
 if [ "$count" -eq 0 ]; then

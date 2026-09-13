@@ -318,15 +318,41 @@ than one:
   files in the module. It reads source, so it catches the old name wherever it
   appears, including in files no spec touches.
 - **The suite** now fails on any binding that evaluates to `undefined` at
-  runtime, in any component it instantiates — including defects the gate cannot
-  see, since a D-prefixed typo (`DThemeTypo`) and a missing token both contain
-  no bare `Theme`. Measured: the gate exits 0 on both, the runner exits 1.
-  It also still pins that the identicon's ink indexing lands on the same seven
-  constants.
-- **Neither can see the collision itself**, for the reason measured above: under
-  `qmltestrunner` the host is absent. The runner check closes the runtime half
-  of the blind spot, not the host-precedence half, which remains a static check
-  plus a real basecamp launch.
+  runtime, **in the components a spec instantiates** — including defects the
+  gate cannot see, since a D-prefixed typo (`DThemeTypo`) and a missing token
+  both contain no bare `Theme`. Measured: the gate exits 0 on both, the runner
+  exits 1. It also still pins that the identicon's ink indexing lands on the
+  same seven constants.
+
+  **The qualifier is load-bearing and was measured, not assumed.** `Main.qml` is
+  not a component any spec instantiates. With `color: DTheme.desk` there
+  rewritten as `DTheme.noSuchDesk` — a typo in the binding that paints the whole
+  screen's ground — the suite exited 0 with 41 passed and zero diagnostics, and
+  the name gate exited 0 alongside it.
+- **The member gate** (`dialectica-ui/tests/check_qml_members.sh`) closes that.
+  It is `qmllint --missing-property error` over every file in `src/qml`, and it
+  is the third direction rather than a variation on the other two: it needs no
+  spec to instantiate anything, so it reaches `Main.qml` and every other file a
+  spec never constructs. Measured both bounds — exit 255 naming the file, line
+  and member with the typo in place; exit 0 on the unmutated tree.
+
+  It exists because an impossibility claim was wrong. Four places in this repo
+  said the component layer was structurally blind here and only a static *name*
+  check was available. That is true of the collision; it was never true of the
+  undefined members the collision produces, and qmllint had been printing those
+  as warnings into a green log the whole time.
+- **None of the three can see the collision itself**, for the reason measured
+  above: under `qmltestrunner` the host is absent. The runner check closes the
+  runtime half of the blind spot, not the host-precedence half, which remains a
+  static check plus a real basecamp launch.
+
+  **The member gate specifically must not be read as covering it.** CI passes
+  `-I dialectica-ui/src/qml`, which puts our own singleton on the import path,
+  so qmllint resolves `DTheme` to the correct file where every member genuinely
+  exists — it is checking a *different resolution* than the app performs.
+  Measured from both bounds: silent exit 0 on a real branch, exit 255 with a
+  bad member planted. A green from it is evidence about members and about
+  nothing else.
 - **Neither can see a wrong-but-defined value** — `DTheme.paper` where
   `DTheme.ink` was meant produces no diagnostic anywhere.
 - **The gate proves a name absent, not that resolution is correct.** Whether

@@ -155,8 +155,27 @@ def qmldir_entries(qmldir_text):
     passed the gate green. Measured by the architecture review.
 
     Command lines (`module`, `depends`, `import`, `optional`, `prefer`) are not
-    type declarations and are skipped; `internal Foo Foo.qml` declares a type
-    whose name is still registered in the directory namespace, so it is not.
+    type declarations and are skipped. `internal Foo Foo.qml` IS checked, and
+    the reason is not the obvious one — it was measured, because the obvious one
+    is wrong:
+
+      * `internal` does NOT export the name. A consumer importing the module by
+        name cannot reach it: `ProbeInternal is not a type`, from a probe
+        staging a module with an `internal` entry and instantiating it through
+        `import Probe`. So an `internal` entry cannot be shadowed by, or shadow,
+        a host registration seen from outside the module.
+      * But the name is live INSIDE the directory. A sibling `.qml` in the same
+        directory instantiates it by that name and loads — and that resolution
+        is by FILENAME, not by the qmldir line: deleting the `internal` entry
+        entirely left the sibling resolving exactly as before, measured.
+
+    The directory is where basecamp loads the plugin, so the name being live
+    there is what matters, and an `internal Theme Theme.qml` line is a reliable
+    witness that a `Theme.qml` sits in that directory. Checking these entries is
+    therefore right, but it is the FILE this catches, not an export. Stated at
+    this length because the first version of this comment claimed the export and
+    a probe written against that claim passed with the `internal` line deleted —
+    it was measuring same-directory filename resolution and nothing else.
     """
     commands = {"module", "depends", "import", "optional", "prefer",
                 "typeinfo", "classname", "plugin", "designersupported"}

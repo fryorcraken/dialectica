@@ -17,13 +17,12 @@
 - [ ] findings all ticked, `findings/` deleted — runner
 - [ ] `openspec validate --strict`, then `archive` — runner
 
-**The `tester` row is left unticked and unstruck, deliberately.** There is a real
-question for that stage to ask — whether the existing QML specs can still fail
-after the rename, and whether the CI gate discriminates — but it is not a
-question `dev-writer` may answer about its own work. What `dev-writer` measured
-is in `design.md` and in section 3 below; a `tester` asking it independently is
-the point of the row. It is not struck through because this is not a case of
-"does not apply": the stage applies and has not been done.
+**The `tester` row covers two passes**, and section 7 is the second. The first
+built `check_bindings` and its test (section 6). The second came back after
+review to close the four `tester` boxes in `findings/spec-test.md`, which is
+where a stage is *supposed* to be re-entered rather than handed to whoever is
+nearest: three of those four boxes are about gates measuring nothing, and a
+`dev-writer` proving its own gate is what the stage split exists to prevent.
 
 **Note for whoever takes the two `tester` boxes in `findings/correctness.md`,
 so neither is re-done from scratch:**
@@ -359,3 +358,62 @@ before committing, which lists nothing.
       half, which stays a static check plus a real basecamp launch. The suite is
       now a genuine second direction for stale and undefined references, which
       is what `design.md`'s corrected prose claims, and nothing more.
+
+## 7. Tests, second pass — closing the `tester` boxes from review
+
+All four `tester` boxes in `findings/spec-test.md`. Three are the same defect
+wearing three hats: a gate whose *input* can go empty while the gate itself
+still looks correct. Each fix below is proven with a mutation that reaches it.
+
+- [x] 7.1 **The runner's corpus is measured end to end.**
+      `tst_check_bindings.sh` gained a two-bound case that drives the real
+      `run-qml-tests.sh` over a staged component — sound token must exit 0,
+      missing token must exit 1. Proved with the reviewer's own mutation,
+      `: > "$out"`: the case fails, the original six stay green.
+- [x] 7.2 **The runner has ONE capture site, because the test can only drive
+      one.** Adding the named-spec argument path created a second, and measured:
+      gutting the suite loop left every case green while gutting the argument
+      path failed one — the finding reproduced inside its own fix. Both paths
+      now go through `run_spec()`. Re-measured after the collapse: the mutation
+      fails the case. Structural rather than a second test case, so a third call
+      site inherits the coverage instead of needing its own.
+- [x] 7.3 **The name gate's walk is pinned against an independently counted
+      floor.** `tst_check_qml_names.py` now counts `.qml` files from disk itself
+      and requires the gate to report that many, because the shipped-module case
+      asserted only exit 0 and survived `rglob("*.qml")` → `rglob("Core.qml")`
+      (the real module contains a `Core.qml`). Re-running that mutation fails
+      **6** cases where it previously failed 5, the new one naming the
+      narrowing. The floor is derived, never read back out of the gate's own
+      summary.
+- [x] 7.4 **The undefined-member class is gated, and the gate is testable.**
+      `dialectica-ui/tests/check_qml_members.sh` —
+      `qmllint --missing-property error` over every file in `src/qml` — with
+      `tst_check_qml_members.sh` pinning both bounds, both wired into the `qml`
+      job. A script rather than a flag in `ci.yml` for the reason 4.11 gives: a
+      heredoc cannot be called, so it cannot be tested. Proved by three
+      mutations: dropping the flag (reverting to the configuration the repo was
+      in) fails the rejection case; narrowing the glob fails two; the real
+      `Main.qml` defect fails the shipped-view case.
+- [x] 7.5 **Its limit is recorded in all three places it could mislead.** With
+      `-I src/qml`, qmllint resolves `DTheme` to our own file — a *different
+      resolution* than the app performs — so a green says nothing about the host
+      collision. Re-measured both ways. Stated in the script header,
+      `design.md` and `CLAUDE.md`, each keeping the two claims apart: it covers
+      members, never the collision.
+- [x] 7.6 **`design.md`'s "in any component it instantiates" is corrected** to
+      "in the components a spec instantiates", with the `Main.qml` measurement
+      recorded as why the qualifier is load-bearing — three gates green over the
+      binding painting the screen's ground.
+- [x] 7.7 **The `internal` question the `dev-writer` flagged is settled by
+      measurement.** `internal Foo Foo.qml` does **not** export the name; what
+      makes it worth gating is that the name is live inside the directory, by
+      **filename**, independent of the qmldir line. The gate's behaviour is
+      unchanged and correct; its recorded reason was wrong and is fixed in
+      `qmldir_entries`, its test case, and `CLAUDE.md`. The first probe passed
+      with the `internal` line deleted — a fixture where two explanations give
+      the same answer — so only import-by-module-name distinguishes them.
+- [x] 7.8 **Implementation untouched, verified by diff rather than memory.**
+      `git diff --stat` against the piece branch lists test scripts, CI, docs
+      and findings only; nothing under `dialectica-ui/src/`. Every mutation
+      above was made to a gate or to `Main.qml` and restored, with the suite
+      re-run green afterwards.

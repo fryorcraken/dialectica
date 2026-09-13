@@ -339,6 +339,16 @@ These are structural and bite at build time, not review time.
   where every member exists. It checks a different resolution than the app
   performs, and a green from it says nothing about the collision.
 
+  **It does catch every undefined MEMBER, which is a different and real class**
+  — and stating only the sentence above is precisely what left that unexamined.
+  `DTheme.noSuchDesk` in `Main.qml` passed the QML suite (no spec instantiates
+  `Main.qml`, so the runner's check never sees it), passed the name gate (a
+  D-prefixed typo contains no bare `Theme`), and passed qmllint, which printed
+  it as a **warning** into a green log. The escalation is now its own gate,
+  `dialectica-ui/tests/check_qml_members.sh`, with `tst_check_qml_members.sh`
+  beside it pinning both directions. Keep the two claims apart: it covers
+  members, never the collision.
+
   **A component test cannot catch this**, and that is the durable part. Under
   `qmltestrunner` the host is simply absent, so `verify(DTheme.x !== undefined)`
   cannot fail *on the collision* — there is no competitor for it to lose to.
@@ -390,6 +400,22 @@ These are structural and bite at build time, not review time.
   the same way. The host's own launch log registers `LogosButton.qml`, which is
   a component. A version of this gate that read only `singleton` lines passed
   green over a `qmldir` declaring `Theme 1.0 Identicon.qml`, measured.
+
+  **`internal` entries are covered too, but not for the reason you would
+  guess** — measured on Qt 6.10.3, because the guess was written down first and
+  was wrong. `internal Foo Foo.qml` does **not** export `Foo`: a consumer doing
+  `import <Module>` gets `Foo is not a type`. What makes it worth gating is that
+  the name is live *inside* the directory — a sibling `.qml` instantiates it and
+  loads — and that resolution is **by filename**, independent of the qmldir line
+  entirely. Deleting the `internal` entry left the sibling resolving exactly as
+  before. Since the directory is where basecamp loads the plugin, an
+  `internal Theme Theme.qml` line is a reliable witness that a `Theme.qml` sits
+  there.
+
+  The trap worth carrying: a probe written against the *export* claim passes
+  with the `internal` line deleted, because it is measuring same-directory
+  filename resolution and nothing else. Import by module name is the only form
+  that distinguishes them.
 
   `Core` and the eleven component names predating the convention are
   grandfathered, each listed in the gate with its reason. **If you add a type,
