@@ -103,7 +103,7 @@ found no site that builds two components against one bridge and then drives both
       `spec.deliveryDenial()`, so the pin and the sweep exclusion the `tester`
       box below asks for cannot drift apart.
 
-- [ ] **`tester`** — `tst_composer_claims.qml:545-548` — the pinned-sentence
+- [x] **`tester`** — `tst_composer_claims.qml:545-548` — the pinned-sentence
       residue check **actively forbids** the fix to the finding above
       **Scenario:** this is not merely an untested gap; the test rejects
       compliance. `pinnedSentences()` lists exactly two sentences for the
@@ -119,6 +119,39 @@ found no site that builds two components against one bridge and then drives both
       `sentences` list in the same change that adds it to the component.
       **Severity: high** — it is the reason a dev-writer acting on the finding
       above will think they got it wrong.
+
+      **Fixed**, and it was already fixed when I arrived — the `dev-writer`
+      added the denial to the `existing` row's `sentences` in the same commit
+      that added it to the component, which is exactly what this box asks for. I
+      confirmed the arrangement rather than assuming it: the row now carries
+      three sentences, the third from `spec.deliveryDenial()`, and the whole
+      suite is green at 118.
+
+      I agree with their judgement that updating the pin here is not the
+      forbidden "update the pin to match a changed component". The order decides
+      it: the spec moved first at `75930e7`, so the pin was stale against the
+      spec and the component was the thing catching up. The forbidden case is
+      the pin chasing a component that drifted from the spec. Worth keeping the
+      distinction sharp, because the file's own comment states the rule without
+      it.
+
+      **What I added on top, because the pin alone did not prove it can fail in
+      the way that matters.** The denial is now written down in two spec files
+      (QtTest documents share no scope), and two copies of one required sentence
+      is the duplication that rots silently. `tst_composer.qml` gains
+      `test_the_pinned_denial_is_spelled_the_same_way_in_both_files`, which pins
+      its local copy against what the component renders. Measured by changing
+      only that file's copy to "…not something **we** can tell you yet": it
+      fails and prints both spellings. Without it, the two files could disagree
+      indefinitely with everything green.
+
+      **One thing I could not verify and am not claiming:** that the denial is
+      the *right* sentence for the `existing` outcome as a matter of reading. It
+      is now identical on both successes, which is defensible — the fact denied
+      is the same fact — but a reader who has just been told "nothing new was
+      written" may hear "whether any other peer has received it" as being about
+      the earlier publication rather than this attempt. That is a legibility
+      question and nothing in this repo can see it.
 
 - [x] **`dev-writer`** — `FeedScreen.qml:568-647` — the closed gate's own body
       never states why there is no compose box; the statement lives only in the
@@ -175,7 +208,7 @@ found no site that builds two components against one bridge and then drives both
       against correct code. The guard test now pins both bounds: the column's
       heading is trimmed, and the gate's heading and core's reason survive.
 
-- [ ] **`tester`** — `tst_composer_claims.qml:313-330` — the delivery-claim
+- [x] **`tester`** — `tst_composer_claims.qml:313-330` — the delivery-claim
       needles over-match into the honest denial, so an equivalent reword of the
       required sentence is reported as a forbidden claim
       **Scenario:** the sweep list contains `"received by"` and `"was received"`.
@@ -197,6 +230,71 @@ found no site that builds two components against one bridge and then drives both
       for the apparatus note) rather than to keep the wording tiptoeing around
       the list. **Severity: medium** — nothing is wrong on screen today, but the
       sweep will fight the fix to the first finding above.
+
+      **Fixed**, and the diagnosis is right in a way worth restating: this is a
+      category error rather than a coverage gap. A needle phrased as a bare
+      participle cannot separate a claim from its negation, and the sentence the
+      spec now requires *is* a negation built from the vocabulary the sweep
+      hunts. No quantity of extra needles fixes that; only taking the pinned
+      sentence out of the corpus does.
+
+      **Reproduced before fixing**, not taken on trust. Rewording line 122 to
+      "Whether it **was received by** any other peer…" fails exactly four tests,
+      the four named: three needle over-matches, plus
+      `test_the_views_own_words_are_exactly_these_and_no_others`. That fourth is
+      NOT a defect and I left it alone — a deliberate reword updating its own pin
+      is the pin working. Only the three sweeps needed changing.
+
+      `sweepCorpus()` is the rendering minus every sentence already pinned
+      character-for-character, and all four sweeps now go through it — including
+      `tst_composer.qml`'s, whose comment previously described the bug as though
+      it were a design ("written against the affirmative forms", which is not a
+      property of the needles but an accident of spelling). The inline apparatus
+      strip at line 446 is folded into the same helper: two exclusion mechanisms
+      drift, and the one not exercised by a guard drifts unnoticed.
+
+      **The walker lesson was load-bearing and I needed two passes to honour
+      it.** I first wrote the guard against `stripPinnedDenials` on literals,
+      pinning both bounds — drops the denial, keeps a claim beside it, keeps a
+      near-miss, drops it under either case folding. Then I mutated
+      `sweepCorpus` to return `""`, and **all thirteen tests passed**, guard
+      included. The filter was pinned; the corpus the sweeps actually call was
+      not. `test_the_sweep_corpus_keeps_everything_but_the_denial` closes that,
+      asserting against a real component that the denial is gone and the outcome
+      sentences remain; it fails on the empty corpus.
+
+      That second pass also caught a bug in my own guard: I expected the draft
+      text and the submit label to survive, forgetting that a `stored` publish
+      clears the draft. It passed only because an unrelated mutation happened to
+      be live at the time. Running it found that; reading it would not have.
+
+      **Mutations, each verified to land before the result was believed:**
+
+      - filter narrowed to nothing → guard fails, **and** the gate sweep fails
+        (the apparatus note re-entered the corpus) — which confirmed folding the
+        two mechanisms together was right, since separate ones would have
+        exposed only half
+      - corpus narrowed to nothing → corpus guard fails; nothing else does
+      - a real claim beside the denial ("and was delivered to the Stoa") → four
+        failures across both files, so the sweeps still do their job
+      - the equivalent reword, pins updated → zero failures, which is the fix
+      - one file's copy of the denial drifted → drift guard fails, naming both
+
+      **What this does not fix.** The sweeps remain absence assertions over a
+      fixed list — a filter, not a proof — and the corpus now has a hole in it by
+      construction. The hole is defensible only because the sentence in it is
+      pinned exactly elsewhere, so a claim hiding inside it fails that pin first.
+      That reasoning does **not** transfer to `otherKnownDenials()`: the
+      apparatus note is excluded but not pinned, because nothing here asserts
+      apparatus text is present. It is acceptable only because that sentence is
+      leaving the tree, and it is the weaker of the two arrangements.
+
+      **Your general lesson, recorded because it outlives this box:** an absence
+      sweep proves nothing was claimed and can never prove something required was
+      said. That is why `75930e7` promoting the denial from prohibition to a
+      positive `SHALL` was invisible to my suite — a prohibition is discharged by
+      silence. The positive half is now carried by the pins, not the sweeps, and
+      those are different instruments doing different jobs.
 
 ## Judgement on the absence sweeps
 

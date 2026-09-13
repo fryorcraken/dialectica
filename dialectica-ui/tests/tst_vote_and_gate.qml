@@ -76,6 +76,33 @@ TestCase {
             + '],"page":0,"hasMore":false}'
     }
 
+    // Rows malformed in the two ways the `currentVersion` fixture does not
+    // cover: a row with no `body` at all, and a row whose `body` is a bare
+    // string rather than the `{text, removed, marked}` object the reply shape
+    // promises.
+    //
+    // **These are peer-derived and the view validates only `Array.isArray(items)`.**
+    // The bare-string case is the sharp one: `"a string".text` is `undefined` in
+    // JavaScript, not an error, so a component reading `value.text` renders
+    // EMPTY rather than failing — the post's text disappears and the row still
+    // draws, which is the shape of defect that never announces itself.
+    //
+    // A third row carries a `body` object whose `removed` is a string, since the
+    // chip's `value.removed ? ... : 0` guard is truthiness rather than a type
+    // test and a non-numeric count would reach the chip's concatenation.
+    function rowsWithMalformedBodies() {
+        return '{"items":['
+            + '{"thread":"t1","currentVersion":"v1","author":"a1",'
+            + '"attachments":[],"isRevised":false,"isHidden":false},'
+            + '{"thread":"t2","currentVersion":"v2","author":"a2",'
+            + '"body":"a bare string, not the object the shape promises",'
+            + '"attachments":[],"isRevised":false,"isHidden":false},'
+            + '{"thread":"t3","currentVersion":"v3","author":"a3",'
+            + '"body":{"text":"third","removed":"lots","marked":null},'
+            + '"attachments":[],"isRevised":false,"isHidden":false}'
+            + '],"page":0,"hasMore":false}'
+    }
+
     Component {
         id: feedComponent
         FeedScreen {}
@@ -269,6 +296,107 @@ TestCase {
         var sent = JSON.parse(spec.calls[spec.calls.length - 1].args[0])
         compare(sent.target, "v1", "the target must reach core")
         screen.destroy()
+    }
+
+    // ---- the rest of the row shape, not just its op ---------------------
+    //
+    // The `currentVersion` tests above cover one field. The security review's
+    // point was broader: the view validates `Array.isArray(items)` and **nothing
+    // about what is inside**, so every field of a peer-supplied row is
+    // unvalidated, not only the one a defect was found in. These cover the two
+    // the finding names — a missing `body` and a `body` that is a bare string —
+    // plus a non-numeric sanitiser count.
+    //
+    // **What these pin is that the screen survives and stays honest, not that it
+    // repairs the row.** A malformed row is peer data; the view's obligation is
+    // to avoid rendering an invention and to avoid taking the whole feed down
+    // with it. "Empty and unreadable must never look alike" is this screen's
+    // governing rule, and one bad row from any peer blanking a feed would break
+    // it in the other direction.
+
+    function test_a_malformed_row_body_does_not_fail_the_whole_read() {
+        // A row core could not have sent today, which is the point: the view is
+        // the boundary for anything `list_threads` returns.
+        var screen = makeScreen({
+            "get_capabilities": '{"canPost":true,"identity":"aa"}',
+            "list_threads": spec.rowsWithMalformedBodies()
+        })
+
+        compare(screen.readState, "ok",
+                "a malformed row must not turn a successful read into a failure — "
+                + "one bad row from any peer would otherwise blank the feed")
+        compare(screen.rows.length, 3,
+                "and must not be silently dropped, which would hide peer content")
+        compare(screen.failure, "", "no failure text alongside an ok read")
+        screen.destroy()
+    }
+
+    function test_a_malformed_row_renders_no_invented_text() {
+        // The honesty half. `undefined` reaching a Text renders the literal
+        // string "undefined" unless something guards it, and a row whose body is
+        // a bare string has `body.text === undefined` — so this is the case where
+        // a view most plausibly prints a word core never sent.
+        var screen = makeScreen({
+            "get_capabilities": '{"canPost":true,"identity":"aa"}',
+            "list_threads": spec.rowsWithMalformedBodies()
+        })
+
+        var shown = spec.renderedText(screen)
+        verify(shown.indexOf("undefined") < 0,
+               "no row may render the word 'undefined', got: " + shown)
+        verify(shown.indexOf("null") < 0,
+               "nor 'null', got: " + shown)
+        verify(shown.indexOf("[object Object]") < 0,
+               "nor a stringified object, got: " + shown)
+
+        // NaN is the arithmetic version of the same failure: a non-numeric
+        // `removed` reaching the chip's concatenation would print "NaN removed".
+        verify(shown.indexOf("NaN") < 0,
+               "nor NaN from a non-numeric sanitiser count, got: " + shown)
+
+        // The negative control, without which every assertion above would pass
+        // against a screen that rendered nothing at all. The third row's body IS
+        // well-formed text, so it must be on screen.
+        verify(shown.indexOf("third") >= 0,
+               "precondition: a readable body among the malformed ones must still "
+               + "render, or this test passes for the wrong reason. Got: " + shown)
+        screen.destroy()
+    }
+
+    function test_a_malformed_row_still_refuses_to_render_peer_text_as_markup() {
+        // The row-shape cases must not open a second path around the format
+        // rule: whatever a malformed body does, nothing may end up in an element
+        // that renders its source as markup. Asserted on the FORMAT property,
+        // because `text` is identical either way — the `ui-stoa-list` defect.
+        var screen = makeScreen({
+            "get_capabilities": '{"canPost":true,"identity":"aa"}',
+            "list_threads": spec.rowsWithMalformedBodies()
+        })
+
+        var bad = spec.nonPlainTextElements(screen)
+        compare(bad.length, 0,
+                "every text-bearing element must render as characters: "
+                + JSON.stringify(bad))
+        screen.destroy()
+    }
+
+    // Every element in the tree that HOLDS text and declares a format, so a
+    // failure names which one drifted. Text.PlainText and TextEdit.PlainText are
+    // both 0; RichText (1), AutoText (2), StyledText (4) and MarkdownText (8)
+    // all render their source as markup.
+    function nonPlainTextElements(item, acc) {
+        var out = acc === undefined ? [] : acc
+        if (item === null || item === undefined)
+            return out
+        if (typeof item.text === "string" && item.textFormat !== undefined
+                && item.textFormat !== 0)
+            out.push(JSON.stringify(item.text) + " has textFormat " + item.textFormat)
+        var kids = item.children
+        if (kids !== undefined) {
+            for (var i = 0; i < kids.length; i++)
+                out = spec.nonPlainTextElements(kids[i], out)
+        }
+        return out
     }
 
     function test_a_refused_vote_leaves_the_control_unchanged() {

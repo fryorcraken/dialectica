@@ -157,7 +157,7 @@ deliberately written not to throw on the unpaired surrogate that
       validation at `reload()` rather than at the vote, that is a broader
       decision about every row field and belongs in its own change.
 
-- [ ] **`tester`** — `tst_vote_and_gate.qml:51-60` — the two-row fixture cannot
+- [x] **`tester`** — `tst_vote_and_gate.qml:51-60` — the two-row fixture cannot
       expose a row-shape defect, because both rows are well-formed
       **Scenario:** `twoRows()` is the only feed fixture used by the vote tests
       and every row in it carries every field. The suite therefore has no case
@@ -171,6 +171,57 @@ deliberately written not to throw on the unpaired surrogate that
       `tst_vote_and_gate.qml`, `tst_gate_affordance.qml` and `tst_feed_states.qml`
       uses the complete shape. A row-shape case belongs beside the existing
       malformed-*reply* cases, which are good. **Severity: medium.**
+
+      **Fixed.** The `currentVersion` half was already covered when I arrived —
+      the `dev-writer` added `twoRowsMissingVersion()` and three tests against it
+      acting on the finding above. The two cases this box names beyond that were
+      not, so `rowsWithMalformedBodies()` covers them: a row with no `body` at
+      all, a row whose `body` is a bare string, and a third with a non-numeric
+      `removed` count, since the chip's `value.removed ? … : 0` guard is a
+      truthiness test rather than a type test.
+
+      The bare-string row is the sharp one and is why this box was worth opening.
+      `"a string".text` is `undefined` in JavaScript rather than an error, so a
+      component reading `value.text` renders **empty** and the row still draws —
+      the post's text disappears with nothing announcing it.
+
+      **Three tests, pinning what the screen owes a malformed row rather than
+      that it repairs one:**
+
+      - `test_a_malformed_row_body_does_not_fail_the_whole_read` — `readState`
+        stays `ok` and all three rows survive. This pins your "what I did not do"
+        paragraph as behaviour: not a read failure (one bad row from any peer
+        would blank a feed, and "empty and unreadable must never look alike" is
+        this screen's governing rule) and not a silent drop (which hides peer
+        content).
+      - `test_a_malformed_row_renders_no_invented_text` — no `undefined`, `null`,
+        `[object Object]` or `NaN` reaches the screen. With a negative control:
+        the well-formed body among the malformed ones must still render, without
+        which every assertion would pass against a screen showing nothing.
+      - `test_a_malformed_row_still_refuses_to_render_peer_text_as_markup` —
+        asserts the `textFormat` property, not the text, so the row-shape cases
+        cannot open a second path around the format rule.
+
+      **Mutations, each verified to land:** removing `SanitisedText`'s
+      `value.text !== undefined` guard makes the bare-string row render the
+      literal word `undefined` — caught. Adding a row-shape check to `reload()`
+      that fails the read — the over-correction — fails both the read test and
+      the negative control.
+
+      **Worth knowing, and I am not treating it as a defect:** the malformed
+      rows make the runner emit `Unable to assign QString to int` from
+      `SanitisedText.qml:30`, the way the vote defect announced itself in your
+      finding. Behaviour is correct — `removedCount` falls back to its `int`
+      default and no chip renders — so this is the type system catching the bad
+      value rather than a hole. I left it visible in the test output rather than
+      suppressing it, since a warning naming the exact line is worth more to the
+      next reader than a clean log.
+
+      **What I did not test, and it is your open question rather than mine.**
+      Whether core can actually emit such a row — `wire.rs:1476` says not today.
+      These tests pin the boundary rule, not a reachable core path, and if the
+      reviewers decide the guarantee one module away suffices, deleting them is a
+      recorded decision rather than a regression.
 
 ## What I could not check
 

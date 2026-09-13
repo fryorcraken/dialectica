@@ -323,6 +323,45 @@ TestCase {
         fresh.destroy(); dedup.destroy(); bad.destroy()
     }
 
+    // **The second copy of the required denial, and the reason there are two.**
+    //
+    // QtTest spec files are separate QML documents with no shared scope, so a
+    // helper in `tst_composer_claims.qml` is not reachable here. The sentence is
+    // therefore written out twice, which is exactly the duplication that rots —
+    // so `test_the_pinned_denial_is_spelled_the_same_way_in_both_files` below
+    // fails the moment the two disagree, and names both spellings when it does.
+    //
+    // Do NOT update this to match a changed component. It is the spec's required
+    // sentence; a change to it is a change to what the interface promises, and
+    // the pin in the other file is the one that reports it.
+    function deliveryDenial() {
+        return "Whether any other peer has received it is not something this "
+             + "software can tell you yet."
+    }
+
+    // The drift guard for that duplication.
+    //
+    // It cannot read the other spec file, so it does the next best thing and
+    // pins this copy against the COMPONENT — which is legitimate here in a way
+    // "asking the implementation what it wrote" is not, because the string is
+    // independently pinned as a literal in `tst_composer_claims.qml`. Two
+    // independent checks against one hardcoded sentence: if the component
+    // changes, this fails; if only this file's copy changes, this fails; if only
+    // the other file's copy changes, its own residue check fails.
+    function test_the_pinned_denial_is_spelled_the_same_way_in_both_files() {
+        var c = makeComposer({ "publish_post": '{"opId":"aa","wasNew":true}' })
+        c.draft = "something"
+        c.submit()
+
+        verify(spec.renderedText(c).indexOf(spec.deliveryDenial()) >= 0,
+               "this file's copy of the required denial must be the sentence the "
+               + "component actually renders — if this fails, the two test files' "
+               + "copies have drifted or the component was reworded. Expected: "
+               + JSON.stringify(spec.deliveryDenial())
+               + " in: " + spec.renderedText(c))
+        c.destroy()
+    }
+
     function test_a_success_names_local_storage_and_claims_no_delivery() {
         var c = makeComposer({ "publish_post": '{"opId":"aa","wasNew":true}' })
         c.draft = "something"
@@ -338,18 +377,34 @@ TestCase {
         // this system has checked: the reply carries no delivery outcome, and
         // delivery's result arrives asynchronously after the call returns.
         //
-        // "delivered" and "received" are matched as whole claims about the post.
-        // The qualifier sentence legitimately contains "received it" inside
-        // "whether any other peer HAS received it is not something this software
-        // can tell you" — a denial, not a claim — so the assertions below are
-        // written against the affirmative forms.
+        // **The denial is removed before the sweep runs, and the old comment
+        // here described the bug rather than a design.** It used to say the
+        // needles were "written against the affirmative forms" so that the
+        // denial's own "has received it" would slip past — which is not a
+        // property of the needles, it is an accident of spelling. Measured: the
+        // denial reworded to "Whether it **was received by** any other peer..."
+        // — semantically identical, still a denial — makes this test report a
+        // delivery claim. A needle phrased as a bare participle cannot separate
+        // a claim from its negation, and the required sentence IS a negation
+        // built from that vocabulary.
+        //
+        // The sentence is pinned character-for-character by
+        // `tst_composer_claims.qml::test_the_views_own_words_are_exactly_these_and_no_others`,
+        // so removing it here loses nothing: a claim smuggled into it fails that
+        // test first. It is spelled out rather than imported because QtTest spec
+        // files do not share scope — and the two copies are kept honest by
+        // `test_the_pinned_denial_is_spelled_the_same_way_in_both_files` below,
+        // which fails if they drift.
+        var swept = shown.split(spec.deliveryDenial().toLowerCase()).join("")
+
         var forbidden = ["was sent", "was delivered", "was received",
-                         "has been sent", "has been delivered",
+                         "has been sent", "has been delivered", "has received",
+                         "received by", "delivered to",
                          "everyone can see", "others can see", "peers reached",
                          "published to the stoa"]
         for (var i = 0; i < forbidden.length; i++) {
-            verify(shown.indexOf(forbidden[i]) < 0,
-                   "a success must not claim '" + forbidden[i] + "', got: " + shown)
+            verify(swept.indexOf(forbidden[i]) < 0,
+                   "a success must not claim '" + forbidden[i] + "', got: " + swept)
         }
         c.destroy()
     }

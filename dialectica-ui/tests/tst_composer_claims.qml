@@ -121,6 +121,204 @@ TestCase {
         return out
     }
 
+    // ---- the sweep corpus, with the pinned denials taken out --------------
+    //
+    // **The instrument turning on its owner, and the general shape worth
+    // naming.** A sweep that forbids the vocabulary of delivery cannot be run
+    // over a sentence whose job is to *deny* delivery, because a denial is built
+    // from exactly that vocabulary. Needles phrased as bare participles —
+    // `"was received"`, `"received by"` — match the negation as readily as the
+    // claim, and no amount of adding needles fixes that: it is a category error,
+    // not a coverage gap.
+    //
+    // Measured before fixing, by rewording the denial to "Whether it **was
+    // received by** any other peer is not something this software can tell you
+    // yet." — semantically identical, still a denial, claiming nothing. Three
+    // sweeps reported it as claiming delivery
+    // (`test_each_outcome_implies_what_it_must_and_denies_what_it_must_not`,
+    // `test_no_composer_state_claims_delivery`, and `tst_composer.qml`'s
+    // `test_a_success_names_local_storage_and_claims_no_delivery`). The current
+    // wording escapes the list only by the accident of spelling "has received"
+    // where the list spells "has been received".
+    //
+    // So the corpus the sweeps search is the rendering **minus every sentence
+    // already pinned character-for-character elsewhere in this file**. That is
+    // not a loosening. The sweep's job is to catch a sentence nobody pinned; a
+    // pinned sentence is under a stricter check already, since
+    // `test_the_views_own_words_are_exactly_these_and_no_others` fails on any
+    // change to it at all. A delivery claim smuggled inside the denial is
+    // impossible without that test failing first.
+    //
+    // **It removes the denial rather than the whole qualifier block**, so a
+    // reassuring sentence added *beside* the denial is still swept. Removing a
+    // region would have been the easy over-correction and would have carved a
+    // hole exactly where a claim would most plausibly be added.
+    // **Lowercased BEFORE the removal, not after.** The sweep needles are
+    // lowercase and so are the strings removed here, so a filter that stripped
+    // first and folded case second would silently fail to match any denial whose
+    // rendered form is not already lowercase — leaving the over-match in place
+    // while looking fixed. That ordering bug is invisible without the guard test
+    // below, which is why the guard drives `stripPinnedDenials` on literals.
+    function sweepCorpus(item) {
+        return spec.stripPinnedDenials(spec.renderedText(item).toLowerCase())
+    }
+
+    // The removal itself, over a raw string. Separate from `sweepCorpus` so the
+    // guard test below can drive it on a literal and pin both bounds without
+    // building a component.
+    //
+    // A `replace` of a string that is not present is a no-op, so this is safe on
+    // a rendering that carries no denial — the refused outcome, the gate, an
+    // untouched composer.
+    // **Case-insensitive on both sides**, so it works whether the caller folds
+    // case before or after. `sweepCorpus` folds first (the needles are
+    // lowercase); the guard test drives this on mixed-case literals. A
+    // case-sensitive version would quietly remove nothing from a lowercased
+    // corpus and leave the over-match exactly where it was.
+    function stripPinnedDenials(text) {
+        var out = text
+        var all = [spec.deliveryDenial()].concat(spec.otherKnownDenials())
+        for (var i = 0; i < all.length; i++) {
+            var needle = all[i].toLowerCase()
+            var scan = out.toLowerCase()
+            var at = scan.indexOf(needle)
+            while (at >= 0) {
+                out = out.slice(0, at) + out.slice(at + needle.length)
+                scan = out.toLowerCase()
+                at = scan.indexOf(needle)
+            }
+        }
+        return out
+    }
+
+    // Denials this file does not pin but must not sweep, for the same reason.
+    //
+    // The apparatus column's `ON PUBLISHING` note is one: it ends "nothing in
+    // this interface will tell you a post was delivered", which is a denial
+    // containing the word the sweep hunts. It is listed rather than pinned
+    // because **nothing here asserts apparatus text is present** — that column is
+    // design-bundle annotation shipped into the QML by mistake and is on its way
+    // out, and a presence assertion would fail on removal and read as a
+    // regression. A `split`/`join` of a string that is absent is a no-op, so this
+    // keeps working either way.
+    //
+    // The asymmetry is deliberate and worth stating: the composer's denial is
+    // both excluded here AND pinned by
+    // `test_the_views_own_words_are_exactly_these_and_no_others`, so nothing can
+    // hide in it. This one is only excluded. That is the weaker arrangement, and
+    // it is acceptable only because the sentence is on its way out of the tree
+    // entirely rather than becoming a place to hide a claim.
+    function otherKnownDenials() {
+        return ["nothing in this interface will tell you a post was delivered."]
+    }
+
+    // **Both bounds pinned, and the reason is a defect that already happened on
+    // this branch.** The dev-writer's first apparatus walker identified the
+    // column by a `content` property that `ColumnLayout` also has, so it
+    // excluded the gate body too — and a placement test failed against correct
+    // code. The mirror-image failure is the one that matters here: a filter
+    // narrowed to nothing, or widened to everything, would make every sweep
+    // pass whatever the code did, silently.
+    //
+    // So this asserts what the filter must DROP and what it must KEEP, over
+    // literals rather than over the component, so it cannot be satisfied by the
+    // component happening to render nothing.
+    function test_the_sweep_filter_drops_only_the_pinned_denial() {
+        // Drops: the pinned denial, wherever it sits and however many times.
+        compare(spec.stripPinnedDenials(spec.deliveryDenial()), "",
+                "the pinned denial must be removed entirely")
+        compare(spec.stripPinnedDenials("A " + spec.deliveryDenial() + " B"), "A  B",
+                "and removed from the middle of a rendering")
+        compare(spec.stripPinnedDenials(
+                    spec.deliveryDenial() + "\n" + spec.deliveryDenial()), "\n",
+                "and removed every time it appears — it renders on two outcomes")
+
+        // Keeps: everything else, and specifically a real delivery claim sitting
+        // next to the denial. Without this, a filter that returned "" would pass
+        // the three assertions above and disarm every sweep in the file.
+        var beside = spec.deliveryDenial() + " Your post was sent to every peer."
+        var left = spec.stripPinnedDenials(beside)
+        verify(left.indexOf("was sent") >= 0,
+               "a claim beside the denial must survive the filter, got: " + left)
+        compare(spec.stripPinnedDenials("Your post was saved on this machine."),
+                "Your post was saved on this machine.",
+                "an unrelated sentence must pass through untouched")
+
+        // And the filter must not be so broad it eats a near-miss. A sentence
+        // that merely resembles the denial is not pinned and must still be swept.
+        var nearMiss = "Whether any other peer has received it is now known."
+        compare(spec.stripPinnedDenials(nearMiss), nearMiss,
+                "a sentence that is not the pinned denial must not be dropped")
+
+        // **Case folding, pinned in both directions.** `sweepCorpus` lowercases
+        // before stripping; a case-sensitive filter would remove nothing from
+        // that corpus and leave the over-match in place while every test still
+        // passed — the failure looks exactly like a fix.
+        compare(spec.stripPinnedDenials(spec.deliveryDenial().toLowerCase()), "",
+                "the filter must drop the denial from a lowercased corpus")
+        compare(spec.stripPinnedDenials(spec.deliveryDenial().toUpperCase()), "",
+                "and from one folded the other way")
+
+        // The other known denial — the apparatus note — dropped by the same
+        // mechanism, and only it. Listed rather than pinned because nothing
+        // asserts apparatus text is present; see `otherKnownDenials`.
+        var others = spec.otherKnownDenials()
+        for (var i = 0; i < others.length; i++) {
+            compare(spec.stripPinnedDenials(others[i]), "",
+                    "a listed denial must be dropped: " + others[i])
+        }
+    }
+
+    // **The guard above is not enough, and finding that out cost a mutation.**
+    //
+    // It drives `stripPinnedDenials` on literals, which pins the FILTER. It says
+    // nothing about `sweepCorpus`, the function the sweeps actually call — so a
+    // `sweepCorpus` returning `""` passed every test in this file, all thirteen,
+    // including the guard. Measured, not reasoned: that is the disarmed-sweep
+    // failure in its purest form, and the one the dev-writer's walker lesson
+    // warned about one level up.
+    //
+    // So this pins the CORPUS the sweeps see, against a real component, at both
+    // bounds: the denial is gone from it, and everything else the composer
+    // renders is still in it. A corpus narrowed to nothing fails the second
+    // half; a corpus that never strips fails the first.
+    function test_the_sweep_corpus_keeps_everything_but_the_denial() {
+        var c = spec.submitAgainst('{"opId":"aa","wasNew":true}')
+        var swept = spec.sweepCorpus(c)
+
+        // Dropped.
+        verify(swept.indexOf(spec.deliveryDenial().toLowerCase()) < 0,
+               "the pinned denial must not be in the swept corpus, got: " + swept)
+
+        // Kept — and this is the half that catches a corpus narrowed away. Each
+        // is a sentence the composer really renders in THIS state, so a
+        // `sweepCorpus` returning "" or dropping a region fails here.
+        //
+        // Only the two outcome sentences: a `stored` publish CLEARS the draft,
+        // so the draft text and the submit affordance are both gone by the time
+        // this runs. An earlier draft of this test expected them and passed only
+        // by accident of an unrelated mutation being live — caught by running
+        // it, which is the whole argument for mutating rather than reasoning.
+        var mustSurvive = ["your post was saved on this machine.",
+                           "it is in this machine's log."]
+        for (var i = 0; i < mustSurvive.length; i++) {
+            verify(swept.indexOf(mustSurvive[i]) >= 0,
+                   "the swept corpus must still contain " + JSON.stringify(mustSurvive[i])
+                   + " — a corpus narrowed to nothing would disarm every sweep in "
+                   + "this file while passing all of them. Got: " + swept)
+        }
+
+        // And a claim planted right next to where the denial was removed is
+        // still visible to a sweep, so the removal did not carve a hole exactly
+        // where a claim would most plausibly be added.
+        verify(spec.stripPinnedDenials(
+                   (spec.deliveryDenial() + " it was delivered.").toLowerCase())
+                   .indexOf("was delivered") >= 0,
+               "a claim adjacent to the denial must survive the strip")
+
+        c.destroy()
+    }
+
     // ---- the claims table ------------------------------------------------
     //
     // **This is the table the sibling piece was missing.** One row per outcome,
@@ -227,7 +425,16 @@ TestCase {
         for (var i = 0; i < cases.length; i++) {
             var k = cases[i]
             var c = spec.submitAgainst(k.reply)
+
+            // `mustSayOneOf` reads the FULL rendering: it asks what the user
+            // sees, and the denial is part of that.
             var shown = spec.renderedText(c).toLowerCase()
+
+            // `mustNotSay` reads the corpus with the pinned denials removed. A
+            // needle like "was received" cannot tell a claim from its negation,
+            // and the denial is a negation built from exactly that vocabulary.
+            // See `sweepCorpus` for the measurement behind this.
+            var swept = spec.sweepCorpus(c)
 
             for (var m = 0; m < k.mustSayOneOf.length; m++) {
                 var alts = k.mustSayOneOf[m]
@@ -244,9 +451,9 @@ TestCase {
             }
 
             for (var n = 0; n < k.mustNotSay.length; n++) {
-                verify(shown.indexOf(k.mustNotSay[n]) < 0,
+                verify(swept.indexOf(k.mustNotSay[n]) < 0,
                        "the '" + k.tag + "' outcome must not say '"
-                       + k.mustNotSay[n] + "', got: " + shown)
+                       + k.mustNotSay[n] + "', got: " + swept)
             }
             c.destroy()
         }
@@ -348,11 +555,15 @@ TestCase {
 
         for (var i = 0; i < states.length; i++) {
             var c = states[i].build()
-            var shown = spec.renderedText(c).toLowerCase()
+            // The pinned denials removed — see `sweepCorpus`. Both successes
+            // carry one now, not just `stored`: the denial moved out of the
+            // `stored` arm of a ternary into its own element keyed on
+            // `!isRefusal`, so the corpus for this sweep changed with it.
+            var swept = spec.sweepCorpus(c)
             for (var j = 0; j < claims.length; j++) {
-                verify(shown.indexOf(claims[j]) < 0,
+                verify(swept.indexOf(claims[j]) < 0,
                        "the '" + states[i].tag + "' state must not claim '"
-                       + claims[j] + "', got: " + shown)
+                       + claims[j] + "', got: " + swept)
             }
             c.destroy()
         }
@@ -409,7 +620,7 @@ TestCase {
         // would pass with the promise sitting one click away.
         shut.showFix = true
 
-        var shownShut = spec.renderedText(shut).toLowerCase()
+        var shownShut = spec.sweepCorpus(shut)
         verify(shownShut.indexOf("show me how to fix it") < 0
                || shownShut.indexOf("gate is checked again") >= 0,
                "precondition: the guidance must actually be revealed, got: " + shownShut)
@@ -427,26 +638,16 @@ TestCase {
         var open = feedComponent.createObject(null, {
             stoaAddress: "ab".repeat(32), stoaGenesis: "00ff", stoaTitle: "Agora"
         })
-        var shownOpen = spec.renderedText(open).toLowerCase()
+        // One exclusion mechanism for every sweep in this file, rather than an
+        // inline `replace` here and a helper elsewhere: two mechanisms drift, and
+        // the one that is not exercised by the guard test drifts unnoticed. The
+        // apparatus note is excluded by `otherKnownDenials()` and the composer's
+        // denial by `deliveryDenial()`, both through `sweepCorpus`.
+        var shownOpen = spec.sweepCorpus(open)
 
         for (var j = 0; j < claims.length; j++) {
-            // The right-hand APPARATUS column currently renders a note ending
-            // "nothing in this interface will tell you a post was delivered" —
-            // a DENIAL, not a claim, but it contains the word this sweep looks
-            // for, so that one clause is removed rather than the check being
-            // weakened for every state.
-            //
-            // **Written as a removal that no-ops when the clause is absent**,
-            // deliberately. The apparatus column is annotation from the design
-            // bundle that was shipped into the QML by mistake and is being taken
-            // out of the screens; a `replace` of a string that is not there
-            // changes nothing, so this sweep keeps working either way. Nothing
-            // in this file asserts apparatus text is PRESENT — see the note on
-            // `test_no_gate_state_claims_delivery` above.
-            var stripped = shownOpen.replace(
-                "nothing in this interface will tell you a post was delivered.", "")
-            verify(stripped.indexOf(claims[j]) < 0,
-                   "the open gate must not claim '" + claims[j] + "', got: " + stripped)
+            verify(shownOpen.indexOf(claims[j]) < 0,
+                   "the open gate must not claim '" + claims[j] + "', got: " + shownOpen)
         }
         open.destroy()
     }
