@@ -399,6 +399,30 @@ to owner-only and replace the key".
 **Never gate on a build flag, and never show a compose box that cannot be
 submitted** — it loses whatever the user typed. Surface the reason instead.
 
+**What the composer does with the author's own text, which is the opposite of
+what obligation 1 below asks for peer text.** It publishes it **exactly as
+typed** — an op is signed over its bytes, so a composer that stripped a
+zero-width space would publish, under the author's signature, something they did
+not write. What it does instead is *warn*: a draft containing characters the
+sanitiser would remove gets a count before submission, because the author is the
+only person who can still change the text, and the warning does not block
+sending.
+
+**That warning covers removals only, and the shortfall is deliberate.** The
+sanitiser's other half — marking letters from a minority script mixed into
+another, the Cyrillic-"а"-in-a-Latin-word case — is a judgement over the whole
+string, and no core method sanitises draft text, so the interface would have to
+reimplement that judgement and would silently disagree with the core about real
+drafts. **So a draft mixing confusable scripts is not warned about.** A reader
+seeing that post later still gets the marked chips, because display-side
+sanitising is unaffected; it is only the author who is not told in advance.
+
+**Also cleared up: what happens to the draft after sending.** It is cleared only
+when something new was actually stored. On a refusal, and on a repeat publish
+that stored nothing new, the box keeps what was typed — in the first case it is
+the only copy, and in the second the author most likely meant to write something
+different and needs the text to edit.
+
 **Two obligations the core creates and cannot meet itself.** Both come from the
 publish contract (`content-authoring`), and neither is visible from a screenshot.
 **Both are now contracted on the interface side by the `composer-view` spec**,

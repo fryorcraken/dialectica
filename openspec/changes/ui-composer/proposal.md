@@ -203,13 +203,73 @@ supplied.
 So the composer **must not** strip or rewrite the user's text: doing so would
 publish something the user did not write, permanently and under their signature.
 What it can do is tell them what they are about to publish. The spec requires a
-warning when the draft contains the characters the sanitiser would mark on the
+warning when the draft contains characters the sanitiser would **remove** on the
 way out, so the one person who can still change the text — the author, before
-signing — is the one told about it.
+signing — is the one told about it. The sanitiser's other half, homoglyph
+marking, is deliberately outside that warning; see the two settled questions
+below.
 
 **The asymmetry is deliberate and worth stating**: peer text is sanitised on
 display because the reader cannot consent to it; the author's own text is not,
 because they can.
+
+### Two questions the implementation raised, settled here
+
+Both were marked `NO SPEC` by the dev-writer rather than decided quietly, which
+is what that marker is for. Both are now contracted.
+
+**The invisible-character warning covers removals only.** The spec originally
+asked it to name characters the sanitiser would "remove **or mark**". Only the
+removal half is implementable in the view, and reading `sanitise.rs` makes the
+case stronger than a first look suggests: removal is membership in a fixed set,
+while marking is a **judgement over the whole string** — which of three scripts
+dominates, an explicit tie-break to "no marking", an `Other` class excluded from
+the count, and all of it computed *after* removal has changed the string being
+judged. A QML reimplementation would disagree with core on real text, and nothing
+would observe the disagreement, because the two counts are never taken over the
+same string at the same moment.
+
+The alternative the question asked about — obtaining the count rather than
+computing it — **is not available**: there is no sanitise method on the module
+surface at all (checked, not assumed), so the sanitiser runs only on stored
+content being rendered outward. Reaching it for draft text means widening the
+wire contract, which this change scopes out.
+
+So the requirement narrows, and the cost is contracted rather than left silent: a
+draft mixing confusable scripts is under-reported, there is now a scenario
+pinning that this is what happens, and reimplementing the judgement in the view
+is explicitly not the way to close it.
+
+**The draft is cleared on a newly stored publish, and kept otherwise.** The spec
+covered refusals and was silent on success. The implementation's asymmetry is
+right and is now contracted: cleared on `wasNew: true`, kept on `wasNew: false`
+and on every refusal.
+
+The reason the three differ is that the facts differ. On a newly stored publish
+nothing is lost by clearing — the text is published and readable — while leaving
+it presents a control whose next use is a deduplicated no-op reported as "already
+published", a confusing state reached through an affordance that looked ready. On
+a refusal the draft is the only copy. On a deduplicated publish nothing new was
+written, and a user who meant to publish something different needs that text to
+edit — clearing would remove exactly what they need.
+
+The cost is named: a near-identical follow-up must be retyped. That is a
+convenience, weighed against an interface offering a control that produces a
+confusing no-op.
+
+### The reply composer is contracted but not yet reachable, and the spec says so
+
+`Composer` supports both modes and tests exercise both; only the post mode is
+instantiated, because `FeedScreen` lists thread heads and a reply names a parent
+op. A reply box there would be a thread-view affordance on a screen that is not
+one.
+
+The spec did not require a reachable reply affordance — every reply requirement
+is conditioned on a reply being submitted or refused — but that was true by
+phrasing rather than by statement, which is the kind of thing a reviewer has to
+reconstruct. The gate requirement now says it outright: this capability governs
+how a compose affordance behaves, not which screens offer one. The reply
+instantiation arrives with the thread screen.
 
 ### The byte cap is shown as the user types, not discovered on refusal
 

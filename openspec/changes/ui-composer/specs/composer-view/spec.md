@@ -29,6 +29,15 @@ probe answer obtained before the current render.
 A probe that cannot be reached, or whose reply the view cannot interpret, SHALL
 close the gate rather than open it.
 
+**This capability governs how a compose affordance behaves, not which screens
+offer one.** It does not require a reply affordance to be reachable, and a screen
+listing thread heads rather than a thread's posts offers no place to put one: a
+reply names a parent op, and a reply box under a thread head would be a
+thread-view affordance on a screen that is not one. Every requirement below about
+replying therefore constrains what the composer does **when** a reply is
+submitted or refused, and is satisfied whether or not a screen currently offers
+that path.
+
 #### Scenario: A closed gate renders no text input
 
 - **WHEN** the probe reports that posting is not possible
@@ -132,14 +141,38 @@ because an op is signed over its bytes. A view that altered the draft would
 publish, permanently and under the user's signature, something the user did not
 write.
 
-Where the draft contains characters the display-side sanitiser would remove or
-mark when rendering it back — bidirectional overrides, zero-width characters, and
-other invisibles — the view SHALL warn the author before they submit, naming how
-many such characters were found. The warning SHALL NOT block submission.
+Where the draft contains characters the display-side sanitiser would **remove**
+when rendering it back — bidirectional controls, zero-width characters, and other
+glyphless characters that alter how their neighbours render — the view SHALL warn
+the author before they submit, naming how many such characters were found. The
+warning SHALL NOT block submission.
 
 The warning exists because the author is the only person who can still change the
 text. A reader cannot consent to what they are shown, which is why peer text is
 sanitised on display; an author can, which is why their own text is not.
+
+**The warning is scoped to removals and SHALL NOT be required to cover the
+sanitiser's homoglyph marking**, and the boundary is drawn here rather than left
+to an implementation to discover.
+
+Whether a character is removed is a membership test against a fixed set. Whether
+a character is *marked* is a judgement over the whole string: which of three
+scripts dominates it, what happens on a tie, and which characters are excluded
+from the judgement entirely — decided after removal has already changed the
+string being judged. A second implementation of that judgement in the view would
+produce a different number from the sanitiser's on the same text, and **nothing
+in the system would observe the disagreement**, because the two counts are never
+computed over the same string at the same time.
+
+The view has no way to obtain the marked count for a draft: the sanitiser runs
+only when stored content is rendered outward, and no method on the module surface
+sanitises a caller-supplied string. Obtaining it would mean widening the wire
+contract, which is out of scope for a change confined to the view.
+
+The cost is stated rather than absorbed: **a draft mixing confusable scripts is
+under-reported**, and the author is not warned about it. Closing that gap means
+the view obtaining the count from the same code that produces it; reimplementing
+the judgement in the view SHALL NOT be treated as a way to close it.
 
 #### Scenario: A draft is published byte-for-byte as typed
 
@@ -150,14 +183,21 @@ sanitised on display; an author can, which is why their own text is not.
 
 #### Scenario: An author is warned about invisible characters before submitting
 
-- **WHEN** a draft contains characters the display sanitiser would remove or mark
+- **WHEN** a draft contains characters the display sanitiser would remove
 - **THEN** the view displays a warning naming how many were found
 - **AND** the submit affordance remains available
 
 #### Scenario: A clean draft carries no warning
 
-- **WHEN** a draft contains no such characters
+- **WHEN** a draft contains no characters the display sanitiser would remove
 - **THEN** no sanitiser warning is displayed
+
+#### Scenario: A draft mixing confusable scripts is not warned about
+
+- **WHEN** a draft contains a character from a minority script among confusable
+  scripts, and no character the sanitiser would remove
+- **THEN** no sanitiser warning is displayed, the view not judging script mixing
+- **AND** the draft is submittable unchanged
 
 ### Requirement: The body limit is expressed in bytes and shown before submission
 
@@ -230,6 +270,44 @@ progress indicator that resolves into a delivery claim.
 - **THEN** the view displays no peer count, delivery state or delivery progress
   for that content
 
+### Requirement: The draft is cleared when the op was newly stored, and kept otherwise
+
+Where a publish succeeds reporting the op was **newly stored**, the view SHALL
+clear the draft.
+
+Where a publish succeeds reporting the op was **not** newly stored, and on every
+refusal, the view SHALL retain the draft. The three cases are therefore not
+uniform, and the asymmetry is the decision rather than an inconsistency.
+
+Clearing on a newly stored op removes an affordance that is ready to produce a
+confusing outcome: the same text submitted again is the same op id, so the second
+submission is a deduplicated no-op reported as "already published" — a state the
+user reached by using a control that looked ready to publish something. Nothing
+is lost by clearing, because the text is published and readable.
+
+Keeping it in the other two cases follows from the same reasoning applied to
+different facts. On a refusal nothing was published, so the draft is the only
+copy. On a deduplicated publish nothing new was written, and a user whose
+intention was to publish something different needs the text in front of them to
+edit — clearing would take away exactly what they need.
+
+The cost of clearing is named: a user writing a near-identical follow-up loses
+their starting point and retypes it. That is a convenience, weighed against an
+interface offering a control whose use produces a confusing no-op.
+
+#### Scenario: A newly stored publish clears the draft
+
+- **WHEN** a publish succeeds reporting the op was newly stored
+- **THEN** the composer holds no draft
+
+#### Scenario: The draft's fate differs across the three outcomes
+
+- **WHEN** the same submission is made against a core reporting a newly stored
+  op, against one reporting an op that was not newly stored, and against one
+  returning a refusal
+- **THEN** the draft is cleared in the first case
+- **AND** retained in the other two
+
 ### Requirement: An already-published op is reported as its own outcome
 
 Where a publish succeeds reporting that the op was not newly stored, the view
@@ -247,6 +325,11 @@ and SHALL NOT report this outcome as an error.
 
 - **WHEN** a publish succeeds reporting the op was not newly stored
 - **THEN** the view displays a message stating the content was already published
+
+#### Scenario: A deduplicated publish keeps the draft
+
+- **WHEN** a publish succeeds reporting the op was not newly stored
+- **THEN** the draft the composer holds is the text the user entered
 
 #### Scenario: The three outcomes are mutually distinguishable
 
