@@ -236,7 +236,7 @@ Mutation 4b is the one new measurement that matters, and it is finding 1 below.
       `nodeStop()` added to `lib.rs`'s shutdown handler passes all 562 tests. The
       new scenario is what a reviewer reads the handler against; no test closes it.
 
-- [ ] **`tester`** — the store-failure path is unreached: `Refusal::Storage` and
+- [x] **`tester`** — the store-failure path is unreached: `Refusal::Storage` and
       `PublishError::NotStored` are each constructed by the implementation
       (`transport.rs:482` and `:588`) but **no test drives either**, because there
       is no failing-log fixture. `MemoryOpLog` always succeeds.
@@ -256,6 +256,46 @@ Mutation 4b is the one new measurement that matters, and it is finding 1 below.
       distinguishable from `NoChannel`.
       A `MemoryOpLog` wrapper whose `append` returns
       `Err(OpLogError::Storage(..))` on demand closes both. **Severity: medium.**
+
+      **Fixed** in `89070d6`, taking the suggested fixture. `AppendFailsLog` is a
+      `MemoryOpLog` whose `append` refuses and whose **reads delegate to the real
+      log** — a fake failing on read too could not witness "the op is NOT in the
+      log", which is the half of the contract that separates `NotStored` from
+      `NoChannel`, where the op IS stored.
+
+      Three tests, each run against the mutation it names before being trusted.
+      Predicted and observed agreed in all three:
+
+      - `a_store_failure_on_receive_is_refused_as_a_store_failure_and_not_as_a_forgery`.
+        The payload is a valid, verifying op naming the right Stoa, so every
+        earlier guard passes and the append is the only thing that can refuse.
+        Under this finding's own mutation — `map_err(Refusal::Storage)` →
+        `map_err(|_| Refusal::FailsVerification)` — it fails with *"a store
+        failure was reported as FailsVerification, which sends the reader looking
+        in the wrong place"*.
+      - `a_publish_that_could_not_store_is_not_reported_as_a_missing_channel`. The
+        channel is open, so `NoChannel` is not a reachable answer and the append
+        is the only failure left. Under `map_err(PublishError::NotStored)` →
+        `map_err(|_| NoChannel { stoa, id })` it fails naming the wrong variant.
+      - `the_two_ways_a_publish_fails_disagree_about_whether_the_op_exists`. Pins
+        the distinction rather than each variant, since what a caller acts on is
+        which of the two it got — and asserts the asymmetry the variants exist
+        for: after `NoChannel` the op is readable, after `NotStored` it is not.
+        Under the same mutation the two failures compare equal.
+
+      **One thing the mutation run showed that is worth more than the fix.**
+      Under the publish mutation,
+      `publishing_without_an_open_channel_fails_and_opens_nothing` — the test this
+      finding calls vacuous — **still passes**. A store failure reported as a
+      missing channel breaks neither assertion that existed before. That is this
+      finding's diagnosis confirmed by measurement rather than accepted on
+      argument, and it is the reason the new tests assert against a *reachable*
+      wrong answer rather than adding a fourth guard to the old one.
+
+      Its `!matches!(err, NotStored(_))` is left in place. It is now non-vacuous —
+      `AppendFailsLog` makes `NotStored` constructible within the module — though
+      it is still not the assertion that would catch the mutation, which is why
+      the two new publish tests exist beside it rather than instead of it.
 
 - [x] **`spec-writer`** — one `// NO SPEC:` marker, on
       `a_send_that_the_transport_accepted_is_not_a_delivery`

@@ -35,7 +35,7 @@ the call returns**, which is why publishing cannot report delivery.
 total size**, on the grounds that "a decoder handed a byte slice cannot see the
 frame the bytes arrived in". Its doc comment names the transport boundary as the
 right home for the total bound. This capability is that frame, and the spec's
-requirement "An oversized payload is refused, and the limit is the transport's"
+requirement "An oversized payload is refused, against a limit pinned at 150 KiB"
 is that bound arriving.
 
 ## Goals / Non-Goals
@@ -173,22 +173,44 @@ cap "does NOT bound the total size of a decoded op, and must not be read as doin
 so". Aliasing them would make a later change to either silently change the other,
 and the spec pins this one's value against drift on its own terms.
 
-### Publish stores first, then hands the bytes out — and the store failure is fatal to the publish while the send failure is not
+### Publish stores first, then hands the bytes out — and the store failure is the only one this function can have
 
-The spec's ordering requirement, implemented as: append to the log; if that
-fails, report and send nothing; then hand `signed_op.to_bytes()` to the transport;
-if *that* fails, report the failure and leave the op stored.
+The spec's ordering requirement, implemented as: append to the log; if that fails,
+return `PublishError::NotStored` and hand out nothing; otherwise return a
+`Publishable` carrying `op.to_bytes()` for the caller to send.
 
-The asymmetry is the requirement. Publishing first loses the op whenever the
-store fails after a successful send — the op is on the network, other peers hold
-it, and its author does not. Sending first is therefore never correct, and
-discarding a stored op on a send failure would make an op's existence depend on
-network conditions at one instant.
+**The send is not in this function**, which is the shape rather than an omission.
+`publish` returns the bytes and the channel to send them on; whoever performs the
+send is the only place a handoff failure exists. So there is no branch here that
+could undo the append, and the spec's "a send failure does not remove the op" is
+structural — the scenario "There is no route by which a handoff failure could
+unpublish the op" is what records that, and it is checkable by reading the
+function rather than by driving it.
 
-**`PublishOutcome` names which of the two happened**, so a caller can tell "your
-post exists but did not go out" from "your post does not exist". A boolean could
-not, and the spec requires a publish with no open channel be "distinguishable
-from a transport failure on an open channel".
+That also means an earlier draft of this section was wrong in a way worth naming:
+it said "if *that* fails, report the failure and leave the op stored", describing
+a send this function does not perform. The reconciled spec forbids reporting a
+handoff failure as a failed publish at all, and `content-authoring` owns the reply
+that reports it.
+
+The ordering asymmetry is still the requirement. Publishing first loses the op
+whenever the store fails after a successful send — the op is on the network, other
+peers hold it, and its author does not. Sending first is therefore never correct.
+
+**`PublishError` has two variants because the two failures call for opposite
+responses**, and the spec requires a publish with no open channel be
+"distinguishable from a transport failure on an open channel":
+
+- `NoChannel { stoa, id }` — **the op exists** and did not go out. Do not retry,
+  do not discard.
+- `NotStored(OpLogError)` — **the op does not exist**. It carries the store's own
+  error rather than flattening it, for the same reason `Refusal::Undecodable`
+  does: the layer below already distinguished the causes.
+
+A boolean could not carry that, and neither could one variant. **Nothing reached
+`NotStored` from a test until `AppendFailsLog` existed** — `MemoryOpLog::append`
+cannot fail — so the distinction was contracted, implemented, and unexercised;
+`tester`'s finding measured it and the fixture closes it.
 
 **The op is stored even when there is no channel**, which reads as odd and is the
 spec's explicit instruction: *"The op SHALL still be stored, on the same
@@ -234,38 +256,64 @@ per-peer while appearing shared". The sibling `message_received` branch does rea
 the message's own timestamp from the event JSON, which is what makes the two look
 like the same kind of value; the channel branch does not.
 
-### The delivery-outcome obligation is NOT met by this change, and that is recorded rather than quietly skipped
+### The delivery-outcome obligation is out of scope here, and this is the seam it attaches to
 
 The owner's decision that a publish reports success once the op is in the log
-makes a failed delivery something this layer must surface — otherwise a loud
+makes a failed delivery something that must surface somewhere — otherwise a loud
 failure becomes a silent one. `channelMessageError` and `messagePropagated` are
 the events that carry the facts.
 
-**The spec does not require it.** It is not in any requirement, and its scope
-exclusions say the opposite twice: *"That a published op reaches another peer …
-none of it is observable from this capability's surface"*, and the channel-close
-requirement's *"a peer therefore cannot observe that a release reached the
-network, and SHALL NOT claim it did."*
+**The spec now contracts the obligation.** The requirement "A successful publish
+is a statement about the local log and nothing more" states it, and names the
+three things owed: the bound, what a peer records for an op in flight, and what it
+records for one that never propagated. It also says none of them is discharged
+here. That replaced the `// NO SPEC:` marker this section used to point at, so the
+behaviour a publish *does* have is specified rather than chosen, and the gap is a
+tracked one.
 
-So this change does not invent the behaviour. What it does:
+**Not built here, and here is the seam.** Both events are asynchronous and arrive
+keyed by `requestId` — the value `channelSend` returns — so an outcome tracker
+needs three things this path does not have: a map from `requestId` to the op it
+sent, state holding that map across calls, and a clock to bound the wait. Those
+make it a component beside this boundary rather than a branch within it, which is
+a scoping decision and not an impossibility. What it attaches to:
 
-- **Nothing is built that would make it harder.** No API promises delivery, and
-  `PublishOutcome` already distinguishes stored-and-sent from stored-only, which
-  is the seam a later outcome tracker attaches to.
-- **The gap is marked in the code** as `// NO SPEC:` on
-  `a_send_that_the_transport_accepted_is_not_a_delivery`, which pins the chosen
-  behaviour (a publish reports the handoff and claims nothing about delivery) so
-  that a reasonable default does not become permanent by accident.
-- **It is reported to `spec-writer`** as unspecified observable behaviour, which
-  is where a decision about an error case the spec did not enumerate belongs.
+- **`Publishable` carries the `id` and the `channel_id`**, which is exactly the
+  pair a tracker needs to key an outcome back to an op: whoever performs the send
+  holds the `requestId` the send returned and the `Publishable` it sent, so the
+  association is available at the one call site that has both. Nothing further up
+  has to re-derive anything.
+- **`publish` returns rather than sends**, so the tracker sits at the caller and
+  needs no change here. Adding one would mean giving this function a clock and a
+  mutable map, which is what makes it a component rather than a branch.
+- **Nothing promises delivery.** No field of `Publishable` carries an outcome, so
+  a tracker adds a fact rather than correcting a claim.
 
-The dead end worth writing down: **this obligation cannot be discharged at this
-boundary at all**, whatever the spec later says. Both events are asynchronous and
-arrive keyed by `requestId` — the value `channelSend` returns — so surfacing an
-undelivered op needs state that outlives the publish call, a map from `requestId`
-to op id, and a timeout with a clock. All three are outside a pure function of its
-arguments, and the clock is the thing this crate has deliberately never held.
-Whoever builds it is building a component, not adding a branch here.
+**The one thing genuinely ruled out** is that a *publish's reply* could carry the
+answer, and that is a consequence of the event timing rather than of this
+design: the outcome arrives after the call has returned. A later capability
+reports it on its own surface, not by widening this one's return type.
+
+This crate has deliberately never held a clock, which is the part of the above
+worth checking before building it: the tracker is the first thing here that needs
+one, and where that clock lives is its decision to record, not this one's.
+
+**The rendering obligation went to `docs/UI-BRIEF.md` now rather than waiting**,
+as its obligation 7: a successful publish means "saved here", not "posted". PLAN
+§9.2 had said the brief would need this once the three owed things were answered,
+and that deferral was the wrong half to act on. The brief is designed against by
+someone who cannot read the code, so a brief silent on the point leaves a designer
+free to render success as *sent* — which is the failure the requirement exists to
+prevent, reintroduced at the only layer a user sees.
+
+What is splittable here is that the obligation has two halves with different
+readiness. The **prohibition** is true today and complete: do not say sent,
+delivered or posted, and *do not design an in-flight state*, because no call
+produces the signal a spinner would wait on and a spinner that cannot resolve is
+worse than none. The **positive** half — what a view shows for an op in flight
+versus one that never propagated — needs the three owed things first, and is
+additive to the prohibition rather than a replacement for it. Writing only the
+first half is what let this land without inventing behaviour.
 
 ### What is left in the adapter, and why it is three lines
 

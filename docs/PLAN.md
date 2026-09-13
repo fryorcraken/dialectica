@@ -3851,8 +3851,17 @@ a statement about the local log and nothing more" contracts what a publish may
 claim, and names the three things still owed: the bound, what a peer records for
 an op in flight, and what it records for one that never propagated. **Still not
 built** — meeting it needs state outliving the publish call and a clock, which is
-a component rather than a branch. `docs/UI-BRIEF.md` will need the rendering
-obligation when those three are answered.
+a component rather than a branch.
+
+**`docs/UI-BRIEF.md` carries the half of the rendering obligation that is true
+today**, as its obligation 7: a successful publish means "saved here" and must not
+be rendered as sent, delivered or seen, and no in-flight state is to be designed
+because no call produces the signal one would wait on. What the brief still needs
+when the three are answered is the *positive* half — what a view shows for an op
+in flight versus one that never propagated — which is additive to the prohibition
+rather than a replacement for it. The prohibition did not wait on the three,
+because a brief silent about it is one designed against by someone free to render
+success as "posted".
 
 Moving `deliver` outside `guarded` was rejected — PHASE0-FINDINGS §3 measured what
 an unguarded panic costs (the module aborts, the caller waits out a 20-second

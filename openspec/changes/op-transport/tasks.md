@@ -133,7 +133,11 @@ checked by hand against the per-file `#[test]` counts rather than asserted.
       `iter_target` each surviving the whole suite, because those fixtures pinned a
       hash coincidence and documented it as the property.
 - [x] Unspecified behaviour marked: one `// NO SPEC:` on
-      `a_send_that_the_transport_accepted_is_not_a_delivery`.
+      `a_send_that_the_transport_accepted_is_not_a_delivery`. **Since removed** —
+      the `spec-writer` adopted the behaviour as the requirement "A successful
+      publish is a statement about the local log and nothing more", so the comment
+      now points at that requirement by name. **No `// NO SPEC:` marker remains in
+      this change.**
 - [x] Mutation-verified. Five mutations, each caught, each reverted and the file
       confirmed byte-identical to its pre-mutation state afterwards:
 
@@ -219,3 +223,39 @@ Recorded because a passing suite here proves less than it appears to.
 - [x] Gates re-run on the merged tree: 562 tests passing, clippy
       `-D warnings` clean, `rustfmt --check` clean on the new file,
       `openspec validate op-transport --strict` valid.
+
+      **That 562 is this merge's number and was superseded by the next one.** #51
+      merged while this piece was in review and its authoring suite arrived with
+      the second `origin/main` merge, taking the baseline to **623** with nothing
+      here changing. Recorded because a stated baseline that has moved sends the
+      next agent hunting a regression that is someone else's feature.
+
+## 10. Acted on review findings
+
+- [x] `findings/spec-test.md`'s one open entry, `tester`'s store-failure path:
+      `AppendFailsLog` added and three tests written, each proved able to fail by
+      the mutation it names. The finding carries predicted-versus-observed for all
+      three; they agreed. **626 tests passing** after, from 623.
+- [x] The `// NO SPEC:` marker replaced with a pointer to its requirement **by
+      name, not by line number**, the requirement having been written for exactly
+      this behaviour.
+- [x] `design.md`'s delivery-outcome section rewritten from *"cannot be discharged
+      at this boundary at all"* to what is owed and why none of it is met here,
+      naming the seam. The old wording was a scoping decision wearing an
+      impossibility's clothes — it claimed the obligation could not be met and
+      then described how it is met.
+- [x] `design.md:38`'s quotation of a renamed requirement title corrected to
+      "An oversized payload is refused, against a limit pinned at 150 KiB".
+- [x] `docs/UI-BRIEF.md` gained the rendering obligation as its **obligation 7**:
+      a successful publish means "saved here", not "posted". Written as the half
+      that is true today — the prohibition, plus *do not design an in-flight state*
+      since no call produces the signal one would wait on — with the positive half
+      left for whoever answers the three owed things. PLAN §9.2's pointer updated
+      to match, since it had said the brief would need this only once the three
+      were answered.
+- [x] Checked that the new requirement and PLAN §9.2 agree rather than assuming
+      it. They do, and closely: §9.2 is struck through and points at the
+      requirement, the requirement names the three owed things §9.2 assigns here,
+      and both call it unbuilt. The `spec-writer` had already done this check in
+      `b81ce46` and found one contradiction against `content-authoring`, which it
+      fixed there.
