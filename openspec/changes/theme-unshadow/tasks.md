@@ -543,3 +543,73 @@ about an earlier tree, which is the convention 2.1 already set here.
       all four, `tst_check_bindings.sh` all eight, and `run-qml-tests.sh` at 9
       spec files / 204 passed / 0 failed on Qt 6.10.3. Section 4.1's "41
       passed" was the pre-merge corpus.
+
+## 10. The pin was checked against the wrong assertion
+
+Run 34761666585 failed the `the QML member gate's own tests` step on 6.8.3 with
+
+    Invalid logging level "error" provided for "missing-property"
+    (allowed are: disable, info, warning)
+
+**Section 8.2's check was real but insufficient, and that is the finding.** It
+confirmed the CATEGORY `missing-property` exists at v6.8.3 in Qt's own source —
+true, and still true. The gate needed something narrower: the LEVEL VALUE
+`error`, which arrived *after* the category. 6.8.3 offers three levels; 6.10.3
+offers four. A source check of the category cannot see a missing level, so the
+pin was chosen against an assertion that did not cover the requirement.
+
+Section 8's rows are left ticked and as written, per 9's convention: they
+describe work that was done, and 8.2's source citation is accurate about what it
+actually checked.
+
+- [x] 10.1 **The escalation no longer uses the level `error`.**
+      `--missing-property warning -W 0` replaces it in `check_qml_members.sh`
+      and in `ci.yml`'s probe. Both versions accept it, so there is ONE code
+      path rather than a version-conditional one — a fallback branch taken only
+      on CI is the branch nobody runs locally. Measured at 6.10.3 both ways:
+      exit 255 naming `noSuchDeskAtAll` on a bad member, exit 0 over the shipped
+      19 files.
+- [x] 10.2 **`-W 0` widens the gate, and the trade is recorded rather than
+      glossed.** It fails on ANY qmllint warning, not only `missing-property`.
+      Accepted because the shipped tree is measured clean of every other
+      category, and because the alternative — `--<category> disable` for all the
+      rest — is a hand-maintained sweep list that goes stale silently the moment
+      qmllint adds a category. A gate stricter than its name fails loudly; one
+      looser is the defect this file exists to prevent. The failure message now
+      tells a reader to check the category before assuming a missing member.
+- [x] 10.3 **The preflight probe was the root cause, and it is fixed.** It
+      appended `--help`, which makes Qt's parser print usage and exit 0 BEFORE
+      validating any level value — so it proved a flag NAME was known and
+      nothing about the VALUE, which is what broke. Measured:
+      `--missing-property totalGibberish --help` exits 0 on a linter that
+      rejects `totalGibberish` outright when linting a file. The probe now lints
+      a minimal generated QML file. The same defective `--help` probe was in
+      `ci.yml` and is fixed there too — it had been PASSING on 6.8.3 while the
+      gate it claims to vet was unrunnable.
+- [x] 10.4 **A fifth self-test case pins the preflight**, proven to fail first.
+      A stub linter accepts `--help` and rejects any escalation level, exactly
+      as 6.8.3 does. Reaching the gate needed a `QMLLINT` override: PATH order
+      does not work, because the gate tries absolute candidates before the bare
+      name, so the case would have measured the machine's real qmllint and
+      passed for the wrong reason.
+- [x] 10.5 **The case asserts on the MESSAGE, not the exit code, and the first
+      two attempts did not.** A stub rejecting the level fails the gate twice —
+      in the preflight and again in the real lint run — so an exit-code
+      assertion passes identically with the broken `--help` probe restored.
+      Measured: it did. The fixture tree has every member present, so "reads a
+      member that does not exist" is necessarily false there, and a gate
+      emitting it has skipped its preflight. That string is the assertion.
+- [x] 10.6 **Local gates re-run**: `tst_check_qml_members.sh` all five cases,
+      `check_qml_members.sh` ok at 19 files, `check_qml_names.py` ok at 28 files
+      / 18 qmldir entries, `tst_check_qml_names.py` all seventeen,
+      `tst_check_bindings.sh` all eight, `run-qml-tests.sh` 9 spec files / 204
+      passed / 0 failed. `yamllint -d relaxed` reports only line-length
+      warnings. All on Qt 6.10.3.
+- [ ] 10.7 **Only CI can confirm 6.8.3 accepts the replacement.** Every
+      measurement above is on 6.10.3, the only Qt available locally. That
+      `--missing-property warning` and `-W 0` both work at 6.8.3 is read from
+      that version's own help output in the failing run's log (which lists the
+      three levels and `-W, --max-warnings`), not executed. The defect itself
+      WAS reproduced locally — it lives in the probe, not in Qt — but the fix
+      passing on the pinned Qt stays unproven until a run goes green. This row
+      stays unticked alongside 8.8 for that reason.

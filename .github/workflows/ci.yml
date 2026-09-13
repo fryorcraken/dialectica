@@ -587,17 +587,26 @@ jobs:
       # `unqualified` and no `missing-property`.
       #
       # PINNED TO 6.8.3, and the pin is the point. `--missing-property <level>`
-      # is what `dialectica-ui/tests/check_qml_members.sh` escalates to `error`.
+      # is what `dialectica-ui/tests/check_qml_members.sh` escalates on.
       # Confirmed present at this exact version in Qt's own source: at tag
       # v6.8.3, `src/qmlcompiler/qqmljslogger.cpp` declares
       # `qmlMissingProperty{ "missing-property" }` and registers it in
       # `defaultCategories()`, which is what `tools/qmllint/main.cpp` turns into
       # a command-line option taking a level. (The category arrived in 6.5; 6.4
-      # is the last release without it.) Also measured directly at 6.10.3, where
-      # `qmllint --help` lists both flags. If this is ever LOWERED, run
+      # is the last release without it.)
+      #
+      # THE CATEGORY IS NOT THE WHOLE REQUIREMENT, and reading it as such cost a
+      # red run. The gate once escalated with the LEVEL `error`, and that level
+      # arrived LATER than the category: 6.8.3 accepts `--missing-property` and
+      # rejects `error`, offering only disable/info/warning, while 6.10.3 adds a
+      # fourth. So the source check above was true and the gate was still
+      # unrunnable here — a green developer machine, a red CI. The gate now
+      # escalates with `--missing-property warning -W 0`, which both versions
+      # accept, and its preflight LINTS A FILE instead of appending `--help`
+      # (`--help` exits 0 without validating a level, which is why nothing
+      # caught this). If this pin is ever LOWERED OR RAISED, run
       # `dialectica-ui/tests/tst_check_qml_members.sh` against the candidate
-      # first — its preflight probe is exactly the assertion that fails, and it
-      # fails loudly rather than skipping.
+      # first — it fails loudly rather than skipping.
       #
       # A FLOATING VERSION WOULD REINTRODUCE THIS THE DAY THE IMAGE MOVES, which
       # is how it arrived: `ubuntu-latest` is a moving label, and the Qt it
@@ -706,16 +715,29 @@ jobs:
             echo "$tool -> $path"
             "$tool" --version
           done
-          # The flag whose absence took this job red. `--help` is the probe
-          # because it needs no input file and exits 0 on a binary that knows
-          # the option; a Qt that does not know it exits non-zero here, which is
-          # the same shape check_qml_members.sh uses.
-          if ! qmllint --unqualified disable --missing-property error --help >/dev/null 2>&1; then
-            echo "::error::the pinned qmllint does not accept --missing-property —"
-            echo "         the version pin above is below the flag's introduction"
+          # The flags whose absence took this job red. THE PROBE LINTS A FILE,
+          # and that is the correction rather than a detail: this probe used to
+          # append `--help`, and it PASSED on 6.8.3 while the gate it claims to
+          # vet was unrunnable there. `--help` makes Qt's argument parser print
+          # usage and exit 0 BEFORE validating any level VALUE, so it proves a
+          # flag NAME is known and nothing about the value passed to it — and
+          # the value was what broke (`--missing-property error`: category
+          # present at 6.8.3, level `error` not).
+          #
+          # Keep this invocation identical to the one in
+          # `dialectica-ui/tests/check_qml_members.sh`. A probe that vets a
+          # different command than the gate runs is not a probe.
+          probe=$(mktemp -d)
+          printf 'import QtQuick\nItem {}\n' > "$probe/Probe.qml"
+          if ! qmllint --unqualified disable --missing-property warning -W 0 "$probe/Probe.qml" >/dev/null 2>&1; then
+            echo "::error::the pinned qmllint cannot run the member gate's invocation"
+            echo "         Probed by LINTING A FILE, not --help, which exits 0"
+            echo "         without validating a level value."
+            qmllint --unqualified disable --missing-property warning -W 0 "$probe/Probe.qml" || true
             exit 1
           fi
-          echo "ok: qmllint accepts --unqualified/--missing-property"
+          rm -rf "$probe"
+          echo "ok: qmllint runs the member gate's --missing-property/-W invocation"
 
       # qmllint does NOT catch a syntax error — radicle watched it report "ok"
       # on a file Qt then refused with "Unexpected token `}'", and basecamp
@@ -812,9 +834,10 @@ jobs:
       # QML suite passed (no spec instantiates Main.qml, so `check_bindings`
       # never sees it), the static name gate passed (a D-prefixed typo contains
       # no bare `Theme`), and the qmllint step below passed WHILE PRINTING the
-      # defect as a warning. `--missing-property error` escalates that one
-      # category and reaches every file in src/qml, not only the ones a spec
-      # constructs.
+      # defect as a warning. `--missing-property warning -W 0` escalates that
+      # warning into a failure and reaches every file in src/qml, not only the
+      # ones a spec constructs. (`-W 0` rather than the level `error`, which
+      # 6.8.3 does not accept — see the Qt pin above.)
       #
       # It does NOT see the host collision — `-I src/qml` puts our own singleton
       # on the import path, so qmllint checks a different resolution than the app

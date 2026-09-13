@@ -183,8 +183,57 @@ looking for a much bigger change than the one that happened.
 The number is self-invalidating in the way `CLAUDE.md` asks for. The comment at
 the pin says *which flag* forces the floor and *which two versions were
 measured*, so a reader who lowers it knows what to re-run —
-`tst_check_qml_members.sh`, whose preflight is the failing assertion — rather
-than finding a bare version number with no attached reason.
+`tst_check_qml_members.sh` — rather than finding a bare version number with no
+attached reason.
+
+### A category existing is not the level being accepted
+
+**The pin above was checked against the wrong assertion, and 6.8.3 rejected the
+gate anyway.** This is the durable part of the whole episode, so it is stated
+separately from the pin decision it corrects.
+
+The source check was real: `missing-property` genuinely is a category at tag
+`v6.8.3`. But the gate did not need the category, it needed the **level value**
+`error` — and that level arrived *later* than the category did. 6.8.3 offers
+`disable`, `info`, `warning`; 6.10.3 adds `error`. So CI failed with
+
+    Invalid logging level "error" provided for "missing-property"
+
+while every local run stayed green on 6.10.3. **A flag has two halves, and
+confirming the name says nothing about the value.** A version check that reads
+the category list is answering a narrower question than "can this binary run my
+command", and the gap between those two questions is where this hid.
+
+**The compounding defect was the preflight, which existed to catch exactly
+this.** It appended `--help` — so Qt's argument parser printed usage and exited
+0 *before* validating any level. Measured: `--missing-property totalGibberish
+--help` exits 0 on a binary that rejects `totalGibberish` outright when asked to
+lint a file. The probe proved a flag name was recognised and nothing more, which
+is why a gate unrunnable on the pinned Qt shipped from a machine where it ran.
+The same `--help` probe sat in `ci.yml`, *passing on 6.8.3*, vouching for a gate
+that could not execute. **A probe that vets a different command than the gate
+runs is not a probe**, so both now lint a real generated QML file.
+
+**Taken: `--missing-property warning -W 0`, unconditionally.** `-W 0` means
+"fail above zero warnings" and exists in both versions, so the escalation lands
+through one code path on every Qt.
+
+**Rejected: keeping `error` with a version-conditional fallback.** It would
+preserve the narrow contract, but the branch CI takes would then be the branch
+nobody runs locally — the arrangement most likely to rot unnoticed, and this
+piece is about gates that quietly stop measuring.
+
+**Rejected: disabling every other category by name to keep `-W 0` narrow.** That
+is a hand-maintained sweep list, correct until qmllint adds a category and with
+nothing able to notice — a trap this repo has already paid for.
+
+**The cost, stated because the gate's name no longer covers it.** `-W 0` fails
+on *any* qmllint warning, not only a missing member. The shipped tree is
+measured clean of every other category, so it costs nothing today, and a gate
+stricter than its name fails loudly and gets fixed, whereas one looser than its
+name is the silent false green this whole piece is written against. The failure
+message now tells the reader to check which category fired before concluding a
+member is missing.
 
 **The SHA pin does not reach the code that downloads Qt, and saying otherwise
 would be the more comfortable lie.** `install-qt-action` at that commit is a
