@@ -421,6 +421,12 @@ to owner-only and replace the key".
 **Never gate on a build flag, and never show a compose box that cannot be
 submitted** — it loses whatever the user typed. Surface the reason instead.
 
+**What a successful submit does and does not establish: see rendering obligation
+7.** It means the post is in this device's log, and nothing more — not that it
+was sent, and not that anyone else can see it. That governs the wording on the
+button's success state and whether there is a pending state at all, so read it
+before designing the submit flow rather than after.
+
 **Two obligations the core creates and cannot meet itself.** Both come from the
 publish contract (`content-authoring`), and neither is visible from a screenshot.
 
@@ -679,6 +685,38 @@ creates that file and reports the protection it wrote; a keep in a second Stoa w
 no key and reports the protection the existing file *has*. Both answers are true about
 the same single secret, so do not render them as two independent facts — "this
 identity is encrypted, that one is not" is not a state that can occur.
+
+**9. A successful publish means "saved here", not "posted". Do not render it as
+sent, delivered, or seen by anyone.**
+
+When someone presses submit and the core reports success, **the only thing that
+has been established is that the post is in this device's own log.** It has not
+been established that the network accepted it, that it left the machine, or that
+any other person can see it. The core is explicit that no field of that reply
+carries a delivery outcome, and that a view rendering a successful publish as
+delivered is relying on a guarantee nothing provides.
+
+This is not pedantry about wording — it is the difference between two states a
+person acts on differently. A post saved locally and never propagated looks, to
+its author, exactly like a post everyone is reading and ignoring. One of those
+calls for retrying or worrying about connectivity; the other does not.
+
+So: a submit that succeeds may say the post was **saved**, and may show it in the
+author's own feed, because it is genuinely there. It must not say *sent*,
+*posted*, *published to the Stoa*, *delivered*, or show a sent-style checkmark,
+and it must not show a recipient or reach count. **The honest affordance is the
+one that describes the local fact**, because that is the only fact there is.
+
+**What is missing, and what it changes when it arrives.** The core does not yet
+tell you the difference between an op still in flight and one that never
+propagated — the spec names three things owed and unbuilt: a bound on how long to
+wait, what a peer records for an op in flight, and what it records for one that
+never propagated. **Until those exist there is no in-flight state to render**, so
+do not design a spinner, a pending badge, or a retry control that waits on a
+signal no call produces; a spinner that can never resolve is worse than no
+spinner. Design the saved state to be correct on its own, and leave room beside it
+for a later "not yet propagated" marker — that marker is additive when the three
+are answered, which is the point of not inventing one now.
 
 ---
 
