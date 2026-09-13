@@ -91,6 +91,17 @@ refuse a merge from a branch that is behind — but that refusal is about the
 *head commit*, not about what the diff contains, and it arrives at merge time
 rather than before you have spent a CI run. Check the diff first.
 
+**Report `BEHIND` the moment you see it — do not wait for the run to finish.**
+`gh pr view <n> --json mergeStateStatus` says so before CI does. A run on a
+branch that is behind is a run whose result cannot be merged: the rebase
+rewrites the head commit and CI starts again from the top, so everything after
+the rebase point was measured against a tree that will not be the one merged.
+Waiting it out spends a full run to learn what one field already said.
+
+So the order is: check `mergeStateStatus` first, report `BEHIND` immediately
+with the run left to finish or not as it likes, and let the runner rebase. Come
+back to Step 4 afterwards, against the run the rebase triggers.
+
 **After the merge the same command gives a false alarm, and it is the loud
 one.** `git diff origin/main HEAD --stat` on a correctly merged branch showed
 6,871 deletions, because `origin/main` had moved on again and the diff was
@@ -138,7 +149,12 @@ though it is removing review evidence.
 
 ## Step 4 — watching CI
 
-Get the run for **your commit**, not for the branch:
+**First, confirm the branch is not behind** — `gh pr view <n> --json
+mergeStateStatus`. `BEHIND` means stop and report now rather than watch a run
+whose result cannot be merged; see Step 2. Watching comes after that field is
+clean.
+
+Then get the run for **your commit**, not for the branch:
 
 ```
 gh run list --branch piece/<name>

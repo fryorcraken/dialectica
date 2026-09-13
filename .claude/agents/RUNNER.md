@@ -233,7 +233,12 @@ arrives without the log the fixer needs, and it goes and reads it anyway.
 top. A piece does not merge because the fix looked right; it merges because the
 `closer` saw it green.
 
-Two cases that are not a writer's to fix, and come back to you instead: a
-**stale branch** needs a rebase onto current `main`, which is the runner's call
-because a rebase rewrites a pushed branch; and an **unticked box** means a
-finding was never answered, so it routes to whoever the finding names.
+Two cases that are not a writer's to fix, and come back to you instead:
+
+- **A stale branch** — the `closer` reports `BEHIND` as soon as it sees it,
+  without waiting for CI, because a run on a branch that is behind produces a
+  result that cannot be merged. Rebase onto current `main` and push: it is your
+  call because a rebase rewrites a pushed branch and you are the one who pushes
+  it. Then re-dispatch the `closer` against the run the rebase triggers.
+- **An unticked box** — a finding was never answered, so it routes to whoever
+  the finding names.
