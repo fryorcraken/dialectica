@@ -73,7 +73,7 @@ deliberately written not to throw on the unpaired surrogate that
 
 ## Findings
 
-- [ ] **`dev-writer`** — `FeedScreen.qml:427` — two feed rows missing
+- [x] **`dev-writer`** — `FeedScreen.qml:427` — two feed rows missing
       `currentVersion` collide on one vote slot, so a vote on one marks the other
       **Scenario:** the vote control binds
       `screen.ownVotes[row.modelData.currentVersion] || 0` and `voteOn` is called
@@ -110,6 +110,52 @@ deliberately written not to throw on the unpaired surrogate that
       already argues for on `items`. The same argument applied one level down is
       the fix: a row whose `currentVersion` is not a non-empty string should not
       key the map or reach `publishVote`.
+
+      **Fixed** in the commit carrying this tick, as the finding prescribes.
+
+      The sharpest part of this is the observation I had no answer to: the view
+      already refuses to trust the shape of `items` and trusts the shape of a row
+      from the same reply. `design.md` claimed the invariant held "by
+      construction, because the key *is* the post" — and that held only while
+      every row carried a distinct key, which is a property of peer data and not
+      of the code. I have rewritten that section to say so, including the general
+      shape, because the same sentence would be equally wrong applied to any
+      other row field.
+
+      `voteTarget(rowData)` returns the row's op or `""`, in one place, and both
+      consumers go through it: the control's `vote` binding and `voteOn`. A row
+      with no usable op renders a **non-interactive** control — no press rather
+      than a press that does nothing — and reaches no call. `voteOn` restates the
+      guard at the call rather than inheriting it from the binding, because it is
+      reachable from anywhere in the file and a second caller that skipped
+      `voteTarget` would reintroduce both halves silently.
+
+      **The tests that fail without it**, three of them, against a
+      `twoRowsMissingVersion()` fixture added for this — measured by reverting
+      `voteTarget` to return `rowData.currentVersion` raw:
+
+      - `test_rows_without_a_version_do_not_share_one_vote_slot` — reproduces
+        your first half: `ownVotes` becomes `{"undefined":1}` and the second row
+        reads back the first's vote.
+      - `test_a_row_without_a_version_sends_no_vote_request_at_all` — reproduces
+        the second and worse half, counting `publish_vote` calls: 1 before the
+        fix, 0 after. The runner also emits
+        `Unable to assign [undefined] to QString` twice, which is the defect
+        announcing itself.
+      - `test_a_targetless_vote_call_is_refused_even_if_reached_directly` —
+        covers `voteOn("")`, `voteOn(undefined)` and `voteOn(null)`.
+
+      Plus `test_a_well_formed_row_still_votes_normally` as the negative control,
+      since a guard that refused everything would satisfy all three above.
+
+      **What I did not do, and why:** I did not make a malformed row fail the
+      whole read. Dropping a row silently hides peer content, and failing the
+      read lets one bad row from any peer blank a feed — and "empty and
+      unreadable must never look alike" is this screen's governing rule. A row
+      that cannot be voted on is still a row worth reading, so it renders with a
+      control that offers nothing. If a reviewer thinks the row shape deserves
+      validation at `reload()` rather than at the vote, that is a broader
+      decision about every row field and belongs in its own change.
 
 - [ ] **`tester`** — `tst_vote_and_gate.qml:51-60` — the two-row fixture cannot
       expose a row-shape defect, because both rows are well-formed

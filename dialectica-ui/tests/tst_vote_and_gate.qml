@@ -59,6 +59,23 @@ TestCase {
             + '],"page":0,"hasMore":false}'
     }
 
+    // The same two rows with `currentVersion` absent from both.
+    //
+    // **Peer-derived rows, and the view validates only that `items` is an
+    // array** — nothing about what is inside it. Today's core always sends the
+    // field, which is precisely the guarantee-one-module-away that the `items`
+    // guard already refuses to rest on.
+    function twoRowsMissingVersion() {
+        return '{"items":['
+            + '{"thread":"t1","author":"a1",'
+            + '"body":{"text":"first","removed":0,"marked":0},'
+            + '"attachments":[],"isRevised":false,"isHidden":false},'
+            + '{"thread":"t2","author":"a2",'
+            + '"body":{"text":"second","removed":0,"marked":0},'
+            + '"attachments":[],"isRevised":false,"isHidden":false}'
+            + '],"page":0,"hasMore":false}'
+    }
+
     Component {
         id: feedComponent
         FeedScreen {}
@@ -149,6 +166,108 @@ TestCase {
         screen.voteOn("v2", -1)
         compare(screen.ownVotes["v2"], -1)
         compare(screen.ownVotes["v1"], 1, "and must not disturb the first")
+        screen.destroy()
+    }
+
+    // ---- rows that do not name the op they are ---------------------------
+    //
+    // Both halves of a defect review reproduced on peer-supplied rows. Each
+    // assertion below FAILS against the pre-fix code, which keyed the map on
+    // `row.modelData.currentVersion` directly.
+
+    function test_rows_without_a_version_do_not_share_one_vote_slot() {
+        // Pre-fix: both rows key the map on the JavaScript value `undefined`,
+        // which stringifies to the single key `"undefined"` — so `ownVotes`
+        // becomes `{"undefined":1}` and reading back the SECOND row's target
+        // returns the FIRST row's vote. That is exactly what "a vote on one post
+        // does not mark another" forbids, reached through peer data rather than
+        // through a code path.
+        var screen = makeScreen({
+            "get_capabilities": '{"canPost":true,"identity":"aa"}',
+            "list_threads": spec.twoRowsMissingVersion(),
+            "publish_vote": '{"opId":"votedop","wasNew":true}'
+        })
+
+        compare(screen.rows.length, 2, "both malformed rows still render")
+
+        var first = screen.voteTarget(screen.rows[0])
+        var second = screen.voteTarget(screen.rows[1])
+        compare(first, "", "a row naming no op yields no vote target")
+        compare(second, "")
+
+        // Voting on the first records nothing, so the second cannot read one
+        // back. Pre-fix this stored `{"undefined":1}` and the second read `1`.
+        screen.voteOn(first, 1)
+        compare(screen.ownVotes[second], undefined,
+                "a vote attributed to one row must not appear on another")
+        compare(JSON.stringify(screen.ownVotes), "{}",
+                "nothing may be recorded for a row that names no op")
+        screen.destroy()
+    }
+
+    function test_a_row_without_a_version_sends_no_vote_request_at_all() {
+        // The second half, and the worse one. `JSON.stringify` OMITS a key whose
+        // value is `undefined`, so pre-fix the request reaching `callModule` was
+        // `{"stoa":"abab…","direction":"up"}` — a vote naming no target — and
+        // the view then marked two controls on core's answer to it.
+        var screen = makeScreen({
+            "get_capabilities": '{"canPost":true,"identity":"aa"}',
+            "list_threads": spec.twoRowsMissingVersion(),
+            "publish_vote": '{"opId":"votedop","wasNew":true}'
+        })
+
+        var before = spec.calls.length
+        screen.voteOn(screen.voteTarget(screen.rows[0]), 1)
+
+        var published = 0
+        for (var i = before; i < spec.calls.length; i++) {
+            if (spec.calls[i].method === "publish_vote")
+                published += 1
+        }
+        compare(published, 0,
+                "no publish_vote may be sent for a row that names no target")
+        screen.destroy()
+    }
+
+    function test_a_targetless_vote_call_is_refused_even_if_reached_directly() {
+        // `voteOn` is reachable from anywhere in the file, so the guard is
+        // restated at the call rather than left to the binding. A second caller
+        // that skipped `voteTarget` would otherwise reintroduce both failures.
+        var screen = makeScreen({
+            "get_capabilities": '{"canPost":true,"identity":"aa"}',
+            "list_threads": spec.twoRows(),
+            "publish_vote": '{"opId":"votedop","wasNew":true}'
+        })
+
+        var before = spec.calls.length
+        screen.voteOn("", 1)
+        screen.voteOn(undefined, 1)
+        screen.voteOn(null, -1)
+
+        for (var i = before; i < spec.calls.length; i++) {
+            verify(spec.calls[i].method !== "publish_vote",
+                   "a vote with no usable target must reach no call")
+        }
+        compare(JSON.stringify(screen.ownVotes), "{}")
+        screen.destroy()
+    }
+
+    function test_a_well_formed_row_still_votes_normally() {
+        // The negative control. A guard that refused everything would pass every
+        // assertion above, so this pins that the ordinary path still works — and
+        // that the target is the row's own op rather than anything derived.
+        var screen = makeScreen({
+            "get_capabilities": '{"canPost":true,"identity":"aa"}',
+            "list_threads": spec.twoRows(),
+            "publish_vote": '{"opId":"votedop","wasNew":true}'
+        })
+
+        compare(screen.voteTarget(screen.rows[0]), "v1")
+        screen.voteOn(screen.voteTarget(screen.rows[0]), 1)
+        compare(screen.ownVotes["v1"], 1)
+
+        var sent = JSON.parse(spec.calls[spec.calls.length - 1].args[0])
+        compare(sent.target, "v1", "the target must reach core")
         screen.destroy()
     }
 
@@ -441,43 +560,125 @@ TestCase {
         screen.destroy()
     }
 
-    // **FLAGGED, NOT CHANGED — this is the one test that blocks removing the
-    // apparatus column, and removing that column is not this suite's call.**
+    // **RESOLVED.** The previous version of this test flagged a decision it
+    // could not make: the required sentence lived in the `APPARATUS` column,
+    // which the owner has said is annotation explaining the design to a reader
+    // of the design, shipped into the real QML by mistake and being removed. So
+    // the test asserted the presence of a string attached to something on its
+    // way out, and hiding `ApparatusColumn` failed exactly this test and nothing
+    // else — the requirement would have gone unmet with nothing failing for the
+    // right reason.
     //
-    // The owner has said the right-hand `APPARATUS` column is annotation from
-    // the design bundle explaining the design to a reader, shipped into the real
-    // QML by mistake, and that it is being taken out of the screens.
+    // The spec-writer picked the second of the two readings that were offered:
+    // the sentence moves into the closed gate's own body, and the requirement is
+    // now on "the statement being present where the gate is rendered", explicitly
+    // NOT discharged by "placing it anywhere a reader of the gate would not
+    // encounter it".
     //
-    // This test asserts a `MarginNote` in that column is PRESENT and verbatim, so
-    // it fails the moment the column goes — measured, not predicted: hiding
-    // `ApparatusColumn` in `ScreenFrame.qml` fails exactly this test and nothing
-    // else in the eight spec files.
-    //
-    // It is left standing rather than deleted because the spec still requires it:
-    // `composer-view`'s "A closed gate shows the reason verbatim and offers a
-    // fix" says the view SHALL state that no compose box is shown and why, "using
-    // the bundle's `compose.apparatus` string". Deleting the test would quietly
-    // drop a requirement the spec still makes; changing the requirement is a spec
-    // change and belongs to the spec-writer.
-    //
-    // **What has to be decided, and by whom:** either the spec stops requiring
-    // `compose.apparatus` (spec-writer), or the sentence moves out of the
-    // apparatus column into the closed gate's own body — where it would satisfy
-    // the requirement without the column. The second reading is available: the
-    // string is a statement about the missing box, and the closed gate is where
-    // the box is missing from. Nothing here picks between them.
-    function test_the_apparatus_string_is_the_bundles_and_is_verbatim() {
-        // `compose.apparatus` survived the audit that dropped the two above,
-        // because it is a statement about this interface's own design and true
-        // of it. Pinned exactly, since this one IS required verbatim.
+    // So this test now asserts **placement**, not mere presence. Sweeping the
+    // whole screen could not tell the two regions apart — which is why the old
+    // version passed both before and after the move.
+    function test_the_missing_box_statement_is_in_the_gates_own_body() {
         var screen = makeScreen({
             "get_capabilities": '{"canPost":false,"reason":"No keystore found."}',
             "list_threads": spec.twoRows()
         })
-        verify(spec.renderedText(screen).indexOf(
-                   "There is no disabled composer here. A box you could type into "
-                   + "and not send would lose what you wrote.") >= 0,
-               "compose.apparatus must be present verbatim")
+
+        // `compose.apparatus`, verbatim. It survived the audit that dropped two
+        // other compose strings because it is a statement about this interface's
+        // own design and true of it.
+        var required = "There is no disabled composer here. A box you could type "
+                     + "into and not send would lose what you wrote."
+
+        verify(spec.renderedText(screen).indexOf(required) >= 0,
+               "the statement must be on screen at all")
+
+        // And still there once every annotation region is disregarded, which is
+        // the scenario the spec spells out. This is the assertion the old test
+        // could not make: it fails if the sentence lives only in the column.
+        verify(spec.renderedTextOutsideApparatus(screen).indexOf(required) >= 0,
+               "the statement must survive the annotation column's removal — it "
+               + "is owed to a reader facing the gate, and an obligation pinned "
+               + "to that column disappears with it, silently")
+        screen.destroy()
+    }
+
+    // The rendered text of everything EXCEPT the apparatus column, found by
+    // skipping any subtree rooted at an `ApparatusColumn`.
+    //
+    // Identified by its `content` alias rather than by a type name, so this does
+    // not depend on how the component is registered — and asserted below to
+    // actually exclude something, because a walker that silently matched nothing
+    // would make every caller pass for the wrong reason.
+    function renderedTextOutsideApparatus(item, acc) {
+        var out = acc === undefined ? "" : acc
+        if (item === null || item === undefined)
+            return out
+        if (spec.isApparatusColumn(item))
+            return out
+        if (typeof item.text === "string" && item.visible !== false)
+            out += item.text + "\n"
+        var kids = item.children
+        if (kids !== undefined) {
+            for (var i = 0; i < kids.length; i++)
+                out = spec.renderedTextOutsideApparatus(kids[i], out)
+        }
+        return out
+    }
+
+    // The column is found by the heading it renders, because that heading is
+    // the thing a reader uses to recognise the region as annotation.
+    //
+    // NOT by a `content` property: `ColumnLayout` carries one too in Qt6, so
+    // that test matched the gate's own body and excluded the very text the
+    // placement assertion was looking for. Caught by the test failing rather
+    // than reasoned about — which is why `test_the_apparatus_walker_actually_excludes_the_column`
+    // asserts the walker trims something AND leaves the gate intact.
+    function isApparatusColumn(item) {
+        var kids = item.children
+        if (kids === undefined)
+            return false
+        for (var i = 0; i < kids.length; i++) {
+            if (kids[i] !== null && kids[i] !== undefined
+                && typeof kids[i].text === "string"
+                && kids[i].text === "APPARATUS")
+                return true
+        }
+        return false
+    }
+
+    function test_the_apparatus_walker_actually_excludes_the_column() {
+        // The guard on the guard. If `isApparatusColumn` never matched, the
+        // placement assertion above would reduce to the presence assertion and
+        // pass whatever the code did — the exact defect family this repo
+        // watches for, where two explanations give the same answer.
+        var screen = makeScreen({
+            "get_capabilities": '{"canPost":false,"reason":"No keystore found."}',
+            "list_threads": spec.twoRows()
+        })
+
+        var all = spec.renderedText(screen)
+        var trimmed = spec.renderedTextOutsideApparatus(screen)
+        verify(trimmed.length < all.length,
+               "the walker must actually skip a subtree; if it skips nothing, "
+               + "the placement test proves nothing")
+
+        // And specifically: an apparatus note's text is gone from the trimmed
+        // rendering. "APPARATUS" is the column's own heading.
+        verify(all.indexOf("APPARATUS") >= 0, "the column is rendered at all")
+        verify(trimmed.indexOf("APPARATUS") < 0,
+               "the column's own heading must be excluded")
+
+        // **And the walker must not over-exclude**, which is the failure the
+        // first version of it actually had: identifying the column by a
+        // `content` property matched `ColumnLayout` too, so the gate's own body
+        // was trimmed away and the placement assertion failed against correct
+        // code. A walker that excluded everything would satisfy both checks
+        // above, so the gate's other text is pinned here as the other bound.
+        verify(trimmed.indexOf("No keystore found.") >= 0,
+               "core's reason is in the gate body and must survive the trim")
+        verify(trimmed.indexOf("You cannot post, reply or vote in this Stoa yet.") >= 0,
+               "the gate's heading must survive the trim")
         screen.destroy()
     }
 

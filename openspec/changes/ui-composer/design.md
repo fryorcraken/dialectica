@@ -20,6 +20,27 @@ Four files change and two are new:
 
 ## Decisions
 
+### The delivery denial is its own element, keyed on "not a refusal"
+
+The spec requires every success to **positively state** that whether any peer has
+received the content is not something this software can report. A prohibition is
+discharged by silence; this one is not, because a reader who sees a post submit
+successfully assumes it went somewhere, and an interface that merely declines to
+mention delivery leaves that assumption standing while being fully compliant with
+every other delivery rule.
+
+The first implementation made the denial the tail of the `stored` arm of the
+qualifier's ternary — which made a requirement owed by *every* success into one
+branch's copy. The `existing` branch, which is a success by this component's own
+design (`isRefusal` is false, nothing failed), carried no denial at all, and
+review found it.
+
+So the denial is now its own `Text`, visible on `!isRefusal`. **Hanging a
+requirement off one arm of a conditional is how it goes missing from the other;
+hanging it off the condition that defines who is owed it is how it cannot.** The
+same reasoning is why it is not in the apparatus column — see the closed-gate note
+below.
+
 ### The three publish outcomes are one value, not three booleans
 
 The spec's hardest requirement to hold by construction is "the three outcomes are
@@ -175,10 +196,36 @@ The control already has a `vote` property (−1/0/+1) for exactly this. What it
 needed was somewhere to read from, and the shape of that store decides the
 "a vote on one post does not mark another" requirement.
 
-Chosen: `FeedScreen.ownVotes`, a plain object keyed by the row's `currentVersion`
-(the op the vote targets), holding −1 or +1. A per-post key makes cross-marking
-unrepresentable rather than checked — there is no code path that could write one
-post's vote into another's slot, because the key *is* the post.
+Chosen: `FeedScreen.ownVotes`, a plain object keyed by the op the vote targets,
+holding −1 or +1. A per-post key makes cross-marking unrepresentable rather than
+checked — there is no code path that could write one post's vote into another's
+slot, because the key *is* the post.
+
+**That argument was originally written against `row.modelData.currentVersion`
+read directly, and in that form it was false.** Review reproduced both halves of
+the failure on peer-supplied rows: two rows omitting `currentVersion` key the map
+on the JavaScript value `undefined`, which stringifies to the single key
+`"undefined"` — so they share one slot and a vote on the first reads back on the
+second. Worse, `JSON.stringify` omits a key whose value is `undefined`, so the
+request reaching core carried **no `target` field at all**: the view asked core to
+vote on nothing and then marked two controls on the answer.
+
+The flaw in the reasoning is worth naming because it is a shape that recurs: "the
+key *is* the post" held only while every row carried a distinct key, which is a
+property of **peer-supplied data**, not of the code. `FeedScreen.reload()`
+validates that `items` is an array and nothing about the elements inside it, and
+today's core always sends the field — which is precisely the "guarantee made one
+module away" that the `items` guard a few lines above **already refuses to rest
+on**. The view was refusing to trust the shape of one field of a reply while
+trusting another field of the same reply.
+
+So the invariant is now established rather than assumed: `voteTarget(rowData)`
+returns the row's op or `""`, in one place, and both consumers — the control's
+`vote` binding and `voteOn` — go through it. A row with no usable op renders a
+non-interactive control and reaches no call. `voteOn` restates the guard at the
+call rather than inheriting it from the binding, because it is reachable from
+anywhere in the file and a second caller that skipped `voteTarget` would
+reintroduce both failures silently.
 
 It is written **only** on a success outcome, so a refused vote leaves the map
 untouched and the control shows what it showed before. And it is a plain QML
@@ -208,7 +255,25 @@ requires and a third thing added:
 - The `compose.fix` affordance, which the spec requires alongside the reason and
   which the existing branch does not have.
 
-`compose.apparatus` moves into the apparatus column where it belongs, verbatim.
+`compose.apparatus` is rendered **in the closed gate's own body**, verbatim.
+
+An earlier version of this note said it "moves into the apparatus column where it
+belongs". That was correct against the spec as it stood and is now wrong twice
+over. The spec was changed to require the statement "in the closed gate's own
+body", and explicitly forbids discharging the obligation by "placing it anywhere
+a reader of the gate would not encounter it".
+
+**The reason is structural rather than editorial.** The `APPARATUS` column is
+annotation explaining the design to a reader of the design; it reached the shipped
+interface by mistake and is being removed. An obligation expressed as "this text
+appears in that column" disappears with the column — silently, while still being
+required — and review measured exactly that: hiding `ApparatusColumn` failed one
+test, which failed because it asserted the *column's* string, so the requirement
+would have gone unmet with nothing failing for the right reason.
+
+The same reasoning moved the delivery denial out of the column and into
+`PublishOutcome`, beside the success it qualifies. Nothing load-bearing is left in
+the apparatus list: what remains there is context a reader may skip.
 
 ### There is no reply composer on the feed, because the feed has no thread view
 

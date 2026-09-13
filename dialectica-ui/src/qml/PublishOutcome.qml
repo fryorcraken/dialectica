@@ -66,9 +66,10 @@ ColumnLayout {
 
     // ---- the qualifier --------------------------------------------------
     //
-    // For a success, what a success does and does not mean. The sentence exists
-    // because the headline's claim is deliberately weaker than users expect, and
-    // an unexplained weak claim reads as a hedge rather than as a fact.
+    // For a success, what a success does and does not mean — the part that
+    // differs between the two successes. The sentence exists because the
+    // headline's claim is deliberately weaker than users expect, and an
+    // unexplained weak claim reads as a hedge rather than as a fact.
     //
     // It must not direct the reader to the content's position on screen: a
     // reply is not a thread head and has no row in a feed of thread heads, so
@@ -77,7 +78,48 @@ ColumnLayout {
         visible: !root.isRefusal
         text: root.outcome === "existing"
                 ? "The identical content is already in this machine's log, under the same op id. Nothing new was written."
-                : "It is in this machine's log. Whether any other peer has received it is not something this software can tell you yet."
+                : "It is in this machine's log."
+        font: Theme.bodySmall
+        color: Theme.inkSoft
+        wrapMode: Text.WordWrap
+        lineHeight: 1.55
+        textFormat: Text.PlainText
+        Layout.fillWidth: true
+    }
+
+    // ---- the delivery denial, owed by EVERY success ---------------------
+    //
+    // **Its own element rather than a clause inside the qualifier above, and
+    // that is the fix rather than an incidental tidy-up.** The denial was
+    // originally the tail of the `stored` arm of that ternary, which made it
+    // one branch's copy — so the `existing` branch, which is a success by this
+    // component's own design (`isRefusal` is false and nothing failed), carried
+    // no denial at all. Hanging a requirement off one arm of a conditional is
+    // how it goes missing from the other; hanging it off `!isRefusal` is how it
+    // cannot.
+    //
+    // **Silence is not compliance here.** Every other delivery rule in this
+    // capability is a prohibition, and a prohibition is discharged by saying
+    // nothing. That is the wrong answer for this one: a reader who sees a forum
+    // post submit successfully assumes it went somewhere, so an interface that
+    // merely declines to mention delivery leaves that assumption standing while
+    // being fully compliant with every prohibition.
+    //
+    // The stakes are specific rather than general good manners. A publish reply
+    // carries no delivery outcome by design, delivery is not wired at all, and a
+    // body that is legal but near the cap encodes past what the transport will
+    // carry — so it is stored locally and silently refused by every receiving
+    // peer. An author cannot tell a post nobody received from one everybody did,
+    // and this sentence is the only place in the system that fact can be told to
+    // them.
+    //
+    // It reads "with the success" because it is inside this component, which is
+    // rendered directly beneath the headline. It is deliberately NOT in the
+    // apparatus column: an obligation expressed as "this text appears in that
+    // column" disappears with the column, silently, while still being required.
+    Text {
+        visible: !root.isRefusal
+        text: "Whether any other peer has received it is not something this software can tell you yet."
         font: Theme.bodySmall
         color: Theme.inkSoft
         wrapMode: Text.WordWrap

@@ -526,6 +526,28 @@ TestCase {
     //
     // One table, three rows, rather than three near-identical functions: the
     // failure names which outcome drifted, and a fourth outcome is one row.
+    // **The one place the required denial's text is written down**, because two
+    // consumers need the identical string and they pull in opposite directions:
+    // the pin below asserts it is PRESENT, and the delivery sweep must exclude
+    // it from the corpus it searches for delivery CLAIMS.
+    //
+    // The reason the sweep has to exclude it is the interesting half. The
+    // required sentence is a statement *about* reception, so it contains the
+    // vocabulary of reception — and needles phrased as bare participles
+    // ("received by", "was received") cannot separate a claim from its
+    // negation. The current wording escapes the list only by the accident of
+    // spelling "has received" where the list spells "has been received", which
+    // means an equivalent reword would be reported as claiming delivery.
+    //
+    // Excluding the pinned denial is right rather than a loosening: the sweep's
+    // job is to catch a sentence nobody pinned, and this sentence is pinned
+    // character-for-character by `test_the_views_own_words_are_exactly_these_and_no_others`.
+    // A claim hiding inside it is impossible without that test failing first.
+    function deliveryDenial() {
+        return "Whether any other peer has received it is not something this "
+             + "software can tell you yet."
+    }
+
     function pinnedSentences() {
         return [
             {
@@ -533,8 +555,8 @@ TestCase {
                 props: { outcome: "stored", detail: "", subject: "post" },
                 sentences: [
                     "Your post was saved on this machine.",
-                    "It is in this machine's log. Whether any other peer has received "
-                        + "it is not something this software can tell you yet."
+                    "It is in this machine's log.",
+                    spec.deliveryDenial()
                 ]
             },
             {
@@ -543,7 +565,17 @@ TestCase {
                 sentences: [
                     "This post was already published.",
                     "The identical content is already in this machine's log, under "
-                        + "the same op id. Nothing new was written."
+                        + "the same op id. Nothing new was written.",
+                    // **Added when the spec promoted the denial from a
+                    // prohibition to a positive SHALL.** `wasNew: false` is a
+                    // success — nothing failed and the component routes it to a
+                    // non-refusal outcome — and the requirement opens "When a
+                    // publish succeeds", so it covers this row too.
+                    //
+                    // This is NOT the forbidden "update the pin to match a
+                    // changed component". The order was the other way round: the
+                    // spec moved first, and the pin was stale against it.
+                    spec.deliveryDenial()
                 ]
             },
             {

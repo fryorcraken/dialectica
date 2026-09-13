@@ -103,7 +103,50 @@ ScreenFrame {
         screen.ownVotes = next
     }
 
+    // **The op a row's vote targets, or "" if the row does not name one.**
+    //
+    // A guard is a job, and this is the one place that judgement is made — so
+    // "is it applied everywhere a row keys the vote map?" stays a question with
+    // an answer. Both consumers go through it: the control's `vote` binding and
+    // `voteOn`.
+    //
+    // **Feed rows are peer-supplied and their element shape is not validated
+    // anywhere.** `reload()` checks that `items` is an array and nothing about
+    // what is inside it, and today's core always sends `currentVersion`
+    // (`wire.rs` maps it unconditionally) — which is exactly the "guarantee made
+    // one module away" that the `items` guard a few lines below already refuses
+    // to rest on. The identical argument applies one level down.
+    //
+    // Two concrete failures if it does not, both reproduced by review:
+    //
+    //   - Two rows missing the field key the map on the JavaScript value
+    //     `undefined`, which stringifies to the single key `"undefined"`. They
+    //     share one slot, so a vote on the first marks the second — the precise
+    //     thing "a vote on one post does not mark another" forbids.
+    //   - `JSON.stringify` omits a key whose value is `undefined`, so the
+    //     request reaching core carries no `target` at all: the view would ask
+    //     core to vote on nothing and then mark two controls on its answer.
+    //
+    // `design.md` claimed this was held "by construction, because the key IS the
+    // post". That holds only while every row carries a distinct one, which is a
+    // property of peer data rather than of the code. It is now held by
+    // construction for real: a row with no usable op yields "", which renders a
+    // non-interactive control and reaches no call.
+    function voteTarget(rowData) {
+        if (rowData === null || rowData === undefined)
+            return ""
+        return typeof rowData.currentVersion === "string" && rowData.currentVersion !== ""
+            ? rowData.currentVersion
+            : ""
+    }
+
     function voteOn(op, direction) {
+        // The guard, restated at the call rather than assumed from the binding:
+        // `voteOn` is reachable from anywhere in this file, and a second caller
+        // that skipped `voteTarget` would reintroduce the defect silently.
+        if (typeof op !== "string" || op === "")
+            return
+
         var reply = Core.publishVote(screen.stoaAddress, op,
                                      direction > 0 ? "up" : "down")
 
@@ -423,9 +466,25 @@ ScreenFrame {
             // The gate governs this as it governs every other posting
             // affordance: publishing a vote is publishing an op.
             VoteControl {
+                id: voteControl
+
+                // "" when the row names no op to vote on — see `voteTarget`.
+                // The empty string is never a key this map holds, so the vote
+                // reads 0 and two such rows cannot share a slot.
+                readonly property string target: screen.voteTarget(row.modelData)
+
                 visible: screen.capability.canPost === true
-                vote: screen.ownVotes[row.modelData.currentVersion] || 0
+                vote: voteControl.target !== ""
+                    ? (screen.ownVotes[voteControl.target] || 0)
+                    : 0
+
+                // A row with no target offers no press rather than a press that
+                // does nothing: the arrows go non-interactive, so the affordance
+                // matches what is actually available. `voteOn` guards again
+                // anyway — this is the presentation half, not the safety half.
                 interactive: screen.capability.canPost === true
+                             && voteControl.target !== ""
+
                 Layout.alignment: Qt.AlignTop
                 onVoted: function (direction) {
                     // Direction 0 is the control's "undo" press. Core has no
@@ -434,7 +493,7 @@ ScreenFrame {
                     // Nothing is sent and nothing changes — which is honest, and
                     // is the reason this is a branch rather than a mapping.
                     if (direction !== 0)
-                        screen.voteOn(row.modelData.currentVersion, direction)
+                        screen.voteOn(voteControl.target, direction)
                 }
             }
 
@@ -610,6 +669,31 @@ ScreenFrame {
             Layout.fillWidth: true
         }
 
+        // **Why there is no box, stated where the gate is rendered.**
+        //
+        // copy.json `compose.apparatus`, verbatim — it survived the audit that
+        // dropped two other compose strings because it is a statement about this
+        // interface's own design and true of it: there IS no disabled composer
+        // here.
+        //
+        // It lives in the gate's body rather than in the apparatus column, and
+        // the move is the requirement rather than a layout preference. The
+        // column is annotation explaining the design to a reader of the design;
+        // it reached the shipped interface by mistake and is being removed. An
+        // obligation expressed as "this text appears in that column" disappears
+        // with the column — silently, while still being required — and a test
+        // asserting the column's string fails for the wrong reason when it goes.
+        // So the statement is owed to the reader facing the gate, and it is here.
+        Text {
+            text: "There is no disabled composer here. A box you could type into and not send would lose what you wrote."
+            font: Theme.bodySmall
+            color: Theme.inkSoft
+            wrapMode: Text.WordWrap
+            lineHeight: 1.55
+            textFormat: Text.PlainText
+            Layout.fillWidth: true
+        }
+
         // The route to acting on it, so the reader gets a reason AND somewhere
         // to go rather than the reason alone.
         //
@@ -646,19 +730,17 @@ ScreenFrame {
         }
     }
 
+    // **Nothing load-bearing lives in this column.**
+    //
+    // It is annotation explaining the design to a reader of the design, it
+    // reached the shipped interface by mistake, and it is being removed. Two
+    // obligations were attached to it and both have moved into the bodies they
+    // qualify: the missing-box statement is now in the closed gate's own body,
+    // and the delivery denial is in `PublishOutcome` beside the success it
+    // qualifies. A requirement discharged from here disappears when the column
+    // does — silently, while still being required — so anything a reader is
+    // OWED belongs where they will meet it, not here.
     apparatus: [
-        // Why there is no box on screen when the gate is shut — so the absence
-        // reads as a decision rather than as a missing feature.
-        //
-        // copy.json `compose.apparatus`, verbatim. It survived the audit that
-        // dropped two other compose strings because it is a statement about this
-        // interface's own design, and true of it: there IS no disabled composer
-        // here.
-        MarginNote {
-            label: "ON THE MISSING BOX"
-            body: "There is no disabled composer here. A box you could type into and not send would lose what you wrote."
-            visible: screen.capability.canPost !== true
-        },
         // What a published post is, and is not. It sits beside the composer
         // because the success message's claim is deliberately weaker than a
         // reader expects, and the weakness is the honest part.

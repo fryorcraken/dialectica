@@ -51,7 +51,7 @@ found no site that builds two components against one bridge and then drives both
 
 ## Findings
 
-- [ ] **`dev-writer`** — `PublishOutcome.qml:78-79` — the deduplicated success
+- [x] **`dev-writer`** — `PublishOutcome.qml:78-79` — the deduplicated success
       carries no delivery denial, and the spec requires one on every success
       **Scenario:** submit a draft against a core replying
       `{"opId":"deadbeef","wasNew":false}`. The view renders "This post was
@@ -75,6 +75,34 @@ found no site that builds two components against one bridge and then drives both
       went somewhere, which is precisely the belief the promoted requirement
       exists to unsettle.
 
+      **Fixed** in the commit carrying this tick. The finding is accurate in
+      every particular, including that neither follow-up named by `75930e7`
+      landed — I finished before that commit and never came back to it.
+
+      The fix is not "add the sentence to the other arm". The denial was the
+      tail of the `stored` arm of a ternary, which made a requirement owed by
+      **every** success into one branch's copy — and a second copy in the other
+      arm would be the same mistake twice, waiting for a third outcome. It is
+      now its own `Text` keyed on `!isRefusal`, so it is hung on the condition
+      that defines who is owed it rather than on one arm of a conditional. The
+      `stored` qualifier loses the clause and keeps "It is in this machine's
+      log."
+
+      **The test that fails without it:**
+      `tst_composer_claims.qml::test_the_views_own_words_are_exactly_these_and_no_others`,
+      once the `existing` row's pin carries the denial. Measured both ways —
+      with `visible:` narrowed back to `root.outcome === "stored"` it reports
+      `the 'existing' outcome must supply the sentence "Whether any other peer
+      has received it..."`, 11 of 12 passing in that file; restored, 12 of 12.
+
+      I also updated the pinned sentence list, which that file's own comment
+      forbids doing "to match a changed component". This is the other case and
+      not that one: the spec moved first at `75930e7`, and the pin was stale
+      against it — the component followed the spec rather than the pin following
+      the component. The denial's text now lives in one helper,
+      `spec.deliveryDenial()`, so the pin and the sweep exclusion the `tester`
+      box below asks for cannot drift apart.
+
 - [ ] **`tester`** — `tst_composer_claims.qml:545-548` — the pinned-sentence
       residue check **actively forbids** the fix to the finding above
       **Scenario:** this is not merely an untested gap; the test rejects
@@ -92,7 +120,7 @@ found no site that builds two components against one bridge and then drives both
       **Severity: high** — it is the reason a dev-writer acting on the finding
       above will think they got it wrong.
 
-- [ ] **`dev-writer`** — `FeedScreen.qml:568-647` — the closed gate's own body
+- [x] **`dev-writer`** — `FeedScreen.qml:568-647` — the closed gate's own body
       never states why there is no compose box; the statement lives only in the
       apparatus column the spec says to disregard
       **Scenario:** the spec requires the view to state, **"in the closed gate's
@@ -115,6 +143,37 @@ found no site that builds two components against one bridge and then drives both
       **Severity: medium.** The gate is honest today because the column is still
       rendered; the defect is that the obligation is pinned to something being
       removed.
+
+      **Fixed** in the commit carrying this tick. `compose.apparatus` now renders
+      as a `Text` in the closed gate's own `ColumnLayout`, between core's reason
+      and the fix button, and the `MarginNote` carrying it is gone — not
+      duplicated, since two copies of one sentence are two things to maintain and
+      the column's copy is the one on its way out.
+
+      `design.md`'s stale note is corrected in the same commit, with the reason
+      recorded rather than just the new fact: an obligation expressed as "this
+      text appears in that column" disappears with the column, silently, while
+      still being required. The apparatus list now carries a comment saying
+      nothing load-bearing may live there, and the delivery denial moved out for
+      the same reason.
+
+      **The test that fails without it:** the old
+      `test_the_apparatus_string_is_the_bundles_and_is_verbatim` could not fail
+      for the right reason — it swept the whole screen, so it passed both before
+      and after the move, which is your point about it. It is replaced by
+      `test_the_missing_box_statement_is_in_the_gates_own_body`, which asserts
+      **placement**: the statement must survive `renderedTextOutsideApparatus()`,
+      a walker that skips the column's subtree. Measured — with the gate's `Text`
+      hidden it fails, 25 of 26 passing; restored, 26 of 26.
+
+      Two notes on that walker, both earned rather than anticipated. It is backed
+      by `test_the_apparatus_walker_actually_excludes_the_column`, because a
+      walker that silently matched nothing would reduce the placement assertion
+      to the old presence assertion and pass whatever the code did. And my first
+      version of it identified the column by a `content` property — which
+      `ColumnLayout` also has in Qt6, so it excluded the gate body too and failed
+      against correct code. The guard test now pins both bounds: the column's
+      heading is trimmed, and the gate's heading and core's reason survive.
 
 - [ ] **`tester`** — `tst_composer_claims.qml:313-330` — the delivery-claim
       needles over-match into the honest denial, so an equivalent reword of the
