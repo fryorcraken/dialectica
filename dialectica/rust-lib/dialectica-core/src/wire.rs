@@ -327,6 +327,62 @@ pub fn posting_identity(
     }
 }
 
+/// The secret key a publish into this Stoa signs with.
+///
+/// # This is the same derivation [`posting_identity`] reports, and that is the
+/// whole requirement
+///
+/// `content-authoring` contracts it directly — *"WHEN the posting-capability
+/// probe reports an identity for a Stoa and a post is then published into that
+/// Stoa, THEN the published op's author is the identity the probe reported"* —
+/// and the probe reports [`posting_identity`], which is
+/// `stoa_address_at_path(stoa, recorded_path)`.
+///
+/// The publish path signed with `keystore.stoa_key(&stoa)` instead: the
+/// **pathless** per-Stoa scheme, under a different salt. `identity.rs`'s own
+/// test asserts the two schemes must disagree, so a user's posts were signed by
+/// an identity neither `getCapabilities` nor `whoAmI` would ever name — the
+/// exact failure `posting-capability` calls out as *"the user sees one handle
+/// and posts under another"*, one layer deeper, because here it is what actually
+/// reaches the network rather than what a screen displays.
+///
+/// **The spec had decided this and the code had not caught up.** CI carried a
+/// named exemption for `keystore.stoa_key(&stoa)` in the adapter, on the
+/// reasoning that *"WHICH key a publish signs with is a spec question this gate
+/// cannot answer"*, ending *"Delete this exemption when the spec decides."* The
+/// scenario above is the spec deciding, so the exemption is gone in the same
+/// change as the call it fenced.
+///
+/// # Why it lives here rather than in the adapter
+///
+/// The same reason [`posting_identity`] does, and the reason is measured: the
+/// choice was in `dialectica/rust-lib/src/lib.rs`, which is
+/// `#[cfg(logos_scaffold)]` and compiled by no `cargo test`, by no clippy run
+/// and by no fmt run. Nothing could compare the key a publish signs with against
+/// the identity the probe reports while the two lived on opposite sides of that
+/// boundary. Moving it here is what makes
+/// `the_key_a_publish_signs_with_is_the_identity_the_probe_reports` possible.
+///
+/// # A missing choice is a refusal, not a fallback
+///
+/// [`posting_identity`] reports `CannotPost` when no path is recorded for this
+/// Stoa, because there is no identity to attribute an op to. Signing with
+/// *anything* here would contradict that: the probe would say the user cannot
+/// post and the publish would succeed, under a key the probe refuses to name.
+/// So the same state is the same answer, carrying
+/// [`NO_CHOICE_FOR_THIS_STOA`] — one constant, because it is one state.
+pub fn publishing_key(
+    stoa: &crate::identity::Address,
+    keystore: &crate::keystore::Keystore,
+    paths: &crate::identity_store::IdentityStore,
+) -> Result<crate::identity::SecretKey, String> {
+    match paths.path_for(stoa) {
+        Ok(Some(path)) => Ok(keystore.stoa_key_at_path(stoa, path)),
+        Ok(None) => Err(NO_CHOICE_FOR_THIS_STOA.to_string()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 /// The reason both `getCapabilities` and `whoAmI` give for "a master key exists and
 /// this Stoa has no choice recorded".
 ///
@@ -2103,7 +2159,7 @@ const FORBIDDEN_FIELDS: [(&str, &str); 5] = [
 /// One guard over a list rather than a check per operation: CLAUDE.md keeps a
 /// guard as its own job, so "is it called everywhere?" stays a question with an
 /// answer. There are three callers and the list is the union across all three.
-fn reject_forbidden_fields(parsed: &serde_json::Value) -> Result<(), String> {
+fn reject_forbidden_fields(parsed: &Request) -> Result<(), String> {
     for (field, why) in FORBIDDEN_FIELDS {
         if parsed.get(field).is_some() {
             return Err(error_json(&format!("{field} is not accepted: {why}")));
@@ -2117,7 +2173,7 @@ fn reject_forbidden_fields(parsed: &serde_json::Value) -> Result<(), String> {
 /// A present-but-wrong-typed field is a different mistake from an absent one and
 /// the message has to say which — "missing field: body" sends someone looking for
 /// a field that is right there, holding a number.
-fn required_string<'a>(parsed: &'a serde_json::Value, field: &str) -> Result<&'a str, String> {
+fn required_string<'a>(parsed: &'a Request, field: &str) -> Result<&'a str, String> {
     match parsed.get(field) {
         Some(serde_json::Value::String(s)) => Ok(s),
         Some(_) => Err(error_json(&format!("{field} must be a string"))),
@@ -2125,14 +2181,18 @@ fn required_string<'a>(parsed: &'a serde_json::Value, field: &str) -> Result<&'a
     }
 }
 
-/// The Stoa address every publish names.
-fn required_stoa(parsed: &serde_json::Value) -> Result<crate::identity::Address, String> {
-    let hex_str = required_string(parsed, "stoa")?;
-    crate::identity::Address::from_hex(hex_str).map_err(|e| error_json(&format!("stoa: {e}")))
-}
+// `required_stoa` used to live here, reading `stoa` through `required_string`
+// and hex-decoding it. It is gone rather than converted to take a `&Request`:
+// `parse_stoa` gives the same three answers for the same three cases, already
+// takes one, and its own doc argues for being the ONLY place the surface reads
+// that field — *"a new Stoa-taking handler cannot reach `stoa` without a
+// `Request` in hand, because this is the only place that reads the field"*. Two
+// readers of one field is the shape that eventually disagrees about whether a
+// missing field and a wrong-typed one are one mistake, and keeping the publish
+// path on its own copy is what kept it outside the envelope in the first place.
 
 /// An op id field — a parent, or a vote's target.
-fn required_op_id(parsed: &serde_json::Value, field: &str) -> Result<crate::op::OpId, String> {
+fn required_op_id(parsed: &Request, field: &str) -> Result<crate::op::OpId, String> {
     let hex_str = required_string(parsed, field)?;
     crate::op::OpId::from_hex(hex_str).map_err(|e| error_json(&format!("{field}: {e}")))
 }
@@ -2145,7 +2205,7 @@ fn required_op_id(parsed: &serde_json::Value, field: &str) -> Result<crate::op::
 /// supplied**, and is not defaulted onto a recognised direction: a caller whose
 /// `"upvote"` silently became `"down"` would have published the opposite of what
 /// it asked for, and nothing would error.
-fn required_direction(parsed: &serde_json::Value) -> Result<crate::op::VoteDirection, String> {
+fn required_direction(parsed: &Request) -> Result<crate::op::VoteDirection, String> {
     let name = required_string(parsed, "direction")?;
     match name {
         "up" => Ok(crate::op::VoteDirection::Up),
@@ -2156,15 +2216,194 @@ fn required_direction(parsed: &serde_json::Value) -> Result<crate::op::VoteDirec
     }
 }
 
-/// Parse the whole request first, then act. The ordering is the requirement.
+/// A publish request that has been through the parse, the forbidden-field guard
+/// and the `stoa` read — because it cannot be built without them.
+///
+/// # Why the prologue is a type and not three copies of four statements
+///
+/// `publish_post`, `publish_reply` and `publish_vote` each carried the same
+/// opening — parse, reject forbidden fields, read `stoa` — and CLAUDE.md names
+/// exactly this: *"when you find yourself writing the fourth slightly-different
+/// copy of a guard, that is the signal to reshape rather than to add a fourth
+/// test"*. `publish_moderation` is the fourth, and there a missed guard is an
+/// **authorisation** defect rather than a wrong reply, which is why PLAN.md §9.2
+/// calls this reshape its precondition.
+///
+/// So the guards are not called by each handler; they are what constructing the
+/// value *is*, and a fourth publish operation inherits them without its author
+/// knowing this decision happened.
+///
+/// **What the compiler actually forces, and what it does not**, stated here for
+/// the reason `every_request_taking_method`'s doc states the same kind of limit:
+/// a guarantee claimed wider than it holds is worse than one known to be
+/// partial. An earlier version of this paragraph said a handler holding a
+/// `PublishRequest` *"provably went through all three"*. It does not. Of the
+/// three, exactly **one** is forced by the type: `fields` is a [`Request`], and
+/// a `Request` cannot exist without [`Request::parse`]. The other two —
+/// `reject_forbidden_fields` and `parse_stoa` — are run by [`PublishRequest::parse`]
+/// and by nothing the type insists on, so a struct literal written inside this
+/// module skips both and names a `stoa` the request never carried. Design review
+/// built one and it compiled.
+///
+/// The exposure is bounded and worth being exact about rather than alarmed by:
+/// `publishing` is the only construction site in the crate, it goes through
+/// `parse`, and the struct's fields are private to this module. So this is a
+/// convention the module boundary keeps rather than a property the type proves,
+/// and the future handler written inside `wire.rs` — which is where handlers go
+/// — is the shape that could break it.
+///
+/// # It is built on [`Request`], and that is what puts the publish path inside
+/// the envelope
+///
+/// The three handlers parsed with a bare `serde_json::from_str`, so they were
+/// outside every obligation `module-wire-contract` places on a request. All
+/// three were measured failing, not inferred:
+///
+/// - **A non-object was served as a missing field.** `serde_json::Value::get`
+///   answers `None` for an array exactly as it does for an object with no
+///   `stoa`, so `[]` came back as `{"error":"missing field: stoa"}` — the
+///   spec's "three caller mistakes, three messages" collapsed into one.
+/// - **There was no size cap.** A request over
+///   [`MAX_REQUEST_BYTES`] was parsed, at roughly 2N transient heap; per
+///   `docs/PHASE0-FINDINGS.md` §3 an allocation failure in a dispatch handler
+///   aborts the module process rather than returning an error.
+/// - **And the three were absent from `every_request_taking_method`**, the sweep
+///   whose whole job is applying these rules to the surface — so five sweeps ran
+///   green over eleven methods while the surface had fourteen.
+///
+/// Going through [`Request::parse`] is the whole of the first two fixes, and it
+/// is one line here rather than three at three call sites, which is what the
+/// preceding refactor bought. The third is
+/// `the_sweep_covers_every_request_taking_method_the_dispatch_trait_declares`.
+///
+/// # Parse the whole request first, then act. The ordering is the requirement.
 ///
 /// Each handler reads every field it needs before [`crate::authoring`] is
 /// reached, so "a refused publish appends nothing and delivery was not invoked"
 /// is structural: there is nothing to append until the last field has parsed.
 /// Under validate-as-you-go that property would be an artefact of the order the
-/// statements happen to be in.
-fn parsed_object(request: &str) -> Result<serde_json::Value, String> {
-    serde_json::from_str(request).map_err(|e| error_json(&format!("invalid JSON: {e}")))
+/// statements happen to be in. This type preserves that: it hands back the
+/// request for the operation's own fields, and the handler reads all of them
+/// before publishing.
+struct PublishRequest {
+    /// The Stoa every publish names, parsed once.
+    stoa: crate::identity::Address,
+    /// The request itself, for the fields this operation adds.
+    fields: Request,
+}
+
+impl PublishRequest {
+    /// Run the envelope, the forbidden-field guard and the `stoa` read, in that
+    /// order.
+    ///
+    /// **The order is not arbitrary, and the first step is the load-bearing
+    /// one.** [`Request::parse`] refuses an oversized request *before* paying
+    /// for the parse, which is the whole point of a cap whose job is bounding
+    /// allocation; and it refuses a non-object with a message the other two
+    /// refusals can be told from. The forbidden-field guard then precedes the
+    /// `stoa` read because a caller who supplied `author` has a wrong model of
+    /// the API that a message about a malformed Stoa would not correct.
+    fn parse(request: &str) -> Result<Self, String> {
+        let fields = Request::parse(request)?;
+        reject_forbidden_fields(&fields)?;
+        let stoa = parse_stoa(&fields)?;
+        Ok(PublishRequest { stoa, fields })
+    }
+}
+
+/// The Stoa a publish request names, for a caller that must know it **before**
+/// the handler runs — which is the adapter, and only the adapter.
+///
+/// # Why this exists, and why it is not a convenience
+///
+/// The per-Stoa signing key cannot be derived without the Stoa, and only the
+/// adapter can open a keystore ([`crate::keystore`] needs a host-supplied path
+/// this crate cannot know). So the adapter genuinely has to read one field
+/// before it can supply the `key` argument the handlers take.
+///
+/// It was reading it with its own bare `serde_json::from_str` and its own
+/// four-arm `stoa` ladder, and **that shadowed every envelope fix in this
+/// change on the shipped module**: an array was answered `missing field: stoa`
+/// by the adapter at a line no `cargo test` compiles, and an N-byte request was
+/// fully parsed at ~2N transient heap before [`MAX_REQUEST_BYTES`] was ever
+/// evaluated — so the cap bounded only a *second* parse of bytes already paid
+/// for, and the PHASE0-FINDINGS §3 abort it exists to prevent was untouched.
+/// `dialectica-core` was correct in isolation and the module was not.
+///
+/// This is the same envelope, reached through the same [`Request::parse`], so
+/// the adapter's early read and the handler's later one **cannot disagree**:
+/// the size cap is evaluated on the adapter's call because it is the first
+/// thing `Request::parse` does, and a non-object earns [`REQUEST_NOT_AN_OBJECT`]
+/// here exactly as it does inside a handler.
+///
+/// # It reads the Stoa and nothing else, deliberately
+///
+/// It does **not** run the forbidden-field guard or any required-field read.
+/// Those stay the handler's, so there is exactly one place that decides what a
+/// publish request must contain — an adapter that validated a second time is
+/// the two-readers-of-one-field shape that produced this defect. What the
+/// adapter gets is the one value it structurally cannot proceed without.
+///
+/// **The request is parsed twice and that is accepted rather than hidden.**
+/// Both parses are now bounded by the cap, so the cost is CPU on a request
+/// already proved small, not unbounded allocation. Removing the second would
+/// mean the handlers taking a key *supplier* rather than a key — a reshape
+/// `design.md` defers with its argument.
+pub fn stoa_of(request: &str) -> Result<crate::identity::Address, String> {
+    let parsed = Request::parse(request)?;
+    parse_stoa(&parsed)
+}
+
+/// The shape all three publish handlers have: guard, prologue, the operation's
+/// own fields, then the tail.
+///
+/// # What the caller is left with, and why that is the whole of it
+///
+/// `run` receives a [`PublishRequest`] — already parsed, guarded and with its
+/// Stoa read — and returns the [`crate::authoring::Published`]. Everything
+/// either side of that is here: the panic guard, the three prologue steps, and
+/// the delivery handoff with its own `catch_unwind`.
+///
+/// So a fourth publish operation is a closure reading its own fields. It cannot
+/// forget a guard, because it never runs one.
+///
+/// # The error arm is the wire reply already, not a type to convert
+///
+/// Both things a `run` closure can fail on already produce one: a field reader
+/// (`required_string` and friends) returns the error shape, and a
+/// [`crate::authoring::Refusal`] is turned into one by [`refused`]. Following
+/// [`Request::parse`]'s own convention here — *"the `Err` arm is already the
+/// wire reply, so a caller cannot invent a second error shape while converting
+/// one"* — means the two arrive by the same route and no closure has to decide
+/// which wrapper to use.
+fn publishing(
+    method: &'static str,
+    request: &str,
+    deliver: &mut dyn FnMut(&crate::op::OpId),
+    run: impl FnOnce(&PublishRequest) -> Result<crate::authoring::Published, String>,
+) -> String {
+    guarded(method, || {
+        let parsed = match PublishRequest::parse(request) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+        match run(&parsed) {
+            Ok(published) => delivered_and_published(&published, deliver),
+            Err(already_the_wire_reply) => already_the_wire_reply,
+        }
+    })
+}
+
+/// An authoring refusal, as the wire reply.
+///
+/// One function rather than `.map_err(|r| error_json(&r.to_string()))` at three
+/// call sites: the wording of a refusal is the `Refusal` type's own job (see
+/// [`no_identity`] for why that matters — the adapter is compiled by no test, so
+/// a message written outside `Refusal`'s `Display` is a message no gate sees),
+/// and three copies of the conversion is three places for one of them to start
+/// wording it differently.
+fn refused(refusal: crate::authoring::Refusal) -> String {
+    error_json(&refusal.to_string())
 }
 
 /// `{"stoa":"…","body":"…"}` -> `{"opId":"…","wasNew":bool}`.
@@ -2220,27 +2459,9 @@ pub fn publish_post<L: crate::log::OpLog>(
     key: &crate::identity::SecretKey,
     deliver: &mut dyn FnMut(&crate::op::OpId),
 ) -> String {
-    guarded("publish_post", || {
-        let parsed = match parsed_object(request) {
-            Ok(v) => v,
-            Err(e) => return e,
-        };
-        if let Err(e) = reject_forbidden_fields(&parsed) {
-            return e;
-        }
-        let stoa = match required_stoa(&parsed) {
-            Ok(v) => v,
-            Err(e) => return e,
-        };
-        let body = match required_string(&parsed, "body") {
-            Ok(v) => v.to_string(),
-            Err(e) => return e,
-        };
-
-        match crate::authoring::post(log, key, stoa, body) {
-            Ok(published) => delivered_and_published(&published, deliver),
-            Err(refusal) => error_json(&refusal.to_string()),
-        }
+    publishing("publish_post", request, deliver, |parsed| {
+        let body = required_string(&parsed.fields, "body")?.to_string();
+        crate::authoring::post(log, key, parsed.stoa, body).map_err(refused)
     })
 }
 
@@ -2468,31 +2689,10 @@ pub fn publish_reply<L: crate::log::OpLog>(
     key: &crate::identity::SecretKey,
     deliver: &mut dyn FnMut(&crate::op::OpId),
 ) -> String {
-    guarded("publish_reply", || {
-        let parsed = match parsed_object(request) {
-            Ok(v) => v,
-            Err(e) => return e,
-        };
-        if let Err(e) = reject_forbidden_fields(&parsed) {
-            return e;
-        }
-        let stoa = match required_stoa(&parsed) {
-            Ok(v) => v,
-            Err(e) => return e,
-        };
-        let parent = match required_op_id(&parsed, "parent") {
-            Ok(v) => v,
-            Err(e) => return e,
-        };
-        let body = match required_string(&parsed, "body") {
-            Ok(v) => v.to_string(),
-            Err(e) => return e,
-        };
-
-        match crate::authoring::reply(log, key, stoa, parent, body) {
-            Ok(published) => delivered_and_published(&published, deliver),
-            Err(refusal) => error_json(&refusal.to_string()),
-        }
+    publishing("publish_reply", request, deliver, |parsed| {
+        let parent = required_op_id(&parsed.fields, "parent")?;
+        let body = required_string(&parsed.fields, "body")?.to_string();
+        crate::authoring::reply(log, key, parsed.stoa, parent, body).map_err(refused)
     })
 }
 
@@ -2508,31 +2708,10 @@ pub fn publish_vote<L: crate::log::OpLog>(
     key: &crate::identity::SecretKey,
     deliver: &mut dyn FnMut(&crate::op::OpId),
 ) -> String {
-    guarded("publish_vote", || {
-        let parsed = match parsed_object(request) {
-            Ok(v) => v,
-            Err(e) => return e,
-        };
-        if let Err(e) = reject_forbidden_fields(&parsed) {
-            return e;
-        }
-        let stoa = match required_stoa(&parsed) {
-            Ok(v) => v,
-            Err(e) => return e,
-        };
-        let target = match required_op_id(&parsed, "target") {
-            Ok(v) => v,
-            Err(e) => return e,
-        };
-        let direction = match required_direction(&parsed) {
-            Ok(v) => v,
-            Err(e) => return e,
-        };
-
-        match crate::authoring::vote(log, key, stoa, target, direction) {
-            Ok(published) => delivered_and_published(&published, deliver),
-            Err(refusal) => error_json(&refusal.to_string()),
-        }
+    publishing("publish_vote", request, deliver, |parsed| {
+        let target = required_op_id(&parsed.fields, "target")?;
+        let direction = required_direction(&parsed.fields)?;
+        crate::authoring::vote(log, key, parsed.stoa, target, direction).map_err(refused)
     })
 }
 
@@ -5164,6 +5343,103 @@ mod tests {
     }
 
     #[test]
+    fn the_key_a_publish_signs_with_is_the_identity_the_probe_reports() {
+        // THE REGRESSION TEST for the second defect this change closes, and it
+        // is the requirement's own scenario: "WHEN the posting-capability probe
+        // reports an identity for a Stoa and a post is then published into that
+        // Stoa, THEN the published op's author is the identity the probe
+        // reported."
+        //
+        // The publish path signed with `keystore.stoa_key(&stoa)` — the
+        // PATHLESS per-Stoa scheme — while the probe reports
+        // `stoa_address_at_path`. `identity.rs`'s
+        // `the_path_taking_scheme_does_not_collide_with_the_pathless_one`
+        // asserts the two MUST disagree, so this is not a near-miss: every op a
+        // user published was authored by an identity no method on the surface
+        // would ever name.
+        //
+        // It could not be tested where it lived. The call was in
+        // `dialectica/rust-lib/src/lib.rs`, which `cargo test` does not
+        // compile, and CI fenced it with a named exemption reading "Delete this
+        // exemption when the spec decides". The spec had decided; this test is
+        // what the choice moving into `core` makes possible.
+        let dir = OnboardingDir::new("publish-signs-as-the-probe-says");
+        let nonce = SlateNonce::generate().unwrap();
+        let kept = keep_through_the_wire(&dir, nonce, Some(nonce), 2, &Unlock::Unencrypted);
+        assert_eq!(kept["kept"], true, "got {kept}");
+
+        let request = format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex());
+        let probe_out =
+            get_capabilities_from_stores(&request, || Ok(a_master_key()), || Ok(dir.paths()));
+        let probe: serde_json::Value = serde_json::from_str(&probe_out)
+            .unwrap_or_else(|e| panic!("the probe reply must be JSON ({e}): {probe_out}"));
+        assert_eq!(probe["canPost"], true, "got {probe_out}");
+
+        let signing = publishing_key(&a_stoa(), &a_master_key(), &dir.paths())
+            .expect("a kept identity must yield a signing key");
+
+        // Through the WIRE, not through `publishing_key` twice. Asking the
+        // function that was just called what it returns would agree with itself
+        // whatever it returns; what has to hold is that an op the publish
+        // handler actually wrote carries the probe's address as its author.
+        let mut log = MemoryOpLog::new();
+        let publish = format!(
+            r#"{{"stoa":"{}","body":"who signed this"}}"#,
+            a_stoa().to_hex()
+        );
+        let out = publish_post(&publish, &mut log, &signing, &mut ignored_delivery);
+        let published = as_json(&out);
+        assert!(published.get("error").is_none(), "got {out}");
+
+        let id = crate::op::OpId::from_hex(published["opId"].as_str().unwrap()).unwrap();
+        let entry = log.get(&id).unwrap().expect("the op must be in the log");
+        assert_eq!(
+            entry.op.op.author.address().to_hex(),
+            probe["identity"].as_str().unwrap(),
+            "the published op's author is NOT the identity the probe reports. \
+             The probe says {probe}, the op was signed as {}. A user is posting \
+             under a handle no method on this surface will ever show them.",
+            entry.op.op.author.address().to_hex()
+        );
+
+        // And the pathless key is the WRONG answer, asserted rather than
+        // assumed — without this the test passes against an implementation
+        // where the two schemes happen to coincide, which is the defect family
+        // this project has recorded: two explanations giving one answer.
+        let pathless = a_master_key().stoa_key(&a_stoa());
+        assert_ne!(
+            pathless.public_key().address().to_hex(),
+            probe["identity"].as_str().unwrap(),
+            "the pathless scheme agrees with the probe, so this test cannot \
+             distinguish the fix from the defect"
+        );
+    }
+
+    #[test]
+    fn a_publish_is_refused_when_no_identity_has_been_chosen_for_the_stoa() {
+        // The other half, and the half that stops the fix being "sign with
+        // something". `posting_identity` reports CannotPost when no path is
+        // recorded; if `publishing_key` fell back to any key, the probe would
+        // say the user cannot post while the publish succeeded under a key the
+        // probe refuses to name — which is a worse disagreement than the one
+        // being fixed, because it is silent on the publishing side.
+        //
+        // One state, one reason: the same constant both other methods give.
+        let dir = OnboardingDir::new("publish-with-no-choice");
+        // `.err()` rather than `.expect_err()`: `SecretKey` has no `Debug`, on
+        // purpose — a secret that can be formatted is a secret that reaches a
+        // log — and `expect_err` requires one on the `Ok` type.
+        let refused = publishing_key(&a_stoa(), &a_master_key(), &dir.paths())
+            .err()
+            .expect("no recorded path must not yield a key");
+        assert_eq!(
+            refused, NO_CHOICE_FOR_THIS_STOA,
+            "a publish with no chosen identity must give the same reason the \
+             probe and whoAmI give, got {refused:?}"
+        );
+    }
+
+    #[test]
     fn the_probe_and_whoami_give_one_reason_when_no_choice_is_recorded_for_this_stoa() {
         // The state the two-store split creates: a master key exists, this Stoa has
         // no choice recorded. Both methods must name it, and name it the SAME way —
@@ -5728,12 +6004,14 @@ mod tests {
 
     #[test]
     fn an_over_long_genesis_hex_string_is_refused_before_it_is_decoded() {
-        // NO SPEC: the spec set bounds no field's length. This is the same
-        // absent decision `MAX_REQUEST_BYTES` is, one layer in — and it is kept
-        // beside the request cap rather than folded into it because they refuse
-        // different things: the request cap bounds what any request may cost,
-        // and this bounds what THIS field may allocate no matter how small the
-        // request around it is.
+        // NO SPEC: the spec set bounds no field's length. This used to read as
+        // "the same absent decision `MAX_REQUEST_BYTES` is, one layer in", and
+        // that half is no longer true — the request bound is now specified in
+        // `module-wire-contract`, and this one is not. The two still refuse
+        // different things, which is why they are kept apart: the request bound
+        // bounds what any request may cost, and this bounds what THIS field may
+        // allocate no matter how small the request around it is. That the outer
+        // one got specified is an argument for specifying this one, not against.
         //
         // The assertion is about ORDERING, which is the only part that matters:
         // the fixture is over-long AND not valid hex. An implementation that
@@ -8350,6 +8628,91 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_adapters_early_stoa_read_crosses_the_same_envelope_the_handler_does() {
+        // THE REGRESSION TEST FOR THE DEFECT THAT MADE THIS PIECE'S HEADLINE
+        // CLAIM TRUE OF THE CRATE AND FALSE OF THE MODULE.
+        //
+        // `Dialectica::publishing` must read `stoa` before it can derive a
+        // per-Stoa signing key, and only the adapter can open a keystore — so
+        // that early read is structural, not incidental. It was doing it with
+        // its own bare `serde_json::from_str` and its own four-arm ladder, at a
+        // line `cargo test` does not compile. The effect was that every
+        // envelope fix in this change was shadowed on the shipped path:
+        //
+        //   - `[]` was answered `{"error":"missing field: stoa"}` by the
+        //     adapter, never reaching REQUEST_NOT_AN_OBJECT;
+        //   - an N-byte request was fully parsed at ~2N transient heap BEFORE
+        //     MAX_REQUEST_BYTES was evaluated, so the cap bounded only a second
+        //     parse of bytes already paid for — and per PHASE0-FINDINGS §3 an
+        //     allocation failure there aborts the module process.
+        //
+        // This is the same kind of test as
+        // `the_three_handlers_share_one_signature_the_adapter_can_dispatch_over`
+        // directly above, and for the same reason: the adapter is behind
+        // `cfg(logos_scaffold)`, so the only way to pin a property of it from a
+        // gate that runs is to pin the `core` function it is obliged to use.
+        // Build LGX proves the adapter compiles; it asserts nothing about the
+        // order of operations inside it. CI's adapter-derivation gate is what
+        // holds the adapter to CALLING this — the two halves together are the
+        // claim.
+        let stoa = publish_stoa();
+
+        // 1. A non-object earns the ENVELOPE's refusal, not a missing-field
+        //    one. This is the assertion that fails against a bare `from_str`,
+        //    and it is on the message rather than on `is_err` because an array
+        //    is an error either way — the two-explanations-one-answer shape.
+        for not_an_object in ["[]", "7", r#""s""#, "true", "null"] {
+            let refused = stoa_of(not_an_object)
+                .expect_err("the adapter's Stoa read must refuse a non-object");
+            assert_eq!(
+                refused,
+                error_json(REQUEST_NOT_AN_OBJECT),
+                "the adapter's early read must refuse {not_an_object} for its \
+                 SHAPE. A bare `serde_json::from_str` answers \
+                 `missing field: stoa` here, which is the defect."
+            );
+        }
+
+        // 2. The size cap is evaluated BEFORE the parse, which is the whole
+        //    point of a cap that exists to bound allocation. Asserted the only
+        //    way it is observable from a return value — the same way
+        //    `an_oversized_request_is_refused_before_it_is_parsed` does it
+        //    inside `Request::parse`: feed in something both oversized AND
+        //    unparseable, and check which refusal comes back. Only an
+        //    implementation that measures length before calling `from_str` can
+        //    answer with the size refusal.
+        let oversized_and_unparseable = "{".repeat(MAX_REQUEST_BYTES + 1);
+        let refused =
+            stoa_of(&oversized_and_unparseable).expect_err("an oversized request must be refused");
+        assert!(
+            refused.contains("over the") && refused.contains("byte limit"),
+            "the adapter's early read must refuse an oversized request for its \
+             SIZE, got {refused}"
+        );
+        assert!(
+            !refused.contains("invalid JSON"),
+            "the size check must run BEFORE the parse on the adapter's path \
+             too, or the allocation the cap exists to prevent has already \
+             happened, got {refused}"
+        );
+
+        // 3. And it still answers the question the adapter actually asked, so
+        //    none of the above is satisfied by a function that refuses
+        //    everything.
+        let served = stoa_of(&publish_request(r#""body":"anything""#))
+            .expect("a well-formed publish request must yield its Stoa");
+        assert_eq!(served, stoa, "the Stoa read must be the Stoa named");
+
+        // 4. It reads the Stoa and NOTHING else. A forbidden field and a
+        //    missing `body` are the handler's to refuse, and an adapter that
+        //    refused them too would be a second reader of what a publish must
+        //    contain — the shape that produced this defect in the first place.
+        let with_forbidden = stoa_of(&publish_request(r#""author":"someone else""#))
+            .expect("the adapter's read must not run the handler's guards");
+        assert_eq!(with_forbidden, stoa);
+    }
+
     // ─── The request envelope ─────────────────────────────────────────────
     //
     // WHY THESE TESTS LOOK OVERBUILT. Every hostile-input fixture already in
@@ -8390,6 +8753,48 @@ mod tests {
 
     /// A method named, and callable with a raw request string.
     type NamedMethod = (&'static str, fn(&str) -> String);
+
+    /// The body of the root post the publish sweeps seed their log with.
+    ///
+    /// Named once because two functions have to agree about it: the one that
+    /// seeds the log and the one that names the resulting op id. They agree
+    /// because an op id is derived from the signed bytes and nothing varying
+    /// between runs participates — `content-authoring`'s "one identity
+    /// publishes the same Stoa and the same body" scenario is that property.
+    const SWEPT_ROOT_BODY: &str = "a root for the sweeps to reply to";
+
+    /// A fresh log holding one root post by the publish key, so a reply or a
+    /// vote in the sweeps has something that exists to name.
+    fn a_log_seeded_with_a_root() -> MemoryOpLog {
+        let mut log = MemoryOpLog::new();
+        crate::authoring::post(
+            &mut log,
+            &publish_key(),
+            publish_stoa(),
+            SWEPT_ROOT_BODY.to_string(),
+        )
+        .expect("seeding a root post must succeed");
+        log
+    }
+
+    /// The op id [`a_log_seeded_with_a_root`] produces, as hex.
+    ///
+    /// Derived by running the same publish into a throwaway log rather than
+    /// hardcoded: a hardcoded id would be a value read back from the
+    /// implementation once and then never checked again, and the property that
+    /// matters here is that the two logs agree — which re-deriving asserts and
+    /// a literal does not.
+    fn a_seeded_root_id() -> String {
+        crate::authoring::post(
+            &mut MemoryOpLog::new(),
+            &publish_key(),
+            publish_stoa(),
+            SWEPT_ROOT_BODY.to_string(),
+        )
+        .expect("deriving the seeded root id must succeed")
+        .id
+        .to_hex()
+    }
 
     /// Every method whose request has **at least one required field**, so `{}` is a
     /// refusal for it and the two missing-field sweeps can assert on the message.
@@ -8442,21 +8847,43 @@ mod tests {
     /// field of its request, add it to this list and give it a fixture in
     /// [`a_served_request`]. That is an obligation, not a courtesy.**
     ///
-    /// Nothing checks it, and the cost was measured rather than imagined: a
-    /// reviewer built a sixth method — a handler parsing `Value` directly with
-    /// all-optional fields, serving `[]` as a request that named nothing — and the
-    /// whole suite passed. An unlisted method is silently unswept, every sweep
-    /// below goes green without it, and a guarantee about five methods reads as a
-    /// guarantee about the surface.
+    /// **Something checks it, and you will meet the check rather than read about
+    /// it.** `the_sweep_covers_every_request_taking_method_the_dispatch_trait_
+    /// declares` reads the dispatch trait's declaration out of the adapter and
+    /// fails **naming your method** if it is on the surface and not in this
+    /// list. Forgetting the list is a red test, not a silent gap. Leaving it out
+    /// but adding it to [`a_served_request`] fails too, from that function's own
+    /// catch-all arm.
     ///
-    /// The compiler cannot force this. Moving `Request` behind a module boundary
-    /// makes it impossible to hold one without the check, but nothing obliges a
-    /// handler to hold one at all — see
-    /// `the_sixth_method_the_boundary_does_not_stop`, which builds that method and
-    /// demonstrates it. And a source-scanning test was rejected for failing on
-    /// unrelated things (see `design.md`'s rejected alternatives). So the
-    /// obligation is written here, where an author adding a method has to be in
-    /// order to add it.
+    /// **The obligation stays written here anyway, because the check tells you
+    /// *that* you forgot and this paragraph tells you *what to do*.** A test
+    /// naming a method is not a place to record why the list exists.
+    ///
+    /// Why the cost is worth naming: it was measured rather than imagined, twice.
+    /// A reviewer built a sixth method — a handler parsing `Value` directly with
+    /// all-optional fields, serving `[]` as a request that named nothing — and
+    /// the whole suite passed. Later, three publish handlers entered this crate's
+    /// wire surface and did not enter this list, so five sweeps ran green over
+    /// eleven methods while the surface had fourteen, and all three bypassed the
+    /// envelope entirely. **That second one is what the trait sweep now
+    /// prevents**, and it is why the sweep exists.
+    ///
+    /// **What the compiler still cannot force**, so that the sweep is not read as
+    /// covering more than it does: nothing obliges a handler to hold a `Request`
+    /// at all. Moving `Request` behind a module boundary makes it impossible to
+    /// hold one *without* the check, and `the_sixth_method_the_boundary_does_not_
+    /// stop` builds the handler that sidesteps the type and demonstrates it
+    /// serving an array. The trait sweep closes the different half — a method
+    /// reaching the *dispatch surface* unswept — so the two together cover
+    /// "declared on the wire" and leave "written in this crate and never
+    /// dispatched" to review.
+    ///
+    /// (An earlier version of this doc said *"Nothing checks it"* and that *"a
+    /// source-scanning test was rejected"*. Both were true when written and false
+    /// by the time they were read — the change that added the sweep left them
+    /// standing, which is this file's own recorded failure family. `design.md`
+    /// decision 6 records why the earlier rejection does not reach the sweep that
+    /// now exists.)
     ///
     /// Two absences are deliberate rather than forgotten, and both are now
     /// governed by the spec rather than chosen here:
@@ -8562,6 +8989,39 @@ mod tests {
         fn list_stoas_m(r: &str) -> String {
             list_stoas(r, &a_membership_store())
         }
+        // The three `content-authoring` added, and the reason this list exists:
+        // they entered the crate's wire surface and did not enter this list, so
+        // every sweep below ran green without them while all three bypassed the
+        // envelope entirely. Each reads `stoa`, so each is inside the envelope
+        // rule's first case.
+        //
+        // Each takes a log, a key and a delivery sink, so each is a `fn`
+        // building a fresh log per call — the sweeps call these repeatedly and
+        // a log shared across calls would make one sweep's op visible to the
+        // next.
+        //
+        // `publish_reply` and `publish_vote` need their parent and target to be
+        // IN that fresh log, or their served fixture is refused for an absent
+        // parent rather than served — which would make
+        // `an_object_supplying_only_its_required_fields_is_served` assert
+        // against a refusal it cannot tell from an envelope one. So each seeds
+        // the root post first, and `a_seeded_root_id` names what seeding makes.
+        fn publish_post_m(r: &str) -> String {
+            publish_post(
+                r,
+                &mut MemoryOpLog::new(),
+                &publish_key(),
+                &mut ignored_delivery,
+            )
+        }
+        fn publish_reply_m(r: &str) -> String {
+            let mut log = a_log_seeded_with_a_root();
+            publish_reply(r, &mut log, &publish_key(), &mut ignored_delivery)
+        }
+        fn publish_vote_m(r: &str) -> String {
+            let mut log = a_log_seeded_with_a_root();
+            publish_vote(r, &mut log, &publish_key(), &mut ignored_delivery)
+        }
         vec![
             ("ping", ping_m),
             ("get_capabilities", caps_m),
@@ -8576,7 +9036,539 @@ mod tests {
             ("create_stoa", create_m),
             ("join_stoa", join_m),
             ("list_stoas", list_stoas_m),
+            ("publish_post", publish_post_m),
+            ("publish_reply", publish_reply_m),
+            ("publish_vote", publish_vote_m),
         ]
+    }
+
+    /// The adapter's source, read as text at compile time.
+    ///
+    /// `../../src/lib.rs` from this file is `rust-lib/src/lib.rs`, the module
+    /// crate's adapter. Reading it is a *file* operation, so none of what makes
+    /// that file untestable applies: `include_str!` does not compile it, does
+    /// not link it, and is not gated by `cfg(logos_scaffold)`.
+    ///
+    /// **The path survives the Nix build.** `mkLogosModule.nix` stages
+    /// `codegen.rust.crate` — `rust-lib/` — with `cp -r`, and this crate is
+    /// nested inside it, so `rust-lib/src/lib.rs` and
+    /// `rust-lib/dialectica-core/src/wire.rs` are staged together and the
+    /// relative path between them is unchanged. That nesting is load-bearing
+    /// for the build already (see `dialectica-core/Cargo.toml`'s placement
+    /// note); this inherits it rather than adding a new requirement.
+    const ADAPTER_SOURCE: &str = include_str!("../../src/lib.rs");
+
+    /// Every method the dispatch trait declares as taking a request, read out
+    /// of the trait declaration rather than retyped.
+    ///
+    /// # Why this is the surface, and why a signature is the discriminator
+    ///
+    /// `DialecticaModule` is the dispatch contract: `interface: "universal"`
+    /// derives the RPC table from it, so a method not declared there is not on
+    /// the wire and a method that is, is. Within it the shape is uniform and
+    /// total — `fn <name>(&mut self, request: String) -> String` takes a
+    /// request, `fn <name>(&mut self) -> String` takes none, and
+    /// `on_context_ready` takes a context.
+    ///
+    /// **So this is not the source-scanning test that was rejected.** That one
+    /// looked for `serde_json::from_str`, which appears in doc comments, in
+    /// test helpers and in reply *decoders* — three ways to go red for a reason
+    /// it does not name, which is why the `wire-request-envelope` change's
+    /// `design.md` ruled it out. A parameter list is none of those: a doc
+    /// comment does not contain one, and a helper is not declared in this
+    /// trait.
+    ///
+    /// **Nor is it the trait-driven sweep that change called structurally
+    /// impossible.** That one wanted the trait as a *type*, which needs the
+    /// `dialectica` crate (the dependency points the wrong way) and needs
+    /// `cfg(logos_scaffold)` (which no `cargo test` sets). Both objections are
+    /// about *compiling* the trait. Reading its declaration as text needs
+    /// neither — which is what makes this reachable from here, and is the part
+    /// that document did not consider rather than a part it got wrong.
+    ///
+    /// # It CLASSIFIES every method rather than filtering for one shape
+    ///
+    /// This is the correction for a defect review measured rather than
+    /// imagined. The first version matched
+    /// `"&mut self, request: String) -> String;"` against a single trimmed
+    /// line, and a reviewer defeated it **two ways, both silent**, by adding
+    /// `publish_moderation` to the trait and watching this gate stay green:
+    ///
+    /// - a signature long enough that rustfmt wraps it across four lines, so no
+    ///   single line carried the pattern; and
+    /// - a parameter named `req` rather than `request`, which is a
+    ///   byte-for-byte identical dispatch surface because a parameter name has
+    ///   no compiler or codegen consequence.
+    ///
+    /// A filter cannot catch either, because **a filter's failure mode is
+    /// silence**: an unrecognised method is simply absent from the result, and
+    /// the `!found.is_empty()` backstop never fires while the other fourteen
+    /// still parse. That backstop only ever caught a *total* change of shape,
+    /// never the partial one that actually happens — one method written
+    /// differently from the rest.
+    ///
+    /// So this enumerates **every** `fn` in the trait and puts each into
+    /// exactly one bucket: takes a request, takes none, or takes something
+    /// else. A method matching no bucket is a **loud panic naming it**, not an
+    /// omission. That is what turns the parser's own blind spot from a silent
+    /// pass into a failure, and it is why the two evasions above are now both
+    /// caught by one mechanism rather than by two patches.
+    ///
+    /// # Its preconditions, stated because a guard with undocumented limits is
+    /// worse than one known to be partial
+    ///
+    /// It assumes the trait declaration is Rust that rustfmt produced and that
+    /// a request parameter is typed `String` by value. A method taking `&str`,
+    /// or `impl Into<String>`, or two parameters, lands in the "something else"
+    /// bucket and **fails loudly** rather than passing — which is the correct
+    /// direction for a shape nobody has considered, and is the property the
+    /// first version lacked.
+    ///
+    /// **A declaration not ending in `;` is a fourth bucket, not a
+    /// precondition.** An earlier version listed "a declaration ending in `;`"
+    /// alongside the other two preconditions and claimed *"anything else fails
+    /// loudly instead of passing"*. That was false of this one: the `;`-less
+    /// arm was a bare `continue`, so a defaulted method added to the trait
+    /// **passed** this gate — measured by design review, which added a
+    /// defaulted `publish_moderation` and watched the sweep stay green. Worse,
+    /// a defaulted method whose body happened to contain a `;` failed in the
+    /// *returns* bucket, telling the reader its return type was unrecognised
+    /// when what was unrecognised was that it had a body at all. Both are the
+    /// *"a filter's failure mode is silence"* shape this function was rewritten
+    /// to eliminate, surviving in the one branch the rewrite did not convert.
+    /// A defaulted method is now recognised **as defaulted**, whether or not
+    /// its body contains a `;`, and checked against the exclusion below.
+    fn the_dispatch_traits_request_taking_methods() -> Vec<String> {
+        request_taking_methods_declared_in(ADAPTER_SOURCE)
+    }
+
+    /// The methods the generator's premise excuses from the wire, by name.
+    ///
+    /// The premise is upstream behaviour, not a property of this module, so it
+    /// is stated with its citation rather than asserted:
+    /// `logos-module-builder` is pinned in `dialectica/flake.nix` at
+    /// `9f420c2901e35a16ba8fc77383e796480000a1d2`, and the `lidl-gen` Rust
+    /// frontend it supplies skips a trait method carrying a default body when
+    /// deriving the `.lidl` — *"required methods (no default body) are the
+    /// module's IPC methods. Methods WITH default bodies (e.g. the framework's
+    /// `on_context_ready`) are not part of the contract."*
+    ///
+    /// **Why the list is by name rather than a filter.** A filter would let any
+    /// future defaulted method leave the swept surface silently, which is the
+    /// failure this whole function exists to prevent. Naming them means a
+    /// defaulted method arriving in the trait turns this test **red naming
+    /// it**, and whoever adds it has to say out loud that the generator's
+    /// premise covers it — which is the event a pin bump would make false, and
+    /// the one `module-wire-contract` requires be visible rather than silent.
+    const NOT_EMITTED_ONTO_THE_WIRE: [&str; 1] = ["on_context_ready"];
+
+    /// The classifier itself, over source text rather than over
+    /// `ADAPTER_SOURCE`.
+    ///
+    /// **Taking the source as a parameter is what makes the buckets
+    /// testable.** While it read the `include_str!` constant directly, the only
+    /// way to exercise a branch was to edit `dialectica/rust-lib/src/lib.rs`
+    /// and revert it — a mutation probe, which is how the silent `;` arm was
+    /// found and also how it stayed unfixed, since no committed test could
+    /// reach it. `the_classifier_buckets_each_declaration_shape` now feeds
+    /// synthetic declarations through this and asserts each bucket, including
+    /// the two shapes that used to pass or misdiagnose.
+    fn request_taking_methods_declared_in(source: &str) -> Vec<String> {
+        // The trait DECLARATION, not the impl — the impl repeats every
+        // signature, and counting both would double every name. The declaration
+        // is also the authority: a method declared and not implemented does not
+        // compile, so it cannot be the shorter of the two.
+        let (_, after) = source
+            .split_once("pub trait DialecticaModule")
+            .expect("the adapter must declare the dispatch trait");
+        let (body, _) = after
+            .split_once("\n}\n")
+            .expect("the trait declaration must be closed by a `}` at column 0");
+
+        // Strip doc comments and line comments BEFORE anything else: a `fn` or
+        // a `;` inside prose would otherwise be read as code. Then collapse all
+        // whitespace, so a signature rustfmt wrapped across four lines and one
+        // it left on a single line are the same string by the time it is
+        // matched. This is what closes the wrapped-signature evasion, and it
+        // closes it for every future method rather than for the one that was
+        // probed.
+        let code: String = body
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.starts_with("//"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let normalised = code.split_whitespace().collect::<Vec<_>>().join(" ");
+
+        let mut found = Vec::new();
+        let mut unclassified = Vec::new();
+        let mut defaulted: Vec<String> = Vec::new();
+
+        // Split on `fn ` rather than on lines, so wrapping is irrelevant.
+        for piece in normalised.split("fn ").skip(1) {
+            let Some((name, rest)) = piece.split_once('(') else {
+                unclassified.push(format!("{piece} (no parameter list)"));
+                continue;
+            };
+            let name = name.trim();
+
+            // Everything between the parens, whitespace already normalised.
+            let Some((params, after_params)) = rest.split_once(')') else {
+                unclassified.push(format!("{name} (parameter list is not closed)"));
+                continue;
+            };
+
+            // A DEFAULTED METHOD IS ITS OWN BUCKET, decided here — before the
+            // return type is read — because what distinguishes it is having a
+            // body, and reading a body as a return type is what produced the
+            // wrong diagnosis this arm used to give. `{` before `;` is a body;
+            // `;` first is a declaration. Deciding it on whichever comes first
+            // is what makes the recognition independent of whether the body
+            // happens to contain a `;`.
+            let ends_declaration = after_params.find(';');
+            let opens_body = after_params.find('{');
+            let ret = match (ends_declaration, opens_body) {
+                (Some(semi), Some(brace)) if brace < semi => {
+                    defaulted.push(name.to_string());
+                    continue;
+                }
+                (Some(semi), _) => &after_params[..semi],
+                (None, Some(_)) => {
+                    defaulted.push(name.to_string());
+                    continue;
+                }
+                (None, None) => {
+                    unclassified.push(format!("{name} (neither `;` nor a body)"));
+                    continue;
+                }
+            };
+            if ret.trim() != "-> String" {
+                unclassified.push(format!("{name} (returns `{}`)", ret.trim()));
+                continue;
+            }
+
+            // Drop the receiver; what is left is the parameter list.
+            //
+            // The TRAILING COMMA is stripped because rustfmt emits one on every
+            // wrapped signature — `fn f(\n &mut self,\n request: String,\n)` —
+            // and it is the same declaration as the unwrapped form. Not
+            // stripping it was not merely cosmetic: it put a perfectly ordinary
+            // wrapped method into the unclassified bucket, so the gate failed
+            // for the wrong reason and an author would have "fixed" it by
+            // teaching the parser a shape it already understood.
+            let params = params.trim().trim_end_matches(',').trim();
+            let rest_of_params = match params.strip_prefix("&mut self") {
+                Some(r) => r.trim_start().trim_start_matches(',').trim(),
+                None => {
+                    unclassified.push(format!("{name} (receiver `{params}`)"));
+                    continue;
+                }
+            };
+
+            if rest_of_params.is_empty() {
+                // Takes no request — the envelope rule's second case. Outside
+                // the rule with nothing to check, and `version` is the one.
+                continue;
+            }
+
+            // MATCHED ON THE TYPE, NOT THE NAME. `request: String` and
+            // `req: String` are the same dispatch surface, so keying on the
+            // name is what let a one-word rename evade this. The name is
+            // ignored entirely; only `: String` decides.
+            match rest_of_params.split_once(':') {
+                Some((_param_name, ty)) if ty.trim() == "String" => {
+                    found.push(name.to_string());
+                }
+                _ => unclassified.push(format!("{name} (parameters `{rest_of_params}`)")),
+            }
+        }
+
+        // THE DEFAULTED BUCKET, STATED RATHER THAN DROPPED. A defaulted method
+        // is off the wire only because the pinned generator does not emit it,
+        // which is upstream behaviour this crate cannot observe. So the premise
+        // is named in the message with its citation, and the set it excuses is
+        // named in `NOT_EMITTED_ONTO_THE_WIRE` — a new defaulted method is red
+        // here rather than an unnoticed subtraction from the swept surface.
+        // `module-wire-contract` requires exactly this: the check SHALL be able
+        // to state the assumption and SHALL fail visibly rather than silently.
+        let unexcused: Vec<&String> = defaulted
+            .iter()
+            .filter(|name| !NOT_EMITTED_ONTO_THE_WIRE.contains(&name.as_str()))
+            .collect();
+        assert!(
+            unexcused.is_empty(),
+            "the dispatch trait declares method(s) with a DEFAULT BODY that \
+             this check does not excuse: {unexcused:?}\n\nA defaulted method is \
+             treated as off the wire on an upstream premise, not on anything \
+             this crate can see: `logos-module-builder` is pinned in \
+             `dialectica/flake.nix` at \
+             `9f420c2901e35a16ba8fc77383e796480000a1d2`, whose `lidl-gen` Rust \
+             frontend skips a trait method carrying a default body when \
+             deriving the `.lidl` — \"required methods (no default body) are \
+             the module's IPC methods. Methods WITH default bodies (e.g. the \
+             framework's `on_context_ready`) are not part of the contract.\"\n\n\
+             If that premise still holds for the method(s) above, add each to \
+             `NOT_EMITTED_ONTO_THE_WIRE` and say so. If the pin has moved, \
+             re-read the frontend first: a generator that emits defaulted \
+             methods puts them on the wire unswept, which is what this \
+             assertion exists to make visible rather than silent."
+        );
+
+        // THE LOUD FAILURE THAT REPLACES A SILENT OMISSION. A method whose
+        // shape this parser does not recognise is the exact case that made the
+        // first version evadable, so it panics NAMING the method rather than
+        // leaving it out of the result. Erring toward a red test on an
+        // unfamiliar shape is the correct direction: the cost is an author
+        // teaching this function one new shape, and the alternative is a
+        // dispatch method reaching the wire unswept.
+        assert!(
+            unclassified.is_empty(),
+            "the dispatch trait declares method(s) whose shape this parser does \
+             not recognise: {unclassified:?}\n\nIt cannot tell whether they read \
+             a request, so it will not silently assume they do not. Teach \
+             `the_dispatch_traits_request_taking_methods` the new shape, and add \
+             the method to `every_request_taking_method` if it reads a field of \
+             its request."
+        );
+
+        found.sort();
+        assert!(
+            !found.is_empty(),
+            "no request-taking method was found in the trait declaration — the \
+             signature shape this test reads by has changed, so it is now \
+             measuring nothing rather than failing"
+        );
+        found
+    }
+
+    #[test]
+    fn the_sweep_covers_every_request_taking_method_the_dispatch_trait_declares() {
+        // THE TEST THAT MAKES THE LIST UNABLE TO GO STALE, and the defect it
+        // exists for is measured rather than imagined: `publish_post`,
+        // `publish_reply` and `publish_vote` entered this crate's wire surface
+        // and did not enter `every_request_taking_method`, so five sweeps ran
+        // green over eleven methods while the surface had fourteen — and all
+        // three bypassed the envelope.
+        //
+        // It is the fourth copy of one guard becoming a data structure. That
+        // list's doc said "ADD YOUR METHOD HERE ... Nothing checks it".
+        // Something checks it now — this — and what it checks against is the
+        // dispatch trait rather than a second hand-written list that could go
+        // stale the same way.
+        //
+        // `every_request_taking_method`'s doc says so too, in the present
+        // tense. It did not for one commit, which readability review caught:
+        // the change that made "nothing checks it" false left the sentence
+        // standing, so an author adding a method read the doc first and learned
+        // the opposite of what holds. Keep the two in step — a test whose
+        // premise is contradicted by the doc it cites is worse than either
+        // alone.
+        //
+        // The exclusion is NAMED rather than filtered silently, because the
+        // spec names it: the envelope rule's third case, a method that takes a
+        // request and reads no field of it. `version` is the second case and is
+        // outside by signature, so it never reaches this list at all.
+        //
+        // A new method arriving in the trait is therefore a RED TEST naming it,
+        // not a silent drop in coverage.
+        const OUTSIDE_THE_ENVELOPE_RULE: [&str; 1] = [
+            // "A method that takes a request and reads no field of it —
+            // passing it through as opaque text — is outside it." The probe's
+            // own requirement obliges it to reach its panic for every request
+            // shape, so the two rules cannot both reach it and that one wins.
+            "panic_probe",
+        ];
+
+        let expected: Vec<String> = the_dispatch_traits_request_taking_methods()
+            .into_iter()
+            .filter(|name| !OUTSIDE_THE_ENVELOPE_RULE.contains(&name.as_str()))
+            .collect();
+        let swept: Vec<String> = every_request_taking_method()
+            .into_iter()
+            .map(|(name, _)| name.to_string())
+            .collect();
+
+        // `parse_channel_id` is in the sweep and is not a trait method: it is
+        // the request-reading half of `delivery_channel_exists`, where that
+        // method's envelope check actually lives and the whole of it a test
+        // binary can reach (`modules()` calls `lp_*` symbols undefined here).
+        // So the sweep covers the trait method THROUGH it, and the mapping is
+        // stated rather than left to look like a name mismatch.
+        let covered_under_another_name = |name: &str| match name {
+            "delivery_channel_exists" => swept.iter().any(|s| s == "parse_channel_id"),
+            _ => false,
+        };
+
+        let missing: Vec<&String> = expected
+            .iter()
+            .filter(|name| !swept.contains(name) && !covered_under_another_name(name))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "these methods are on the dispatch surface and are NOT swept for \
+             the request envelope: {missing:?}\n\nAdd each to \
+             `every_request_taking_method` and give it a fixture in \
+             `a_served_request`. An unswept method is one no test checks the \
+             size cap, the non-object refusal or the three distinct messages \
+             for."
+        );
+    }
+
+    /// A synthetic trait declaration, so a bucket can be exercised without
+    /// editing the adapter and reverting it.
+    ///
+    /// The `\n}\n` terminator and the `pub trait DialecticaModule` opener are
+    /// what the classifier splits on, so both are spelled here exactly as the
+    /// real declaration carries them.
+    fn a_trait_declaring(methods: &str) -> String {
+        format!("pub trait DialecticaModule: Send + 'static {{\n{methods}\n}}\n")
+    }
+
+    #[test]
+    fn a_defaulted_method_is_recognised_as_defaulted_whether_or_not_its_body_has_a_semicolon() {
+        // THE REGRESSION TEST FOR THE SILENT PASS. Design review measured both
+        // halves of this by adding a defaulted `publish_moderation` to the real
+        // trait: the body WITHOUT a `;` passed the sweep outright, and the body
+        // WITH one failed in the `returns` bucket reporting
+        // `publish_moderation (returns \`-> String { let _ = request\`)` —
+        // diagnosing a return type when what was unrecognised was that the
+        // method had a body. Both shapes must now land in the defaulted bucket,
+        // which is what makes the recognition independent of where the first
+        // `;` happens to fall.
+        for body in [
+            "{ let _ = request; String::new() }",
+            "{ request }",
+            "{}",
+            "{ let a = 1; let b = 2; String::new() }",
+        ] {
+            let source = a_trait_declaring(&format!(
+                "    fn version(&mut self) -> String;\n\
+                 \x20   fn ping(&mut self, request: String) -> String;\n\
+                 \x20   fn publish_moderation(&mut self, request: String) -> String {body}"
+            ));
+            let outcome = std::panic::catch_unwind(|| request_taking_methods_declared_in(&source));
+            let payload = outcome.expect_err(&format!(
+                "a defaulted method must not pass silently — body {body} did"
+            ));
+            let message = payload
+                .downcast_ref::<String>()
+                .expect("the panic payload must be a String");
+            // WHICH panic matters, not merely that one happened. The `;`-body
+            // shape already panicked before this fix — in the RETURNS bucket,
+            // with the wrong diagnosis. Asserting the defaulted message is what
+            // distinguishes the fix from the defect it replaces, and asserting
+            // the absence of the returns wording is what stops a future
+            // reordering from quietly restoring the misdiagnosis.
+            assert!(
+                message.contains("with a DEFAULT BODY that this check does not excuse"),
+                "body {body} must be diagnosed as defaulted, got: {message}"
+            );
+            assert!(
+                !message.contains("(returns `"),
+                "body {body} must not be diagnosed by its return type, got: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_defaulted_bucket_excuses_only_the_methods_the_generators_premise_covers() {
+        // `on_context_ready` is defaulted and IS excused, so the real
+        // declaration's shape passes. This is the other direction of the test
+        // above: the bucket must not be so loud that the legitimate exclusion
+        // fails too.
+        let source = a_trait_declaring(
+            "    fn ping(&mut self, request: String) -> String;\n\
+             \x20   fn on_context_ready(&mut self, _ctx: &RustModuleContext) {}",
+        );
+        assert_eq!(request_taking_methods_declared_in(&source), vec!["ping"]);
+    }
+
+    #[test]
+    fn the_classifier_buckets_each_declaration_shape() {
+        // The buckets that were already right, pinned from a committed test
+        // rather than from a mutation probe someone has to remember to revert.
+        // Each of these used to be reachable only by editing the adapter.
+        let request_taking = a_trait_declaring(
+            "    fn ping(&mut self, request: String) -> String;\n\
+             \x20   fn renamed(&mut self, req: String) -> String;\n\
+             \x20   fn version(&mut self) -> String;",
+        );
+        // The rename evasion stays closed: matched on the TYPE, not the name.
+        // `version` takes no request, so it is outside by signature.
+        assert_eq!(
+            request_taking_methods_declared_in(&request_taking),
+            vec!["ping", "renamed"]
+        );
+
+        // A wrapped signature is the same declaration once whitespace is
+        // normalised, trailing comma included.
+        let wrapped = a_trait_declaring(
+            "    fn wrapped(\n        &mut self,\n        request: String,\n    ) -> String;\n\
+             \x20   fn ping(&mut self, request: String) -> String;",
+        );
+        assert_eq!(
+            request_taking_methods_declared_in(&wrapped),
+            vec!["ping", "wrapped"]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "whose shape this parser does not recognise")]
+    fn a_borrowed_request_parameter_fails_loudly_rather_than_passing() {
+        // `request: &str` is the third evasion decision 6 names. It must reach
+        // the unclassified panic, not be dropped.
+        let source = a_trait_declaring(
+            "    fn ping(&mut self, request: String) -> String;\n\
+             \x20   fn borrowed(&mut self, request: &str) -> String;",
+        );
+        let _ = request_taking_methods_declared_in(&source);
+    }
+
+    #[test]
+    #[should_panic(expected = "with a DEFAULT BODY that this check does not excuse")]
+    fn an_unexcused_defaulted_method_names_itself_and_cites_the_generator_pin() {
+        // The message must NAME the method and STATE the premise with its
+        // citation, which is what `module-wire-contract` requires of anything
+        // checking this contract's coverage of the surface. The `should_panic`
+        // string pins the first half; `the_defaulted_panic_states_the_premise_
+        // and_its_citation` pins the rest, because a `should_panic` matcher
+        // reads a prefix and would not notice the citation being dropped.
+        let source = a_trait_declaring(
+            "    fn ping(&mut self, request: String) -> String;\n\
+             \x20   fn publish_moderation(&mut self, request: String) -> String { request }",
+        );
+        let _ = request_taking_methods_declared_in(&source);
+    }
+
+    #[test]
+    fn the_defaulted_panic_states_the_premise_and_its_citation() {
+        // A message that fails visibly is not enough on its own: the spec asks
+        // the check to be able to STATE the assumption it rests on. So the
+        // panic must carry the generator, the pinned revision and the method's
+        // name — a reader who has just bumped the pin needs all three to know
+        // whether the premise still holds. Asserted on the message rather than
+        // trusted to the doc comment, because a doc comment is not what a
+        // failing author reads.
+        let source = a_trait_declaring(
+            "    fn ping(&mut self, request: String) -> String;\n\
+             \x20   fn publish_moderation(&mut self, request: String) -> String { request }",
+        );
+        let panic_message = std::panic::catch_unwind(|| request_taking_methods_declared_in(&source))
+            .expect_err("an unexcused defaulted method must panic");
+        let message = panic_message
+            .downcast_ref::<String>()
+            .expect("the panic payload must be a String");
+        for required in [
+            "publish_moderation",
+            "lidl-gen",
+            "9f420c2901e35a16ba8fc77383e796480000a1d2",
+            "NOT_EMITTED_ONTO_THE_WIRE",
+        ] {
+            assert!(
+                message.contains(required),
+                "the defaulted panic must state {required:?}, got: {message}"
+            );
+        }
     }
 
     /// A request each method would serve, so a refusal in the sweeps below is
@@ -8624,6 +9616,18 @@ mod tests {
                 join_request(&genesis, &genesis.address().unwrap())
             }
             "list_stoas" => "{}".to_string(),
+            // The three publish handlers. `publish_post` needs only a body; the
+            // other two also name an op that must EXIST in the log their
+            // wrapper seeds, which `a_seeded_root_id` supplies.
+            "publish_post" => publish_request(r#""body":"swept""#),
+            "publish_reply" => publish_request(&format!(
+                r#""parent":"{}","body":"swept reply""#,
+                a_seeded_root_id()
+            )),
+            "publish_vote" => publish_request(&format!(
+                r#""target":"{}","direction":"up""#,
+                a_seeded_root_id()
+            )),
             other => panic!("no served request known for {other}"),
         }
     }
@@ -8864,12 +9868,17 @@ mod tests {
 
     #[test]
     fn every_request_taking_method_refuses_an_oversized_request() {
-        // NO SPEC: the spec set says nothing about a size limit on a request —
-        // not that there is one, not that there is not. This is therefore an
-        // ABSENT decision rather than a rejected one, and the number is
-        // `dev-writer`'s choice pending the spec-writer: 4 MiB, derived in
-        // `MAX_REQUEST_BYTES`'s doc from what a legitimate composed op can
-        // carry.
+        // SPECIFIED, as of this change: `module-wire-contract`'s "A request is
+        // bounded, and the bound is checked before the request is parsed". This
+        // comment carried a `NO SPEC:` marker until then — the limit was an
+        // ABSENT decision, and pinning it across the whole surface is what made
+        // leaving it absent expensive.
+        //
+        // The spec deliberately does NOT fix the number, only that one exists,
+        // that it is checked first, and that it is bracketed: above the largest
+        // op `op-format` permits, materially below what costs the module its
+        // process. 4 MiB is where `MAX_REQUEST_BYTES`'s doc puts it within that
+        // bracket, with the arithmetic shown.
         //
         // What made it necessary is measured rather than theorised: a 64 MiB
         // request padded with one ignored field was ACCEPTED and served, at
@@ -8882,6 +9891,33 @@ mod tests {
         // the envelope bounds every request-taking method, including one written
         // next month. If this test ever has to be edited to exempt a method,
         // that is the signal that the method reached around the type.
+        //
+        // WHAT THIS TEST OWNS, AND WHAT IT DOES NOT — read this before trimming
+        // it or copying its shape for a fifteenth method.
+        //
+        // It owns EVERY METHOD IS BOUNDED. It does NOT own the ordering, and it
+        // cannot: the ~2N-heap paragraph above is only true if the length check
+        // runs BEFORE the parse, and this fixture is VALID JSON, so both
+        // orderings return the size refusal for it and the assertion below
+        // cannot tell them apart. Measured rather than reasoned: moving
+        // `request.len() > MAX_REQUEST_BYTES` to after `serde_json::from_str` in
+        // `wire/request.rs` leaves this test GREEN.
+        //
+        // The ordering is owned by two tests that feed in something both
+        // oversized AND UNPARSEABLE, which is the only way the order is
+        // observable from a return value — `wire::request::tests::
+        // an_oversized_request_is_refused_before_it_is_parsed` inside
+        // `Request::parse`, and
+        // `the_adapters_early_stoa_read_crosses_the_same_envelope_the_handler_does`
+        // on the adapter's path. That same mutation turns both red naming
+        // `invalid JSON`. So the coverage is complete across the three tests;
+        // what was wrong was this comment implying one test carried all of it.
+        //
+        // The general lesson, and the reason it is written here rather than in a
+        // findings file that is deleted at merge: a fixture on which two
+        // implementations agree cannot distinguish them. "Refused: yes" is true
+        // under both orderings, so a test that asserts only the refusal is
+        // measuring the cap's existence and nothing about when it is paid.
         let oversized = format!(r#"{{"junk":"{}"}}"#, "x".repeat(MAX_REQUEST_BYTES));
         assert!(oversized.len() > MAX_REQUEST_BYTES);
         for (name, method) in every_request_taking_method() {
@@ -9117,6 +10153,56 @@ mod tests {
                 "includeHidden",
                 feed_request(r#""includeHidden":null"#),
                 Box::new(|r: &str| list_threads(r, &log_with_body("hello"), &feed_genesis())),
+            ),
+            // The publish path's own required fields, added with the handlers
+            // themselves. All three are strings whose declared type does not
+            // admit `null`, so all three are reading 3 — and the assertion that
+            // matters is the one this sweep makes for every field: never
+            // reported as missing, and exactly one outcome, so a field cannot
+            // quietly acquire a second reading later.
+            //
+            // These PASSED on the unfixed code, which is worth saying: the
+            // three handlers' null readings were already right. What was wrong
+            // was the envelope around them, and this sweep is coverage of a
+            // property rather than a regression test for a defect.
+            (
+                "body",
+                publish_request(r#""body":null"#),
+                Box::new(|r: &str| {
+                    publish_post(
+                        r,
+                        &mut MemoryOpLog::new(),
+                        &publish_key(),
+                        &mut ignored_delivery,
+                    )
+                }),
+            ),
+            (
+                "parent",
+                publish_request(r#""parent":null,"body":"x""#),
+                Box::new(|r: &str| {
+                    publish_reply(
+                        r,
+                        &mut a_log_seeded_with_a_root(),
+                        &publish_key(),
+                        &mut ignored_delivery,
+                    )
+                }),
+            ),
+            (
+                "direction",
+                publish_request(&format!(
+                    r#""target":"{}","direction":null"#,
+                    a_seeded_root_id()
+                )),
+                Box::new(|r: &str| {
+                    publish_vote(
+                        r,
+                        &mut a_log_seeded_with_a_root(),
+                        &publish_key(),
+                        &mut ignored_delivery,
+                    )
+                }),
             ),
         ];
 
