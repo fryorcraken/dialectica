@@ -86,7 +86,12 @@ false — **F3**.
 
 ## Findings
 
-### F1 — `design.md` records a signature the code does not have, and the dead end that changed it is missing from Decisions. (serious: code contradicts a recorded decision)
+- [x] **`dev-writer`** — **F1** — `design.md` records a signature the code does not have, and the dead end that changed it is missing from Decisions
+      **Verified on conversion** (2026-09-13), all four parts: `design.md` now states
+      `&mut dyn FnMut(&OpId)` and `Published { id, appended }`, carries a snippet that
+      matches the real code, and records the `FnOnce` dead end in Decisions including the
+      rustc-probe correction. The snippet was updated again by the panicking-sink fix, so
+      it still matches — see readability R3.
 
 **For:** `dev-writer`
 
@@ -155,7 +160,21 @@ neither of which exists.
 
 ---
 
-### F2 — §11.1's "untestable as specified" is a claim about the chosen design, not about the capability, and the seam that would make it testable is the one the sibling handler already uses. (serious: the exact shape of the error this change's history proves)
+- [x] **`dev-writer`** — **F2's documentation half** — §11.1's "untestable as specified" is a claim about the chosen design, not about the capability
+      **Verified on conversion** (2026-09-13): `tasks.md` §11.1 now names the old
+      "structurally cannot" reason as wrong, cites `get_capabilities`'s `lookup` closure
+      and `capability_for` tested against a *failing* lookup as the counter-example, and
+      states the narrower honest claim. The cost is recorded beside the benefit with the
+      closure alternative named as not-taken, and the section says what the spec should
+      not be told.
+
+- [ ] **`spec-writer`** + **`dev-writer`** — **F2's routing question** — whether to close the no-identity gap in code
+      **Still open, and deliberately so** (2026-09-13): swapping `&SecretKey` for a
+      fallible key-supplier would trade away the structural "a publish creates no key
+      material" property, which is a decision to take on purpose with the `spec-writer`
+      rather than as a review fix. `tasks.md` §11.1 sets out the three routes. The code is
+      unchanged — handlers still take `&crate::identity::SecretKey` — so the requirement
+      remains undischarged in core, which is what the unticked box records.
 
 **For:** `dev-writer` (and `spec-writer` for the routing question §11.1 already raises)
 
@@ -235,7 +254,11 @@ take on purpose with the spec-writer rather than as a review fix.
 
 ---
 
-### F3 — §11's claim that the spec does not choose `address` is false; `spec.md` chooses it explicitly. (serious: a false claim licensing rework)
+- [x] **`dev-writer`** — **F3** — §11's claim that the spec does not choose `address` is false; `spec.md` chooses it explicitly
+      **Verified on conversion** (2026-09-13), in both places it was said: `tasks.md` §11
+      now quotes the spec's "or an address" and records the scenario-versus-requirement
+      misread, and the `NO SPEC:` marker names `author`/`identity`/`key`/`address` as
+      specified while marking only `thread` as the chosen one.
 
 **For:** `dev-writer`
 
@@ -285,7 +308,20 @@ requirement they were reading already said.
 
 ---
 
-### F4 — Four decisions the code took that no document records. (gap)
+- [x] **`dev-writer`** — **F4 (a), (b), (d)** — decisions the code took that no document records
+      **Verified on conversion** (2026-09-13): (a) the `unordered` arrival has its own
+      Decisions entry naming the three constructors and the sort-after cost; (b) is folded
+      into the thread entry, noting `reply` refuses a non-post parent first and that
+      `thread_of` has one caller, with the unrepresentable-arm reshape deferred alongside
+      A2/A3; (d) the double-`stoa`-read is now a named decision rather than only a code
+      comment.
+
+- [ ] **`spec-writer`** — **F4 (c)** — no requirement owns `Refusal::Storage`
+      **Still open, verified on conversion** (2026-09-13): `design.md` has the
+      `Refusal::Storage` entry and routes the question, but grepping the spec delta for
+      storage finds **nothing** — no requirement says a storage failure is a
+      distinguishable refusal rather than an absent parent. The behaviour is implemented
+      and tested; it is simply uncontracted.
 
 **For:** `dev-writer` for a, b and d; `spec-writer` for c.
 
@@ -369,7 +405,11 @@ and is what I used.
 
 ---
 
-### F5 — `UI-BRIEF.md` tells the designer a vote count is safe to show; nothing in the wire API can supply one. (moderate: a live document designed against)
+- [x] **`dev-writer`** — **F5** — `UI-BRIEF.md` tells the designer a vote count is safe to show; nothing in the wire API can supply one
+      **Verified on conversion** (2026-09-13): the bullet now reads "**Not available yet,
+      though it would be safe:**", and no wire method returns a count — `publish_vote`
+      replies with an op id and `wasNew` only, and its doc comment says so. The live
+      document no longer promises the designer a field the API cannot fill.
 
 **For:** `dev-writer`
 
@@ -418,7 +458,30 @@ wrong place still found the right thing because you checked the premise first.
 
 ---
 
-### F6 — A publish whose delivery panics answers with the error shape, contradicting the spec scenario, and the departure is recorded nowhere. (serious: the code contradicts the contract, and the test's name hides it)
+- [x] **`dev-writer`** — **F6** — A publish whose delivery panics answers with the error shape, contradicting the spec scenario
+      **Fixed** (2026-09-13). Same defect as `findings/spec-test.md` entry 1, found
+      independently by two reviewers; both close together. The owner settled it: catch the
+      panic at the handoff and report the publish as successful. **The requirement was
+      right and the code was wrong** — so of the three routes offered, the outcome matches
+      (3) only in that the behaviour was kept for the op, and not in its reasoning: the
+      reply carries no fault at all, because there is no fault to report about a published
+      op.
+      Route (1), moving `deliver` outside `guarded`, is rejected on the PHASE0-FINDINGS §3
+      measurement — an unguarded panic aborts the module process, costs the caller a
+      20-second timeout, and makes every later call report `MODULE_NOT_LOADED`.
+      Route (2), scoping the requirement to a sink that returns rather than unwinds, is
+      ruled out by `delivery_module.lidl`: the outcome arrives asynchronously, so a
+      synchronous reply could never carry it, and the distinction would have contracted
+      nothing informative. **This is the point where the reviewer's sharpest argument —
+      "nothing in this API distinguishes declined from panicked" — turned out to argue for
+      the fix rather than against it**: if neither can be reported synchronously, neither
+      belongs in the reply.
+      Implemented as `wire::delivered_and_published`; pinned by
+      `a_panicking_delivery_sink_still_reports_the_op_as_published_on_all_three_handlers`,
+      which fails without the fix. Reasoning is in `design.md` Decisions and
+      `docs/PLAN.md` §9.2, which carries the obligation handed to `op-transport`. The
+      documents that described this as an open question — `tasks.md` §11 and the sibling
+      test's comment — were updated in the same change.
 
 **For:** `spec-writer` (the requirement is the thing to settle), cc `dev-writer`
 
@@ -495,7 +558,11 @@ needs care that a sink panic still cannot abort the module process, which is wha
 
 ---
 
-### F7 — `docs/PLAN.md` shed the behaviour correctly, but kept a fresh copy of reasoning that now also lives in `proposal.md`. (moderate)
+- [x] **`dev-writer`** — **F7** — `docs/PLAN.md` shed the behaviour correctly, but kept a fresh copy of reasoning that now also lives in `proposal.md`
+      **Verified on conversion** (2026-09-13): split along the line the reviewer drew.
+      `design.md` carries the declination reasoning as its own content and says so in as
+      many words ("this is the one place that reasoning lives"); PLAN keeps the
+      forward-looking half. No second copy of the reasoning survives to drift.
 
 **For:** `dev-writer`
 

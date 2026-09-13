@@ -15,7 +15,22 @@ is clean at the time of writing and the only file added is this one.
 
 ---
 
-## S1 — A 153,601-byte body publishes successfully and permanently bricks every feed read on the store
+- [x] **`dev-writer`** — **S1** — A 153,601-byte body publishes successfully and permanently bricks every feed read on the store
+      **Verified on conversion** (2026-09-13): `Refusal::BodyTooLong { len, cap }`
+      exists at `authoring.rs:125` with its `Display` arm at `:160`;
+      `body_within_cap` (`authoring.rs:214`) is its own function called from `post`
+      (`:245`) and `reply` (`:332`), before the store read in both; all four named
+      tests exist. Same fix as C1.
+      **Scope worth recording:** the guard is at the `authoring` layer, not the
+      encoder — `op.rs`'s `put_bytes` still writes any length, so a caller building
+      an `Op` directly can still produce undecodable bytes. The findings defend that
+      choice explicitly, so it is a recorded scope decision rather than an unmet
+      claim.
+
+- [ ] **`spec-writer`** — **S1's missing requirement** — no requirement bounds a body from above
+      **Still open, verified on conversion** (2026-09-13): the same gap as C1's spec
+      note and `findings/spec-test.md` entry 3. The spec has a behaviour to ratify
+      and has not ratified it.
 
 **For:** `dev-writer` (the fix), `spec-writer` (the missing requirement),
 `tester` (the boundary tested on one side only)
@@ -138,7 +153,21 @@ something the green gate structurally could not see.
 
 ---
 
-## S2 — Lead 1 re-measured: the sweep reaches every parser, but the tasks.md table's conclusion does not hold, and `required_direction`'s refusal path is unexercised
+- [x] **`dev-writer`** — **S2's documentation half** — `tasks.md` §10's table claimed more than it measured
+      **Verified on conversion** (2026-09-13): `tasks.md` §10 now says the table
+      measures *reachability* and not refusal-path coverage, records that a `panic!`
+      on only the `Err` arm still passes, and names the missing fixtures. The
+      `dev-writer` side needed no code change, which is what the finding says.
+
+- [ ] **`tester`** — **S2's suite gap** — no fixture pairs a valid Stoa with a wrong-typed `direction`, and the refusal sweep cannot tell a refusal from a panic
+      **Still open, verified on conversion** (2026-09-13): the sweep's wrong-typed
+      fixtures at `wire.rs:3088-3091` all malform `stoa` alongside `direction`, so
+      `required_direction`'s `Err` arm is still unexercised by a request that is
+      otherwise valid. And
+      `every_publish_refusal_is_the_error_shape_and_carries_no_op_id` asserts only
+      that an `error` key exists (`wire.rs:3105`) — no `starts_with("panic in ")`
+      check — so a refusal that reached the panic guard would satisfy it. Both
+      remain the `tester`'s to close.
 
 **For:** `tester` (the claim), `dev-writer` (no code change needed)
 
@@ -225,7 +254,15 @@ assertion the sweep already has, missing from the one test that gets there.
 
 ---
 
-## S3 — Every publish runs a full Argon2id keystore unlock and opens SQLite before the request is validated, including requests it has already decided to refuse
+- [x] **`dev-writer`** — **S3** — Every publish runs a full Argon2id keystore unlock and opens SQLite before the request is validated, including requests it has already decided to refuse
+      **Deferred, and the destination verified on conversion** (2026-09-13):
+      `design.md`'s reshape entry carries it as "A second reason to want it, found by
+      the security review", naming the 64 MiB RFC 9106 option 2 parameters, the
+      ordering inversion, and the finding's own argument that hoisting
+      `reject_forbidden_fields` alone is insufficient. Now also recorded in
+      `docs/PLAN.md` §9.2 as a named follow-up, which survives the archive where a
+      findings file does not. Not fixed here: the reshape touches the adapter, the one
+      file no gate in this repo compiles.
 
 **For:** `dev-writer`
 
@@ -307,7 +344,19 @@ treats the module wire as untrusted.
 
 ---
 
-## S4 — `Refusal::WrongStoa` discloses the actual Stoa of an op the caller only named by id
+- [x] **`dev-writer`** — **S4's recording half** — the disclosure is now a named decision rather than an unexamined one
+      **Verified on conversion** (2026-09-13): `design.md` carries "What the
+      distinguishability discloses, and why that is accepted here", sitting with the
+      refusal-distinguishability reasoning rather than under `Refusal::Storage`. It
+      names the trigger condition (a publish handler reachable by anything less
+      privileged than the local view), cites the `log/sqlite.rs` cross-Stoa-leak
+      precedent, and records that `actual` is the field to drop first. No code change,
+      which is what the finding recommends.
+
+- [ ] **`spec-writer`** — **S4's spec note** — whether the disclosure is intended is undecided
+      **Still open, verified on conversion** (2026-09-13): the spec has no line saying
+      the disclosure is deliberate and scoped to a same-privilege caller. The finding
+      asked the `spec-writer` to decide; nothing has decided it.
 
 **For:** `spec-writer` (decide whether this is intended), `dev-writer` if not
 

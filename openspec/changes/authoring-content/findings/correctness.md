@@ -12,7 +12,15 @@ clean with `git status --short` returning nothing.
 
 ---
 
-## C1 — A body one byte over `MAX_FIELD_LEN` publishes, then permanently bricks every feed read on the peer
+- [x] **`dev-writer`** — **C1** — A body one byte over `MAX_FIELD_LEN` publishes, then permanently bricks every feed read on the peer
+      **Verified on conversion** (2026-09-13): `MAX_FIELD_LEN` is `pub` at
+      `op.rs:146`; `authoring::MAX_BODY_LEN` at `authoring.rs:206` is defined as
+      it, not a second literal; `the_publish_body_cap_is_the_format_field_cap`
+      (`authoring.rs:1472`), `a_body_one_byte_over_the_cap_is_refused_rather_than_signed`
+      (`authoring.rs:1482`, covering both `post` and `reply`) and
+      `every_op_a_publish_produces_decodes_again` (`authoring.rs:1523`) all exist.
+      The `spec-writer` note at the end is separately still open — see the
+      unticked box below.
 
 **For:** `dev-writer` (the fix is code), with a `spec-writer` note at the end.
 
@@ -138,6 +146,12 @@ contract that `op-format`'s cap is the publish path's cap — because at present
 "Hostile input is never a panic" is the only requirement in the area and it is
 satisfied by the defective behaviour.
 
+- [ ] **`spec-writer`** — **C1's spec note** — no requirement bounds a body from above
+      **Still open, verified on conversion** (2026-09-13): grepped
+      `specs/content-authoring/spec.md` for a cap, length or upper bound — there is
+      none. The code refuses at `op-format`'s cap, so the behaviour a caller can
+      already depend on is unspecified. Same gap as `findings/spec-test.md` entry 3.
+
 **Outcome of the `spec-writer` note: routed, still open.** The code now refuses at
 `op-format`'s cap, so the spec has a behaviour to ratify rather than a blank — but the
 choice between your two options ("refuse at the boundary" versus "contract that
@@ -157,7 +171,13 @@ length and the other end is silent.
 
 ---
 
-## C2 — `a_refused_publish_reaches_neither_the_append_nor_delivery` does not reach the cross-Stoa refusal it says it covers
+- [x] **`tester`** — **C2** — `a_refused_publish_reaches_neither_the_append_nor_delivery` does not reach the cross-Stoa refusal it says it covers
+      **Verified on conversion** (2026-09-13): the fourth case at `wire.rs:2667`
+      seeds a post into `stoa`, clears the journal so the seed's append is not
+      counted, then votes on that seed naming `elsewhere` — the prescription
+      exactly. The per-case message assertion is present, keyed on the four
+      fragments named. The stale "three refusals" comment now reads four at three
+      depths.
 
 **For:** `tester`.
 
@@ -217,7 +237,13 @@ any table-driven test whose rows are meant to exercise different paths.
 
 ---
 
-## C3 — The over-cap boundary literal is a second copy of `MAX_FIELD_LEN`
+- [x] **`tester`** — **C3** — The over-cap boundary literal is a second copy of `MAX_FIELD_LEN`
+      **Verified on conversion** (2026-09-13):
+      `a_maximal_body_publishes_rather_than_panicking` (`authoring.rs:1453`) builds
+      its body from `MAX_BODY_LEN` rather than `150 * 1024`, and both new boundary
+      tests use the constant. `the_field_cap_is_pinned_to_a_known_answer`
+      (`op.rs:1657`) still pins the literal, which is where a hardcoded expectation
+      belongs.
 
 **For:** `tester`.
 
@@ -245,7 +271,13 @@ remembering to edit both.
 
 ---
 
-## C4 — A stale comment asserts the ordering is unobservable, in the same file as the test that observes it
+- [x] **`dev-writer`** — **C4** — A stale comment asserts the ordering is unobservable, in the same file as the test that observes it
+      **Verified on conversion** (2026-09-13): the comment in
+      `delivery_is_handed_the_published_op_and_is_not_reached_by_a_refusal` now
+      states the ordering IS observable, names
+      `the_append_completes_before_delivery_is_invoked_on_all_three_handlers` as the
+      test that observes it, and records that the old claim was load-bearing while
+      it stood. The retracted sentence is gone.
 
 **For:** `dev-writer`.
 

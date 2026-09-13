@@ -14,7 +14,22 @@ Restored to 531 at the end; `git status --porcelain` on the worktree is empty.
 
 ## Entries
 
-### 1. `A declined handoff leaves the op published` — the reply *does* report a failure
+- [x] **`dev-writer`** — **entry 1** — `A declined handoff leaves the op published` — the reply *does* report a failure
+      **Fixed** (2026-09-13), after the owner settled the question this finding and
+      `design-review.md` F6 both routed. The decision: catch the panic at the handoff and
+      report the publish as successful — the op is in the log, the requirement says so,
+      and delivery belongs to the transport. **The spec was right and the code was
+      wrong**, so no half of the spec moved.
+      Implemented as `wire::delivered_and_published`, which wraps only the sink call in
+      its own `catch_unwind` and is called from all three handlers; the outer `guarded`
+      stays, because PHASE0-FINDINGS §3 measured that an unguarded panic aborts the
+      module process.
+      Pinned by
+      `a_panicking_delivery_sink_still_reports_the_op_as_published_on_all_three_handlers`,
+      which **fails without the fix** with exactly the reply this finding quoted:
+      `{"error":"panic in publish_post: delivery refused the handoff"}` and no `opId`.
+      Reasoning moved to `design.md` Decisions and `docs/PLAN.md` §9.2, the latter
+      carrying the obligation this hands to `op-transport`.
 
 **For:** `spec-writer` (to decide which half moves) and `dev-writer` (if the
 spec wins).
@@ -91,7 +106,17 @@ contract question rather than a bug to patch.
 
 ---
 
-### 2. `A publish returns while delivery is still outstanding` — untestable as written
+- [ ] **`spec-writer`** — **entry 2** — `A publish returns while delivery is still outstanding` — untestable as written
+      **Still open, verified on conversion** (2026-09-13): the sink is still
+      `&mut dyn FnMut(&crate::op::OpId)` returning `()`, so "reports no outcome" and
+      "reports an outcome promptly" remain states the API cannot be in, and the scenario
+      remains a spec defect rather than a coverage gap. Nothing in the spec was edited.
+      **The panicking-sink fix does not touch this**: catching a panic at the handoff
+      changes what a *failing* sink does to the reply, not whether an outcome channel
+      exists. If anything it strengthens the finding — `delivery_module.lidl` delivers
+      outcomes asynchronously via `channelMessageSent`/`channelMessageError`/
+      `messagePropagated`, so a synchronous reply could never have carried one, which is
+      the argument for restating or dropping this scenario.
 
 **For:** `spec-writer`.
 **Requirement:** *Publishing signs, appends, and hands off — in that order.*
@@ -143,7 +168,18 @@ claim and belongs in the spec's own revision rather than in a change's tracker.
 
 ---
 
-### 3. A body over the format's field cap publishes — unspecified, and untested either way
+- [x] **`dev-writer`** — **entry 3's code half** — a body over the format's field cap publishes
+      **Verified on conversion** (2026-09-13): refused with
+      `Refusal::BodyTooLong { len, cap }`, `MAX_FIELD_LEN` exported, `MAX_BODY_LEN`
+      defined as it, and `the_publish_body_cap_is_the_format_field_cap` pinning them as
+      one number. Same fix as correctness C1 and security S1.
+
+- [ ] **`spec-writer`** — **entry 3's spec half** — the cap is chosen rather than contracted
+      **Still open, verified on conversion** (2026-09-13): the spec delta has no
+      upper-bound requirement. This reviewer found the gap from the spec's asymmetry
+      alone — the empty end of the body is argued at length and the other end is silent —
+      which is the same gap correctness C1 and security S1 route from the code side.
+      Three findings now point at one missing requirement.
 
 **For:** `spec-writer` (a gap to decide), then `tester`.
 **Requirement:** *A post names a Stoa and carries a body* / *A publish answers
@@ -218,7 +254,12 @@ observable behaviour a caller can depend on.
 
 ---
 
-### 4. `A published op is verified on read like any other` — the tamper half is a property of Ed25519
+- [x] **`tester`** — **entry 4** — `A published op is verified on read like any other` — the tamper half is a property of Ed25519
+      **Verified on conversion** (2026-09-13): the tamper assertion is gone. The test now
+      publishes one op, hand-builds an identical one, and asserts
+      `ours.verify() == theirs.verify()`, that both actually verify, and that
+      `to_bytes()` matches — so it discriminates against a publish path that signed
+      different bytes, which the Ed25519 property could not.
 
 **For:** `tester`.
 **Requirement:** *A publish checks only what it can decide, and never in place
@@ -273,7 +314,11 @@ evidence, and now it is.
 
 ---
 
-### 5. `A voted target reads exactly as it did before` — the feed half cannot fail
+- [x] **`tester`** — **entry 5** — `A voted target reads exactly as it did before` — the feed half cannot fail
+      **Verified on conversion** (2026-09-13): fixed as prescribed — kept, with the
+      comment. It names the byte-identical half as the one that discriminates, explains
+      that `feed::list_threads` resolves `Post` ops so a `Vote` could never appear in the
+      feed half, and names the `items.len() == 1` guard that is actually asserted.
 
 **For:** `tester` (low severity; the requirement is covered by its other half).
 **Requirement:** *A published vote is stored and readable, and no ordering
@@ -318,7 +363,12 @@ drift — the failure mode this review caught three times elsewhere.
 
 ---
 
-### 6. `The signing identity is the one the probe reports` — the probe's lookup is injected, not exercised
+- [x] **`tester`** — **entry 6** — `The signing identity is the one the probe reports` — the probe's lookup is injected, not exercised
+      **Verified on conversion** (2026-09-13): fixed as a comment, deliberately. It states
+      what the test reaches and what it does not — it would catch a publish signing with a
+      different key, but not `Keystore::stoa_address` being changed to compose differently
+      — and why closing that would mean reaching a real `Keystore` this layer does not
+      take. Same edit as readability R6.
 
 **For:** `tester` (low severity).
 **Requirement:** *The author is derived from the Stoa, never supplied.*
@@ -360,7 +410,14 @@ resolved-key-versus-lookup-closure question, and it should be answered once.
 
 ---
 
-### 7. `Refusal::NoIdentity`'s "no key was created" wording is pinned without a requirement
+- [x] **`dev-writer`** — **entry 7** — `Refusal::NoIdentity`'s "no key was created" wording is pinned without a requirement
+      **Verified on conversion** (2026-09-13): the finding offered two routes — require
+      the sentence in the spec, or mark it `NO SPEC:` — and the second was taken, which
+      closes it. Both sites carry the marker (`authoring.rs:1260`, `wire.rs:2919`), the
+      `authoring.rs` one drawing the structural-versus-message distinction this reviewer
+      made, and `tasks.md` §9 records it as the third `NO SPEC:` in the change. The
+      assertions themselves are unchanged, which is correct — the choice is now visible
+      rather than removed.
 
 **For:** `spec-writer`.
 **Requirement:** *A publish requires a usable identity and says so when there is

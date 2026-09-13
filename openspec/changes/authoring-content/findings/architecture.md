@@ -9,7 +9,19 @@ applied and reverted; `git status --porcelain` is empty at hand-off. A standalon
 
 ---
 
-## A1 — The `&mut dyn FnMut` sink's stated justification is a false premise, and the adapter contradicts it
+- [x] **`dev-writer`** — **A1** — The `&mut dyn FnMut` sink's stated justification is a false premise, and the adapter contradicts it
+      **Fixed, and completed on conversion** (2026-09-13). The earlier pass corrected
+      two of the three sites this finding names — `wire.rs`'s doc comment and the test
+      comment, both of which now say the single-pointer requirement is the *test's*,
+      name `Dialectica::publishing` as generic over the handler, and state that
+      recovering `FnOnce` is a live option. `design.md` carries the same correction.
+      **The third site was missed**: `tasks.md` §8 still argued the retracted premise
+      verbatim ("It does not survive the **adapter**" / "The adapter … dispatches over
+      the three handlers through one function-pointer type"). Since A1's whole point is
+      that a wrong impossibility note stops the next reader from retrying, leaving it
+      re-armed exactly that. §8 now attributes the constraint to
+      `the_three_handlers_share_one_signature_the_adapter_can_dispatch_over` and says
+      why recovering `FnOnce` costs one test's `Handler` type rather than a redesign.
 
 **For:** `dev-writer`
 **Where:** `dialectica/rust-lib/dialectica-core/src/wire.rs:698-715` (the doc
@@ -94,7 +106,19 @@ no gate in this repo could have: the adapter is behind `cfg(logos_scaffold)`.
 
 ---
 
-## A2 — The append-then-deliver tail is three byte-identical copies, so the ordering invariant is a branch got right three times rather than a shape right once
+- [x] **`dev-writer`** — **A2** — The append-then-deliver tail is three byte-identical copies, so the ordering invariant is a branch got right three times rather than a shape right once
+      **Partly overtaken by the panicking-sink fix, and the rest deferred**
+      (2026-09-13). Settling the panicking-sink question put the handoff in one
+      function, `wire::delivered_and_published`, called from all three success arms —
+      so `deliver` is now named **once** and a handler has no op id to hoist, which is
+      the property this finding asked for. That was motivated by a correctness defect
+      rather than by this finding, and it is recorded that way in `design.md` so nobody
+      reads the reshape as having been done on purpose here.
+      What remains copied three times is the `match`'s `Err` arm
+      (`error_json(&refusal.to_string())`), which carries no sequence and no guard, and
+      the **prologue**, which is the real reshape and stays deferred — recorded in
+      `design.md`'s reshape entry and in `docs/PLAN.md` §9.2 as a precondition of
+      `publish_moderation`.
 
 **For:** `dev-writer`
 **Where:** `wire.rs:744-750`, `wire.rs:788-794`, `wire.rs:831-837`.
@@ -197,7 +221,14 @@ cleanup after it.
 
 ---
 
-## A3 — The parse-then-decide prologue is three copies of one sequence, and `design.md` records a data shape the code does not have
+- [x] **`dev-writer`** — **A3** — The parse-then-decide prologue is three copies of one sequence, and `design.md` records a data shape the code does not have
+      **Documentation half fixed, reshape deferred with A2; verified on conversion**
+      (2026-09-13): `design.md` no longer claims `PostRequest`/`ReplyRequest`/
+      `VoteRequest` exist — it names them as planned and not built, says what holding
+      one would have bought, and states that the requirement holds three times over
+      rather than by construction. Grepping the three names across `dialectica/` and
+      `openspec/` finds only that sentence, so no false claim survives. The prologue is
+      still three copies in code, which is the deferred half.
 
 **For:** `dev-writer` (with a note for `design-reviewer`, whose dimension the
 second half is)
@@ -277,7 +308,13 @@ kind of reasoning that should survive this directory being deleted.
 
 ---
 
-## A4 — `authoring::reply` and `authoring::vote` carry two copies of the held-and-in-this-Stoa guard, with `&'static str` as the discriminator
+- [x] **`dev-writer`** — **A4** — `authoring::reply` and `authoring::vote` carry two copies of the held-and-in-this-Stoa guard, with `&'static str` as the discriminator
+      **Agreed, no change — which is what the finding itself recommends.** Verified on
+      conversion (2026-09-13): no shared helper exists (grep for one finds nothing), and
+      the two copies are live in `reply` (`authoring.rs:334`, `:346`) and `vote`
+      (`:398`, `:403`) with `&'static str` still the discriminator. Two copies is below
+      the reshape threshold CLAUDE.md sets at the fourth; the finding recommended no
+      action and none was taken.
 
 **For:** `dev-writer`
 **Where:** `authoring.rs:274-292` (`reply`) and `authoring.rs:338-348` (`vote`).

@@ -9,7 +9,11 @@ gitignored SDK symlink and this file.
 
 ---
 
-## 1. `wire.rs` still carries the false-premise comment `tasks.md` §10 retracted
+- [x] **`dev-writer`** — **R1** — `wire.rs` still carries the false-premise comment `tasks.md` §10 retracted
+      **Verified on conversion** (2026-09-13): the comment now says the ordering IS
+      observable, names the test that observes it, explains the `Rc<RefCell<Vec<_>>>`
+      mechanism, and records that the old claim was load-bearing because it was the
+      stated reason the weaker test was accepted as sufficient.
 
 **For: `dev-writer`.**
 `dialectica/rust-lib/dialectica-core/src/wire.rs:2406-2413`, inside
@@ -60,7 +64,11 @@ corroboration standing in for a test here.
 
 ---
 
-## 2. `design.md` names three request structs that do not exist
+- [x] **`dev-writer`** — **R2** — `design.md` names three request structs that do not exist
+      **Verified on conversion** (2026-09-13): same edit as architecture A3's
+      documentation half. `design.md` now describes what each handler actually reads and
+      says the three structs were planned and not built; grepping the names finds only
+      that sentence.
 
 **For: `dev-writer`.**
 `openspec/changes/authoring-content/design.md:39-40`.
@@ -94,7 +102,15 @@ than as done.
 
 ---
 
-## 3. `design.md` rests a requirement on a `let _` and a `FnOnce` the code does not have
+- [x] **`dev-writer`** — **R3** — `design.md` rests a requirement on a `let _` and a `FnOnce` the code does not have
+      **Verified on conversion** (2026-09-13): the bogus `let _` reasoning is gone
+      (grep finds no `let _` in `design.md`), the three requirements are re-assigned to
+      the mechanisms that actually carry them, and the `FnOnce` dead end is recorded in
+      Decisions including the A1 correction.
+      **One update since that outcome was written:** the snippet no longer shows a bare
+      `deliver(&published.id);`, because the panicking-sink fix moved the handoff into
+      `delivered_and_published`. The snippet was updated in the same change, so it still
+      shows the real code — which is the property this finding was about.
 
 **For: `dev-writer`.**
 `openspec/changes/authoring-content/design.md:64-74`.
@@ -132,7 +148,14 @@ recorded in Decisions beside it, which is where design-review F1 said it belonge
 
 ---
 
-## 4. `Dialectica::publishing` does two jobs, and its own doc heading says so
+- [x] **`dev-writer`** — **R4** — `Dialectica::publishing` does two jobs, and its own doc heading says so
+      **Rejected, with the argument; verified on conversion** (2026-09-13). A fixture's
+      job *is* the assembly, and splitting it into five would spread key/store ordering
+      across the one file no gate compiles — the code's own comment gives that reason,
+      and it holds. The reader cost the finding identified was not dropped: it is
+      recorded as a decision in `design.md` ("The adapter reads `stoa` twice, and the
+      second parser is the authority"), which names the cost that a malformed `stoa` may
+      be reported by either parser.
 
 **For: `dev-writer`.**
 `dialectica/rust-lib/src/lib.rs:251-252`, `276`.
@@ -181,7 +204,12 @@ sixth assembly step this should be revisited.
 
 ---
 
-## 5. `thread_of`'s fallback comment contradicts what the line returns
+- [x] **`dev-writer`** — **R5** — `thread_of`'s fallback comment contradicts what the line returns
+      **Verified on conversion** (2026-09-13): the "it belongs to no thread" clause is
+      gone. The comment now says answering with `id` treats the op as its own thread
+      root, which is the same answer a root post gets, and keeps the unreachability half
+      — which still checks out, since `reply` refuses a non-post parent before
+      `thread_of` is reached.
 
 **For: `dev-writer`.**
 `dialectica/rust-lib/dialectica-core/src/authoring.rs:242-245`.
@@ -214,7 +242,14 @@ The unreachability half, which the reviewer verified as sound, is kept unchanged
 
 ---
 
-## 6. A test comment claims two functions were called that were not
+- [x] **`tester`** — **R6** — A test comment claims two functions were called that were not
+      **Verified on conversion** (2026-09-13): the overstated "through the two real
+      functions" sentence is gone. The comment now states what the test reaches (the
+      publish path agreeing with `stoa_address`'s composition from the same root) and
+      what it does not (`Keystore::stoa_address` itself being changed to compose
+      differently), and says why closing that would mean reaching a real `Keystore` this
+      layer deliberately does not take. Comment-only, as the outcome claims: the test
+      body is unchanged.
 
 **For: `tester`.**
 `dialectica/rust-lib/dialectica-core/src/authoring.rs:507-508`, in
@@ -253,7 +288,13 @@ claimed here either way.
 
 ---
 
-## 7. `an_op_a_publish_would_refuse_is_stored_anyway_when_it_arrives` says "both shapes"; the module refuses three
+- [x] **`tester`** — **R7** — `an_op_a_publish_would_refuse_is_stored_anyway_when_it_arrives` says "both shapes"; the module refuses three
+      **Verified on conversion** (2026-09-13): the comment now says "two of the three
+      shapes this module refuses", names which two are built (the orphan and the
+      cross-Stoa reply), names the one omitted (a non-post parent), and says the point is
+      the direction rather than an enumeration. The third case was deliberately not
+      added, which the finding left to the `tester` as optional rather than required —
+      so this is the word fixed, not a coverage gap left open.
 
 **For: `tester`.**
 `dialectica/rust-lib/dialectica-core/src/authoring.rs:1195-1196`.
