@@ -65,9 +65,17 @@ TestCase {
         Main {}
     }
 
-    // A feed reply, so the "present" branch has something to render rather than
-    // failing for an unrelated reason and confusing the diagnosis.
+    // Replies for the screens the "present" branch reaches, so it has something
+    // to render rather than failing for an unrelated reason and confusing the
+    // diagnosis.
+    //
+    // `list_stoas` is here because the forum now OPENS on the Stoa list rather
+    // than on one hardcoded feed: the launch gate sits above the whole
+    // navigator. The feed replies stay — the feed is still reachable from the
+    // list — and an unused fixture entry is cheaper than one that is missing
+    // the day a test opens a Stoa.
     readonly property var feedReplies: ({
+        "list_stoas": '{"items":[],"page":0,"hasMore":false}',
         "get_capabilities": '{"canPost":true,"identity":"aa"}',
         "list_threads": '{"items":[],"page":0,"hasMore":false}'
     })
@@ -75,8 +83,11 @@ TestCase {
     function makeMain(replies) {
         installBridge(replies)
         return mainComponent.createObject(null, {
-            stoaAddress: "ab".repeat(32),
-            stoaGenesis: "00ff",
+            // `identityStoa`, not `stoaAddress`: the navigator this now gates
+            // holds no Stoa of its own to render, and this is the address the
+            // identity question is asked ABOUT. See Main.qml's comment on the
+            // property for why the two are different questions.
+            identityStoa: "ab".repeat(32),
             width: 1200,
             height: 900
         })
@@ -289,7 +300,7 @@ TestCase {
     function onboardingOn(item) {
         if (item === null || item === undefined)
             return null
-        // Duck-typed on the properties only OnboardingScreen has, because
+        // Duck-typed on the properties only DOnboardingScreen has, because
         // `instanceof` over a QML type is not available here.
         if (item.phase !== undefined && item.candidates !== undefined
             && item.keptIdentity !== undefined)

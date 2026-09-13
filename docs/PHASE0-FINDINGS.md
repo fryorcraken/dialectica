@@ -504,7 +504,16 @@ person clicking the buttons. Where something is inference it says so.
 
 Reproduce with `lgs basecamp modules`, `lgs basecamp install`,
 `lgs basecamp launch alice`, then click the four buttons in the Dialectica
-plugin. The evidence is in `.scaffold/basecamp/profiles/alice/basecamp.log`.
+plugin.
+
+**The evidence is in
+`.scaffold/basecamp/profiles/alice/xdg-data/Logos/LogosBasecampDev/logs/basecamp_<timestamp>.log`**
+— a timestamped file several directories deeper than the
+`.scaffold/basecamp/profiles/alice/basecamp.log` this line used to give. The
+wrong path was not harmless: it is part of why nobody read a launch log while
+diagnosing the `Theme` shadowing, and that log turned out to hold the whole
+answer in two `grep -c` runs (209 resolutions into the host's `Theme`, zero into
+the plugin's own). A log is only evidence if the path to it is right.
 
 ### Both modules load, and the view renders
 

@@ -708,10 +708,21 @@ half: the address is a hash of the genesis record (§5.1), so a wrong or tampere
 record **fails to match the address it is offered with**. Verification needs
 nothing but those two inputs — no registry, no peer, no network call.
 
-Still to get right, and still not built: in-post addresses are
+~~Still to get right, and still not built: in-post addresses are
 **attacker-supplied content**. Render them as an explicit affordance the reader
 chooses to act on, never auto-join, and show what is being joined before joining
-it. That is a UI obligation — see §5.5, which holds it.
+it. That is a UI obligation — see §5.5, which holds it.~~
+
+**Contracted, and built for the paste route.** "Joining shows what is being
+joined, and joins nothing until the user acts" in the `stoa-navigation-view`
+capability holds every clause: a preview before any join, no auto-join, and the
+address rendered in full because this is where the decision is made.
+
+**Still not built: the in-post affordance itself.** Nothing in a rendered post
+yet offers a Stoa address to act on, so the route exists for a pasted reference
+and not for one read out of a post body. That half arrives with the piece that
+renders addresses inside posts, and it inherits the requirement above rather than
+needing a new one.
 
 **Phase 2 — opt-in broadcast.** A dedicated content topic, **outside SDS**,
 carries Stoa announcements. A creator decides at creation whether their Stoa is
@@ -1777,7 +1788,11 @@ social: a reader who recognises people by name is fooled; a reader who has the
 address in front of them is not.
 
 **The interface consequence is therefore identical in shape to the join
-confirmation, and belongs on §11.1's list:**
+confirmation, and belongs on §11.1's list** — the *name* half of it does, at
+least. The join confirmation it is compared to is no longer waiting on that list:
+`stoa-navigation-view` contracts it, and is the worked example of this same
+argument applied to Stoa titles. This obligation is about attribution on every
+post, which no spec yet owns:
 
 > **A name alone is the forgeable half.** Wherever recognition carries weight —
 > a moderator's name above all, because that is what converts a button press
@@ -3578,11 +3593,18 @@ restating it.
 > change and is not in this file until that lands.** The references to it below
 > are deliberate forward references rather than mistakes: this section
 > *surfaces* three new obligations — an `Unhide` affordance that must not be
-> offered as symmetric, a join confirmation that must show the address and not
-> only the title, and a bidi obligation wider than the one §11.1 records — and
+> offered as symmetric, ~~a join confirmation that must show the address and not
+> only the title~~, and a bidi obligation wider than the one §11.1 records — and
 > their home is that list, not here. If
 > §11.1 is absent when you read this, that change has not merged yet — which is
 > a fact `git log` answers and this sentence should not.
+>
+> **The join-confirmation obligation no longer waits on §11.1**: it is contracted
+> by the `stoa-navigation-view` capability, whose list rows, join preview and
+> lookalike panel all require the address on screen. A forward reference to an
+> unlanded list is the wrong pointer for an obligation that already has a spec,
+> so read that capability rather than §11.1 for this one. The other two are
+> genuinely still waiting.
 
 #### The constraint everything below follows from
 
@@ -3637,9 +3659,13 @@ ceiling does not support — the ops are in every peer's log regardless.
 **Stage D — reach another Stoa.** §4.8 Phase 1's address, which verifies the
 genesis record it is offered with, and in-post addresses rendered as an
 affordance rather than acted on. **The joining half is built** — see below and
-the `stoa-membership` capability; the in-post affordance is a UI obligation and
-is not. §4.8 Phase 1 records why "pasting an address is enough to join" was
-wrong: a join takes the address **and** the record.
+the `stoa-membership` capability. ~~The in-post affordance is a UI obligation and
+is not.~~ **The view half is now contracted too** — the Stoa list, the join
+preview, creation and sharing are the `stoa-navigation-view` capability, which
+carries what the screens must render and must refuse to claim. §4.8 Phase 1
+records why "pasting an address is enough to join" was wrong: a join takes the
+address **and** the record, and that is why what a user *shares* has to carry
+both halves as well.
 
 The ordering is not arbitrary and the dependencies run one way only. B needs A
 because a compose box needs somewhere to put the result, and B needs A′ because
@@ -3817,6 +3843,15 @@ the probe in the current render. The probe is cheap and re-determines its
 answer on every call by design; caching it across a keystore change is how a
 button outlives the key that justified it.
 
+**The view half is now contracted by the `composer-view` spec** — the gate, what
+a draft is owed on every refusal, what a success may claim, how an
+already-published op is reported, and what the vote control may show. Three of its
+decisions are worth knowing before designing around this section: a success says
+the content was **stored on this machine** and never that it was sent; a
+deduplicated publish is a third outcome distinct from both success and failure;
+and the composer does **not** sanitise what the author typed, because an op is
+signed over its bytes.
+
 #### 4. What the moderation UI needs
 
 The ceiling first, because it bounds the whole design: §6.1 — **moderation
@@ -3876,16 +3911,48 @@ resolvers do not provide" below.
 **In-post addresses are attacker-supplied content.** §4.8 is explicit and this
 section adds nothing to it except the mechanics: a Stoa address appearing in a
 post body renders as an affordance the reader chooses to act on; acting on it
-shows what is being joined — the Stoa's title and address — **before** joining;
-and nothing auto-joins, ever. The relevant threat is not a malicious Stoa, which
-a reader can leave; it is a reader who does not know they joined one. **This is a
-UI obligation and is not built**, which is why it stays here rather than moving.
+shows what is being joined — ~~the Stoa's title and address~~ **the Stoa's
+address; see below for why not its title** — **before** joining; and nothing
+auto-joins, ever. The relevant threat is not a malicious Stoa, which a reader can
+leave; it is a reader who does not know they joined one. ~~**This is a UI
+obligation and is not built**, which is why it stays here rather than moving.~~
+**The address half and the no-auto-join half are now contracted** by
+`stoa-navigation-view`'s "Joining shows what is being joined, and joins nothing
+until the user acts".
 
-**The obligation this surfaces, also new to §11.1**: a Stoa's *displayed* title
+**The title half is NOT built, and cannot be on this API.** `join_stoa` is the
+only call that answers a `foundingTitle` for a given `(stoa, genesis)` pair, so a
+preview — which by definition happens before a join — has no title to show. The
+title is inside the genesis record the reader was handed; reading it in the view
+would mean a second implementation of the core's genesis encoding, which §2.1's
+core/UI split forbids. The join screen therefore renders the address and states
+plainly that it cannot tell the reader what the Stoa is called, rather than
+captioning an empty panel. The reasoning is in `ui-stoa-list`'s `design.md` D11.
+
+**What this costs is the same-title warning's timing.** §5.7's point that two
+Stoas may present the same title is contracted and implemented — but the
+comparison is over titles, so on this API it can only run *after* a join rather
+than before one. That makes it a record of what happened rather than a warning
+about what is about to, which is a real weakening of the property this section
+describes. It closes with a core call that answers a founding title for an
+un-joined reference — `getStoa` in §9.1's shape, or something narrower that
+decodes a pair without recording membership. Until then the screen says the check
+has not been made, because an absent warning read as a clean result is worse than
+no warning at all.
+
+What also remains unbuilt is the affordance inside a post body, as §4.8 Phase 1
+now records.
+
+~~**The obligation this surfaces, also new to §11.1**: a Stoa's *displayed* title
 comes from a metadata op signed by its moderators and is not unique, not
 verified against anything, and freely chosen. Two Stoas may present the same
 title. The address is the identity and the title is decoration, so a join
-confirmation that shows only a title has shown the reader the forgeable half.
+confirmation that shows only a title has shown the reader the forgeable half.~~
+**Contracted across three `stoa-navigation-view` requirements** — the list row
+carrying its address, the preview's full address, and the same-title Stoa shown
+beside a lookalike. It is no longer waiting on §11.1. **The third of those runs
+after a join rather than before one**, for the API reason given above; it is
+implemented and its timing is the open half.
 
 #### 6. The core API this requires
 
@@ -4214,15 +4281,20 @@ the costs below were named and accepted.
 **In the MVP:**
 
 1. Create an identity
-2. Create a Stoa
+2. Create a Stoa. **Built**, core and view both — the core half is the
+   `stoa-membership` capability, the screen is `stoa-navigation-view`
 3. Post
 4. Reply to a post
 5. Upvote / downvote
-6. Share a Stoa — copy its address. **Built** (the address is what creation
-   returns); sharing it *from the UI* is not
+6. ~~Share a Stoa — copy its address~~ **Share a Stoa — what is shared carries
+   its address *and* its genesis record**, for the same reason item 7 does: an
+   address is a one-way hash, so it verifies a record and cannot reconstruct
+   one. The address alone would produce something its recipient cannot act on.
+   **Built** — `stoa-navigation-view` carries what a share must contain
 7. ~~Join a Stoa by address~~ **Join a Stoa, given its address and its genesis
-   record. Built** — see the `stoa-membership` capability. An address alone is
-   not joinable; §4.8 Phase 1 records why the original wording was wrong
+   record. Built** — the core half is the `stoa-membership` capability, the
+   preview screen `stoa-navigation-view`. An address alone is not joinable;
+   §4.8 Phase 1 records why the original wording was wrong
 8. ~~**Receive ops from other peers**, over delivery's reliable channel~~ —
    **specified: the `op-transport` spec.** Publishing and receiving both, with the
    receive-side validation boundary.
@@ -4274,21 +4346,30 @@ change that found it.
 Both came out of review and are recorded here rather than in a findings file,
 which is deleted at merge.
 
-**The publish prologue/tail wants reshaping into one place.** `publish_post`,
-`publish_reply` and `publish_vote` each carry the same prologue — parse, validate,
-open the keystore, open the store — and the same tail. Three copies of one guard
-is the point at which a guard should become a data structure, and two things make
-it more than tidiness:
+~~**The publish prologue/tail wants reshaping into one place.**~~ **Done** — the
+prologue is `wire::PublishRequest`, whose construction *is* the envelope, the
+forbidden-field guard and the `stoa` read, so a fourth publish operation inherits
+all three. It remains the **precondition of `publish_moderation`** it was named
+as.
 
-- It is a **precondition of `publish_moderation`**, where a missed guard is an
-  authorisation defect rather than a wrong reply.
-- The adapter runs a **64 MiB Argon2id unlock before any validation**, so a
-  request that will be refused for a malformed Stoa pays for a full key
-  derivation first. Validate, then unlock — one reshape fixes both.
+**What that reshape was also meant to buy is NOT done: the adapter still
+unlocks before it validates.** `open_from_env` runs a **64 MiB Argon2id**
+derivation before the forbidden-field guard and every required-field read, so
+`{"stoa":"<valid hex>","author":"x"}` — refused unconditionally — or a request
+with no `body` each pay a full memory-hard KDF and are then refused. The Stoa
+need not exist and the caller need not be a member; only hex well-formedness is
+checked first, which makes it a cheap-request memory-and-CPU amplifier.
 
-Deliberately **not** done inside the change that revealed it: make the change
-easy, then make the easy change. A diff that reshapes three handlers and adds a
-publish path cannot be reviewed for either.
+The reshape makes the fix a change to **one** function instead of three, and
+that is all it did. The remaining cost is a signature change: `handler` takes
+`&SecretKey`, so the key must exist before the handler runs and the handler is
+what validates — reordering means the three handlers taking a **fallible key
+supplier** instead, which also moves the `Handler` type test and every sweep
+fixture. Judge that on the merits recorded above under "Taking a fallible
+key-supplier in core", not as the price of this reordering.
+
+Found by review on `piece/publish-envelope`, whose `design.md` decision 8 carries
+the full argument; recorded here because a findings file is deleted at merge.
 
 **A panicking delivery sink must not report a published op as failed.** `deliver`
 runs inside `guarded`, so a sink that panics yields `{"error":…}` with no `opId`
@@ -4378,13 +4459,20 @@ identified, and the honest options are a visible per-post tally that is not a
 ranking, or a control whose effect the copy does not overstate. §7.4 settles the
 control's shape; it does not settle this.
 
-**The core half is now settled and the UI half is not.** The
-`content-authoring` spec contracts publishing a vote at exactly the honest width —
-the op is signed, appended and readable by its op id and by its target, and the
-reply carries an op id and nothing describing an effect. So core makes no claim a
-reader could be misled by. **What remains is entirely an interface obligation**:
-a vote control must not imply a ranking, and this is the open item, not a
-contracted one. It belongs on §11.1's rendering-obligations list when that lands.
+~~**The core half is now settled and the UI half is not.**~~ **Both halves are
+now contracted.** The `content-authoring` spec contracts publishing a vote at
+exactly the honest width — the op is signed, appended and readable by its op id
+and by its target, and the reply carries an op id and nothing describing an
+effect. So core makes no claim a reader could be misled by.
+
+~~What remains is entirely an interface obligation, and this is the open item.~~
+The interface obligation is now the **`composer-view`** spec's, which resolved it
+in the only direction available: of the two honest options named above, a
+per-post tally turned out **not to be one** — no call returns a score, a tally or
+the viewer's earlier votes — so the control shows the viewer their own vote back
+and **no number at all**, specifically not a zero. The reasoning, including why a
+rendered zero is worse than a rendered absence, is in that change's
+`proposal.md`.
 
 ---
 

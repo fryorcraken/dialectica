@@ -9,7 +9,7 @@ import "../src/qml"
 //   * nothing is selected until the user selects it;
 //   * a reply the screen cannot read is a failure rather than an empty offer.
 //
-// These drive the real OnboardingScreen through a fake bridge, so what is under
+// These drive the real DOnboardingScreen through a fake bridge, so what is under
 // test is the screen's own state machine rather than a re-implementation of it.
 //
 // **Every assertion is against a value the fixture chose**, not against
@@ -84,7 +84,7 @@ TestCase {
 
     Component {
         id: onboardingComponent
-        OnboardingScreen {}
+        DOnboardingScreen {}
     }
 
     // Two candidates whose addresses differ in every character, so "the two

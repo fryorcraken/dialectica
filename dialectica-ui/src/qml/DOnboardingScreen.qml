@@ -313,8 +313,8 @@ ScreenFrame {
         Text {
             // copy.json `onboarding.title`
             text: "Choose the identity you will keep here."
-            font: Theme.display
-            color: Theme.ink
+            font: DTheme.display
+            color: DTheme.ink
             wrapMode: Text.WordWrap
             textFormat: Text.PlainText
             Layout.fillWidth: true
@@ -336,10 +336,10 @@ ScreenFrame {
             // would be the same failure in different words, and saying less is
             // available where saying something false is not.
             text: "You are picking a key. Its name is computed from it, so the name cannot be changed afterwards."
-            font: Theme.body
-            color: Theme.inkSoft
+            font: DTheme.body
+            color: DTheme.inkSoft
             wrapMode: Text.WordWrap
-            lineHeight: Theme.lineHeightBody
+            lineHeight: DTheme.lineHeightBody
             textFormat: Text.PlainText
             Layout.fillWidth: true
         }
@@ -349,8 +349,8 @@ ScreenFrame {
     ColumnLayout {
         Layout.fillWidth: true
         spacing: 2
-        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: Theme.hairline; color: Theme.ink }
-        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: Theme.hairline; color: Theme.ink }
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: DTheme.hairline; color: DTheme.ink }
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: DTheme.hairline; color: DTheme.ink }
     }
 
     // ---- phase: the opening state ---------------------------------------
@@ -361,12 +361,12 @@ ScreenFrame {
     ColumnLayout {
         visible: screen.phase === "intro"
         Layout.fillWidth: true
-        spacing: Theme.itemGap
+        spacing: DTheme.itemGap
 
         Text {
             text: "You have no identity here yet. Nothing has been generated and nothing has been stored."
-            font: Theme.bodySmall
-            color: Theme.inkSoft
+            font: DTheme.bodySmall
+            color: DTheme.inkSoft
             wrapMode: Text.WordWrap
             lineHeight: 1.55
             textFormat: Text.PlainText
@@ -407,9 +407,9 @@ ScreenFrame {
 
             Layout.fillWidth: true
             implicitHeight: rowBody.implicitHeight + 22
-            color: row.chosen ? Theme.field : "transparent"
-            border.width: row.chosen ? Theme.border : Theme.hairline
-            border.color: row.chosen ? Theme.ink : Theme.rule2
+            color: row.chosen ? DTheme.field : "transparent"
+            border.width: row.chosen ? DTheme.border : DTheme.hairline
+            border.color: row.chosen ? DTheme.ink : DTheme.rule2
 
             RowLayout {
                 id: rowBody
@@ -446,8 +446,8 @@ ScreenFrame {
                 Text {
                     visible: row.chosen
                     text: "SELECTED"
-                    font: Theme.label
-                    color: Theme.ink
+                    font: DTheme.label
+                    color: DTheme.ink
                     textFormat: Text.PlainText
                 }
             }
@@ -476,8 +476,8 @@ ScreenFrame {
         Text {
             // copy.json `onboarding.refreshNote`
             text: "Refresh as often as you like. Nothing is published until you keep one."
-            font: Theme.note
-            color: Theme.inkMuted
+            font: DTheme.note
+            color: DTheme.inkMuted
             wrapMode: Text.WordWrap
             textFormat: Text.PlainText
             Layout.fillWidth: true
@@ -502,8 +502,8 @@ ScreenFrame {
         // copy.json `onboarding.apparatus.permanence`, in the body as well as
         // the margin: it qualifies the action, and the action is here.
         text: "There is no settings screen where this can be changed later, because the name is only the key written out. Choosing again means being someone else here."
-        font: Theme.bodySmall
-        color: Theme.accent
+        font: DTheme.bodySmall
+        color: DTheme.accent
         wrapMode: Text.WordWrap
         lineHeight: 1.55
         textFormat: Text.PlainText
@@ -532,8 +532,8 @@ ScreenFrame {
     Text {
         visible: screen.phase === "slate" || screen.phase === "refused"
         text: "Names are not unique and are not identifiers. Someone else in this Stoa may hold the same name. Your address is what tells you apart, so it is printed beside your name everywhere."
-        font: Theme.bodySmall
-        color: Theme.inkSoft
+        font: DTheme.bodySmall
+        color: DTheme.inkSoft
         wrapMode: Text.WordWrap
         lineHeight: 1.55
         textFormat: Text.PlainText
@@ -547,21 +547,21 @@ ScreenFrame {
     Rectangle {
         visible: screen.phase === "refused"
         Layout.fillWidth: true
-        implicitHeight: refusedBody.implicitHeight + 2 * Theme.cardPaddingY
-        color: Theme.field
-        border.width: Theme.border
-        border.color: Theme.accent
+        implicitHeight: refusedBody.implicitHeight + 2 * DTheme.cardPaddingY
+        color: DTheme.field
+        border.width: DTheme.border
+        border.color: DTheme.accent
 
         ColumnLayout {
             id: refusedBody
             anchors.fill: parent
-            anchors.margins: Theme.cardPaddingY
-            spacing: Theme.itemGap
+            anchors.margins: DTheme.cardPaddingY
+            spacing: DTheme.itemGap
 
             Text {
                 text: "That identity was not kept."
-                font: Theme.heading
-                color: Theme.accent
+                font: DTheme.heading
+                color: DTheme.accent
                 wrapMode: Text.WordWrap
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
@@ -569,8 +569,8 @@ ScreenFrame {
 
             Text {
                 text: "Nothing was stored. The keys above are still on offer."
-                font: Theme.bodySmall
-                color: Theme.inkSoft
+                font: DTheme.bodySmall
+                color: DTheme.inkSoft
                 wrapMode: Text.WordWrap
                 lineHeight: 1.55
                 textFormat: Text.PlainText
@@ -581,8 +581,8 @@ ScreenFrame {
             // written to name a fix.
             Text {
                 text: screen.refusal
-                font: Theme.address
-                color: Theme.ink
+                font: DTheme.address
+                color: DTheme.ink
                 wrapMode: Text.WrapAnywhere
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
@@ -594,21 +594,21 @@ ScreenFrame {
     Rectangle {
         visible: screen.phase === "kept"
         Layout.fillWidth: true
-        implicitHeight: keptBody.implicitHeight + 2 * Theme.cardPaddingY
-        color: Theme.field
-        border.width: Theme.hairline
-        border.color: Theme.rule2
+        implicitHeight: keptBody.implicitHeight + 2 * DTheme.cardPaddingY
+        color: DTheme.field
+        border.width: DTheme.hairline
+        border.color: DTheme.rule2
 
         ColumnLayout {
             id: keptBody
             anchors.fill: parent
-            anchors.margins: Theme.cardPaddingY
-            spacing: Theme.itemGap
+            anchors.margins: DTheme.cardPaddingY
+            spacing: DTheme.itemGap
 
             Text {
                 text: "This is who you are here now."
-                font: Theme.heading
-                color: Theme.ink
+                font: DTheme.heading
+                color: DTheme.ink
                 wrapMode: Text.WordWrap
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
@@ -620,7 +620,7 @@ ScreenFrame {
 
                 Identicon {
                     address: screen.keptIdentity !== null ? screen.keptIdentity.address : ""
-                    size: Theme.markInList
+                    size: DTheme.markInList
                 }
 
                 AddressLabel {
@@ -652,8 +652,8 @@ ScreenFrame {
                 text: reported === true
                     ? "The master key on this machine is stored encrypted."
                     : "The master key on this machine is stored unencrypted, in the clear. Anyone who can read the file can use it."
-                font: Theme.bodySmall
-                color: reported === true ? Theme.inkSoft : Theme.accent
+                font: DTheme.bodySmall
+                color: reported === true ? DTheme.inkSoft : DTheme.accent
                 wrapMode: Text.WordWrap
                 lineHeight: 1.55
                 textFormat: Text.PlainText
@@ -670,8 +670,8 @@ ScreenFrame {
             Text {
                 visible: screen.recoveryNeedsTheRecord === true
                 text: "Which key you chose is recorded only on this machine. A copy of the master key by itself is not enough to get back in — it can derive this identity, but not tell you which one was yours."
-                font: Theme.bodySmall
-                color: Theme.inkSoft
+                font: DTheme.bodySmall
+                color: DTheme.inkSoft
                 wrapMode: Text.WordWrap
                 lineHeight: 1.55
                 textFormat: Text.PlainText
@@ -687,21 +687,21 @@ ScreenFrame {
     Rectangle {
         visible: screen.phase === "failed"
         Layout.fillWidth: true
-        implicitHeight: failedBody.implicitHeight + 2 * Theme.cardPaddingY
-        color: Theme.field
-        border.width: Theme.border
-        border.color: Theme.accent
+        implicitHeight: failedBody.implicitHeight + 2 * DTheme.cardPaddingY
+        color: DTheme.field
+        border.width: DTheme.border
+        border.color: DTheme.accent
 
         ColumnLayout {
             id: failedBody
             anchors.fill: parent
-            anchors.margins: Theme.cardPaddingY
-            spacing: Theme.itemGap
+            anchors.margins: DTheme.cardPaddingY
+            spacing: DTheme.itemGap
 
             Text {
                 text: "No identity could be offered, so nothing can be chosen yet."
-                font: Theme.heading
-                color: Theme.accent
+                font: DTheme.heading
+                color: DTheme.accent
                 wrapMode: Text.WordWrap
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
@@ -709,8 +709,8 @@ ScreenFrame {
 
             Text {
                 text: "Nothing was stored and nothing was lost. This is a failure to read or write on this machine, not a choice that went wrong."
-                font: Theme.bodySmall
-                color: Theme.inkSoft
+                font: DTheme.bodySmall
+                color: DTheme.inkSoft
                 wrapMode: Text.WordWrap
                 lineHeight: 1.55
                 textFormat: Text.PlainText
@@ -719,8 +719,8 @@ ScreenFrame {
 
             Text {
                 text: screen.failure
-                font: Theme.address
-                color: Theme.ink
+                font: DTheme.address
+                color: DTheme.ink
                 wrapMode: Text.WrapAnywhere
                 textFormat: Text.PlainText
                 Layout.fillWidth: true

@@ -466,6 +466,64 @@ reserving space and no `""` binding that a future field would fill by accident.
 
 ## Open questions
 
-None blocking. The name derivation and the "recovery needs the record" export
-path are both owned elsewhere and both have a place to land in this screen
-without it changing shape.
+The name derivation and the "recovery needs the record" export path are both
+owned elsewhere and both have a place to land in this screen without it changing
+shape.
+
+### BLOCKING, found merging #60 into main after #63/#62 landed: where the launch gate sits
+
+This change was written when `Main.qml` was a single feed over one
+developer-supplied Stoa, so "branch on launch between onboarding and the feed"
+had exactly one reading. `main` has since made `Main.qml` a **three-screen
+navigator** (list / join / feed, `piece/ui-stoa-list`) that deliberately holds
+no Stoa address of its own, choosing one at runtime from the membership listing.
+
+The merge resolution taken here gates the whole navigator: `screenShown` tests
+the identity answer first, so `onboarding` and `identityFailed` outrank the three
+navigator screens, and the app opens on the Stoa **list** once an identity is
+reported. All 13 `tst_launch_branch.qml` specs pass against it, and it satisfies
+every scenario in this change's spec — none of which names the list, the feed or
+their order; they say onboarding versus "the forum".
+
+**It contradicts a requirement `main` tests directly**, which is why this is
+recorded rather than settled. `tst_stoa_screens.qml`'s
+`test_the_view_supplies_no_stoa_of_its_own_before_one_is_chosen` asserts
+`screenShown === "list"` at startup with **no identity fixture at all**, and nine
+sibling tests build `Main` the same way. Ten fail under the gate, every one for
+that single reason; the other 57 in that file pass. So the two branches disagree
+about whether the Stoa list is reachable before an identity exists:
+
+- **This change's spec**: the app branches on launch, and both absent cases reach
+  onboarding. A user with no identity sees onboarding.
+- **`main`'s stoa-navigation spec**: the list is the entry point, asserted so
+  that "a view rendering NOTHING cannot satisfy the two absences above" — the
+  assertion is load-bearing, not incidental.
+
+Both are defensible and the choice is the owner's, because it is a product
+question about what a peer with no identity may do:
+
+1. **Gate everything** (what is implemented here). Nobody browses without an
+   identity. The ten `tst_stoa_screens.qml` fixtures must then supply an
+   `identityStoa` and a `who_am_i` reply, and that file's entry-point requirement
+   has to be rewritten to say "the list is the entry point *once an identity is
+   reported*".
+2. **Gate only what needs an identity.** The list and join screens open
+   ungated — reading and joining need no key — and onboarding is reached from
+   the feed's existing posting gate, which already renders core's own reason for
+   `canPost: false` verbatim and offers a route to act on it. This change's
+   spec would need its launch-branch requirement reworded, since the branch
+   would no longer be at launch.
+
+Option 2 fits the merged code better than it first looks: `FeedScreen` already
+handles an identity-less peer gracefully per Stoa. It is also the shape §5.2's
+destination wants — identity becomes per-Stoa again, at which point a single
+app-level gate over one arbitrary Stoa is the wrong seam, and the gate belongs
+where a Stoa is already in hand.
+
+**`identityStoa` is the seam either way.** Core's `who_am_i`,
+`generate_identity_slate` and `keep_identity` each take a Stoa and refuse a
+request without one (`wire.rs`'s `parse_stoa`), so onboarding cannot ask anything
+without an address — even though §5.2's MVP waypoint makes the answer the same
+for every Stoa. That is why the property survives `piece/ui-stoa-list`'s removal
+of `stoaAddress`: it is a different question from "whose feed is up", renders
+nothing, and is commented as such at its declaration.

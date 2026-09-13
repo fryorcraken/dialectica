@@ -20,16 +20,16 @@ Rectangle {
     // effect of dropping decoration, and the change that drops it cannot see
     // that it did.
     //
-    // `OnboardingScreen` has the worked example — its uniqueness statement is
+    // `DOnboardingScreen` has the worked example — its uniqueness statement is
     // in the body AND in a MarginNote, because the spec requires the screen to
     // state it. Repetition is permitted, not required: a note that only
     // explains (its "ON THE MARK") is free to be margin-only.
     property alias apparatus: app.content
 
-    implicitWidth: Theme.cardWidth
-    color: Theme.paper
-    border.width: Theme.hairline
-    border.color: Theme.ink
+    implicitWidth: DTheme.cardWidth
+    color: DTheme.paper
+    border.width: DTheme.hairline
+    border.color: DTheme.ink
 
     RowLayout {
         anchors.fill: parent
@@ -39,16 +39,16 @@ Rectangle {
             id: body
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignTop
-            Layout.margins: Theme.cardPaddingY
-            Layout.leftMargin: Theme.cardPaddingX
-            Layout.rightMargin: Theme.cardPaddingX
-            spacing: Theme.blockGap
+            Layout.margins: DTheme.cardPaddingY
+            Layout.leftMargin: DTheme.cardPaddingX
+            Layout.rightMargin: DTheme.cardPaddingX
+            spacing: DTheme.blockGap
         }
 
         ApparatusColumn {
             id: app
             Layout.fillHeight: true
-            Layout.preferredWidth: Theme.apparatusWidth
+            Layout.preferredWidth: DTheme.apparatusWidth
         }
     }
 }
