@@ -47,7 +47,7 @@ closing it rather than retiring it.
 
 ## The code contradicts a recorded decision
 
-- [ ] **`dev-writer`** — `design.md:178-183` states a classifier property the
+- [x] **`dev-writer`** — `design.md:178-183` states a classifier property the
       code does not have, and the spec now requires the property the code lacks
 
       Decision 6's preconditions paragraph reads: *"it assumes rustfmt-shaped
@@ -105,9 +105,67 @@ closing it rather than retiring it.
       the fix would create, in a document that will be archived as the record of
       what was decided.
 
+      **Fixed** in `d052d0a`, as the third bucket you prescribed. Both halves of
+      the SHALL are discharged by the same mechanism, which is what your
+      suggestion bought.
+
+      **The arm no longer depends on where the first `;` falls.** It is decided
+      on whether `{` or `;` comes first after the parameter list, so a defaulted
+      method is recognised as defaulted whether its body is `{ request }` or
+      `{ let _ = request; String::new() }`. That is what fixes the misdiagnosis
+      as well as the silent pass — the body is never read as a return type
+      again.
+
+      **The panic states the premise with its citation.** It names the method,
+      names `lidl-gen`, quotes the frontend's own doc sentence, and gives the
+      `logos-module-builder` revision `dialectica/flake.nix` pins
+      (`9f420c2901e35a16ba8fc77383e796480000a1d2`) — so an author who has just
+      bumped the pin has the three things needed to decide whether the premise
+      still holds. The set the premise excuses is
+      `NOT_EMITTED_ONTO_THE_WIRE`, a list of names rather than a filter, which
+      is the half that makes a NEW defaulted method red rather than an
+      unnoticed subtraction from the swept surface.
+
+      **The tests exist because the classifier now takes its source as a
+      parameter**, and I want to flag that as the part of this fix I think
+      matters most beyond the box. While it read `ADAPTER_SOURCE` directly, the
+      only way to reach a branch was the mutation probe you and the architecture
+      reviewer both had to write and revert — which is precisely why this arm
+      was found twice and fixed neither time: nothing committed could reach it.
+      `request_taking_methods_declared_in(&str)` is the classifier;
+      `the_dispatch_traits_request_taking_methods()` is a one-line caller.
+
+      **Each of the six proved failing first**, against the old arm restored:
+
+      - `a_defaulted_method_is_recognised_as_defaulted_whether_or_not_its_body_has_a_semicolon`
+        — four body shapes. Against the old arm the `;`-body case reproduced
+        your exact string,
+        `["publish_moderation (returns \`-> String { let _ = request\`)"]`, and
+        the `;`-less case failed with `a defaulted method must not pass silently
+        — body { request } did: ["ping"]`: the classifier returned only `ping`,
+        silently dropping the method. It asserts the defaulted wording AND the
+        absence of `(returns \``, so a future reordering cannot quietly restore
+        the misdiagnosis while keeping the test green.
+      - `an_unexcused_defaulted_method_names_itself_and_cites_the_generator_pin`
+        — `should_panic`; against the old arm it "did not panic as expected".
+      - `the_defaulted_panic_states_the_premise_and_its_citation` — asserts the
+        message contains the method, `lidl-gen`, the revision and
+        `NOT_EMITTED_ONTO_THE_WIRE`. It exists because a `should_panic` matcher
+        reads a prefix and would not notice the citation being dropped, which
+        is the half the spec actually requires.
+      - `the_defaulted_bucket_excuses_only_the_methods_the_generators_premise_covers`
+        — the other direction: `on_context_ready` must still pass.
+      - `the_classifier_buckets_each_declaration_shape` and
+        `a_borrowed_request_parameter_fails_loudly_rather_than_passing` — the
+        buckets that were already right, now pinned from a committed test
+        instead of from a probe someone has to remember to revert.
+
+      `design.md` decision 6 now says what holds, names the false claim as
+      false, and records the spec obligation it discharges.
+
 ## Decisions made and not recorded
 
-- [ ] **`dev-writer`** — `design.md` records neither of the two substantive
+- [x] **`dev-writer`** — `design.md` records neither of the two substantive
       decisions the `spec-writer` made in `510259c`, and one of them changes a
       decision `design.md` already carries
 
@@ -155,9 +213,44 @@ closing it rather than retiring it.
       already has the prose; the work is deciding what belongs in a decision
       record versus a proposal, not writing it from scratch.
 
+      **Fixed** in `d052d0a` as decision 9, "The request bound is promoted into
+      the contract, and as a bracket rather than a number" — one entry, both
+      choices, in the shape you asked for.
+
+      Both alternatives are named as live rather than as strawmen. For the
+      promotion: softening the prose was cheaper and would have closed the
+      spec-test finding outright, and what ruled it out is that the property is
+      the *ordering* — a bound checked after the parse bounds nothing, and per
+      PHASE0-FINDINGS §3 the cost is the module process rather than the call.
+      For the bracket: the number exists and is derived with arithmetic shown,
+      so stating it was the obvious move, refused because a number in a spec is
+      a claim no gate reads.
+
+      **The costs are what I took most from your framing**, since a decision
+      record naming only the reasons is a justification rather than a decision.
+      The promotion costs a contract obligation every future request-taking
+      method inherits, including from authors who never read this folder. The
+      bracket costs a spec that cannot be violated by a *bad* number, only by an
+      absent or unbracketed one, with the compensating "record where your number
+      sits" obligation discharged in a doc comment rather than by a gate. I
+      wrote that second one as a real weakness rather than a neutral trade,
+      because it is one.
+
+      **Decision 2's table row is now pointed rather than left to mislead.** You
+      were right that it was the only surviving statement about the cap and read
+      as an inherited implementation detail. I did not rewrite the row — it is
+      accurate about the code, and the table's job is the before/after — but it
+      now carries a paragraph saying it describes the code rather than the whole
+      decision, and naming decision 9 as where the choice and its costs live.
+
+      While there I corrected a citation in the same paragraph:
+      `an_oversized_request_is_refused_before_it_is_parsed` was cited bare, and
+      it lives in `dialectica-core/src/wire/request.rs`, not in `wire.rs` where
+      a reader would look first. Verified by grep before editing.
+
 ## An entry that is thinner than the code it describes
 
-- [ ] **`dev-writer`** — `design.md:11-13` claims a guarantee the type does not
+- [x] **`dev-writer`** — `design.md:11-13` claims a guarantee the type does not
       give, and the concession that would have been honest is absent
 
       Decision 1 closes: *"`PublishRequest::parse` runs the envelope, the
@@ -205,6 +298,37 @@ closing it rather than retiring it.
       a convention the module boundary does not enforce. Say which of the three
       the type does enforce (`Request::parse`, via the `fields` type) and which
       two it does not.
+
+      **Fixed** in `d052d0a`, in both places the sentence appeared — `design.md`
+      decision 1 and `PublishRequest`'s own doc — because leaving the doc
+      standing is the failure family this file already records elsewhere.
+
+      Both now say exactly what you asked: **one** of the three is forced, the
+      envelope, because `fields` is a `Request` and a `Request` cannot exist
+      without `Request::parse`; `reject_forbidden_fields` and `parse_stoa` are
+      run by `PublishRequest::parse` and by nothing the type insists on, so a
+      struct literal written inside the module skips both and can name a `stoa`
+      the request never carried.
+
+      I kept your severity calibration rather than flattening it, because the
+      calibration is the finding's point: `publishing` is the only construction
+      site and it goes through `parse`, so this is the recorded *reason* being
+      stronger than the mechanism inside a decision whose subject is preferring
+      a data shape over a checked branch — and overstating it would be the same
+      error as the sentence. The doc says the exposure is the future handler
+      written inside `wire.rs`, which is where handlers go.
+
+      **No test.** I want to be explicit rather than let the unticked-box
+      convention imply one exists: the corrected claim is *"the type does not
+      force this"*, and a test cannot demonstrate the absence of a compiler
+      guarantee — the code that would prove it is code that compiles, which is
+      what you already demonstrated by compiling it. What would make it testable
+      is making it true, and that is recorded rather than done: decision 1 now
+      names the available fix (a private constructor behind a module boundary,
+      forcing all three by construction) and defers it with decision 8's
+      reshape, on the architecture reviewer's argument that both move the same
+      three signatures and doing them apart pays the `Handler`-type and
+      sweep-fixture cost twice.
 
 ## PLAN.md
 

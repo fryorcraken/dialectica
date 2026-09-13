@@ -77,7 +77,7 @@ probe below was run in my own worktree and reverted; the worktree is deleted.
       resolved — the read goes through `core` now, and the remaining reshape is
       decision 8's.
 
-- [ ] **`design-reviewer`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:7954`
+- [x] **`design-reviewer`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:7954`
       — the classifier's `;` precondition is enforced by a silent `continue`,
       not by the loud bucket the design claims
       **Scenario:** `design.md` decision 6 and the function's own doc both state
@@ -108,6 +108,65 @@ probe below was run in my own worktree and reverted; the worktree is deleted.
       matching the claim), or decision 6 should say a defaulted method is
       deliberately skipped **because the generator skips it**, with the
       `.lidl`-derivation claim cited rather than assumed.
+
+      **Fixed** in `d052d0a` — and you offered this as an either/or, so it is
+      worth saying that both halves landed, because between your filing and now
+      the spec made both mandatory. `module-wire-contract:141-143` requires a
+      check of this contract's coverage to *"state that assumption"* and to
+      *"fail visibly rather than silently"*. Your first branch is the second
+      half; your second branch is the first. Neither alone would have
+      discharged it.
+
+      So: the `;`-less arm pushes to a `defaulted` bucket checked against
+      `NOT_EMITTED_ONTO_THE_WIRE`, and the panic states the premise with its
+      citation — `lidl-gen`, the frontend's own doc sentence, and the
+      `logos-module-builder` revision `dialectica/flake.nix` pins. Recognition
+      is decided on whether `{` or `;` comes first, so it no longer depends on
+      where the first `;` in a body happens to fall, which also fixes the
+      misdiagnosis you measured. Six tests, each proved failing against the old
+      arm; the design reviewer's box carries the detail.
+
+      **On the `.lidl` claim you could not verify** and correctly flagged as
+      load-bearing: I did not re-verify it either, and it is no longer
+      load-bearing in the way that worried you. The `spec-writer` verified it
+      against the frontend (`lidl-gen/src/rust_frontend.rs:350-354`,
+      `if f.default.is_some() { continue; }`) and recorded it in the spec with
+      its citation. More to the point, the fix does not *rest* on it: the
+      classifier now names the method and states the premise, so if the premise
+      is ever false the failure is a red test with a citation to go re-read
+      rather than a request-taking method on the wire unswept. That inversion is
+      what your box was really asking for.
+
+      **On your second branch's other half — whether `design.md` should carry
+      the premise too.** Your box offered "decision 6 should say a defaulted
+      method is deliberately skipped because the generator skips it, with the
+      claim cited". Decision 6 now says the first part and points at the spec
+      for the citation rather than repeating it, and that split is deliberate
+      rather than a shortcut, so here is the reasoning in case you would have
+      drawn it differently.
+
+      The design reviewer was given exactly this question and answered it in
+      `findings/design-review.md:22-46`: the premise belongs in the spec and
+      **only** there. It is a statement about *what the wire surface is*, which is
+      `module-wire-contract`'s subject, and the `spec-writer` framed it there
+      correctly as "we depend on upstream behaviour X, verified at this
+      revision". A second copy in `design.md` would drift in the worst available
+      direction: a `design.md` is **archived and frozen at merge** while the
+      spec stays live and is re-read whenever the pin moves. The premise's whole
+      value is that a pin bump makes it visibly re-checkable — so a frozen copy
+      is a copy of a claim that can no longer be invalidated, which is worse
+      than no copy. That is `.claude/agents/README.md:53-54`'s "two copies drift
+      and the wrong one gets read", with the drift direction known in advance.
+
+      Recorded in `design.md` under Rejected alternatives as "Restating the
+      generator premise here as well as in the spec", so the reasoning survives
+      the deletion of `findings/` at merge — which is the only reason this
+      needed a commit at all.
+
+      What `design.md` owes instead is the *property of the classifier*, which
+      is its own subject and which it now carries: that a defaulted method is a
+      named bucket rather than a silent drop, with the spec named as the home of
+      the premise rather than restated.
 
 ## Judgements the brief asked for
 
