@@ -192,15 +192,20 @@ Two consequences for you:
   moving. That is the one thing to get right here, because the name is coming
   and the row is the only place it goes.
 
-  **Do not size that space from the word count stated elsewhere in this file.**
-  As of this change the count is unsettled: the screen deliberately asserts no
-  number, and `docs/name-shape-sweep` (`d3e7579`) supersedes the four-word
-  design this brief still describes at the provenance block, in "It is four
-  words, and they all matter", and in the collision figures below. Those three
-  are corrected by that sweep, not here — its figures are arithmetic over
-  vocabulary sizes and were re-derived by hand, so correcting the count without
-  them would leave a worse artefact than either. Until it lands, take the shape
-  from PLAN.md §5.2.1, which wins any disagreement with this file.
+  **Do not size that space from a word count — not the one stated elsewhere in
+  this file, and not the one in PLAN.md §5.2.1 either.** The count has moved
+  three times (`git log docs/PLAN.md` is the record), and a change is in flight
+  that moves it again along with the collision figures derived from it, since
+  those are arithmetic over vocabulary sizes rather than prose. This file and
+  PLAN.md currently agree, so there is no disagreement to resolve — they are
+  simply both a count ahead of a decision, and a layout sized to either is a
+  layout that has to be redrawn.
+
+  The screen asserts no number for exactly this reason, and the row should be
+  built the same way: **size the space from the longest name the row can show
+  without the address moving, and let the count be whatever it turns out to
+  be.** That constraint does not change when the count does, which is the only
+  reason it is safe to design against today.
 - **A name is not unique and not an identifier** — see obligation 6 below.
   Accidental collisions are now rare: in a Stoa of a thousand the chance two
   people share a name is **about 0.003%**, and at five thousand **about 0.07%**.

@@ -10,7 +10,7 @@ Baseline: **99 QML tests across 6 spec files, all passing**.
 
 ## Defects
 
-- [ ] **`dev-writer`** — `docs/UI-BRIEF.md:17`, `:139`, `:196-198` — this change
+- [x] **`dev-writer`** — `docs/UI-BRIEF.md:17`, `:139`, `:196-198` — this change
       removed the word count from the screen because the owner settled three,
       and left the live brief asserting **four** in three places
       **Scenario:** CLAUDE.md's table says the brief is *"a **live document**…
@@ -66,6 +66,55 @@ Baseline: **99 QML tests across 6 spec files, all passing**.
       lands, the pointer is visibly about sites that no longer say four.
       **The box stays open** because the three sites are still wrong on disk,
       and it should close when #64 merges rather than on my say-so.
+      **Fixed — but not the fix you proposed, because the premise moved when I
+      checked it.** Your deferral reasoning holds and I am not duplicating #64.
+      Two of your facts I re-ran rather than read: `git diff origin/main...HEAD
+      -- docs/UI-BRIEF.md` returns exactly the one paragraph block, so all three
+      four-word sites do predate this piece; and `d3e7579` is a commit object in
+      this worktree's store but `git branch -a --contains d3e7579` returns
+      nothing, so it is reachable from no branch here — #64 is still open.
+      **What that makes wrong is the mitigation, not the three sites.** On this
+      branch `PLAN.md:947` reads *"the shape is settled below and is **four
+      words**"*, `:1316` heads "why the name is four words", `:1376` concludes
+      *"Therefore the name is four words"*, and `:1682` is a rendering
+      obligation — *"**A four-word name needs room**"*. So the brief and PLAN.md
+      **agree** at four here; there is no disagreement for PLAN.md to win. Your
+      pointer's closing sentence — *"take the shape from PLAN.md §5.2.1, which
+      wins any disagreement with this file"* — therefore routes a designer off a
+      four-word claim and onto a stronger one, citing as authority a section
+      that says the thing the pointer just warned them off. It also asserts a
+      supersession that has not landed, on a hash a reader cannot resolve.
+      `spec-test.md:398-401` records `PLAN.md:947` and `:1682` as stale
+      *"already recorded as deferred… in `UI-BRIEF.md:195-202`"*, and
+      `design-review.md:295-303` endorsed the pointer as self-invalidating.
+      Both passed over the same thing: the pointer names PLAN.md as the escape
+      hatch and PLAN.md is one of the sites it is escaping.
+      **The rewrite** drops both defects and keeps your intent. It tells the
+      designer not to size the space from a word count *at all* — naming this
+      file and PLAN.md §5.2.1 together, and saying plainly that the two agree
+      and are simply a count ahead of a decision, so neither is a refuge. It
+      cites `git log docs/PLAN.md` instead of a hash, per CLAUDE.md's rule that
+      a document should name the command rather than the number. And it replaces
+      the warning with a constraint that survives the count moving: size the row
+      from the longest name it can show without the address moving. That is the
+      same argument the screen makes by asserting no number, which is why it is
+      safe to design against before the sweep lands.
+      **The three sites and the collision figures are untouched**, for your
+      reason: the figures are hand-derived arithmetic over vocabulary sizes and
+      re-deriving them here would either duplicate #64 or conflict with it.
+      **Checked for orphaned citations** before rewriting, per the repo rule.
+      Five files cite `d3e7579`. `proposal.md:94-98` and `design.md:334-341`
+      cite the count's *history of moving* as the argument for asserting none —
+      true whether or not #64 lands, and neither instructs a designer, so both
+      stand. The two ticked boxes near those lines were discharged by edits to
+      `proposal.md` and `design.md`, not by the pointer, so nothing is stranded.
+      `design-review.md:295-303` is prose describing the pointer's old wording;
+      it is now a description of a superseded version, and I have left another
+      reviewer's text alone rather than editing it — flagging it here instead.
+      **No test.** A brief is prose and no gate reads it; the assertable half —
+      that the screen states no count — is already pinned by
+      `test_the_uniqueness_note_states_the_obligation_without_a_word_count` and
+      its eight-spelling sweep, and that test is unchanged and still passes.
 
 - [x] **`dev-writer`** — `Core.qml:38-45` — the seam's own comment promises
       exactly the property `ok:true` does not have, and the three callers that
@@ -183,6 +232,29 @@ Baseline: **99 QML tests across 6 spec files, all passing**.
       is the good outcome, and the reason to run
       `dialectica-ui/tests/run-qml-tests.sh` after the merge rather than trusting
       that a conflict-free rebase preserved the behaviour.
+      **Deferred — box stays OPEN, and I am not ticking it.** I verified your
+      citations still land: `Main.qml:26` is `property string stoaAddress: ""`,
+      `:48` is `identityState`, and `:77-121` is `askWhoAmI()` with the
+      `stoaAddress === ""` guard at `:78`. The collision is real as described.
+      **I changed nothing in `Main.qml`,** and the reason is your own: the
+      resolution is a decision about which shape `Main` takes, the coordinator
+      has taken that sequencing, and a unilateral accommodation would be a guess
+      at a decision that is not mine — the merge is semantic rather than
+      textual, so a wrong guess compiles and then fails an identity check on
+      every cold start. This box closes when that decision is made, not on my
+      say-so, and it correctly blocks the merge until then.
+      **What I did do is move the durable half out of the tracker**, which is
+      deleted at archive: `design.md` now carries *"The launch branch is
+      per-Stoa, and what a reconciliation must not lose"* beside the existing
+      three-copies-of-the-guard entry, which already recorded the collision but
+      only its guard half. It states that the question is per-Stoa rather than
+      per-app and why (`whoAmI(stoa)` takes a Stoa, and re-asking rather than
+      remembering means it is asked wherever a Stoa becomes current), that
+      `"unknown"` already represents "not asked yet" so a navigator needs no new
+      state, and it names your three tests as the contract with the instruction
+      to run the suite after the merge rather than trusting a clean rebase.
+      **Verified the three tests exist** at `tst_launch_branch.qml:132`, `:155`
+      and `:181` before citing them, rather than copying the names across.
 
 - [x] **`dev-writer`** — `OnboardingScreen.qml:707-747` — the screen's three
       `MarginNote` entries sit in an `apparatus` property that

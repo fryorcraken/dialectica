@@ -261,6 +261,38 @@ Stoa wired shows a failure card before it shows anything else. That is the same
 trade `FeedScreen` already makes for the same reason — a view given nothing
 says so rather than looking empty.
 
+### The launch branch is per-Stoa, and what a reconciliation must not lose
+
+`Main` here owns the identity decision for a Stoa supplied from outside.
+`piece/ui-stoa-list` gives `Main` a navigator instead and removes `stoaAddress`
+outright, on the argument that leaving it would be a second source for the one
+value those screens exist to supply. **The two are not a textual conflict.** A
+line-by-line merge of the two files compiles, and then `askWhoAmI()` guards on
+a property the other branch deleted — a failed identity check on every cold
+start, reported by no gate that reads only one branch.
+
+Which shape wins is not decided here, and deliberately not: a unilateral
+accommodation of a branch that may itself move would make this `Main` answer to
+a navigator that does not exist in this tree.
+
+What is decided here, and is what the reconciliation needs:
+
+- **The question is per-Stoa, not per-app.** `whoAmI(stoa)` takes a Stoa, and
+  the requirement that the branch be re-asked rather than remembered means it is
+  asked wherever a Stoa becomes current — not once at startup. So after a
+  navigator exists, `askWhoAmI()` belongs where a Stoa is chosen and
+  `identityState` becomes a property of the chosen-Stoa screen rather than of
+  `Main`. `"unknown"` already exists for "not asked yet", so a navigator that has
+  chosen nothing is representable without a new state.
+- **Three behaviours are the contract, and each has a test that fails loudly if
+  the reconstruction drops it**, which is the good outcome and the reason to run
+  `dialectica-ui/tests/run-qml-tests.sh` after the merge rather than trusting a
+  conflict-free rebase: the module answers on every ask and no flag is remembered
+  (`test_the_second_answer_decides_the_branch_and_the_first_does_not`); both
+  absent cases route to onboarding with the reason held unparsed
+  (`test_an_unloadable_identity_also_shows_onboarding_with_its_own_reason`); and
+  a failed report shows neither branch (`test_a_failed_report_shows_neither_branch`).
+
 ### A spec'd obligation never rests only on the apparatus column
 
 The uniqueness statement — names are not unique, are not identifiers, the
