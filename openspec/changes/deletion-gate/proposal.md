@@ -200,16 +200,36 @@ and refused to fix it itself. Three documentation edits that all answer "what
 must a closer do about a merge or an archive nobody else has read" are one
 review surface, not three.
 
-The rule, as added to `closer.md`'s "What you never do" neighbourhood:
+The rule was drafted here as:
 
 > The closer may author a fix to its own checklist or its own file, and must
 > then treat that PR as one it cannot approve — it goes to the runner like any
 > other. It must say in its report which commits on the PR are its own, since
 > the runner reviewing it needs to know which parts had no second reader.
 
-The final clause is the closer's own addition and is the sharpest part: without
-it the rule produces a correct handoff that the runner cannot act on, because
-"this PR needs a second reader" does not say *which lines* lacked one.
+**That draft is wrong and was corrected by the owner before it shipped**, on the
+grounds that *"the closer is supposed to archive so commits from the closer are
+expected"*. Applied literally to the archive commit it is self-defeating:
+`openspec archive` is the closer's own stage row, so every piece it archived
+would become a piece it could not close, and the role deadlocks on its normal
+path.
+
+The axis is not authored-or-not, it is **dispatched or discretionary**. The
+archive commit is what the closer was sent to write and is mechanical — a folder
+moved, a delta merged — so it disqualifies nothing. A fix to its own checklist
+is something it *decided* to write, had no second reader, and does disqualify it
+from approving that PR. The checkable test is "was I dispatched to write this?"
+rather than "is this routine?": the first can be checked against the brief, the
+second is a judgement made by the agent with the most reason to answer
+conveniently.
+
+The report clause survives the correction unchanged and applies to the
+discretionary kind. It is the sharpest part: without it the rule produces a
+correct handoff that the runner cannot act on, because "this PR needs a second
+reader" does not say *which lines* lacked one.
+
+See `.claude/agents/closer.md` for the wording that shipped; this section is the
+record of why the first version was wrong, which the file itself does not carry.
 
 ## Archiving a change that has no spec delta
 

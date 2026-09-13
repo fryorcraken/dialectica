@@ -233,13 +233,27 @@ Each of these is here because the cheap version of it is tempting:
 - **Force-push, or rebase the piece branch.** Only the runner pushes the piece.
   A stale branch is a report, not a repair.
 - **Merge a PR you did not check the diff of**, however green the run.
-- **Approve a PR you wrote any part of.** The closer may author a fix to its own
-  checklist or its own file — that is how a gap in this page gets closed by the
-  agent standing in front of it — and must then treat that PR as one it cannot
-  approve: it goes to the runner like any other. **Say in your report which
-  commits on the PR are your own.** Without that the handoff is correct and
-  unactionable, because "this needs a second reader" does not say which lines
-  lacked one.
+- **Approve a PR carrying your own discretionary work.** Not every commit you
+  make is discretionary, and the difference decides what you may still close.
+
+  **The archive commit is your job.** You were dispatched to write it, it is the
+  mechanical result of `openspec archive` — a folder moved, a delta merged — and
+  it changes nothing about what you may approve. A rule that disqualified you
+  from it would deadlock the role on its normal path.
+
+  **Discretionary work is anything you decided to write**: a fix to this
+  checklist, an edit to your own file, a correction you noticed and chose to
+  make. The test is *"was I dispatched to write this?"*, not *"does this feel
+  routine?"* — the first has an answer you can check against the brief you were
+  given, the second is a judgement made by the agent with the most reason to
+  answer conveniently. **If you had to decide to write it, it is
+  discretionary.**
+
+  Where you wrote anything discretionary, treat that PR as one you cannot
+  approve: it goes to the runner like any other. And **say in your report which
+  commits are your own discretionary work** — without that the handoff is
+  correct and unactionable, because "this needs a second reader" does not say
+  which lines lacked one.
 
 ## Your report
 

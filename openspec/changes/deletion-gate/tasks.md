@@ -73,7 +73,12 @@
 ## 4. The documentation edits
 
 - [x] 4.1 Add the closer-authoring rule to `closer.md`'s "What you never do",
-      including the clause naming which commits are the closer's own.
+      on the **dispatched-or-discretionary** axis: the archive commit is the
+      closer's job and disqualifies nothing, discretionary work disqualifies it
+      from approving that PR, and the report names which commits are its own
+      discretionary work. The first draft was on an authored-or-not axis and
+      would have deadlocked the role on its own archive commit; corrected by the
+      owner before it shipped, and `proposal.md` carries why.
 - [x] 4.2 Add the zero-delta pointer to `closer.md` step 5, beside the existing
       "read the page in full" instruction.
 - [x] 4.3 Add the full zero-delta note to `docs/OPENSPEC-ARCHIVE.md`. Its three
