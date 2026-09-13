@@ -697,9 +697,12 @@ jobs:
           # exceeds `ran` and this gate fails, which is correct, because a test
           # that cannot run is worse than no test. The previous comment here
           # claimed that protection while excluding the directory that would have
-          # provided it; a review created an example holding one `#[test]` and
-          # measured the gate staying green at 495/495. It is true now because
-          # `examples/` is walked.
+          # provided it: a review created an example holding one `#[test]` and
+          # measured the old gate staying green, because the example was in
+          # neither number. Re-measured under this rglob with the same probe
+          # restored, `declared` came out one HIGHER than `ran` and the mismatch
+          # fired. The claim is true now because `examples/` is walked; no number
+          # is quoted here because both move with every test added.
           import pathlib
           tree = pathlib.Path("dialectica/rust-lib")
           if not tree.is_dir():

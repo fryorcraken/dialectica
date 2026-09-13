@@ -1,5 +1,45 @@
 //! The read path, end to end, against real files on a real disk.
 //!
+//! # What this target covers, and what it does not
+//!
+//! **Covers:** the read path from the JSON request a view sends to
+//! [`dialectica_core::wire::list_threads_from_request`] down to the bytes in a
+//! SQLite file, plus the keystore file that mints the signing identity. Both ends
+//! are real files, and the layers between them are crossed rather than stubbed.
+//!
+//! **Does NOT cover, and these are absences to know about rather than gaps to
+//! infer:**
+//!
+//! - **The publish path.** Every test here is a READ. Posting, replying, voting
+//!   and revising are exercised only as fixtures — an op is constructed and
+//!   appended directly, never through whatever public write entry point arrives.
+//!   When one does, it gets its own section (see the sectioning rule below).
+//! - **`list_stoas` and membership.** Neither exists yet:
+//!   `grep -rn "list_stoas\|listStoas"` over `dialectica/` finds only a line in
+//!   `docs/PLAN.md`'s JSON contract. There is nothing here to cover because there
+//!   is nothing there to call.
+//! - **Transport.** Nothing here sends or receives an op over the network. An
+//!   arriving op is modelled as an `append` with an `Arrival`, which is what the
+//!   store sees, and not as anything a peer did.
+//! - **The QML view.** Out of scope by construction: this is a Rust integration
+//!   test of the core crate, and the view forwards JSON.
+//!
+//! # How the sections are organised, and where a new test goes
+//!
+//! **Sections are the BOUNDARY a test crosses**, not the capability it exercises
+//! — because this crate's defects live in seams and organising by capability
+//! hides seams. Three rules, so that four pieces in flight adding to one file
+//! answer "where does this go?" the same way:
+//!
+//! 1. A test belonging to two sections goes under the boundary it would fail at
+//!    **first**. A forged hide is both authority and refusal; it fails at the
+//!    authority check, so it lives under moderation.
+//! 2. A test crossing a boundary no section names **gets a new section**, and the
+//!    write path is the one known to be coming.
+//! 3. A section's heading states the boundary, never a count of what is under it.
+//!    A count goes stale the first time somebody adds a test and is a claim
+//!    nothing checks — this file shipped "at three boundaries" over four.
+//!
 //! # Why this target exists, and what the per-change suites structurally cannot do
 //!
 //! Every other test in this crate is an in-crate `#[cfg(test)]` module, which
@@ -12,9 +52,17 @@
 //!    surface was missing a method entirely would pass every one of them. This
 //!    file imports `dialectica_core` as an outside consumer does and touches
 //!    nothing private. Where a test here needs a value the crate keeps private
-//!    — the field cap, the title cap — the value is **hardcoded**, which is the
-//!    stronger assertion anyway: a cap that silently drifted would still refuse
-//!    an absurd input and still pass every test that only probes absurd inputs.
+//!    — the field cap, the title cap — the value is **hardcoded, because an
+//!    integration test cannot see a private `const` at all**. That is the whole
+//!    reason, and it is enough of one.
+//!
+//!    It is specifically NOT that nothing else pins these caps. Two unit tests
+//!    already hardcode both — `op.rs`'s
+//!    `the_field_cap_is_pinned_to_a_known_answer` asserts
+//!    `MAX_FIELD_LEN == 150 * 1024`, and `stoa.rs` asserts
+//!    `MAX_TITLE_BYTES == 1024` — so a drifted cap has two other tests to argue
+//!    with before it reaches this one. What this file adds is an outside
+//!    consumer's view of the same boundary, reached only through public API.
 //!
 //! 2. **They mostly run in memory.** `SqliteOpLog::in_memory()` exercises the
 //!    real SQL, which is most of the value, and by construction cannot survive
@@ -22,11 +70,19 @@
 //!    *file*, so every store here is a file and every restart is a dropped
 //!    connection and a reopened path — never a flag.
 //!
-//! A third reason is specific to this crate's defect history. The three bugs
-//! that reached this session's review were each **cross-layer**: encode versus
-//! decode, wire versus store, memory versus disk. A per-change suite cannot see
-//! one, because each layer is correct in isolation and the defect lives in the
-//! seam. So the tests below prefer crossing a boundary to going deep on one.
+//! A third reason is specific to this crate's defect history. Its expensive
+//! defects have been **cross-layer** — the seam between encode and decode,
+//! between the wire shape and the store, between memory and disk — and a
+//! per-change suite structurally cannot see one, because each layer is correct
+//! in isolation and the defect lives between them. The over-cap body this file
+//! documents below is the worked example: `canonical_bytes` and `decode` are
+//! each defensible alone and disagree with each other. So the tests below prefer
+//! crossing a boundary to going deep on one.
+//!
+//! No count is given for how many such defects there have been, because none is
+//! recorded anywhere countable — a review measured that `grep -rn "cross-layer"`
+//! over `openspec/` and `docs/` returns nothing but this file. The argument is
+//! about the SHAPE of the defect, which does not need a tally to hold.
 //!
 //! # The defect family these fixtures are shaped against
 //!
@@ -49,9 +105,29 @@
 //! Every row was applied to the implementation, the suite run, and the mutation
 //! reverted. A test nobody has watched fail is a test nobody knows works.
 //!
-//! Eleven mutations, each with the failure PREDICTED before the run and the
-//! failure OBSERVED after it. Two rows disagreed, and both disagreements changed
-//! this file — see the note under the table.
+//! Each row carries the failure PREDICTED before the run and the failure
+//! OBSERVED after it. The four notes under the table are the rows where the two
+//! disagreed, and three of those disagreements changed this file — a prediction
+//! that misses is the most useful row in the table, because it is the one that
+//! found something.
+//!
+//! **EACH ROW WAS MEASURED ONCE, on the date its group says, and nothing keeps
+//! this table true.** There is no gate that re-runs these and no test that fails
+//! when a row goes stale — and most rows name implementation symbols
+//! (`feed::list_threads`, `moderation::resolve`, `Moderators::contains`,
+//! `SqliteOpLog::append`, `SqliteOpLog::open`, `from_connection`) that a rename
+//! silently invalidates. Read the table as dated history, not as a current claim.
+//!
+//! **What a later author owes it:** if you add a test here, you owe this table
+//! nothing — a row is a record of one experiment, not a coverage claim, and
+//! re-running eleven mutations to add one test would be a tax nobody would pay.
+//! What you owe is the same discipline for YOUR test: mutate the thing it
+//! claims to cover, predict the failure, watch it, and add a row saying so. If
+//! you RENAME or MOVE something the table names, fix the row in that commit or
+//! delete it; a row pointing at a symbol that no longer exists is worse than no
+//! row, because it reads as though somebody checked.
+//!
+//! ## Measured at commit `9bb2bc1`, when this file was added — eleven mutations
 //!
 //! | Mutation | Predicted | Observed |
 //! |---|---|---|
@@ -65,7 +141,23 @@
 //! | `found != LAYOUT_VERSION` loosened to `found >` | foreign-version test alone | that test alone, degraded to `LayoutDoesNotMatchItsVersion{version:1,why:"no such table: ops"}` — as predicted, including the mechanism |
 //! | `sanitise` stops removing invisibles | sanitise test alone | that test alone, `"hello\u{200b}world"` vs `"helloworld"` — as predicted |
 //! | the paging slice loses one row per page | paging test alone | that test alone, first page 2 rows vs 3 — as predicted |
-//! | `SqliteOpLog::open` ignores its path and opens `:memory:` | ~15 of 20 | **18 of 20** — see note 3 |
+//! | `SqliteOpLog::open` ignores its path and opens `:memory:` | ~15 of 20 | **18 of 20** — see note 3; re-run at 24 tests in the group below |
+//!
+//! ## Measured when the review findings were addressed — seven mutations
+//!
+//! The suite was 20 tests when the group above was run and is 24 now, so the
+//! `:memory:` row was re-run rather than left to read as though it still
+//! described the whole suite.
+//!
+//! | Mutation | Predicted | Observed |
+//! |---|---|---|
+//! | `pub score: i64` added to `FeedRow`, set to `7` | the vote test, as a COMPILE error | `E0027: pattern does not mention field \`score\`` — as predicted. This is the mutation a review ran against the previous form of that test and watched **pass**; the destructure is what changed it |
+//! | `list_threads_from_request` returns an empty page instead of `error_json` on a failed store open | the JSON error-shape test alone | that test alone, `{"hasMore":false,"items":[],"page":0}` where an `error` was required — and the `feed::list_threads`-level test one layer down **stayed green**, which is why that layer could not cover this seam |
+//! | the wire row's `author` is emitted as `""` | the JSON happy-path test alone | that test alone, `""` vs the independently derived address — as predicted |
+//! | the paging slice loses one row per page | the TILING test, and not the past-the-end test | exactly that split, first page 2 vs 3 — which is what splitting the old `…and…` name bought |
+//! | `iter_stoa` compares `substr(stoa, 1, 8)` | shared-prefix test alone | that test alone, `["right","left"]` vs `["left"]` — so the 16-byte fixture is as strong as the 31-byte one it replaced |
+//! | `SqliteOpLog::open` refuses a path that does not exist | the created-file test **at its own assertion**, plus fixture-guard deaths | 18 of 24: the split test died on `a missing store is created, not refused`, the other 17 at the `dir.store()` helper — see note 4 |
+//! | `SqliteOpLog::open` ignores its path and opens `:memory:` (re-run) | more than 18, since two wire tests reach a file | **20 of 24**, then **21 of 24** — see note 4 |
 //!
 //! **Note 1 — a mismatch that was a defect in this file.** The `contains`
 //! mutation was predicted to kill two tests. It killed one, and it killed it at
@@ -85,15 +177,33 @@
 //! on `Some(9)` vs `Some(1)` — the claim the test is named for. A test that
 //! reports the shallowest of its failures hides the rest.
 //!
-//! **Note 3 — the load-bearing mutation.** Making every store in-memory kills
-//! **18 of 20**, more than the ~15 predicted. The two survivors are the only two
-//! tests that deliberately touch no store at all
+//! **Note 3 — the load-bearing mutation.** Making every store in-memory killed
+//! **18 of 20** at the time, more than the ~15 predicted. The two survivors were
+//! the only two tests that deliberately touch no store at all
 //! (`the_moderator_set_of_a_genesis_record_is_exactly_its_creator` and
 //! `an_over_cap_genesis_title_is_refused_before_it_can_name_a_stoa`), which is the
 //! correct outcome for pure-value tests. This is what proves the persistence
 //! claims here are about a file rather than about process memory: a suite where
 //! this mutation killed little would be a suite whose "survives a restart" tests
 //! were restarting nothing.
+//!
+//! **Note 4 — the re-run found a test passing for the wrong reason.** Re-running
+//! note 3's mutation at 24 tests killed **20**, and the four survivors were the
+//! two pure-value tests above plus the two halves of the newly split paging pair.
+//! One of those two was a genuine defect and one was correct, and telling them
+//! apart is the point of running the mutation at all:
+//!
+//! - `a_page_past_the_end_is_an_empty_page…` **should not have survived.** "Page
+//!   99 is empty" is also what a store holding nothing answers, so the test
+//!   passed against a fixture that had persisted no rows — this project's own
+//!   defect family, a fixture where two explanations give the same answer. A
+//!   fixture guard asserting page 0 holds three rows was added, and the re-run
+//!   then killed **21 of 24**.
+//! - `an_empty_store_answers_every_read…` **correctly survives**, and is not the
+//!   same case. An in-memory store genuinely does answer every read empty, which
+//!   is the behaviour that test asserts; there is no rival explanation for it to
+//!   exclude. A test that survives because the mutation does not change what it
+//!   claims is a passing test, not a weak one.
 //!
 //! # A defect this file found, and did not fix
 //!
@@ -109,9 +219,18 @@
 //! this file is not the change that fixes it. It is written so that fixing the
 //! encoder flips it loudly: the assertion names the current outcome and the
 //! comment names what should replace it.
+//!
+//! **THIS TEST IS CURRENTLY THE ONLY RECORD THAT THE DEFECT EXISTS**, which is a
+//! bad place for it to be: a test is a good place to reproduce a known bug and a
+//! bad place to be the sole evidence of one, because deleting or rewriting the
+//! test loses the knowledge with it. Checked while writing this: the repository
+//! has no issues at all (`gh issue list --state all` is empty), and `docs/PLAN.md`
+//! does not mention the asymmetry. **Whoever files it should replace this
+//! paragraph with the pointer.** Until then the search terms are
+//! `Op::canonical_bytes` and `MAX_FIELD_LEN`.
 
 use dialectica_core::arrival::{Arrival, MessageId};
-use dialectica_core::feed::{self, FeedPage};
+use dialectica_core::feed::{self, FeedPage, FeedRow};
 use dialectica_core::identity::{Address, PublicKey, SecretKey};
 use dialectica_core::keystore::{Keystore, Unlock};
 use dialectica_core::log::sqlite::LAYOUT_VERSION;
@@ -120,6 +239,7 @@ use dialectica_core::moderation::{self, Moderation, Moderators};
 use dialectica_core::op::{ModerationAction, Op, OpId, OpKind, SignedOp, VoteDirection};
 use dialectica_core::revision::current_version;
 use dialectica_core::stoa::{Genesis, GenesisError, Policy};
+use dialectica_core::wire;
 use std::path::{Path, PathBuf};
 
 // ─── Caps this crate keeps private, hardcoded here ────────────────────────
@@ -171,9 +291,12 @@ impl TempDir {
         self.0.join(name)
     }
 
+    /// The filename `store()` and `reopen()` use when a test needs only one.
+    const CONVENTIONAL_STORE: &'static str = "ops.sqlite";
+
     /// A store at the conventional path in this directory.
     fn store(&self) -> SqliteOpLog {
-        SqliteOpLog::open(&self.file("ops.sqlite")).expect("a fresh store opens")
+        self.store_at(Self::CONVENTIONAL_STORE)
     }
 
     /// Drop a store and reopen the same path — **this is what "a restart" means
@@ -181,8 +304,29 @@ impl TempDir {
     /// and the file is opened again from scratch, which is the only thing that
     /// distinguishes a claim about a file from a claim about process memory.
     fn reopen(&self, store: SqliteOpLog) -> SqliteOpLog {
+        self.reopen_at(store, Self::CONVENTIONAL_STORE)
+    }
+
+    /// A store at a NAMED path in this directory.
+    ///
+    /// **The filename is a parameter so that a test needing two stores in one
+    /// directory does not have to hand-roll the primitive.** It used to be
+    /// hardcoded, and the one test that needed two — the over-cap pair, which
+    /// wants an at-cap store and an over-cap store side by side — therefore
+    /// wrote its own `SqliteOpLog::open` and `drop` inline. That is a second,
+    /// divergent copy of the restart primitive the doc above calls load-bearing,
+    /// and this crate has already paid for leaving a weaker copy in place: it
+    /// becomes the template the next test is written against. The publish path
+    /// and a two-peer membership test will both want two stores.
+    fn store_at(&self, name: &str) -> SqliteOpLog {
+        SqliteOpLog::open(&self.file(name)).expect("a fresh store opens")
+    }
+
+    /// Restart a NAMED store: the same dropped-and-reopened primitive as
+    /// [`Self::reopen`], for a directory holding more than one.
+    fn reopen_at(&self, store: SqliteOpLog, name: &str) -> SqliteOpLog {
         drop(store);
-        SqliteOpLog::open(&self.file("ops.sqlite")).expect("an existing store reopens")
+        SqliteOpLog::open(&self.file(name)).expect("an existing store reopens")
     }
 }
 
@@ -445,7 +589,7 @@ fn the_same_keystore_posts_under_different_addresses_in_two_stoas() {
     );
 }
 
-// ─── Empty versus unreadable, at three boundaries ──────────────────────────
+// ─── Empty versus unreadable, at each boundary a read can fail at ──────────
 //
 // This is the project's defect family at its sharpest: an empty store and a
 // broken one both produce an empty listing, so a test that only checks "the feed
@@ -453,17 +597,29 @@ fn the_same_keystore_posts_under_different_addresses_in_two_stoas() {
 // DIFFERENT KINDS of answer, not merely different values.
 
 #[test]
-fn an_empty_store_answers_every_read_and_a_missing_file_is_a_created_one() {
-    // A fresh path is CREATED rather than refused — so "no file yet" is not an
-    // error, and every read over it is an empty answer rather than a failure.
-    // The rival explanation excluded: that the reads returned empty because they
-    // failed. They are asserted as `Ok`, and the error case is the next test.
-    let dir = TempDir::new("empty-store");
+fn a_missing_store_file_is_created_rather_than_refused() {
+    // Split out from the empty-read test below, so that each name states ONE
+    // falsifiable thing: creation is a claim about `open`, and the empty answers
+    // are a claim about every read method. Joined, a failure named a test whose
+    // other half was still true and the reader had to open the body to find out
+    // which. `feed.rs` already splits the equivalent pair.
+    let dir = TempDir::new("missing-file");
     let path = dir.file("ops.sqlite");
     assert!(!path.exists(), "the fixture must start with no file");
 
     let store = SqliteOpLog::open(&path).expect("a missing store is created, not refused");
     assert!(path.exists(), "opening a fresh path writes the file");
+    // Created EMPTY rather than created-and-populated, which is the only other
+    // thing "created" could mean.
+    assert_eq!(store.len(), Ok(0));
+}
+
+#[test]
+fn an_empty_store_answers_every_read_with_an_empty_answer_and_not_a_failure() {
+    // The rival explanation excluded: that the reads returned empty because they
+    // failed. They are asserted as `Ok`, and the error cases are the tests below.
+    let dir = TempDir::new("empty-store");
+    let store = dir.store();
 
     let founder = a_key(1);
     let genesis = a_genesis(&founder.public_key(), "Agora");
@@ -1090,21 +1246,40 @@ fn two_stoas_whose_addresses_share_a_leading_byte_do_not_leak_into_each_other() 
     // 2-byte prefix leak.
     //
     // `Address::from_bytes` takes a fixed array, so the two addresses here are
-    // literals differing only in their LAST byte. They are not derived from any
+    // literals differing at exactly one byte. They are not derived from any
     // genesis record, which is fine: `iter_stoa` filters on the address in the
     // op, and nothing in this test reads a genesis.
+    //
+    // **16, and the number is not this file's to pick.**
+    // `log::fixtures::SHARED_PREFIX_BYTES` is 16 with an argued rationale — far
+    // past any plausible accidental truncation (a `substr(.., 8)`, a `u64` read
+    // of the first 8 bytes, a hex-prefix comparison) while leaving 16 bytes for
+    // the divergence to be unmistakable — and it explicitly rejects 31, on the
+    // grounds that a fixture agreeing on 31 of 32 bytes tests the same property
+    // and reads as a puzzle. An integration test cannot import that constant
+    // (`log::fixtures` is `pub(crate)`), so the value is repeated here; what is
+    // NOT repeated is a second, disagreeing rationale. If that constant moves,
+    // this literal is the one to chase.
+    const SHARED_PREFIX_BYTES: usize = 16;
     let dir = TempDir::new("shared-prefix");
     let author = a_key(1);
     let mut left_bytes = [0x5Au8; 32];
     let mut right_bytes = [0x5Au8; 32];
-    left_bytes[31] = 0x01;
-    right_bytes[31] = 0x02;
+    // Diverge at exactly the first byte past the prefix, so the guarantee is
+    // "agrees on N, differs at N" rather than "agrees on at least N somewhere".
+    left_bytes[SHARED_PREFIX_BYTES] = 0x01;
+    right_bytes[SHARED_PREFIX_BYTES] = 0x02;
     let left = Address::from_bytes(left_bytes);
     let right = Address::from_bytes(right_bytes);
     assert_eq!(
-        left.as_bytes()[..31],
-        right.as_bytes()[..31],
-        "the fixture requires a 31-byte shared prefix"
+        left.as_bytes()[..SHARED_PREFIX_BYTES],
+        right.as_bytes()[..SHARED_PREFIX_BYTES],
+        "the fixture must share its whole declared prefix"
+    );
+    assert_ne!(
+        left.as_bytes()[SHARED_PREFIX_BYTES],
+        right.as_bytes()[SHARED_PREFIX_BYTES],
+        "and must diverge immediately after it"
     );
     assert_ne!(left, right);
 
@@ -1144,22 +1319,19 @@ fn two_stoas_whose_addresses_share_a_leading_byte_do_not_leak_into_each_other() 
     assert_eq!(in_right, vec!["right".to_string()]);
 }
 
-#[test]
-fn a_page_past_the_end_is_an_empty_page_and_the_pages_before_it_tile_the_feed() {
-    // Paging over a real file, and the case most likely to panic on a slice. The
-    // rival explanation excluded: that page 1 is empty because paging is broken
-    // rather than because the feed ends. Page 0 is asserted FULL and the two
-    // pages are asserted to tile — every body appears exactly once across them —
-    // so an off-by-one that dropped or duplicated a row fails here even though
-    // each page's length would still look plausible.
-    let dir = TempDir::new("paging");
+/// A store on disk holding five distinguishable thread heads, after a restart.
+///
+/// Five and distinguishable BY NAME rather than by count, so a dropped or
+/// duplicated row is visible as "post 3 is missing" rather than as "four, not
+/// five" — a count alone is the fixture where two explanations give the same
+/// answer. Returned after `reopen` so every paging claim below is a claim about
+/// a file.
+fn five_posts_on_disk(dir: &TempDir) -> (SqliteOpLog, Moderators, Address) {
     let author = a_key(1);
     let genesis = a_genesis(&author.public_key(), "Agora");
     let stoa = genesis.address().expect("a short title encodes");
 
     let mut store = dir.store();
-    // Five distinguishable bodies, so a dropped or duplicated row is visible by
-    // name rather than only as a count.
     for n in 0..5u8 {
         store
             .append(
@@ -1170,6 +1342,21 @@ fn a_page_past_the_end_is_an_empty_page_and_the_pages_before_it_tile_the_feed() 
     }
     let store = dir.reopen(store);
     let moderators = Moderators::of(&genesis).expect("moderators");
+    (store, moderators, stoa)
+}
+
+#[test]
+fn the_pages_of_a_feed_tile_it_with_no_gap_and_no_repeat() {
+    // Paging over a real file. The rival explanation excluded: that each page
+    // looked right while the SET was wrong. Page 0 is asserted FULL and the two
+    // pages are asserted to tile — every body appears exactly once across them —
+    // so an off-by-one that dropped or duplicated a row fails here even though
+    // each page's length would still look plausible.
+    //
+    // Split from the past-the-end test: tiling and the empty-page boundary are
+    // two claims, and `feed.rs` splits the equivalent pair the same way.
+    let dir = TempDir::new("paging-tile");
+    let (store, moderators, stoa) = five_posts_on_disk(&dir);
 
     let first = feed::list_threads(&store, &moderators, &stoa, 0, 3, false).expect("readable");
     assert_eq!(first.items.len(), 3);
@@ -1181,7 +1368,6 @@ fn a_page_past_the_end_is_an_empty_page_and_the_pages_before_it_tile_the_feed() 
     assert_eq!(second.page, 1);
     assert!(!second.has_more, "nothing follows the last two");
 
-    // The two pages tile the feed: every body once, none twice, none missing.
     let mut seen: Vec<&str> = bodies(&first);
     seen.extend(bodies(&second));
     seen.sort_unstable();
@@ -1190,8 +1376,32 @@ fn a_page_past_the_end_is_an_empty_page_and_the_pages_before_it_tile_the_feed() 
         vec!["post 0", "post 1", "post 2", "post 3", "post 4"],
         "the pages must tile the feed exactly — no gap, no repeat"
     );
+}
 
-    // Past the end: an empty page, and NOT a panic and NOT a wrapped first page.
+#[test]
+fn a_page_past_the_end_is_an_empty_page_rather_than_a_panic_or_a_wrapped_first_page() {
+    // The case most likely to panic on a slice. The rival explanation excluded:
+    // that the page came back empty because paging is broken rather than because
+    // the feed ends — the tiling test above proves the same fixture pages
+    // correctly, so an empty page 99 here is the boundary and not a breakage.
+    //
+    // `page` is asserted to be the page ASKED FOR: a wrapped read would return
+    // page 0's rows, and a clamped one would report page 1.
+    let dir = TempDir::new("paging-past-end");
+    let (store, moderators, stoa) = five_posts_on_disk(&dir);
+
+    // FIXTURE GUARD, and it is load-bearing rather than decorative: "page 99 is
+    // empty" is also what a store holding NOTHING answers, so without this the
+    // test passes against a fixture that persisted no rows at all. Making every
+    // store in-memory is a mutation this file's table records, and this test
+    // survived it until this assertion was added.
+    let first = feed::list_threads(&store, &moderators, &stoa, 0, 3, false).expect("readable");
+    assert_eq!(
+        first.items.len(),
+        3,
+        "the fixture must hold rows for page 99 to be PAST anything"
+    );
+
     let past = feed::list_threads(&store, &moderators, &stoa, 99, 3, false).expect("readable");
     assert_eq!(past.items, vec![], "a page past the end is empty");
     assert_eq!(past.page, 99, "and reports the page that was asked for");
@@ -1214,23 +1424,27 @@ fn an_over_cap_body_signs_and_appends_and_then_poisons_every_read_forever() {
     // The AT-CAP half of the pair is what makes this a fencepost test rather than
     // an absurd-value test: exactly 153,600 must round-trip, so a cap tightened to
     // `>=` fails here. A test using only `u32::MAX` would pass under that
-    // tightening — which is the second entry on this project's list of tests that
-    // could not fail for the reason they named.
+    // tightening, and `op.rs`'s own `the_field_cap_is_pinned_to_a_known_answer`
+    // makes that argument at length: an absurd value is about 28,000x the cap, so
+    // it proves *a* cap exists and nothing about *where* it is.
     let dir = TempDir::new("over-cap-body");
     let author = a_key(1);
     let genesis = a_genesis(&author.public_key(), "Agora");
     let stoa = genesis.address().expect("a short title encodes");
 
     // At the cap: encodes, stores, reads back, renders.
+    //
+    // Two stores in one directory, which is why `store_at`/`reopen_at` take a
+    // filename: the at-cap store must stay READABLE while the over-cap store is
+    // poisoned, so they cannot be the same file.
     {
         let at_cap = a_post(&stoa, &author, &"x".repeat(FIELD_CAP));
         let id = at_cap.op.id();
-        let mut store = SqliteOpLog::open(&dir.file("at-cap.sqlite")).expect("opens");
+        let mut store = dir.store_at("at-cap.sqlite");
         store
             .append(at_cap, Arrival::unordered())
             .expect("storable");
-        drop(store);
-        let store = SqliteOpLog::open(&dir.file("at-cap.sqlite")).expect("reopens");
+        let store = dir.reopen_at(store, "at-cap.sqlite");
         let back = store
             .get(&id)
             .expect("a body of exactly the cap must read back")
@@ -1275,7 +1489,7 @@ fn an_over_cap_body_signs_and_appends_and_then_poisons_every_read_forever() {
         "this peer's own encoder produced bytes its own decoder refuses — the defect"
     );
 
-    let mut store = SqliteOpLog::open(&dir.file("over-cap.sqlite")).expect("opens");
+    let mut store = dir.store_at("over-cap.sqlite");
     assert_eq!(
         store.append(over, Arrival::unordered()),
         Ok(Appended::Stored),
@@ -1283,8 +1497,7 @@ fn an_over_cap_body_signs_and_appends_and_then_poisons_every_read_forever() {
     );
 
     // Every ordered read now fails, before and after a restart.
-    drop(store);
-    let store = SqliteOpLog::open(&dir.file("over-cap.sqlite")).expect("the file still opens");
+    let store = dir.reopen_at(store, "over-cap.sqlite");
     match store.iter() {
         Err(OpLogError::CorruptEntry(_)) => {}
         other => panic!(
@@ -1365,12 +1578,15 @@ fn a_vote_is_stored_and_is_rendered_by_nothing() {
     // behaviour so that adding a score is a visible change rather than a silent
     // one.
     let dir = TempDir::new("vote");
-    let author = a_key(1);
+    // Named `poster` rather than `author`, because the destructure below binds a
+    // `FeedRow` field of that name and the two must stay tellable apart: the
+    // whole point of the attribution assertion is that they are different keys.
+    let poster = a_key(1);
     let voter = a_key(2);
-    let genesis = a_genesis(&author.public_key(), "Agora");
+    let genesis = a_genesis(&poster.public_key(), "Agora");
     let stoa = genesis.address().expect("a short title encodes");
 
-    let post = a_post(&stoa, &author, "voted on");
+    let post = a_post(&stoa, &poster, "voted on");
     let post_id = post.op.id();
     let vote = Op {
         stoa,
@@ -1415,12 +1631,51 @@ fn a_vote_is_stored_and_is_rendered_by_nothing() {
         "a vote is not a thread head and does not appear as a row"
     );
     // The row carries no score field at all — there is nothing for a view to
-    // render. Pinned by the row's own shape: if a score is ever added, this
-    // comparison against a fully-specified row fails and someone has to decide
-    // what the view does with it.
-    assert!(!page.items[0].is_revised);
-    assert!(!page.items[0].is_hidden);
-    assert_eq!(page.items[0].attachments, vec![]);
+    // render.
+    //
+    // **Pinned by an exhaustive destructure, not by reading a field at a time.**
+    // A review proved the earlier form of this could not do what its comment
+    // claimed: it asserted three fields individually, and adding `pub score: i64`
+    // to `FeedRow` left the test passing unchanged. `FeedRow` is not
+    // `#[non_exhaustive]`, so a destructure naming every field is the one shape
+    // that fails to COMPILE when a field is added — which is louder than a failed
+    // assertion and cannot be skipped. Whoever adds a score has to come here and
+    // decide what a view does with it.
+    let FeedRow {
+        thread,
+        current_version,
+        author,
+        body,
+        attachments,
+        is_revised,
+        is_hidden,
+    } = &page.items[0];
+    assert_eq!(
+        thread, current_version,
+        "an unedited post is its own version"
+    );
+    assert_eq!(
+        thread,
+        &post_id.to_hex(),
+        "the thread is the root post, not the vote"
+    );
+    // Derived from the POST's author key, independently of anything the feed
+    // returned — and asserted DIFFERENT from the voter's, which is the
+    // attribution a vote-rendering bug would produce.
+    assert_eq!(
+        author,
+        &poster.public_key().address().to_hex(),
+        "the row is attributed to whoever posted it"
+    );
+    assert_ne!(
+        author,
+        &voter.public_key().address().to_hex(),
+        "and never to whoever voted on it"
+    );
+    assert_eq!(body.text, "voted on");
+    assert!(attachments.is_empty());
+    assert!(!is_revised);
+    assert!(!is_hidden);
 }
 
 #[test]
@@ -1480,4 +1735,133 @@ fn a_body_carrying_invisible_characters_is_sanitised_on_the_way_out_of_the_store
         "and counted, so a view can mark it"
     );
     assert!(!page.items[0].body.is_clean());
+}
+
+// ─── The JSON boundary: a request string in, a reply string out ─────────────
+//
+// The outermost boundary this crate has, and the one CLAUDE.md calls the
+// deliverable: "the core module's API is the part of this project to be most
+// deliberate about". `wire::list_threads_from_request` takes a JSON string and
+// returns a JSON string, which is what a view actually calls — every test above
+// stops one layer below it at `feed::list_threads`.
+//
+// That layer is not empty of behaviour, which is why stopping below it was a gap
+// rather than a tidy boundary. `Err` and `{"error":...}` are two different
+// things, and the mapping between them is exactly the encode/decode asymmetry
+// class this file exists to catch: a handler that flattened a storage failure
+// into an empty page would satisfy every assertion above and still hand a view
+// a quiet, wrong answer.
+//
+// A REAL FILE on both tests, not a `MemoryOpLog`. The unit tests in `wire.rs`
+// already cover the handler's parsing against an in-memory log; what they cannot
+// do is prove the JSON a view receives reflects a store on disk, which is the
+// only thing this section adds.
+
+#[test]
+fn a_request_naming_a_stoa_on_disk_comes_back_as_the_feed_in_json() {
+    // The whole read path in one call: a JSON request string in, and a JSON reply
+    // carrying the body that was signed and written to a file.
+    //
+    // The rival explanation excluded: that the handler echoed something from the
+    // request. The body asserted for — "over the wire" — appears nowhere in the
+    // request, which carries only the Stoa address and the genesis record. The
+    // request is built from the genesis record's hex, so nothing here is taken
+    // from a value the handler produced.
+    let dir = TempDir::new("wire-happy");
+    let author = a_key(1);
+    let genesis = a_genesis(&author.public_key(), "Agora");
+    let stoa = genesis.address().expect("a short title encodes");
+
+    let mut store = dir.store();
+    store
+        .append(
+            a_post(&stoa, &author, "over the wire"),
+            Arrival::unordered(),
+        )
+        .expect("storable");
+    drop(store);
+
+    // The request a view sends. Hex of the canonical record, which is how the
+    // caller supplies the moderator set §4.8 makes self-authenticating.
+    let request = format!(
+        r#"{{"stoa":"{}","genesis":"{}"}}"#,
+        stoa.to_hex(),
+        hex::encode(genesis.canonical_bytes().expect("a short title encodes"))
+    );
+
+    // The store is opened INSIDE the handler, from the path, so the handler owns
+    // the whole read including the open — which is what makes the failure test
+    // below meaningful.
+    let path = dir.file(TempDir::CONVENTIONAL_STORE);
+    let reply = wire::list_threads_from_request(&request, || SqliteOpLog::open(&path));
+
+    let v: serde_json::Value =
+        serde_json::from_str(&reply).expect("every reply is valid JSON, whatever happened");
+    assert!(
+        v.get("error").is_none(),
+        "a readable store must not produce the error shape, got {reply}"
+    );
+    // The pagination shape the ecosystem mandates, asserted as a shape rather
+    // than only as a length.
+    assert_eq!(v["items"].as_array().expect("items is an array").len(), 1);
+    assert_eq!(v["items"][0]["body"]["text"], "over the wire");
+    assert_eq!(v["page"], 0);
+    assert_eq!(v["hasMore"], false);
+    // The author reaches the view as the hex address and never as a name: names
+    // are the view's to derive, and a name on the wire would be a second,
+    // forgeable identifier beside the real one.
+    assert_eq!(
+        v["items"][0]["author"],
+        serde_json::Value::String(author.public_key().address().to_hex())
+    );
+}
+
+#[test]
+fn a_store_on_disk_that_is_not_a_database_reaches_the_view_as_the_error_shape() {
+    // THE SEAM THIS SECTION EXISTS FOR, and the one a test at `feed::list_threads`
+    // can only half-prove. `a_store_that_is_not_a_database_is_a_storage_failure…`
+    // above shows the read returns `Err`; it cannot show what a view receives,
+    // because `Err` is not a JSON reply. §11.1 obligation 5 is about what the
+    // reader sees — "an empty feed is indistinguishable from a Stoa nobody has
+    // posted in" — so the obligation is only discharged at this layer.
+    //
+    // Same fixture as that test deliberately: identical bytes on disk, one layer
+    // further out, so the pair shows the failure surviving the JSON crossing
+    // rather than being flattened by it.
+    let dir = TempDir::new("wire-not-a-database");
+    let path = dir.file("garbage.sqlite");
+    std::fs::write(
+        &path,
+        b"this is not a database, it is a text file\n".repeat(8),
+    )
+    .expect("a file is writable");
+
+    let founder = a_key(1);
+    let genesis = a_genesis(&founder.public_key(), "Agora");
+    let stoa = genesis.address().expect("a short title encodes");
+    let request = format!(
+        r#"{{"stoa":"{}","genesis":"{}"}}"#,
+        stoa.to_hex(),
+        hex::encode(genesis.canonical_bytes().expect("a short title encodes"))
+    );
+
+    let reply = wire::list_threads_from_request(&request, || SqliteOpLog::open(&path));
+
+    let v: serde_json::Value = serde_json::from_str(&reply).expect("a failure is still valid JSON");
+    // The three assertions are one claim each, and the middle one is the
+    // load-bearing one: a handler that returned `{"items":[],...}` here would
+    // satisfy "valid JSON" and "no panic" while telling the view the Stoa is
+    // empty. §2.5 makes the error shape EXCLUSIVE — never a partial success.
+    assert!(
+        v.get("error").is_some(),
+        "an unreadable store must reach the view as an error, got {reply}"
+    );
+    assert!(
+        v.get("items").is_none(),
+        "and must NOT carry an items array beside it — the shapes are exclusive, got {reply}"
+    );
+    assert!(
+        !v["error"].as_str().expect("error is a string").is_empty(),
+        "the error must say something, not merely exist"
+    );
 }
