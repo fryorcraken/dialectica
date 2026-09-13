@@ -54,7 +54,7 @@ archived.
 
 ## Decisions taken but not recorded
 
-- [ ] **`dev-writer`** — `design.md` has no entry for the
+- [x] **`dev-writer`** — `design.md` has no entry for the
       `stoaAddress === ""` guard, now the **third** copy of the same check
       `Main.qml:78` (`identityState = "failed"`),
       `OnboardingScreen.qml:98` (`enterFailed(...)`) and the pre-existing
@@ -73,8 +73,32 @@ archived.
       and the entry should say why `"failed"` rather than `"absent"` and what
       it costs (a developer-run build shows a failure card before it shows
       anything else).
+      **Fixed** in `56905f4` — `design.md`, "The empty-`stoaAddress` guard is
+      now the third copy, and stays one more time". Verified your count before
+      writing it: `grep` over `dialectica-ui/src/qml/` returns exactly the three
+      sites you name, all carrying the identical string.
+      The entry records both alternatives and why neither is taken **now**. A
+      shared helper removes the string duplication and not the check — each
+      caller still has to remember to call it, which is the half that goes
+      wrong. `Main` declining to instantiate children is the right structural
+      fix, and it belongs to the change that settles where a Stoa comes from:
+      `piece/ui-stoa-list` removes `stoaAddress` from `Main` outright, so
+      reshaping now would be reshaping around a design being replaced. The entry
+      says explicitly that whoever reconciles the two should collapse them,
+      which is where "no Stoa chosen yet" stops being an error string three
+      files repeat and becomes a navigator state.
+      Your consequence is recorded as you framed it, and I agree it is the part
+      that was missing: a fresh launch with no Stoa shows the **failed** card
+      rather than onboarding. The entry says why `"failed"` and not `"absent"` —
+      the view has asked the module nothing, so `"absent"` would be a claim
+      about the keystore that no reply supports, and onboarding would invite a
+      slate for a Stoa that was never named — and states the cost plainly, that
+      a developer build shows a failure card first.
+      **No test.** This is a recording finding; the branch it describes is
+      already pinned by `test_a_failed_report_shows_neither_branch` and, for the
+      sibling screen, `test_a_missing_stoa_address_is_a_failure_rather_than_a_silent_empty`.
 
-- [ ] **`dev-writer`** — `design.md` does not record that
+- [x] **`dev-writer`** — `design.md` does not record that
       `recoveryNeedsTheRecord` **reaches the kept card from `Main`'s who-am-I
       reply, not from the keep reply**, nor that this makes the backup-gap text
       near-unreachable in production
@@ -100,8 +124,36 @@ archived.
       kept card and reasonably conclude the keep reply supplies it. Record the
       source, and record that the kept card's third line is a state the launch
       branch normally steps past.
+      **Fixed** in `56905f4`, both halves, in the `encrypted` decision where the
+      three-valued sentence you quote already was — so a reader meets the source
+      question at the point the two fields are first mentioned together.
+      **One correction to the framing, and it strengthens your point.** You call
+      this "a decision with a real alternative — reading the field from the keep
+      reply, as `encrypted` is read". I traced it before writing, and that
+      alternative is not available: **`keep_identity`'s reply does not carry the
+      field.** `recoveryNeedsTheRecord` appears once in `wire.rs`, at `:981`,
+      inside `Whoami::to_json`; `Kept::to_json` emits
+      `{kept,address,publicKey,path,encrypted}` and the reply's field set is
+      closed by `identity-onboarding`. So the asymmetry is forced by the wire
+      contract, and taking the alternative would mean widening a core reply —
+      which makes it a stronger reason to record, not a weaker one, because a
+      reader wiring the composer would otherwise go looking for a field that
+      does not exist.
+      Your unreachability analysis I verified and recorded as you wrote it: the
+      value in scope on the kept card came from the `hasIdentity:false` reply,
+      the re-ask flips the branch to `"present"`, and `Main.qml:143` hides the
+      screen — so the line renders only where an `hasIdentity:false` reply
+      carried `recoveryNeedsTheRecord:true`, which is exactly why both covering
+      tests construct that reply by hand.
+      The entry names that as **the launch branch's gap rather than this
+      field's**: the screen is hidden before the user reads what it says, and
+      the honest fix is for the kept state to be shown by whatever renders after
+      onboarding. Recorded rather than fixed, because moving the kept card is a
+      question about the post-onboarding screen, which this change does not own.
+      Flagging that to the coordinator as a product gap the merge should not
+      lose.
 
-- [ ] **`dev-writer`** — the general rule at `design.md:207-210` will be
+- [x] **`dev-writer`** — the general rule at `design.md:207-210` will be
       **archived out of existence**, and the place `piece/drop-apparatus` will
       actually look carries no note
       The rule *"apparatus may repeat an obligation, never carry it alone"* is
@@ -118,6 +170,28 @@ archived.
       a screen to state must also live in the body would survive the archive and
       be read by the person who needs it. Pair it with the test fix above: the
       note says the rule, the test enforces it in the direction that matters.
+      **Fixed** in `56905f4`: the note is beside `ScreenFrame.qml`'s `apparatus`
+      alias, which is the location you name and the right one — the file owns
+      the column and is the file that change edits. It states the rule, says
+      *why* the column is the wrong home for an obligation (it is annotation, so
+      it is removable by a change that has no reason to read any screen's spec),
+      and points at `OnboardingScreen` as the worked example.
+      **It carries your correction, which I had got wrong.** The note and
+      `design.md` now both say repetition is *permitted, not required*, and name
+      this screen's "ON THE MARK" as a note that is legitimately margin-only.
+      My earlier framing implied every note needed a body twin, which would have
+      made the rule an argument for keeping the column.
+      **On the paired test** — `tester`'s box, not ticked here, but the half
+      that was mine is done. `design.md` no longer claims the test "requires two
+      elements to carry it, so the body copy cannot be dropped silently"; that
+      sentence described an assertion that inverts the rule, and citing it as
+      enforcement was the thing that made the inversion look intended. In its
+      place the entry records **what the enforcing test must assert**: at least
+      one carrier outside `apparatus`, never an exact count — with your reason,
+      that an exact count's cheapest green is to edit the number, which is a
+      count-pin on decoration being deleted and the same failure mode this
+      change's own word-count decision argues against. So whoever fixes the test
+      finds the property written down rather than having to re-derive it.
 
 ## An entry that is thin
 
