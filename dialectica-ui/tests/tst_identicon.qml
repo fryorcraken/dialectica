@@ -164,6 +164,147 @@ TestCase {
         }
     }
 
+    // ─── Disjointness, pinned from the ABBREVIATION's side ─────────────────
+    //
+    // `test_no_byte_the_abbreviation_displays_reaches_the_mark` above pins this
+    // from the mark's side, but it hardcodes WHICH bytes the abbreviation shows
+    // (0..3, 14..17, 29..31) in its fixture string. That set is not a constant:
+    // `abbreviate()` derives it from `Theme.headChars`, `Theme.middleChars` and
+    // `Theme.tailChars`, and the middle group is CENTRED, so widening it walks
+    // the group outward from the middle in both directions.
+    //
+    // So a Theme edit can slide the middle group onto a byte the mark reads
+    // while that test keeps passing — it would go on flipping bytes 14..17,
+    // which by then are no longer the group. Measured, not supposed: with
+    // `middleChars: 20` the group becomes bytes 11..20 and overlaps the mark's
+    // byte 11 (`_weave`), and all eight tests in this file still passed.
+    //
+    // These two ask `AddressLabel` what it actually displays and compare that
+    // against what `Identicon` actually reads. Neither set is written down here,
+    // so moving EITHER window — the mark's offsets or any of the three Theme
+    // group sizes — fails these rather than silently removing the property.
+
+    Component {
+        id: labelFactory
+        AddressLabel {}
+    }
+
+    // Several probe values per byte, NOT one.
+    //
+    // A single flip to `ff` gives false negatives, and that is not hypothetical:
+    // `_weave()` is `_byte(11) % 3`, and `0x00 % 3` and `0xff % 3` are both 0, so
+    // a one-value probe concludes the mark does not read byte 11. The first
+    // version of these tests did exactly that and passed under a mutation that
+    // genuinely broke disjointness. Coprime-ish spread across the byte range, so
+    // no modulus in either component can collide on all of them.
+    readonly property var probeValues: ["ff", "01", "02", "05", "07", "3b", "91"]
+
+    // The byte indices the abbreviation puts on screen, discovered by varying
+    // one byte at a time and watching the rendered text. This is a MEASUREMENT
+    // of AddressLabel rather than a restatement of Theme's arithmetic: if
+    // `abbreviate` changes shape, this follows it.
+    function _displayedBytes() {
+        var base = "";
+        for (var i = 0; i < 32; i++) base += "00";
+        var label = labelFactory.createObject(null, { address: "k:" + base });
+        var reference = label.text;
+        var shown = [];
+        for (var b = 0; b < 32; b++) {
+            for (var v = 0; v < probeValues.length; v++) {
+                var hex = base.substr(0, b * 2) + probeValues[v]
+                        + base.substr(b * 2 + 2);
+                label.address = "k:" + hex;
+                if (label.text !== reference) { shown.push(b); break; }
+            }
+        }
+        label.destroy();
+        return shown;
+    }
+
+    // The byte indices the mark reads, discovered the same way: vary a byte and
+    // see whether any selector moves. Derived from Identicon, not written down.
+    function _markBytes() {
+        var base = "";
+        for (var i = 0; i < 32; i++) base += "00";
+        function selectors(addr) {
+            var m = mark(addr);
+            var s = [m._form(), String(m._inkA()), String(m._inkB()),
+                     String(m._outlineInk()), m._angleDeg(), m._pitch(),
+                     m._duty(), m._weave()].join("|");
+            m.destroy();
+            return s;
+        }
+        var reference = selectors("k:" + base);
+        var read = [];
+        for (var b = 0; b < 32; b++) {
+            for (var v = 0; v < probeValues.length; v++) {
+                var hex = base.substr(0, b * 2) + probeValues[v]
+                        + base.substr(b * 2 + 2);
+                if (selectors("k:" + hex) !== reference) { read.push(b); break; }
+            }
+        }
+        return read;
+    }
+
+    // The measurement itself must be sound, or "disjoint" is satisfied by a
+    // probe that finds nothing. This pins both measurements against their known
+    // windows — the one place in these tests where the windows ARE written down,
+    // so that a probe which silently stopped detecting bytes fails here rather
+    // than reporting a false all-clear from the two tests below.
+    function test_the_byte_probes_find_the_windows_they_should() {
+        compare(_markBytes().join(","), "4,5,6,7,8,9,10,11",
+                "the mark probe does not see the mark's documented window");
+        compare(_displayedBytes().join(","), "0,1,2,3,14,15,16,17,29,30,31",
+                "the abbreviation probe does not see the documented groups");
+    }
+
+    // The security property itself: grinding for a lookalike mark and grinding
+    // for a lookalike abbreviated address must be independent searches, whose
+    // costs multiply rather than add. A byte in both sets is worse than merely
+    // shared — it is a byte the attacker can target while reading their progress
+    // off the screen.
+    function test_the_mark_and_the_abbreviation_share_no_byte() {
+        var shown = _displayedBytes();
+        var read = _markBytes();
+
+        // Both windows must be non-empty, or "disjoint" would be satisfied by a
+        // measurement that found nothing — the two-explanations-one-answer shape.
+        verify(shown.length > 0, "the abbreviation displays no byte at all");
+        verify(read.length > 0, "the mark reads no byte at all");
+
+        for (var i = 0; i < read.length; i++) {
+            verify(shown.indexOf(read[i]) === -1,
+                   "byte " + read[i] + " is both read by the mark and displayed "
+                   + "by the abbreviation (mark reads [" + read.join(",")
+                   + "], abbreviation shows [" + shown.join(",") + "])");
+        }
+    }
+
+    // The middle group is the half a vanity generator is built to defeat, so its
+    // presence is a requirement rather than a detail of the current Theme. Head
+    // and tail alone would satisfy "disjoint" trivially while removing exactly
+    // the protection the shape exists for.
+    function test_the_abbreviation_keeps_a_middle_group() {
+        var shown = _displayedBytes();
+        verify(shown.length > 0, "the abbreviation displays no byte at all");
+
+        // A group drawn from the INTERIOR: some displayed byte is neither at the
+        // head nor at the tail, with unshown bytes on both sides of it.
+        var interior = false;
+        for (var i = 0; i < shown.length; i++) {
+            var b = shown[i];
+            if (shown.indexOf(b - 1) === -1 && shown.indexOf(b + 1) !== -1
+                && b > 0 && b < 31) {
+                // The start of a run that does not begin at byte 0.
+                interior = true;
+            }
+        }
+        verify(interior,
+               "the abbreviation shows no interior group — head and tail alone "
+               + "is the shape a vanity generator is built to defeat. Displayed: ["
+               + shown.join(",") + "]");
+    }
+
     // The prefix must not shift the byte offsets, or a "k:" address and a
     // bare one would render as different identities.
     function test_the_prefix_does_not_shift_the_offsets() {
