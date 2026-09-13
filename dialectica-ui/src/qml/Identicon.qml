@@ -17,29 +17,50 @@ import QtQuick
 // change WHICH shape or WHICH inks are drawn, which is the part recognition
 // depends on and the part this contract covers.
 //
-// EIGHT BYTES of the address are read — bytes 12..19, one per dimension — and
+// EIGHT BYTES of the address are read — bytes 4..11, one per dimension — and
 // TWENTY-FOUR are not, which is exactly why this can never stand in for showing
 // the address. The mark is a recognition aid; the address is the identity. A
 // reader who needs to know WHO this is reads the address, always.
 //
-// Why 12..19 and not some wider window: the mark's OUTPUT is about 16 bits of
-// perceptually distinct results, so eight bytes of input (64 bits) already
+// Why eight bytes and not some wider window: the mark's OUTPUT is about 16 bits
+// of perceptually distinct results, so eight bytes of input (64 bits) already
 // exceeds what the rendering can express by a factor of 2^48. Reading more
 // bytes would change nothing a reader could see — the input was never the
 // binding constraint, the perceptual space is. Widening the read to look
 // thorough would be the exact confusion this file's design note argues against.
+// That reasoning is about the COUNT and is unaffected by which eight.
 //
-// Bytes 0..11 are reserved for the generated-name scheme. That disjointness is
-// load-bearing: grinding for a lookalike NAME and grinding for a lookalike MARK
-// are then independent searches whose costs multiply rather than add.
+// WHY 4..11 SPECIFICALLY: it is the window the abbreviation cannot see.
+// AddressLabel shows head 8, middle 8, tail 6 of the hex body — bytes 0..3,
+// 14..17 and 29..31 — so 21 bytes are hidden at feed density (4..13 and 18..28).
+// Bytes 4..11 lie wholly inside that hidden region and touch none of the three
+// displayed groups. A byte the abbreviation displays is worse than merely
+// shared: it is a byte an attacker can grind while reading their progress off
+// the screen, and it tells the reader nothing the address has not already told
+// them.
 //
-// One honest limitation. AddressLabel abbreviates to head 8, middle 8, tail 6
-// of the hex body — bytes 0..3, 14..17 and 29..31 — so bytes 14..17 are ALREADY
-// on screen in the middle group. Half of what the mark reads therefore sits on
-// ground the abbreviation covers, and only {12, 13, 18, 19} of the 21 bytes the
-// abbreviation hides reach the reader through the mark. That is a weaker version
-// of the criticism this design makes of the bundle's original, reduced rather
-// than eliminated.
+// This window was 12..19 and overlapped the middle group on {14, 15, 16, 17} —
+// HALF of what the mark read was already on screen, so only {12, 13, 18, 19}
+// reached the reader as new information. That was a weaker version of the
+// criticism this design makes of the bundle's original mark: reduced rather than
+// eliminated. Moving the mark rather than the abbreviation is what preserves the
+// 8-8-6 shape and its vanity-defeating middle group, which is the property worth
+// keeping.
+//
+// THE GENERATED NAME READS NONE OF THIS AND RESERVES NONE OF IT. An earlier
+// version of this comment said bytes 0..11 were "reserved for the generated-name
+// scheme" and called that disjointness load-bearing. THE MECHANISM IT DESCRIBED
+// DOES NOT EXIST. The name derives from H(NAME_PREFIX || public_key); the mark
+// and the abbreviation read the ADDRESS, which is
+// SHA256(AUTHOR_ADDRESS_PREFIX || 0x01 || public_key). Two different digests, so
+// byte 3 of one and byte 3 of the other are unrelated values and there is no
+// shared space in which they could overlap — no allocation of address bytes to
+// the name is required, or even possible.
+//
+// The independence is real and it comes from DOMAIN SEPARATION: grinding for a
+// lookalike name yields an unrelated mark and grinding for a lookalike mark
+// yields an unrelated name, so the costs multiply rather than add. That holds
+// whichever bytes each side reads, and it would hold if both read byte 0.
 Canvas {
     id: root
 
@@ -99,7 +120,7 @@ Canvas {
     // name in a post. That distinction is now carried by POSITION ALONE — if
     // a mark is ever rendered somewhere the context does not disambiguate,
     // that placement must label it.
-    function _form() { return _byte(12) % 11; }
+    function _form() { return _byte(4) % 11; }
 
     // Two inks for the weave and one for the outline, ALL THREE DISTINCT.
     //
@@ -115,18 +136,18 @@ Canvas {
     // the outline independently, so one mark in seven had ring and ground the
     // same colour and no visible contour at all — the outline silently vanished
     // on ~14% of identities.
-    function _inkA() { return inks[_byte(14) % 7]; }
+    function _inkA() { return inks[_byte(6) % 7]; }
     function _inkB() {
-        var i = _byte(14) % 7;
-        var j = _byte(15) % 6;          // 0..5, so the offset is never 0 mod 7
+        var i = _byte(6) % 7;
+        var j = _byte(7) % 6;           // 0..5, so the offset is never 0 mod 7
         return inks[(i + 1 + j) % 7];   // never equal to A
     }
     function _outlineInk() {
-        var i = _byte(14) % 7;
-        var j = _byte(15) % 6;
+        var i = _byte(6) % 7;
+        var j = _byte(7) % 6;
         var b = (i + 1 + j) % 7;        // B's index
         // Walk forward from B by an offset that skips A, so all three differ.
-        var k = _byte(13) % 5;          // 0..4
+        var k = _byte(5) % 5;           // 0..4
         var c = b;
         for (var step = 0; step <= k; step++) {
             c = (c + 1) % 7;
@@ -139,20 +160,20 @@ Canvas {
     // at 15 and at 195 degrees is the same field — so the original 24 steps of
     // 15 degrees were really 12. Twelve steps of 15 degrees over a half turn
     // is the honest version of the same dimension.
-    function _angleDeg() { return (_byte(16) % 12) * 15; }
+    function _angleDeg() { return (_byte(8) % 12) * 15; }
 
     // Pitch. Four values rather than six: at feed size the interior is about
     // 15px, so pitch 6 and 7 both render as "one bar across the mark" and
     // differ by a pixel of bar width. Values that a reader cannot separate are
     // not dimensions, they are noise with a parameter attached.
-    function _pitch() { return [2, 3, 4, 6][_byte(17) % 4]; }
+    function _pitch() { return [2, 3, 4, 6][_byte(9) % 4]; }
 
     // Duty cycle: what fraction of each period ink B covers. This is what
     // makes the ink pair genuinely ordered, and it is its own visual
     // dimension — a mark that is mostly A with thin B lines reads differently
     // from one that is mostly B with thin A lines, independently of WHICH two
     // inks they are.
-    function _duty() { return [0.30, 0.45, 0.62][_byte(18) % 3]; }
+    function _duty() { return [0.30, 0.45, 0.62][_byte(10) % 3]; }
 
     // Weave kind. Perceptually independent of angle and pitch: it changes the
     // TOPOLOGY of the fill (parallel bands / crossed lattice / dot lattice)
@@ -169,7 +190,7 @@ Canvas {
     // carrying no pattern at all. Both are a mark that has stopped
     // distinguishing anything. A pattern whose legibility depends on the
     // parity of a radius count is not a dimension.
-    function _weave() { return _byte(19) % 3; }
+    function _weave() { return _byte(11) % 3; }
 
     // ---- contours ---------------------------------------------------------
     function _roundRect(ctx, x, y, w, h, tl, tr, br, bl) {

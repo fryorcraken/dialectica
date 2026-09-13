@@ -27,15 +27,26 @@ TestCase {
     // a selector accidentally reading a neighbouring byte shows up as a changed
     // value rather than coinciding.
     readonly property string fixed:
-        "k:000102030405060708090a0b" +   // bytes 0..11, the name's range
-        "0c0d0e0f10111213" +             // bytes 12..19, the mark's range
-        "1415161718191a1b1c1d1e1f"       // bytes 20..31, unread
+        "k:00010203" +                   // bytes 0..3, the abbreviation's head
+        "0405060708090a0b" +             // bytes 4..11, the mark's range
+        "0c0d0e0f1011121314151617" +     // bytes 12..23 — 14..17 is the middle
+        "18191a1b1c1d1e1f"               // bytes 24..31 — 29..31 is the tail
 
-    function test_the_mark_reads_only_bytes_12_to_19() {
+    // The mark reads bytes 4..11 and NOTHING the abbreviation displays. The
+    // abbreviation shows bytes 0..3 (head), 14..17 (middle) and 29..31 (tail),
+    // so every one of those must be free to change without moving a selector.
+    //
+    // This window was 12..19 and overlapped the middle group on {14, 15, 16, 17}
+    // — half of what the mark read was already on screen. An attacker grinding
+    // for a lookalike could watch their progress on those four bytes in the
+    // rendered address. Moving the mark rather than the abbreviation keeps the
+    // 8-8-6 shape and its vanity-defeating middle group intact.
+    function test_the_mark_reads_only_bytes_4_to_11() {
         var a = mark(fixed);
-        // Changing a byte the mark does not read must not change any selector.
-        var b = mark("k:ffffffffffffffffffffffff" + "0c0d0e0f10111213"
-                     + "ffffffffffffffffffffffff");
+        // Changing every byte the mark does not read — INCLUDING all three
+        // groups the abbreviation displays — must not change any selector.
+        var b = mark("k:ffffffff" + "0405060708090a0b"
+                     + "ffffffffffffffffffffffffffffffffffffffff");
         compare(b._form(), a._form(), "form changed on an unread byte");
         compare(b._inkA(), a._inkA(), "ink A changed on an unread byte");
         compare(b._inkB(), a._inkB(), "ink B changed on an unread byte");
@@ -65,33 +76,71 @@ TestCase {
     // failing here before this was called done.
     function test_a_fixed_address_selects_fixed_values() {
         var m = mark(fixed);
-        compare(m._form(), 0x0c % 11, "form");
-        compare(m._angleDeg(), (0x10 % 12) * 15, "angle");
-        compare(m._pitch(), [2, 3, 4, 6][0x11 % 4], "pitch");
-        compare(m._duty(), [0.30, 0.45, 0.62][0x12 % 3], "duty");
-        compare(m._weave(), 0x13 % 3, "weave");
+        // In `fixed`, byte i holds the value i, so each expected value below is
+        // the selector's arithmetic on its own byte, written out rather than
+        // recomputed from the code under test.
+        compare(m._form(), 4, "form");                  // byte 4 = 0x04; 4 % 11 = 4
+        compare(m._angleDeg(), 120, "angle");           // byte 8 = 0x08; (8 % 12) * 15
+        compare(m._pitch(), 3, "pitch");                // byte 9 = 0x09; [2,3,4,6][9 % 4 = 1]
+        compare(m._duty(), 0.45, "duty");               // byte 10 = 0x0a; [...][10 % 3 = 1]
+        compare(m._weave(), 2, "weave");                // byte 11 = 0x0b; 11 % 3 = 2
 
-        // byte 14 = 0x0e = 14; 14 % 7 = 0 -> the first ink in the ladder.
-        compare(String(m._inkA()), String(DTheme.markInk), "ink A indexing");
-        // byte 15 = 0x0f = 15; 15 % 6 = 3, so B = (0 + 1 + 3) % 7 = 4.
-        compare(String(m._inkB()), String(DTheme.markSteel), "ink B indexing");
-        // byte 13 = 0x0d = 13; 13 % 5 = 3, so the outline walks four steps on
-        // from B, skipping A's index 0: 5, 6, then 0 is skipped to 1, then 2.
+        // byte 6 = 0x06; 6 % 7 = 6 -> the seventh ink in the ladder.
+        compare(String(m._inkA()), String(DTheme.markSage), "ink A indexing");
+        // byte 7 = 0x07; 7 % 6 = 1, so B = (6 + 1 + 1) % 7 = 1.
+        compare(String(m._inkB()), String(DTheme.markIndigo), "ink B indexing");
+        // byte 5 = 0x05; 5 % 5 = 0, so the outline walks ONE step on from B's
+        // index 1 to 2, and 2 is not A's index 6, so it stays.
         compare(String(m._outlineInk()), String(DTheme.markRust), "outline indexing");
         m.destroy();
+    }
+
+    // The disjointness the whole window move exists to produce, asserted as a
+    // RELATION rather than as a restatement of the window. Changing any byte the
+    // abbreviation displays must leave every selector alone — which is what makes
+    // the mark a genuinely second channel rather than a restatement of what is
+    // already on screen.
+    function test_no_byte_the_abbreviation_displays_reaches_the_mark() {
+        var a = mark(fixed);
+        // Each group the abbreviation displays is flipped to ff, and the mark's
+        // window is held at its `fixed` value. Byte counts, so a miscount cannot
+        // hide a passing test: 4 + 8 + 2 + 4 + 11 + 3 = 32.
+        var altered = "k:"
+                    + "ffffffff"                   // bytes  0.. 3  head, flipped
+                    + "0405060708090a0b"           // bytes  4..11  the mark, held
+                    + "0c0d"                       // bytes 12..13  hidden
+                    + "ffffffff"                   // bytes 14..17  middle, flipped
+                    + "12131415161718191a1b1c"     // bytes 18..28  hidden
+                    + "ffffff";                    // bytes 29..31  tail, flipped
+        var b = mark(altered);
+        compare(b._form(), a._form(), "form moved on a displayed byte");
+        compare(b._inkA(), a._inkA(), "ink A moved on a displayed byte");
+        compare(b._inkB(), a._inkB(), "ink B moved on a displayed byte");
+        compare(b._outlineInk(), a._outlineInk(), "outline moved on a displayed byte");
+        compare(b._angleDeg(), a._angleDeg(), "angle moved on a displayed byte");
+        compare(b._pitch(), a._pitch(), "pitch moved on a displayed byte");
+        compare(b._duty(), a._duty(), "duty moved on a displayed byte");
+        compare(b._weave(), a._weave(), "weave moved on a displayed byte");
+        a.destroy(); b.destroy();
     }
 
     // The invariant that a guard used to be responsible for and is now
     // structural. All three inks must differ, or the outline vanishes into the
     // ground and the mark loses its contour.
+    // It sweeps bytes 6 and 7 — ink A's index and ink B's offset — which are the
+    // two that decide all three inks, with byte 5 (the outline offset) held. It
+    // MUST sweep bytes the mark actually reads: pointed at bytes the mark
+    // ignores, every iteration would build the same three inks and the sweep
+    // would pass while proving nothing.
     function test_the_three_inks_are_always_distinct() {
         for (var hi = 0; hi < 256; hi += 7) {
             for (var lo = 0; lo < 256; lo += 11) {
                 var hx = (hi < 16 ? "0" : "") + hi.toString(16);
                 var lx = (lo < 16 ? "0" : "") + lo.toString(16);
-                // bytes 13, 14, 15 are the outline offset, ink A and ink B offset.
-                var m = mark("k:000102030405060708090a0b" + "0c" + hx + lx
-                             + "0f10111213" + "1415161718191a1b1c1d1e1f");
+                //                bytes 0..4      byte 5   bytes 6,7   bytes 8..31
+                var m = mark("k:" + "0001020304" + "05" + hx + lx
+                             + "08090a0b0c0d0e0f1011121314151617"
+                             + "18191a1b1c1d1e1f");
                 var a = m._inkA(), b = m._inkB(), o = m._outlineInk();
                 verify(a !== b, "ink A equals ink B at " + hx + "/" + lx);
                 verify(a !== o, "outline equals ink A at " + hx + "/" + lx);
