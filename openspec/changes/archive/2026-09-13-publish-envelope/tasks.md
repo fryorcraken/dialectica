@@ -27,7 +27,7 @@
 - [x] review: spec-test — `spec-test-reviewer`
 - [x] review: design — `design-reviewer`
 - [x] findings all ticked, `findings/` deleted — `closer`
-- [ ] CI green, PR merged — `closer`. **Watch `Build LGX` by name, not "CI
+- [x] CI green, PR merged — `closer`. **Watch `Build LGX` by name, not "CI
       green".** It is the ONLY gate that compiles `dialectica/rust-lib/src/lib.rs`
       — `cargo test` does not compile `cfg(logos_scaffold)` code at all, so a
       fully green suite says nothing about that file. Task 7.6 deleted
@@ -190,7 +190,7 @@ arguments that could disagree.
 - [x] 8.5 The test-count gate needs no number kept in step: it counts `#[test]`
       in the tree and compares against what cargo ran, so six added tests move
       both sides together. Run locally after §10: declared == ran.
-- [ ] 8.6 **Build LGX is the only gate that compiles the adapter, and it proves
+- [x] 8.6 **Build LGX is the only gate that compiles the adapter, and it proves
       the file COMPILES rather than what order it runs in.** That distinction is
       not academic: both adapter findings passed every green gate on this PR,
       including Build LGX, and were caught by a reviewer reading the call order.
