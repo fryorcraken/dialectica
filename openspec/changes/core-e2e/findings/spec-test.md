@@ -34,7 +34,7 @@ repository — `wire::tests::the_index_refusal_says_what_it_actually_refuses`, a
 
 ## Findings
 
-- [ ] **`tester`** — `end_to_end.rs:1898-1955`,
+- [x] **`tester`** — `end_to_end.rs:1898-1955`,
       `a_request_naming_a_stoa_on_disk_comes_back_as_the_feed_in_json` — the two
       pagination-envelope assertions cannot fail, because the fixture's expected
       values are the constants a broken handler would emit.
@@ -57,7 +57,33 @@ repository — `wire::tests::the_index_refusal_says_what_it_actually_refuses`, a
       A second wire test over a two-page store on disk, asserting `page == 1` and
       `hasMore == true`, kills it.
 
-- [ ] **`tester`** — `end_to_end.rs:865` and `end_to_end.rs:1962` — both cite
+      **FIXED** — `the_json_envelope_reports_the_page_that_was_asked_for_and_whether_more_follows`,
+      in the same section. Five posts on disk at `perPage: 2`, so the feed has
+      three pages and neither literal is ever the right answer: page 0 has
+      `hasMore` **true**, page 1 has a non-zero `page`, and page 2 has `hasMore`
+      **false**. One constant cannot satisfy both ends, which is what the
+      one-item/page-0 fixture could not arrange. Pages are also asserted to tile,
+      so an envelope counting correctly over page 0's rows three times fails too.
+
+      Proved by re-applying **the exact mutation measured above**, twice, to
+      separate the two halves — because a test killed only by the `hasMore`
+      literal would leave `page` unproven:
+
+      - Both literals (`"page": 0, "hasMore": false`): **predicted** the first
+        failure at the `page` assertion on page 1, `0` vs `1`. **OBSERVED** the
+        `hasMore` assertion on page **0**, `Bool(false)` vs `Bool(true)`, at
+        `end_to_end.rs:2029`. The prediction missed on *which* assertion fires
+        first and the difference is the useful part: page 0 is read before page 1
+        and its `hasMore` is genuinely `true`, so the `hasMore` half fires one
+        loop iteration earlier than the `page` half. 25 passed, 1 failed.
+      - `page` alone (`"page": 0`, `has_more` restored): **predicted** and
+        **OBSERVED** the same thing — the `page` assertion on page 1,
+        `Number(0)` vs `Number(1)`, at `end_to_end.rs:2031`.
+
+      `git diff` over `dialectica-core/src/` is empty after the restores, so
+      neither mutation shipped.
+
+- [x] **`tester`** — `end_to_end.rs:865` and `end_to_end.rs:1962` — both cite
       "§11.1 obligation 5" and quote it verbatim, and **§11.1 does not exist**.
       `docs/PLAN.md:3196` says so in terms: *"§11.1 'Rendering obligations,
       collected' arrives with the `vouching-state` change… If §11.1 is absent when
@@ -81,7 +107,35 @@ repository — `wire::tests::the_index_refusal_says_what_it_actually_refuses`, a
       the error shape, and never a partial success", which says the same thing and
       is promoted.
 
-- [ ] **`tester`** — `end_to_end.rs:1131` — `(§6)` is a bare PLAN section
+      **FIXED**, and both citations now name `docs/UI-BRIEF.md` instead of a PLAN
+      section — cited by **heading, not by number**.
+      Getting to that took one wrong turn worth recording, because it is the same
+      family as the finding. The obligation number 5 *is* real — UI-BRIEF's own,
+      at `docs/UI-BRIEF.md:429`, "**5. Distinguish an empty result from a failed
+      one.**", quoted sentence at :430 (the finding says :397; the merge of
+      `origin/main` moved it). So I first kept the number and only corrected the
+      document. That was wrong: UI-BRIEF **restarts its numbering per section** —
+      `grep -n "^\*\*[0-9]"` returns three separate `1.`/`2.` sequences plus a
+      `2b` at :398 — so a bare "obligation 5" does not locate anything in that
+      file any more than "§11.1" did in PLAN.md. The concurrent `dev-writer`
+      reached the same conclusion independently and its commit message argues it;
+      I agree and dropped the ordinal. The quoted heading is unique and greppable,
+      which is what a citation owes a reader.
+      The `a_store_on_disk_that_is_not_a_database…` comment also now names the
+      promoted requirement the assertions actually check —
+      `module-wire-contract`'s "Failure is always the error shape, and never a
+      partial success", verified at `openspec/specs/module-wire-contract/spec.md:229`
+      — keeping UI-BRIEF for *why* a view cannot recover.
+      No test changed, so nothing newly fails; these are comment defects, and the
+      assertions they sit above were already falsifiable. Both cited strings were
+      re-grepped rather than trusted.
+      **Attribution:** the first half of this edit (removing the two §11.1
+      quotations) was already in the worktree uncommitted when I started, from the
+      concurrent `dev-writer` — see the note at the end of this file. I verified
+      both replacement citations against `docs/` before keeping it, and added the
+      obligation-number and promoted-requirement halves.
+
+- [x] **`tester`** — `end_to_end.rs:1131` — `(§6)` is a bare PLAN section
       citation with no such heading, and the live spec already carries the rule.
       `docs/PLAN.md` numbers sections `6.1`, `6.2`…; there is no `§6` to read.
       Meanwhile `openspec/specs/moderation-resolution/spec.md:40` promotes exactly
@@ -92,7 +146,14 @@ repository — `wire::tests::the_index_refusal_says_what_it_actually_refuses`, a
       creator; whoever updates this assertion looks for §6 to find out what the
       rule was, and has to guess which of §6.1–§6.n it meant.
 
-- [ ] **`tester`** — `end_to_end.rs:10-25`, the "Does NOT cover" list — it omits
+      **FIXED** — the assertion message now reads "the initial set is the creator
+      alone, which is `moderation-resolution`'s \"A Stoa's moderator set is
+      derived from its genesis record\"", naming the promoted requirement verified
+      at `openspec/specs/moderation-resolution/spec.md:40`. A comment fix, so no
+      test newly fails; the assertion itself was already falsifiable — the
+      reviewer's own `Moderators::contains` mutation kills it at this exact line.
+
+- [x] **`tester`** — `end_to_end.rs:10-25`, the "Does NOT cover" list — it omits
       `posting-capability`, which is promoted, reachable, and cross-boundary.
       The list names the publish path, `list_stoas`, membership, transport and the
       view. It does not name the capability probe, whose public entry points
@@ -115,7 +176,25 @@ repository — `wire::tests::the_index_refusal_says_what_it_actually_refuses`, a
       `dialectica/` finds no implementation, so **that** half of the list is
       substantively honest (see the next box for its citation).
 
-- [ ] **`tester`** — `end_to_end.rs:17-20` — the reproduction instruction does not
+      **FIXED at the reviewer's stated minimum, and the rest is deferred with a
+      reason.** The list now carries a `posting-capability` entry labelled "a GAP
+      rather than an absence", naming both public entry points, citing
+      `openspec/specs/posting-capability/spec.md:53` (verified: six reasons, three
+      of them file properties), saying the fixture cost is near zero and why, and
+      drawing the parallel to the `list_threads_from_request` gap explicitly.
+      I verified the two functions are public alongside `list_threads_from_request`
+      in the same module — `wire.rs` lines 232, 259 and 488.
+
+      **Not closed by a test, deliberately.** Three of the six states are reached
+      by making a file hostile (loosened permissions, a world-writable directory,
+      a malformed keystore) rather than by calling anything, and the dispatch for
+      this pass reserves that decision for the `spec-writer` — the requirement is
+      promoted, so a test *is* warrantable, but which of the six an integration
+      test may construct is a contract question rather than a coverage one. The
+      list entry now says so, so the gap is visible to whoever answers it instead
+      of being inferable only by noticing an omission.
+
+- [x] **`tester`** — `end_to_end.rs:17-20` — the reproduction instruction does not
       reproduce what it claims, and is self-referential as scoped.
       The comment says: *"`grep -rn "list_stoas\|listStoas"` over `dialectica/`
       finds only a line in `docs/PLAN.md`'s JSON contract."* But `docs/PLAN.md` is
@@ -136,6 +215,20 @@ repository — `wire::tests::the_index_refusal_says_what_it_actually_refuses`, a
       /home/…/rev-e2e-spectest/dialectica/` → exactly the two comment lines.
       Widening the scope to the repo root, or naming `docs/PLAN.md:3490` directly,
       fixes it.
+
+      **FIXED.** The comment now names **both roots** — `dialectica/` *and*
+      `docs/` — says what each returns (nothing but these comment lines in the
+      first, only the `listStoas()` line of PLAN.md's JSON contract in the second),
+      and adds the sentence the finding earns: "run it over `dialectica/` alone and
+      it returns only itself, which confirms nothing". That last clause is the
+      whole finding, written where the next reader will hit it.
+      Both halves re-run here rather than trusted: over `dialectica/` the grep
+      returns exactly the three comment lines and nothing else; over `docs/` it
+      returns exactly `docs/PLAN.md:3490`. No test newly fails — this is a comment
+      defect with no assertion behind it.
+      **Attribution:** as with the §11.1 box, this edit was already in the worktree
+      uncommitted from the concurrent `dev-writer` when I reached it. I re-ran both
+      greps before keeping it and they confirm the new text.
 
 - [ ] **`spec-writer`** — `openspec/specs/` has **no promoted requirement for the
       feed at all**, and 19 of these 25 tests assert against `feed::list_threads`.
@@ -249,3 +342,52 @@ Pinning a known defect as current behaviour with a loud flip on fix is the right
 call for a test-only piece. Its "this test is currently the only record that the
 defect exists" paragraph is the correct warning to leave, and filing it belongs to
 whoever owns the fix rather than to this review.
+
+## `tester`'s notes on this pass — three facts that differ from the dispatch
+
+Appended below the review rather than into it; none of the reviewer's text above
+is altered.
+
+**The baseline is 592, not 531.** Measured in this worktree at `5323b57` before
+any edit of mine: **567 in-crate + 25 e2e**. The review's 531 (506 + 25) was
+measured at `f007bcd`, before `5323b57` merged `origin/main` and brought the
+publish path's 61 in-crate tests with it. After this pass it is **593** — one new
+e2e test, nothing removed, nothing adapted away. Doc-tests are 0, so no
+`ignore`-fenced block registered one and CI's `ran == declared` gate is
+undisturbed.
+
+**A concurrent `dev-writer` was editing this worktree, including two of these
+five `tester` boxes.** `git status` was clean at my first call and by my third
+carried four modified files: `.github/workflows/ci.yml`, `docs/PLAN.md`,
+`openspec/changes/core-e2e/design.md` — all correctly its own — **and
+`dialectica-core/tests/end_to_end.rs`**, which the dispatch assigns to `tester`.
+Its edits there were the mutation-table header (its file this pass, by the
+dispatch) plus the §11.1 and `list_stoas`-grep comment fixes, which are boxes 2
+and 5 above. I kept both, having re-verified every citation in them first, and
+said so in each box.
+
+**It then committed `918f2f1` mid-pass, sweeping my uncommitted test-file work
+into it.** Its message says so plainly and names what rode along, which is the
+right thing to have done; I verified all four of my edits survived intact. So
+nothing was lost. But this is the overlap `.claude/agents/README.md` forbids, and
+the near-miss is the part worth recording: I mutated `wire.rs` twice during this
+pass, and had its `git add` landed inside either mutation window it would have
+committed a deliberately broken line — a line **my own suite cannot catch**, since
+I restore the test's expectation to match. The two roles need serialising even
+when their nominal file lists look disjoint, because a findings box does not
+respect a file list: two of my five boxes lived in a file the dispatch gave me and
+an edit the dispatch gave it.
+
+One genuine disagreement came out of it, and the `dev-writer` was right — see box
+2: it dropped the UI-BRIEF obligation NUMBER where I had kept it. UI-BRIEF
+restarts its numbering per section, so the ordinal is as unresolvable as the
+phantom §11.1 was. I adopted its position and amended my own comment and box.
+
+**`wire.rs:469` still cites "§11.1 obligation 5"** — the same fabricated citation
+box 2 is about, one layer down, in the `Err` arm of `list_threads`. It is
+implementation code and therefore not mine to edit; recorded here for
+`dev-writer`, since fixing it in a test comment while it stands in the code it
+describes is half a fix. The correct citation is `docs/UI-BRIEF.md`'s rendering
+obligation 5, and the promoted requirement the arm actually honours is
+`module-wire-contract`'s "Failure is always the error shape, and never a partial
+success".

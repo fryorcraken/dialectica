@@ -6,7 +6,7 @@
       because "does not apply" and "nobody did this" are different states and the
       block exists to tell them apart.
 - [x] design + code — `dev-writer`
-- [ ] tests — `tester`
+- [x] tests — `tester`
 - [x] review: correctness — `code-reviewer`
 - [x] review: security — `code-reviewer`
 - [x] review: readability — `code-reviewer`
@@ -182,3 +182,66 @@ text; this section records only what was done.
       test file returning nothing, so no doc-test is registered and the count gate
       is unaffected. The count gate itself needs no edit: it counts `#[test]`
       occurrences under an rglob, so 7.5's test is counted and run.
+
+## 9. The spec-test findings
+
+Seven boxes in `findings/spec-test.md`; **five addressed to `tester` and all five
+closed**, two addressed to `spec-writer` and deliberately left open. The
+measurements are in that file beside the reviewer's text.
+
+- [x] 9.1 Close the surviving envelope mutation, which is why this piece was
+      extended to the JSON seam in the first place. The review hardcoded
+      `"page": 0, "hasMore": false` in the feed reply and **all 25 tests passed**,
+      because the only wire happy-path test reads page 0 of a one-post store — so
+      the two values it asserts are exactly what a broken handler emits.
+      `the_json_envelope_reports_the_page_that_was_asked_for_and_whether_more_follows`
+      uses five posts at `perPage: 2`: three pages, a non-zero index, `hasMore`
+      true on one read and false on another, plus a tiling assertion. Verified by
+      re-applying the same mutation twice — both literals, then `page` alone — so
+      each half is shown to discriminate on its own. Recorded as the test file's
+      note 6, including the prediction that missed.
+- [x] 9.2 Replace the fabricated `§11.1 obligation 5` citation in two test
+      comments, citing `docs/UI-BRIEF.md` by **heading rather than by number**.
+      The obligation is real at `docs/UI-BRIEF.md:429` and `docs/PLAN.md` states in
+      about a dozen places that §11.1 arrives with `vouching-state` and is absent
+      until then. The ordinal is dropped because UI-BRIEF restarts its numbering
+      per section and contains a `2b`, so "obligation 5" locates no more there than
+      "§11.1" did in PLAN.md — a correction I owe the concurrent `dev-writer`,
+      which reached it independently.
+      Also names the promoted requirement the assertions actually check,
+      `module-wire-contract`'s "Failure is always the error shape, and never a
+      partial success" (`spec.md:229`). **`wire.rs:469` still carries the same
+      citation** and is `dev-writer`'s to fix — recorded in the findings file.
+- [x] 9.3 Replace the bare `(§6)` in the moderator-set assertion with
+      `moderation-resolution`'s "A Stoa's moderator set is derived from its genesis
+      record", verified at `openspec/specs/moderation-resolution/spec.md:40`.
+- [x] 9.4 Name `posting-capability` in the "Does NOT cover" list, as a GAP rather
+      than an absence: both public entry points named, `spec.md:53`'s six reasons
+      cited, and the near-zero fixture cost stated. **Not closed by a test**, and
+      the entry says why — three of the six states are reached by making a file
+      hostile, and which of them an integration test may construct is a contract
+      question this pass leaves to `spec-writer`.
+- [x] 9.5 Fix the self-referential grep instruction: it now names both
+      `dialectica/` and `docs/`, says what each returns, and states that the
+      single-root form "returns only itself, which confirms nothing". Both greps
+      re-run here.
+
+## 10. Gates, re-measured after section 9
+
+The numbers in §8 were measured at `f007bcd`, before `5323b57` merged
+`origin/main`. They are left as the dated record they are; these are current.
+
+- [x] 10.1 `cargo test -p dialectica -p dialectica-core` — **593 passed**, 0
+      failed (567 in-crate + 26 in `tests/end_to_end.rs`). The baseline in this
+      worktree before this pass was **592**; the one added test is 9.1's. The `-p`
+      flags are load-bearing: without them cargo tests almost nothing and still
+      reports `ok`.
+- [x] 10.2 `rustfmt --check --edition 2021 --config skip_children=true` clean on
+      `tests/end_to_end.rs`; nothing pre-existing reformatted. `wire.rs` was
+      mutated twice and restored, and `git diff` over `dialectica-core/src/` is
+      **empty**, so neither mutation shipped.
+- [x] 10.3 `cargo clippy --all-targets -- -D warnings` clean on both crates. The
+      six remaining warnings are the staged upstream SDK's and pre-date this
+      change.
+- [x] 10.4 No `ignore`-fenced doc block added; the run reports **0 doc-tests**, so
+      CI's `ran == declared` gate is undisturbed.
