@@ -510,6 +510,36 @@ ScreenFrame {
         Layout.fillWidth: true
     }
 
+    // The uniqueness obligation, IN THE BODY rather than only in the margin.
+    //
+    // The spec requires this screen to state that generated names are not
+    // unique and not identifiers, and that the address is what distinguishes
+    // two participants — required *"even though no row shows a name"*, because
+    // what the user is choosing is a key whose name follows from it.
+    //
+    // It was previously only a `MarginNote` in `apparatus`, which made a spec'd
+    // obligation depend on a column that is not load-bearing: `ScreenFrame`'s
+    // apparatus is annotation explaining the design, and a change that removes
+    // it would delete a requirement as a side effect. The permanence note above
+    // was already duplicated into the body for the same reason — this makes the
+    // two consistent rather than leaving one obligation resting on decoration.
+    //
+    // The margin note stays: it is the same text in the place a reader of the
+    // mockup expects it, and duplication here is cheap because neither copy is
+    // computed.
+    //
+    // **No word count**, in either copy. See the apparatus note below.
+    Text {
+        visible: screen.phase === "slate" || screen.phase === "refused"
+        text: "Names are not unique and are not identifiers. Someone else in this Stoa may hold the same name. Your address is what tells you apart, so it is printed beside your name everywhere."
+        font: Theme.bodySmall
+        color: Theme.inkSoft
+        wrapMode: Text.WordWrap
+        lineHeight: 1.55
+        textFormat: Text.PlainText
+        Layout.fillWidth: true
+    }
+
     // ---- phase: a keep that was refused ----------------------------------
     //
     // Its own block, neither the kept state nor the failed one. The set above

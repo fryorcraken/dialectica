@@ -43,6 +43,11 @@ QtObject {
     // "failed" from "succeeded with nothing" is the caller that eventually
     // renders a broken store as an empty feed — which is the one confusion
     // UI-BRIEF obligation 5 exists to prevent.
+    //
+    // **This separates a failure from an answer. It does not tell you the
+    // operation succeeded** — for three methods the answer itself can be no.
+    // See the note at the `ok: true` return below, which is the half of this
+    // contract a caller is most likely to miss.
     function call(method, args) {
         // The bridge is injected by the host. Absent means the view is running
         // somewhere that provides no core, which is worth saying plainly: a
@@ -73,6 +78,30 @@ QtObject {
         if (reply.error !== undefined)
             return { ok: false, error: String(reply.error) }
 
+        // **`ok: true` means THE MODULE ANSWERED. It does not mean the thing
+        // you asked for happened.**
+        //
+        // Read that before using `value`. Three core methods answer a refusal
+        // as a wire SUCCESS, so `ok` is true and the answer is no:
+        //
+        //   keep_identity     {"kept":false,"reason":…}
+        //   who_am_i          {"hasIdentity":false,"reason":…}
+        //   get_capabilities  {"canPost":false,"reason":…}
+        //
+        // For those three, the negative field is the answer and `reason` says
+        // why. A caller that stops at `ok` reports an identity that was never
+        // stored, or opens a composer for a user who cannot post — and it does
+        // so silently, because nothing failed.
+        //
+        // This is not a defect in the normalisation. `{"error":…}` is the wire's
+        // one FAILURE shape and that is what `ok:false` reports; a refusal is a
+        // different thing from a failure and the contract is right to keep them
+        // apart. What the caller owes is the second branch: `ok` first, then the
+        // method's own answer field.
+        //
+        // The warning lives HERE rather than only at the call sites that
+        // already get it right, because this is the line a new wrapper's author
+        // reads.
         return { ok: true, value: reply }
     }
 

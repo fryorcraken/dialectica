@@ -39,7 +39,9 @@
 - [x] Every candidate address renders through `AddressLabel { full: true }`. No
       elision is hand-rolled; no row shows a name, a path or an index.
 - [x] Copy: the cross-Stoa unlinkability clause is dropped with no replacement
-      claim, and the uniqueness note says four words.
+      claim, and the uniqueness note states its obligation with **no word count
+      at all** — the count has moved three times, so a screen carrying a number
+      goes stale on the next move. `design.md` records why.
 - [x] Every `Text` sets `textFormat: Text.PlainText` explicitly.
 - [x] `Main.qml` branches on `who_am_i` alone, re-asks after a keep, routes both
       absent cases to onboarding with the reason held unparsed, and shows the
@@ -48,5 +50,9 @@
 - [x] `docs/UI-BRIEF.md`: the onboarding bullet now says core serves **no name**
       and what the row must therefore show. Fixed here rather than deferred,
       because this change is what makes the omission concrete.
-- [x] Tests: `tst_onboarding_states.qml` (36) and `tst_launch_branch.qml` (10).
-      Five mutations run against the suite, each caught — see the report.
+- [x] Tests: `tst_onboarding_states.qml` and `tst_launch_branch.qml`, both new.
+      Counts are deliberately not written here — run
+      `dialectica-ui/tests/run-qml-tests.sh`, which reports them and cannot go
+      stale. Every fix in this change was a failing test first, and each
+      mechanism was mutation-checked; the findings files record which mutation
+      reaches which test.

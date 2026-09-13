@@ -188,6 +188,27 @@ So the policy across all three sites is **treat a non-string as absent**:
   is the value a later keep sends back to core to say which set the selection
   was made against. There is no honest default for it.
 
+### A spec'd obligation never rests only on the apparatus column
+
+The uniqueness statement — names are not unique, are not identifiers, the
+address distinguishes — is a **spec requirement**, and it was at first only a
+`MarginNote` in `apparatus`. That made a requirement depend on a column that is
+annotation rather than interface: `piece/drop-apparatus` removes
+`ApparatusColumn` and `MarginNote` on the argument that those notes explain the
+design to a reader of the mockup, which is right about the notes and would have
+deleted a requirement as a side effect.
+
+So the statement is now in the **body** as well, where the permanence warning
+already was for the same reason. The margin note stays — same text, in the place
+a reader of the mockup expects it, and duplication is cheap because neither copy
+is computed. `test_the_uniqueness_obligation_survives_without_the_apparatus_column`
+requires two elements to carry it, so the body copy cannot be dropped silently.
+
+The general rule this is an instance of: **apparatus may repeat an obligation,
+never carry it alone.** Anything the spec requires the screen to state belongs
+in the body, because the column is removable by a change that has no reason to
+read this spec.
+
 ### Every `Text` is `Text.PlainText`, explicitly
 
 Not one element is left on `AutoText`, which sniffs its input and switches to

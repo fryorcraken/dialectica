@@ -359,10 +359,15 @@ TestCase {
     }
 
     function test_the_keep_guard_refuses_at_the_sentinel_even_when_a_row_carries_it() {
-        // The guard `design.md` calls "the guard that actually guards" was
-        // unprotected: every fixture's candidates had non-negative indexes, so
-        // `candidateAt(-1)` found nothing and the SECOND guard caught the call.
-        // This drives the first one by making the sentinel addressable.
+        // `keepSelected()` once had TWO guards, and the first was unprotected:
+        // every fixture's candidates had non-negative indexes, so
+        // `candidateAt(-1)` found nothing and the second caught the call. This
+        // drives the refusal by making the sentinel addressable.
+        //
+        // The two have since collapsed into one — see `design.md`, "Selection
+        // is a candidate's own index, and the sentinel is unaddressable", which
+        // records why a second guard that can only be true when the first is is
+        // not a guard.
         //
         // With the fix, such a slate never reaches the slate phase at all — so
         // the assertion is that no keep request is sent, which holds whether
@@ -894,6 +899,35 @@ TestCase {
                    + "times and a screen carrying a number goes stale on the "
                    + "next move; found \"" + counts[i] + "\"")
         }
+        screen.destroy()
+    }
+
+    function test_the_uniqueness_obligation_survives_without_the_apparatus_column() {
+        // The spec requires this screen to state that names are not unique and
+        // not identifiers. That obligation must not rest on the apparatus
+        // column, which is annotation rather than interface and which a sibling
+        // piece removes — a spec'd requirement deleted as a side effect of
+        // dropping decoration is the failure this pins.
+        //
+        // So: require the statement to appear on TWO separate elements. One is
+        // the margin note; the second is the body copy, and it is the one that
+        // survives the column's removal. With the margin note alone this finds
+        // one and fails.
+        var screen = makeScreen({ "generate_identity_slate": spec.twoCandidateSlate })
+        screen.requestSlate()
+
+        var texts = spec.everyTextOn(screen)
+        var carriers = 0
+        for (var i = 0; i < texts.length; i++) {
+            if (texts[i].indexOf("not unique") >= 0
+                && texts[i].indexOf("not identifiers") >= 0)
+                carriers++
+        }
+
+        compare(carriers, 2,
+                "the obligation must be stated in the body as well as the "
+                + "margin, so dropping the apparatus column cannot delete a "
+                + "spec'd requirement")
         screen.destroy()
     }
 

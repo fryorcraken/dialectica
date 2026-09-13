@@ -191,6 +191,16 @@ Two consequences for you:
   Design the row so a name can **arrive above the address** without the layout
   moving. That is the one thing to get right here, because the name is coming
   and the row is the only place it goes.
+
+  **Do not size that space from the word count stated elsewhere in this file.**
+  As of this change the count is unsettled: the screen deliberately asserts no
+  number, and `docs/name-shape-sweep` (`d3e7579`) supersedes the four-word
+  design this brief still describes at the provenance block, in "It is four
+  words, and they all matter", and in the collision figures below. Those three
+  are corrected by that sweep, not here — its figures are arithmetic over
+  vocabulary sizes and were re-derived by hand, so correcting the count without
+  them would leave a worse artefact than either. Until it lands, take the shape
+  from PLAN.md §5.2.1, which wins any disagreement with this file.
 - **A name is not unique and not an identifier** — see obligation 6 below.
   Accidental collisions are now rare: in a Stoa of a thousand the chance two
   people share a name is **about 0.003%**, and at five thousand **about 0.07%**.
