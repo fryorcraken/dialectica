@@ -33,7 +33,7 @@ makes the contradiction below sharper rather than softer.
 
 ## Findings
 
-- [ ] **`tester`** — `names/denylist.rs` — **the denylist's 199 pairs are pinned
+- [x] **`tester`** — `names/denylist.rs` — **the denylist's 199 pairs are pinned
       by nothing.** `the_denylist_is_sorted_deduplicated_and_in_range` checks
       sortedness, range and non-emptiness; `a_refused_pair_redraws_every_slot...`,
       `a_redraw_is_deterministic` and `exhausting_the_reserve...` reference only
@@ -64,7 +64,23 @@ makes the contradiction below sharper rather than softer.
       in `design.md` D5 as one of the deletion's benefits, crediting the
       mechanism you identified.
 
-- [ ] **`tester`** — `dialectica-ui/tests/` — **the abbreviation side of the
+      **MOOT BY DELETION — no test written, and none should be.** Verified in
+      this worktree rather than taken from the note: `names/denylist.rs` does not
+      exist, and `grep -rnw` for `TRUE_ATTRIBUTION_PAIRS`, `draw_at`,
+      `ReserveExhausted` and `denylist` under `dialectica/` returns only prose
+      comments describing the deletion, plus stale `target/` build-artefact
+      dependency files. No source symbol survives. There are no 199 pairs to pin.
+
+      The finding was right and it is the reason the deletion was clean rather
+      than merely convenient. Recording what replaced it, so this box does not
+      read as an unpinned constant that was waved through: the consensus-critical
+      constants that remain — the three wordlists, `NAME_PREFIX`, `CONNECTOR` —
+      are each pinned against a value produced off-implementation.
+      `every_wordlist_is_pinned_entry_by_entry_and_in_order` hashes the source
+      TEXT FILES rather than the arrays, which is the shape you prescribed here,
+      applied to the constants that survived.
+
+- [x] **`tester`** — `dialectica-ui/tests/` — **the abbreviation side of the
       channel-disjointness requirement has no test at all.** `AddressLabel.qml`
       has no `tst_` file. `tst_identicon.qml` asserts disjointness only from the
       mark's side (flipping displayed bytes leaves every selector alone) and
@@ -85,6 +101,38 @@ makes the contradiction below sharper rather than softer.
       `headChars: 24`. Each time all 42 QML tests and all 946 Rust tests passed.
       A test must compute the displayed byte set from the three `Theme`
       properties and assert it disjoint from `4..12`. Severity: high.
+
+      **FIXED — and the prescribed fix turned out to be the weaker of the two
+      shapes, which is the part worth recording.** `tst_identicon.qml` now
+      carries `test_the_byte_probes_find_the_windows_they_should` and
+      `test_the_mark_and_the_abbreviation_share_no_byte`. Neither computes the
+      displayed set from the `DTheme` properties; both **measure `AddressLabel`**
+      by varying one address byte at a time and watching the rendered text, and
+      measure `Identicon` the same way by watching its selectors. Seven probe
+      values per byte rather than one, because `_weave()` is `_byte(11) % 3` and
+      `0x00 % 3 == 0xff % 3`, so a single flip concludes the mark does not read
+      byte 11.
+
+      **Measured on your exact mutation.** `DTheme.headChars: 24` → 2 of 11
+      identicon tests fail, naming byte 4 and printing both windows. The
+      `middleChars: 20` variant → the same 2, naming byte 11.
+
+      **Why not the computed-from-`DTheme` version you prescribed.** A third
+      test of that shape existed (added by the `dev-writer`, which offered to
+      withdraw it). It catches both `DTheme` widenings, but it redoes
+      `abbreviate`'s arithmetic in the test instead of asking `AddressLabel` what
+      it shows — so it can only see its *inputs* move, never the arithmetic.
+      Measured: shifting the head group to `body.substr(8, h)` with `DTheme`
+      untouched puts mark byte 4 on screen, and **that test passed** while both
+      probe tests failed. It was deleted rather than kept as a third guard, and
+      its one genuine contribution — naming the three `DTheme` settings in the
+      failure message — is folded into the surviving probe test's message. The
+      reasoning is recorded in a comment above it so the shape is not
+      reinvented.
+
+      Your scenario arithmetic was correct in both variants and is what made the
+      two-sided requirement legible; the correction is only about which side of
+      the component a test should read.
 
 - [x] **`spec-writer`** — spec.md:599 vs `openspec/specs/thread-read/spec.md:169`
       — **two live `SHALL`s in direct opposition, and the tests enforce the one
@@ -129,7 +177,7 @@ makes the contradiction below sharper rather than softer.
       carries no name" and "A reply carrying only an address carries the name".
       The suite that pins the thread item's key set stays correct as written.
 
-- [ ] **`tester`** — `names.rs:1336` `a_refused_pair_leaves_both_of_its_words_drawing_freely`
+- [x] **`tester`** — `names.rs:1336` `a_refused_pair_leaves_both_of_its_words_drawing_freely`
       — **the test cannot fail on the property it names.** Its body is
       `NOUNS.contains(&NOUNS[noun as usize])` and
       `PLACES.contains(&PLACES[place as usize])`: it takes an element out of an
@@ -159,7 +207,28 @@ makes the contradiction below sharper rather than softer.
       indices `(5136, 1015, 431)`, both produced by `examples/pin_name.rs`
       off-implementation, rather than asking the arrays about themselves.
 
-- [ ] **`tester`** — spec.md:826, "A different scheme version gives a different
+      **MOOT BY DELETION, and the diagnosis was applied rather than merely
+      noted.** Confirmed in this worktree: `grep -rnw` finds no
+      `a_refused_pair_leaves_both_of_its_words_drawing_freely` in any source
+      file. No replacement was written — the test named a property of a filter
+      that no longer exists.
+
+      The `NOUNS.contains(&NOUNS[i])` shape is the thing here that outlives the
+      deletion, and it is worth stating as a rule rather than an incident:
+      **asking a collection whether it contains an element taken out of it is
+      true for every in-range index**, so the assertion measures index validity
+      and nothing else. I swept the surviving `names.rs` tests for it while
+      closing the other boxes. `an_unknown_key_still_derives_a_name` carries
+      three `ADJECTIVES.contains(&name.adjective)`-style lines, but those are not
+      the shape: the word comes from the DERIVATION rather than from the array,
+      so the assertion is "what the derivation returned is a list member", which
+      a derivation returning an invented string would fail. The rewritten
+      `every_index_of_every_list_is_reachable_and_uniformly_so` indexes its lists
+      too, but it counts the words the derivation returned and compares the
+      totals against `65_536 / len` — a written-down expectation, not the array
+      agreeing with itself.
+
+- [x] **`tester`** — spec.md:826, "A different scheme version gives a different
       name for one key" — **no test, and the `tasks.md` claim that it needs the
       API widened for tests alone is wrong.** `NAME_PREFIX` is module-private but
       `mod tests` is inside `names.rs` and reaches it through `use super::*`.
@@ -170,7 +239,27 @@ makes the contradiction below sharper rather than softer.
       scenario guarding the versioning requirement's whole purpose and it is
       currently unpinned. Severity: medium.
 
-- [ ] **`tester`** — spec.md:831, "Removing a word renames identities that drew
+      **FIXED —** `a_different_scheme_version_gives_a_different_name_for_one_key`
+      in `names.rs`'s test module. No API widened, exactly as you said: `mod
+      tests` reaches `NAME_PREFIX` through `use super::*`. It copies the shipped
+      separator, sets byte 12 to `b'2'`, hashes `v2 || key` **in the test body**
+      rather than calling `name_digest`, and compares against `display_name`
+      across 39 seeds.
+
+      Two guards ahead of the sweep, because the comparison is vacuous if either
+      fails silently: the version byte is asserted to be at index 12 (if it
+      moves, the test would bump the wrong byte and compare v1 with v1), and the
+      two separators are asserted to differ.
+
+      **Proved it can fail, in both halves.** Shipping `NAME_PREFIX` at version
+      `2` fails the index guard, naming it — `left: 50, right: 49`. Reaching the
+      property assertion itself needs a derivation that ignores its digest, so I
+      pinned all three slot indices to `0`: `seed 1 renders identically under
+      both scheme versions, so a v1 name is silently reproducible by v2`, with
+      both sides printed as `"abandonable acheron of abai"`. Implementation
+      restored after each.
+
+- [x] **`tester`** — spec.md:831, "Removing a word renames identities that drew
       past it" — **no test, and also testable without widening the API.** The
       lists are `const` arrays, but the test module can build the shortened list
       as a `Vec` and assert the reindexing by hand.
@@ -180,7 +269,31 @@ makes the contradiction below sharper rather than softer.
       and worth pinning, but `every_wordlist_is_pinned_entry_by_entry_and_in_order`
       already catches the removal itself.
 
-- [ ] **`tester`** — spec.md:711, "No method accepts a name where an identity is
+      **FIXED —** `removing_a_word_renames_identities_that_drew_past_it`, built
+      the way you describe: `PLACES` filtered into a `Vec` with index 100
+      dropped, reindexing asserted by hand. No API widened.
+
+      One strengthening on your sketch. "Assert every index at or after 100
+      renders a different place" passes on any reshuffling of the tail, where the
+      spec's claim is the specific one that everything shifts down by exactly
+      one. So the tail is compared against `PLACES[i + 1]` — a written-down
+      relation — and the head against `PLACES[i]`, with both sweeps counted so
+      neither can pass by not running.
+
+      **Proved it can fail.** The list-side mutation is the one that matters
+      here, since the reindexing arithmetic lives in the test: I made index 101
+      duplicate index 100 (`araithyrea` → `araden`), which makes the removal
+      invisible at that index. The test fails with `moved: 922, expected 923` and
+      a message naming the cause. `places.rs` restored.
+
+      **A note on the index, because the brief warned about exactly this and it
+      was live here.** `PLACES`'s literals begin at **line 24**, so index = line −
+      24: `araden` is index 100 at line 124 and `araithyrea` is index 101 at line
+      125. A grep line number taken as an index selects a different word and pins
+      the wrong answer silently. Cross-checked against the spec-test reviewer's
+      independent measurement of the same pair, which agrees.
+
+- [x] **`tester`** — spec.md:711, "No method accepts a name where an identity is
       required" — **no test.** `design.md` D10 says "the test asserts the
       refusal", and `a_forbidden_field_is_refused_on_every_operation` is about a
       request carrying an unknown *field name* (`displayName`). The scenario is
@@ -192,7 +305,32 @@ makes the contradiction below sharper rather than softer.
       refused, so the behaviour is right and the coverage is missing. Severity:
       medium — the requirement is load-bearing for "the address is the identity".
 
-- [ ] **`tester`** — `names.rs:1068` `a_failure_is_never_reported_as_a_name` —
+      **FIXED —** `no_method_accepts_a_display_name_where_an_identity_is_required`
+      at `wire.rs:5748`, covering five method/field pairs as a table:
+      `publish_vote/target`, `publish_vote/stoa`, `publish_reply/parent`,
+      `publish_reply/stoa`, `publish_post/stoa`. The names used are REAL derived
+      names for real keys plus the written-down colliding name, and the
+      connector-dropped form, rather than name-shaped strings — a handler that
+      happened to reject `"not hex"` while resolving something name-shaped would
+      pass a weaker fixture.
+
+      **Re-verified against the cut rather than assumed.** The scope cut removed
+      `displayName` from every reply, which could have made this test vacuous if
+      it had depended on a name being on the wire. It does not — it derives the
+      names by calling `display_name` directly — and it still passes on the
+      current tree.
+
+      **The third assertion is live, and the first two are not enough.** Its job
+      is to distinguish a refusal AT THE PARSE from a later failure, by requiring
+      the error message to start with the field name. Proved by mutating
+      `required_op_id` to resolve an unparseable value by hashing it into an
+      `OpId`: the request is then refused later as *"this peer does not hold the
+      target def243e…"*, which **passes** the `error`-present and no-`opId`
+      checks and fails only the third. That is the mutation the test's own
+      comment claims it catches, now measured on this tree rather than inherited.
+      `wire.rs` restored.
+
+- [x] **`tester`** — `names.rs:1068` `a_failure_is_never_reported_as_a_name` —
       **the second half of the test asserts nothing it claims to.** The comment
       says "a 9-byte key and the same bytes zero-padded must not agree", the code
       builds `padded`, calls `display_name_from_bytes(&padded)` and discards the
@@ -206,7 +344,34 @@ makes the contradiction below sharper rather than softer.
       written for it. Either delete the dead half or assert the refusal reason.
       Severity: low.
 
-- [ ] **`tester`** — `feed.rs:292–293` — **a phantom citation over an uncovered
+      **FIXED, and the fix turned up something that raises this above low.** The
+      dead half is replaced with a live assertion, but writing it exposed that
+      **the fixture could not have worked as either of us assumed**: zero-padding
+      `b"too short"` does not produce a valid public key. Those 32 bytes are not
+      a decompressable Edwards point, so `display_name_from_bytes` refuses them
+      at the parse. A test built on that fixture — including the one your
+      suggestion describes — would have passed on a padding implementation,
+      because the padded value fails for an unrelated reason. That is this
+      repo's "constant that looks obviously valid and is not" trap, the
+      all-`0xFF`-Ed25519 case in a different costume, and it is why the corrected
+      test now **searches** for a short prefix whose zero-padded form genuinely
+      parses (`short_key_whose_padding_is_a_valid_key`, documented with why the
+      intuitive choice fails) instead of writing one down.
+
+      With a live fixture the test asserts three things: the padded value parses
+      (so padding is a reachable route to a name), the short form is refused, and
+      the short call does not arrive at the padded value's name.
+
+      **Proved it can fail.** Mutating `display_name_from_bytes` to zero-pad any
+      short input to 32 bytes before parsing: *"a 2-byte key must be refused
+      rather than widened"*. The old `let _ =` half could not fail under that
+      mutation, which is the finding. `names.rs` restored.
+
+      So: your severity was right about the release and wrong about the class —
+      the half was not merely dead, it was unwritable as sketched, and nobody
+      would have discovered that without trying to make it assert something.
+
+- [x] **`tester`** — `feed.rs:292–293` — **a phantom citation over an uncovered
       branch, and the uncovered direction is the spec-forbidden one.** The
       `NO SPEC:` block says "See
       `a_row_whose_name_cannot_be_derived_is_dropped_rather_than_faked`"; a
@@ -240,6 +405,26 @@ makes the contradiction below sharper rather than softer.
       Your framing of *why* it mattered — "worse than silence, because it closes
       the question for the next reader" — is quoted in `design.md` and is the
       rule I worked to for every cross-reference in this pass.
+
+      **MOOT BY DELETION — verified rather than taken on the note, which is what
+      this finding asks of a reader.** In this worktree: `grep -rnw` for
+      `a_row_whose_name_cannot_be_derived_is_dropped_rather_than_faked` over
+      `dialectica/` and `dialectica-ui/` returns nothing, and `grep -n
+      "display_name\|displayName"` over `feed.rs` returns five hits, all inside
+      its test module — no production path in `feed.rs` derives a name at all.
+      There is no `Err` arm for a placeholder to occupy and no row for a
+      placeholder to reach.
+
+      **No test was written for the deleted branch, deliberately.** A test over a
+      path that should not exist guards the wrong thing; removing the path
+      removes the class, which is the stronger fix and the one taken.
+
+      The positive replacement checks out too: `the_feed_reply_is_the_ecosystems_
+      pagination_shape` exists at `wire.rs:5683`, and
+      `a_row_carries_the_address_and_no_derived_display_name` (`feed.rs:631`)
+      pins the struct from the other side. Both cited tests exist — I ran the
+      grep rather than trusting the citation, which is the whole point of this
+      box.
 
 - [x] **`spec-writer`** — spec.md:658, "A reply with no author carries no name
       field", and spec.md:746, "A name is unchanged by every surrounding state" —

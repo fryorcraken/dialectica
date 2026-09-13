@@ -11,7 +11,7 @@ tree was `git status --short`-clean before this file was written.
 
 ## Findings
 
-- [ ] **`tester`** — `feed.rs:293` — the derivation-failure path is entirely
+- [x] **`tester`** — `feed.rs:293` — the derivation-failure path is entirely
       uncovered, and a fabricated placeholder name survives the whole suite
       **Scenario:** replace the `let Ok(display_name) = … else { continue }` with
       `…unwrap_or(DisplayName { adjective: ADJECTIVES[0], noun: NOUNS[0], place:
@@ -38,6 +38,23 @@ tree was `git status --short`-clean before this file was written.
       malformed/failed-input requirement that reaches a *user's screen*". A test
       over that branch would have guarded a path that should not exist; removing
       the path removes the class.
+
+      **MOOT BY DELETION — no test written, and the mutation is unexpressible.**
+      Verified rather than relayed: `display_name` returns `DisplayName`, not
+      `Result`, so there is no `Err` arm to `unwrap_or` a fabricated name into;
+      and `grep -n "display_name\|displayName"` over `feed.rs` finds five hits,
+      all inside its test module, so no production path there derives a name to
+      fabricate.
+
+      **What still carries the property, since it is a real one and should not
+      be recorded as merely deleted.** The prohibition you cite —
+      `spec.md:775`'s "no placeholder name, no name for 'unknown'" — now has its
+      guard in `names.rs` rather than `feed.rs`, at
+      `a_failure_is_never_reported_as_a_name`, which I rewrote while closing the
+      `spec-test` box on it. It now asserts that a short key does not arrive at
+      the name its zero-padded form reaches, and fails under a
+      `display_name_from_bytes` that pads. The placeholder class is closed by
+      construction at the feed and by assertion at the derivation.
 
 - [x] **`dev-writer`** — `feed.rs:292` — the comment cites a test that does not
       exist anywhere in the repository
@@ -71,7 +88,7 @@ tree was `git status --short`-clean before this file was written.
       `the_feed_reply_is_the_ecosystems_pagination_shape` — were both checked by
       running them.
 
-- [ ] **`tester`** — `tst_identicon.qml:103` —
+- [x] **`tester`** — `tst_identicon.qml:103` —
       `test_no_byte_the_abbreviation_displays_reaches_the_mark` is one-sided: it
       cannot see the abbreviation widening onto the mark's window
       **Scenario:** the test hardcodes the displayed groups as the literal hex
@@ -116,6 +133,57 @@ tree was `git status --short`-clean before this file was written.
       siblings name the byte and the two sets. If that is not worth a third test,
       delete it; the property is covered either way and I would rather say so
       than defend a test I added redundantly.
+
+      **FIXED. The `dev-writer`'s test is deleted — not for redundancy, but
+      because it is blind to a class the other two catch.** Taking up its offer,
+      with the measurement that decides it.
+
+      **I re-ran your mutation myself rather than accepting the report.** With
+      `DTheme.headChars: 24` on the three-test tree: **3 of 12 identicon tests
+      fail**, as the `dev-writer` said. The `middleChars: 20` variant: the same
+      3, naming byte 11. So all three did catch both `DTheme` widenings, and on
+      that evidence alone the choice would have been a coin-toss about failure
+      messages.
+
+      **The discriminating mutation is a change to `abbreviate` itself, with
+      `DTheme` untouched.** `test_no_byte_the_mark_reads_is_ever_displayed`
+      computes the displayed set by redoing `abbreviate`'s arithmetic from the
+      three `DTheme` properties; the other two *measure* `AddressLabel` by
+      varying one address byte at a time and watching the rendered text. Shifting
+      the head group to `body.substr(8, h)` puts mark byte 4 on screen —
+      precisely the defect this box is about — and:
+
+      - `test_no_byte_the_mark_reads_is_ever_displayed` **PASSED**
+      - `test_the_byte_probes_find_the_windows_they_should` failed, printing
+        `abbreviation shows 4,5,6,7,14,15,16,17,29,30,31`
+      - `test_the_mark_and_the_abbreviation_share_no_byte` failed, naming byte 4
+
+      A test that restates the production arithmetic can only see its *inputs*
+      move, never the arithmetic. That is the same family as the finding you
+      opened — a gate the defect satisfies — one level up, so keeping it as a
+      third guard would have left a reader checking the wrong test. Deleted, with
+      the reasoning recorded in a comment above the surviving test so the shape
+      is not reinvented.
+
+      **Its one genuine contribution is kept.** The failure message now carries
+      the three `DTheme` settings alongside both measured windows: *"byte 4 is
+      both read by the mark and displayed by the abbreviation (mark reads
+      [4,5,6,7,8,9,10,11], abbreviation shows [...]) at head 24, middle 8, tail 6
+      — an attacker grinding a lookalike mark can read their progress off the
+      rendered address"*. Re-measured after the deletion: `headChars: 24` fails
+      2 of 11 with that message. `DTheme.qml` and `AddressLabel.qml` restored
+      after every mutation; `git diff --stat` shows test files only.
+
+      One correction to the box's own citation, since it affects where a reader
+      looks: the hardcoded-span test you name,
+      `test_no_byte_the_abbreviation_displays_reaches_the_mark`, is still
+      present and still hardcodes its spans — it is the MARK side and is correct
+      as the mark side. Its comment claimed the abbreviation side was "the test
+      above", which after the deletion pointed at nothing; it now names
+      `test_the_mark_and_the_abbreviation_share_no_byte` explicitly, checked by
+      running it. A dangling "see `<test>`" is the failure the `dev-writer`'s own
+      box in this file is about, and deleting a test is exactly how one gets
+      created.
 
 - [x] **`dev-writer`** — `names.rs:358-362` — the denylist arithmetic reinstates a
       premise `docs/PLAN.md` explicitly struck through, and the shipped list is
@@ -241,7 +309,7 @@ tree was `git status --short`-clean before this file was written.
       merits — and it is the right shape for your concern, rather than putting a
       second copy of the name on every thread item.
 
-- [ ] **`tester`** — `names.rs:683` —
+- [x] **`tester`** — `names.rs:683` —
       `the_name_digest_is_neither_the_address_nor_a_bare_hash` passes for an
       incidental reason and does not test the property it is named for
       **Scenario:** set `NAME_PREFIX` to `b"/dialectica/1/Address/Author\0\0\0\0"`,
@@ -262,6 +330,44 @@ tree was `git status --short`-clean before this file was written.
       **Measured:** 63 of 65 `dialectica-core` lib tests pass under the
       prefix-collision mutation; this test is among the 63.
       **Severity: low** — a weak gate rather than an uncovered defect.
+
+      **FIXED — the test named for domain separation now fails when domain
+      separation is removed.** A third assertion is added to
+      `the_name_digest_is_neither_the_address_nor_a_bare_hash`: for each of the
+      five other separators in the crate, the name's digest must not equal the
+      key hashed under that separator in this module's own `PREFIX || key`
+      shape, and `NAME_PREFIX` must not equal that separator as a byte string.
+
+      **Your diagnosis was exactly right about why the old body was blind**, and
+      it is the reason the new assertion is shaped the way it is: the address
+      hashes `PREFIX || 0x01 || key` where the name hashes `PREFIX || key`, so
+      comparing the two digests is a test of the record-count byte. Comparing
+      under a common preimage shape is what makes the prefix the only variable.
+
+      **On "all five are private consts in separate modules and nothing compares
+      them" — that is the constraint, and the fix leans into it rather than
+      routing around it.** The five are WRITTEN DOWN as literals in the test
+      rather than imported. Widening five modules' visibility for a test would
+      have been the wrong trade, and importing them would be worse than not
+      testing: a future edit that moved a separator would move the expectation
+      with it, which is the self-consistency shape this whole review is about.
+
+      **Proved it can fail, on your exact mutation.** Setting `NAME_PREFIX` to
+      `b"/dialectica/1/Address/Author\0\0\0\0"` now fails this test — *"the
+      name's separator is the author address separator, so the two capabilities
+      are one function of the key"* — where before it was among the 63 that
+      passed.
+
+      **And proved the literals are byte-exact, which is the way this fix could
+      have failed silently.** A mistyped literal would make its comparison pass
+      vacuously. Setting `NAME_PREFIX` to the slate-path separator also fails,
+      naming that one, so at least that entry matches `onboarding.rs`'s const
+      byte for byte and the loop reaches entries past the first.
+      `names.rs` restored after each.
+
+      Severity was right at low as an exploitability judgement, and the finding
+      still earned its keep: the gate a future auditor will check is now the gate
+      that holds.
 
 ## What was clean
 

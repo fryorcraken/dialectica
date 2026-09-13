@@ -665,6 +665,52 @@ mod tests {
             h.finalize().into()
         };
         assert_ne!(name_digest(&key), bare);
+
+        // **The two assertions above pass without domain separation, and that
+        // is why this third one exists.** Measured: setting `NAME_PREFIX` to the
+        // author-address separator — a total loss of separation — left both of
+        // them passing, because the address hashes `PREFIX || 0x01 || key` while
+        // the name hashes `PREFIX || key`. It is the record-count byte that
+        // separates those two digests, not the prefix, so the test named for
+        // domain separation was blind to domain separation being removed.
+        //
+        // This asserts the separation directly: hashing the key under ANOTHER
+        // capability's separator, in this module's own `PREFIX || key` shape,
+        // must not reach the name digest. The separators are private consts in
+        // other modules, so each is WRITTEN DOWN here rather than imported —
+        // which is the right shape anyway, since importing them would let a
+        // future edit move a separator and this test together.
+        //
+        // If one of these fails, a separator has been duplicated. Do not update
+        // the literal to match; two capabilities hashing the same preimage means
+        // grinding for one grinds for the other, and the costs add instead of
+        // multiplying.
+        const OTHER_SEPARATORS: [(&str, &[u8; 32]); 5] = [
+            ("author address", b"/dialectica/1/Address/Author\0\0\0\0"),
+            ("stoa address", b"/dialectica/1/Address/Stoa\0\0\0\0\0\0"),
+            ("op signing", b"/dialectica/1/Signed/Op\0\0\0\0\0\0\0\0\0"),
+            ("op id", b"/dialectica/1/Id/Op\0\0\0\0\0\0\0\0\0\0\0\0\0"),
+            ("slate path", b"/dialectica/1/Slate/Path\0\0\0\0\0\0\0\0"),
+        ];
+        for (which, separator) in OTHER_SEPARATORS {
+            assert_ne!(
+                separator, NAME_PREFIX,
+                "the name's separator is the {which} separator, so the two \
+                 capabilities are one function of the key"
+            );
+            let under_other: [u8; 32] = {
+                let mut h = Sha256::new();
+                h.update(separator);
+                h.update(key.to_bytes());
+                h.finalize().into()
+            };
+            assert_ne!(
+                name_digest(&key),
+                under_other,
+                "the name digest equals the key hashed under the {which} \
+                 separator, so name derivation is not domain-separated from it"
+            );
+        }
     }
 
     #[test]
@@ -797,29 +843,64 @@ mod tests {
     #[test]
     fn every_index_of_every_list_is_reachable_and_uniformly_so() {
         // Both halves in one sweep, because they are one property: over the full
-        // 16-bit range every index must appear, and appear the SAME number of
+        // 16-bit range every WORD must appear, and appear the SAME number of
         // times. A list whose size did not divide 65,536 would fail the second
         // half while passing the first.
         //
-        // Counted with a vector rather than asserted from the arithmetic,
-        // because the arithmetic is the thing under test.
-        for (len, name) in [
-            (ADJECTIVES.len(), "adjectives"),
-            (NOUNS.len(), "nouns"),
-            (PLACES.len(), "places"),
+        // **Driven through `name_from_digest`, not through the test's own
+        // modulo.** An earlier version computed `draw as u16 % len as u16` in
+        // this body and never called the derivation at all, so it tested the
+        // arithmetic of `%` — a property of Rust — rather than the derivation's
+        // use of it. Measured: replacing the adjective reduction with
+        // `(word(0) % (ADJECTIVES.len() as u16 - 1)) + 1`, which makes index 0
+        // unreachable and the reduction biased, left that version passing. It
+        // now fails here.
+        //
+        // Counted by WORD rather than by index, because the word is what a
+        // reader sees and what a second implementation must agree on; an index
+        // is an internal step. Words are unique per list
+        // (`no_list_holds_a_duplicate`), so the counts are equivalent, and
+        // counting the visible thing means a mutation that reindexed without
+        // changing the modulus is still caught.
+        for (slot, list, label) in [
+            (0usize, ADJECTIVES, "adjectives"),
+            (1, NOUNS, "nouns"),
+            (2, PLACES, "places"),
         ] {
-            let mut counts = vec![0usize; len];
+            let mut counts: std::collections::HashMap<&str, usize> =
+                list.iter().map(|w| (*w, 0usize)).collect();
+
             for draw in 0u32..=u16::MAX as u32 {
-                counts[(draw as u16 % len as u16) as usize] += 1;
+                // Every other slot is held at zero, so only this slot's two
+                // bytes vary and the word read back is this slot's draw.
+                let mut digest = [0u8; 32];
+                digest[slot * 2] = (draw >> 8) as u8;
+                digest[slot * 2 + 1] = draw as u8;
+
+                let name = name_from_digest(&digest);
+                let word = name.words()[slot];
+                *counts
+                    .get_mut(word)
+                    .unwrap_or_else(|| panic!("{label}: {word} is not in its own list")) += 1;
             }
-            let expected = 65_536 / len;
+
+            let expected = 65_536 / list.len();
             assert!(
-                counts.iter().all(|&c| c == expected),
-                "{name}: reduction is not uniform"
+                counts.values().all(|&c| c == expected),
+                "{label}: reduction is not uniform — some word is drawn more \
+                 often than another, so the 2^33 space is not reached exactly"
             );
             assert!(
-                counts.iter().all(|&c| c > 0),
-                "{name}: an index is unreachable"
+                counts.values().all(|&c| c > 0),
+                "{label}: a word is unreachable, so the list is larger than the \
+                 space the derivation can select from"
+            );
+            // The sweep must have covered the whole list, or "every word" is a
+            // claim about however many words happened to be counted.
+            assert_eq!(
+                counts.len(),
+                list.len(),
+                "{label}: the count table lost an entry"
             );
         }
     }
@@ -997,20 +1078,78 @@ mod tests {
         // No placeholder, no name for "unknown", no name from padded input. Each
         // would render as an ordinary participant — a name attributable to
         // nobody, presented as one attributable to somebody.
-        let short = display_name_from_bytes(b"too short");
-        assert!(short.is_err());
+        let short_bytes = b"too short";
+        let short = display_name_from_bytes(short_bytes);
+        assert!(short.is_err(), "a 9-byte key must be refused");
         assert!(
             short.unwrap_err().to_string().contains("cannot derive"),
             "the error must say a name could not be derived"
         );
 
-        // Padding a short key to 32 bytes must not be what the implementation
-        // does: a 9-byte key and the same bytes zero-padded must not agree.
+        // **No name derived from truncated or padded input.** The half this
+        // replaces built the zero-padded 32-byte value, called the derivation
+        // and threw the result away with `let _ =`, asserting nothing — so it
+        // read as covering the no-padding rule while being unable to fail for
+        // it. The rule is that a short key is refused OUTRIGHT rather than
+        // widened to a length that parses, so what must be asserted is that the
+        // short call does not arrive at the name the padded value reaches.
+        //
+        // **The fixture has to be chosen, not assumed**, and that is the whole
+        // difficulty of testing this rule. Zero-padding `b"too short"` produces
+        // bytes that are NOT a decompressable Edwards point, so a padding
+        // implementation would be refused at the parse anyway and a test built
+        // on it passes while proving nothing — measured, not supposed. The
+        // prefix below is one whose zero-padded form does parse, so padding is
+        // a genuinely reachable route to a name and the assertion after it is
+        // what closes the route rather than the parse closing it by accident.
+        let padded_prefix = short_key_whose_padding_is_a_valid_key();
         let mut padded = [0u8; 32];
-        padded[..9].copy_from_slice(b"too short");
-        // Whether the padded value parses at all is incidental; what matters is
-        // that the SHORT one produced no name.
-        let _ = display_name_from_bytes(&padded);
+        padded[..padded_prefix.len()].copy_from_slice(&padded_prefix);
+
+        let padded_name = display_name_from_bytes(&padded).expect(
+            "the zero-padded value must itself be a usable key, or this test \
+             proves nothing about padding",
+        );
+
+        // The short form of that same prefix must still be refused.
+        assert!(
+            display_name_from_bytes(&padded_prefix).is_err(),
+            "a {}-byte key must be refused rather than widened",
+            padded_prefix.len()
+        );
+
+        // An implementation that zero-padded a short key would return
+        // `Ok(padded_name)` from the short call and fail here. `is_err()` above
+        // would also catch that, but only this says WHICH name was avoided, so
+        // a future implementation that refused short keys for some unrelated
+        // reason while padding elsewhere is still caught.
+        assert_ne!(
+            display_name_from_bytes(&padded_prefix).ok(),
+            Some(padded_name),
+            "the short key reached the padded value's name, so the derivation \
+             pads rather than refusing"
+        );
+    }
+
+    /// A short byte string whose zero-padding to 32 bytes IS a valid public key.
+    ///
+    /// Searched rather than written down, because which prefixes have this
+    /// property is a fact about Ed25519 point decompression and not something a
+    /// reader can check by eye — the intuitive choice, zero-padding an ASCII
+    /// string, does not have it. Cheap: valid points are dense, so the first few
+    /// candidates suffice.
+    fn short_key_whose_padding_is_a_valid_key() -> Vec<u8> {
+        for n in 1u16..=1024 {
+            let mut candidate = [0u8; 32];
+            candidate[0] = (n & 0xff) as u8;
+            candidate[1] = (n >> 8) as u8;
+            if display_name_from_bytes(&candidate).is_ok() {
+                // The first two bytes are the whole of the prefix; the rest is
+                // the padding a padding implementation would have added.
+                return candidate[..2].to_vec();
+            }
+        }
+        panic!("no zero-padded prefix in the search range parsed as a key");
     }
 
     #[test]
@@ -1306,5 +1445,152 @@ mod tests {
             );
             assert_eq!(name.words().len(), 3, "still three drawn words");
         }
+    }
+
+    // ─── The scheme is versioned and frozen ────────────────────────────────
+
+    #[test]
+    fn a_different_scheme_version_gives_a_different_name_for_one_key() {
+        // "Names under two scheme versions SHALL be distinguishable, so that one
+        // version's names cannot be silently reproduced by the other." This is
+        // what a version bump BUYS, and without it the bump is bookkeeping: two
+        // schemes that mint the same names for the same keys have not been
+        // separated, they have only been relabelled.
+        //
+        // **No API is widened to reach this.** An earlier `tasks.md` claimed the
+        // scenario needed `NAME_PREFIX` exposed; it does not. `mod tests` is
+        // inside this module and `use super::*` already brings the private const
+        // in, so the test builds a v2 separator from the shipped v1 one.
+        //
+        // The v2 digest is hashed HERE rather than by calling `name_digest`,
+        // which is what makes this a comparison of two independent routes rather
+        // than the derivation compared with itself.
+        assert_eq!(
+            NAME_PREFIX[12], b'1',
+            "the scheme version lives at byte 12 of the separator; if it has \
+             moved, this test is bumping the wrong byte and would pass while \
+             comparing v1 with v1"
+        );
+        let mut v2_prefix = *NAME_PREFIX;
+        v2_prefix[12] = b'2';
+        assert_ne!(
+            &v2_prefix, NAME_PREFIX,
+            "the two separators must actually differ, or every comparison below \
+             is one scheme compared with itself"
+        );
+
+        // Many keys rather than one: a single pair could differ by coincidence
+        // of one draw, where "the two schemes are separated" is a claim about
+        // every key.
+        let mut differed = 0;
+        for seed in 1u8..40 {
+            let key = a_key(seed).public_key();
+
+            let v2_digest: [u8; 32] = {
+                let mut h = Sha256::new();
+                h.update(v2_prefix);
+                h.update(key.to_bytes());
+                h.finalize().into()
+            };
+            let under_v2 = name_from_digest(&v2_digest);
+            let under_v1 = display_name(&key);
+
+            assert_ne!(
+                under_v1.render(),
+                under_v2.render(),
+                "seed {seed} renders identically under both scheme versions, so \
+                 a v1 name is silently reproducible by v2"
+            );
+            differed += 1;
+        }
+        // The loop must have run, or "every key differed" is true of no key.
+        assert_eq!(differed, 39, "the sweep did not exercise every seed");
+    }
+
+    #[test]
+    fn removing_a_word_renames_identities_that_drew_past_it() {
+        // The mechanism a version bump exists to prevent, exhibited rather than
+        // asserted. "The derivation maps digest bytes to list INDICES, so
+        // removing one word reindexes the list and every identity that drew at
+        // or after the removed index renders differently — on peers that have
+        // updated and not on peers that have not."
+        //
+        // Reachable without widening anything: the lists are `const` arrays that
+        // `use super::*` already brings in, so the shortened list is a `Vec`
+        // built here and the reindexing is done by hand. This is a statement
+        // about what a removal WOULD do, not a test that a removal happened —
+        // `every_wordlist_is_pinned_entry_by_entry_and_in_order` is what catches
+        // an actual removal.
+        const REMOVED: usize = 100;
+
+        let shortened: Vec<&'static str> = PLACES
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != REMOVED)
+            .map(|(_, w)| *w)
+            .collect();
+        assert_eq!(
+            shortened.len(),
+            PLACES.len() - 1,
+            "exactly one entry must have been removed"
+        );
+
+        // Below the removed index: nothing moves. This half is what makes the
+        // test a statement about REINDEXING rather than about the list simply
+        // being different — a test asserting only that names changed would pass
+        // on a shortened list that had been shuffled.
+        let mut unchanged = 0;
+        for i in 0..REMOVED {
+            assert_eq!(
+                shortened[i], PLACES[i],
+                "index {i} is below the removal and must be untouched"
+            );
+            unchanged += 1;
+        }
+        assert_eq!(unchanged, REMOVED, "the below-the-cut sweep did not run");
+
+        // At and above it: every index now names the word that used to sit one
+        // place later, so an identity that drew index i renders as a DIFFERENT
+        // place than it did before.
+        //
+        // Compared against `PLACES[i + 1]` — a written-down relation — rather
+        // than merely asserting inequality: `shortened[i] != PLACES[i]` alone
+        // would pass on any reshuffling, where the spec's claim is the specific
+        // one that everything shifts down by exactly one.
+        let mut renamed = 0;
+        for i in REMOVED..shortened.len() {
+            assert_eq!(
+                shortened[i],
+                PLACES[i + 1],
+                "index {i} must now hold what index {} held",
+                i + 1
+            );
+            renamed += 1;
+        }
+        assert_eq!(
+            renamed,
+            PLACES.len() - 1 - REMOVED,
+            "the above-the-cut sweep did not run"
+        );
+
+        // And the renaming is real rather than nominal: the words genuinely
+        // differ, so an identity drawing here would render as someone else.
+        // Asserted over the whole tail rather than at one index, because a
+        // single adjacent duplicate in the list would make a one-index check
+        // pass while the property failed there.
+        let mut moved = 0;
+        for i in REMOVED..shortened.len() {
+            if shortened[i] != PLACES[i] {
+                moved += 1;
+            }
+        }
+        assert_eq!(
+            moved,
+            shortened.len() - REMOVED,
+            "some index at or above the removal renders the same word as before, \
+             so the list holds an adjacent duplicate and the reindexing is \
+             invisible there — which `no_list_holds_a_duplicate` should have \
+             caught"
+        );
     }
 }

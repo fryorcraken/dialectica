@@ -169,7 +169,7 @@ with a new worktree and `cargo` fails at manifest resolution without it.)
       not expressible: there is no `draw_at`, no offset parameter, and no path
       that indexes the digest outside the slice.
 
-- [ ] **`tester`** — `names.rs:833-860` —
+- [x] **`tester`** — `names.rs:833-860` —
       `every_index_of_every_list_is_reachable_and_uniformly_so` tests the modulo
       arithmetic, not `draw_at`, so it cannot see the derivation stop being uniform
       **Scenario:** the test computes `draw as u16 % len as u16` in its own body and
@@ -210,6 +210,32 @@ with a new worktree and `cargo` fails at manifest resolution without it.)
       the mutation**, exactly as you said it would. Your finding is confirmed by
       measurement, not merely still open: the test named for the property is the
       one test that cannot see the property break.
+
+      **FIXED — the test now drives the derivation instead of restating its
+      arithmetic.** It builds a digest per draw with the other two slots held at
+      zero, calls `name_from_digest`, and counts the WORD that slot returned. The
+      old body computed `draw as u16 % len as u16` in the test and never called
+      the derivation at all, so it was testing a property of Rust's `%`.
+
+      Counted by word rather than by index, deliberately: the word is what a
+      reader sees and what a second implementation must agree on, an index is an
+      internal step, and the counts are equivalent because
+      `no_list_holds_a_duplicate` holds. A third assertion checks the count table
+      still has one entry per list member, so "every word" cannot become a claim
+      about however many words happened to be counted.
+
+      **Proved it can fail, on your exact mutation.** Replacing the adjective
+      reduction with `(word(0) % (ADJECTIVES.len() as u16 - 1)) + 1`:
+      *"adjectives: reduction is not uniform — some word is drawn more often
+      than another, so the 2^33 space is not reached exactly"*. That is the
+      mutation this test survived when you filed the box. `names.rs` restored.
+
+      **Your severity was low and the box was still worth the pass**, for the
+      reason your `debug_assert_eq!` box gives: the property was covered by the
+      pins, but the test a reader consults when asking "is the reduction
+      uniform?" was the one test that could not answer. That is a navigational
+      defect rather than a coverage one, and it is only fixable by someone
+      reading the body rather than the name.
 
 ## What was clean
 

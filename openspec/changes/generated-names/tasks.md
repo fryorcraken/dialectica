@@ -65,10 +65,38 @@
       **collision** case had no fixture. The colliding pair was found by searching
       the shipped 2³³ scheme rather than stubbing the derivation. Mutations run
       with predictions stated first; one prediction was wrong and is recorded.
-      **Three gaps stay open and are reviewer-visible rather than fixed**:
+      ~~**Three gaps stay open and are reviewer-visible rather than fixed**:
       `feed.rs:292` cites a test that does not exist, and neither the scheme
       version nor a wordlist removal can be varied without widening the API for
-      tests alone.
+      tests alone.~~ **The API-widening claim was wrong and is withdrawn** — see
+      the third pass below.
+
+      **Third pass: the twelve `tester` findings closed.** Four fixed, five moot
+      by the owner's deletions, three strengthened from "passes for an incidental
+      reason" to "fails for the reason it names". No API was widened for any of
+      them: `mod tests` reaches `NAME_PREFIX` and the wordlist consts through
+      `use super::*`, which is what disproves the claim struck through above.
+
+      New: `a_different_scheme_version_gives_a_different_name_for_one_key` and
+      `removing_a_word_renames_identities_that_drew_past_it`. Rewritten so each
+      can fail for its stated reason:
+      `every_index_of_every_list_is_reachable_and_uniformly_so` (now drives
+      `name_from_digest` instead of restating `%`),
+      `a_failure_is_never_reported_as_a_name` (the `let _ =` half replaced; the
+      fixture had to be **searched** because zero-padding `b"too short"` is not a
+      valid key, so the obvious test would have passed on a padding
+      implementation), and `the_name_digest_is_neither_the_address_nor_a_bare_hash`
+      (now compares against all five other domain separators, written down as
+      literals rather than imported).
+
+      Deleted: `tst_identicon.qml`'s `test_no_byte_the_mark_reads_is_ever_displayed`.
+      It mirrored `abbreviate`'s arithmetic from `DTheme` rather than measuring
+      `AddressLabel`, and **passed** under a head-group shift that put a mark byte
+      on screen, where the two probe-based tests failed. Its failure message's
+      one contribution — naming the three `DTheme` settings — is folded into the
+      survivor.
+
+      Every mutation was restored and `git diff --stat` checked: test files only.
 - [x] review: correctness — `code-reviewer`
 - [x] review: security — `code-reviewer` — Seven findings in
       `findings/security.md`, two high. A **fabricated placeholder name** replacing
@@ -225,8 +253,14 @@ the rendering obligations bound for §11.1.
       `a_multi_word_place_entry_is_accepted_and_renders_as_one_place` asserts the
       list holds at least one, so the single-word screen cannot creep back
 - [x] 2.4 `every_index_of_every_list_is_reachable_and_uniformly_so` sweeps the full
-      16-bit range and **counts into a vector** rather than asserting from the
-      arithmetic, since the arithmetic is what is under test
+      16-bit range and ~~**counts into a vector** rather than asserting from the
+      arithmetic, since the arithmetic is what is under test~~ — **corrected in
+      the third `tester` pass.** Counting into a vector was not the property: the
+      old body computed `draw as u16 % len as u16` **in the test** and never
+      called the derivation, so it tested Rust's `%` rather than this scheme's
+      use of it, and survived a mutation making the adjective reduction biased.
+      It now builds a digest per draw, calls `name_from_digest`, and counts the
+      **word** returned against `65_536 / len`.
 
 ## 3. Removing the denylist and the redraw
 
