@@ -1,12 +1,19 @@
 ## Stages
 
-- [ ] ~~spec — `spec-writer`~~ — **does not apply.** This change removes a view
-      element no requirement ever asked for, so it has no spec delta;
-      `.openspec.yaml` sets `skip_specs: true` with the measurement behind it.
-      Struck through rather than omitted, because "does not apply" and "nobody did
-      this" are different states and the block exists to tell them apart.
-      **One caveat, and it is `design.md` §7 rather than a reason to unstrike
-      this row:** an *unmerged* delta on `piece/ui-composer` requires a
+- [x] spec — `spec-writer` — **no OpenSpec delta, and that half still does not
+      apply.** This change removes a view element no requirement ever asked for,
+      so it has no capability delta; `.openspec.yaml` sets `skip_specs: true` with
+      the measurement behind it.
+      **The row is ticked rather than struck because a requirement was
+      nonetheless written**, on the second pass, in answer to the `spec-writer`
+      boxes in `findings/architecture.md` and `findings/correctness.md`:
+      `docs/UI-BRIEF.md` **rendering obligation 10**, plus the matching clause in
+      the Feed section. That is where a view obligation belongs — every capability
+      `openspec list --specs` reports contracts core behaviour, and there is no
+      view-facing capability in the tree. Reasoning is in `proposal.md` under *The
+      obligation the move narrowed*.
+      **One caveat, and it is `design.md` §7 rather than a reason to reopen this
+      row:** an *unmerged* delta on `piece/ui-composer` requires a
       `compose.apparatus` string. It is reported, not touched — a spec change is a
       `spec-writer`'s and needs the owner's call.
 - [x] design + code — `dev-writer`
@@ -62,6 +69,15 @@ requirement being deleted by accident. The table is `design.md` §2.
       (`UI-BRIEF.md:86-88`, "a count of *anything* global … is unknowable") **and
       in the interface already**, at `FeedScreen.qml`'s empty state: "This is a
       fact about your copy, not about the Stoa."
+      **Narrowed by the `spec-writer`'s second pass — the "in the interface
+      already" half is true only of the empty state**, and the state where the
+      screen asserts extent (the pagination control) carries no locality
+      statement. The brief was incomplete rather than wrong: it covered counts and
+      not non-numeric extent claims. Completed as `UI-BRIEF.md` rendering
+      obligation 10; the code gap is an open `dev-writer` box in
+      `findings/correctness.md`. Read that box and `proposal.md`'s *The obligation
+      the move narrowed* before citing this line as evidence the obligation
+      survived intact — it did not.
 - [x] 2.2 `ON THE MARK` — survives in the brief at obligation 6 layer 2
       (`UI-BRIEF.md:584-593`, "must never be rendered as a verification mark, a
       badge, or anything that reads as 'checked'") **and structurally**, since
@@ -123,6 +139,21 @@ reported to the runner rather than fixed here.
       label is **not by itself enough**, because it declines to claim recency
       without denying it, so the screen must say plainly that this is not newest
       first.
+- [x] 5.3 *(`spec-writer`, second pass.)* Add **rendering obligation 10** —
+      every quantity is a fact about this machine's copy, and "more" is a
+      quantity — in two halves: never render a quantity the core cannot know, and
+      where the interface does assert extent, that assertion must be readable as
+      local. It closes the gap constraint 1 left: constraint 1 forbids a global
+      *count*, and the feed's extent claim is a **control**, not a numeral.
+      Includes the explicit non-obligation — a screen asserting no extent owes
+      nothing, because a once-per-screen disclaimer is the mistake this change
+      undoes.
+- [x] 5.4 *(`spec-writer`, second pass.)* Add the matching clause to the Feed
+      section: paging is an extent claim governed by obligation 10, `hasMore` is
+      computed from this peer's log alone, and the screen that offers paging is
+      the one that owes the locality statement. Placed there because a screen
+      author works from the Feed section, which is the routing failure that let
+      the apparatus ship.
 
 ## 6. Gates
 
@@ -151,8 +182,9 @@ reported to the runner rather than fixed here.
       `design.md` §7. Read in full it does not need the column (it governs the
       **closed gate's** content), but the wording is contract text, so it is the
       composer piece's `spec-writer` to change. Verified that the string has no
-      implementation on any branch, that `composer-view` is not among the sixteen
-      merged capabilities, and that no `copy.json` exists in the tree.
+      implementation on any branch, that `composer-view` is not among the merged
+      capabilities (`openspec list --specs`), and that no `copy.json` exists in
+      the tree.
 - [x] 7.2 The `ON PUBLISHING` delivery disclaimer — `design.md` §8. Verified
       absent from `origin/main` and from `piece/ui-composer`'s pushed tip, so
       there is nothing on this branch to preserve it into and no publish path to

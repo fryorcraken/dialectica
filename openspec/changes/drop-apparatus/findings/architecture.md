@@ -192,7 +192,7 @@ registrations whose files went. Nothing here is over-built.
       go is that branch's call against a rule that now exists in a shared place.
       The dispatch was explicit that this piece does not edit sibling branches.
 
-- [ ] **`spec-writer`** — `docs/UI-BRIEF.md:468-485` vs `FeedScreen.qml:302-351`
+- [x] **`spec-writer`** — `docs/UI-BRIEF.md:468-485` vs `FeedScreen.qml:302-351`
       — the new rule and the `ON WHAT YOU HOLD` gap answer the same question
       differently, and the architecture currently supports neither answer
       **Scenario:** the correctness review filed the substantive question — the
@@ -244,6 +244,39 @@ registrations whose files went. Nothing here is over-built.
       - **Nothing I changed touches `FeedScreen.qml`.** The `Rectangle` at `:302`
         and its `visible` binding are as you found them, so the measurement in
         `findings/correctness.md` still stands as filed.
+
+      **Answered — `spec-writer`.** You filed this as "the architecture supports
+      neither answer". The answer is a third one, and it is cheaper than both of
+      yours because it does not need a fourth `visible:` guard.
+
+      **Your first branch assumed the trigger is the screen state.** It is not.
+      The requirement written is `docs/UI-BRIEF.md` **rendering obligation 10**,
+      triggered by the **extent claim** — so the condition is not "the feed is
+      non-empty" but "this screen asserts how much exists". On `FeedScreen` those
+      coincide today, because the only extent claim is the pagination row and it
+      already has its own `visible:` binding computed from `hasMore` and `page`.
+      A sentence placed inside that existing `RowLayout`, or bound to the same
+      condition, adds **no new guard** — it reuses the one the control already
+      carries. `readState`'s three-state invariant is untouched: the pagination
+      row was already outside it.
+
+      **Your second branch — "then `design.md` §2 overclaims" — is correct, and
+      it is now recorded rather than left implied.** The row's "in the
+      **interface already**" claim is true only of the empty state. I have not
+      edited `design.md`, which is the `dev-writer`'s file; the narrowing is
+      annotated at `tasks.md` 2.1 (the claim's other citation, which I checked for
+      before touching anything) and carried in `proposal.md`, which survives
+      archival. Correcting §2's row itself is folded into the open `dev-writer`
+      box in `findings/correctness.md`.
+
+      **On "the answer is cheap now and expensive once three screens copy the
+      shape":** agreed, and obligation 10 is written so the next screen inherits
+      it — it states the trigger and the explicit non-obligation, so a screen with
+      no count and no paging owes nothing and is not tempted to print a
+      disclaimer. It lives in the brief rather than a spec because every
+      capability `openspec list --specs` reports contracts core behaviour and
+      there is no view-facing one; a rule in a file no screen author opens is the
+      exact failure that let the apparatus column ship.
 
 ## Areas that were clean
 

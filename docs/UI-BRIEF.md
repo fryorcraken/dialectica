@@ -334,6 +334,14 @@ different people.
 
 Paginated. Hidden posts are omitted by default.
 
+**Paging is an extent claim, and rendering obligation 10 governs it.** "Next"
+appears when *this peer* holds another page — the core computes it from the local
+store and it means nothing about the Stoa. A reader seeing thirty posts and a
+"Next" button reads it as "there is more in this Stoa", so **the state that offers
+paging is the state that owes the locality statement**. Putting that sentence in
+the empty state instead satisfies nothing: the empty state is the one state where
+no page control is offered.
+
 **Orderings, and an honesty problem worth designing around.**
 
 The intended orderings are **new** (most recent first), **active** (threads by
@@ -752,6 +760,46 @@ signal no call produces; a spinner that can never resolve is worse than no
 spinner. Design the saved state to be correct on its own, and leave room beside it
 for a later "not yet propagated" marker — that marker is additive when the three
 are answered, which is the point of not inventing one now.
+
+**10. Every quantity is a fact about this machine's copy, and "more" is a
+quantity.**
+
+Constraint 1 forbids showing a count of anything global. This obligation is the
+half that is easy to satisfy on the empty screen and easy to miss everywhere
+else: **the prohibition does not stop at numerals.** A control that offers a next
+page, a "showing 30" line, a reply count, a scrollbar that implies an end — each
+asserts something about how much exists, and none of them can mean more than
+*how much has reached this peer*.
+
+Two rules, and they are different obligations rather than one stated twice:
+
+- **Never render a quantity the core cannot know.** There is no total, no member
+  count, no "of N". A peer cannot see the whole of a Stoa, so any figure
+  presented as the size of something is false — not imprecise, false. This is a
+  prohibition, and a screen that shows no such figure has met it.
+- **Where the interface does assert extent, it must be readable as local.** The
+  feed's "Next" is the live instance: it appears when this peer holds another
+  page and disappears when it does not, so it is honest — and a reader meeting
+  thirty posts and a "Next" button will nonetheless read it as *this Stoa has
+  more*, which is the claim nothing can make. Whatever carries that assertion has
+  to say whose copy it is about.
+
+**Where this does not apply, and why saying so matters.** An interface owes a
+locality statement where it makes an extent claim — **not once per screen as a
+disclaimer**. A screen that shows no count and offers no paging owes nothing
+here, and adding a line to it would be printing an obligation at the reader
+rather than discharging one. This is the distinction the box at the top of this
+section draws: the second half of this obligation is one of the cases it means by
+*"in the screen's own body where a sentence is genuinely required"* — the claim is
+made by a control, so no structure can unmake it, and the reader has to be told.
+
+**How this obligation was found, which is the part worth keeping.** The feed's
+locality sentence — "This is a fact about your copy, not about the Stoa." — was
+written into the empty state, where there is nothing to over-read, and the
+paging control that does make a claim got nothing. Nobody noticed because the
+brief said *count* and the claim had stopped being a number. **So check the
+trigger, not the vocabulary**: if a screen tells a reader there is more, it has
+made the claim, whatever shape the telling took.
 
 ---
 

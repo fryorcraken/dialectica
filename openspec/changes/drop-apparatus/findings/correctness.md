@@ -107,7 +107,7 @@ and the Feed-section clause names the specific trap.
       what to add. Recorded in `design.md` §4, which you correctly noted
       discussed only the `implicitHeight` half.
 
-- [ ] **`spec-writer`** — `FeedScreen.qml:302-351` — the `ON WHAT YOU HOLD`
+- [x] **`spec-writer`** — `FeedScreen.qml:302-351` — the `ON WHAT YOU HOLD`
       obligation now holds only on the empty screen
       **Scenario:** open a Stoa that holds thirty posts. The deleted note said
       "Every number here counts what this machine has received. No peer can see
@@ -137,6 +137,66 @@ and the Feed-section clause names the specific trap.
       exactly as you measured them. `design.md` §2's `ON WHAT YOU HOLD` row still
       carries the narrowing pointer at this box, so the question is not orphaned
       if this file is deleted before it is answered.
+
+      **Answered — `spec-writer`.** The requirement is now
+      `docs/UI-BRIEF.md` **rendering obligation 10**, and the reasoning behind it
+      is in `proposal.md` under *The obligation the move narrowed*, which survives
+      archival where this file does not.
+
+      **Your framing needed one correction and it changes the requirement.** The
+      non-empty feed renders **no number at all** — `"STORE READ OK · N POSTS
+      HELD"` is the screen's only count and it renders only when `rows.length ===
+      0`, so it only ever reads `0`; there is no page number and no "showing 30
+      of". A requirement written as "a locality line wherever a count appears"
+      would therefore have had no subject on the screen you filed it against.
+      What is actually unqualified is the **pagination control**: `hasMore` is
+      computed by `feed::list_threads` from this peer's log alone, so "Next" means
+      *this machine holds another page* and a reader reads it as *this Stoa has
+      more*. That is an extent claim without being a numeral, which is precisely
+      the crack the apparatus note's wording ("every **number** here") left open.
+
+      So obligation 10 is triggered by the extent claim rather than by the screen:
+      never render a quantity the core cannot know, and where the interface does
+      assert extent, that assertion must be readable as local. **Rejected: a
+      once-per-screen locality line** — that is a disclaimer printed at the
+      reader, which is the mistake this whole change undoes.
+
+      **The code is now wrong against a brief that is right**, so the remaining
+      work is a `dev-writer` box below rather than more spec.
+
+- [ ] **`dev-writer`** — `FeedScreen.qml`, the pagination row — the paging
+      control asserts extent and nothing on that screen says whose copy it is
+      about
+      **The requirement it fails:** `docs/UI-BRIEF.md` rendering obligation 10,
+      second half — where the interface asserts extent, the assertion must be
+      readable as local. Written in answer to the `spec-writer` box above; read
+      that box for why the obligation is about the control rather than about a
+      count.
+      **Scenario:** open a Stoa this peer holds thirty-one posts for. Thirty
+      render and a "Next" button appears. The screen's locality sentence — "This
+      is a fact about your copy, not about the Stoa." — is inside the `Rectangle`
+      gated on `rows.length === 0`, so it does not render; the pagination
+      rationale ("a fact about this copy and not a claim about how much exists")
+      is a **code comment** beside the `RowLayout`, which no user reads. The
+      reader has an extent claim and no locality statement.
+      **The shape this change already demonstrated** is the one to reach for, and
+      it is named here because it is a pointer rather than a layout decision: the
+      `ON THIS ORDERING` sentence became a body-level `Text` outside the state
+      branches, with a comment saying which obligation it discharges. Whether
+      obligation 10's sentence belongs beside the pagination row, in the body, or
+      folded into the ordering sentence already there is yours — **what is settled
+      is that it must render in the state where paging is offered, and must not
+      become a disclaimer on screens that assert no extent.**
+      **One documentation edit belongs with the code fix**, because it is your
+      file and not mine: `design.md` §2's `ON WHAT YOU HOLD` row claims the
+      obligation survives "in the **interface already**", which is true only of
+      the empty state. Narrow it the way §2's `ON THE MARK` row was already
+      narrowed — say which claim it supports. The row's other citation,
+      `tasks.md` 2.1, is annotated; `findings/architecture.md` files the same
+      point and is answered there.
+      **Severity: medium.** Pre-existing, not created by this change; it is in
+      scope because this change is what moved the obligation and because the brief
+      it must now meet is completed in the same change.
 
 - [ ] **`tester`** — `dialectica-ui/tests/` — nothing pins the one piece of
       interface text this change creates, nor the `implicitHeight` it fixes
