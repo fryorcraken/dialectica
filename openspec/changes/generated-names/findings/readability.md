@@ -209,7 +209,7 @@ run. Every one rests on a file read in this tree.
       illustrated (no register screen) is true, which is what makes the false
       examples costly: they are the only evidence offered for a true claim.
 
-      **Fixed** in `f0c9fda`. The header now reads *"`luminous`, `pensive` and
+      **Fixed** in `bdfd685`. The header now reads *"`luminous`, `pensive` and
       `restless` draw alongside any other"* — the three the spec itself uses,
       each verified present.
 
