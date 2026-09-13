@@ -9,7 +9,7 @@
       apply" and "nobody did this" are different states and this block exists to
       tell them apart.
 - [x] design + code — `dev-writer`
-- [ ] tests — `tester`
+- [x] tests — `tester`
 - [x] review: correctness — `code-reviewer`
 - [x] review: security — `code-reviewer`
 - [x] review: readability — `code-reviewer`
@@ -20,24 +20,48 @@
 - [ ] CI green, PR merged — `closer`
 - [ ] `openspec validate --strict`, then `archive` — `closer`
 
-### A note for the `tester`
+### What the `tester` did, and the blind spot that remains
 
-This piece's row is left **unticked rather than struck**, unlike `core-e2e`'s,
-because there is genuinely something a `tester` can do here and it is not
-obvious what.
+This piece's row was left **unticked rather than struck**, unlike `core-e2e`'s,
+because there was genuinely something a `tester` could do here. There was, and it
+is the shape this note predicted: **not in `examples/`, but in
+`dialectica-core/tests/end_to_end.rs`**, as an integration test over a `tempdir`
+that mints a keystore, founds a Stoa, records a path, publishes and reads back,
+independently of the binary.
 
-What the example asserts about itself, it asserts inline, and those assertions
-run — a failing one exits non-zero. What nothing checks is that the program still
-*works*: CI compiles it (measured, see `design.md`) and nothing runs it. The gap
-a `tester` could close is in `tests/end_to_end.rs`, not in `examples/`, and the
-shape worth considering is whether the seeding sequence — mint a keystore, found
-a Stoa, record a path, publish, read back — holds as an integration test over a
-`tempdir`, independently of the binary.
+Two tests, in a new `publish path` section of that file — added under its own
+sectioning rule 2, which had named the write path as the boundary it was waiting
+for:
+
+- `a_store_seeded_from_two_identities_carries_exactly_those_two_authors` — the
+  distinct-author **set** over `authoring::post`/`reply`/`vote`, which is what a
+  `contains` pair structurally cannot assert and is what the false "every seeded
+  op is by ⟨one address⟩" report line slipped past.
+- `the_seeding_sequence_builds_a_nested_thread_whose_author_the_probe_does_not_report`
+  — the sequence above, plus the three-level nesting and the self-invalidating
+  probe-versus-signing inequality.
+
+Three mutations were run, each predicted before the run and each observed as
+predicted; the table is in `end_to_end.rs`'s own mutation section, per that
+file's rule. The load-bearing one: the reviewer's `wire.rs:324` mutation, which
+closes the three-derivations gap at the probe. It makes the example **exit 0**
+and now makes this suite **fail**, which is exactly the difference the boxes were
+about.
+
+**The blind spot itself is not closed, and that is deliberate.** `examples/` is
+still a target CI compiles and never runs. The example keeps its inline
+assertions — they are what makes a bad *run* of the tool loud, and a test and a
+run answer different questions. What changed is that the properties no longer
+live only there. A workflow step that runs examples was weighed and declined: it
+would gate on a dev tool's exit code, and `design.md` already records why a third
+Rust step duplicating two working gates is the wrong move. That decision is a
+`ci.yml` change and outside a tester's remit either way.
 
 **A `#[test]` must never be added to `examples/seed_store.rs`.** CI's test-count
 gate counts declarations across the whole Rust tree with `examples/` in scope and
 cargo does not run an example's tests, so one declared there fails the job. That
-is the correct outcome; the file says so at the top.
+is the correct outcome; the file says so at the top. The two tests above are in
+`tests/`, which cargo does run, so `declared` and `ran` both move together.
 
 ## Implementation
 

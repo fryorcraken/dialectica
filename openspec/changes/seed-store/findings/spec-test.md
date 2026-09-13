@@ -143,7 +143,7 @@ piece does ship actually fail?* — and the answer for the flagship one is no.
       fires for someone who runs the program. That is box 2 below, and it stays
       open.
 
-- [ ] **`tester`** — the piece ships **nine assertions that no gate ever
+- [x] **`tester`** — the piece ships **nine assertions that no gate ever
       executes**, and the `tests` row is correctly unticked; this is the box that
       records what the missing stage must cover.
       **Scenario:** `design.md:182-186` is candid that *"nothing **runs** the
@@ -173,7 +173,69 @@ piece does ship actually fail?* — and the answer for the flagship one is no.
       **Severity: medium — the piece's own design document names this gap; the box
       exists so the unticked row has something to point at.**
 
-- [ ] **`tester`** — `seed_store.rs:711-726` — the false "every seeded op is by
+      **Fixed, by the route you specified**, and the shape you named is the shape
+      built: an integration test over a `tempdir` in
+      `dialectica-core/tests/end_to_end.rs` that mints a keystore, founds a Stoa,
+      records a path, publishes and reads back. It is
+      `the_seeding_sequence_builds_a_nested_thread_whose_author_the_probe_does_not_report`,
+      and it is executed by `cargo test --manifest-path
+      dialectica/rust-lib/Cargo.toml -p dialectica -p dialectica-core` — the
+      command CI's `Tests` step runs.
+
+      **The options weighed, and why this one.** Three were on the table and two
+      were declined on the merits:
+
+      - **a CI step that runs the example** — declined. It would gate on a
+        developer tool's exit code, and it pins nothing a test cannot: the report
+        line remains a `println!` either way. It also adds a workflow step for a
+        dev tool, which this piece deliberately did not do for compilation —
+        `design.md` records that a third step would duplicate two gates that
+        already work, and the same argument applies here.
+      - **recording the gap and leaving it** — declined. The properties are
+        testable and the cost is one section of an existing file, so "cannot be
+        tested" would have been false. This repo's own record is that the sentence
+        is the least reliable one in it.
+      - **an integration test in the existing target** — taken. It needs no new
+        gate, no new file and no workflow change; `end_to_end.rs` already imports
+        `dialectica_core` as an outside consumer, already writes keystores into
+        `0o700` temp directories, and its sectioning rule 2 explicitly anticipated
+        the write path as "the one known to be coming". That rule and the file's
+        "does NOT cover the publish path" preamble are both updated in the same
+        commit, since this is the change that makes them stale.
+
+      **What the missing stage now covers**, against your list of nine: the thread
+      head (the feed assertion), the `parent`/`thread` pairs at the row that
+      discriminates, the author lookups (as a set — box 3), the moderator pair, and
+      the inequality. **Two are deliberately not ported**: `ops == 9` and the
+      second thread head are fixture arithmetic over the seeder's particular
+      content rather than properties of the module. A test asserting them here
+      would pin the example's fixture and would need editing every time that
+      fixture changed. What is ported is every claim that is about behaviour.
+
+      **Proved it can fail, with three mutations rather than by reasoning.** The
+      full table is recorded in `end_to_end.rs`'s own mutation section, per that
+      file's rule that a new test owes it a row. The load-bearing one for this box:
+
+      > `wire.rs:324`'s `posting_identity` reports `stoa_public_key` instead of
+      > `stoa_address_at_path` — **the gap closed at the probe, your own mutation
+      > from box 1.** Predicted: the seeding test alone, at its `assert_ne!`.
+      > Observed: exactly that, 1 of 28, both operands
+      > `bb49dc8fb64af3f348aec1b9a8179515b5302c5381631a596ef5be80d8d1cf90`.
+
+      That is the mutation you ran against the example's copy of this assertion and
+      watched **exit 0**. It now fails in a target CI executes, which is the
+      difference this box asked for.
+
+      **The third structural blind spot you name is NOT closed by this, and saying
+      so is part of the outcome.** `examples/` remains a target CI compiles and
+      never runs, and the example still carries its nine assertions behind "a
+      person typed `cargo run --example`". What changed is that the *properties* no
+      longer live only there. Closing the blind spot itself — a workflow step that
+      runs examples — is a change to `ci.yml`, outside a tester's remit, and it was
+      not made. If it is wanted, it is its own piece, and the argument against it
+      is the one recorded two paragraphs up.
+
+- [x] **`tester`** — `seed_store.rs:711-726` — the false "every seeded op is by
       \<one address\>" report line, already filed as high-severity by
       `findings/readability.md`, **had no check that could have caught it, and the
       brief's question is why.**
@@ -226,6 +288,57 @@ piece does ship actually fail?* — and the answer for the flagship one is no.
       `tests/end_to_end.rs` shape you describe is still the work; what this gives
       you is the assertion already written and already shown discriminating, to
       port rather than to design.
+
+      **`tester` — fixed, and the `dev-writer`'s judgement not to tick was right.**
+      The assertion existing in `examples/` was not the thing this box asked for.
+      It now also lives where a gate runs, as
+      `a_store_seeded_from_two_identities_carries_exactly_those_two_authors` in
+      `dialectica-core/tests/end_to_end.rs`, run by `cargo test --manifest-path
+      dialectica/rust-lib/Cargo.toml -p dialectica -p dialectica-core`. The
+      seeder's copy is **kept** rather than moved: it is what makes a bad *run* of
+      the tool loud, and the two answer different questions.
+
+      **It is not the example's assertion re-typed.** The seeder collects authors
+      over its own nine ops; this drives `authoring::post`, `reply` and `vote`
+      directly and asserts the distinct-author set over what the publish path
+      produced. Two things that matters for:
+
+      - the expected pair is derived **from the two `SecretKey`s**, via
+        `public_key().address()`, never read out of an op — so a publish path that
+        stamped a constant author satisfies no self-referential version of this;
+      - **each identity signs a root, a reply AND a vote**, so the pair cannot be
+        satisfied by a path that attributes posts correctly and votes to whoever is
+        handy. That asymmetry is what a two-op fixture would have missed.
+
+      **Proved it can fail.** Predicted: `authoring::publish` signing and
+      attributing every op with one fixed key collapses authorship, so the set
+      assertion fires with one address on the left and two on the right, and the
+      op-count guard above it does **not** fire, since a collapse changes
+      attribution and not the count. Observed: exactly that —
+
+      ```
+      assertion `left == right` failed: the store must carry exactly the two
+      identities that signed it — no collapse to one, no third author, and each
+      address as its own key derives it
+        left: ["0ff8484a7b159f5b8db05ac4a36c04f6fcdb93fe1b902bb7ff49815c761aade3"]
+       right: ["1830504810f3ff31d4992d3002c7490fb6115128f3b276eb1d4bdb3cb7e3663f",
+               "fb6016d2bc7fa25ff849e6d5af6fa6b05ed5d8bf1d801148647aee7bac093f39"]
+      ```
+
+      **2 of 28 died and the other 26 lived**, which is the part worth keeping:
+      before this section, nothing in the integration target asserted *who* an op
+      is attributed to when the publish path put it there. The third-author
+      direction needs no separate mutation — the assertion compares the set for
+      **equality**, not containment, so a third member fails it by construction,
+      and the mutation above proves the comparison is reached and compares real
+      values rather than being vacuous.
+
+      **One citation correction.** `seed_store.rs:711-726` no longer lands on the
+      report line: the `dev-writer`'s edits moved it, and 711-726 is now the
+      moderation-gap assertion block. The false universal you filed was at what is
+      now the report block around `:869-889`, which is where `seeded_ops_by`'s
+      per-author counts are printed. The line numbers in `design.md:182-186` and
+      `tasks.md:23-35`, cited in box 2, **do** still land where you say.
 
 ## What was clean
 
