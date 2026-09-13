@@ -41,8 +41,22 @@
       has — measured, `filler.h=0` in a `Main.qml`-shaped harness, and reproduced
       independently when the box was closed. §4's six figures all reproduce;
       PLAN.md is clean.
-- [ ] findings all ticked, `findings/` deleted — `closer`
-- [ ] `openspec validate --strict`, then `archive` — `closer`
+- [x] findings all ticked, `findings/` deleted — `closer` — gate measured in both
+      directions, which is the check a headings-only findings file defeats:
+      `grep -rn "^- \[ \]"` over `findings/` returned nothing, **and**
+      `grep -rc "^- \["` returned a non-zero count for each of the six files
+      (security 1, design 7, spec-test 4, architecture 3, readability 3,
+      correctness 5). Deleted only after confirming the durable reasoning had
+      already moved to `design.md` — §9's verbatim record of all fourteen removed
+      notes and §4's layout account. `proposal.md`'s two live citations into
+      `findings/correctness.md` were corrected in the same commit rather than left
+      to dangle; one of them claimed a box was still open that 9.1 had closed.
+- [x] `openspec validate --strict`, then `archive` — `closer` — validate passes
+      and reports `skip_specs` **honoured**, not ignored. `archive` moved the
+      folder to `archive/2026-09-14-drop-apparatus/` and promoted nothing: no
+      `specs/` delta, so `openspec/specs/` is untouched. It warned about 2
+      incomplete tasks of 85 — these two rows, ticked by the commit that does the
+      work rather than in advance.
 
 **On the `tests` row.** It was left unticked deliberately, with a real question
 attached: §4 of `design.md` records that **no test on `main` could see the
