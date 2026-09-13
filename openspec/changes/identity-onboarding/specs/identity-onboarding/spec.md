@@ -65,8 +65,11 @@ The master key SHALL be generated locally, and SHALL be exportable by the user, 
 that one saved value is sufficient to reproduce every identity derived from it —
 subject to the recorded path, below.
 
-Derivation SHALL remain that of the `identity` capability. This capability adds
-the path as an input to it and SHALL NOT introduce a second derivation scheme.
+Derivation SHALL remain that of the `identity` capability, which owns it. This
+capability adds the path as an input and SHALL NOT define a derivation of its own.
+That `identity` therefore carries a derivation taking a path alongside the one
+taking none — and that the two must be distinguishable so neither silently
+reproduces the other — is stated there rather than here.
 
 #### Scenario: Candidates come from one master key
 
@@ -92,8 +95,10 @@ to identify and display it, and SHALL NOT carry a secret key, a master key, a se
 a mnemonic, or any value from which one could be reconstructed.
 
 The view has no use for a secret: it cannot sign, because signing is the module's.
-Widening a reply later is additive, while a secret that has crossed the module
-boundary cannot be recalled.
+Adding a field later is a change to this contract and can be made; a secret that has
+crossed the module boundary cannot be recalled. The asymmetry is the whole argument
+for starting narrow, and the requirement below that each reply's field set is closed
+is what keeps "later" meaning a decision rather than a side effect.
 
 A candidate's address SHALL be present, because an address is the only unforgeable
 way to tell two candidates apart. A candidate's public key SHALL be present,
@@ -130,6 +135,30 @@ An identity becomes real when it signs, and nothing signs during onboarding — 
 before a candidate is kept there is nothing to lose, and after it is kept there
 must be nothing missing.
 
+**The identity kept SHALL be the candidate the offering reply displayed at the
+position selected** — the same public key and the same address, not merely a
+candidate derived at the same position. A selection is made on what the user was
+shown, and an offering and a keep are two separate calls, so anything the offering
+depended on and the keep re-established can differ between them while every guard on
+the selection still passes. When it does, the user is given a working identity they
+never saw, which is the outcome the requirement on malformed input calls
+unrecoverable.
+
+The reply SHALL state whether the candidate was kept, and where it was, SHALL carry
+the identity kept — its address and its public key — and where it was not, SHALL
+carry a reason and no identity. This is the posting probe's shape rather than a
+second convention for the same job, and it is what makes a caller able to show the
+user the identity they now have without asking a second question.
+
+#### Scenario: The identity kept is the candidate that was displayed
+
+- **WHEN** a set of candidates is offered, and a candidate is then kept at a selected
+  position
+- **THEN** the identity the keep reports has the public key the offering reply
+  carried at that position
+- **AND** has the address the offering reply carried at that position
+- **AND** this holds for every position in the set
+
 #### Scenario: A kept identity survives a restart
 
 - **WHEN** a candidate is kept, and the stored state is then loaded afresh
@@ -145,11 +174,19 @@ must be nothing missing.
 - **WHEN** a candidate is kept and an op is then signed by the identity it yields
 - **THEN** the op's author is the identity that keeping it reported
 
+#### Scenario: A successful keep reports the identity it kept
+
+- **WHEN** a candidate is kept
+- **THEN** the reply states that it was kept
+- **AND** carries that identity's address and public key
+- **AND** carries no reason
+
 #### Scenario: A failed keep records nothing
 
 - **WHEN** keeping a candidate fails
 - **THEN** no identity is reported as kept
 - **AND** a subsequent load finds no identity that was not there before
+- **AND** the reply carries a reason and no identity
 
 ### Requirement: A chosen derivation path is recorded, because it cannot be recomputed
 
@@ -192,9 +229,72 @@ does not belong in the keystore file, whose every field is accounted for.
 
 #### Scenario: The record is fully readable once written
 
-- **WHEN** paths have been recorded for several Stoas
+- **WHEN** paths have been recorded for several Stoas through this module
 - **THEN** every recorded pairing of Stoa and path can be read back
 - **AND** reading them requires nothing beyond the stored record itself
+
+### Requirement: A recorded path is one this module's derivation could have produced
+
+The set of derivation paths this capability can offer SHALL be bounded, and a path
+outside that bound SHALL be refused rather than coerced into it — both when it is
+offered for recording and when it is read back from the record.
+
+An identity derives from any path whatsoever, so a path the module did not produce
+derives a working identity that is not the user's, and nothing downstream can tell
+the difference. Coercing such a value — clamping, masking on read, truncating —
+hands the user a usable identity they did not choose, which the requirement on
+malformed input calls unrecoverable because the choice cannot be recomputed. A
+refusal is the only outcome that is visible.
+
+The bound SHALL be the same on the offering side and the reading side. Two bounds
+that agree today are two things to keep in step, and the narrower of them then
+describes what the module writes while the wider describes what it accepts.
+
+**This is a bound on the range, not on the five paths a particular set offered.**
+Which five those were is not recoverable once the set is superseded, and the record
+outlives every set. So what is required is that a recorded path be a value this
+module's derivation could have produced, which is the strongest property available
+to a reader of the record alone.
+
+A value in the record that is not a Stoa address SHALL likewise be refused rather
+than padded or truncated, for the same reason: a coerced address names a different
+Stoa.
+
+**These refusals concern content the module did not write.** The requirement that
+the record be fully readable is about what the module recorded through its own
+interface, and nothing this module writes can be refused by these bounds — a bound
+that refused a path the module can offer would be a store bricked by its own writer.
+Content the module did not write reaches the record by restore, by file sync, or by
+edit, and refusing it is not a contradiction of readability but its precondition:
+what reads back must be what was recorded.
+
+#### Scenario: A path outside the bound is refused on read
+
+- **WHEN** the record holds a path outside the bound
+- **THEN** reading the record reports a failure naming that
+- **AND** no identity is derived from the value
+
+#### Scenario: A path outside the bound is refused on recording
+
+- **WHEN** a path outside the bound is offered for recording
+- **THEN** the attempt is refused
+- **AND** the record holds no entry for it
+
+#### Scenario: The last path inside the bound is accepted
+
+- **WHEN** the greatest path inside the bound is recorded and read back
+- **THEN** it reads back as that value
+
+#### Scenario: Every path a set can offer is inside the bound
+
+- **WHEN** candidates are generated over many different sets
+- **THEN** every path offered is one the record accepts
+
+#### Scenario: A recorded Stoa that is not an address is refused
+
+- **WHEN** the record holds, in place of a Stoa address, a value of another length
+- **THEN** reading the record reports a failure naming that
+- **AND** no pairing is returned for it
 
 ### Requirement: One device holds the master key, and the record has one writer
 
@@ -355,6 +455,95 @@ when it is not:
 - **WHEN** a master key is stored and no passphrase was available
 - **THEN** the reply states that it was not encrypted
 
+### Requirement: The derivation path is carried in the replies that name an identity
+
+A reply describing a candidate, a reply reporting a kept identity, and a reply
+reporting the identity in use SHALL each carry the derivation path that identity
+derives from.
+
+The path is the one input to an identity that no published value carries and that
+the module alone holds, so a caller that cannot see it cannot show the user what
+must be preserved — and the requirement that the interface be able to state that
+recovery needs the record is a statement about a value the caller is otherwise
+never shown. The path is not secret: the record of it "reveals nothing that a
+published identity does not already reveal".
+
+#### Scenario: A candidate carries its path
+
+- **WHEN** a slate is generated
+- **THEN** each candidate carries the derivation path it derives from
+
+#### Scenario: A kept identity is reported with its path
+
+- **WHEN** a candidate is kept
+- **THEN** the reply carries the path of the candidate that was kept
+
+#### Scenario: The identity in use is reported with its path
+
+- **WHEN** the identity in use is asked for and there is one
+- **THEN** the reply carries the path it derives from
+- **AND** the path is the one recorded for that Stoa
+
+### Requirement: A set of candidates and each candidate in it are nameable by the caller
+
+A reply offering candidates SHALL carry a value identifying that set, and SHALL
+carry, for each candidate, a value identifying it within the set. A request to keep a
+candidate SHALL name both — alongside the Stoa the choice is for, which every method
+of this capability takes.
+
+Without the set identifier there is no way for a caller to say which set its
+selection was made against, and so no way for the module to refuse a selection made
+against a superseded one — which is a requirement above rather than a nicety, since
+the refusal is what stops a stale choice storing a candidate the user never saw. The
+per-candidate value is what makes "a selection that does not name a candidate in the
+current set" a thing a caller can get wrong rather than a thing it cannot express.
+
+#### Scenario: A set is identified and its candidates are individually nameable
+
+- **WHEN** a slate is generated
+- **THEN** the reply carries a value identifying the set
+- **AND** each candidate carries a value identifying it within the set
+
+#### Scenario: A candidate is kept by naming the set and the candidate
+
+- **WHEN** a candidate is kept by supplying the set's identifier and that
+  candidate's own
+- **THEN** the request is accepted, the choice being identified by that pair
+- **AND** a request naming a set that is not the current one is refused
+
+### Requirement: The fields of each reply are exactly those this capability requires
+
+Each reply of this capability SHALL carry exactly the fields the requirements above
+name for it, and SHALL carry no other field.
+
+A closed set is what makes the requirement that no reply carry a display name or a
+visual mark checkable at all: an obligation to carry *no* name cannot be met by a
+reply whose field set is open, because any later field is then admissible and a name
+is a later field. The same argument covers every field a separate contract owns.
+
+**Widening a reply remains available and remains cheap** — it is a change to this
+requirement, made deliberately, rather than a field that arrives as a side effect of
+producing one. What this forbids is a caller coming to depend on a field no contract
+names.
+
+#### Scenario: A candidate's field set is closed
+
+- **WHEN** a slate is generated
+- **THEN** each candidate's set of fields, compared as a whole set against the set
+  the requirements name for it, is equal to it
+- **AND** the reply's own set of fields, compared the same way, is equal to the set
+  required of it
+
+Comparing the set as a whole rather than asking whether each required field is
+present is what this scenario turns on: presence checks pass on a reply carrying an
+extra field, so they cannot establish closure.
+
+#### Scenario: The identity replies' field sets are closed
+
+- **WHEN** a candidate is kept, and separately the identity in use is asked for
+- **THEN** each reply's set of fields, compared as a whole set, is equal to the set
+  required of it for that outcome
+
 ### Requirement: Every entry point refuses malformed input rather than guessing
 
 Each method of this capability SHALL reject input it cannot interpret, and SHALL
@@ -416,21 +605,37 @@ identity existed to lose.
 - **WHEN** a slate is generated and then superseded by another
 - **THEN** no record of the first remains in storage
 
-### Requirement: Slate material in memory is cleared when discarded
+### Requirement: A set of candidates retains no secret material
 
-Secret material held while a slate exists SHALL be cleared when that slate is
-discarded or superseded.
+A set of candidates SHALL retain no candidate's secret key and no master key. Secret
+material SHALL exist only for as long as deriving a candidate's public half takes,
+and SHALL be cleared when that derivation is done rather than when the set is
+discarded.
 
-`keystore` requires this of the root secret, the derived encryption key and the
-passphrase. This extends the same obligation to material this capability holds,
-because a slate is the one place several candidates exist at once — and a
-discarded candidate's material has no further use, so retaining it is exposure
-with no compensating benefit.
+`keystore` requires clearing of the root secret, the derived encryption key and the
+passphrase. This is the same obligation, discharged one step earlier: a set is the
+one place several candidates would exist at once, so a set that held their secrets
+would multiply the exposure by the number of candidates and keep it for as long as
+the user is deciding — which is unbounded, because regeneration is unlimited.
 
-#### Scenario: Discarded slate material does not persist in its buffer
+**The stated obligation is what a caller and a test can check: that the set holds
+none.** Whether a transient buffer inside a derivation was overwritten is not
+observable from outside the derivation, so it is not stated as a scenario here.
+Requiring the retention property instead is stronger where it can be checked and
+silent where it cannot, rather than the other way round.
 
-- **WHEN** a slate holding secret material is discarded
-- **THEN** the buffer that held it is overwritten rather than left with it in place
+**The buffers inside derivation itself belong to `identity`**, which owns how a key
+derives. A requirement about them is that capability's and is not stated here; this
+capability requires only that nothing it hands on or holds carries one.
+
+#### Scenario: A set of candidates holds no secret
+
+- **WHEN** a set of candidates is generated
+- **AND** every byte the set exposes is searched for the master key and for each
+  candidate's secret key
+- **THEN** none of them is found
+- **AND** a value that is present in the set is found by the same search, so the
+  search is known to work
 
 ### Requirement: A generated name and a mark are not settled by this capability
 
@@ -450,6 +655,13 @@ A reply of this capability SHALL therefore carry no display name and no visual
 mark, for any candidate and for the identity in use. Carrying one would settle
 here what a separate contract is to settle, and a caller written against it would
 be written against a name this capability never defined.
+
+**How this is enforced is the closed field set**, not a check for fields with
+name-like spellings. A rule that forbade the two while admitting anything else would
+be met by a `label`, a `nickname` or a glyph under a field name nobody anticipated;
+a closed set forbids all of them without having to enumerate what a name might be
+called. So a test failing because a field was added is failing this requirement as
+much as the closed-set one, and the two are deliberately not independent.
 
 #### Scenario: No reply carries a name or a mark
 

@@ -1,3 +1,34 @@
+## Stages
+
+- [x] spec — `spec-writer`
+- [x] design + code — `dev-writer`
+- [x] tests — `tester`
+- [x] review: correctness — `code-reviewer`
+- [x] review: security — `code-reviewer`
+- [x] review: readability — `code-reviewer`
+- [x] review: architecture — `code-reviewer`
+- [x] review: spec-test — `spec-test-reviewer`
+- [x] review: design — `design-reviewer`
+- [ ] findings all ticked, `findings/` deleted — runner
+- [ ] `openspec validate --strict`, then `archive` — runner
+
+**Written late, and every row but the runner's was already done when it was
+written** — which is the cost task 7.8 recorded rather than a reason not to write it.
+`spec-writer` owns this block and it was missing from the first spec pass; `dev-writer`
+declined to author it because its own file forbids adding rows, which was the right
+call about rows and left the block absent altogether.
+
+**Each review row is ticked against a file, not a memory.** There is one
+`findings/<dimension>.md` per row — `correctness`, `security`, `readability`,
+`architecture`, `spec-test`, `design-review` — each written by the instance that did
+that review, so a tick here is checkable rather than asserted. The two runner rows are
+unticked because they are the runner's and neither has happened: `findings/` still
+exists, and the change is not archived.
+
+**A reader arriving now should not conclude the stages were tracked as they ran.**
+They were not. What this block is good for from here is the two rows that are still
+open.
+
 Every box below is checked because the work was done AND the verification named
 in it was run. Where reality differed from the plan, the task carries a note
 rather than a tick alone — a checklist that hides a correction is worse than one
@@ -297,7 +328,7 @@ carries its own outcome there — **that** is the gate, not this list.
   `findings/readability.md`: `parse_stoa`'s three unconverted copies, `parse_index`'s
   caller count and its `as usize`, the slate reply's presence-only pin, the zeroize
   comment's false claim, `OnboardingDir`'s wrong precedent, `who_am_i`'s off-by-one.
-- [ ] 7.8 **`tasks.md` has no stage block, and I have not added one.**
+- [x] 7.8 **`tasks.md` has no stage block, and I have not added one.**
   `.claude/agents/README.md` specifies one at the top of this file, one row per agent
   instance, each agent ticking only its own row — and it is the mechanism by which "an
   unticked row with no agent running is a stage nobody is doing" is checkable. This
@@ -310,6 +341,15 @@ carries its own outcome there — **that** is the gate, not this list.
   reviewer rows to create for reviewers who have already run.
 
   Unticked because it is a real gap in this change's tracking, not a note.
+
+  **Written, `spec-writer`.** The block is at the top of this file. `dev-writer` was
+  right on both counts — the block is `spec-writer`'s and the no-added-rows rule is
+  about not authoring other agents' lines while they run — and the second reason it
+  gave for declining, "guessing at how many reviewer rows to create for reviewers who
+  have already run", turned out not to be a guess: there is one `findings/` file per
+  reviewer, so the row count is read off the directory. Six review rows, one per
+  dimension. Each tick names a file rather than a recollection, and the block says
+  plainly that it was written after the fact so nobody reads it as live tracking.
 
 ## What is NOT in this change, and where it went
 
@@ -327,8 +367,20 @@ carries its own outcome there — **that** is the gate, not this list.
 - **The pathless `Keystore` trio now has no production caller.** Retiring it would
   delete three public methods from the secret-holding type, in a change whose
   proposal declares `keystore` untouched. Recorded in `design.md`'s Risks.
-- **The spec gaps** the findings route to `spec-writer`: no scenario requires that
+- ~~**The spec gaps** the findings route to `spec-writer`: no scenario requires that
   the kept identity be the candidate the slate *displayed* across two calls; no
   requirement states the recorded path's admissible range; no requirement names
   `path` as a reply field; and `proposal.md` still says `posting-capability`'s
-  derivation is untouched, which 7.3 makes false.
+  derivation is untouched, which 7.3 makes false.~~
+
+  **All four closed by `spec-writer`**, and this list was the most useful handover in
+  the file because it named them in one place. The spec now carries: a scenario
+  requiring the identity kept to be the candidate displayed at the selected position,
+  for every position; a requirement bounding the recorded path to what this module's
+  derivation could have produced, with the bound required to be the same on the write
+  and the read side; a requirement carrying `path` in all three identity-naming
+  replies, plus one closing each reply's field set so the contract and the pinning test
+  say the same thing. `proposal.md` no longer claims `posting-capability`'s derivation
+  is untouched — it says which key the probe reports changed, and why that needs no
+  delta: the requirement governing it was already right and the code was violating it.
+  Outcomes are in `findings/spec-test.md`.

@@ -27,8 +27,12 @@ change.
 - **One device holds the master key**, and the path record has exactly one
   writer. A scope limit taken on purpose; additional devices arrive later through
   an approved per-device key, which is a separate change.
-- `getCapabilities` gains no new shape and **its derivation is unchanged**; it
-  begins answering `canPost: true` because a keystore now exists.
+- `getCapabilities` gains no new shape, and begins answering `canPost: true`
+  because a keystore now exists. **Its derivation does change**, and that was not
+  foreseen when this was written: the probe reported the pathless derivation while
+  the new methods reported the path-taking one, so the two named two different
+  identities for one user in one Stoa. Both now report the identity the user kept.
+  The reasoning is in `design.md`.
 
 ## Capabilities
 
@@ -55,8 +59,14 @@ change.
   be encrypted, and putting it in the keystore file would widen a format whose
   every field is currently accounted for by a test asserting no room for
   anything else.
-- `posting-capability` — unchanged. The probe's shape, its reasons and its
-  derivation are untouched. A keystore existing is a state it already describes.
+- `posting-capability` — **no delta, and not because nothing about the probe
+  changes.** Its shape and its reasons are untouched, and a keystore existing is a
+  state it already describes. Which key the probe reports *does* change, from the
+  pathless derivation to the path-taking one — but the requirement governing that is
+  already there and already says the right thing: "the identity reported SHALL be
+  the one an op published now would be attributed to". The code was violating it and
+  now honours it, which is a fix under an unchanged contract rather than a change to
+  one. A delta here would have restated a requirement in order to leave it as it was.
 
 ## Decisions
 
@@ -145,15 +155,19 @@ recorded as unsettled because nobody has decided it.
 
 - **Does the secret leave core?** Settled: **no**. A slate carries public keys
   and addresses. Nothing on the screen needs a secret, the view cannot sign, and
-  widening later is additive while a secret that has crossed the boundary cannot
-  be recalled. Under the wallet model core may hold no secret at all, which this
-  does not obstruct.
-- **What happens to unkept candidates?** Settled: **they are discarded and their
-  secret material cleared**. Under the derivation-path model there are no unkept
-  *secrets* to begin with — one master key, several paths — which is a second
-  reason to prefer that model. `keystore` already requires secret material be
-  cleared on drop; the spec extends that to slate material rather than restating
-  it.
+  adding a field later is a change to the contract that can be made while a secret
+  that has crossed the boundary cannot be recalled. That asymmetry is why the spec
+  requires each reply's field set to be closed rather than merely to contain what is
+  needed. Under the wallet model core may hold no secret at all, which this does not
+  obstruct.
+- **What happens to unkept candidates?** Settled: **a set of candidates retains no
+  secret at all**. Under the derivation-path model there are no unkept *secrets* to
+  begin with — one master key, several paths — which is a second reason to prefer
+  that model. The spec states the obligation as the set holding none, discharged
+  when each candidate's public half has been taken rather than when the set is
+  discarded, because that is the form a caller and a test can check; whether a
+  transient buffer inside a derivation was overwritten is `identity`'s and is not
+  observable from outside it.
 - **Where does the slate live between generating and keeping?** Settled: **in
   memory, and nothing is written until a candidate is kept**. PLAN.md leaves this
   open explicitly; writing only on selection is chosen because it never persists
@@ -212,12 +226,12 @@ stays open on its own terms.
 
 An instruction given during implementation said that one-identity-per-user meant
 **not** calling `derive_stoa_key`. That was wrong, and building on it would have
-changed every author address on the peer:
-
-- `dialectica/rust-lib/src/lib.rs:251` — `get_capabilities`, a shipped method —
-  calls `open_from_env(&path).map(|ks| ks.stoa_address(stoa).to_hex())`
-- `keystore.rs:651` `stoa_address` → `:645` `stoa_public_key` → `:640`
-  `stoa_key` → `:641` `derive_stoa_key(&self.root, stoa)`
+changed every author address on the peer. Before this change, `get_capabilities` —
+a shipped method — reached per-Stoa derivation through the adapter's
+`ks.stoa_address(stoa)`, and `Keystore::stoa_address` resolves through
+`stoa_public_key` and `stoa_key` to `identity::derive_stoa_key(&self.root, stoa)`.
+Cited by name rather than by line because these are the names that survive a
+reshuffle; `git log -S` finds the shape.
 
 Two merged specs require it: `keystore` ("a single root secret from which every
 per-Stoa identity is derived", "per-Stoa keys are derived from it rather than
