@@ -16,9 +16,9 @@
 - [x] review: architecture — `code-reviewer`
 - [x] review: spec-test — `spec-test-reviewer`
 - [x] review: design — `design-reviewer`
-- [ ] findings all ticked, `findings/` deleted — `closer`
-- [ ] CI green, PR merged — `closer`
-- [ ] `openspec validate --strict`, then `archive` — `closer`
+- [x] findings all ticked, `findings/` deleted — `closer`
+- [x] CI green, PR merged — `closer`
+- [x] `openspec validate --strict`, then `archive` — `closer`
 
 ### What the `tester` did, and the blind spot that remains
 
