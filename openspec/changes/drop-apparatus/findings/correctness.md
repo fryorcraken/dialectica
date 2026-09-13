@@ -164,7 +164,7 @@ and the Feed-section clause names the specific trap.
       **The code is now wrong against a brief that is right**, so the remaining
       work is a `dev-writer` box below rather than more spec.
 
-- [ ] **`dev-writer`** — `FeedScreen.qml`, the pagination row — the paging
+- [x] **`dev-writer`** — `FeedScreen.qml`, the pagination row — the paging
       control asserts extent and nothing on that screen says whose copy it is
       about
       **The requirement it fails:** `docs/UI-BRIEF.md` rendering obligation 10,
@@ -197,6 +197,73 @@ and the Feed-section clause names the specific trap.
       **Severity: medium.** Pre-existing, not created by this change; it is in
       scope because this change is what moved the obligation and because the brief
       it must now meet is completed in the same change.
+
+      **Fixed.** The pagination `RowLayout` is now a `ColumnLayout` holding the
+      button row and the locality sentence, so the existing `visible:` binding —
+      `readState === "ok" && (hasMore || page > 0)` — decides both. The claim and
+      its qualifier cannot render apart in either direction, and no new guard was
+      added: the row was always outside `readState`'s three-state invariant.
+
+      **Of the three placements you left to me, I took the third and rejected the
+      one you pointed at.** A body-level `Text` mirroring `ON THIS ORDERING` would
+      work, but it needs its own visibility condition duplicating the control's —
+      a fourth slightly-different `visible:` guard, which CLAUDE.md names as the
+      signal to reshape rather than to add a fifth. Nesting reuses the binding the
+      control already carries, so there is no second condition to keep in step.
+      Folding it into the ordering sentence was rejected for the opposite reason:
+      that sentence renders unconditionally, so it would have printed a paging
+      disclaimer on screens that offer no paging — the outcome your last clause
+      forbids.
+
+      **Proved in both states, and the instrument matters more than the result.**
+      Measured through `run-qml-tests.sh` on a throwaway spec in `tmp/probe/`:
+      with `hasMore=true` the sentence and the "Next" button resolve to the same
+      governing ancestor; with `hasMore=false` at `page=0` they still do, so
+      neither can be shown without the other. `page=2, hasMore=false` keeps the
+      control (Previous is still an extent claim) and keeps the sentence with it.
+
+      **Two instruments were tried first and both are gates the defect
+      satisfies** — worth recording, because each looks conclusive:
+
+      - **`visible` is unreadable here.** QML reports *effective* visibility and a
+        `TestCase` is itself invisible offscreen, so every descendant reads
+        `false` — including the unconditional ordering sentence. A test asserting
+        `visible === true` would fail on correct code; one asserting `false` would
+        pass on anything.
+      - **Height cannot see the sentence.** The card's paging-versus-no-paging
+        `implicitHeight` delta was measured **identical** with the real sentence
+        and with it replaced by a one-word string. A height assertion would have
+        reported clean across the exact mutation it was meant to catch.
+
+      What is readable is the object graph, so that is what the test asserts.
+
+      **Test added:** `dialectica-ui/tests/tst_feed_extent_claim.qml`, three
+      cases — the sentence is present where paging is offered, it shares a
+      governing ancestor with the buttons, and the no-extent state does not
+      acquire it separately. **Two mutations justify them**, and the second is
+      the one that matters:
+
+      - deleting the sentence fails two of the three;
+      - **moving the sentence into the empty-state card** — the defect shape you
+        filed, a sentence that exists on the screen but in a state that never
+        coincides with the control — leaves the presence check **passing** and is
+        caught only by the shared-ancestor assertion. A presence-only test would
+        have been a gate this defect satisfies, which is why the structural one
+        is the load-bearing assertion rather than a nicety.
+
+      Both mutations were run and reverted; `git diff` on `FeedScreen.qml` was
+      read back to confirm no residue before committing.
+
+      **`design.md` §2 narrowed**, as asked. The row no longer claims the
+      obligation survives "in the interface already"; it now cites brief
+      constraint 1 *and* obligation 10, and points at a new subsection —
+      *`ON WHAT YOU HOLD` was narrower than it looked, and the gap was not a
+      count* — which records that the repair the row's wording invited (a
+      locality line wherever a count appears) has **no subject on this screen**,
+      because the non-empty feed renders no number; that the unqualified claim is
+      the control; the two placements rejected and why; and the measurement note
+      above, so the next person does not re-derive that height and `visible` are
+      blind here.
 
 - [ ] **`tester`** — `dialectica-ui/tests/` — nothing pins the one piece of
       interface text this change creates, nor the `implicitHeight` it fixes

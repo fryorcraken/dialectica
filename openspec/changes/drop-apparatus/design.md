@@ -31,7 +31,7 @@ being deleted by accident. Line numbers are `origin/main`'s.
 
 | Note | The obligation | Where it survives |
 |---|---|---|
-| `ON WHAT YOU HOLD` | every count is what this machine holds; no global total is knowable | **Brief constraint 1**, `UI-BRIEF.md:86-88`: "a count of *anything* global — members, total posts — is unknowable. Do not show one." And in the **interface already**: `FeedScreen.qml`'s empty state says "This is a fact about your copy, not about the Stoa." |
+| `ON WHAT YOU HOLD` | every count is what this machine holds; no global total is knowable | **Brief constraint 1** — "a count of *anything* global — members, total posts — is unknowable. Do not show one" — and **brief rendering obligation 10**, which this change added because the note's wording did not cover the feed's actual claim. In the **interface**, two separate sentences carry it, each beside the claim it qualifies: see below. |
 | `ON THE MARK` | **two propositions** — see below; they do not survive equally | **Brief obligation 6** — *"A generated name is never unique and never an identifier — the address is."* — and specifically **layer 2, the identicon**, in its four-layer list. Carries both. In the **interface**, only the pairing half survives. |
 | `ON THIS ORDERING` | this feed is **not** newest-first | **Brief Feed section**, `UI-BRIEF.md:331-375` — but see §3. The brief's half survived; the interface's half did not, so it was moved rather than deleted. |
 
@@ -63,11 +63,67 @@ So the claim this row supports is **"the address is beside the mark"**, not "the
 non-proof proposition is discharged somewhere". Anyone citing this table for the
 latter is citing it wrongly, which is why the distinction is written out.
 
-The `ON WHAT YOU HOLD` row has a related narrowing that is **not** mine to make —
-review found both of its carriers sit inside the empty-feed branch, so a feed
-showing thirty posts makes no locality claim. That is filed as a `spec-writer`
-box in `findings/correctness.md`: whether a non-empty feed owes a locality line is
-a requirement question, not a QML one.
+### `ON WHAT YOU HOLD` was narrower than it looked, and the gap was not a count
+
+An earlier version of the row above claimed this obligation survived "in the
+**interface already**", citing the empty state's "This is a fact about your copy,
+not about the Stoa." Review found that sentence and the `"STORE READ OK · N POSTS
+HELD"` line both sit inside the `Rectangle` gated on `rows.length === 0`, so a
+feed showing thirty posts made no locality claim at all. The row was overclaiming.
+
+**The obvious repair was the wrong one, and measurement is what showed that.**
+The natural reading — "a locality line wherever a count appears" — has no subject
+on a non-empty feed, because **the non-empty feed renders no number**. `"STORE
+READ OK · N POSTS HELD"` is the screen's only count and it renders only when the
+list is empty, so it only ever reads `0`. There is no page number, no "showing 30
+of", no reply count.
+
+**What is unqualified is the pagination control, and it is an extent claim
+without a numeral.** `hasMore` comes from `feed::list_threads`, computed from this
+peer's log alone, so "Next" means *this machine holds another page* — while a
+reader meeting a full page and a "Next" button reads it as *this Stoa has more*.
+That is precisely the crack the note's own wording left open: it said "every
+**number** here counts what this machine has received", so when the assertion
+stopped being a numeral it stopped being covered.
+
+So the requirement is **triggered by the extent claim rather than by screen
+state**, and it is written as brief rendering obligation 10: never render a
+quantity the core cannot know; where the interface *does* assert extent, that
+assertion must be readable as local; and **a screen asserting no extent owes
+nothing** — the last clause being what keeps this from becoming a disclaimer
+printed once per screen, which is the mistake this whole change undoes.
+
+**Taken: the sentence lives inside the pagination control's own layout.** The
+`RowLayout` became a `ColumnLayout` holding the buttons and the sentence, so one
+`visible:` binding — the one the row already had — decides both. The claim and
+its qualifier cannot render apart, in either direction.
+
+**Rejected: a body-level `Text` with its own visibility condition**, which is the
+shape `ON THIS ORDERING` uses in §3. It would work, but it adds a fourth
+slightly-different `visible:` guard to a screen that computes `readState`
+precisely so at most one state renders by construction — and CLAUDE.md names a
+fourth guard as the signal to reshape rather than to add a fifth. Nesting reuses
+the existing binding instead of duplicating its condition, so there is no second
+place to keep in step.
+
+**Rejected: leaving it as the code comment beside the `RowLayout`**, which is
+where this reasoning already lived and which no user opens. That is the same
+failure as leaving an obligation in the brief alone.
+
+**The architecture review's premise dissolved rather than being answered.** It
+filed this as "whichever answer you choose, the current shape makes it awkward",
+on the assumption the trigger was screen state and a fourth guard was needed. The
+pagination row was always outside `readState`'s three-state invariant and already
+carried its own binding, so the reshape costs no new condition.
+
+**A note for whoever tests this.** `visible` is not a readable signal here: QML
+reports *effective* visibility, and a `TestCase` is itself invisible offscreen, so
+every descendant reads `false` whatever its own binding says. Height is worse than
+useless — the paging-versus-no-paging card height delta was measured identical
+with the sentence present and with it replaced by a one-word string, so a height
+assertion is a gate the defect satisfies. What is readable is the object graph:
+the sentence and the buttons sharing one governing ancestor is the property that
+makes "renders where paging is offered, and only there" true by construction.
 
 ## 3. The one obligation that would have vanished, and the decision taken
 

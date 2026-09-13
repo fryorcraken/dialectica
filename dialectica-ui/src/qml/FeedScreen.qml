@@ -412,26 +412,59 @@ ScreenFrame {
     // Pagination only: no infinite scroll and no totals. "Next" is offered when
     // this peer holds another page, which is a fact about this copy and not a
     // claim about how much exists.
-    RowLayout {
+    //
+    // That fact used to live only in the comment you are reading, which no user
+    // opens. UI-BRIEF rendering obligation 10 makes it interface: paging is an
+    // EXTENT CLAIM, and where the interface asserts extent the assertion must be
+    // readable as local. `hasMore` is computed by `feed::list_threads` from this
+    // peer's log alone, so "Next" means *this machine holds another page* — while
+    // a reader meeting thirty posts and a "Next" button reads it as *this Stoa
+    // has more*, which is the claim no peer can make.
+    //
+    // The whole control is one ColumnLayout so the sentence CANNOT render without
+    // the claim it qualifies, and cannot fail to render with it: there is one
+    // `visible:` binding for both, and it is the binding the row already had.
+    // Obligation 10's other half — a screen asserting no extent owes nothing —
+    // is therefore satisfied by construction rather than by a second guard
+    // someone has to remember: no paging offered, no sentence.
+    ColumnLayout {
         visible: screen.readState === "ok" && (screen.hasMore || screen.page > 0)
         Layout.fillWidth: true
         spacing: Theme.itemGap
 
-        FlatButton {
-            text: "Previous"
-            kind: "secondary"
-            visible: screen.page > 0
-            onClicked: { screen.page = screen.page - 1; screen.reload() }
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Theme.itemGap
+
+            FlatButton {
+                text: "Previous"
+                kind: "secondary"
+                visible: screen.page > 0
+                onClicked: { screen.page = screen.page - 1; screen.reload() }
+            }
+
+            FlatButton {
+                text: "Next"
+                kind: "secondary"
+                visible: screen.hasMore
+                onClicked: { screen.page = screen.page + 1; screen.reload() }
+            }
+
+            Item { Layout.fillWidth: true }
         }
 
-        FlatButton {
-            text: "Next"
-            kind: "secondary"
-            visible: screen.hasMore
-            onClicked: { screen.page = screen.page + 1; screen.reload() }
+        // The locality statement obligation 10 requires. Deliberately about the
+        // PAGES rather than about the posts: "Next" is the claim being qualified,
+        // so the sentence has to deny what "Next" would otherwise be read to say.
+        Text {
+            text: "Pages are what this machine holds. \"Next\" means another page has reached your copy — not that the Stoa has more, which no peer can know."
+            font: Theme.note
+            color: Theme.inkSoft
+            wrapMode: Text.WordWrap
+            lineHeight: 1.4
+            textFormat: Text.PlainText
+            Layout.fillWidth: true
         }
-
-        Item { Layout.fillWidth: true }
     }
 
     // ---- posting gate: a reason, never a dead text field -----------------

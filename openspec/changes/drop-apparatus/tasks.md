@@ -157,20 +157,23 @@ reported to the runner rather than fixed here.
 
 ## 6. Gates
 
-- [x] 6.1 `dialectica-ui/tests/run-qml-tests.sh` — **41 passed**, 0 failed across
-      4 spec files (13 + 12 + 7 + 9), on Qt 6.10.3. Same 41 as before the change:
-      no test asserted apparatus content, which is the 1.4 measurement.
+- [x] 6.1 `dialectica-ui/tests/run-qml-tests.sh` — green, 0 failed, on Qt 6.10.3.
+      Run it for the count; a number written here goes stale the moment a spec
+      file is added, as one was for obligation 10. What the count cannot say and
+      is worth recording: no test asserted apparatus content before the change,
+      which is the 1.4 measurement, so nothing was lost by the deletions.
 - [x] 6.2 `qmllint` clean (exit 0) on `ScreenFrame.qml`, `FeedScreen.qml`,
       `Theme.qml`, `Main.qml` and `PostHeader.qml`, with `-I` pointing at the qml
       directory so local types resolve.
 - [x] 6.3 `qmlformat` parses `ScreenFrame.qml` and exits 0 — CI uses it as the
       syntax check because qmllint does not catch a syntax error.
 - [x] 6.4 CI's `textFormat` gate re-measured with **its own** regex rather than a
-      looser one. `grep -cE '\bText \{'` gives 13 for `FeedScreen.qml` against 13
-      `textFormat:` assignments, and every other file balances. A plain
-      `grep -c "Text {"` reports 15 and would have looked like a failure — the
-      false positives are `SanitisedText {`, which the gate's `\b` excludes by
-      design.
+      looser one: `grep -cE '\bText \{'` against `grep -c 'textFormat:'`, which
+      balance in `FeedScreen.qml` and in every other file. Run both for the
+      figures — obligation 10's sentence moved them.
+      The trap worth recording is the regex, not the number: a plain
+      `grep -c "Text {"` also counts `SanitisedText {` and would report an
+      imbalance that is not there. The gate's `\b` excludes those by design.
 - [x] 6.5 CI's layout-import gate: `ScreenFrame.qml` still uses `ColumnLayout` and
       still imports `QtQuick.Layouts`.
 - [x] 6.6 No component name shadows a Qt built-in — only deletions were made, so
@@ -231,8 +234,48 @@ boxes are one `spec-writer`'s and one `tester`'s and are deliberately untouched.
       "never a proof" half has no rendered text and is accepted as undischarged
       in the interface, with the reason stated. The note is not restored — the
       reviewer explicitly did not ask for it back.
-- [x] 8.6 Gates re-run after every edit above: `run-qml-tests.sh` **41 passed**,
-      0 failed across 4 spec files; `qmllint` exit 0 on `ScreenFrame.qml`,
-      `FeedScreen.qml` and `Main.qml`, with no binding-loop warning. The probe
-      harness was a temporary `tst_zzprobe.qml`; it is deleted and the suite is
-      back to its four spec files.
+- [x] 8.6 Gates re-run after every edit above: `run-qml-tests.sh` green, 0 failed;
+      `qmllint` exit 0 on `ScreenFrame.qml`, `FeedScreen.qml` and `Main.qml`,
+      with no binding-loop warning. The probe harness was a temporary
+      `tst_zzprobe.qml`; it is deleted.
+
+## 9. Obligation 10 — the extent claim, after the second review pass
+
+- [x] 9.1 Make `FeedScreen.qml` satisfy brief rendering obligation 10. The
+      pagination `RowLayout` became a `ColumnLayout` holding the button row and a
+      locality sentence, so the control's existing `visible:` binding governs
+      both and the claim cannot render without its qualifier. No new `visible:`
+      guard: the row was always outside `readState`'s three-state invariant.
+- [x] 9.2 Reject the two placements that do not hold by construction. A
+      body-level `Text` mirroring `ON THIS ORDERING` needs a fourth
+      slightly-different guard duplicating the control's condition; folding the
+      sentence into the ordering sentence would print a paging disclaimer on
+      screens that offer no paging, which obligation 10 explicitly forbids.
+      Recorded in `design.md` §2.
+- [x] 9.3 Prove the control in **both** states rather than reading the binding:
+      with `hasMore=true`, with `hasMore=false` at `page=0`, and at `page=2`
+      where Previous keeps the claim alive. Measured through `run-qml-tests.sh`
+      on a throwaway spec under `tmp/probe/`, since the runner now takes a path.
+- [x] 9.4 Record that two obvious instruments are blind here, because each looks
+      conclusive and one is already assumed in several test-file comments:
+      `visible` reports *effective* visibility and reads `false` for every
+      descendant of an offscreen `TestCase`; and the card's
+      paging-versus-no-paging height delta measures **identical** with the
+      sentence present and replaced by a one-word string. Written into
+      `design.md` §2 and the new spec's header comment.
+- [x] 9.5 Add `dialectica-ui/tests/tst_feed_extent_claim.qml`, asserting the
+      object-graph relation rather than a pinned literal, and prove each case can
+      fail. Two mutations: deleting the sentence fails two cases; **moving it
+      into the empty-state card** — the filed defect shape — leaves the presence
+      check passing and is caught only by the shared-ancestor assertion, which is
+      why that assertion is the load-bearing one.
+- [x] 9.6 Narrow `design.md` §2's `ON WHAT YOU HOLD` row, which claimed the
+      obligation survives "in the interface already" — true only of the empty
+      state. The row now cites constraint 1 and obligation 10 and points at a new
+      subsection recording why the repair the old wording invited had no subject
+      on this screen.
+- [x] 9.7 Gates after the change: `run-qml-tests.sh` green, 0 failed; `qmllint
+      --unqualified disable` exit 0 on `FeedScreen.qml` and on the new spec;
+      CI's `textFormat` gate balances under its own regex. `git diff` on
+      `FeedScreen.qml` read back to confirm both mutations were reverted with no
+      residue, and the scratch probe deleted.
