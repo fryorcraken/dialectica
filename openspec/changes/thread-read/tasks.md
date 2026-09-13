@@ -4,7 +4,7 @@
 
 - [x] spec — `spec-writer`
 - [x] design + code — `dev-writer`
-- [ ] tests — `tester`
+- [x] tests — `tester`
 - [ ] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
 - [ ] review: readability — `code-reviewer`
@@ -113,7 +113,45 @@
       `cfg(logos_scaffold)` and `cargo test` does not compile it. Only CI's Build
       LGX job sees this file.
 
-## 4. Documents
+## 4. The gaps the dev's suite left, closed by the tester
+
+- [x] 4.1 Sweep the not-a-post refusal over **kinds** rather than over the vote
+      alone. `thread::every_non_post_kind_takes_the_same_refusal` and
+      `wire::every_non_post_kind_takes_one_refusal_on_the_wire_and_never_the_unheld_one`
+      run a vote, a moderation op, a Stoa metadata op and a revision through
+      `read_thread`, and
+      `thread::a_chain_reaching_any_op_that_is_not_a_post_places_nothing`
+      (which replaces the vote-only
+      `a_chain_reaching_an_op_that_is_not_a_post_places_nothing`) runs all four
+      through the chain walk. Proved by mutating the `_ => NotAPost` arm to
+      `Revise => IsAReply`: the two sweeps fail, the dev's vote-only
+      distinguishability tests both pass.
+- [x] 4.2 Keep the hand-written kind table from going stale.
+      `every_op_kind_is_either_a_post_or_in_the_non_post_table` matches
+      exhaustively with no wildcard arm, so a sixth `OpKind` variant is a
+      compile error here rather than a silently narrower sweep, and asserts the
+      four entries are four distinct discriminants.
+- [x] 4.3 Pin that a **held** op is never reported as unheld.
+      `thread::no_held_non_post_is_ever_reported_as_unheld` compares each
+      refusal against `NotAThread::NotHeld(<the same id>).to_string()` — the
+      message the implementation would have produced had it been wrong — so it
+      cannot pass by a joint reword nor by two ids making two strings. Proved by
+      mutating that arm to `NotHeld`: it fails, as does the wire sweep.
+- [x] 4.4 Assert the three refusals by the **next action each implies** rather
+      than by three distinct strings.
+      `the_three_refusals_each_name_the_next_action_they_imply` requires the
+      wait-for-propagation phrasing of exactly one refusal and forbids it of the
+      other two, and likewise for the category error and the read-this-instead
+      pointer. Proved twice: giving `NotAPost` the "may not have arrived yet"
+      wording, and stripping `IsAReply`'s pointer — each fails this test alone
+      while both dev distinguishability tests stay green.
+- [x] 4.5 Replace the branch-on-what-happened root-ordering fixture.
+      `a_thread_whose_root_does_not_sort_first` **searches** for a body whose
+      root does not lead `iter_stoa`'s order (the pattern `moderation.rs` uses),
+      and the test now asserts the arrangement rather than reporting it. Proved
+      by turning `items.insert(0, item)` into `items.push(item)`.
+
+## 5. Documents
 
 - [x] 4.1 Write `design.md` alongside the code, recording the chain-walk decision
       and what was rejected.

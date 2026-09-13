@@ -667,6 +667,50 @@ mod tests {
         .sign(signer)
     }
 
+    fn a_vote(signer: &SecretKey, target: OpId) -> SignedOp {
+        Op {
+            stoa: a_stoa(),
+            author: signer.public_key(),
+            kind: OpKind::Vote {
+                target,
+                direction: VoteDirection::Up,
+            },
+        }
+        .sign(signer)
+    }
+
+    fn a_metadata_op(signer: &SecretKey) -> SignedOp {
+        Op {
+            stoa: a_stoa(),
+            author: signer.public_key(),
+            kind: OpKind::StoaMetadata {
+                title: "Agora, renamed".to_string(),
+                description: "what the Stoa is called today".to_string(),
+            },
+        }
+        .sign(signer)
+    }
+
+    /// Every op kind that is not a `Post`, each genuinely signed and in this
+    /// Stoa, named so a failure says which kind broke.
+    ///
+    /// **Enumerated here so the enumeration is in one place**, which is the only
+    /// honest way to test a rule the spec states over *kinds*: a kind added to
+    /// `OpKind` and not added here is a gap, and the exhaustive match in
+    /// [`every_op_kind_is_either_a_post_or_in_the_non_post_table`] is what makes
+    /// that gap a compile error rather than a silently narrower sweep.
+    fn every_non_post_kind(target: OpId) -> Vec<(&'static str, SignedOp)> {
+        vec![
+            ("a vote", a_vote(&a_key(4), target)),
+            (
+                "a moderation",
+                a_moderation(&a_key(1), target, ModerationAction::Hide),
+            ),
+            ("a Stoa metadata op", a_metadata_op(&a_key(1))),
+            ("a revision", a_revision(&a_key(2), target, "v2")),
+        ]
+    }
+
     fn a_log(ops: Vec<SignedOp>) -> MemoryOpLog {
         let mut log = MemoryOpLog::new();
         for op in ops {
@@ -874,39 +918,41 @@ mod tests {
     }
 
     #[test]
-    fn a_chain_reaching_an_op_that_is_not_a_post_places_nothing() {
-        // A parent naming a vote. The vote is a real op in the log, so the walk
-        // genuinely reaches it and refuses it for its kind rather than for its
-        // absence.
+    fn a_chain_reaching_any_op_that_is_not_a_post_places_nothing() {
+        // A parent naming each non-post kind in turn. Each is a real op in the
+        // log, so the walk genuinely reaches it and refuses it for its KIND
+        // rather than for its absence — and the rule the spec states over kinds
+        // is exercised over all of them rather than over the one that happened
+        // to get written first.
         let root = a_root(2, "root");
-        let voter = a_key(3);
-        let vote = Op {
-            stoa: a_stoa(),
-            author: voter.public_key(),
-            kind: OpKind::Vote {
-                target: root.op.id(),
-                direction: VoteDirection::Up,
-            },
-        }
-        .sign(&voter);
-        let child_of_a_vote = a_post_in(
-            a_stoa(),
-            4,
-            Some(root.op.id()),
-            Some(vote.op.id()),
-            "replying to a vote",
-        );
-        let log = a_log(vec![root.clone(), vote.clone(), child_of_a_vote.clone()]);
+        for (name, non_post) in every_non_post_kind(root.op.id()) {
+            let child = a_post_in(
+                a_stoa(),
+                7,
+                // Claims the genuine thread, so an implementation placing posts
+                // by the claim would return it — this is not merely a chain that
+                // reaches nowhere, it is one with a tempting wrong answer.
+                Some(root.op.id()),
+                Some(non_post.op.id()),
+                "replying to something that is not a post",
+            );
+            let log = a_log(vec![root.clone(), non_post.clone(), child.clone()]);
 
-        assert!(
-            log.get(&vote.op.id()).unwrap().is_some(),
-            "the vote must be held, or this passes for absence rather than kind"
-        );
-        assert_eq!(thread_of(&log, &child_of_a_vote.op.id()).unwrap(), None);
-        assert_eq!(
-            ids_of(&read(&log, &root, false)),
-            vec![root.op.id().to_hex()]
-        );
+            assert!(
+                log.get(&non_post.op.id()).unwrap().is_some(),
+                "{name} must be held, or this passes for absence rather than kind"
+            );
+            assert_eq!(
+                thread_of(&log, &child.op.id()).unwrap(),
+                None,
+                "a chain reaching {name} must place nothing"
+            );
+            assert_eq!(
+                ids_of(&read(&log, &root, false)),
+                vec![root.op.id().to_hex()],
+                "a post beneath {name} must not appear in the thread it claims"
+            );
+        }
     }
 
     // ─── The walk terminates over ops an attacker chose ───────────────────
@@ -1871,6 +1917,212 @@ mod tests {
     }
 
     #[test]
+    fn every_op_kind_is_either_a_post_or_in_the_non_post_table() {
+        // The guard on [`every_non_post_kind`]'s hand-written list. A hand
+        // maintained sweep list goes stale silently: a sixth kind enters
+        // `OpKind` and the sweep below keeps passing over five.
+        //
+        // This match is exhaustive and has no wildcard arm, so adding a variant
+        // to `OpKind` stops this file compiling until somebody decides whether
+        // the new kind is a post or belongs in the table. That is the only
+        // mechanism available — nothing can enumerate an enum's variants at
+        // runtime — and it is why the arms are spelled out rather than
+        // `_ => {}`.
+        let root = a_root(2, "root");
+        let table = every_non_post_kind(root.op.id());
+        let mut seen_kinds = 0;
+        for (_, op) in &table {
+            match &op.op.kind {
+                // Never in the table: a post is the kind that opens a thread.
+                OpKind::Post { .. } => {
+                    panic!("a Post must not be in the non-post table")
+                }
+                OpKind::Revise { .. }
+                | OpKind::Moderate { .. }
+                | OpKind::Vote { .. }
+                | OpKind::StoaMetadata { .. } => seen_kinds += 1,
+            }
+        }
+        assert_eq!(
+            seen_kinds, 4,
+            "every non-post kind must be represented exactly once"
+        );
+        // And they are four DISTINCT kinds rather than four copies of one — a
+        // table of four votes would satisfy the count above.
+        let discriminants: HashSet<std::mem::Discriminant<OpKind>> = table
+            .iter()
+            .map(|(_, op)| std::mem::discriminant(&op.op.kind))
+            .collect();
+        assert_eq!(discriminants.len(), 4, "four kinds, not four of one kind");
+    }
+
+    #[test]
+    fn every_non_post_kind_takes_the_same_refusal() {
+        // The rule is stated over KINDS rather than enumerated, so it is tested
+        // over kinds: a vote, a moderation op, a Stoa metadata op and a revision
+        // are each an op this peer holds that is not a post, and the outcome must
+        // not vary between them. A kind this table does not name would be left
+        // with an answer of its own, which is what
+        // `every_op_kind_is_either_a_post_or_in_the_non_post_table` prevents.
+        let root = a_root(2, "root");
+        let mut ops = vec![root.clone()];
+        let table = every_non_post_kind(root.op.id());
+        ops.extend(table.iter().map(|(_, op)| op.clone()));
+        let log = a_log(ops);
+
+        for (name, op) in &table {
+            let id = op.op.id();
+            // Held and in this Stoa, or the refusal below would be about an
+            // absence rather than about a kind.
+            assert!(
+                log.get(&id).unwrap().is_some(),
+                "{name} must be HELD, or this passes for absence rather than kind"
+            );
+            assert_eq!(
+                log.get(&id).unwrap().unwrap().op.op.stoa,
+                a_stoa(),
+                "{name} must be in the named Stoa"
+            );
+            assert!(op.verify(), "{name} must be authentic");
+
+            assert_eq!(
+                read_thread(&log, &moderators(), &a_stoa(), &id, 0, MAX_PER_PAGE, false).unwrap(),
+                Err(NotAThread::NotAPost(id)),
+                "{name} must take the not-a-post refusal"
+            );
+        }
+    }
+
+    #[test]
+    fn no_held_non_post_is_ever_reported_as_unheld() {
+        // The specific falsehood, and the one a revision invites: a revision is
+        // bound up with a post, so "this is a version of a post, not a post" is
+        // a distinction a reader can talk themselves out of — and the answer
+        // they talk themselves into is the not-held one, which the log disproves.
+        //
+        // **The expectation is the message the implementation would have
+        // produced had it been wrong**, built for the SAME op id. So this
+        // cannot pass by both messages being reworded together, and it cannot
+        // pass because two different ids made two different strings. The only
+        // way to satisfy it is to not report a held op as unheld.
+        let root = a_root(2, "root");
+        let table = every_non_post_kind(root.op.id());
+        let mut ops = vec![root.clone()];
+        ops.extend(table.iter().map(|(_, op)| op.clone()));
+        let log = a_log(ops);
+
+        for (name, op) in &table {
+            let id = op.op.id();
+            let refusal = read_thread(&log, &moderators(), &a_stoa(), &id, 0, MAX_PER_PAGE, false)
+                .unwrap()
+                .expect_err("a non-post must be refused");
+            let the_false_answer = NotAThread::NotHeld(id).to_string();
+
+            assert_ne!(
+                refusal.to_string(),
+                the_false_answer,
+                "{name} is held, so reporting it as not held is false"
+            );
+            assert_ne!(
+                refusal,
+                NotAThread::NotHeld(id),
+                "{name} must not take the not-held variant either"
+            );
+        }
+
+        // And the not-held refusal is genuinely reachable in this same log for an
+        // id the peer really does not hold — without which the assertions above
+        // would be satisfied by an implementation that never says "not held" at
+        // all, which is a different bug rather than this one fixed.
+        let never_seen = a_root(7, "never received").op.id();
+        assert!(log.get(&never_seen).unwrap().is_none());
+        assert_eq!(
+            read_thread(
+                &log,
+                &moderators(),
+                &a_stoa(),
+                &never_seen,
+                0,
+                MAX_PER_PAGE,
+                false
+            )
+            .unwrap(),
+            Err(NotAThread::NotHeld(never_seen))
+        );
+    }
+
+    #[test]
+    fn the_three_refusals_each_name_the_next_action_they_imply() {
+        // Three different strings is not the property. The property is that a
+        // caller acts differently on each, and the message has to carry which:
+        //
+        //   not held        -> the op may still arrive; wait, and say so.
+        //   held, not a post -> the identifier names the wrong kind of thing;
+        //                       waiting never helps.
+        //   held, a reply    -> one level too deep; there is a right answer
+        //                       nearby, reachable by another call.
+        //
+        // Asserted as a RELATION between the three rather than as three pinned
+        // literals, because a pinned literal fails on a reword and passes on
+        // misinformation, which is the wrong way round. Each phrase below is
+        // required of exactly one refusal and forbidden of the other two, so
+        // moving a phrase from one message to another fails here even though the
+        // three strings stay distinct.
+        let root = a_root(2, "root");
+        let reply = a_reply(3, &root, "a reply");
+        let vote = a_vote(&a_key(4), root.op.id());
+        let never_seen = a_root(5, "never received").op.id();
+        let log = a_log(vec![root, reply.clone(), vote.clone()]);
+
+        let refuse = |id: &OpId| {
+            read_thread(&log, &moderators(), &a_stoa(), id, 0, MAX_PER_PAGE, false)
+                .unwrap()
+                .expect_err("must be refused")
+                .to_string()
+        };
+        let not_held = refuse(&never_seen);
+        let not_a_post = refuse(&vote.op.id());
+        let is_a_reply = refuse(&reply.op.id());
+
+        // Waiting is the answer to exactly ONE of the three, and telling a
+        // caller to wait for an op that has already arrived, or that can never
+        // be a thread, is the expensive mistake this triple exists to prevent.
+        assert!(
+            not_held.contains("may not have arrived yet"),
+            "the not-held refusal must say the op may still arrive, got {not_held}"
+        );
+        for (name, other) in [("not-a-post", &not_a_post), ("is-a-reply", &is_a_reply)] {
+            assert!(
+                !other.contains("arriv"),
+                "the {name} refusal must not send a caller waiting for an op the \
+                 peer already holds, got {other}"
+            );
+            assert!(
+                !other.contains("holds no op"),
+                "the {name} refusal must not claim the peer holds nothing under \
+                 an id it does hold, got {other}"
+            );
+        }
+
+        // The category error names the category, and nothing else does.
+        assert!(
+            not_a_post.contains("is not a post"),
+            "the not-a-post refusal must name the category error, got {not_a_post}"
+        );
+        assert!(!not_held.contains("is not a post"));
+        assert!(!is_a_reply.contains("is not a post"));
+
+        // And the one a caller can act on by making another call says which call.
+        assert!(
+            is_a_reply.contains("read the") && is_a_reply.contains("thread"),
+            "the is-a-reply refusal must point at the thread to read instead, got \
+             {is_a_reply}"
+        );
+        assert!(!not_held.contains("read the"));
+        assert!(!not_a_post.contains("read the"));
+    }
+
+    #[test]
     fn a_store_failure_is_an_error_and_never_an_empty_thread() {
         // An empty thread and a broken store mean opposite things and look
         // identical once rendered.
@@ -1921,15 +2173,44 @@ mod tests {
 
     // ─── Order, and what it does and does not claim ───────────────────────
 
+    /// A thread whose root does **not** lead the log's own order.
+    ///
+    /// Returns `(root, replies)` with at least one reply's op id sorting below
+    /// the root's, so that `read_thread`'s `items.insert(0, …)` is genuinely the
+    /// thing under test.
+    ///
+    /// **Searched rather than hoped for.** The branch-on-what-happened form —
+    /// "if the log leads with the root this still passes, it just tests less" —
+    /// reports the case rather than guaranteeing it, and a fixture edit that made
+    /// the hashes fall the other way would leave the test green while exercising
+    /// nothing. Which of several SHA-256 outputs sorts first is not a fact to
+    /// take on trust, so the arrangement is found and then asserted.
+    ///
+    /// The budget of 256 mirrors `moderation.rs`'s two searches and is chosen for
+    /// the same reason: each body is an independent trial and every one of four
+    /// replies would have to sort above the root, so exhausting it is far below
+    /// any rate at which a flaky test would be noticed. Exhaustion panics rather
+    /// than skipping, so the impossible case is loud.
+    fn a_thread_whose_root_does_not_sort_first() -> (SignedOp, Vec<SignedOp>) {
+        for n in 0..256u32 {
+            let root = a_root(2, &format!("root {n}"));
+            let replies: Vec<SignedOp> = (0..4)
+                .map(|i| a_reply(3 + i, &root, &format!("reply {i} of {n}")))
+                .collect();
+            if replies.iter().any(|r| r.op.id() < root.op.id()) {
+                return (root, replies);
+            }
+        }
+        panic!("no body in 256 attempts put a reply's op id below the root's; SHA-256 is not this biased");
+    }
+
     #[test]
     fn the_root_is_the_first_item_whatever_the_logs_order_puts_first() {
-        // The one position this module fixes. Built so that the log's own order
-        // does NOT lead with the root — asserted, not assumed, because which of
-        // several hashes sorts first is not something to guess.
-        let root = a_root(2, "root");
-        let replies: Vec<SignedOp> = (0..4)
-            .map(|i| a_reply(3 + i, &root, &format!("reply {i}")))
-            .collect();
+        // The one position this module fixes. The fixture is SEARCHED so that the
+        // log's own order does not lead with the root — see
+        // `a_thread_whose_root_does_not_sort_first` for why branching on which
+        // way the hashes fell is not good enough.
+        let (root, replies) = a_thread_whose_root_does_not_sort_first();
         let mut ops = replies.clone();
         ops.push(root.clone());
         let log = a_log(ops);
@@ -1940,21 +2221,20 @@ mod tests {
             .iter()
             .map(|e| e.id().to_hex())
             .collect();
-        // If the log happens to lead with the root the test still passes, but it
-        // would not be exercising the insertion — so it is reported rather than
-        // silently weakened.
-        let root_leads_naturally = log_order.first() == Some(&root.op.id().to_hex());
+        assert_ne!(
+            log_order[0],
+            root.op.id().to_hex(),
+            "the search must have found a log whose order does NOT lead with the \
+             root, or the insertion is not being exercised"
+        );
 
         let page = read(&log, &root, false);
-        assert_eq!(page.items[0].id, root.op.id().to_hex());
+        assert_eq!(
+            page.items[0].id,
+            root.op.id().to_hex(),
+            "the root leads the page even though it does not lead the log"
+        );
         assert_eq!(page.items.len(), 5);
-        if !root_leads_naturally {
-            assert_ne!(
-                log_order[0],
-                root.op.id().to_hex(),
-                "the fixture was supposed to have the root NOT leading"
-            );
-        }
 
         // And the replies keep the log's relative order — this module sorts
         // nothing.

@@ -6105,6 +6105,126 @@ mod tests {
     }
 
     #[test]
+    fn every_non_post_kind_takes_one_refusal_on_the_wire_and_never_the_unheld_one() {
+        // The rule is stated over KINDS, so the wire is swept over kinds: a vote,
+        // a moderation op, a Stoa metadata op and a revision are each an op the
+        // peer holds that is not a post. Every one gets the same answer, and none
+        // of them gets the one that would send a view waiting for propagation of
+        // something that already arrived.
+        //
+        // The expectation for the falsehood is built from `NotAThread::NotHeld`
+        // on the SAME op id — the message the handler would have produced had it
+        // been wrong — so this cannot pass by both messages being reworded
+        // together, nor because two different ids made two different strings.
+        let root = a_thread_root();
+        let stoa = feed_genesis().address().unwrap();
+        let moderator = feed_key(1);
+        let author = feed_key(2);
+        let voter = feed_key(4);
+        let non_posts: Vec<(&str, crate::op::SignedOp)> = vec![
+            (
+                "a vote",
+                Op {
+                    stoa,
+                    author: voter.public_key(),
+                    kind: OpKind::Vote {
+                        target: root.op.id(),
+                        direction: crate::op::VoteDirection::Up,
+                    },
+                }
+                .sign(&voter),
+            ),
+            (
+                "a moderation",
+                Op {
+                    stoa,
+                    author: moderator.public_key(),
+                    kind: OpKind::Moderate {
+                        target: root.op.id(),
+                        action: crate::op::ModerationAction::Hide,
+                    },
+                }
+                .sign(&moderator),
+            ),
+            (
+                "a Stoa metadata op",
+                Op {
+                    stoa,
+                    author: moderator.public_key(),
+                    kind: OpKind::StoaMetadata {
+                        title: "Agora, renamed".to_string(),
+                        description: "today's description".to_string(),
+                    },
+                }
+                .sign(&moderator),
+            ),
+            (
+                "a revision",
+                Op {
+                    stoa,
+                    author: author.public_key(),
+                    kind: OpKind::Revise {
+                        target: root.op.id(),
+                        body: "v2".to_string(),
+                        attachments: vec![],
+                    },
+                }
+                .sign(&author),
+            ),
+        ];
+
+        let mut log = MemoryOpLog::new();
+        log.append(root.clone(), Arrival::unordered()).unwrap();
+        for (_, op) in &non_posts {
+            log.append(op.clone(), Arrival::unordered()).unwrap();
+        }
+
+        let stoa_hex = stoa.to_hex();
+        let mut messages = Vec::new();
+        for (name, op) in &non_posts {
+            let id = op.op.id();
+            assert!(
+                crate::log::OpLog::get(&log, &id).unwrap().is_some(),
+                "{name} must be HELD, or a refusal proves nothing about kinds"
+            );
+            let request = format!(r#"{{"stoa":"{stoa_hex}","thread":"{}"}}"#, id.to_hex());
+            let out = read_thread(&request, &log, &feed_genesis());
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert!(
+                v.get("items").is_none(),
+                "{name}: a refusal carries no items"
+            );
+
+            let message = error_message(&out);
+            assert_ne!(
+                message,
+                crate::thread::NotAThread::NotHeld(id).to_string(),
+                "{name} is held, so reporting it as not held is false"
+            );
+            assert_eq!(
+                message,
+                crate::thread::NotAThread::NotAPost(id).to_string(),
+                "{name} must take the not-a-post refusal, like every other kind"
+            );
+            messages.push(message);
+        }
+
+        // The outcome does not vary by kind: strip each op id and the four
+        // messages are one message, so a kind this test does not name is not
+        // left with an answer of its own.
+        let shapes: std::collections::HashSet<String> = non_posts
+            .iter()
+            .zip(&messages)
+            .map(|((_, op), m)| m.replace(&op.op.id().to_hex(), "<id>"))
+            .collect();
+        assert_eq!(
+            shapes.len(),
+            1,
+            "four kinds, four different messages: {shapes:?}"
+        );
+    }
+
+    #[test]
     fn a_thread_read_refuses_a_missing_field_distinguishably_from_a_wrong_typed_one() {
         let stoa = feed_genesis().address().unwrap().to_hex();
         let missing = error_message(&read_thread(
