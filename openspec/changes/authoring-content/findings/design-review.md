@@ -168,7 +168,7 @@ neither of which exists.
       closure alternative named as not-taken, and the section says what the spec should
       not be told.
 
-- [ ] **`spec-writer`** + **`dev-writer`** — **F2's routing question** — whether to close the no-identity gap in code
+- [x] **`spec-writer`** + **`dev-writer`** — **F2's routing question** — whether to close the no-identity gap in code
       **Still open, and deliberately so** (2026-09-13): swapping `&SecretKey` for a
       fallible key-supplier would trade away the structural "a publish creates no key
       material" property, which is a decision to take on purpose with the `spec-writer`
@@ -222,6 +222,35 @@ neither of which exists.
       structural security property; it relocates a requirement to the capability that
       already answers the same question one step earlier. It needs a `spec-writer` with
       both capabilities in scope, which this piece is not.
+
+      **Decided, 2026-09-13 — route 3, as its own change after this piece merges.**
+      **Deferred**, not fixed: the requirement stands undischarged in core and this box
+      closes on the decision, not on the work.
+
+      Two agents in succession declined to close this unilaterally and gave the same
+      reason, which is what makes it a decision rather than a task. The reasoning I acted
+      on, having read both:
+
+      - **Route 2 is disqualified outright.** It buys a tickable box by dropping the
+        *trigger*, so a module built with no guard at all would satisfy the narrowed
+        requirement. This change's own `correctness.md` C1 caught the converse mistake — a
+        requirement satisfied by defective behaviour — in the same review pass. Narrowing a
+        contract to make a box go away is the failure the box exists to prevent.
+      - **Route 1 trades a real property for a testable one**, which is the wrong direction.
+        `a_refused_publish_creates_no_key_material` holds *structurally*: `authoring` cannot
+        create key material because it never holds anything that could. A fallible
+        key-supplier replaces "cannot" with "does not, and here is a test saying so". The
+        first is a property of the shape; the second is a property of the current code.
+      - **Route 3 has the generality demonstrated** — `posting-capability` already owns
+        eight requirements on this exact question — but an extraction must move requirement
+        text **verbatim**, `ADDED` in one capability and `REMOVED` in the other with Reason
+        and Migration, in one change. Riding that inside a piece whose six reviews are
+        complete would make neither half reviewable, which is the same
+        one-diff-two-purposes failure as route 1 in a different costume.
+
+      So the undischarged requirement is the honest state, `tasks.md` §11.1's narrower
+      claim stands in front of whoever takes it, and the extraction is filed as its own
+      change. Route 1 is to be judged on its merits there, not as the price of testability.
 
 **For:** `dev-writer` (and `spec-writer` for the routing question §11.1 already raises)
 

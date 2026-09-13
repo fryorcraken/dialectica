@@ -3729,6 +3729,28 @@ because it is still the destination for per-Stoa identity.
 
 #### Follow-ups the publish path named, not yet built
 
+**"A publish requires a usable identity and says so when there is none" moves to
+`posting-capability`.** Decided 2026-09-13, to be done as its own change.
+
+The requirement's subject is the *absence* of an identity, and discovering that
+absence means reaching a keystore — which `dialectica-core` deliberately cannot
+do. So the requirement is undischarged in core, and the two alternatives to
+moving it both cost something real:
+
+- **Narrowing it to the wire shape** would contract the wording of a refusal only
+  the adapter can raise, and require nothing of the trigger — a module built with
+  no guard would satisfy it. A weaker contract bought with a tickable box.
+- **Taking a fallible key-supplier in core** would discharge it, but trades a
+  structural property for a tested one: `authoring` currently *cannot* create key
+  material, because it never holds anything that could. A closure replaces
+  "cannot" with "does not, and here is a test". That may still be right on its own
+  merits, and should be judged there rather than as the price of testability.
+
+`posting-capability` already owns eight requirements on this same question, so the
+generality is demonstrated. The move is `ADDED` there and `REMOVED` here, verbatim,
+with Reason and Migration in one change — which is why it does not ride inside the
+change that found it.
+
 Both came out of review and are recorded here rather than in a findings file,
 which is deleted at merge.
 
