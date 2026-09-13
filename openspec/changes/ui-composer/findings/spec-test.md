@@ -24,7 +24,7 @@ Seven mutations, each applied alone, the tree restored between each and
 
 ## Findings
 
-- [ ] **`tester`** — the requirement *"The draft is cleared when the op was newly
+- [x] **`tester`** — the requirement *"The draft is cleared when the op was newly
       stored, and kept otherwise"* (spec.md:336-372) has **no test at all**, in
       either direction
       **Scenario:** the requirement names the three-way asymmetry as "the decision
@@ -41,7 +41,39 @@ Seven mutations, each applied alone, the tree restored between each and
       **Severity: high** — this is a whole requirement with zero coverage, and
       the failure mode is silent data loss for the user.
 
-- [ ] **`tester`** — the two pre-submission warnings are pinned by the
+      **Fixed.** A whole requirement with no test in either direction is the
+      worst of the four boxes here, and I have no defence for it: the asymmetry
+      is the thing the requirement spends two scenarios insisting on, and I
+      tested neither side of it.
+
+      `draftFateCases()` is one table over the three outcomes — the reply shape
+      and the expected draft are the only things that vary, so a fourth outcome
+      is a row rather than a fourth near-identical function, and a failure names
+      which outcome drifted rather than stopping at the first.
+
+      **The relation is asserted as well as the three values**, which is the part
+      that matters for your mutation B. Three rows each checked in isolation
+      would still pass a component that cleared on all three; so
+      `test_the_drafts_fate_differs_across_the_three_outcomes` also asserts
+      `stored !== existing` and `existing === refused` — the asymmetry stated as
+      the spec states it, rather than inferred from three separate equalities.
+
+      Two more, because the table pins the value and not what the value is for:
+      `test_a_cleared_draft_is_cleared_rather_than_merely_shorter` (the composer
+      offers nothing to submit afterwards — a cleared draft with a live button
+      publishes an empty body on the next press) and
+      `test_a_retained_draft_is_submittable_again_unchanged` (retained means
+      usable, and the resubmission sends identical bytes — a draft kept in a
+      composer that will not submit is a draft the user retypes anyway).
+
+      **Both your mutations now fail**, each verified to land first:
+      - A, `clearDraft()` deleted from the stored arm → 2 fail
+        (`test_the_drafts_fate_differs_across_the_three_outcomes` naming the
+        `stored` row, and `test_a_cleared_draft_is_cleared_rather_than_merely_shorter`)
+      - B, `clearDraft()` added to the `existing` arm → 2 fail (the table naming
+        the `existing` row, and `test_a_retained_draft_is_submittable_again_unchanged`)
+
+- [x] **`tester`** — the two pre-submission warnings are pinned by the
       **computation feeding the binding**, never by the rendered property
       **Scenario:** spec.md:211 requires *"the view **displays** a warning naming
       how many were found"* and spec.md:244-245 requires *"the view **reports**
@@ -58,7 +90,37 @@ Seven mutations, each applied alone, the tree restored between each and
       **Severity: high.** The fix is one assertion per warning against
       `renderedText(c)`, which both files already have a helper for.
 
-- [ ] **`tester`** — `test_a_published_vote_is_reflected_on_that_posts_control_only`
+      **Fixed**, and your last sentence is the uncomfortable one: the helper was
+      already there. Nothing was missing except reaching for it.
+
+      **This is worth more than the repair.** `tst_composer_claims.qml`'s header
+      states this defect family explicitly — "assert the rendered property, not
+      the source" — with the `ui-stoa-list` `textFormat` mutation as the worked
+      example, and I wrote that header. Then I pinned two warnings by the value
+      feeding their binding. Documenting a family is not the same as being immune
+      to it: the header describes the trap, and the habit of reaching for the
+      property is what actually walks into it. I have said so in the test file
+      rather than quietly repairing, because the next reader deserves to know the
+      warning was written by someone who then did it twice.
+
+      Four tests, both bounds for each warning, since a warning displayed
+      unconditionally satisfies a presence assertion and trains the reader to
+      ignore it:
+      - `test_the_invisible_warning_is_on_the_screen_and_names_the_count` — and
+        it asserts "3 invisible character", not merely that a warning exists,
+        because spec.md:211 requires the warning to NAME how many were found.
+      - `test_a_clean_draft_displays_no_invisible_warning`
+      - `test_the_over_length_warning_is_on_the_screen` — including "Nothing has
+        been removed", which is the half the user most needs: a greyed-out button
+        with no text leaves them guessing whether their words survived.
+      - `test_a_draft_within_the_limit_displays_no_over_length_warning`
+
+      **Measured, each mutation verified to land:** D and E applied together →
+      exactly the two positive tests fail, and the failure output prints what the
+      user would actually have seen — a byte counter and a button, no
+      explanation. That output is the finding made visible.
+
+- [x] **`tester`** — `test_a_published_vote_is_reflected_on_that_posts_control_only`
       (tst_vote_and_gate.qml:179) asserts the map, not the control its name
       promises
       **Scenario:** spec.md:669-672 says *"**THEN** the control for that post
@@ -74,7 +136,37 @@ Seven mutations, each applied alone, the tree restored between each and
       which are also asserted only against `ownVotes`. **Severity: medium** —
       no false claim results, but the affordance silently stops working.
 
-- [ ] **`tester`** — nothing pins that a successful publish triggers the re-read;
+      **Fixed.** The test's name promised the control and its body read the map;
+      the name was the accurate description of what should have been asserted.
+      Same family as the two warnings above — the value driving a binding is not
+      the binding — which makes three instances of one shape in this piece.
+
+      `voteControls()` walks for the real controls, identified by the `vote` +
+      `showScore` property pair rather than by position, and three tests read
+      `vote` off them: the published direction shows on that post's control and
+      no other, a refused vote leaves the control as it was, and a post with no
+      recorded vote renders identically to one before any vote existed anywhere.
+
+      That last one is asserted as an **equality between the two situations**
+      rather than against the literal `0`, because the spec's requirement is that
+      an unknown vote state must not be distinguishable from "not voted" — a
+      component that introduced a third rendering for "unknown" would pass a
+      `=== 0` check on a neutral control and still break the rule.
+
+      **The walker has both bounds pinned**, which is the lesson from the sweep
+      helpers one round ago: `test_the_vote_control_walker_finds_one_control_per_row`
+      asserts it finds exactly two and that their targets are `v1` and `v2`.
+      Measured by narrowing the walker to match nothing — **4 tests fail**, so a
+      disarmed walker cannot make the assertions vacuous while passing.
+
+      **Measured (F):** the `vote:` binding hardwired to `0` →
+      `test_a_published_vote_shows_on_that_posts_control_and_no_other` fails.
+      The original map-reading test still passes under that mutation, which is
+      your finding demonstrated rather than asserted; I left it in place, since
+      it pins the map and the map is worth pinning — it just never pinned the
+      control.
+
+- [x] **`tester`** — nothing pins that a successful publish triggers the re-read;
       the signal's **emitter** is tested and its **receiver** is not
       **Scenario:** spec.md:501 requires *"After a successful publish the view
       SHALL re-read from core."*
@@ -86,6 +178,38 @@ Seven mutations, each applied alone, the tree restored between each and
       **Measured (C):** replaced `onPublished: screen.reload()` with a no-op —
       **124 of 124 passed**. A published post then never appears until the user
       reloads by hand, and the suite reports nothing. **Severity: medium.**
+
+      **Fixed**, and this is the finding I learned most from, because it is a
+      shape I had not been carrying: **a connection is a thing that can be
+      absent.** I tested the emitter and I tested the receiver, and testing both
+      ends separately proves neither end is joined. Two green tests either side of
+      a cut wire look exactly like two green tests either side of a live one.
+
+      The only way to see a wire is to drive one end and observe the far end. So
+      `publishThroughTheScreen()` submits through the screen's **actual**
+      `Composer` — found by property signature, not by walking to a position —
+      and the tests count the calls that reach core.
+      `test_a_publish_adds_no_row_the_view_composed` now publishes this way too,
+      instead of calling `reload()` itself.
+
+      Four tests, because one positive assertion would be satisfied by a screen
+      that re-reads unconditionally:
+      - `test_a_successful_publish_triggers_a_re_read_from_core`
+      - `test_a_deduplicated_publish_also_triggers_the_re_read` — `wasNew:false`
+        is a success by the component's own design and the requirement opens
+        "After a successful publish", so a handler wired to one arm only would
+        otherwise pass
+      - `test_a_refused_publish_triggers_no_re_read` — the negative bound, and
+        without it "reload always" satisfies both positives
+      - `test_the_re_read_happens_after_the_publish_not_before` — ordering, which
+        counts cannot see; a screen reading first and publishing second shows the
+        user a feed from before their post
+
+      **Measured (C):** `onPublished` replaced with a no-op → **3 fail**. And the
+      negative bound proved separately by making `refuse()` emit `published`
+      → `test_a_refused_publish_triggers_no_re_read` fails alone. The
+      `composerIn` walker's precondition is pinned too: narrowing it to match
+      nothing fails all five consumers rather than making them vacuous.
 
 - [ ] **`spec-writer`** — spec.md:208-212 and spec.md:234 contradict each other
       for a draft that is both over-length and carries invisible characters

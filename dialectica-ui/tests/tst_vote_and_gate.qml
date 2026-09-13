@@ -196,6 +196,127 @@ TestCase {
         screen.destroy()
     }
 
+    // **The map is not the control, and this test's name promised the control.**
+    //
+    // The test above reads `screen.ownVotes` — the state feeding the binding —
+    // and a reviewer replaced the `VoteControl`'s `vote:` binding with the
+    // constant `0`, so no control anywhere could show a vote back. All 31 tests
+    // in this file passed. The requirement's whole stated purpose is the
+    // affordance ("the one thing about a vote that is true and immediate: the
+    // user pressed a button and the interface remembers"), and the affordance was
+    // entirely unpinned.
+    //
+    // So these walk the rendered tree for the actual controls and read `vote` off
+    // them. Same defect family as the two warnings in `tst_composer.qml`: the
+    // value that drives a binding is not the binding.
+
+    // Every VoteControl in the tree, in row order, identified by the pair of
+    // properties only that component carries. `vote` alone would match nothing
+    // else today, but `showScore` alongside it makes the match specific to this
+    // control rather than to any item that happens to expose a `vote`.
+    function voteControls(item, acc) {
+        var out = acc === undefined ? [] : acc
+        if (item === null || item === undefined)
+            return out
+        if (item.vote !== undefined && item.showScore !== undefined)
+            out.push(item)
+        var kids = item.children
+        if (kids !== undefined) {
+            for (var i = 0; i < kids.length; i++)
+                out = spec.voteControls(kids[i], out)
+        }
+        return out
+    }
+
+    // The guard the helper needs, for the reason the sweep helpers needed one: a
+    // walker that found nothing would make every assertion below vacuous while
+    // passing. Both bounds — it finds one control per row, and the controls it
+    // finds are the ones whose targets are the rows' ops.
+    function test_the_vote_control_walker_finds_one_control_per_row() {
+        var screen = makeScreen({
+            "get_capabilities": '{"canPost":true,"identity":"aa"}',
+            "list_threads": spec.twoRows()
+        })
+
+        var controls = spec.voteControls(screen)
+        compare(controls.length, 2,
+                "one control per row, or every assertion built on this walker "
+                + "is vacuous. Found " + controls.length)
+        compare(controls[0].target, "v1", "and in row order")
+        compare(controls[1].target, "v2")
+        screen.destroy()
+    }
+
+    function test_a_published_vote_shows_on_that_posts_control_and_no_other() {
+        var screen = makeScreen({
+            "get_capabilities": '{"canPost":true,"identity":"aa"}',
+            "list_threads": spec.twoRows(),
+            "publish_vote": '{"opId":"votedop","wasNew":true}'
+        })
+
+        var controls = spec.voteControls(screen)
+        compare(controls.length, 2, "precondition: two controls to distinguish")
+        compare(controls[0].vote, 0, "neither shows a vote before one is published")
+        compare(controls[1].vote, 0)
+
+        screen.voteOn("v1", 1)
+        compare(controls[0].vote, 1,
+                "the control for the voted post must SHOW the direction "
+                + "published — this is the assertion a constant binding fails")
+        compare(controls[1].vote, 0,
+                "and a vote on one post must not mark another's control")
+
+        screen.voteOn("v2", -1)
+        compare(controls[1].vote, -1, "the other direction reaches its control")
+        compare(controls[0].vote, 1, "without disturbing the first")
+        screen.destroy()
+    }
+
+    function test_a_refused_vote_leaves_the_control_showing_what_it_showed() {
+        // spec.md's "A refused vote leaves the control unchanged", asserted at
+        // the control rather than at the map. Nothing was recorded, so nothing
+        // may be reflected.
+        var screen = makeScreen({
+            "get_capabilities": '{"canPost":true,"identity":"aa"}',
+            "list_threads": spec.twoRows(),
+            "publish_vote": '{"error":"the keystore is unreadable"}'
+        })
+
+        var controls = spec.voteControls(screen)
+        compare(controls.length, 2)
+        var before = controls[0].vote
+
+        screen.voteOn("v1", 1)
+        compare(controls[0].vote, before,
+                "a refused vote must leave the control exactly as it was")
+        compare(controls[0].vote, 0, "which is the neutral state")
+        screen.destroy()
+    }
+
+    function test_a_post_with_no_recorded_vote_renders_neutrally() {
+        // The scenario spec.md states separately: where the view has no record of
+        // a vote, the control renders in the same neutral state it renders before
+        // any vote is published. Asserted as an equality between the two
+        // situations rather than against the literal 0, so a component that
+        // changed its neutral value consistently still passes and one that
+        // distinguished "unknown" from "not voted" fails.
+        var screen = makeScreen({
+            "get_capabilities": '{"canPost":true,"identity":"aa"}',
+            "list_threads": spec.twoRows(),
+            "publish_vote": '{"opId":"votedop","wasNew":true}'
+        })
+
+        var controls = spec.voteControls(screen)
+        var neutralBeforeAnyVote = controls[1].vote
+
+        screen.voteOn("v1", 1)
+        compare(controls[1].vote, neutralBeforeAnyVote,
+                "a post the viewer has not voted on must render exactly as it "
+                + "did before any vote existed anywhere — the view has no way to "
+                + "say 'you have not voted' and must not imply it")
+        screen.destroy()
+    }
+
     // ---- rows that do not name the op they are ---------------------------
     //
     // Both halves of a defect review reproduced on peer-supplied rows. Each
@@ -877,6 +998,11 @@ TestCase {
     function test_a_publish_adds_no_row_the_view_composed() {
         // The feed must show what core reported and nothing else. A row the view
         // built would carry sanitiser counts and a revision flag it invented.
+        //
+        // **The publish goes through the screen's own composer**, not through a
+        // hand-called `reload()`. The earlier version of this test called
+        // `screen.reload()` itself, which tests the function rather than anything
+        // reaching it — see the wiring tests below for what that missed.
         var screen = makeScreen({
             "get_capabilities": '{"canPost":true,"identity":"aa"}',
             "list_threads": spec.twoRows(),
@@ -884,15 +1010,162 @@ TestCase {
         })
         compare(screen.rows.length, 2)
 
-        // Publishing through the screen's own composer, then re-reading against
-        // a core that still reports the same two rows.
-        screen.reload()
+        spec.publishThroughTheScreen(screen, "a new post")
+
         compare(screen.rows.length, 2,
                 "the rows must be exactly the ones the read returned")
         for (var i = 0; i < screen.rows.length; i++) {
             verify(screen.rows[i].thread === "t1" || screen.rows[i].thread === "t2",
                    "no row composed by the view may appear")
         }
+        screen.destroy()
+    }
+
+    // ---- the publish is WIRED to the re-read -----------------------------
+    //
+    // **A new defect shape, and worth naming: a connection is a thing that can
+    // be absent.**
+    //
+    // `tst_composer.qml` pins that `Composer` emits `published` on a success.
+    // `test_a_publish_adds_no_row_the_view_composed` pinned that `reload()`
+    // behaves. Both ends were tested; **nothing tested that they are joined.** A
+    // reviewer replaced `onPublished: screen.reload()` with a no-op and all 124
+    // tests passed — a published post then never appears until the user reloads
+    // by hand, and the suite reports nothing.
+    //
+    // Testing an emitter and a receiver separately proves neither end is
+    // connected. The only way to see the wire is to drive the real component at
+    // one end and observe the far end, which is what these do: they submit
+    // through the screen's actual `Composer` and count the reads that reach core.
+
+    // Submit a draft through the screen's own composer, the way a user would.
+    // Returns nothing; the caller observes what the screen did.
+    //
+    // It finds the composer by the property pair only that component carries,
+    // rather than by walking to a known position — a structural walk would break
+    // on any layout change and would not be checking the wiring either.
+    function composerIn(item) {
+        if (item === null || item === undefined)
+            return null
+        if (item.draft !== undefined && item.submittable !== undefined
+                && typeof item.submit === "function")
+            return item
+        var kids = item.children
+        if (kids !== undefined) {
+            for (var i = 0; i < kids.length; i++) {
+                var found = spec.composerIn(kids[i])
+                if (found !== null)
+                    return found
+            }
+        }
+        return null
+    }
+
+    function publishThroughTheScreen(screen, draft) {
+        var composer = spec.composerIn(screen)
+        verify(composer !== null,
+               "precondition: the screen must contain a composer to publish "
+               + "through, or this test proves nothing about the wiring")
+        composer.draft = draft
+        composer.submit()
+    }
+
+    function countCalls(method, from) {
+        var n = 0
+        for (var i = from; i < spec.calls.length; i++) {
+            if (spec.calls[i].method === method)
+                n += 1
+        }
+        return n
+    }
+
+    function test_a_successful_publish_triggers_a_re_read_from_core() {
+        var screen = makeScreen({
+            "get_capabilities": '{"canPost":true,"identity":"aa"}',
+            "list_threads": spec.twoRows(),
+            "publish_post": '{"opId":"newop","wasNew":true}'
+        })
+
+        // Everything the initial render did is behind us; count from here.
+        var mark = spec.calls.length
+        spec.publishThroughTheScreen(screen, "a new post")
+
+        compare(spec.countCalls("publish_post", mark), 1,
+                "precondition: the publish itself reached core")
+        verify(spec.countCalls("list_threads", mark) >= 1,
+               "a successful publish must trigger a re-read — with the "
+               + "`onPublished` handler unwired, the publish still happens and "
+               + "nothing reads back, which is what 124 green tests missed")
+        screen.destroy()
+    }
+
+    function test_a_deduplicated_publish_also_triggers_the_re_read() {
+        // `wasNew: false` is a success by this component's own design, and the
+        // spec's re-read requirement opens "After a successful publish". Pinning
+        // only the `stored` path would let a handler wired to one arm pass.
+        var screen = makeScreen({
+            "get_capabilities": '{"canPost":true,"identity":"aa"}',
+            "list_threads": spec.twoRows(),
+            "publish_post": '{"opId":"newop","wasNew":false}'
+        })
+
+        var mark = spec.calls.length
+        spec.publishThroughTheScreen(screen, "a duplicate post")
+
+        verify(spec.countCalls("list_threads", mark) >= 1,
+               "a deduplicated publish is still a success and still re-reads")
+        screen.destroy()
+    }
+
+    function test_a_refused_publish_triggers_no_re_read() {
+        // The negative bound, and it is what stops the two tests above being
+        // satisfied by a screen that re-reads unconditionally — on a timer, or on
+        // every property change. Without this, `onPublished` could be replaced by
+        // "reload always" and both would still pass.
+        var screen = makeScreen({
+            "get_capabilities": '{"canPost":true,"identity":"aa"}',
+            "list_threads": spec.twoRows(),
+            "publish_post": '{"error":"the keystore is unreadable"}'
+        })
+
+        var mark = spec.calls.length
+        spec.publishThroughTheScreen(screen, "a post that will be refused")
+
+        compare(spec.countCalls("publish_post", mark), 1,
+                "precondition: the publish was attempted")
+        compare(spec.countCalls("list_threads", mark), 0,
+                "a refusal must not re-read: nothing was published, so there is "
+                + "nothing new to read back")
+        screen.destroy()
+    }
+
+    function test_the_re_read_happens_after_the_publish_not_before() {
+        // Ordering, which the counts above cannot see. A screen that re-read
+        // first and published second would satisfy every count and show the user
+        // a feed from before their post.
+        var screen = makeScreen({
+            "get_capabilities": '{"canPost":true,"identity":"aa"}',
+            "list_threads": spec.twoRows(),
+            "publish_post": '{"opId":"newop","wasNew":true}'
+        })
+
+        var mark = spec.calls.length
+        spec.publishThroughTheScreen(screen, "a new post")
+
+        var publishAt = -1
+        var readAt = -1
+        for (var i = mark; i < spec.calls.length; i++) {
+            if (spec.calls[i].method === "publish_post" && publishAt < 0)
+                publishAt = i
+            if (spec.calls[i].method === "list_threads" && publishAt >= 0
+                    && readAt < 0)
+                readAt = i
+        }
+        verify(publishAt >= 0, "precondition: a publish occurred")
+        verify(readAt > publishAt,
+               "the re-read must follow the publish, or the feed shown is the "
+               + "one from before it. publish at " + publishAt
+               + ", read at " + readAt)
         screen.destroy()
     }
 }

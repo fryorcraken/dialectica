@@ -182,22 +182,90 @@ TestCase {
         c.destroy()
     }
 
-    // ---- the invisible-character warning --------------------------------
+    // ---- the pre-submission warnings, asserted on the SCREEN -------------
+    //
+    // **The defect this file's own header warns about, found in this file.**
+    //
+    // Both warnings were pinned by the value feeding their binding —
+    // `invisibleCount`, `overLimit` — and never by anything rendered. A reviewer
+    // set each warning's `visible:` to `false` and the whole suite stayed green:
+    // a user pasting bidirectional overrides gets no warning, a user over the cap
+    // gets a greyed-out button and no explanation, and nothing fails.
+    //
+    // The spec is explicit that the obligation is on the rendering: "the view
+    // **displays** a warning naming how many were found" (spec.md:211) and "the
+    // view **reports** that it is too long" (spec.md:244). A count held in a
+    // property displays nothing.
+    //
+    // Worth stating plainly rather than quietly repairing: documenting a defect
+    // family in a header is not the same as being immune to it. This file's
+    // header describes exactly this shape — assert the rendered property, not the
+    // source — and the file then did it twice. The check that catches it is
+    // cheap; the habit of reaching for the property is what needs interrupting.
+    //
+    // These read `renderedText`, which only concatenates a `Text` whose `visible`
+    // is not false, so a hidden warning leaves nothing to find.
 
-    function test_invisible_characters_are_counted_and_do_not_block_submission() {
+    function test_the_invisible_warning_is_on_the_screen_and_names_the_count() {
         var c = makeComposer({ "publish_post": '{"opId":"aa","wasNew":true}' })
 
         c.draft = "safe‮text​more﻿end"
         compare(c.invisibleCount, 3, "one override, one ZWSP, one BOM")
+
+        // **The half the value assertion above cannot reach.** The spec requires
+        // the warning to NAME how many were found, so the count has to be in the
+        // text rather than merely correct in a property.
+        var shown = spec.renderedText(c)
+        verify(shown.indexOf("invisible character") >= 0,
+               "the warning must be displayed, not merely computed. Got: " + shown)
+        verify(shown.indexOf("3 invisible character") >= 0,
+               "and must name how many were found. Got: " + shown)
+
         compare(c.submittable, true, "the warning must NOT be a gate")
         c.destroy()
     }
 
-    function test_a_clean_draft_carries_no_warning() {
+    function test_a_clean_draft_displays_no_invisible_warning() {
+        // The negative bound. Without it, a component that displayed the warning
+        // unconditionally would satisfy the test above — and a warning on every
+        // draft trains the reader to ignore the one that matters.
         var c = makeComposer({})
         c.draft = "An ordinary post, with punctuation — and a dash.\nAnd a newline."
         compare(c.invisibleCount, 0,
                 "ordinary text and whitespace are content, not controls")
+        verify(spec.renderedText(c).indexOf("invisible character") < 0,
+               "a clean draft must display no warning at all")
+        c.destroy()
+    }
+
+    function test_the_over_length_warning_is_on_the_screen() {
+        // Same shape, the other warning. `overLimit` being true is what drives
+        // the binding; it is not what the user reads.
+        var c = makeComposer({}, { bodyByteLimit: 10 })
+        c.draft = "far more than ten bytes of text"
+
+        compare(c.overLimit, true, "precondition: the draft is over the cap")
+
+        var shown = spec.renderedText(c)
+        verify(shown.indexOf("longer than") >= 0,
+               "the view must REPORT that the draft is too long, not merely "
+               + "compute it. Got: " + shown)
+
+        // And it says the draft was not truncated, which is the half the user
+        // most needs: a greyed-out button with no text leaves them guessing
+        // whether their words are still there.
+        verify(shown.indexOf("Nothing has been removed") >= 0,
+               "and must say nothing was removed from what they wrote. Got: " + shown)
+        c.destroy()
+    }
+
+    function test_a_draft_within_the_limit_displays_no_over_length_warning() {
+        // The negative bound for the over-length warning.
+        var c = makeComposer({}, { bodyByteLimit: 100 })
+        c.draft = "short"
+        compare(c.overLimit, false, "precondition: within the cap")
+        verify(spec.renderedText(c).indexOf("longer than") < 0,
+               "a draft within the limit must display no over-length warning")
         c.destroy()
     }
 
@@ -227,6 +295,123 @@ TestCase {
                     "U+" + visibles[j].charCodeAt(0).toString(16)
                     + " is outside every removed range and was counted anyway")
         }
+        c.destroy()
+    }
+
+    // ---- what happens to the draft, per outcome -------------------------
+    //
+    // **A whole requirement that had no test in either direction.**
+    //
+    // spec.md:336-372 makes the three-way asymmetry the decision rather than an
+    // inconsistency: cleared on a newly stored op, retained on a deduplicated one
+    // and on every refusal. A reviewer deleted `clearDraft()` from the stored arm
+    // (green), then added it to the `existing` arm — which the requirement's own
+    // rationale forbids, "clearing would take away exactly what they need"
+    // (green). Both halves of the asymmetry could be inverted with 124 tests
+    // passing, and the failure mode is silent data loss.
+    //
+    // A table, because the requirement is one rule over three outcomes and three
+    // near-identical functions would hide which one drifted. The reply shape and
+    // the expected draft are the two things that vary; everything else is the
+    // same submission.
+    function draftFateCases() {
+        return [
+            {
+                tag: "stored",
+                reply: '{"opId":"aa","wasNew":true}',
+                // Cleared. Nothing is lost — the text is published and readable —
+                // and a draft left in the box is one the user can submit again,
+                // where the second submission is a deduplicated no-op reported as
+                // "already published": a confusing state reached through a
+                // control that looked ready.
+                expectDraft: ""
+            },
+            {
+                tag: "existing",
+                reply: '{"opId":"aa","wasNew":false}',
+                // **Retained, and this is the half most likely to be "tidied"
+                // into consistency with the arm above.** Nothing new was written,
+                // so there is nothing to go and look at; and a user whose
+                // intention was to publish something different needs the text in
+                // front of them to edit.
+                expectDraft: "what the user wrote"
+            },
+            {
+                tag: "refused",
+                reply: '{"error":"no such op is held by this peer"}',
+                // Retained. Nothing was published, so the draft is the only copy.
+                expectDraft: "what the user wrote"
+            }
+        ]
+    }
+
+    function test_the_drafts_fate_differs_across_the_three_outcomes() {
+        var typed = "what the user wrote"
+        var cases = spec.draftFateCases()
+
+        // Collected first, asserted after, so the failure names every outcome
+        // that drifted rather than only the first.
+        var seen = []
+        for (var i = 0; i < cases.length; i++) {
+            var k = cases[i]
+            var c = makeComposer({ "publish_post": k.reply })
+            c.draft = typed
+            c.submit()
+
+            compare(c.draft, k.expectDraft,
+                    "after a '" + k.tag + "' publish the composer must hold "
+                    + JSON.stringify(k.expectDraft))
+            seen.push(c.draft)
+            c.destroy()
+        }
+
+        // **The asymmetry stated as a relation, not only as three values.** The
+        // spec's scenario is "the draft's fate DIFFERS across the three
+        // outcomes", and a component that cleared on all three — or on none —
+        // satisfies a naive reading of each row while destroying the rule. This
+        // is the assertion that fails for the reviewer's mutation B, where the
+        // `existing` arm was made to clear like the stored one.
+        verify(seen[0] !== seen[1],
+               "a newly stored op and a deduplicated one must NOT leave the "
+               + "composer in the same state — that asymmetry is the decision");
+        compare(seen[1], seen[2],
+               "a deduplicated publish and a refusal both retain the draft, "
+               + "for the same reason applied to different facts")
+    }
+
+    function test_a_cleared_draft_is_cleared_rather_than_merely_shorter() {
+        // The boundary the table above states but is worth pinning alone: after
+        // a stored publish the composer holds NOTHING, and the submit affordance
+        // goes with it. A composer holding "" that still offered a button would
+        // publish an empty body on the next press.
+        var c = makeComposer({ "publish_post": '{"opId":"aa","wasNew":true}' })
+        c.draft = "something worth publishing"
+        c.submit()
+
+        compare(c.draft, "", "the draft is cleared")
+        compare(c.draft.length, 0)
+        compare(c.submittable, false,
+                "and an empty composer offers nothing to submit")
+        c.destroy()
+    }
+
+    function test_a_retained_draft_is_submittable_again_unchanged() {
+        // The other side: a retained draft is not merely present but usable, and
+        // the retry sends the identical bytes. A draft retained in a composer
+        // that will not submit again is a draft the user has to retype anyway.
+        var typed = "identical on both attempts"
+        var c = makeComposer({ "publish_post": '{"opId":"aa","wasNew":false}' })
+        c.draft = typed
+        c.submit()
+
+        compare(c.draft, typed, "a deduplicated publish retains the draft")
+        compare(c.submittable, true, "and it remains submittable")
+
+        var firstBody = JSON.parse(spec.lastCall.args[0]).body
+        c.submit()
+        var secondBody = JSON.parse(spec.lastCall.args[0]).body
+        compare(secondBody, firstBody, "and a resubmission sends the same body")
+        compare(secondBody, typed)
         c.destroy()
     }
 
