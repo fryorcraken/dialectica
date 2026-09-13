@@ -256,8 +256,9 @@ pub fn capability_for(
 /// cannot accidentally invent a second error shape while converting one.
 fn parse_stoa(parsed: &serde_json::Value) -> Result<crate::identity::Address, String> {
     match parsed.get("stoa") {
-        Some(serde_json::Value::String(s)) => crate::identity::Address::from_hex(s)
-            .map_err(|e| error_json(&format!("stoa: {e}"))),
+        Some(serde_json::Value::String(s)) => {
+            crate::identity::Address::from_hex(s).map_err(|e| error_json(&format!("stoa: {e}")))
+        }
         Some(_) => Err(error_json("stoa must be a string")),
         None => Err(error_json("missing field: stoa")),
     }
@@ -462,13 +463,15 @@ pub fn keep_identity(
             Err(e) => return e,
         };
         let nonce = match parsed.get("slate") {
-            Some(serde_json::Value::String(s)) => match crate::onboarding::SlateNonce::from_hex(s) {
-                Ok(n) => n,
-                // A malformed nonce is a malformed REQUEST, so it is §2.5's error
-                // shape rather than a `Kept::Refused` — the same line
-                // `get_capabilities` draws between a caller bug and a user state.
-                Err(e) => return error_json(&format!("slate: {e}")),
-            },
+            Some(serde_json::Value::String(s)) => {
+                match crate::onboarding::SlateNonce::from_hex(s) {
+                    Ok(n) => n,
+                    // A malformed nonce is a malformed REQUEST, so it is §2.5's error
+                    // shape rather than a `Kept::Refused` — the same line
+                    // `get_capabilities` draws between a caller bug and a user state.
+                    Err(e) => return error_json(&format!("slate: {e}")),
+                }
+            }
             Some(_) => return error_json("slate must be a string"),
             None => return error_json("missing field: slate"),
         };
@@ -623,7 +626,10 @@ impl Whoami {
 pub fn who_am_i(
     request: &str,
     master: impl Fn() -> Result<crate::keystore::Keystore, crate::keystore::KeystoreError>,
-    paths: impl Fn() -> Result<crate::identity_store::IdentityStore, crate::identity_store::IdentityStoreError>,
+    paths: impl Fn() -> Result<
+        crate::identity_store::IdentityStore,
+        crate::identity_store::IdentityStoreError,
+    >,
 ) -> String {
     guarded("who_am_i", || {
         let parsed: serde_json::Value = match serde_json::from_str(request) {
@@ -651,7 +657,10 @@ pub fn who_am_i(
 pub fn whoami_for(
     stoa: &crate::identity::Address,
     master: impl Fn() -> Result<crate::keystore::Keystore, crate::keystore::KeystoreError>,
-    paths: impl Fn() -> Result<crate::identity_store::IdentityStore, crate::identity_store::IdentityStoreError>,
+    paths: impl Fn() -> Result<
+        crate::identity_store::IdentityStore,
+        crate::identity_store::IdentityStoreError,
+    >,
 ) -> Whoami {
     // The keystore is asked first, because "there is no master key" is the state a
     // fresh install is in and it needs no record consulted to establish. Asking
@@ -1406,7 +1415,12 @@ mod tests {
         let sig = sign_op_bytes(&key, b"a post");
         let author = Address::from_hex(reported).expect("the probe reports a parseable address");
         assert!(
-            verify_authored_op(&author, &key.public_key().to_bytes(), b"a post", &sig.to_bytes()),
+            verify_authored_op(
+                &author,
+                &key.public_key().to_bytes(),
+                b"a post",
+                &sig.to_bytes()
+            ),
             "an op signed by this identity is not attributed to the address the \
              probe reported"
         );
@@ -1562,10 +1576,9 @@ mod tests {
         // anything. A panic here does not make one button unavailable — it
         // aborts the module process (PHASE0-FINDINGS §3) and the entire
         // interface is unrenderable.
-        let out = get_capabilities(
-            &format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex()),
-            |_| panic!("the keystore layer exploded"),
-        );
+        let out = get_capabilities(&format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex()), |_| {
+            panic!("the keystore layer exploded")
+        });
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("error").is_some(), "got {out}");
         assert!(v.get("canPost").is_none());
@@ -1875,7 +1888,8 @@ mod tests {
         // reason that had nothing to do with them.
         let remembered = std::cell::Cell::new(None);
         for bad in ["not json", r#"{}"#, r#"{"stoa":"nothex"}"#] {
-            let _ = generate_identity_slate(bad, || Ok(a_master_key()), |n| remembered.set(Some(n)));
+            let _ =
+                generate_identity_slate(bad, || Ok(a_master_key()), |n| remembered.set(Some(n)));
         }
         assert_eq!(
             remembered.into_inner(),
@@ -2153,7 +2167,10 @@ mod tests {
             },
         );
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-        assert_eq!(v["kept"], false, "the fixture must fail the keystore write, got {out}");
+        assert_eq!(
+            v["kept"], false,
+            "the fixture must fail the keystore write, got {out}"
+        );
 
         // The assertion the ordering exists for: nothing reached the record.
         assert_eq!(
@@ -2165,12 +2182,9 @@ mod tests {
 
         // And the spec's "a subsequent load finds no identity that was not there
         // before": who-am-i must still find nobody.
-        let who: serde_json::Value = serde_json::from_str(&whoami_for(
-            &a_stoa(),
-            || Ok(a_master_key()),
-            || Ok(dir.paths()),
+        let who: serde_json::Value = serde_json::from_str(
+            &whoami_for(&a_stoa(), || Ok(a_master_key()), || Ok(dir.paths())).to_json(),
         )
-        .to_json())
         .unwrap();
         assert_eq!(who["hasIdentity"], false, "got {who}");
     }
@@ -2470,9 +2484,7 @@ mod tests {
         store.record_path(&here, 1).unwrap();
         store.record_path(&elsewhere, 2).unwrap();
 
-        let ask = |stoa: &Address| {
-            whoami_for(stoa, || Ok(a_master_key()), || Ok(dir.paths()))
-        };
+        let ask = |stoa: &Address| whoami_for(stoa, || Ok(a_master_key()), || Ok(dir.paths()));
         let (a, b) = (ask(&here), ask(&elsewhere));
         match (&a, &b) {
             (
@@ -2623,7 +2635,10 @@ mod tests {
             r#"{}"#,
             r#"{"stoa":null,"slate":null,"index":null}"#,
             r#"{"stoa":[],"slate":{},"index":[]}"#,
-            &format!(r#"{{"stoa":"{stoa}","slate":"{}","index":18446744073709551616}}"#, nonce.to_hex()),
+            &format!(
+                r#"{{"stoa":"{stoa}","slate":"{}","index":18446744073709551616}}"#,
+                nonce.to_hex()
+            ),
             "\u{0}\u{1}\u{2}",
         ] {
             for out in [
@@ -3204,11 +3219,7 @@ mod tests {
         // refused: an unknown field is not a caller error.
         let log = log_with_body("hello");
         let plain = list_threads(&feed_request(""), &log, &feed_genesis());
-        let with_order = list_threads(
-            &feed_request(r#""order":"top""#),
-            &log,
-            &feed_genesis(),
-        );
+        let with_order = list_threads(&feed_request(r#""order":"top""#), &log, &feed_genesis());
         assert_eq!(
             plain, with_order,
             "an ordering argument must not change the answer while there is one ordering"
@@ -3282,11 +3293,7 @@ mod tests {
         // refusing the page outright would be a worse answer than a smaller one
         // — but the reply must not actually be built at that size.
         let log = log_with_body("hello");
-        let out = list_threads(
-            &feed_request(r#""perPage":1000000"#),
-            &log,
-            &feed_genesis(),
-        );
+        let out = list_threads(&feed_request(r#""perPage":1000000"#), &log, &feed_genesis());
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("error").is_none(), "got {out}");
         assert_eq!(v["items"].as_array().unwrap().len(), 1);
@@ -3351,7 +3358,10 @@ mod tests {
         let ev: serde_json::Value = serde_json::from_str(&empty).unwrap();
         assert!(ev.get("error").is_none(), "got {empty}");
         assert_eq!(ev["items"].as_array().unwrap().len(), 0);
-        assert_ne!(out, empty, "empty and unreadable must never be the same reply");
+        assert_ne!(
+            out, empty,
+            "empty and unreadable must never be the same reply"
+        );
     }
 
     #[test]
@@ -3416,9 +3426,8 @@ mod tests {
     #[test]
     fn a_request_carrying_its_genesis_record_reads_the_feed() {
         let log = log_with_body("hello");
-        let out = list_threads_from_request(&full_request(), || {
-            Ok::<_, crate::log::OpLogError>(log)
-        });
+        let out =
+            list_threads_from_request(&full_request(), || Ok::<_, crate::log::OpLogError>(log));
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("error").is_none(), "got {out}");
         assert_eq!(v["items"].as_array().unwrap().len(), 1);
@@ -3461,7 +3470,10 @@ mod tests {
         let stoa = feed_genesis().address().unwrap().to_hex();
         for (bad, why) in [
             (format!(r#"{{"stoa":"{stoa}"}}"#), "missing"),
-            (format!(r#"{{"stoa":"{stoa}","genesis":7}}"#), "must be a string"),
+            (
+                format!(r#"{{"stoa":"{stoa}","genesis":7}}"#),
+                "must be a string",
+            ),
             (format!(r#"{{"stoa":"{stoa}","genesis":"nothex!"}}"#), "hex"),
             (format!(r#"{{"stoa":"{stoa}","genesis":""}}"#), "genesis"),
         ] {
@@ -3509,9 +3521,9 @@ mod tests {
             ping(r#"{"payload":1}"#),
             ping("garbage"),
             panic_probe("{}"),
-            get_capabilities(&format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex()), |_| Ok(
-                "abcd".to_string()
-            )),
+            get_capabilities(&format!(r#"{{"stoa":"{}"}}"#, a_stoa().to_hex()), |_| {
+                Ok("abcd".to_string())
+            }),
             get_capabilities("garbage", |_| Ok("abcd".to_string())),
             list_threads(&feed_request(""), &log_with_body("hello"), &feed_genesis()),
             list_threads("garbage", &log_with_body("hello"), &feed_genesis()),
