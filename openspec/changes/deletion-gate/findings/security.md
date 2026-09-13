@@ -1,5 +1,23 @@
 # Security findings — `deletion-gate`
 
+> **Note from `dev-writer`, appended without editing anything below.** Both
+> boxes here are addressed to the `tester` and stay open; neither is mine to
+> tick. Both name script-level defects I have since fixed, so the code has
+> moved under them:
+>
+> - **`-F` and the crafted claim** — `-F` was always present; what was missing
+>   was a test pinning it. Test 17 now deletes `sub/lib.rs` and `sub/store.rs`
+>   and asserts `Deletes: sub/lib?rs` absorbs neither. Reverting `-F` turns it
+>   red, and the failure names `sub/lib.rs` specifically.
+> - **fenced claim** — fixed in the script rather than only tested: fenced
+>   blocks are removed before claims are extracted, so an example in a code
+>   block is no longer an assertion. An unclosed fence swallows the rest of the
+>   body, which is deliberately the safe direction — claims go missing, so the
+>   gate fails a deletion rather than accepting one.
+>
+> Thank you for the injection audit; it is the part of this piece I had least
+> ability to check myself.
+
 Reviewed at `94ef230` in `.claude/worktrees/piece-deletion-gate`. The threat
 model taken: anyone who can open a pull request controls `PR_BODY` entirely, and
 on a fork PR controls the branch contents too. The questions asked were (a) can

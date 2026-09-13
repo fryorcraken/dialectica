@@ -152,7 +152,10 @@ body is attacker-controlled text: `${{ }}` interpolation into a `run:` block is
 shell injection, and this is the one step in the workflow that handles untrusted
 input at all.
 
-### 7. Two of these tests were written wrong first, and both are recorded
+### 7. Three of these tests were written wrong first, and all are recorded
+
+(The third is guard 3's, in §11 — it was found by review rather than by me, and
+it is the same shape as these two.)
 
 Both are the defect family this repo already catalogues — a fixture where two
 explanations give the same answer — and both were found by mutating the script
@@ -192,6 +195,77 @@ the form that actually runs in CI. Reading the base from the event rather than
 hardcoding `origin/main` also means a PR targeting a non-`main` base is measured
 against its own base.
 
+### 9. Two git settings are pinned, because each changes the verdict
+
+Both were found by review, and both are defaults rather than guarantees —
+settable in repo, global or system config, or through `GIT_CONFIG_COUNT`, none
+of which this workflow controls.
+
+- **`--find-renames`.** Measured: `git mv big.txt moved.txt`, same branch, same
+  command — with detection on the gate reports 0 deletions and exits 0; with
+  `diff.renames false` in the repo config it reports `big.txt` unclaimed and
+  exits 1. A gate whose answer depends on a developer's config is not a gate,
+  and renames are the obvious false-positive class.
+- **`core.quotePath=false`.** This one refutes a weakness recorded in the
+  earlier draft. I predicted a non-ASCII path would fail in the *passing*
+  direction; it does not — git C-quotes it, so the gate fails, which is safe.
+  The real defect is the mirror image: deleting `café.txt` prints
+  `"caf\303\251.txt"`, so a correct PR writing `Deletes: café.txt` was
+  **rejected**, and the note printed told the author their correct claim matched
+  nothing. That is a false positive on a legitimate change plus advice pointing
+  away from the problem, and a false positive is what gets a check disabled.
+
+### 10. The tests run in CI, reversing the earlier decision
+
+The first version of this design left them out: nothing else in this repo tests
+its CI scripts, and that convention was "not this piece's to set."
+
+**Review refuted that on its own terms.** Two mutations survived the entire
+suite — dropping `-F` from the claim lookup, so a crafted `Deletes: src/lib?rs`
+acknowledges a real deletion of `src/lib.rs`, and replacing guard 3 with the
+`|| true` idiom §2's own table names as dangerous. Both are silent passes. The
+tests that catch them now exist, but a test nothing runs stops being true the
+moment someone edits the script, and the argument for leaving it unmeasured is
+precisely the argument this gate exists to refute: **an unmeasured property is
+not a held property.** A gate against silently-stopped measuring that was itself
+never measured is the joke `ci.yml` keeps warning about.
+
+It runs on every event rather than only `pull_request`, because the script's
+behaviour is a property of the script, not of the event. Verified it does not
+depend on the developer's git config: run with `HOME`, `GIT_CONFIG_GLOBAL` and
+`GIT_CONFIG_SYSTEM` pointed at empty files — no `user.name` available anywhere,
+as on a GitHub runner — all 34 assertions still pass. Without that check it
+would have gone red in CI for a reason having nothing to do with the gate.
+
+### 11. Guard 3 is reachable, and finding out cost a third wrong test
+
+Review asked the right question — dead code, or defence against a case the
+fixtures do not model? The answer is the second, and it is now pinned. Measured
+per guard, with one subtree object removed from the object store:
+
+| check | result |
+|---|---|
+| guard 2a `rev-parse --verify base^{commit}` | exit 0 — peels a commit only |
+| guard 2a `rev-parse --verify HEAD^{commit}` | exit 0 |
+| guard 2b `merge-base base HEAD` | exit 0 — walks commits, not trees |
+| the diff | **exit 128** — must read the tree |
+
+That is a partially-fetched or corrupted object store: every cheap check says
+the repository is healthy and only the diff disagrees.
+
+**The first version of this test passed for the wrong reason**, which is the
+third instance of this piece's recurring defect and the one I would most want a
+reader to notice. It removed the *root* tree, which in a fresh clone also makes
+`rev-parse --verify` fail — so the script exited 1 at **guard 2**, the assertion
+went green, and the `|| true` mutation still passed 33 of 33. The exit status
+was identical whichever guard fired, so the test could not tell them apart. The
+fixture now removes a *subtree*, and asserts guard 2 still passes before
+asserting the failure, so it cannot silently drift back to measuring guard 2.
+
+Also measured and worth recording: removing the **blob** of the deleted file
+does not reach guard 3 at all, because `--name-only` never reads file contents.
+It is the obvious fixture to reach for and it proves nothing.
+
 ## Risks / Trade-offs
 
 - **[A `Deletes:` line is an assertion, not a review]** → Intended, and stated in
@@ -201,13 +275,8 @@ against its own base.
 - **[The script is invoked by CI but lives outside the workflow]** → A reader of
   `ci.yml` sees a path rather than the logic. Mitigated by the step's comment
   naming what the script does and why it is not inline.
-- **[The tests build throwaway git repos and are not run by CI]** →
-  `test-check-claimed-deletions.sh` is developer-run. Wiring it into `Lint` would
-  be a second gate on the gate; the argument for adding it later is that it costs
-  ~1s, and the argument against doing it here is that nothing else in this repo
-  tests its CI scripts and that convention is not this piece's to set. Left as a
-  note rather than done silently.
-- **[A rename trips the gate]** → Correct behaviour, per `proposal.md`: a move is
-  a deletion plus an addition. `--diff-filter=D` does not include `R`, so only a
-  rename git scores below its similarity threshold reports as a deletion — which
-  is the case a reader should look at anyway.
+- **[A rename trips the gate]** → Only a rename git scores below its similarity
+  threshold, which is the case a reader should look at anyway. The earlier
+  wording here said this followed from `--diff-filter=D` not including `R`; that
+  was the wrong reason and review caught it. It follows from rename *detection*
+  being on, which was a default rather than a guarantee until §9 pinned it.

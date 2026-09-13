@@ -123,7 +123,36 @@ claimed_list=$(mktemp) || cannot_measure "mktemp failed."
 unclaimed_list=$(mktemp) || cannot_measure "mktemp failed."
 trap 'rm -f "$deleted_list" "$claimed_list" "$unclaimed_list"' EXIT
 
-if ! git diff --diff-filter=D --name-only "$base_ref...$head_ref" > "$deleted_list" 2>/dev/null
+# TWO GIT SETTINGS ARE PINNED HERE RATHER THAN INHERITED, because each of them
+# changes this gate's VERDICT and each is a default rather than a guarantee.
+# `diff.renames` and `core.quotePath` can both be set in repo, global or system
+# config, or through GIT_CONFIG_COUNT/GIT_CONFIG_KEY_0, none of which this
+# workflow controls.
+#
+#   * `--find-renames` keeps rename DETECTION on, which is what makes a
+#     `git mv` report as `R` and not as a `D` plus an `A`. Measured: the same
+#     branch, the same command, `git mv big.txt moved.txt` — with detection on
+#     the gate says "0 deleted paths" and exits 0; with `diff.renames false` in
+#     the repo config it reports `big.txt` unclaimed and exits 1. A gate whose
+#     answer depends on a developer's config is not a gate. Renames are also the
+#     obvious false-positive class, and a false positive is what gets a check
+#     disabled.
+#
+#     This is a WEAKER property than it looks and the comment must not overstate
+#     it: a rename git scores below its similarity threshold still reports as a
+#     deletion, correctly, because at that point the file really did go. What is
+#     pinned is that the threshold is consulted at all.
+#
+#   * `core.quotePath=false` makes git print a non-ASCII path as itself rather
+#     than C-quoted. At the default, deleting `café.txt` prints
+#     `"caf\303\251.txt"`, so a correct PR claiming `Deletes: café.txt` is
+#     REJECTED — and the note it prints tells the author their correct claim did
+#     not match anything, which is advice pointing away from the problem. The
+#     only body that satisfied the gate was one copying the escaped form back,
+#     which no author would write. That is a false positive on a legitimate
+#     change; the safe-direction failure is not a defence.
+if ! git -c core.quotePath=false diff --find-renames --diff-filter=D \
+        --name-only "$base_ref...$head_ref" > "$deleted_list" 2>/dev/null
 then
     cannot_measure "'git diff $base_ref...$head_ref' failed. The merge base
   resolved to $merge_base, so this is not the shallow-clone case."
@@ -151,8 +180,36 @@ fi
 # argument on BSD and refuses one on GNU, and a portability fallback around a
 # command that may already have rewritten the file is a worse shape than not
 # needing one.
+# FENCED CODE BLOCKS ARE REMOVED FIRST, and this is the anchoring rule's real
+# teeth rather than a refinement of it.
+#
+# Anchoring stops a claim mentioned mid-sentence. It does NOT stop one written
+# on its own line inside a ``` fence — and a fenced example is exactly how a PR
+# body documents this convention, which is the hazard named above and the shape
+# any PR introducing or amending this gate naturally contains. Measured before
+# fixing: a body of "here is how it works", a fence, `Deletes: doomed.txt`, a
+# closing fence, satisfied the gate for a genuine deletion of that file. To a
+# human reading the rendered PR it is an example; to the gate it was an
+# assertion.
+#
+# Toggling on every line whose first non-space characters are ``` or ~~~ (the
+# two CommonMark fence characters), and dropping everything while inside. An
+# unclosed fence swallows the rest of the body — deliberately the safe
+# direction: claims go missing, so the gate FAILS a deletion rather than
+# accepting one.
+#
+# Blockquote, bold `**Deletes:**`, lowercase, HTML comment, numbered list and
+# nested bullet forms were all measured as already rejected by the anchor, so
+# the fence was the one specific gap rather than general looseness.
+uncommented_body=$(mktemp) || cannot_measure "mktemp failed."
+trap 'rm -f "$deleted_list" "$claimed_list" "$unclaimed_list" "$uncommented_body"' EXIT
+awk '
+    /^[[:space:]]*(```|~~~)/ { infence = !infence; next }
+    !infence { print }
+' "$body_file" > "$uncommented_body"
+
 sed -n 's/^[[:space:]]*[-*+]\{0,1\}[[:space:]]*Deletes:[[:space:]]*\(.*[^[:space:]]\)[[:space:]]*$/\1/p' \
-    "$body_file" > "$claimed_list"
+    "$uncommented_body" > "$claimed_list"
 
 unclaimed=0
 deleted_count=0

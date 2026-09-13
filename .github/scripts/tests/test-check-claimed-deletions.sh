@@ -347,5 +347,231 @@ out=$(sh "$script" "$base_sha" HEAD "$work/body.txt" 2>&1)
 st=$?
 report "a raw base SHA with HEAD can be claimed" 0 "$st" "$out"
 
+# ── 17. `-F` is load-bearing: a claim is a literal, not a pattern ─────────
+# REVIEW FINDING. Test 15 pinned `-x` and left `-F` unpinned, and 23 of 23 tests
+# passed with `-F` removed. Without it the DELETED PATH becomes a basic regular
+# expression, so `Deletes: sub/lib?rs` acknowledges a deletion of `sub/lib.rs`
+# — attacker-supplied text reaching a pattern position, accepting a path the
+# body never names.
+#
+# Two files are deleted and only one is absorbed by the crafted claim, so a pass
+# here cannot be a coincidence of the gate failing for some other reason: under
+# the mutation the output names only `sub/store.rs`.
+clone_full "$work/c17"
+cd "$work/origin" || exit 1
+git checkout -q -b regex main
+mkdir -p sub
+echo l > sub/lib.rs
+echo s > sub/store.rs
+git add sub/lib.rs sub/store.rs
+git commit -qm "add two rs files"
+git checkout -q -b regex-del regex
+git rm -q sub/lib.rs sub/store.rs
+git commit -qm "delete both"
+git checkout -q main
+cd "$work/c17" || exit 1
+git fetch -q origin 'refs/heads/*:refs/remotes/origin/*'
+printf 'Deletes: sub/lib?rs\n' > "$work/body.txt"
+out=$(sh "$script" origin/regex origin/regex-del "$work/body.txt" 2>&1)
+st=$?
+report "a regex metacharacter in a claim does not match a real path" 1 "$st" "$out"
+# and specifically: lib.rs must still be reported unclaimed
+case "$out" in
+    *"sub/lib.rs"*)
+        passes=$((passes + 1))
+        echo "ok   sub/lib.rs still reported unclaimed under a regex-shaped claim" ;;
+    *)
+        failures=$((failures + 1))
+        echo "FAIL sub/lib.rs was absorbed by the claim 'sub/lib?rs' — -F is not doing its job" ;;
+esac
+
+# ── 18. Guard 3 is reachable, and is not dead code ────────────────────────
+# REVIEW FINDING, and it asked the right question: replacing guard 3 with the
+# `|| true` idiom design.md §2 names as dangerous left the whole suite green,
+# because no fixture reached it. The answer is that guard 3 is NOT unreachable
+# — it defends a case the fixtures did not model.
+#
+# THE FIRST VERSION OF THIS TEST PASSED FOR THE WRONG REASON and is the third
+# instance of this piece's recurring defect. It removed the base commit's ROOT
+# tree, which in a fresh clone also makes `rev-parse --verify <sha>^{commit}`
+# fail — so the script exited 1 at GUARD 2, the assertion went green, and the
+# `|| true` mutation still passed 33 of 33. Measured per guard before rewriting:
+# with the root tree gone, guard 2 fired; the exit status was identical either
+# way, which is precisely why the test could not tell the two apart.
+#
+# What actually reaches guard 3 is removing a SUBTREE object. Measured, all
+# three guards individually:
+#
+#   guard 2a  rev-parse --verify base^{commit}  exit 0   (peels a commit only)
+#   guard 2a  rev-parse --verify HEAD^{commit}  exit 0
+#   guard 2b  merge-base base HEAD              exit 0   (walks commits)
+#   the diff  ...                               exit 128 (must read the tree)
+#
+# That is a partially-fetched or corrupted object store — a real thing a CI
+# checkout can produce, and the case where every cheap check says the repo is
+# healthy and only the diff disagrees.
+#
+# (Removing the BLOB of the deleted file does NOT reach it: `--name-only` never
+# reads file contents, so the diff succeeds. Noted because it is the obvious
+# fixture to reach for and it proves nothing.)
+clone_full "$work/c18"
+cd "$work/c18" || exit 1
+git checkout -q -b local origin/feature
+base_sha=$(git merge-base origin/main origin/feature)
+# Make every object loose so one can be removed. `unpack-objects` REFUSES to
+# write an object that already exists in a pack, so the pack is moved aside
+# first and fed in from outside the object store — unpacking with the pack still
+# in place is a silent no-op, which broke an earlier version of this fixture.
+mkdir -p "$work/packs-c18"
+for pack in .git/objects/pack/*.pack; do
+    [ -e "$pack" ] || break
+    mv "$pack" "$work/packs-c18/"
+done
+rm -f .git/objects/pack/*.idx
+for pack in "$work/packs-c18"/*.pack; do
+    [ -e "$pack" ] || break
+    git unpack-objects -q < "$pack" 2>/dev/null
+done
+# Assert the clone is HEALTHY before corrupting it. Without this the fixture can
+# silently break and the test then passes on a repo that was broken for an
+# unrelated reason — the failure mode this very test already had once.
+if ! git rev-parse --verify --quiet "origin/main^{commit}" > /dev/null; then
+    failures=$((failures + 1))
+    echo "FAIL test 18 fixture is broken: origin/main does not resolve after unpack"
+else
+    subtree_sha=$(git rev-parse "$base_sha:sub")
+    subtree_dir=$(printf '%s' "$subtree_sha" | cut -c1-2)
+    subtree_file=$(printf '%s' "$subtree_sha" | cut -c3-)
+    rm -f ".git/objects/$subtree_dir/$subtree_file"
+
+    # Guard 2 must still PASS, or this test is measuring guard 2 again.
+    if git rev-parse --verify --quiet "$base_sha^{commit}" > /dev/null \
+       && git merge-base "$base_sha" HEAD > /dev/null 2>&1; then
+        passes=$((passes + 1))
+        echo "ok   guard 2 still passes, so the next failure is guard 3's"
+    else
+        failures=$((failures + 1))
+        echo "FAIL guard 2 fires on this fixture — test 18 is measuring the wrong guard"
+    fi
+
+    printf 'Deletes: sub/doomed.txt\n' > "$work/body.txt"
+    out=$(sh "$script" "$base_sha" HEAD "$work/body.txt" 2>&1)
+    st=$?
+    report "an unreadable subtree fails at guard 3 rather than passing" 1 "$st" "$out"
+    case "$out" in
+        *"cannot measure"*"git diff"*)
+            passes=$((passes + 1))
+            echo "ok   guard 3 names the failing diff, not a missing ref" ;;
+        *)
+            failures=$((failures + 1))
+            echo "FAIL guard 3 did not report a failing 'git diff'" ;;
+    esac
+fi
+
+# ── 19. A rename is not reported as a deletion, whatever the config ───────
+# REVIEW FINDING. The verdict depended on `diff.renames`, which the script did
+# not pin: `git mv big.txt moved.txt` reported 0 deletions with git's default
+# and 1 unclaimed deletion with `diff.renames false` in the repo config. A gate
+# whose answer a developer's config changes is not a gate, and a rename is the
+# obvious false-positive class.
+#
+# The config is set IN THE CLONE the script runs against, so this fails unless
+# the script pins `--find-renames` on its own invocation.
+clone_full "$work/c19"
+cd "$work/origin" || exit 1
+git checkout -q -b renbase main
+printf 'aaaa\nbbbb\ncccc\ndddd\neeee\nffff\n' > big.txt
+git add big.txt
+git commit -qm "add big.txt"
+git checkout -q -b renamed renbase
+git mv big.txt moved.txt
+git commit -qm "rename big.txt"
+git checkout -q main
+cd "$work/c19" || exit 1
+git fetch -q origin 'refs/heads/*:refs/remotes/origin/*'
+git config diff.renames false
+printf 'a rename, deliberately unclaimed' > "$work/body.txt"
+out=$(sh "$script" origin/renbase origin/renamed "$work/body.txt" 2>&1)
+st=$?
+report "a rename is not a deletion even with diff.renames=false" 0 "$st" "$out"
+
+# ── 20. A non-ASCII path can be claimed as itself ─────────────────────────
+# REVIEW FINDING, and it refuted the author's own flagged weakness in its stated
+# direction. A non-ASCII deletion does NOT pass silently — git C-quotes it, so
+# the gate fails, which is safe. The defect is the mirror image: a CORRECT PR
+# claiming `Deletes: café.txt` was REJECTED, and the note printed told the
+# author their correct claim matched nothing. That is a false positive on a
+# legitimate change, which is the failure mode that gets a gate disabled.
+#
+# Fixed by `-c core.quotePath=false` on the diff. This test fails without it.
+clone_full "$work/c20"
+cd "$work/origin" || exit 1
+git checkout -q -b unibase main
+echo x > "café.txt"
+git add "café.txt"
+git commit -qm "add a non-ascii path"
+git checkout -q -b unidel unibase
+git rm -q "café.txt"
+git commit -qm "delete it"
+git checkout -q main
+cd "$work/c20" || exit 1
+git fetch -q origin 'refs/heads/*:refs/remotes/origin/*'
+printf 'Deletes: caf\303\251.txt\n' > "$work/body.txt"
+out=$(sh "$script" origin/unibase origin/unidel "$work/body.txt" 2>&1)
+st=$?
+report "a non-ASCII path can be claimed as the author would write it" 0 "$st" "$out"
+# and unclaimed, it must still be caught
+printf 'unclaimed' > "$work/body.txt"
+out=$(sh "$script" origin/unibase origin/unidel "$work/body.txt" 2>&1)
+st=$?
+report "an unclaimed non-ASCII deletion is still caught" 1 "$st" "$out"
+
+# ── 21. A claim inside a code fence is not a claim ────────────────────────
+# REVIEW FINDING. Anchoring stops a mid-sentence mention (test 8) but not a
+# claim on its own line inside a ``` fence — which is exactly how a PR body
+# documents this convention, and the shape any PR amending this gate contains.
+# To a human reading the rendered PR it is an example; to the gate it was an
+# assertion. Measured before the fix: exit 0, "all claimed in the PR body".
+clone_full "$work/c21"
+run_gate "Here is how the gate works:
+
+\`\`\`
+Deletes: sub/doomed.txt
+\`\`\`
+
+This PR does not actually claim that deletion."
+st=$?
+report "a claim inside a code fence does not count" 1 "$st" \
+    "$(cat "$work/last-output.txt")"
+
+# A tilde fence is the other CommonMark form and must behave the same.
+clone_full "$work/c21b"
+run_gate "Example:
+
+~~~
+Deletes: sub/doomed.txt
+~~~
+"
+st=$?
+report "a claim inside a tilde fence does not count" 1 "$st" \
+    "$(cat "$work/last-output.txt")"
+
+# The fence must not eat a REAL claim that follows it — otherwise the fix
+# would trade a silent pass for a false positive, which is a worse trade.
+clone_full "$work/c21c"
+run_gate "The convention looks like this:
+
+\`\`\`
+Deletes: some/example.txt
+\`\`\`
+
+And this PR really does delete one:
+
+Deletes: sub/doomed.txt
+"
+st=$?
+report "a real claim after a fenced example still counts" 0 "$st" \
+    "$(cat "$work/last-output.txt")"
+
 printf '\n%s passed, %s failed\n' "$passes" "$failures"
 [ "$failures" -eq 0 ]

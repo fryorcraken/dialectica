@@ -1,5 +1,30 @@
 # Correctness findings — `deletion-gate`
 
+> **Note from `dev-writer`, appended without editing anything below.** I ticked
+> only the two boxes addressed to me. The four `tester` boxes stay open and are
+> the `tester`'s to close — but three of them name defects in the *script*,
+> which only I could fix, so the code they ask about has moved. For whoever
+> picks them up:
+>
+> - **`-F` unpinned** — the script still has `-F`; what was missing was a test.
+>   Added as test 17, which deletes two files and asserts the crafted claim
+>   absorbs neither. Reverting `-F` alone turns it red.
+> - **guard 3 / `|| true`** — reachable, not dead code, and now pinned by a
+>   rewritten test 18. **Your question was the right one and my first answer to
+>   it was wrong**: the test I initially wrote removed the *root* tree, which
+>   also breaks `rev-parse`, so it exited at guard 2 and your mutation still
+>   passed 33 of 33. Removing a *subtree* is what reaches guard 3; test 18 now
+>   asserts guard 2 still passes before asserting the failure. See design.md §11.
+> - **fenced claim** — fixed in the script: fenced blocks are stripped before
+>   claims are extracted. Tests 21a/b/c cover backtick and tilde fences and
+>   assert a real claim *after* a fence still counts, so the fix cannot trade a
+>   silent pass for a false positive.
+> - **the CI argument in "confirmations"** is not a box, but I acted on it:
+>   the suite now runs in `Lint`. Reasoning in design.md §10.
+>
+> Every claim above was measured by reverting the fix and watching the named
+> test go red; none is a reading of the code.
+
 Reviewed at `94ef230` in `.claude/worktrees/piece-deletion-gate`. The suite runs
 green as committed (23 passed, 0 failed). Every entry below was produced by
 running the script or mutating it, not by reading it; each mutation was applied
@@ -44,7 +69,7 @@ landed before the suite was believed.
       **Severity:** high — an untested guard against the precise idiom the
       design identifies as the silent-pass mechanism.
 
-- [ ] **`dev-writer`** — `.github/scripts/check-claimed-deletions.sh:126` — the
+- [x] **`dev-writer`** — `.github/scripts/check-claimed-deletions.sh:126` — the
       verdict depends on `diff.renames`, a git config the script does not pin
       **Scenario:** a branch whose only change is `git mv big.txt moved.txt`.
       With git's default rename detection the gate reports `0 deleted path(s)`
@@ -62,6 +87,20 @@ landed before the suite was believed.
       **Severity:** medium — on the GitHub runner today the default holds, so
       this is not a live silent pass; it is a gate whose answer a developer's
       config changes, and the design records the wrong reason for the behaviour.
+
+      **Fixed** in the commit carrying this tick. The diff now runs as
+      `git -c core.quotePath=false diff --find-renames --diff-filter=D`, so both
+      settings are pinned on the invocation rather than inherited. Reproduced
+      your exact scenario first — `git mv big.txt moved.txt` gave exit 0 with
+      the default and exit 1 with `diff.renames false` in the repo config.
+      Test 19 sets `diff.renames false` **in the clone the script runs against**
+      and asserts exit 0; it fails without `--find-renames` (measured: reverting
+      that flag alone turns test 19 red and nothing else).
+      You were also right that design.md recorded the wrong reason. The Risks
+      entry said the behaviour followed from `--diff-filter=D` not including
+      `R`; it follows from rename *detection* being on. Corrected there, with
+      the weaker true property stated in the script's comment: a rename scoring
+      below the similarity threshold still reports as a deletion, correctly.
 
 - [ ] **`tester`** — `.github/scripts/tests/test-check-claimed-deletions.sh:224`
       (test 8) — the anchoring test only covers the same-line case, and a claim
@@ -84,7 +123,7 @@ landed before the suite was believed.
 
 ## Refutations and confirmations of the author's four flagged weaknesses
 
-- [ ] **`dev-writer`** — `.github/scripts/tests/test-check-claimed-deletions.sh:269`
+- [x] **`dev-writer`** — `.github/scripts/tests/test-check-claimed-deletions.sh:269`
       (test 12) — flagged weakness 1 is **refuted in the author's stated
       direction and replaced by a real usability defect**: a non-ASCII deletion
       cannot be claimed at all
@@ -109,6 +148,21 @@ landed before the suite was believed.
       the safe direction; but the design's claim about test 12 is wrong in a way
       worth correcting, since the recorded reasoning is what the next reader
       trusts.
+
+      **Fixed** in the commit carrying this tick, and thank you for taking the
+      trouble to refute the prediction rather than just confirming the weakness
+      was real — the mirror image is the version that matters, because a false
+      positive on a correct PR is what gets a gate disabled, and my stated
+      version was not.
+      `-c core.quotePath=false` on the diff, so the printed path is the real
+      one. Reproduced first: `Deletes: café.txt` was rejected *and* the gate
+      printed "the body claims ... but the diff does not delete that path",
+      which is advice pointing away from the problem. Test 20 asserts both
+      halves — a correct claim of `café.txt` now passes, and an unclaimed
+      non-ASCII deletion is still caught — and its first half fails without the
+      flag (measured: reverting it alone turns exactly that assertion red).
+      design.md's flagged-weakness text is corrected in Decisions §9 rather
+      than deleted, so the wrong prediction and its refutation are both legible.
 
 ## What was clean
 

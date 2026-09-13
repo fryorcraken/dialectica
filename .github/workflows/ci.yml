@@ -116,6 +116,33 @@ jobs:
           .github/scripts/check-claimed-deletions.sh \
             "$BASE_SHA" HEAD "$RUNNER_TEMP/pr-body.txt"
 
+      # THE GATE ON THE GATE, and it is not belt-and-braces.
+      #
+      # This was deliberately left out at first, on the grounds that nothing
+      # else in this repo tests its CI scripts and that convention was not this
+      # piece's to set. Review proved that reasoning wrong on its own terms: two
+      # mutations to the script above survived the entire suite — dropping `-F`
+      # from the claim lookup (a crafted `Deletes: src/lib?rs` then acknowledges
+      # a real deletion of `src/lib.rs`), and replacing its third guard with the
+      # `|| true` idiom. Both are silent passes, which is the failure this whole
+      # step exists to prevent.
+      #
+      # Those tests now exist. But a test nothing runs is a test that stops
+      # being true the moment someone edits the script — and the argument for
+      # not running them is exactly the argument the deletion gate itself
+      # refutes: an unmeasured property is not a held property. A gate against
+      # silently-stopped measuring that was itself never measured would be the
+      # joke this file keeps warning about.
+      #
+      # It runs on every event, not just pull_request: the script's behaviour is
+      # a property of the script, not of the event, and a push to main that
+      # breaks it should go red at once rather than on someone's next PR.
+      #
+      # Costs about a second. It builds its own throwaway repositories in a temp
+      # directory and touches nothing in the checkout.
+      - name: the deletion gate's own tests
+        run: .github/scripts/tests/test-check-claimed-deletions.sh
+
       # Same shape as radicle's, with two dialectica-specific rules added and
       # one radicle rule dropped.
       #

@@ -70,7 +70,26 @@
       Done — the first version of test 15 stayed green under it and was
       rewritten.
 
-## 4. The documentation edits
+## 4. Acting on review findings
+
+- [x] 4.0a Pin `--find-renames` and `core.quotePath=false` on the diff. Verified
+      by tests 19 and 20; reverting either flag alone turns exactly its own test
+      red, measured.
+- [x] 4.0b Strip fenced code blocks before extracting claims, so a documented
+      example is not an assertion. Verified by tests 21a/b/c, the third of which
+      pins that a real claim after a fence still counts.
+- [x] 4.0c Pin `-F` in the claim lookup with a test. Verified by test 17, which
+      deletes two files so a pass cannot be a coincidence.
+- [x] 4.0d Rewrite test 18 so it reaches guard 3. The first version removed the
+      root tree and exited at guard 2, leaving the `|| true` mutation green at
+      33/33; it now removes a subtree and asserts guard 2 passes first. Verified
+      by applying the reviewer's exact mutation and watching test 18 go red.
+- [x] 4.0e Run the suite in `Lint`, reversing the earlier decision. Verified by
+      parsing the YAML (step 2, no `if:`) and by running the suite with `HOME`
+      and both `GIT_CONFIG_*` pointed at empty files, so it cannot depend on a
+      developer's git identity as CI cannot.
+
+## 5. The documentation edits
 
 - [x] 4.1 Add the closer-authoring rule to `closer.md`'s "What you never do",
       on the **dispatched-or-discretionary** axis: the archive commit is the
