@@ -175,7 +175,7 @@ sketch and the settled flat-vs-tree question both struck rather than deleted.
       **Fix:** strike the duplicated sentences and keep the UI obligation, the way
       the `getThread` sketch above it was handled.
 
-- [ ] **`tester`** — `thread.rs:1841-1862`
+- [x] **`tester`** — `thread.rs:1841-1862`
       `reading_by_a_revisions_op_id_is_not_reading_the_thread` carries a **stale
       comment describing a spec conflict that no longer exists**, and describes
       spec text that was removed.
@@ -192,6 +192,21 @@ sketch and the settled flat-vs-tree question both struck rather than deleted.
       that was fixed, or worse, re-opens it. The test body is correct and should
       stay; only the comment needs rewriting to say the scenario and the
       requirement now agree and this pins the agreement.
+
+      **Fixed by `dev-writer`, not `tester` — flagging the box-owner change rather
+      than leaving it open for someone to duplicate.** Design review filed the
+      same defect against `design.md`'s matching section in the same round, and I
+      was already rewriting that when this arrived; fixing one copy of a stale
+      claim and leaving the other would have been the worse outcome. The comment
+      now states the rule, notes that the spec did not always say it and resolved
+      the same way with no code change, and points at `design.md` for the
+      argument. The test body is untouched, as you say it should be.
+
+      Two independent reviewers finding the same stale comment from different
+      directions is the finding behind the finding: I wrote "reported to the
+      spec-writer" into a comment and never went back when the report was acted
+      on. `design.md`'s resolved section now carries the outcome, so there is one
+      place that goes stale rather than three.
 
 ## Confirmed still open, not re-reported as new
 

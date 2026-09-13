@@ -255,6 +255,22 @@ impl std::fmt::Display for NotAThread {
 /// guard as its own job. Zero clamps **up** to the default rather than down to an
 /// empty page: a permanently empty thread is precisely the confusion the
 /// held/not-held distinction exists to prevent.
+///
+/// # This is a COPY of [`crate::feed::clamp_per_page`], and the copy is on purpose
+///
+/// Byte-identical body over byte-identical values, which is worth flagging rather
+/// than leaving for a reader to discover. It follows the constants: [`MAX_PER_PAGE`]
+/// argues that the two caps answer different questions and may diverge, and a
+/// shared clamping *function* over per-module constants would either take the
+/// caps as arguments — a guard with two parameters a caller can pair wrongly,
+/// which is the shape this is supposed to avoid — or re-export one module's
+/// numbers and quietly undo that argument.
+///
+/// **The cost is real: the zero-clamps-up rule now lives in two places, and
+/// `MembershipStore::list` answers zero a third way** (an empty last page). A
+/// reader changing the rule has to find all three. `design.md` §12 carries the
+/// count, why the newtype that would collapse them is not this change's to
+/// introduce, and what whoever takes it has to decide first.
 pub fn clamp_per_page(requested: Option<usize>) -> usize {
     match requested {
         None | Some(0) => DEFAULT_PER_PAGE,
@@ -1839,27 +1855,19 @@ mod tests {
 
     #[test]
     fn reading_by_a_revisions_op_id_is_not_reading_the_thread() {
-        // SPEC CONFLICT, resolved toward the requirement rather than the
-        // scenario, and flagged because the two genuinely disagree.
+        // A revision is an op the peer HOLDS that is not a post, so the refusal
+        // is the not-a-post one and never the not-held one — which would be false
+        // about an op the peer has, and would send a view waiting for propagation
+        // of something that already arrived.
         //
-        // "Reading by a revision's op id is not reading the thread" says the
-        // refusal "is the one for a thread this peer does not hold". The
-        // refusals requirement says a read is refused "when the op it holds
-        // under that id is not a post", that this refusal SHALL be
-        // distinguishable from the not-held one, and that the message SHALL say
-        // "the op named is not a post" — and a revision IS an op held that is not
-        // a post, so the two rules name different answers for one input.
-        //
-        // The requirement wins over the scenario, for the reason the requirement
-        // itself gives: three different mistakes call for three different
-        // responses, and a caller who named a revision has made the category
-        // error the not-a-post message exists to name. Answering "this peer holds
-        // no op under that id" would be false — the peer holds it — and would
-        // send the caller to wait for propagation of something already arrived.
-        //
-        // Both halves of the scenario's OBSERVABLE claim still hold: the thread
-        // is not returned, and the reply is a refusal. Only which refusal
-        // differs. Reported to the spec-writer.
+        // The spec says exactly this, stated over KINDS so a vote, a moderation,
+        // a metadata op and a revision all take it. It did not always: the
+        // scenario once named the not-held refusal while the requirement named
+        // the not-a-post one, and this test was written against the requirement
+        // while the contradiction was reported. The spec resolved it the same
+        // way, with no code change, so this comment no longer describes a
+        // conflict — `design.md` keeps the argument for why the resolution went
+        // this way.
         let root = a_root(2, "v1");
         let revision = a_revision(&a_key(2), root.op.id(), "v2");
         let log = a_log(vec![root.clone(), revision.clone()]);

@@ -89,18 +89,51 @@ Separating them is CLAUDE.md's "a guard is a job": the question "is the
 membership rule called everywhere?" has one place to look, and the chain walk
 is testable on its own against a log full of cycles without building a page.
 
-### 4. The root's absence is settled before anything else is read
+### 4. The root is settled before anything else is read — five gates, three messages
 
-`read_thread` resolves the named op first and refuses three ways — not held, held
-but not a post, held but has a parent — before walking anything. Three refusals
-because the spec requires three distinguishable messages, and because a root
-that is not a root makes every later step meaningless.
+`read_thread` resolves the named op and refuses five ways before walking
+anything, because a root that is not a root makes every later step meaningless.
+The five collapse into the **three messages** the spec requires, and which gate
+maps to which message is the decision:
 
-The refusal for *a reply's op id* is the one worth naming: it is not an error in
-the caller's data, it is a caller one level too deep, and the message says which
-thread to read instead is derivable from the reply's own parent chain. (The
-message names the mistake; it does not carry the thread id, because computing it
-would be doing the caller's next call for them inside a refusal.)
+| Gate | Refusal | Why that one |
+|---|---|---|
+| the log holds nothing under the id | `NotHeld` | the ordinary partial-set case |
+| the row's bytes are not that op | `NotHeld` | §11 — the peer holds no op *under this id* |
+| the op does not verify | `NotHeld` | an unverifiable op is not evidence anything was published |
+| the op is in another Stoa | `NotHeld` | below |
+| the op is a post with a parent | `IsAReply` | the caller is one level too deep |
+| the op is any other kind | `NotAPost` | a category error |
+
+**The Stoa refusal is a real choice with a real alternative**, and it lived only
+in a code comment until design review asked for it here. The alternative is to
+make no check and let the `iter_stoa` loop below simply not find the root — which
+costs nothing and is wrong, because it produces an **empty page**, and an empty
+page is the answer reserved for a thread whose root is held and has no replies.
+That is the one confusion this capability's refusals exist to prevent, so a root
+in another Stoa is refused rather than silently answered with nothing.
+
+*Which* refusal is no longer this change's choice to defend: `spec.md`'s
+refusals requirement scopes the word to "**holds a usable post in the named
+Stoa**", and names the two cases that would otherwise look like exceptions — an
+op that fails verification and an op of another Stoa each take the **not-held**
+refusal, "since neither is a post this read may use and the caller's remedy is
+the same as for an op that never arrived". Both of those gates were implemented
+before the spec said so and the spec then agreed, which is why they are recorded
+here as gates rather than as open questions. The same passage forbids the
+over-reach: an in-Stoa op of the wrong kind is a *usable* op and takes
+`NotAPost`, which is the last row of the table.
+
+The refusal for *a reply's op id* is the other one worth naming: it is not an
+error in the caller's data, it is a caller one level too deep, and which thread
+to read instead is derivable from the reply's own parent chain. (The message
+names the mistake; it does not carry the thread id, because computing it would be
+doing the caller's next call for them inside a refusal.)
+
+Three of these five gates arrived after this section was first written — two from
+security review (§11) and the Stoa one from the first implementation pass. The
+table is the current shape rather than the original one, because a decision
+record that describes an earlier version of the function is worse than none.
 
 ### 5. A hidden root keeps its row and loses its body; a hidden reply loses its row
 
@@ -239,12 +272,67 @@ That gap is exactly CLAUDE.md's "a guard is a job, so *is it called everywhere?*
 stays a question with an answer" — and the answer was "at one of two entry
 points". Clamping inside makes the question answerable by reading one function.
 
-**The better shape was not taken, and the reason is scope.** A page-size type
-that cannot be zero would make the invariant hold by construction rather than by
-a call — "put the complexity in the data structure". It changes
-`feed::list_threads`'s signature too, and `feed.rs` is not this change's to
-touch. **If a third paginated read is added, that is the moment to introduce the
-type** rather than write a third clamp.
+**The better shape was not taken. The honest count is three, and the trigger an
+earlier draft of this section named had already fired when it was written.**
+
+A page-size type that cannot be zero would make the invariant hold by
+construction rather than by a call — "put the complexity in the data structure".
+This section used to defer it until "a third paginated read is added". Design
+review pointed out that **this is the third**, and the count is worth stating
+rather than glossing:
+
+| Read | Zero answered by | What it answers |
+|---|---|---|
+| `feed::list_threads` | `feed::clamp_per_page` at the wire | the default page size |
+| `MembershipStore::list` | an unconditional guard at `membership.rs:598` | an empty **last** page |
+| `thread::read_thread` | `thread::clamp_per_page`, now inside the function | the default page size |
+
+**The three `pub` functions do not agree what a zero means**, which is precisely
+the state a type prevents. `membership.rs`'s own comment reaches this change's
+argument independently and at length — the guard is unconditional "because this
+function is `pub` on a `pub mod`", and a storage module whose correctness rests
+on a caller one layer up "invites someone to delete the guard when that caller
+changes". That is CLAUDE.md's fourth-slightly-different-guard signal, and §10
+invokes it for the Stoa check while this section did not.
+
+Two things make the divergence smaller than it first reads, and neither
+dissolves it. **All three wire paths clamp up to the default**, `list_stoas`
+included — `wire.rs:2329` calls `feed::clamp_per_page` — so no caller reaching
+this crate through the module surface can observe the disagreement today; it is
+between the direct contracts of three `pub` functions. And **membership's answer
+is arguably the better one**: an empty last page terminates a pager without
+inventing a size the caller did not ask for, where clamping up answers a question
+with a different question.
+
+**Deferred, and the reason is the same boundary that kept the feed's spec debt
+out of this change.** The type has to live somewhere neutral — `membership.rs`
+has no caps of its own and borrows `feed`'s through the wire — so introducing it
+edits `feed.rs`, `membership.rs`, `wire.rs` and this module at once, in a
+findings-response commit on a piece whose reviewers looked at a thread read.
+Reshaping two other pieces' surfaces past the review those pieces had is the
+thing this project has a rule against.
+
+**Owner: whoever next touches pagination in more than one of the three.** The
+work is a `PageSize` newtype with one constructor that cannot yield zero,
+carrying the cap, replacing both `clamp_per_page` copies and the membership
+guard — and the decision that has to be made first is which of the two zero
+answers becomes the single one. This paragraph is the brief; nothing here is
+blocked on it, because every surface is individually correct today.
+
+**`thread::clamp_per_page` is a byte-identical copy of `feed::clamp_per_page`,
+and the copy is deliberate rather than overlooked.** It follows the constants:
+`thread.rs`'s `MAX_PER_PAGE` argues that the two caps answer different questions
+— a feed row carries one post's body, a thread item carries a body *and* a parent
+— and are free to diverge, with
+`the_page_caps_agree_until_someone_decides_otherwise` observing the present
+agreement rather than enforcing it. A shared clamping *function* over per-module
+constants would have to take the caps as arguments, which is a guard with two
+parameters a caller can pair wrongly — the shape a guard exists to avoid — or
+re-export one module's numbers and quietly undo the divergence argument.
+
+The cost is that the zero-clamps-up rule now lives in two places, which is the
+same cost the table above prices. Both are noted on the functions themselves, so
+a reader changing one is told the other exists.
 
 ## Risks / Trade-offs
 
@@ -252,10 +340,14 @@ type** rather than write a third clamp.
   links, each link an `OpLog::get`. → Accepted for this change: the feed is
   already O(N) with a version and a moderation resolution per row, and the
   in-memory log makes a `get` a map lookup. The projection with an index by
-  parent is where this is fixed, and `proposal.md` records that the index is
-  owed to whoever builds it. **A peer holding a very large Stoa will feel this
-  before the projection lands**, and that is a real limit rather than a
-  theoretical one.
+  parent is where this is fixed, and **`docs/PLAN.md`'s resolver-gap bullet
+  records that debt** — corrected in this change to say the projection must index
+  by **parent** rather than by the untrustworthy `thread` field, which is the
+  correction that matters to whoever builds it. (This entry used to cite
+  `proposal.md`, which records nothing of the sort; `PLAN.md` outlives the
+  change's archived folder, so it is both the true and the better pointer.)
+  **A peer holding a very large Stoa will feel this before the projection
+  lands**, and that is a real limit rather than a theoretical one.
 - **A partial op set silently narrows a thread.** A reply whose parent has not
   arrived is returned under no thread, so a reader sees a smaller thread than
   a better-connected peer. → This is contracted, not hidden: the spec makes it
@@ -266,27 +358,34 @@ type** rather than write a third clamp.
   parent: it is an identifier, not a promise of delivery, and the spec already
   says so of parents.
 
-## Where the spec is silent or disagrees with itself
+## Where the spec was silent or disagreed with itself
 
-Two things the implementation had to settle that the spec does not settle, both
-marked in the code where a reviewer will find them.
+One question the implementation raised and the spec has since settled, and one
+the spec leaves open — both marked in the code where a reviewer will find them.
 
-### The spec names two different refusals for a revision's op id
+### The two refusals for a revision's op id — RESOLVED IN THE SPEC
 
-"Reading by a revision's op id is not reading the thread" says the refusal "is
-the one for a thread this peer does not hold". The refusals requirement says a
-read is refused "when the op it holds under that id is not a post", that the two
-SHALL be distinguishable, and that the message SHALL say "the op named is not a
-post". A revision **is** an op held that is not a post, so one input has two
-contracted answers.
+**Settled; this is the record, not an open question.** The scenario "Reading by a
+revision's op id is not reading the thread" once said the refusal "is the one for
+a thread this peer does not hold", while the refusals requirement said a read is
+refused "when the op it holds under that id is not a post" and that the two SHALL
+be distinguishable. A revision **is** an op held that is not a post, so one input
+had two contracted answers.
 
-**Resolved toward the requirement**, on the requirement's own argument: three
-mistakes call for three responses, and telling a caller "this peer holds no op
-under that id" about an op the peer demonstrably holds is false, and sends them
-to wait for propagation of something that already arrived. Both halves of the
-scenario's observable claim still hold — the thread is not returned, and the
-reply is a refusal. `reading_by_a_revisions_op_id_is_not_reading_the_thread`
-carries the argument. **The spec-writer should pick one.**
+The implementation resolved toward the requirement, on the requirement's own
+argument: telling a caller "this peer holds no op under that id" about an op the
+peer demonstrably holds is false, and sends a view waiting for propagation of
+something that already arrived. Commit `c6ce3c7` then made that the contract —
+`spec.md`'s scenario now reads "the refusal is the one for an op the peer holds
+that is not a post, a revision being exactly that", stated over **kinds** so a
+vote, a moderation, a metadata op and a revision all take it and a kind added
+later needs no new decision. That commit changed no code, because the
+implementation already did all four.
+
+The argument is kept here because it is why the spec reads as it does; the
+instruction to the spec-writer that used to close this section is gone, because
+it was carried out. `reading_by_a_revisions_op_id_is_not_reading_the_thread`
+pins the behaviour.
 
 ### A chain may cross a Stoa boundary mid-walk
 
