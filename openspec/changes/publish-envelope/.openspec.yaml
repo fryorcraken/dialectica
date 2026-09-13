@@ -1,0 +1,29 @@
+# `schema` is REQUIRED for this file to be valid change metadata, and without it
+# `skip_specs` is silently NOT HONOURED — `openspec validate --strict` reports
+# the marker as ignored and then fails for having no deltas, which reads as two
+# problems rather than one. It must name a known schema; this project's is the
+# built-in `spec-driven`, set in `openspec/config.yaml`.
+schema: spec-driven
+
+# No spec delta: this change fixes code against contracts that were already
+# right, and that was checked rather than assumed.
+#
+# `module-wire-contract` scopes the request-envelope rule to "every method that
+# reads a field of its request" and names the panic probe as the surface's ONLY
+# exception. The three publish handlers read `stoa`, `body`, `parent`, `target`
+# and `direction`, so they were already inside the rule and already violating
+# it. `content-authoring` likewise already decides which key signs: "WHEN the
+# posting-capability probe reports an identity for a Stoa and a post is then
+# published into that Stoa, THEN the published op's author is the identity the
+# probe reported."
+#
+# Adding a requirement naming these handlers would make the contract WEAKER, and
+# the requirement says so itself: "This SHALL hold for every such method,
+# whatever fields that method requires ... The rule is therefore stated once,
+# for the envelope, rather than left to each method's fields to imply." A rule
+# restated per method is a rule the next method is outside — which is the exact
+# failure this change fixes at the test layer.
+#
+# `proposal.md` and `design.md` record the check itself, not just its outcome,
+# so the next reader can see the question was asked.
+skip_specs: true

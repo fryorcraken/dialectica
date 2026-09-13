@@ -536,7 +536,33 @@ impl Dialectica {
                 Ok(k) => k,
                 Err(e) => return core::no_identity(&e.to_string()),
             };
-            let key = keystore.stoa_key(&stoa);
+
+            // WHICH KEY SIGNS IS `core`'s DECISION, not this file's, and that is
+            // the same correction `get_capabilities` above already carries.
+            //
+            // This was `keystore.stoa_key(&stoa)` — the PATHLESS per-Stoa scheme
+            // — while the probe reports `stoa_address_at_path`. The two schemes
+            // are asserted to DISAGREE in `identity.rs`, so every published op
+            // was authored by an identity neither `getCapabilities` nor `whoAmI`
+            // would name. `core::wire::publishing_key` is the same derivation
+            // the probe reports, and
+            // `the_key_a_publish_signs_with_is_the_identity_the_probe_reports`
+            // is the test that the choice living in `core` makes possible — it
+            // could not be written while the choice was on this line.
+            let paths = match Self::paths(&dir) {
+                Ok(p) => p,
+                Err(e) => return core::no_identity(&e.to_string()),
+            };
+            let key = match core::wire::publishing_key(&stoa, &keystore, &paths) {
+                Ok(k) => k,
+                // A Stoa with no chosen identity is the state the probe reports
+                // as `canPost:false`. Refusing here is what keeps the two
+                // methods agreeing: a publish that succeeded under some other
+                // key while the probe said the user cannot post would be a
+                // worse disagreement than the one this fixes, because nothing
+                // on the publishing side would say so.
+                Err(why) => return core::no_identity(&why),
+            };
 
             let mut log = match core::log::SqliteOpLog::open(&dir.join("ops.sqlite")) {
                 Ok(l) => l,

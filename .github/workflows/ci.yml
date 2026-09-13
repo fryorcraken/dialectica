@@ -343,8 +343,16 @@ jobs:
           # `the_probe_and_whoami_report_the_same_identity_for_one_user_and_stoa`
           # asserts on it. What the gate still checks is that the adapter did not take
           # the choice back.
+          #
+          # THE PUBLISH PATH'S HALF IS NOW HERE TOO, and for the same reason the
+          # probe's is: `core::wire::publishing_key` is where "which key signs a
+          # publish" is decided, inside the crate `cargo test` compiles. It was
+          # `keystore.stoa_key(&stoa)` on a line in this file, which is how it
+          # came to disagree with the probe unnoticed. Losing this call from the
+          # adapter is the adapter taking the choice back.
           for want in ("core::keystore::creator_key_in",
-                       "core::wire::get_capabilities_from_stores"):
+                       "core::wire::get_capabilities_from_stores",
+                       "core::wire::publishing_key"):
               if want not in src:
                   print(f"::error file={path}::{want} is gone from the adapter — "
                         "which key the creator is, and which the poster is, are "
@@ -364,17 +372,29 @@ jobs:
           # weakens rather than obeys.
           code = re.sub(r"^\s*//.*$", "", src, flags=re.M)
 
-          # ONE EXEMPTION, NAMED, AND IT IS A KNOWN GAP RATHER THAN AN ALLOWANCE.
-          # `with_publish_identity` calls `keystore.stoa_key(&stoa)` — the PATHLESS
-          # per-Stoa scheme — while `getCapabilities` reports
-          # `stoa_address_at_path` and `createStoa` names `identity_public_key`.
-          # That is three derivations for one user, and `stoa-lifecycle`'s merge of
-          # `main` is what made all three visible at once; see its design.md,
-          # "Three derivations after the merge". It is exempted rather than fixed
-          # because WHICH key a publish signs with is a spec question this gate
-          # cannot answer, and failing CI on it would block a merge on a question
-          # nobody has decided. Delete this exemption when the spec decides.
-          code = code.replace("keystore.stoa_key(&stoa)", "<exempt: publish path>")
+          # THE EXEMPTION IS GONE, BECAUSE THE SPEC DECIDED.
+          #
+          # It read: `with_publish_identity` calls `keystore.stoa_key(&stoa)` --
+          # the PATHLESS per-Stoa scheme -- while `getCapabilities` reports
+          # `stoa_address_at_path`, and "WHICH key a publish signs with is a spec
+          # question this gate cannot answer ... Delete this exemption when the
+          # spec decides."
+          #
+          # `content-authoring` decides it: "WHEN the posting-capability probe
+          # reports an identity for a Stoa and a post is then published into that
+          # Stoa, THEN the published op's author is the identity the probe
+          # reported." So the publish path now calls
+          # `core::wire::publishing_key`, which is the probe's own derivation,
+          # and the exempted call no longer exists to exempt. The ban below is
+          # what keeps it from coming back.
+          #
+          # WHAT MADE THE FIX POSSIBLE is the same move this gate already
+          # records for the probe's half: the choice went into `core`, where
+          # `cargo test` compiles it and
+          # `the_key_a_publish_signs_with_is_the_identity_the_probe_reports`
+          # asserts an op's author against the probe's reply. While it lived on
+          # this file's line, no test could see it -- which is the whole reason
+          # this gate exists.
 
           banned = re.findall(
               r"\.\s*(stoa_key|stoa_public_key|stoa_address|identity_key|"
