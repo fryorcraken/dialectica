@@ -21,7 +21,13 @@
       tests alone.
 - [ ] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
-- [ ] review: readability — `code-reviewer`
+- [x] review: readability — `code-reviewer` — 15 findings in
+      `findings/readability.md`. The module's numeric claims are the problem: the
+      denylist arithmetic in `names.rs:358-362` is the paragraph PLAN.md struck
+      through and proposal.md withdrew, and the shipped list holds 199 pairs
+      against its "about 960". Every worked example in the module — *measured
+      aporia of lampsacus*, `brittle`, `damp`, `alexandria troas` — names entries
+      that are not in the lists. `feed.rs:292` cites a test that does not exist.
 - [ ] review: architecture — `code-reviewer`
 - [ ] review: spec-test — `spec-test-reviewer`
 - [x] review: design — `design-reviewer` — 14 findings. D3/D4/D6–D10/D13 verified
