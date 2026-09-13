@@ -1,6 +1,6 @@
 ## Purpose
 
-Defines how a readable display name is derived from an identity's public key: what the derivation takes and guarantees, which three mechanical screens the wordlists are held to and that nothing else decides what is in them, where a name must be returned, what a name may never be used for, and how the name, the mark and the abbreviated address stay independent channels — so that every peer renders one identity identically, and so that a name is never mistaken for the thing that settles who published something.
+Defines the derivation of a three-word display name from an identity's public key: what the derivation takes, what it guarantees, which three mechanical screens the wordlists are held to, and what a name may never be used for. A name is never published and never sent over the wire — it is recomputed by whoever holds the key, at the point of rendering — so this capability's whole subject is making one key yield one name on every peer, forever.
 
 ## ADDED Requirements
 
@@ -54,26 +54,110 @@ no device identifier, no Stoa address, and no value carried by an op.
 - **WHEN** names are derived for many distinct public keys
 - **THEN** the names are not all equal, so the derivation depends on its input
 
-### Requirement: The three recognition channels read disjoint inputs
+### Requirement: Core SHALL expose the derivation, and the name SHALL NOT travel
+
+Core SHALL expose a way to derive a display name from a public key, answering for
+any well-formed key supplied by a caller.
+
+**This is the only way a name is obtained, and that is what makes exposing it
+matter.** No reply SHALL carry a display name: not a feed row, not a thread item,
+not an onboarding slate candidate, not any other reply in which core reports an
+author. A name is derived by whoever holds the key, at the point of rendering.
+
+Two things follow, and the second is the reason for the first.
+
+**A derived value beside the material it derives from is two values that must
+agree and could disagree**, where the recipient has no way to tell which is
+wrong. A name on the wire is also a name a relay could strip or forge, which
+determinism exists to make impossible. So the name does not travel, in either
+direction, under any reply shape.
+
+**A caller therefore needs an answer from core, or it will write its own.** The
+view cannot reimplement this: the QML sandbox denies it the network and the
+filesystem outside its plugin directory, so it holds none of the wordlists — and
+a second implementation of a consensus-critical derivation is exactly the silent
+divergence the pinning requirements below exist to prevent. One normative
+implementation, reachable by every caller, is the property that matters.
+
+What a reply owes is therefore the derivation's **input**, and that obligation
+belongs to each reply's own capability rather than to this one. This capability
+says only that a name is never the thing carried.
+
+#### Scenario: A name is derived on request from a supplied key
+
+- **WHEN** core is asked for the name of a public key
+- **THEN** a name is returned
+- **AND** it is the name this capability's derivation produces for that key
+
+#### Scenario: No reply carries a display name
+
+- **WHEN** a reply in which core reports an author is read and every field of the
+  item reporting that author is enumerated
+- **THEN** no field carries a display name
+
+#### Scenario: A name does not travel as content
+
+- **WHEN** a post arrives carrying a field that spells a display name
+- **THEN** that field is not treated as the author's name anywhere
+- **AND** the name for that author remains the one derived from the signing key
+
+### Requirement: The derivation is domain-separated from every other use of the key
+
+The hashed preimage SHALL begin with a fixed-width domain separator reserved for
+name derivation, distinct from the separator every address derivation and every
+signing digest uses.
+
+Without separation the name's digest and the address's digest would be the same
+function of the same key, and the two would move together. Separation is what
+makes them independent functions: an attacker grinding keys for a target's name
+gets an unrelated address and mark each time, and grinding for the mark gets an
+unrelated name. The two must be landed together, so the costs multiply rather
+than add.
+
+**The name's independence from the mark and the abbreviated address holds by
+domain separation and not by byte allocation**, and stating it the other way is a
+mistake this project has made twice in two documents. The name is derived from
+`H(NAME_PREFIX || public_key)`; the mark and the abbreviation both read the
+**address**, a different digest of the same key. Byte 3 of one digest and byte 3
+of the other are unrelated values, so there is no shared range in which the name
+could overlap either. Any claim that a range of **address** bytes is "reserved
+for the name" is describing a mechanism that does not exist.
+
+The separator SHALL carry a scheme version, so that a future change to the
+derivation or to the wordlists mints different names from identical keys rather
+than silently colliding with this scheme's.
+
+#### Scenario: The name digest is not the address digest
+
+- **WHEN** a name's digest and an author address are computed from one public key
+- **THEN** the two digests differ
+
+#### Scenario: The name digest is not an undomain-separated hash of the key
+
+- **WHEN** a name's digest for a key is compared with the plain hash of that key
+- **THEN** they differ
+
+#### Scenario: The name's digest is not the digest the other two channels read
+
+- **WHEN** the name's digest for a key is compared, byte for byte, with that key's
+  address
+- **THEN** the two differ, so no byte range is shared between the name's input and
+  the input the mark and the abbreviation read
+- **AND** so no allocation of address bytes to the name is required or possible
+
+#### Scenario: The separator is pinned against silent change
+
+- **WHEN** a name is derived from fixed key material
+- **THEN** it equals a value derived independently of this implementation
+
+### Requirement: The mark and the abbreviated address read disjoint address bytes
 
 A reader is offered three derived channels for telling identities apart: the
 **name**, the **mark** derived from the address, and the **abbreviated address**
-shown on screen. No two of them SHALL be derivable from input the other reads.
-
-**For the name this holds by domain separation and not by byte allocation**,
-and stating it the other way is a mistake this project has made twice in two
-documents. The name is derived from `H(NAME_PREFIX || public_key)`; the mark and
-the abbreviation both read the **address**, a different digest of the same key.
-Byte 3 of one digest and byte 3 of the other are unrelated values, so there is no
-shared range in which the name could overlap either. Any claim that a range of
-**address** bytes is "reserved for the name" is therefore describing a mechanism
-that does not exist. The independence is real and it comes from the two digests
-being different functions.
-
-**For the mark and the abbreviation the disjointness is real, must be arranged,
-and is not currently satisfied.** Both read the same 32-byte address, so a byte
-one reads is a byte the other may also read. They SHALL read disjoint byte
-ranges:
+shown on screen. The name's independence is settled by the requirement above.
+The mark and the abbreviation are the pair whose disjointness must be arranged,
+because both read the same 32-byte address and a byte one reads is a byte the
+other may also read. They SHALL read disjoint byte ranges:
 
 - The **abbreviation** shows a head group, a middle group and a tail group of the
   address's display form. The middle group SHALL be retained: head-and-tail alone
@@ -82,11 +166,11 @@ ranges:
 - The **mark** SHALL read only bytes the abbreviation does not show.
 
 The security argument is the one that justifies domain separation, applied to a
-single digest: an attacker grinding for a lookalike name and an attacker grinding
-for a lookalike mark are independent searches **only when the channels share no
-input**, and independent searches multiply in cost rather than adding. A byte the
-abbreviation displays is worse than merely shared — it is a byte the attacker can
-target while reading their progress off the screen.
+single digest: an attacker grinding for a lookalike mark and an attacker grinding
+for a lookalike abbreviation are independent searches **only when the channels
+share no input**, and independent searches multiply in cost rather than adding. A
+byte the abbreviation displays is worse than merely shared — it is a byte the
+attacker can target while reading their progress off the screen.
 
 Where the mark reads bytes the abbreviation already shows, those bytes tell the
 reader nothing the address has not already told them, so the mark's effective
@@ -114,46 +198,6 @@ contribution is only the bytes it reads that the abbreviation hides.
 
 - **WHEN** two addresses differ only in a byte the abbreviation displays
 - **THEN** their marks are identical
-
-#### Scenario: The name's digest is not the digest the other two read
-
-- **WHEN** the name's digest for a key is compared, byte for byte, with that key's
-  address
-- **THEN** the two differ, so no byte range is shared between the name's input and
-  the input the mark and the abbreviation read
-- **AND** so no allocation of address bytes to the name is required or possible
-
-### Requirement: The derivation is domain-separated from every other use of the key
-
-The hashed preimage SHALL begin with a fixed-width domain separator reserved for
-name derivation, distinct from the separator every address derivation and every
-signing digest uses.
-
-Without separation the name's digest and the address's digest would be the same
-function of the same key, and the two would move together. Separation is what
-makes them independent functions: an attacker grinding keys for a target's name
-gets an unrelated address and mark each time, and grinding for the mark gets an
-unrelated name. The two must be landed together, so the costs multiply rather
-than add.
-
-The separator SHALL carry a scheme version, so that a future change to the
-derivation or to the wordlists mints different names from identical keys rather
-than silently colliding with this scheme's.
-
-#### Scenario: The name digest is not the address digest
-
-- **WHEN** a name's digest and an author address are computed from one public key
-- **THEN** the two digests differ
-
-#### Scenario: The name digest is not an undomain-separated hash of the key
-
-- **WHEN** a name's digest for a key is compared with the plain hash of that key
-- **THEN** they differ
-
-#### Scenario: The separator is pinned against silent change
-
-- **WHEN** a name is derived from fixed key material
-- **THEN** it equals a value derived independently of this implementation
 
 ### Requirement: A name is three drawn words in the form adjective noun of place
 
@@ -210,9 +254,9 @@ constrains which adjectives are eligible.
 
 ### Requirement: The three drawn words are never elided; the connector may be
 
-A name SHALL be reproducible from a reply in full. Core SHALL NOT abbreviate,
-truncate or elide any of the three drawn words when returning a name, and SHALL
-NOT return a name with a drawn word shortened mid-word.
+A name SHALL be reproducible in full from the derivation. Core SHALL NOT
+abbreviate, truncate or elide any of the three drawn words when returning a name,
+and SHALL NOT return a name with a drawn word shortened mid-word.
 
 The three drawn words are the whole of the space. Eliding one removes a slot's
 worth of distinguishing content, and eliding the place removes the half of the
@@ -227,7 +271,7 @@ is droppable precisely because it is the only part that is not derived.
 
 #### Scenario: A returned name carries all three drawn words in full
 
-- **WHEN** a name is returned in any reply
+- **WHEN** a name is returned by the derivation
 - **THEN** each of the three drawn words appears complete
 - **AND** none is shortened, elided or replaced by an ellipsis
 
@@ -342,10 +386,10 @@ retry a draw, and SHALL never substitute, suppress or reorder an output for what
 the words are, what they mean, what they connote, whom they name, or what they
 spell together.
 
-**Owner decision, recorded rather than argued.** The requirement above forbids
-keeping a word out of a list. This forbids the other shape the same rule takes —
-leaving every word in and refusing what they combine into. The two are one
-decision and are stated as two requirements because they are two places an
+**Owner decision, recorded rather than argued.** The screens requirement below
+forbids keeping a word out of a list. This forbids the other shape the same rule
+takes — leaving every word in and refusing what they combine into. The two are
+one decision and are stated as two requirements because they are two places an
 implementation could put a filter.
 
 **Exactly one rule refuses anything anywhere in this contract**, and it is the
@@ -508,86 +552,6 @@ entirely and are the larger half of what the slot now draws on.
 - **WHEN** each list is compared against itself
 - **THEN** no entry appears twice in a list
 
-### Requirement: Every noun and every place carries a one-sentence gloss, served on request
-
-Every entry of the **noun** list and every entry of the **place** list SHALL
-carry a short gloss in English saying what the word means or where the place is.
-Core SHALL expose a way to ask for the gloss of a word the derivation drew, and
-SHALL answer for any entry of either list.
-
-**The adjective list SHALL NOT carry glosses.** An English adjective needs no
-translation for an English-speaking reader, where a Greek noun does. Glossing all
-three lists would be five times the work for a reader who already knows the word,
-and a gloss on `pensive` that says what `pensive` means is noise that teaches a
-reader to stop reading the ones that are not.
-
-**A name the reader cannot interpret is doing half its job.** A reader shown
-*pensive aporia of lampsakos* can tell that identity from another, which is the
-recognition job, but has no way to learn what `aporia` is or where `lampsakos`
-was — and the view cannot look it up. The QML sandbox denies the view both the
-network and the filesystem outside its plugin directory, so a gloss is not
-something a view could fetch, bundle or infer. If it does not come from core it
-does not exist.
-
-**The gloss SHALL be requested per word rather than returned beside every name.**
-A reply carrying an author's name SHALL NOT carry that name's glosses. The feed
-caps a page at 100 rows, so bundling would put up to 200 glosses on a single
-reply — mostly repeated across rows that share a word, and nearly all of them
-never read, because a gloss is what a reader wants for the one name they paused
-on. That is the whole page's weight spent on the exception. Asking per word also
-keeps the gloss out of the name's own contract: the requirement above on what a
-reply reporting an author carries is unchanged by this one, and a gloss is never
-part of what a name *is*.
-
-**A gloss SHALL NOT participate in the derivation**, SHALL NOT be drawn, and
-SHALL NOT change which word an index selects. It is display material attached to
-an entry, so changing a gloss is not a change to the lists and does not mint a
-new scheme version — which is the opposite of every other change to an entry, and
-is stated because the freezing requirement below would otherwise be read as
-covering it. What SHALL NOT change without a version bump is the word a gloss is
-attached to.
-
-**A gloss SHALL be ASCII**, for the reason the ASCII screen above gives: it is
-rendered text this project composes, so keeping it ASCII keeps a bidi override
-and a homoglyph off the surface entirely rather than mitigating them.
-
-#### Scenario: Every noun and every place has a gloss
-
-- **WHEN** every entry of the noun list and of the place list is examined
-- **THEN** each carries a gloss
-- **AND** each gloss is non-empty
-
-#### Scenario: A gloss is returned for a drawn word
-
-- **WHEN** a gloss is asked for by naming an entry of the noun list, and
-  separately an entry of the place list
-- **THEN** a gloss is returned for each
-
-#### Scenario: A word outside the two glossed lists is refused rather than guessed
-
-- **WHEN** a gloss is asked for by naming a word that is in neither the noun list
-  nor the place list
-- **THEN** the reply is a refusal
-- **AND** it is not an empty gloss or an invented one
-
-#### Scenario: An adjective carries no gloss
-
-- **WHEN** a gloss is asked for by naming an entry of the adjective list that is
-  in neither Greek list
-- **THEN** the reply is the same refusal, so the adjective list is not glossed by
-  omission of a check
-
-#### Scenario: A name reply carries no glosses
-
-- **WHEN** a reply carrying an author's display name is read and every field is
-  enumerated
-- **THEN** no gloss appears in it
-
-#### Scenario: Every gloss is ASCII
-
-- **WHEN** every gloss of every glossed entry is examined
-- **THEN** each contains only ASCII characters
-
 ### Requirement: No noun entry contains the connector
 
 No entry of the noun list SHALL contain the connector as a separate word — that
@@ -617,9 +581,7 @@ against the shipped list, unlike the attestation obligation above.
 **This is the only rule in this capability that keeps anything out, and it is a
 rule about one literal substring.** What a noun means is no part of whether it
 is in: the bare form of a qualified entry — `zenon` where a source offered
-`zenon of kition` — is in the list and draws normally. The requirement is on how
-an entry is spelled, so it is checkable against the shipped list, unlike the
-attestation obligation above.
+`zenon of kition` — is in the list and draws normally.
 
 #### Scenario: No noun entry carries the connector as a word
 
@@ -632,141 +594,80 @@ attestation obligation above.
 - **THEN** no name's second word group contains the connector, so no name reads as
   carrying two places
 
-### Requirement: A reply reporting an author SHALL carry either the name or the key it derives from
+### Requirement: Every noun and every place carries a one-sentence gloss, served on request
 
-A reply in which core reports who authored something SHALL put the caller in a
-position to render that author's name. It SHALL do so by carrying **either** the
-author's display name **or** the author's public key, and it SHALL carry the
-author's address in both cases. A reply carrying neither the name nor the key is
-the one shape this requirement forbids.
+Every entry of the **noun** list and every entry of the **place** list SHALL
+carry a short gloss in English saying what the word means or where the place is.
+Core SHALL expose a way to ask for the gloss of a given word, and SHALL answer
+for any entry of either list.
 
-**The obligation is discharged by the key, and this is what decides which
-surfaces owe a name.** A name derives from a public key. A reply reporting an
-author always reports an **address**, which is a hash from which no key is
-recoverable — so a reply carrying *only* an address has handed the caller a
-value it cannot render an attribution from, and core, which holds the key
-because the signed op carries it, SHALL render the name there. A reply already
-carrying the public key has handed the caller the derivation's own input, and
-the caller can compute the name for itself; that reply SHALL NOT also carry the
-name.
+**The gloss is core's for the same reason the derivation is, and it is stated
+here because the wordlists are stated here.** It is deliberately **not** part of
+a name and not part of the derivation: a gloss is data attached to a list entry,
+asked for by word rather than produced from a key. It lives in this capability
+because this capability is what defines the lists, and there is nowhere else the
+entries are enumerated.
 
-**Both halves matter, and the second is a prohibition rather than a
-permission.** Sending the name beside the key it derives from puts two values on
-the wire that must agree and could disagree, where the recipient has no way to
-tell which is wrong. So the two surfaces are not free variants of one another: a
-reply carrying the key is required *not* to carry the name, and this is what
-keeps the `thread-read` capability's closed field set and this capability's
-obligation consistent rather than merely compatible.
+**A name the reader cannot interpret is doing half its job.** A reader shown
+*pensive aporia of lampsakos* can tell that identity from another, which is the
+recognition job, but has no way to learn what `aporia` is or where `lampsakos`
+was — and the view cannot look it up. The QML sandbox denies the view both the
+network and the filesystem outside its plugin directory, so a gloss is not
+something a view could fetch, bundle or infer. If it does not come from core it
+does not exist.
 
-**This is the narrow reading, and it is the intended one.** An earlier statement
-of this requirement was universally quantified — every reply reporting an author
-carries a name — while being reasoned entirely from the address-only case. That
-made it contradict `thread-read`, which requires that no thread item carry a
-derived display name and ships `authorKey` on every item precisely so a holder
-can derive one. Both cannot hold; the argument above is the one that was always
-being made, so the quantifier moves rather than the other capability.
+**The adjective list SHALL NOT carry glosses.** An English adjective needs no
+translation for an English-speaking reader, where a Greek noun does. Glossing all
+three lists would be five times the work for a reader who already knows the word,
+and a gloss on `pensive` that says what `pensive` means is noise that teaches a
+reader to stop reading the ones that are not.
 
-**Under the rule as now stated, the two capabilities that decline to carry a
-name are both satisfying it rather than excepted from it.** `thread-read` ships
-the public key on every item, and `identity-onboarding` ships it on every slate
-candidate and on the identity in use — so in both the caller holds the
-derivation's input and the prohibition above, not an exemption, is what keeps
-the name off those replies. Neither needs amending, and a future reply reporting
-an author by address alone owes a name without either being revisited.
+**The gloss SHALL be requested per word.** A caller asks for the one word a
+reader paused on. Nothing bundles glosses beside anything, which follows from a
+name never travelling at all: there is no reply for a gloss to ride on.
 
-**Core SHALL expose a way to derive a name from a public key**, so that a caller
-holding a reply of the second kind can render an attribution without
-implementing the scheme. This is what makes the prohibition above affordable
-rather than a cost pushed onto the view: the alternative to core answering is a
-second implementation of a consensus-critical derivation, in a language holding
-none of the wordlists, which is the silent-divergence failure the pinning
-requirements exist to prevent. One normative implementation, reachable by every
-caller, is the property that matters — not which reply a name happens to ride
-on.
+**A gloss SHALL NOT participate in the derivation**, SHALL NOT be drawn, and
+SHALL NOT change which word an index selects. It is display material attached to
+an entry, so changing a gloss is not a change to the lists and does not mint a
+new scheme version — which is the opposite of every other change to an entry, and
+is stated because the freezing requirement below would otherwise be read as
+covering it. What SHALL NOT change without a version bump is the word a gloss is
+attached to.
 
-The address SHALL remain present in every such reply. Where a name is carried it
-is added beside the address and never substituted for it, which is what the
-requirement below on what a name is not depends on.
+**A gloss SHALL be ASCII**, for the reason the ASCII screen above gives: it is
+rendered text this project composes, so keeping it ASCII keeps a bidi override
+and a homoglyph off the surface entirely rather than mitigating them.
 
-Where a name is carried, it SHALL be the one this capability's derivation
-produces for the public key that signed, rather than a value stored with the
-content or carried by any op. A name travelling as data is a name a relay could
-strip or forge.
+#### Scenario: Every noun and every place has a gloss
 
-Where a reply reports no author, it SHALL carry no name. A field that would be
-meaningless is omitted rather than sent as an empty or null value, which is the
-partial-success shape the module's reply contract forbids.
+- **WHEN** every entry of the noun list and of the place list is examined
+- **THEN** each carries a gloss
+- **AND** each gloss is non-empty
 
-#### Scenario: A feed row carries a name and an address
+#### Scenario: A gloss is returned for a word of either Greek list
 
-- **WHEN** a feed of threads is read
-- **THEN** each row carries the author's address
-- **AND** each row carries a display name
+- **WHEN** a gloss is asked for by naming an entry of the noun list, and
+  separately an entry of the place list
+- **THEN** a gloss is returned for each
 
-#### Scenario: The name on a row is the pinned name for the signing key
+#### Scenario: A word outside the two glossed lists is refused rather than guessed
 
-- **WHEN** a feed row is read for a post signed by one of the fixed keys whose
-  name is written down
-- **THEN** the row's display name equals that written-down name
+- **WHEN** a gloss is asked for by naming a word that is in neither the noun list
+  nor the place list
+- **THEN** the reply is a refusal
+- **AND** it is not an empty gloss or an invented one
 
-This is pinned to the written-down name rather than compared against the
-derivation's own output, because a row built by calling the derivation and then
-checked by calling the derivation agrees with itself whatever either does — it
-would pass on a row that named the wrong author's key.
+#### Scenario: An adjective carries no gloss
 
-#### Scenario: A row's name follows the key that signed, not the row's position
+- **WHEN** a gloss is asked for by naming an entry of the adjective list that is
+  in neither Greek list
+- **THEN** the reply is the same refusal, so the adjective list is not glossed by
+  omission of a check
 
-- **WHEN** two posts signed by two different fixed keys appear in one feed
-- **THEN** each row carries the written-down name for the key that signed that
-  post
-- **AND** exchanging the two posts' order exchanges the two names with them
+#### Scenario: Every gloss is ASCII
 
-#### Scenario: The address is not replaced
-
-- **WHEN** a feed of threads is read
-- **THEN** every row's author address is the address of the key that signed it
-- **AND** adding the name changed no other field of the row
-
-#### Scenario: Two posts by one author render one name
-
-- **WHEN** two posts signed by one key are read in a feed
-- **THEN** both rows carry the same display name
-- **AND** both carry the same author address
-
-#### Scenario: A reply carrying the author's key carries no name
-
-- **WHEN** a reply that reports an author by public key as well as by address is
-  read, and every field of the item reporting that author is enumerated
-- **THEN** it carries no display name field
-- **AND** the public key it carries is the one the derivation takes as input, so
-  the name the caller derives from it is the name for that author
-
-#### Scenario: A reply carrying only an address carries the name
-
-- **WHEN** a reply that reports an author by address alone is read
-- **THEN** it carries a display name for that author
-- **AND** the address is present beside it
-
-#### Scenario: A caller can derive the name a key-carrying reply omits
-
-- **WHEN** a reply reporting an author by public key is read, and core is asked
-  for the name of the key that reply carries
-- **THEN** a name is returned
-- **AND** it is the name a reply of the address-only kind would have carried for
-  that same author, so the two surfaces render one identity identically
-
-#### Scenario: A reply with no author carries no name field
-
-- **WHEN** a reply that reports no author is read
-- **THEN** it carries no display name field at all, rather than an empty or null
-  one
-
-#### Scenario: A name does not travel as content
-
-- **WHEN** a post arrives carrying a field that spells a display name
-- **THEN** the name rendered for its author is the one derived from the signing
-  key
-- **AND** the arriving field does not change it
+- **WHEN** every gloss of every glossed entry is examined
+- **THEN** each contains only ASCII characters
 
 ### Requirement: A name is never unique, never an identifier, and never numbered
 
@@ -791,22 +692,19 @@ author. The address is the identity.
 Collisions are rare rather than expected at the specified space, and that changes
 nothing here. The rule is not a response to the rate.
 
-#### Scenario: Two identities sharing a name are both served unchanged
+#### Scenario: Two keys deriving one name each derive it unchanged
 
-- **WHEN** two distinct identities whose keys derive the same name each author a
-  post, and the feed is read
-- **THEN** both rows carry that name exactly as derived
+- **WHEN** two distinct public keys that derive the same name are each put through
+  the derivation
+- **THEN** each yields that name exactly as derived
 - **AND** neither carries a number, a suffix or any other added distinguishing
   mark
-- **AND** the two rows carry different author addresses, which is what tells them
-  apart
 
 A colliding pair is not found by searching the key space, which is infeasible at
 the specified size. It is constructed: the name is a function of the key, so a
 pair is obtained by holding the derivation's inputs fixed at a chosen name and
-taking two distinct keys that reach it, or by exercising the feed against a
-derivation stubbed to one name. What is under test is the feed's handling of a
-collision, not the likelihood of one.
+taking two distinct keys that reach it. What is under test is that the derivation
+adds nothing when two keys meet, not the likelihood of their meeting.
 
 #### Scenario: No method accepts a name where an identity is required
 

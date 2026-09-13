@@ -2,7 +2,18 @@
 
 ## Stages
 
-- [x] spec — `spec-writer`
+- [x] spec — `spec-writer` — **Second pass: owner ruling, a scope reduction.** The
+      capability is now the derivation alone: three words from an author's public
+      key, and **the three words do not go over the wire**. The requirement that a
+      reply reporting an author carry either the name or the key is **deleted**,
+      with every scenario about what a feed row or any other reply carries. The
+      cross-capability contradiction with `thread-read` dissolves rather than being
+      narrowed — `thread-read` carries no name and now nothing does. What core
+      exposes is the **derivation**, which matters more under the ruling, not less.
+      The gloss stays, decided explicitly: it is not a name and is not derived, but
+      it is data on a wordlist entry and this is the only capability that
+      enumerates the entries. `docs/PLAN.md` and `docs/UI-BRIEF.md` need no
+      correction — obligation 6 already states the position the ruling adopts.
 - [x] design + code — `dev-writer` — The four lists are written and the crate is
       green. Sizes are exactly 8,192 / 1,024 / 1,024 and the denylist holds 199
       pairs. **All four modules are generated from text files by `tmp/gen.rs`
@@ -94,12 +105,19 @@ the QML sandbox forbids a view looking anything up, so the gloss can only come
 from core. **Scoped to noun and place only** — an English adjective needs no
 translation for an English-speaking reader. ~2,048 glosses, not 10,240.
 
-**Fetched per word, not bundled.** The spec requires core to answer a gloss
-request for any entry of either Greek list, and forbids a name-carrying reply
-from carrying glosses: the feed caps a page at 100 rows, so bundling would put
-up to 200 glosses on one reply, mostly repeated and nearly all unread. A gloss
-does not participate in the derivation, and changing one is **not** a scheme
-version bump — which is the opposite of every other change to an entry.
+**Fetched per word.** The spec requires core to answer a gloss request for any
+entry of either Greek list. Under the owner's second ruling there is no bundling
+question left to answer — no reply carries a name, so there is no reply for a
+gloss to ride beside. A gloss does not participate in the derivation, and
+changing one is **not** a scheme version bump — which is the opposite of every
+other change to an entry.
+
+**Kept in this capability, decided explicitly rather than left ambiguous.** A
+gloss is not a name and is not derived from a key, so it is not one of the three
+words the ruling scopes this to. It stays because it is data attached to a
+wordlist entry, this capability is the only place the entries are enumerated, and
+the sandbox argument that puts the derivation in core puts the gloss there for
+the same reason.
 
 **2. PLAN.md's section on what an identity is called has been SHED.** It ran
 1,039 lines (956–1994, about a fifth of the document) and now runs 135. The
@@ -213,16 +231,32 @@ spelling rule on wordlist entries.
       point of the pin. The spec now also requires pinned cases to span the lists
       — a low and a high index in each slot — rather than clustering
 
-## 5. The feed row
+## 5. The feed row — REVERSED by the owner ruling
 
-- [x] 5.1 `FeedRow::display_name` is filled from `entry.op.op.author` and the false
-      doc comment is gone. Pinned to the **written-down** name for the signing key,
-      not to the derivation's own output
-- [x] 5.2 `displayName` is in `feed_page_json` and in the key-set test; the address
-      is unchanged
-- [x] 5.3 `a_rows_name_follows_the_key_that_signed_not_the_rows_position` exchanges
-      the two posts' order, and asserts the two pinned names differ so the check is
-      not trivially satisfied by one name matching both branches
+**The name does not go over the wire, on any reply.** Tasks 5.1 to 5.3 put a
+`displayName` on the feed row; the spec no longer has a requirement they satisfy,
+and the requirement they were written against is deleted. The row goes back to
+carrying the address and nothing added. What the feed *should* carry instead —
+the public key, so a holder can derive — is filed as its own issue rather than
+done here, because it changes the wire contract's `author` field and several
+merged specs.
+
+- [x] ~~5.1 `FeedRow::display_name` is filled from `entry.op.op.author`~~ — the
+      **false doc comment correction stays**; the field does not
+- [x] ~~5.2 `displayName` is in `feed_page_json` and in the key-set test~~
+- [x] ~~5.3 `a_rows_name_follows_the_key_that_signed_not_the_rows_position`~~
+- [ ] 5.4 Remove `FeedRow::display_name`, its `feed_page_json` field and its
+      key-set entry. Keep the corrected doc comment: the false claim it replaced
+      ("the name is a pure function of this address") is what this change exists to
+      correct, and it is false under the ruling too
+- [ ] 5.5 Delete 5.1–5.3's tests, and the `feed.rs:293` drop-the-row path with
+      them — the failure it handled cannot arise once no row derives a name. This
+      closes the security, correctness and design findings against the placeholder
+      and the silent drop by removing what they were about
+- [ ] 5.6 Assert **positively** that no feed row carries a display name, so the
+      absence is pinned rather than merely current — the same shape as
+      `the_wire_reports_the_author_as_an_address_and_a_key_and_no_name` already
+      uses for the thread item
 
 ## 5b. The glosses, and deriving a name from a key
 
@@ -236,13 +270,15 @@ spelling rule on wordlist entries.
       that distinguishes a real check from one that returns empty for a miss
 - [ ] 5b.3 Glosses are ASCII, asserted over every entry, for the same bidi reason
       the word lists are
-- [ ] 5b.4 No name-carrying reply gains a gloss field. The feed row keeps exactly
-      the fields it has plus `displayName`
-- [ ] 5b.5 **A way to derive a name from a public key**, so a caller holding a
-      key-carrying reply can render an attribution without reimplementing the
-      scheme. This is what makes forbidding name-and-key-together affordable
-      rather than a cost pushed onto the view, and it is the answer to the
-      security reviewer's silent-divergence concern
+- [ ] 5b.4 No reply gains a gloss field. This is satisfied by construction once
+      5.4 lands — with no name on any reply there is nothing for a gloss to ride
+      beside — so assert it rather than arrange it
+- [ ] 5b.5 **A way to derive a name from a public key, reachable by a caller.**
+      Under the ruling this is the **only** way a name is obtained, so it is the
+      load-bearing surface of the change rather than a convenience beside a
+      returned name. The QML sandbox holds none of the wordlists; without this
+      call a second implementation of a consensus-critical derivation gets written
+      in QML, which is the silent divergence the pins exist to prevent
 
 ## 6. The identicon window
 
