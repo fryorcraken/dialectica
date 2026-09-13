@@ -103,10 +103,13 @@ applied to the other obligation.
 **So the brief was incomplete and the code is wrong against it.** The brief never
 covered the non-numeric extent claim, which is why no gate and no reviewer caught
 the gap before the apparatus column was removed from around it. Completing the
-brief is this change's job and is done here. **Changing `FeedScreen.qml` is not**:
-that is a `dev-writer` box, filed in `findings/correctness.md`, and the shape it
-should take is the one this change already demonstrated for `ON THIS ORDERING` —
-a body-level sentence outside the state branches, discharging a named obligation.
+brief is this change's job and is done here. **Changing `FeedScreen.qml` was filed
+separately and has since been done in this same change** — review raised it as a
+`dev-writer` box, and the shape it took is the one already demonstrated for
+`ON THIS ORDERING`: the pagination `RowLayout` became a `ColumnLayout` holding the
+button row and the locality sentence, so the control's existing `visible:` binding
+governs both and the extent claim cannot render without its qualifier.
+`design.md` §2 and `tasks.md` 9.1 carry the decision.
 
 ## Capabilities
 
@@ -245,7 +248,10 @@ the first place.
   is a quantity) plus the matching clause in the Feed section. That gap is why the
   `ON WHAT YOU HOLD` move narrowed without anyone noticing — see "The obligation
   the move narrowed".
-- **One `dev-writer` box remains open by design**, in `findings/correctness.md`:
-  `FeedScreen.qml` does not yet meet obligation 10, because its locality sentence
-  renders only in the empty state while the paging control renders only outside
-  it. The requirement is settled here; the layout is not this role's to pick.
+- **`FeedScreen.qml` now meets obligation 10**, which it did not when this
+  proposal was first written: its locality sentence rendered only in the empty
+  state while the paging control rendered only outside it. Review filed that gap,
+  and it was closed in this same change by folding the sentence and the button row
+  into one `ColumnLayout` under the control's existing `visible:` binding — so the
+  extent claim and its qualifier cannot render apart. `tasks.md` 9.1 to 9.5 record
+  the decision, the two rejected placements, and the spec that pins it.
