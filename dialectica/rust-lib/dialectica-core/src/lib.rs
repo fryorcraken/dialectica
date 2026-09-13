@@ -31,6 +31,7 @@ pub mod revision;
 pub mod sanitise;
 pub mod stoa;
 pub mod thread;
+pub mod transport;
 pub mod wire;
 
 // The wire surface is re-exported at the crate root because it IS the module's
