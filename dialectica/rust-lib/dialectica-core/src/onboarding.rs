@@ -522,6 +522,57 @@ mod tests {
     }
 
     #[test]
+    fn a_slates_paths_are_the_derivation_at_indices_zero_to_four() {
+        // WHAT THE WALK ACTUALLY DELIVERS, pinned to hardcoded answers.
+        //
+        // `the_slate_constants_are_pinned_to_known_answers` pins `derive_path`
+        // itself, and `every_candidate_in_a_slate_is_distinct` pins that a slate's
+        // five candidates differ from each other. Neither connects the two: nothing
+        // said which indices a slate's candidates come from. So a walk that started
+        // at index 1, or stepped by two, would offer five perfectly distinct
+        // candidates derived by the correct function — and every assertion in this
+        // file held. Measured: `for step in 1..MAX_PATH_WALK` passed 655 of 655.
+        //
+        // That is not a cosmetic reordering. The walk's index is the whole input to
+        // a candidate's path, so an off-by-one silently changes which identity every
+        // user of this build is offered and keeps, with no error anywhere — the same
+        // silent direction `the_slate_constants_are_pinned_to_known_answers` exists
+        // to guard.
+        //
+        // The expectations are the OpenSSL digests, masked by hand, NOT read back
+        // from `derive_path` — a slate compared against `derive_path` would be the
+        // implementation agreeing with itself, which is the defect family this
+        // project has shipped three times. **Do not update these to match the code.**
+        //
+        //   printf '<prefix||nonce||index>' | openssl dgst -sha256
+        //
+        // index 0: 831b85ca -> top bit set -> 031b85ca =    52,135,370
+        // index 1: e27a008a -> top bit set -> 627a008a = 1,652,162,698
+        // index 2: c24e07e6 -> top bit set -> 424e07e6 = 1,112,410,086
+        // index 3: 968e1439 -> top bit set -> 168e1439 =   378,410,041
+        // index 4: 7b51f060 -> top bit CLEAR -> unchanged = 2,068,967,520
+        //
+        // Index 4 earns its place twice: it is the one digest here whose top bit is
+        // already clear, so it also pins that the mask leaves an in-range value
+        // alone rather than clearing a bit it should not.
+        let expected = [
+            52_135_370u32,
+            1_652_162_698,
+            1_112_410_086,
+            378_410_041,
+            2_068_967_520,
+        ];
+        let slate = Slate::from_nonce(&[7u8; 32], &a_stoa(), a_nonce()).unwrap();
+        let got: Vec<u32> = slate.candidates.iter().map(|c| c.path).collect();
+        assert_eq!(
+            got,
+            expected.to_vec(),
+            "a slate's paths are no longer the derivation at indices 0..5, so the \
+             identities this build offers have silently changed"
+        );
+    }
+
+    #[test]
     fn a_nonce_reproduces_an_identical_slate() {
         // The property every other decision here rests on: `keep` recomputes the
         // slate a selection was made against rather than looking one up, so a
