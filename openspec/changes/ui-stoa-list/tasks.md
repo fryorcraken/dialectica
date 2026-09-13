@@ -243,3 +243,57 @@ or a difference where the requirement is about meaning.
   the failed and empty read states are legible as different screens, that the
   lookalike panel reads as two Stoas rather than one, and that the address is
   large enough to compare by eye are unverified by anything here.
+
+## 11. Four scenarios the spec-test review found unpinned
+
+Numbered from this file's current maximum rather than from what I last wrote —
+the rule the `## 9` collision produced, and the reason `validate --strict` had
+to be repaired once already.
+
+The spec-test reviewer ran five mutations and **four survived**, each confirmed
+rendered before being called a survivor. All four are the two defect families
+this change has now hit repeatedly: three are an absence asserted over a corpus
+that could not contain the candidate, and one is a literal blocked where the
+requirement is about what a caption claims.
+
+- [x] 11.1 R13's scenario names **the list and the creation outcome**; the only
+      test on the subject scanned the join screen. Fixed by
+      `test_neither_the_list_nor_the_creation_outcome_claims_moderation_or_identity`,
+      which drives the list into the created state and **asserts its corpus
+      before any absence** — the clause that stops it going vacuous the way its
+      sibling did. Mutation: the reviewer's caption claiming both moderation and
+      a per-Stoa identity. Caught, where all 100 previously passed.
+- [x] 11.2 R11's "it offers no field for a creator key" was unpinned — the only
+      create test asserts the button exists. Fixed by
+      `test_the_create_affordance_offers_exactly_one_field_and_it_is_not_a_key`,
+      counting editable inputs (hardcoded 2, since `<= 2` passes on zero) via a
+      new `editableInputs` helper keyed on input behaviour rather than on a name
+      or a placeholder, plus a caption assertion as a second net. Both nets
+      proved independently.
+- [x] 11.3 R1's "A second abbreviation MUST NOT be written" was knowingly
+      unpinned — the row test says so in its own comment. Fixed by
+      `test_a_row_abbreviates_through_the_one_component_and_keeps_a_middle_group`:
+      three groups (the requirement itself, which a correct reimplementation
+      would satisfy) **and** `full !== undefined` (the no-second-implementation
+      clause). Two mutations, one for each clause.
+- [x] 11.4 R6 was pinned by two literal strings. Fixed by adding two
+      conjunctions to `test_no_current_title_is_rendered_while_nothing_resolves_one`
+      — a present-tense naming word with a title word, and a moderator with a
+      naming word, each in either order. Mutation: the reviewer's extended
+      caption, which carries neither blocked literal.
+- [x] 11.5 Implementation restored after all five mutations, proved with
+      `git diff --stat -- dialectica-ui/src` returning empty rather than from
+      memory.
+
+### What this pass did not close
+
+The reviewer's fifth mutation was **caught**, so it opened no box. Their two
+`spec-writer` boxes on this file — the undeclared `stoa:` prefix behaviour and
+the missing route out of terminal states — are not mine and are left open.
+
+The residue named at 10.4 stands unchanged: a count spelled in words or in
+non-digit glyphs is still invisible to
+`test_no_digit_is_rendered_that_the_reply_did_not_supply`. The reviewer
+independently reached the same conclusion and declined to mutate it, on the
+grounds that the test already declares the limit — which is the right call, and
+is what an honestly stated gap is for.

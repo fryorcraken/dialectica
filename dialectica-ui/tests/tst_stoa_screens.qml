@@ -197,6 +197,78 @@ TestCase {
         return out.join("\n")
     }
 
+    // Every visible element a user can type into.
+    //
+    // **Keyed on behaviour, not on a name or a placeholder.** A walker looking
+    // for `objectName: "creatorKeyField"` pins one spelling of the defect; the
+    // next one is called `identityPicker`. And a walker keyed on
+    // `placeholderText` finds nothing even on the clean tree — the shipped title
+    // field is a bare `TextInput` without one, which is the trap the spec-test
+    // reviewer flagged after hitting it.
+    //
+    // These three properties are what `TextInput` and `TextEdit` expose and a
+    // `Text` does not, so the set is "things that accept typing" rather than
+    // "things that look like a field". `readOnly` is checked because a read-only
+    // TextEdit is a display element, not somewhere a user enters a key — the
+    // ClipboardSink is exactly that and must not be counted.
+    function editableInputs(item) {
+        var found = []
+        function walk(node, ancestorsVisible) {
+            if (!node)
+                return
+            var here = ancestorsVisible && node.visible !== false
+            if (here && node.echoMode !== undefined
+                     && node.cursorPosition !== undefined
+                     && node.readOnly === false)
+                found.push(node)
+            var kids = node.children
+            if (kids !== undefined)
+                for (var i = 0; i < kids.length; i++)
+                    walk(kids[i], here)
+        }
+        walk(item, true)
+        return found
+    }
+
+    // What those inputs currently hold, for a failure message that names which
+    // field is the unexpected one rather than only how many there were.
+    function describeInputs(inputs) {
+        var out = []
+        for (var i = 0; i < inputs.length; i++)
+            out.push("<" + String(inputs[i].text) + ">")
+        return out.join(" ")
+    }
+
+    // Every visible element that RENDERS TEXT derived from `address`.
+    //
+    // Keyed on the rendered text rather than on an `address` property, for two
+    // reasons. A hand-rolled elision written as a bare `Text` has no `address`
+    // property at all, and would simply not be found — an absence that reads as
+    // "nothing renders the address" rather than as the defect it is. And the
+    // `Identicon` beside every address DOES carry `address`, so a property-keyed
+    // walker returns two elements where one renders characters.
+    //
+    // So: anything whose text contains the address's first eight characters,
+    // which both the right form and every wrong one must render to be an
+    // abbreviation of it at all.
+    function addressElementsFor(item, address) {
+        var head = address.slice(0, 8)
+        var found = []
+        function walk(node, ancestorsVisible) {
+            if (!node)
+                return
+            var here = ancestorsVisible && node.visible !== false
+            if (here && typeof node.text === "string" && node.text.indexOf(head) >= 0)
+                found.push(node)
+            var kids = node.children
+            if (kids !== undefined)
+                for (var i = 0; i < kids.length; i++)
+                    walk(kids[i], here)
+        }
+        walk(item, true)
+        return found
+    }
+
     // The text of the apparatus column alone.
     //
     // **The apparatus is annotation explaining the design, not interface**, and
@@ -896,6 +968,33 @@ TestCase {
         // made in the layout instead of the copy.
         compare(spec.visibleNamed(screen, "currentTitleText").length, 0)
         compare(spec.visibleNamed(screen, "foundingTitleText").length, 1)
+
+        // **The two literals above are not the requirement**, and a reviewer
+        // proved it: extending the founding caption to `FOUNDING TITLE — FIXED
+        // FOREVER — AND THIS STOA'S PRESENT NAME, AS ITS MODERATOR HAS IT TODAY`
+        // carries neither blocked string and asserts both things R6 forbids. All
+        // 100 tests passed. Same family as the address note — the assertion read
+        // the right value and asked the wrong question.
+        //
+        // So: the *claim* is refused, however phrased. Two conjunctions, because
+        // the requirement forbids two distinct things and either alone is the
+        // harm. On a build where metadata resolution is not implemented, copy
+        // saying this title is what the Stoa is called NOW asserts that no
+        // moderator has renamed it — a fact no peer here has checked and which
+        // is false for every Stoa that has been renamed.
+        var low = shown.toLowerCase()
+
+        // (a) a present-tense naming word attached to a title.
+        verify(!/\b(present|current|now|today|at the moment|as it stands|presently)\b[^.]{0,80}\b(name|title|called|known as)\b/.test(low)
+               && !/\b(name|title|called|known as)\b[^.]{0,80}\b(present|current|now|today|at the moment|as it stands|presently)\b/.test(low),
+               "nothing may present a title as what the Stoa is called now — "
+               + "nothing on this build resolves a current title, so such a "
+               + "caption asserts no moderator has renamed it: " + shown)
+
+        // (b) a title attributed to a moderator, in any voice.
+        verify(!/\bmoderator\b[^.]{0,80}\b(name|title|called|renamed|has it|chose|chosen)\b/.test(low)
+               && !/\b(name|title|called|renamed)\b[^.]{0,80}\bmoderator\b/.test(low),
+               "nothing may attribute this title to a moderator: " + shown)
         screen.destroy()
     }
 
@@ -1733,6 +1832,186 @@ TestCase {
                && shown.indexOf("verified stoa") < 0
                && shown.indexOf("verified record") < 0,
                "nothing may present the Stoa or its record as verified outright: " + shown)
+        screen.destroy()
+    }
+
+    // ---- scanned over the screen the requirement names ---------------------
+    //
+    // R13 forbids a moderator or per-Stoa-identity claim on THESE SCREENS, and
+    // its scenario (spec.md:611) names two: the list rendering a Stoa, and the
+    // creation outcome rendering a newly created one. The only test on the
+    // subject scanned the JOIN screen — a third screen the scenario does not
+    // mention — so the requirement was pinned over the wrong corpus entirely.
+    //
+    // Measured by a reviewer: captioning the creation outcome `CREATED — THIS IS
+    // ITS ADDRESS. You moderate this Stoa, and joining it generates you an
+    // identity for it alone.` left **all 100 tests passing**, with the sentence
+    // confirmed rendered. Both claims are forbidden, and the second is the one
+    // the spec calls the only failure here that could actually harm someone.
+    //
+    // This is the corpus defect the file header documents, recurring in the
+    // requirement the header calls the most harmful to get wrong. Hence the
+    // corpus assertion below, before any absence: it is the lesson applied to
+    // its own fix.
+    function test_neither_the_list_nor_the_creation_outcome_claims_moderation_or_identity() {
+        var addr = "b02d5e77" + "a1".repeat(28)
+        var screen = makeList({
+            "list_stoas": '{"items":[{"stoa":"' + addr + '","foundingTitle":"Transport Notes"}],'
+                        + '"page":0,"hasMore":false}',
+            "create_stoa": '{"stoa":"' + addr + '","foundingTitle":"Transport Notes","policy":"open"}'
+        })
+        screen.createTitle = "Transport Notes"
+        screen.create()
+        compare(screen.createState, "created", "the creation outcome must be on screen")
+
+        var body = spec.bodyText(screen)
+
+        // **The corpus, asserted before the absences.** Both screens the
+        // scenario names must actually be rendering: the list's row, and the
+        // creation outcome. Without this the test would pass on a blank screen,
+        // which is exactly how its sibling proved nothing for so long.
+        verify(body.indexOf("CREATED") >= 0,
+               "the creation outcome must be in the scanned corpus, or the "
+               + "absences below prove nothing: " + body)
+        verify(body.indexOf("Transport Notes") >= 0,
+               "and the list's row with it: " + body)
+
+        var shown = body.toLowerCase()
+
+        // The same two predicates the join screen uses, over the screens R13's
+        // scenario actually names. Deliberately the same words: one requirement,
+        // one vocabulary, so a reviewer comparing the two reads them as the pair
+        // they are.
+        verify(!/\bidentity\b/.test(shown),
+               "neither the list nor the creation outcome may raise identity — "
+               + "one key signs in every Stoa in this release, so a per-Stoa "
+               + "identity promise offers an unlinkability property the "
+               + "software does not have: " + body)
+        verify(shown.indexOf("you moderate") < 0,
+               "nor may either claim the user moderates a Stoa — the creator key "
+               + "in the record is never re-checked against this peer's current "
+               + "signing key, so it is a question these screens cannot answer: "
+               + body)
+        // A created Stoa is the tempting case for the moderation claim, since
+        // this peer did create it. Refused in the other voice too.
+        verify(!/\byou (are|become|are now)\b[^.]{0,40}\bmoderator\b/.test(shown),
+               "including of a Stoa this peer just created: " + body)
+        screen.destroy()
+    }
+
+    // R11's central prohibition — "it offers no field for a creator key or an
+    // identity to create under" — was pinned by nothing. The only test on the
+    // create affordance asserts the button exists and is enabled, which is the
+    // scenario's FIRST clause and never its second.
+    //
+    // Measured by a reviewer: a visible `TextInput` labelled `CREATOR KEY` beside
+    // the title field left all 100 tests passing, confirmed rendered.
+    //
+    // The stake is why this is not a nicety: the creator key is fixed inside the
+    // address preimage forever, so a field for one mints a Stoa nobody can
+    // moderate at an address that cannot be un-minted.
+    function test_the_create_affordance_offers_exactly_one_field_and_it_is_not_a_key() {
+        var screen = makeList({ "list_stoas": '{"items":[],"page":0,"hasMore":false}' })
+
+        // **Counted, not searched by name.** A test looking for an element named
+        // `creatorKeyField` pins one spelling of the defect and nothing else;
+        // the next one would be called `identityPicker`. What the requirement
+        // bounds is how many things the user can type into at all.
+        //
+        // The reviewer's warning applies here and shaped this: the shipped title
+        // field is a bare `TextInput` with no `placeholderText`, so a probe keyed
+        // on that property finds nothing even on a clean tree. These three
+        // properties are what an editable text input exposes and a `Text` does
+        // not — verified by walking the shipped screen.
+        var inputs = spec.editableInputs(screen)
+
+        // Two: the create title, and the paste field. Hardcoded rather than
+        // `<= 2`, because zero is a different defect — a create affordance with
+        // no title field at all — and an inequality would pass on it.
+        compare(inputs.length, 2,
+                "exactly two things on this screen accept typing: the Stoa title "
+                + "and the paste field. A third is a field for something the "
+                + "create call does not take — and the only candidates are a "
+                + "creator key or an identity, neither of which is a parameter "
+                + "and neither of which can be: " + spec.describeInputs(inputs))
+
+        // And nothing captions a field as a key or an identity, which catches a
+        // key field built from something other than a TextInput.
+        var shown = spec.visibleText(screen).toLowerCase()
+        verify(!/\b(creator key|signing key|private key|secret key)\b/.test(shown),
+               "no field may be captioned as a key: " + shown)
+        verify(!/\b(identity|identities)\b[^.]{0,30}\b(to create|create under|choose|select|pick)\b/.test(shown),
+               "nor may an identity be offered to create under: " + shown)
+
+        // The affordance is still THERE — asserted alongside, so a screen that
+        // rendered no create row at all could not satisfy the absences above.
+        compare(spec.visibleNamed(screen, "createStoaButton").length, 1,
+                "the create affordance itself must be present")
+        screen.destroy()
+    }
+
+    // R1: "A second abbreviation MUST NOT be written." The existing row test
+    // says in its own comment that it asserts "the ADDRESS is there in some
+    // form, not that a second elision was written" — so the prose requirement
+    // was knowingly unpinned, and a reviewer confirmed it: replacing the row's
+    // `AddressLabel` with a hand-rolled `head8 + "…" + tail6` left all 100 tests
+    // passing. It passes because both the right and the wrong implementation
+    // render the head `7f3a91c4`, which is the only thing asserted — the repo's
+    // defect family exactly, a question both implementations answer alike.
+    //
+    // The requirement says why it matters: "an elision that keeps only a head
+    // and a tail is the shape vanity-address generators are built to defeat".
+    function test_a_row_abbreviates_through_the_one_component_and_keeps_a_middle_group() {
+        // Every 8-character window of this address is distinct, so "the middle
+        // group came from the middle" is a real check rather than one satisfied
+        // by a repeated byte matching an earlier offset by accident.
+        var addr = "7f3a91c4" + "0123456789abcdef" + "fedcba9876543210"
+                 + "13579bdf02468ace" + "cafebabe"
+        var screen = makeList({
+            "list_stoas": '{"items":[{"stoa":"' + addr + '","foundingTitle":"Transport Notes"}],'
+                        + '"page":0,"hasMore":false}'
+        })
+        compare(screen.rows.length, 1, "the fixture must put a row on screen")
+
+        // The row's address element, found by carrying the address rather than
+        // by a name the mutation could keep.
+        var labels = spec.addressElementsFor(screen, addr)
+        compare(labels.length, 1,
+                "exactly one element renders this row's address: "
+                + spec.visibleText(screen))
+        var label = labels[0]
+
+        // **Two assertions, and they fail for different reasons.**
+        //
+        // (a) The rendered form keeps a MIDDLE group. This is the requirement
+        //     itself rather than a proxy for it: head-8 middle-8 tail-6 renders
+        //     three groups, a head-and-tail elision renders two. A correct
+        //     reimplementation would satisfy this and a weak one cannot,
+        //     whatever component it lives in.
+        var parts = label.text.split("…")
+        compare(parts.length, 3,
+                "the abbreviation must render THREE groups separated by two "
+                + "ellipses — head, middle, tail. A head-and-tail form is the "
+                + "shape vanity generators are built to defeat. Got: " + label.text)
+        verify(parts[1].length > 0, "the middle group must not be empty")
+        // The middle group is drawn from the middle of the address, so it is
+        // neither the head nor the tail — asserted as a relation, because
+        // hardcoding the offset would re-implement AddressLabel's arithmetic
+        // here and agree with it by construction.
+        verify(addr.indexOf(parts[1]) > parts[0].length,
+               "the middle group must come from the middle of the address, "
+               + "not be a second copy of the head: " + label.text)
+
+        // (b) And it is rendered through the component that OWNS that form.
+        //     `full` is a property AddressLabel declares and a bare Text does
+        //     not, so this is the "no second implementation" clause: a screen
+        //     that grew its own elision fails here even if it happened to keep
+        //     three groups.
+        verify(label.full !== undefined,
+               "the row's address must render through AddressLabel, which owns "
+               + "the 8-8-6 form — a second implementation is how one screen "
+               + "quietly acquires the weaker one")
+        compare(label.full, false, "and a row abbreviates rather than showing it whole")
         screen.destroy()
     }
 

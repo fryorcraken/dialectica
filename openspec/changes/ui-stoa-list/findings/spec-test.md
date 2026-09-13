@@ -45,7 +45,7 @@ Four of five survived. Each survivor is a box.
 
 ---
 
-- [ ] **`tester`** — `tst_stoa_screens.qml` has no test scanning the **list or
+- [x] **`tester`** — `tst_stoa_screens.qml` has no test scanning the **list or
       the creation outcome** for a moderator or per-Stoa-identity claim, so
       Requirement "Nothing on these screens claims a per-Stoa identity, a
       membership, or a moderator" (spec.md:583) is pinned over the wrong corpus
@@ -71,7 +71,28 @@ Four of five survived. Each survivor is a box.
       already exist, plus a corpus assertion (`body.indexOf("CREATED") >= 0`) so
       it cannot go vacuous the way its sibling did.
 
-- [ ] **`tester`** — no test asserts the **absence of a creator-key or identity
+      **Fixed**, and the prescribed shape taken unchanged — including the corpus
+      clause, which is the part that matters. This is my own documented lesson
+      failing to reach my own fix: I wrote "an absence assertion is only as
+      strong as its corpus" into the file header and then left the requirement
+      the header calls the most harmful to get wrong scanning a screen its
+      scenario does not name.
+
+      New test: `test_neither_the_list_nor_the_creation_outcome_claims_moderation_or_identity`.
+      It drives the list into the **created** state, asserts the corpus carries
+      both `CREATED` and the row's title *before* any absence, then applies the
+      two existing predicates — deliberately the same words as the join
+      screen's, so one requirement reads as one vocabulary. A third clause
+      refuses the claim in the other voice (`you are/become … moderator`),
+      because a Stoa this peer just created is the tempting case for it.
+
+      **Mutation:** the reviewer's own caption, verbatim. Confirmed landed
+      (`git diff --stat` non-empty) before the run. Observed: fails on the
+      identity predicate, printing the rendered body so the planted sentence is
+      visible in the failure. The suite was otherwise green, so nothing else
+      covers this.
+
+- [x] **`tester`** — no test asserts the **absence of a creator-key or identity
       field** on the create affordance, so the central prohibition of
       "Creating a Stoa asks for a title and nothing else" (spec.md:447) is
       unpinned
@@ -94,7 +115,32 @@ Four of five survived. Each survivor is a box.
       count of input fields on the create row — pinned as a number, since
       `<= 1` would pass on zero and zero is a different defect.
 
-- [ ] **`tester`** — a hand-rolled second address abbreviation in a list row
+      **Fixed**, and the warning about the naive walker saved real time — I
+      confirmed it by probing the shipped screen first: the title field is a bare
+      `TextInput` with no `placeholderText`, exactly as reported.
+
+      New test: `test_the_create_affordance_offers_exactly_one_field_and_it_is_not_a_key`,
+      with a new `editableInputs` helper keyed on `echoMode` + `cursorPosition` +
+      `readOnly === false` — what an editable text input exposes and a `Text`
+      does not. `readOnly` is in the set deliberately: the `ClipboardSink`'s
+      hidden `TextEdit` is a display element, not somewhere a user enters a key,
+      and counting it would make the number wrong for a reason unrelated to the
+      requirement.
+
+      **Counted, not searched by name**, per the finding. A test looking for
+      `objectName: "creatorKeyField"` pins one spelling of the defect; the next
+      one is called `identityPicker`. The count is hardcoded at **2** — the
+      title and the paste field — because `<= 2` passes on zero, and zero is a
+      create affordance with no title field at all.
+
+      **Two mutations, because the test has two independent nets:**
+        - the reviewer's `TextInput` labelled `CREATOR KEY`. Observed: fails on
+          the count, 3 vs 2.
+        - a key affordance built from something that is *not* a `TextInput`, so
+          the count stays at 2. Observed: fails on the caption assertion. Run
+          separately, since the count fires first and would otherwise mask it.
+
+- [x] **`tester`** — a hand-rolled second address abbreviation in a list row
       survives, so "A second abbreviation MUST NOT be written" (spec.md:23-27)
       is pinned by nothing
       **Scenario:** the requirement is explicit about why: "an elision that keeps
@@ -118,7 +164,43 @@ Four of five survived. Each survivor is a box.
       8-8-6 form renders a middle group that a head-and-tail elision drops.
       Either fails on mutation 3 and passes on the shipped code.
 
-- [ ] **`tester`** — `test_no_current_title_is_rendered_while_nothing_resolves_one`
+      **Fixed, using both** — they are not alternatives, because each catches
+      what the other misses. New test:
+      `test_a_row_abbreviates_through_the_one_component_and_keeps_a_middle_group`.
+
+        - **The middle group is the requirement itself**, not a proxy: 8-8-6
+          renders three groups, a head-and-tail elision renders two. A correct
+          reimplementation satisfies it and a weak one cannot, whatever
+          component it lives in. Asserted as a relation — the middle group must
+          come from beyond the head's extent — rather than by hardcoding the
+          offset, which would re-implement `AddressLabel`'s arithmetic here and
+          agree with it by construction.
+        - **`full !== undefined` is the "no second implementation" clause**,
+          which the middle-group check alone cannot enforce.
+
+      The walker is keyed on **rendered text containing the address head**, not
+      on an `address` property. Two reasons, both found by probing: a hand-rolled
+      `Text` has no `address` property and would simply not be found — an absence
+      reading as "nothing renders the address" rather than as the defect — and
+      the `Identicon` beside every row *does* carry `address`, so a
+      property-keyed walker returns two elements where one renders characters.
+
+      **Two mutations:**
+        - the reviewer's `head8 + "…" + tail6`. Observed: fails on the group
+          count, 2 vs 3, printing `7f3a91c4…d4d4d4`. The pre-existing
+          `test_a_row_carries_the_address_as_well_as_the_title` passed in the
+          same run, exactly as measured.
+        - a hand-rolled elision that *does* keep three groups, so only the
+          component clause can catch it. Observed: fails on `full !== undefined`.
+
+      One fixture change fell out of the second: the original address repeated a
+      byte, so a mid-address slice collided with an earlier offset and the
+      provenance check fired for a reason unrelated to the mutation. The fixture
+      now uses an address whose every 8-character window is distinct, which makes
+      "the middle group came from the middle" a real check rather than one
+      satisfied by accident.
+
+- [x] **`tester`** — `test_no_current_title_is_rendered_while_nothing_resolves_one`
       (line 883) blocks two literal strings where the requirement is about what
       a caption **claims**, and an equivalent claim passes
       **Scenario:** the test forbids `CURRENT TITLE` and `chosen by a moderator`.
@@ -142,6 +224,26 @@ Four of five survived. Each survivor is a box.
       present-tense naming word (`present name`, `current`, `now called`,
       `today`, `as it stands`) with the title as its subject, and forbid
       attributing any title to a moderator, rather than blocking two phrasings.
+
+      **Fixed**, and the reviewer is right that this is the second family
+      recurring in a requirement my pass did not revisit. I fixed that family on
+      the address note and the paste refusals and did not sweep for it — the
+      finding is a fair hit on an incomplete job rather than on a wrong one.
+
+      The two literals are kept and two conjunctions added, in the shape used for
+      the address note: a present-tense naming word (`present|current|now|today|
+      at the moment|as it stands|presently`) together with a title word
+      (`name|title|called|known as`) within one sentence, in either order; and
+      `moderator` together with a naming or renaming word, likewise both ways
+      round. Two separate assertions rather than one, because the requirement
+      forbids two distinct things and either alone is the harm.
+
+      **Mutation:** the reviewer's caption, verbatim. Observed: fails on the
+      present-name conjunction, printing the whole screen. The positive sibling
+      `test_a_resolved_current_title_fills_that_position_when_one_exists` — which
+      deliberately renders `CURRENT TITLE — CHOSEN BY A MODERATOR` — still
+      passes, because it supplies a resolved title and is a different test; the
+      new predicates are scoped to the screen where nothing resolves one.
 
 - [ ] **`spec-writer`** — the `stoa:` display prefix is behaviour two tests pin
       and **no requirement describes**, with no `NO SPEC` marker
