@@ -17,6 +17,7 @@
 mod cursor;
 
 pub mod arrival;
+pub mod authoring;
 pub mod feed;
 pub mod identity;
 pub mod keystore;
@@ -41,6 +42,6 @@ pub mod wire;
 // private to somewhere a handler cannot reach.
 pub use wire::{
     callee_error, channel_exists_reply, error_json, get_capabilities, guarded, list_threads,
-    list_threads_from_request, panic_probe, parse_channel_id, ping, version, Request,
-    MAX_REQUEST_BYTES, REQUEST_NOT_AN_OBJECT,
+    list_threads_from_request, no_identity, panic_probe, parse_channel_id, ping, publish_post,
+    publish_reply, publish_vote, version, Request, MAX_REQUEST_BYTES, REQUEST_NOT_AN_OBJECT,
 };
