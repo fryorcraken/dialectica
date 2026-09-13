@@ -142,12 +142,38 @@ agent that calls it, which is why the instruction belongs in the brief.
 | Stage | How many | Why |
 |---|---|---|
 | `spec-writer` / `dev-writer` / `tester` | **one per piece, one in total** | they share the piece's worktree; they can share it only because they never overlap |
-| reviewers | **up to six, in parallel** | a tree each, a findings file each, no shared line |
+| reviewers | **six, in parallel** | a tree each, a findings file each, no shared line |
 | `closer` | one, never beside a writer | it decides nothing; it reports back |
 
-**Launch `code-reviewer` once per dimension** — correctness, security,
-readability, architecture — naming the dimension in the prompt. One agent asked
-to hold two dimensions becomes whichever it started with.
+A full review is **six agents of three types**, one per row of the stage block,
+each writing the findings file its row names:
+
+| Dispatch | Reads | Writes |
+|---|---|---|
+| `code-reviewer` × 4 — correctness, security, readability, architecture, the dimension named in the prompt | the code | `findings/<dimension>.md` |
+| `spec-test-reviewer` × 1 | **the spec and the tests only — never the implementation** | `findings/spec-test.md` |
+| `design-reviewer` × 1 | the code, `design.md`, PLAN.md | `findings/design-review.md` |
+
+The two single-instance reviewers are not a smaller `code-reviewer`; they ask
+questions it cannot:
+
+- **`spec-test-reviewer` is blind to the implementation on purpose.** Someone
+  who has read the code judges tests by what the code does — which is exactly
+  the defect a spec exists to catch, a test faithfully pinning the wrong
+  behaviour. Do not hand it the code to "give it context"; that removes the
+  thing that makes it work.
+- **`design-reviewer` asks whether the recorded decisions were the ones taken**,
+  and whether decisions worth recording were recorded at all. A gap it finds is
+  a missing `design.md` entry, not a code defect.
+
+**Launch `code-reviewer` once per dimension, naming the dimension.** Scanning
+for a reachable panic is a different reading of a file from scanning for a
+function doing two jobs; one agent asked to hold both becomes whichever it
+started with.
+
+A small change can take one `code-reviewer` covering all four dimensions — but
+`spec-test-reviewer` and `design-reviewer` are still their own dispatches,
+because what distinguishes them is what they are allowed to read.
 
 **Across pieces, two concurrent authors is the ceiling.** Fanning agents across
 work that is actually sequential moves dependency discovery to collision time,
