@@ -81,15 +81,29 @@ are two things to maintain, and the copy the view would otherwise carry is not
 checked against what the probe can actually establish.
 
 The view SHALL also present an affordance leading to guidance on resolving the
-blockage, labelled with the bundle's `compose.fix` string, so that the reader is
-shown the reason and a route to acting on it rather than the reason alone.
+blockage, so that the reader is shown the reason and a route to acting on it
+rather than the reason alone.
 
 The view SHALL state, **in the closed gate's own body**, that no compose box is
 shown and why — that a box the reader could type into and not submit would lose
 what they wrote — so the absence reads as a decision rather than as a missing
-feature. The bundle's `compose.apparatus` string says exactly this and SHALL be
-used, but the requirement is on the **statement being present where the gate is
+feature. The requirement is on the **statement being present where the gate is
 rendered**, not on it occupying any particular region of the screen.
+
+**These requirements are on what the interface says, not on which stored string
+it says it with, and that is deliberate.** The design bundle supplies wording for
+both (`compose.fix` and `compose.apparatus`) and remains the recommended source
+for it, but **the bundle is not part of this repository** — `copy.json` has never
+been committed to it — so a requirement to reproduce one of its strings verbatim
+cannot be checked by anything inside the repository. What such a requirement
+actually produces is a hand transcription pinned by a literal, which fails when
+someone rewords the interface and never when the interface diverges from the
+bundle: the opposite of the check it appears to be. A requirement no gate can
+enforce is worse than a looser one that can, because it reads as enforced.
+
+So conformance is judged on the statement being made and being accurate. Copying
+the bundle's wording is the easiest way to satisfy that and SHALL NOT be read as
+required by it.
 
 That distinction is the requirement rather than a note about it. An earlier
 version of this capability tied the sentence to a marginal annotation column;
@@ -205,11 +219,25 @@ the judgement in the view SHALL NOT be treated as a way to close it.
 - **THEN** the body sent to core is identical to the draft
 - **AND** no character of it was removed or replaced
 
+**The warning is information and not a gate.** It SHALL NOT itself withhold
+submission, and a draft SHALL NOT become unsubmittable by virtue of carrying such
+characters. Whether the draft is submittable for other reasons — its length above
+all — is decided elsewhere and is not affected either way by the warning.
+
 #### Scenario: An author is warned about invisible characters before submitting
 
-- **WHEN** a draft contains characters the display sanitiser would remove
+- **WHEN** a draft contains characters the display sanitiser would remove, and is
+  otherwise submittable
 - **THEN** the view displays a warning naming how many were found
 - **AND** the submit affordance remains available
+
+#### Scenario: The warning neither grants nor withholds submission
+
+- **WHEN** two drafts identical in length, one containing such characters and one
+  not, are each entered
+- **THEN** both are submittable, or neither is
+- **AND** the difference between them changes only whether the warning is
+  displayed
 
 #### Scenario: A clean draft carries no warning
 
@@ -221,7 +249,7 @@ the judgement in the view SHALL NOT be treated as a way to close it.
 - **WHEN** a draft contains a character from a minority script among confusable
   scripts, and no character the sanitiser would remove
 - **THEN** no sanitiser warning is displayed, the view not judging script mixing
-- **AND** the draft is submittable unchanged
+- **AND** the draft reaches core unchanged when it is submitted
 
 ### Requirement: The body limit is expressed in bytes and shown before submission
 
@@ -420,9 +448,16 @@ is the worst available response to it.
 The view SHALL NOT reword core's message, and SHALL NOT select what it displays
 by matching on that message's text.
 
+A refusal SHALL NOT itself withhold submission, so that a refusal expected to
+succeed later can be retried. It does not follow that every refused draft is
+submittable: where the draft is one the length gate withholds, that gate still
+withholds it, and the retry becomes available when the draft comes under the
+limit. A refusal removes no reason to submit and adds none.
+
 #### Scenario: A refusal leaves the draft intact
 
-- **WHEN** a publish is refused for any reason
+- **WHEN** a publish is refused for any reason, for a draft the length gate does
+  not withhold
 - **THEN** the draft the composer holds is the text the user entered
 - **AND** the submit affordance remains available so the submission can be
   retried

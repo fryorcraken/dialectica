@@ -211,7 +211,7 @@ Seven mutations, each applied alone, the tree restored between each and
       `composerIn` walker's precondition is pinned too: narrowing it to match
       nothing fails all five consumers rather than making them vacuous.
 
-- [ ] **`spec-writer`** — spec.md:208-212 and spec.md:234 contradict each other
+- [x] **`spec-writer`** — spec.md:208-212 and spec.md:234 contradict each other
       for a draft that is both over-length and carries invisible characters
       **Scenario:** the scenario *"An author is warned about invisible characters
       before submitting"* has the unconditioned **WHEN** *"a draft contains
@@ -227,7 +227,51 @@ Seven mutations, each applied alone, the tree restored between each and
       refusal like any other", whose scenario requires the submit affordance to
       remain available).
 
-- [ ] **`spec-writer`** — the `NO SPEC` marker at `Composer.qml:231-240` is now
+      **Fixed**, including the weaker sibling, which was the same defect and not
+      a separate one.
+
+      Both scenarios asserted availability **absolutely** while a different
+      requirement withheld it, so the contradiction was in the claim's shape
+      rather than in either requirement's substance. Patching the two scenarios
+      independently would have left the next such scenario to be written the same
+      way, so the underlying rule is now stated once in each requirement's prose:
+      **the warning is information and not a gate** — it "SHALL NOT itself
+      withhold submission", and length "is decided elsewhere and is not affected
+      either way by the warning"; and a **refusal** likewise "SHALL NOT itself
+      withhold submission", with the explicit corollary that a refused draft the
+      length gate withholds stays withheld, the retry becoming available when the
+      draft comes under the limit.
+
+      The two scenarios are now conditioned rather than absolute — "and is
+      otherwise submittable", "for a draft the length gate does not withhold" —
+      so neither speaks about a draft the other governs.
+
+      Added `"The warning neither grants nor withholds submission"`, which states
+      the relation rather than an instance: two drafts of identical length, one
+      with such characters and one without, are both submittable or neither is,
+      and the difference changes only whether the warning shows. An absolute
+      assertion cannot catch a warning that silently began gating; this one can.
+
+      A third scenario of the same shape that the box did not name — "A draft
+      mixing confusable scripts is not warned about", which ended "the draft is
+      submittable unchanged" — is fixed too: it now says the draft reaches core
+      unchanged **when it is submitted**, which was the claim actually intended
+      (that the view does not alter the text) rather than a claim about
+      availability.
+
+      **Verified against the code rather than reasoned about**: `Composer.qml:96`
+      is `submittable: root.draft.length > 0 && !root.overLimit`. Length and
+      emptiness are the only gates; `invisibleCount` is computed at :91 and never
+      reaches it, and no outcome state does either. The resolution matches what
+      ships, so **no behaviour change follows**.
+
+      One thing the code gates that the spec does not mention — an empty draft is
+      not submittable. "Otherwise submittable" now accommodates it without
+      contradiction. Pinning it would be a new requirement rather than a fix to
+      this one, so it is left; flagging it here so it is a known omission rather
+      than an unnoticed one.
+
+- [x] **`spec-writer`** — the `NO SPEC` marker at `Composer.qml:231-240` is now
       stale and should be removed, because the spec has since answered it
       **Scenario:** the marker reads *"the spec says what happens to a draft on a
       REFUSAL (it survives) and says nothing about one on a success"*. The spec
@@ -239,6 +283,30 @@ Seven mutations, each applied alone, the tree restored between each and
       **still accurate** — spec.md:178-199 names that gap deliberately — and
       should stay. **Severity: low**, but it is the marker's whole job to be
       trustworthy.
+
+      **Already fixed — verified by reading the file rather than taking the
+      report for it.** The draft-clearing marker is gone; `Composer.qml:236-239`
+      now carries a comment saying it was removed once the spec contracted the
+      rule, and giving your reason for removing it: leaving it "would have said a
+      decision was unmade when it is made, contracted and argued".
+
+      **The surviving marker at `:157` should stay, and its wording is now stale
+      in a different way — flagged for the `dev-writer`, since I may not edit
+      code.** You are right that the gap it names is real and deliberate. But the
+      marker opens *"the spec asks the warning to name how many characters the
+      sanitiser would remove OR MARK"*, and the spec has not asked that since the
+      requirement was narrowed: spec.md:178-180 now reads "**The warning is
+      scoped to removals and SHALL NOT be required to cover the sanitiser's
+      homoglyph marking**", with the reasoning the marker rehearses given as the
+      justification for the scope rather than as an apology for missing it.
+
+      So the marker describes a spec that no longer exists, and it reads as an
+      implementation falling short of its contract when it is in fact meeting a
+      contract that was written around this very argument. That is the same
+      failure this box is about — a marker saying something is unsettled when it
+      is settled — with the staleness one level in, in the premise rather than
+      the verdict. It wants rewording from "the spec asks X and this does less"
+      to "the spec scopes this to removals, and here is why", not deleting.
 
 ## What was clean
 

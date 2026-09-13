@@ -369,6 +369,33 @@ already have tests — including `tst_vote_and_gate.qml:191`, which pins that bo
 malformed rows still render, the half distinguishing this position from dropping
 the row.
 
+### The bundle's strings are a recommended source, not a contract
+
+Two requirements originally said the view SHALL use a named `copy.json` string.
+A design reviewer found that **`copy.json` has never been committed to this
+repository** — verified with `git log --all -- "**/copy.json"`, which returns
+nothing; the bundle lives in gitignored scratch.
+
+So a requirement to reproduce one of its strings verbatim **cannot be checked by
+anything inside the repository.** What it produces instead is a hand
+transcription pinned by a literal, which fails when someone rewords the interface
+and never when the interface diverges from the bundle — the opposite of the check
+it appears to be, and the "pinned literal cannot enforce distinguishability"
+trap in its purest form. A requirement no gate can enforce is worse than a looser
+one that can, because it reads as enforced.
+
+The requirements now contract **what the interface says** — the fix route is
+offered; the missing-box statement is present and accurate — with the bundle
+named as the recommended source and explicitly not as the conformance test.
+Nothing about the shipped wording changes, and the existing verbatim test stays
+valid: the spec now requires less than that test checks, so the test is one
+permissible implementation rather than the only one.
+
+The earlier copy audit, which dropped two bundle strings for promising delivery,
+is the same lesson arriving from the other direction: the bundle is a design
+reference whose claims are not all true of this system. Treating it as normative
+was the residue of not having finished that thought.
+
 ### The reply composer is contracted but not yet reachable, and the spec says so
 
 `Composer` supports both modes and tests exercise both; only the post mode is
