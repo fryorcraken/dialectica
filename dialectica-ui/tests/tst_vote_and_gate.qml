@@ -267,16 +267,40 @@ TestCase {
         screen.destroy()
     }
 
-    // Walks for a visible TextEdit. `visible` on a QML item is false when any
-    // ancestor is hidden, so this answers "can the user type into anything".
+    // Walks for something the user can actually type into. `visible` on a QML
+    // item is false when any ancestor is hidden, so this answers "can the user
+    // put text anywhere on this screen".
+    //
+    // **It probes by WRITING, not by recognising a property.** The first version
+    // of this helper identified a text input by the presence of `selectByMouse`
+    // — structural on purpose, but a proxy: it asks "is there something here
+    // with a property TextEdit happens to have", not "can the user type". A
+    // future component exposing `selectByMouse` — a selectable transcript, a
+    // code block a reader can copy from — would make a closed gate look open,
+    // and this test would report the gate working while the box was gone.
+    //
+    // So: visible, not read-only, enabled, and a write to `.text` sticks. A
+    // read-only element fails that, a plain `Text` has no `readOnly` at all, and
+    // a disabled one fails on `enabled`. The write is undone before returning.
+    //
+    // `tst_gate_affordance.qml` builds on the same probe and adds the half this
+    // one cannot reach: that the box and the submit control are wired together.
     function hasVisibleComposer(item) {
         if (item === null || item === undefined)
             return false
-        // A TextEdit has `selectByMouse`; ordinary Text does not. Checking a
-        // property rather than a type name so this does not depend on the
-        // component's internal structure.
-        if (item.selectByMouse !== undefined && item.visible)
-            return true
+        if (typeof item.text === "string"
+                && item.readOnly !== undefined
+                && item.visible === true
+                && item.readOnly === false
+                && item.enabled !== false) {
+            var before = item.text
+            var probe = "✓probe✓"
+            item.text = probe
+            var took = (item.text === probe)
+            item.text = before
+            if (took)
+                return true
+        }
         var kids = item.children
         if (kids !== undefined) {
             for (var i = 0; i < kids.length; i++) {
@@ -417,6 +441,31 @@ TestCase {
         screen.destroy()
     }
 
+    // **FLAGGED, NOT CHANGED — this is the one test that blocks removing the
+    // apparatus column, and removing that column is not this suite's call.**
+    //
+    // The owner has said the right-hand `APPARATUS` column is annotation from
+    // the design bundle explaining the design to a reader, shipped into the real
+    // QML by mistake, and that it is being taken out of the screens.
+    //
+    // This test asserts a `MarginNote` in that column is PRESENT and verbatim, so
+    // it fails the moment the column goes — measured, not predicted: hiding
+    // `ApparatusColumn` in `ScreenFrame.qml` fails exactly this test and nothing
+    // else in the eight spec files.
+    //
+    // It is left standing rather than deleted because the spec still requires it:
+    // `composer-view`'s "A closed gate shows the reason verbatim and offers a
+    // fix" says the view SHALL state that no compose box is shown and why, "using
+    // the bundle's `compose.apparatus` string". Deleting the test would quietly
+    // drop a requirement the spec still makes; changing the requirement is a spec
+    // change and belongs to the spec-writer.
+    //
+    // **What has to be decided, and by whom:** either the spec stops requiring
+    // `compose.apparatus` (spec-writer), or the sentence moves out of the
+    // apparatus column into the closed gate's own body — where it would satisfy
+    // the requirement without the column. The second reading is available: the
+    // string is a statement about the missing box, and the closed gate is where
+    // the box is missing from. Nothing here picks between them.
     function test_the_apparatus_string_is_the_bundles_and_is_verbatim() {
         // `compose.apparatus` survived the audit that dropped the two above,
         // because it is a statement about this interface's own design and true

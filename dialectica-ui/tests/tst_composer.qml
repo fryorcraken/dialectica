@@ -468,22 +468,20 @@ TestCase {
                 "a retry must be offered even here: the view has no way to "
                 + "establish that retrying cannot help")
 
-        // And the view's own words blame nobody and promise nothing permanent.
-        // Core's message is excluded from this check by construction — it is
-        // asserted separately — because these are claims the VIEW supplies.
-        var blaming = ["you did", "your mistake", "invalid", "permanently",
-                       "cannot be retried", "will never", "you cannot fix"]
-        var mine = [notHeld, notAPost]
-        for (var i = 0; i < mine.length; i++) {
-            var shown = spec.renderedText(mine[i]).toLowerCase()
-            // Core's own text is in there too; strip it so this asserts only
-            // what the view wrote.
-            shown = shown.replace(mine[i].outcomeDetail.toLowerCase(), "")
-            for (var j = 0; j < blaming.length; j++) {
-                verify(shown.indexOf(blaming[j]) < 0,
-                       "the view must not say '" + blaming[j] + "', got: " + shown)
-            }
-        }
+        // **The blaming-phrase grep that used to live here has been removed, and
+        // where it went matters.**
+        //
+        // It stripped `outcomeDetail` from the rendering and searched the
+        // remainder for seven phrases. A blaming sentence phrased differently —
+        // "you should have checked the parent first", say — contains none of the
+        // seven and passed. A list of forbidden phrasings cannot constrain a
+        // sentence nobody on the list anticipated, which is the whole failure
+        // mode: the test reported safety for wordings it had never considered.
+        //
+        // `tst_composer_claims.qml` replaces it with the inverse assertion —
+        // the view's own sentences are pinned EXACTLY, and anything else in the
+        // rendering is a failure. That constrains every reword rather than seven
+        // of them. This test keeps the half that was always the stronger one.
 
         // The two are presented the SAME way — no branch was taken on the
         // message's wording. The only difference between the two renderings
