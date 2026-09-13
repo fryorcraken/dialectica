@@ -255,7 +255,7 @@ edit is owed.
       and with a one-word string, which is a statement about that sentence and not
       about QtTest. It is left standing.
 
-- [ ] **`spec-writer`** — the change's central assertion has no gate of any
+- [x] **`spec-writer`** — the change's central assertion has no gate of any
       kind, and this is worth a line in the record rather than only in a review
       **The claim:** the apparatus column is annotation and must not appear in
       the shipped interface. `proposal.md` records, correctly, that no test
@@ -279,6 +279,62 @@ edit is owed.
       something should check it.
       **Severity: low.** Nothing is wrong today; what is missing is a decision
       on the record about a change whose subject nothing can observe.
+
+      **Decided, and the decision is the second branch — `spec-writer`.** You
+      offered "accept it deliberately" or "make it the requirement". It is the
+      requirement, and the reason is that your citation is exactly right about
+      the gap and slightly wrong about what follows from it.
+
+      **Your line number did not drift.** `:258` still lands on this box, the
+      only one of your four citations that needed no correction.
+
+      **Your CI claim reproduces, and I extended it past where you stopped.**
+      You reasoned from reading `ci.yml`. I restored the column instead:
+      both components rebuilt as a future author would write them today —
+      `DApparatusColumn` and `DMarginNote`, reading `DTheme`, `textFormat` on
+      every `Text` — registered in `qmldir`, and instantiated in `FeedScreen`
+      so the literal `APPARATUS` heading rendered. Result: `check_qml_names.py`
+      **ok (33 files, 19 qmldir entries)**, `check_qml_members.sh` **ok**,
+      layout-import and `textFormat` gates green, `run-qml-tests.sh` green over
+      **13 spec files, 0 failed** — indistinguishable from the clean tree, which
+      I re-ran afterwards to confirm. Probe reverted; `git status --porcelain`
+      empty.
+
+      **Why that changes the answer rather than confirming it.** "A test
+      asserting the absence of a deleted component is usually the wrong
+      instrument" is true, and it is why I did not write one. But the reason it
+      is the wrong instrument is sharper than *usually*: my probe was named
+      `DApparatusColumn`, so **any** name-keyed gate would have been green on a
+      tree rendering the annotation. That rules out the obvious gate; it does
+      not rule out a gate. What separates the two trees is a string a user could
+      read on screen, and this suite already sweeps rendered text — that is
+      precisely what `tst_feed_copy.qml` does for the locality sentence. The
+      instrument exists; nothing had been pointed at this.
+
+      **So the requirement is written** — `docs/UI-BRIEF.md`, the box under
+      *Non-negotiable rendering obligations*, beside the general rule this piece
+      established: no screen may render a region whose heading announces it as
+      commentary on the design, the discriminator being *who is addressed*. It
+      is stated as an assertion over rendered text, with the rename result
+      recorded so the next author does not reach for the name check. The
+      measurement and the reasoning are in `proposal.md`'s Impact list, where
+      your "no gate could see it" sentence was.
+
+      **One correction to the record, and it is the thing most likely to be
+      mistaken for coverage.** `tst_stoa_screens.qml`'s
+      `test_the_absence_assertions_scan_the_body_and_not_only_the_apparatus`
+      asserts `apparatusText(screen) === ""` with a comment saying a failure
+      means "annotation has returned to the shipped view". It reads
+      `ScreenFrame.apparatus` — the alias this change deleted — so it catches a
+      return through that property and nothing else. My probe restored the
+      column without touching the alias, and it passed. The test is right about
+      its own corpus and stays; it is not this gate, and its comment currently
+      promises more than it delivers.
+
+      **Left for a `tester`:** writing the assertion. Not taken here because the
+      `tester` has finished and pushed, and a `spec-writer` editing the suite
+      behind it is the overlap this flow exists to prevent. The box above is the
+      contract; `tst_feed_copy.qml`'s rendered-text sweep is the machinery.
 
 ## Mutations run, and what each measured
 

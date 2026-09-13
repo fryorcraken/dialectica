@@ -183,11 +183,50 @@ the first place.
   call, and losing the runner discovery that distinguishes a real failure from a
   Qt5 binary exiting 1 with no output.
 - **No test asserted the *feed's* apparatus content**, which is worth recording:
-  that column shipped and no gate could see it — and **no gate can see it come
-  back**, either. Restoring both components and their two `qmldir` lines would
-  pass every gate in the repo. That is accepted rather than overlooked: a test
-  asserting the absence of a deleted component is usually the wrong instrument,
-  and the obligations the notes carried are pinned instead.
+  that column shipped and no gate could see it — and, before this change,
+  **no gate could see it come back** either.
+
+  **That was measured rather than argued, and the measurement is the reason the
+  answer is not "accept it".** Both components were reconstructed as a future
+  author would write them today — `D`-prefixed, reading `DTheme`, a
+  `textFormat` on every `Text` — registered in `qmldir`, and instantiated in
+  `FeedScreen` so the literal heading `APPARATUS` rendered in the shipped view.
+  Against that tree: `check_qml_names.py` **ok**, `check_qml_members.sh` **ok**,
+  the layout-import and `textFormat` gates green, and `run-qml-tests.sh` green
+  across every spec file with zero failures — byte-for-byte the same result as
+  the clean tree. The suite is **indifferent** to whether the annotation is
+  there.
+
+  **So the requirement is stated where it can be checked**, in
+  `docs/UI-BRIEF.md`'s box under *Non-negotiable rendering obligations*: no
+  screen may render a region whose heading announces it as commentary on the
+  design, the discriminator being *who is addressed*.
+
+  **And the instrument is named, because the obvious one does not work.** A
+  check that a component called `ApparatusColumn` is absent is defeated by a
+  rename — the probe above was called `DApparatusColumn` and passed every
+  name-based gate in the repo. The assertion has to be over **what a screen
+  renders**: no screen's rendered text contains a heading that presents a region
+  as annotation. That is the same instrument `tst_feed_copy.qml` already uses
+  for the feed's locality sentence — a sweep over the rendered `Text` of a
+  driven screen — so the machinery exists and the spec files that would carry it
+  are already in the suite.
+
+  **One existing assertion looks like this gate and is not**, which is worth
+  recording so the next reader does not mistake it for coverage.
+  `tst_stoa_screens.qml`'s
+  `test_the_absence_assertions_scan_the_body_and_not_only_the_apparatus` asserts
+  `apparatusText(screen) === ""` and its comment says a failure means
+  "annotation has returned to the shipped view". It reads
+  `ScreenFrame.apparatus`, the alias this change deleted — so it catches a
+  return *through that property* and nothing else. The probe above restored the
+  column without touching the alias and that test passed. It is correct about
+  its own corpus and should stay; it is not the gate this box asks for.
+
+  **Writing the test is a `tester` box rather than this role's**, and it is left
+  open deliberately: the `tester` has finished and its work is pushed, and a
+  spec-writer editing the suite behind it is the overlap this flow exists to
+  prevent.
 
   **Three assertions elsewhere did have to change**, and this list no longer
   claims otherwise. The screens `main` added were tested, and two of those tests

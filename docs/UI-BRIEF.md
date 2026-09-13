@@ -779,6 +779,27 @@ invisible from inside it.
 > somebody else. Most discharge structurally: "the mark is never proof" is met by
 > printing the address beside every mark, which is obligation 6, and a note saying
 > so would add nothing a reader acts on.
+>
+> **The rule, stated so an instrument can check it: no screen may render a
+> region whose heading announces it as commentary on the design.** The test is
+> *who is addressed*. Interface text tells the reader something about their own
+> situation — what this machine holds, what a control will do, why a gate is
+> closed. Annotation tells a reader of the design why the design is as it is;
+> `APPARATUS` is the heading that announces it, and headings of that kind are
+> the observable form the prohibition takes.
+>
+> **This is asserted over what a screen renders, not over which components
+> exist**, and the difference is the whole of it. A component-name check —
+> "nothing called `ApparatusColumn` is registered" — is defeated by renaming the
+> component, which is a rename a well-meaning author performs for unrelated
+> reasons: measured on this branch, a reconstruction registered as
+> `DApparatusColumn`, instantiated in `FeedScreen` and rendering the literal
+> heading `APPARATUS` passed the name gate, the member gate, the layout-import
+> gate, the `textFormat` gate and every file in the QML suite, all green — a
+> result indistinguishable from the tree with no apparatus at all.
+> A gate keyed to the name would have been green too. What distinguishes the two
+> trees is the string a user could read on screen, so that is what the assertion
+> is over.
 
 ## What `ScreenFrame` gives you, and the one thing it asks
 

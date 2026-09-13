@@ -16,6 +16,14 @@
       row:** an *unmerged* delta on `piece/ui-composer` requires a
       `compose.apparatus` string. It is reported, not touched — a spec change is a
       `spec-writer`'s and needs the owner's call.
+      **Third pass — the change's own central assertion is now a requirement too.**
+      `findings/spec-test.md`'s last box asked whether the piece's claim (this
+      annotation is gone and does not come back) can be gated at all. Measured by
+      restoring the column rather than by reading `ci.yml`: rebuilt as a future
+      author would write it, registered and rendering, it passes every static gate
+      and every spec file. A name-keyed gate cannot help — the probe was called
+      `DApparatusColumn` — so the requirement is written over **rendered text** in
+      `docs/UI-BRIEF.md`'s obligations box. See §13.
 - [x] design + code — `dev-writer`
 - [x] tests — `tester` — **the question below is answered: yes, and by
       measurement rather than by principle.** Two spec files added,
@@ -519,3 +527,57 @@ before the commit rather than from memory.
       `dev-writer`'s. And `SanitisedText.qml:30` emits `Unable to assign QString
       to int` on malformed rows, pre-existing on `origin/main` and invisible to
       `check_bindings`, which matches `[undefined]` rather than this.
+
+## 13. The `spec-writer` box: can the central assertion be gated
+
+The last open box in `findings/spec-test.md`. The piece's central claim — this
+annotation is gone and does not come back — rested on nothing any instrument
+could check. Both answers were open; this records which was taken and on what
+evidence.
+
+- [x] 13.1 **Verify the reviewer's citation before acting on it**, since several
+      on this branch had drifted. `findings/spec-test.md:258` still lands on the
+      box, unchanged — the only one of the four citations needing no correction.
+- [x] 13.2 **Establish the gap by restoring the column rather than by reading
+      `ci.yml`.** The review reasoned from the workflow file; that identifies
+      which gates exist but not what they do to a tree carrying the defect.
+      `DApparatusColumn.qml` and `DMarginNote.qml` were rebuilt the way a future
+      author would write them today — `D`-prefixed, reading `DTheme`, a
+      `textFormat` on every `Text` — registered in `qmldir`, and instantiated in
+      `FeedScreen` so the literal heading `APPARATUS` rendered in the shipped
+      view. **Every gate green:** `check_qml_names.py` ok across 33 QML files and
+      19 qmldir entries, `check_qml_members.sh` ok, the layout-import and
+      `textFormat` gates ok, and `run-qml-tests.sh` green over 13 spec files with
+      0 failed — the same result as the clean tree, re-run afterwards to confirm.
+      Probe reverted, `git status --porcelain` read back empty.
+- [x] 13.3 **Reject the obvious gate, on the probe's evidence.** A check that no
+      component named `ApparatusColumn` is registered is defeated by a rename,
+      and the rename is one a well-meaning author makes for unrelated reasons —
+      this repo renamed eleven components for #67. The probe *was* the renamed
+      form and passed every name-keyed gate in the tree. Recorded because "assert
+      the deleted name is absent" is the first thing the next reader will reach
+      for, and it would be a gate the defect satisfies.
+- [x] 13.4 **Write the requirement over what a screen renders**, in
+      `docs/UI-BRIEF.md`'s box under *Non-negotiable rendering obligations*,
+      beside the general rule this piece established: no screen may render a
+      region whose heading announces it as commentary on the design, the
+      discriminator being *who is addressed*. Placed there rather than in a
+      capability for the reason argued in `proposal.md` — every capability
+      contracts core behaviour, and a spec file no screen author opens is how the
+      apparatus shipped in the first place.
+- [x] 13.5 **Correct one assertion that looks like this gate and is not.**
+      `tst_stoa_screens.qml`'s
+      `test_the_absence_assertions_scan_the_body_and_not_only_the_apparatus`
+      asserts `apparatusText(screen) === ""`, and its comment says a failure means
+      annotation has returned to the shipped view. It reads `ScreenFrame.apparatus`
+      — the alias this change deleted — so it catches a return through that
+      property and nothing else; the probe restored the column without touching
+      the alias and it passed. Reported rather than edited: the test is correct
+      about its own corpus, the file is the `tester`'s, and its comment
+      overstating its reach is what a reader needs told.
+- [x] 13.6 **Leave the assertion itself to a `tester`**, deliberately. The
+      `tester` has finished and pushed, and a `spec-writer` editing the suite
+      behind it is the overlap this flow exists to prevent. The contract is 13.4;
+      the machinery is `tst_feed_copy.qml`'s sweep over the rendered `Text` of a
+      driven screen, which is the instrument that already catches the feed's
+      locality mutations.
