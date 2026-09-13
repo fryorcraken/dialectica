@@ -10,9 +10,15 @@ import QtQuick.Layouts
 // written.
 //
 // This is Stage A of PLAN.md §9.1 and only its first screen: a feed over one
-// Stoa, with the empty and unreadable states that must never look alike. There
-// is no onboarding, no Stoa list, no thread view and no composer — each is a
-// later change, and each needs core methods that do not exist yet.
+// Stoa, with the empty and unreadable states that must never look alike, and —
+// behind the posting gate — a composer for a top-level post plus a vote control
+// on each row.
+//
+// There is still no onboarding, no Stoa list and no THREAD view, and the last
+// of those is why there is no reply box here: this feed lists thread heads, so a
+// reply box under a row would be a thread-view affordance on a screen that is
+// not one. `Composer.qml` supports replying and is tested in that mode; the
+// instantiation arrives with the thread screen.
 Item {
     id: root
 

@@ -3808,6 +3808,15 @@ the probe in the current render. The probe is cheap and re-determines its
 answer on every call by design; caching it across a keystore change is how a
 button outlives the key that justified it.
 
+**The view half is now contracted by the `composer-view` spec** — the gate, what
+a draft is owed on every refusal, what a success may claim, how an
+already-published op is reported, and what the vote control may show. Three of its
+decisions are worth knowing before designing around this section: a success says
+the content was **stored on this machine** and never that it was sent; a
+deduplicated publish is a third outcome distinct from both success and failure;
+and the composer does **not** sanitise what the author typed, because an op is
+signed over its bytes.
+
 #### 4. What the moderation UI needs
 
 The ceiling first, because it bounds the whole design: §6.1 — **moderation
@@ -4369,13 +4378,20 @@ identified, and the honest options are a visible per-post tally that is not a
 ranking, or a control whose effect the copy does not overstate. §7.4 settles the
 control's shape; it does not settle this.
 
-**The core half is now settled and the UI half is not.** The
-`content-authoring` spec contracts publishing a vote at exactly the honest width —
-the op is signed, appended and readable by its op id and by its target, and the
-reply carries an op id and nothing describing an effect. So core makes no claim a
-reader could be misled by. **What remains is entirely an interface obligation**:
-a vote control must not imply a ranking, and this is the open item, not a
-contracted one. It belongs on §11.1's rendering-obligations list when that lands.
+~~**The core half is now settled and the UI half is not.**~~ **Both halves are
+now contracted.** The `content-authoring` spec contracts publishing a vote at
+exactly the honest width — the op is signed, appended and readable by its op id
+and by its target, and the reply carries an op id and nothing describing an
+effect. So core makes no claim a reader could be misled by.
+
+~~What remains is entirely an interface obligation, and this is the open item.~~
+The interface obligation is now the **`composer-view`** spec's, which resolved it
+in the only direction available: of the two honest options named above, a
+per-post tally turned out **not to be one** — no call returns a score, a tally or
+the viewer's earlier votes — so the control shows the viewer their own vote back
+and **no number at all**, specifically not a zero. The reasoning, including why a
+rendered zero is worse than a rendered absence, is in that change's
+`proposal.md`.
 
 ---
 

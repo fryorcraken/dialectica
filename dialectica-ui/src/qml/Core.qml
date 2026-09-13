@@ -94,4 +94,40 @@ QtObject {
     function getCapabilities(stoa) {
         return root.call("get_capabilities", [JSON.stringify({ stoa: stoa })])
     }
+
+    // ---- publishing -----------------------------------------------------
+    //
+    // Three wrappers rather than three call sites spelling the method string,
+    // for the same reason as the two above. Each returns `call()`'s two-shape
+    // reply and interprets nothing: what counts as a success for a publish is
+    // richer than "no error" — `wasNew` distinguishes a fresh op from a
+    // deduplicated one — and that judgement belongs at the one place that
+    // renders it, not repeated in three wrappers.
+    //
+    // **The body is passed through untouched.** An op is signed over its bytes,
+    // so anything done to a draft here would publish, under the user's
+    // signature, something the user did not write. `JSON.stringify` escapes for
+    // transport and core parses that back to the same string; nothing else on
+    // this path reads the body.
+
+    function publishPost(stoa, body) {
+        return root.call("publish_post", [JSON.stringify({ stoa: stoa, body: body })])
+    }
+
+    // No `thread` argument, deliberately: core derives the thread from the
+    // parent and REFUSES a request that names one, which is what makes a reply
+    // filed under the wrong thread unrepresentable rather than checked here.
+    function publishReply(stoa, parent, body) {
+        return root.call("publish_reply",
+                         [JSON.stringify({ stoa: stoa, parent: parent, body: body })])
+    }
+
+    // `direction` is "up" or "down". It is NOT mapped from a number here —
+    // core refuses an unrecognised direction naming what was supplied, and a
+    // view translating -1/+1 into strings would be a second place the mapping
+    // could be got wrong.
+    function publishVote(stoa, target, direction) {
+        return root.call("publish_vote",
+                         [JSON.stringify({ stoa: stoa, target: target, direction: direction })])
+    }
 }

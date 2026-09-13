@@ -1,0 +1,991 @@
+import QtQuick
+import QtTest
+import "../src/qml"
+
+// What the composer is allowed to SAY, and what it must never say.
+//
+// The sibling suites pin the composer's state machine (`tst_composer.qml`) and
+// the feed's gate and vote control (`tst_vote_and_gate.qml`). This one pins the
+// half those two cannot: **the meaning of the three messages a user actually
+// reads.**
+//
+// ## Why a separate file, and what went wrong on the sibling piece
+//
+// `thread-read` asserted three refusal messages were three DIFFERENT strings. A
+// tester then reworded one to actively misinform — it told the reader to wait
+// for something that had already arrived — and **both distinguishability tests
+// stayed green**, because three misinforming strings are still three distinct
+// strings. Distinctness is a property of the string SET; a claim is a property
+// of ONE string, and no amount of the former constrains the latter.
+//
+// So every test here asserts what a particular message must and must not imply,
+// with the phrases hardcoded in this file rather than read back off the
+// component. A test that took its expectation from `PublishOutcome`'s own
+// property would be asking the implementation what it wrote and agreeing.
+//
+// ## What these tests structurally cannot see
+//
+// QtTest drives properties and signals, never pixels. So: nothing here checks
+// that a refusal is legible, that the three outcomes are visually distinct, that
+// the accent colour reads as a warning, or that any of this fits on a screen.
+// A message can satisfy every assertion below and be rendered in 4pt grey on
+// grey. That is unverified by anything in this repo.
+TestCase {
+    id: spec
+    name: "ComposerClaims"
+
+    property var savedBridge: undefined
+
+    function init() {
+        spec.savedBridge = Core.bridge
+    }
+
+    function cleanup() {
+        Core.bridge = spec.savedBridge
+    }
+
+    function bridgeFor(replies) {
+        return {
+            callModule: function (module, method, args) {
+                if (replies[method] === undefined)
+                    return '{"error":"no fake reply for ' + method + '"}'
+                return replies[method]
+            }
+        }
+    }
+
+    Component { id: composerComponent; Composer {} }
+    Component { id: feedComponent;     FeedScreen {} }
+    Component { id: outcomeComponent;  PublishOutcome {} }
+
+    // **Create AND submit before the next composer is made.**
+    //
+    // `Core` is a singleton, so assigning `Core.bridge` reassigns the ONE bridge
+    // every composer shares. Building three composers and then submitting all
+    // three runs every submission against the LAST bridge — which reports three
+    // outcomes as indistinguishable when they are not, and the symptom looks
+    // exactly like a defect in the component. `tst_composer.qml` hit this in its
+    // first draft; the shape is easy to reintroduce, so it is spelled out here
+    // too rather than cross-referenced.
+    function submitAgainst(reply, props) {
+        Core.bridge = bridgeFor({ "publish_post": reply, "publish_reply": reply })
+        var p = props === undefined ? {} : props
+        if (p.stoaAddress === undefined)
+            p.stoaAddress = "ab".repeat(32)
+        var c = composerComponent.createObject(null, p)
+        c.draft = "identical text"
+        c.submit()
+        return c
+    }
+
+    // ---- reading the rendered tree --------------------------------------
+
+    // Every visible Text in the tree, joined. Deliberately reads `text` — the
+    // property the user's eye lands on — and is paired everywhere it matters
+    // with `everyTextFormatIsPlain()` below, because `text` alone is blind to
+    // formatting: a `StyledText` element renders markup that never appears in
+    // its source string. That exact gap let a `textFormat` mutation survive on
+    // the `ui-stoa-list` piece.
+    function renderedText(item, acc) {
+        var out = acc === undefined ? "" : acc
+        if (item === null || item === undefined)
+            return out
+        if (typeof item.text === "string" && item.visible !== false)
+            out += item.text + "\n"
+        var kids = item.children
+        if (kids !== undefined) {
+            for (var i = 0; i < kids.length; i++)
+                out = spec.renderedText(kids[i], out)
+        }
+        return out
+    }
+
+    // Every element in the tree that both HOLDS text and declares a format.
+    // Returns the list of offenders, so a failure names which one drifted.
+    function nonPlainTextElements(item, acc) {
+        var out = acc === undefined ? [] : acc
+        if (item === null || item === undefined)
+            return out
+        if (typeof item.text === "string" && item.textFormat !== undefined) {
+            // Text.PlainText and TextEdit.PlainText are both 0. Anything else —
+            // RichText (1), AutoText (2), StyledText (4), MarkdownText (8) —
+            // renders its source as markup.
+            if (item.textFormat !== 0)
+                out.push(JSON.stringify(item.text) + " has textFormat " + item.textFormat)
+        }
+        var kids = item.children
+        if (kids !== undefined) {
+            for (var i = 0; i < kids.length; i++)
+                out = spec.nonPlainTextElements(kids[i], out)
+        }
+        return out
+    }
+
+    // ---- the sweep corpus, with the pinned denials taken out --------------
+    //
+    // **The instrument turning on its owner, and the general shape worth
+    // naming.** A sweep that forbids the vocabulary of delivery cannot be run
+    // over a sentence whose job is to *deny* delivery, because a denial is built
+    // from exactly that vocabulary. Needles phrased as bare participles —
+    // `"was received"`, `"received by"` — match the negation as readily as the
+    // claim, and no amount of adding needles fixes that: it is a category error,
+    // not a coverage gap.
+    //
+    // Measured before fixing, by rewording the denial to "Whether it **was
+    // received by** any other peer is not something this software can tell you
+    // yet." — semantically identical, still a denial, claiming nothing. Three
+    // sweeps reported it as claiming delivery
+    // (`test_each_outcome_implies_what_it_must_and_denies_what_it_must_not`,
+    // `test_no_composer_state_claims_delivery`, and `tst_composer.qml`'s
+    // `test_a_success_names_local_storage_and_claims_no_delivery`). The current
+    // wording escapes the list only by the accident of spelling "has received"
+    // where the list spells "has been received".
+    //
+    // So the corpus the sweeps search is the rendering **minus every sentence
+    // already pinned character-for-character elsewhere in this file**. That is
+    // not a loosening. The sweep's job is to catch a sentence nobody pinned; a
+    // pinned sentence is under a stricter check already, since
+    // `test_the_views_own_words_are_exactly_these_and_no_others` fails on any
+    // change to it at all. A delivery claim smuggled inside the denial is
+    // impossible without that test failing first.
+    //
+    // **It removes the denial rather than the whole qualifier block**, so a
+    // reassuring sentence added *beside* the denial is still swept. Removing a
+    // region would have been the easy over-correction and would have carved a
+    // hole exactly where a claim would most plausibly be added.
+    // **Lowercased BEFORE the removal, not after.** The sweep needles are
+    // lowercase and so are the strings removed here, so a filter that stripped
+    // first and folded case second would silently fail to match any denial whose
+    // rendered form is not already lowercase — leaving the over-match in place
+    // while looking fixed. That ordering bug is invisible without the guard test
+    // below, which is why the guard drives `stripPinnedDenials` on literals.
+    function sweepCorpus(item) {
+        return spec.stripPinnedDenials(spec.renderedText(item).toLowerCase())
+    }
+
+    // The removal itself, over a raw string. Separate from `sweepCorpus` so the
+    // guard test below can drive it on a literal and pin both bounds without
+    // building a component.
+    //
+    // A `replace` of a string that is not present is a no-op, so this is safe on
+    // a rendering that carries no denial — the refused outcome, the gate, an
+    // untouched composer.
+    // **Case-insensitive on both sides**, so it works whether the caller folds
+    // case before or after. `sweepCorpus` folds first (the needles are
+    // lowercase); the guard test drives this on mixed-case literals. A
+    // case-sensitive version would quietly remove nothing from a lowercased
+    // corpus and leave the over-match exactly where it was.
+    function stripPinnedDenials(text) {
+        var out = text
+        var all = [spec.deliveryDenial()]
+        for (var i = 0; i < all.length; i++) {
+            var needle = all[i].toLowerCase()
+            var scan = out.toLowerCase()
+            var at = scan.indexOf(needle)
+            while (at >= 0) {
+                out = out.slice(0, at) + out.slice(at + needle.length)
+                scan = out.toLowerCase()
+                at = scan.indexOf(needle)
+            }
+        }
+        return out
+    }
+
+    // **There is exactly one hole in the corpus, and the sentence in it is
+    // pinned.** That is the whole justification for cutting a hole at all: a
+    // claim smuggled into the removed sentence fails
+    // `test_the_views_own_words_are_exactly_these_and_no_others` before any
+    // sweep gets a chance to miss it.
+    //
+    // This file briefly carried a second exclusion, `otherKnownDenials()`, for
+    // the apparatus column's `ON PUBLISHING` note — a second delivery denial
+    // that was excluded here and pinned nowhere, because nothing asserts
+    // apparatus text is present. That is the strictly weaker arrangement: it
+    // made one sentence of the interface a place a delivery claim could be
+    // reworded into with no test failing. The note is deleted from
+    // `FeedScreen.qml` and the exclusion with it, so the corpus has one hole
+    // rather than two and both halves of the justification hold for it.
+    //
+    // **Both bounds pinned, and the reason is a defect that already happened on
+    // this branch.** The dev-writer's first apparatus walker identified the
+    // column by a `content` property that `ColumnLayout` also has, so it
+    // excluded the gate body too — and a placement test failed against correct
+    // code. The mirror-image failure is the one that matters here: a filter
+    // narrowed to nothing, or widened to everything, would make every sweep
+    // pass whatever the code did, silently.
+    //
+    // So this asserts what the filter must DROP and what it must KEEP, over
+    // literals rather than over the component, so it cannot be satisfied by the
+    // component happening to render nothing.
+    function test_the_sweep_filter_drops_only_the_pinned_denial() {
+        // Drops: the pinned denial, wherever it sits and however many times.
+        compare(spec.stripPinnedDenials(spec.deliveryDenial()), "",
+                "the pinned denial must be removed entirely")
+        compare(spec.stripPinnedDenials("A " + spec.deliveryDenial() + " B"), "A  B",
+                "and removed from the middle of a rendering")
+        compare(spec.stripPinnedDenials(
+                    spec.deliveryDenial() + "\n" + spec.deliveryDenial()), "\n",
+                "and removed every time it appears — it renders on two outcomes")
+
+        // Keeps: everything else, and specifically a real delivery claim sitting
+        // next to the denial. Without this, a filter that returned "" would pass
+        // the three assertions above and disarm every sweep in the file.
+        var beside = spec.deliveryDenial() + " Your post was sent to every peer."
+        var left = spec.stripPinnedDenials(beside)
+        verify(left.indexOf("was sent") >= 0,
+               "a claim beside the denial must survive the filter, got: " + left)
+        compare(spec.stripPinnedDenials("Your post was saved on this machine."),
+                "Your post was saved on this machine.",
+                "an unrelated sentence must pass through untouched")
+
+        // And the filter must not be so broad it eats a near-miss. A sentence
+        // that merely resembles the denial is not pinned and must still be swept.
+        var nearMiss = "Whether any other peer has received it is now known."
+        compare(spec.stripPinnedDenials(nearMiss), nearMiss,
+                "a sentence that is not the pinned denial must not be dropped")
+
+        // **Case folding, pinned in both directions.** `sweepCorpus` lowercases
+        // before stripping; a case-sensitive filter would remove nothing from
+        // that corpus and leave the over-match in place while every test still
+        // passed — the failure looks exactly like a fix.
+        compare(spec.stripPinnedDenials(spec.deliveryDenial().toLowerCase()), "",
+                "the filter must drop the denial from a lowercased corpus")
+        compare(spec.stripPinnedDenials(spec.deliveryDenial().toUpperCase()), "",
+                "and from one folded the other way")
+
+        // **The filter cuts exactly one hole, and this is what pins that.**
+        //
+        // This file used to carry a second exclusion for the apparatus column's
+        // `ON PUBLISHING` note — a delivery denial excluded here and pinned
+        // nowhere, so a claim reworded into it would have escaped every sweep.
+        // The note and the exclusion are both gone, and this asserts the
+        // exclusion cannot come back unnoticed: that sentence must now pass
+        // through the filter untouched, which means any sweep would see it.
+        //
+        // Re-adding an `otherKnownDenials()`-style entry for it fails here.
+        var wasExcluded = "nothing in this interface will tell you a post was delivered."
+        compare(spec.stripPinnedDenials(wasExcluded), wasExcluded,
+                "the apparatus note's denial is no longer excluded — it left the "
+                + "tree with the column, and re-excluding it would reopen an "
+                + "unpinned hole in the corpus")
+    }
+
+    // **The guard above is not enough, and finding that out cost a mutation.**
+    //
+    // It drives `stripPinnedDenials` on literals, which pins the FILTER. It says
+    // nothing about `sweepCorpus`, the function the sweeps actually call — so a
+    // `sweepCorpus` returning `""` passed every test in this file, all thirteen,
+    // including the guard. Measured, not reasoned: that is the disarmed-sweep
+    // failure in its purest form, and the one the dev-writer's walker lesson
+    // warned about one level up.
+    //
+    // So this pins the CORPUS the sweeps see, against a real component, at both
+    // bounds: the denial is gone from it, and everything else the composer
+    // renders is still in it. A corpus narrowed to nothing fails the second
+    // half; a corpus that never strips fails the first.
+    function test_the_sweep_corpus_keeps_everything_but_the_denial() {
+        var c = spec.submitAgainst('{"opId":"aa","wasNew":true}')
+        var swept = spec.sweepCorpus(c)
+
+        // Dropped.
+        verify(swept.indexOf(spec.deliveryDenial().toLowerCase()) < 0,
+               "the pinned denial must not be in the swept corpus, got: " + swept)
+
+        // Kept — and this is the half that catches a corpus narrowed away. Each
+        // is a sentence the composer really renders in THIS state, so a
+        // `sweepCorpus` returning "" or dropping a region fails here.
+        //
+        // Only the two outcome sentences: a `stored` publish CLEARS the draft,
+        // so the draft text and the submit affordance are both gone by the time
+        // this runs. An earlier draft of this test expected them and passed only
+        // by accident of an unrelated mutation being live — caught by running
+        // it, which is the whole argument for mutating rather than reasoning.
+        var mustSurvive = ["your post was saved on this machine.",
+                           "it is in this machine's log."]
+        for (var i = 0; i < mustSurvive.length; i++) {
+            verify(swept.indexOf(mustSurvive[i]) >= 0,
+                   "the swept corpus must still contain " + JSON.stringify(mustSurvive[i])
+                   + " — a corpus narrowed to nothing would disarm every sweep in "
+                   + "this file while passing all of them. Got: " + swept)
+        }
+
+        // And a claim planted right next to where the denial was removed is
+        // still visible to a sweep, so the removal did not carve a hole exactly
+        // where a claim would most plausibly be added.
+        verify(spec.stripPinnedDenials(
+                   (spec.deliveryDenial() + " it was delivered.").toLowerCase())
+                   .indexOf("was delivered") >= 0,
+               "a claim adjacent to the denial must survive the strip")
+
+        c.destroy()
+    }
+
+    // ---- the claims table ------------------------------------------------
+    //
+    // **This is the table the sibling piece was missing.** One row per outcome,
+    // naming what that outcome's rendering MUST imply and what it MUST NOT.
+    //
+    // The phrases are hardcoded here on purpose. They are not read off the
+    // component, not derived from it, and must not be "updated to match" a
+    // reworded message: a reword that loses one of these meanings is exactly the
+    // failure this table exists to report. If a reword is genuinely right, the
+    // spec requirement it answers to is what changes first.
+    //
+    // `mustSayOneOf` is a disjunction so that an honest reword survives; the
+    // meaning is pinned, not the sentence. `mustNotSay` is a conjunction: each
+    // is a claim no part of this system has established, and none of them has an
+    // honest phrasing.
+    function claimCases() {
+        return [
+            {
+                tag: "stored",
+                reply: '{"opId":"deadbeef","wasNew":true}',
+                // It happened, and it happened HERE. The spec requires the
+                // message to state the content was saved on this machine.
+                mustSayOneOf: [["saved on this machine", "stored on this machine",
+                                "in this machine's log"]],
+                // Every one of these is a delivery claim, and the reply core
+                // sends carries no delivery outcome at all. "will be sent" is in
+                // the list because a future-tense promise is the reassuring
+                // reword most likely to be added later: nothing schedules a
+                // send, so it is a claim about the future with nothing behind it.
+                mustNotSay: ["was sent", "has been sent", "will be sent",
+                             "is being sent", "sending",
+                             "was delivered", "has been delivered", "delivered to",
+                             "was received", "has been received",
+                             "was propagated", "propagated to",
+                             "published to the stoa", "everyone can", "others can see",
+                             "other peers can see", "peers reached", "peers received",
+                             "now visible to", "visible to everyone",
+                             "your post is below", "is now below", "appears below",
+                             "scroll", "highlighted below"]
+            },
+            {
+                tag: "existing",
+                reply: '{"opId":"deadbeef","wasNew":false}',
+                // **The hardest of the three, and the reason this table exists.**
+                //
+                // `wasNew:false` must read as neither a fresh success nor a
+                // failure. Nothing failed, so a refusal is wrong. Nothing new was
+                // written, so reporting a fresh success leaves the user watching
+                // for a post that will never appear.
+                //
+                // Two disjunctions, both required: it must say the content is
+                // ALREADY there, and it must say nothing NEW happened. A message
+                // saying only the first ("this was already published") without
+                // the second passes a distinctness test and still leaves a reader
+                // who thinks "published — good, it went out just now".
+                mustSayOneOf: [["already published", "already in this machine",
+                                "already exists"],
+                               ["nothing new was written", "nothing new was stored",
+                                "nothing was written"]],
+                // It must not read as a fresh store, and it must not read as a
+                // failure. "failed", "could not", "error" and "refused" are here
+                // because the spec explicitly forbids reporting this as an error
+                // state, and "just now"/"was saved" because reporting a fresh
+                // success is the other half of the same requirement.
+                mustNotSay: ["was saved on this machine", "just now",
+                             "failed", "could not", "was not published",
+                             "error", "refused", "rejected", "try again",
+                             "was sent", "was delivered"]
+            },
+            {
+                tag: "refused",
+                reply: '{"error":"no such op is held by this peer"}',
+                // A refusal owes the user three things: that nothing was
+                // published, that their text survived, and that a retry exists.
+                mustSayOneOf: [["was not published", "nothing was published"],
+                               ["still here", "still in the box", "what you wrote is"],
+                               ["try again", "you can retry"]],
+                // **The blame-and-permanence list, and the point of putting it in
+                // a table.** The view CANNOT tell a parent-not-yet-arrived
+                // refusal from a target-is-not-a-post one — one error shape, no
+                // discriminant. The common case is nobody's fault and is expected
+                // to succeed on a retry, so the view's own words must not blame
+                // the user or claim permanence.
+                mustNotSay: ["you did", "your mistake", "your fault",
+                             "invalid", "permanent", "permanently",
+                             "cannot be retried", "will never", "you cannot fix",
+                             "not allowed", "you are not", "incorrect",
+                             "gave up", "abandoned",
+                             // and it must not claim a success it did not have
+                             "was saved on this machine", "was published successfully"]
+            }
+        ]
+    }
+
+    // **The test the `thread-read` reword would have failed.**
+    //
+    // The sibling piece's distinctness tests stayed green against a message that
+    // actively misinformed, because distinctness cannot see meaning. This walks
+    // the table above and asserts each outcome's rendering against what it must
+    // and must not imply — one assertion per claim, so a rendering breaking three
+    // rules reports three names rather than the first.
+    function test_each_outcome_implies_what_it_must_and_denies_what_it_must_not() {
+        var cases = spec.claimCases()
+        for (var i = 0; i < cases.length; i++) {
+            var k = cases[i]
+            var c = spec.submitAgainst(k.reply)
+
+            // `mustSayOneOf` reads the FULL rendering: it asks what the user
+            // sees, and the denial is part of that.
+            var shown = spec.renderedText(c).toLowerCase()
+
+            // `mustNotSay` reads the corpus with the pinned denials removed. A
+            // needle like "was received" cannot tell a claim from its negation,
+            // and the denial is a negation built from exactly that vocabulary.
+            // See `sweepCorpus` for the measurement behind this.
+            var swept = spec.sweepCorpus(c)
+
+            for (var m = 0; m < k.mustSayOneOf.length; m++) {
+                var alts = k.mustSayOneOf[m]
+                var found = false
+                for (var a = 0; a < alts.length; a++) {
+                    if (shown.indexOf(alts[a]) >= 0) {
+                        found = true
+                        break
+                    }
+                }
+                verify(found,
+                       "the '" + k.tag + "' outcome must say one of "
+                       + JSON.stringify(alts) + ", got: " + shown)
+            }
+
+            for (var n = 0; n < k.mustNotSay.length; n++) {
+                verify(swept.indexOf(k.mustNotSay[n]) < 0,
+                       "the '" + k.tag + "' outcome must not say '"
+                       + k.mustNotSay[n] + "', got: " + swept)
+            }
+            c.destroy()
+        }
+    }
+
+    // The deduplicated outcome, asserted as the RELATION the spec states rather
+    // than as three strings being unequal.
+    //
+    // A user reaching this state has to end up in neither of the other two
+    // beliefs. Distinctness of the state string is already covered in
+    // `tst_composer.qml`; what is covered here is that the *sentence a reader
+    // reads* does not carry the other two outcomes' load-bearing claims — which
+    // is a different property, and the one a reword can silently break.
+    function test_a_deduplicated_publish_reads_as_neither_a_fresh_success_nor_a_failure() {
+        var fresh = spec.submitAgainst('{"opId":"aa","wasNew":true}')
+        var dedup = spec.submitAgainst('{"opId":"aa","wasNew":false}')
+        var bad   = spec.submitAgainst('{"error":"the keystore is unreadable"}')
+
+        var freshText = spec.renderedText(fresh).toLowerCase()
+        var dedupText = spec.renderedText(dedup).toLowerCase()
+        var badText   = spec.renderedText(bad).toLowerCase()
+
+        // The sentence each of the other two leans on, taken from each of THEM
+        // rather than hardcoded — so this half stays true through an honest
+        // reword of either — and then asserted absent from the middle one.
+        verify(freshText.indexOf("saved on this machine") >= 0,
+               "precondition: a fresh store says so, got: " + freshText)
+        verify(dedupText.indexOf("saved on this machine") < 0,
+               "a deduplicated publish must not borrow the fresh-store claim: "
+               + dedupText)
+
+        verify(badText.indexOf("was not published") >= 0,
+               "precondition: a refusal says nothing was published, got: " + badText)
+        verify(dedupText.indexOf("was not published") < 0,
+               "a deduplicated publish must not read as a failure: " + dedupText)
+
+        // And the outcome it reached is not the refused one — the spec states
+        // this separately from the message, because a view could render the
+        // right words in the wrong state (an error border round a success).
+        compare(dedup.outcome, "existing")
+        verify(dedup.outcome !== bad.outcome,
+               "an already-published op is not an error state")
+
+        fresh.destroy(); dedup.destroy(); bad.destroy()
+    }
+
+    // ---- the delivery claim, across every state the composer can be in ----
+    //
+    // The spec forbids claiming delivery after a publish. The gate's copy is
+    // forbidden the same claim BEFORE one. This checks the whole composer tree
+    // in all four of its states with one list, rather than only the success
+    // message — a reassuring sentence added to the over-limit warning or the
+    // invisibles warning would satisfy every other test in this suite.
+    //
+    // **On how strong this is, plainly: it is an absence assertion and those are
+    // the weakest kind.** It catches a forbidden phrase from a fixed list. A
+    // sentence claiming delivery in words nobody listed — "it's on its way", "in
+    // flight", "the network has it" — passes. The list is written against the
+    // phrasings a reassuring reword actually reaches for, and it is a filter, not
+    // a proof. The real defect underneath (a maximal legal post is refused by
+    // every receiving peer, silently) cannot be seen by any test in this repo,
+    // because nothing here has a second peer.
+    function deliveryClaims() {
+        return ["was sent", "has been sent", "will be sent", "is being sent",
+                "sent to", "sending",
+                // The affordance LABEL, not only the messages. "Publish", not
+                // "Send": the word is the claim, and a button reading "Send the
+                // post" promises a delivery outcome before anything is even
+                // submitted. Found by mutation — an earlier draft of this list
+                // had every past-tense form and missed the imperative, which is
+                // the phrasing a button actually uses.
+                "send the ", "send this ", "send it",
+                "was delivered", "has been delivered", "will be delivered",
+                "delivered to", "delivery",
+                "was received", "has been received", "received by",
+                "propagated", "broadcast", "transmitted",
+                "would actually send", "actually send", "comes back when",
+                "peers reached", "peers received", "reached the network",
+                "on the network", "in flight", "on its way",
+                "everyone can see", "others can see", "other peers can see",
+                "visible to everyone", "now visible to"]
+    }
+
+    function test_no_composer_state_claims_delivery() {
+        var claims = spec.deliveryClaims()
+
+        // Every state the composer can render: the four outcomes, and the two
+        // pre-submission warnings. Built as a table so a fifth state added later
+        // is one row rather than a fifth near-identical test function.
+        var states = [
+            { tag: "untouched",  build: function () { return spec.submitAgainstNothing("") } },
+            { tag: "typing",     build: function () { return spec.submitAgainstNothing("an ordinary draft") } },
+            { tag: "over-limit", build: function () { return spec.overLimitComposer() } },
+            { tag: "invisibles", build: function () { return spec.submitAgainstNothing("safe‮text") } },
+            { tag: "stored",     build: function () { return spec.submitAgainst('{"opId":"aa","wasNew":true}') } },
+            { tag: "existing",   build: function () { return spec.submitAgainst('{"opId":"aa","wasNew":false}') } },
+            { tag: "refused",    build: function () { return spec.submitAgainst('{"error":"the keystore is unreadable"}') } }
+        ]
+
+        for (var i = 0; i < states.length; i++) {
+            var c = states[i].build()
+            // The pinned denials removed — see `sweepCorpus`. Both successes
+            // carry one now, not just `stored`: the denial moved out of the
+            // `stored` arm of a ternary into its own element keyed on
+            // `!isRefusal`, so the corpus for this sweep changed with it.
+            var swept = spec.sweepCorpus(c)
+            for (var j = 0; j < claims.length; j++) {
+                verify(swept.indexOf(claims[j]) < 0,
+                       "the '" + states[i].tag + "' state must not claim '"
+                       + claims[j] + "', got: " + swept)
+            }
+            c.destroy()
+        }
+    }
+
+    function submitAgainstNothing(draft) {
+        Core.bridge = spec.bridgeFor({})
+        var c = composerComponent.createObject(null, { stoaAddress: "ab".repeat(32) })
+        c.draft = draft
+        return c
+    }
+
+    function overLimitComposer() {
+        Core.bridge = spec.bridgeFor({})
+        var c = composerComponent.createObject(null,
+            { stoaAddress: "ab".repeat(32), bodyByteLimit: 4 })
+        c.draft = "well over four bytes"
+        return c
+    }
+
+    // The same list against the closed gate, whose copy bundle contains the
+    // delivery promise verbatim: `compose.noKeystore` and `compose.badPermissions`
+    // both end "the reply box comes back when a reply would actually send". A
+    // future paste of copy.json reintroduces it, and the gate's OWN guidance text
+    // is the other place a reassuring sentence would land.
+    //
+    // **Nothing in this file asserts that APPARATUS text is rendered, and that
+    // is deliberate.** The right-hand `APPARATUS` column is annotation from the
+    // design bundle explaining the design to a reader. It was shipped into the
+    // real QML by mistake and is being removed from the screens. A test asserting
+    // one of those notes is present would then fail for the right reason and read
+    // as a regression, so every assertion here is an ABSENCE sweep: it is
+    // indifferent to whether the apparatus is on screen or gone.
+    //
+    // The cost of that, stated rather than absorbed: the sweep can only say the
+    // interface does not claim delivery, never that it positively DENIES
+    // delivery knowledge. **That positive half is not a gap here, and this is
+    // where it lives:** the denial is rendered by `PublishOutcome` beside the
+    // success it qualifies, and pinned character-for-character by
+    // `test_the_views_own_words_are_exactly_these_and_no_others`. It does not
+    // depend on the apparatus column and survives the column's removal. The
+    // column's own `ON PUBLISHING` restatement of it is deleted — it was a
+    // second copy pinned by nothing, so it could only ever weaken this file.
+    function test_no_gate_state_claims_delivery() {
+        var claims = spec.deliveryClaims()
+
+        Core.bridge = spec.bridgeFor({
+            "get_capabilities": '{"canPost":false,"reason":"No keystore found. Create one before posting."}',
+            "list_threads": '{"items":[],"page":0,"hasMore":false}'
+        })
+        var shut = feedComponent.createObject(null, {
+            stoaAddress: "ab".repeat(32), stoaGenesis: "00ff", stoaTitle: "Agora"
+        })
+        // With the guidance REVEALED: the fix text is hidden until pressed, and
+        // a delivery promise hiding behind a disclosure is still on screen for
+        // the reader who presses it. A test reading only the collapsed state
+        // would pass with the promise sitting one click away.
+        shut.showFix = true
+
+        var shownShut = spec.sweepCorpus(shut)
+        verify(shownShut.indexOf("show me how to fix it") < 0
+               || shownShut.indexOf("gate is checked again") >= 0,
+               "precondition: the guidance must actually be revealed, got: " + shownShut)
+        for (var i = 0; i < claims.length; i++) {
+            verify(shownShut.indexOf(claims[i]) < 0,
+                   "the closed gate must not claim '" + claims[i] + "', got: " + shownShut)
+        }
+        shut.destroy()
+
+        // And the OPEN gate.
+        Core.bridge = spec.bridgeFor({
+            "get_capabilities": '{"canPost":true,"identity":"aa"}',
+            "list_threads": '{"items":[],"page":0,"hasMore":false}'
+        })
+        var open = feedComponent.createObject(null, {
+            stoaAddress: "ab".repeat(32), stoaGenesis: "00ff", stoaTitle: "Agora"
+        })
+        // One exclusion mechanism for every sweep in this file, rather than an
+        // inline `replace` here and a helper elsewhere: two mechanisms drift, and
+        // the one that is not exercised by the guard test drifts unnoticed. The
+        // single excluded sentence is `deliveryDenial()`, through `sweepCorpus`.
+        var shownOpen = spec.sweepCorpus(open)
+
+        for (var j = 0; j < claims.length; j++) {
+            verify(shownOpen.indexOf(claims[j]) < 0,
+                   "the open gate must not claim '" + claims[j] + "', got: " + shownOpen)
+        }
+        open.destroy()
+    }
+
+    // ---- formatting, not just content -----------------------------------
+    //
+    // **The `ui-stoa-list` defect, applied here before it can be introduced.**
+    // On that piece a `textFormat: Text.StyledText` mutation SURVIVED, because
+    // the test asserted `Text.text` — the source string, which the format does
+    // not change — while the title rendered as live markup.
+    //
+    // Every assertion in this file reads `text`, so every one of them is blind
+    // to that mutation. This is the test that is not.
+    //
+    // It matters here specifically because a refusal renders CORE'S message
+    // verbatim, and a refusal message can carry text a peer influenced. Under
+    // StyledText or AutoText — which SNIFFS its input and switches to rich text
+    // when the string looks like markup — that message renders as markup.
+    function test_every_text_the_composer_renders_is_plain_text() {
+        var cases = spec.claimCases()
+        for (var i = 0; i < cases.length; i++) {
+            var c = spec.submitAgainst(cases[i].reply)
+            var bad = spec.nonPlainTextElements(c)
+            compare(bad.length, 0,
+                    "every Text in the '" + cases[i].tag
+                    + "' rendering must be PlainText, offenders: " + JSON.stringify(bad))
+            c.destroy()
+        }
+    }
+
+    // A refusal carrying markup renders as the characters, not as the markup.
+    // The assertion is on the format, because `text` is identical either way —
+    // asserting `c.outcomeDetail === markup` would pass under StyledText and is
+    // precisely the self-consistency check that let the sibling defect through.
+    function test_a_refusal_message_containing_markup_is_not_rendered_as_markup() {
+        var markup = "<b>no such op</b> is held by this <i>peer</i>"
+        var c = spec.submitAgainst(JSON.stringify({ error: markup }))
+
+        // The source reaches the view intact...
+        compare(c.outcomeDetail, markup, "core's message must arrive verbatim")
+        verify(spec.renderedText(c).indexOf(markup) >= 0,
+               "and must reach the screen verbatim")
+
+        // ...and the element holding it renders it as characters. This is the
+        // half that fails under a format mutation; the two above do not.
+        var bad = spec.nonPlainTextElements(c)
+        compare(bad.length, 0,
+                "core's message must render as characters, not markup: "
+                + JSON.stringify(bad))
+        c.destroy()
+    }
+
+    // ---- the view's words do not depend on core's --------------------------
+    //
+    // **Replaces the blaming-phrase grep as the primary guard.**
+    //
+    // The old test stripped `outcomeDetail` from the rendering and grepped the
+    // remainder for seven blaming phrases — so a blaming sentence phrased
+    // differently passed it. Its stronger half was the identity check, and this
+    // builds on that instead: the view's own contribution to a refusal is pinned
+    // to an exact set of sentences, and those sentences are hardcoded here.
+    //
+    // That converts "does it contain any of seven bad phrases" into "is it
+    // exactly this". Any reword — blaming, permanence-claiming, or merely
+    // careless — fails, and fixing the failure means a person reading the new
+    // sentence against the requirement rather than a grep missing it.
+    //
+    // The instruction that goes with a pinned string: **do not update these to
+    // match a changed component.** They are the requirement's text, and a change
+    // to them is a change to what the interface promises.
+    //
+    // `PublishOutcome` is driven directly rather than through a composer, so the
+    // residue check sees only the outcome block. Driven through a composer it
+    // would also sweep up the byte counter and the submit label, and the only way
+    // to exclude those would be to list them — at which point the check is a
+    // phrase list again, which is the thing being replaced.
+    //
+    // One table, three rows, rather than three near-identical functions: the
+    // failure names which outcome drifted, and a fourth outcome is one row.
+    // **The one place the required denial's text is written down**, because two
+    // consumers need the identical string and they pull in opposite directions:
+    // the pin below asserts it is PRESENT, and the delivery sweep must exclude
+    // it from the corpus it searches for delivery CLAIMS.
+    //
+    // The reason the sweep has to exclude it is the interesting half. The
+    // required sentence is a statement *about* reception, so it contains the
+    // vocabulary of reception — and needles phrased as bare participles
+    // ("received by", "was received") cannot separate a claim from its
+    // negation. The current wording escapes the list only by the accident of
+    // spelling "has received" where the list spells "has been received", which
+    // means an equivalent reword would be reported as claiming delivery.
+    //
+    // Excluding the pinned denial is right rather than a loosening: the sweep's
+    // job is to catch a sentence nobody pinned, and this sentence is pinned
+    // character-for-character by `test_the_views_own_words_are_exactly_these_and_no_others`.
+    // A claim hiding inside it is impossible without that test failing first.
+    function deliveryDenial() {
+        return "Whether any other peer has received it is not something this "
+             + "software can tell you yet."
+    }
+
+    function pinnedSentences() {
+        return [
+            {
+                tag: "stored",
+                props: { outcome: "stored", detail: "", subject: "post" },
+                sentences: [
+                    "Your post was saved on this machine.",
+                    "It is in this machine's log.",
+                    spec.deliveryDenial()
+                ]
+            },
+            {
+                tag: "existing",
+                props: { outcome: "existing", detail: "", subject: "post" },
+                sentences: [
+                    "This post was already published.",
+                    "The identical content is already in this machine's log, under "
+                        + "the same op id. Nothing new was written.",
+                    // **Added when the spec promoted the denial from a
+                    // prohibition to a positive SHALL.** `wasNew: false` is a
+                    // success — nothing failed and the component routes it to a
+                    // non-refusal outcome — and the requirement opens "When a
+                    // publish succeeds", so it covers this row too.
+                    //
+                    // This is NOT the forbidden "update the pin to match a
+                    // changed component". The order was the other way round: the
+                    // spec moved first, and the pin was stale against it.
+                    spec.deliveryDenial()
+                ]
+            },
+            {
+                tag: "refused",
+                props: { outcome: "refused",
+                         detail: "no such op is held by this peer",
+                         subject: "post" },
+                sentences: [
+                    "Your post was not published.",
+                    "Nothing was published and what you wrote is still here. "
+                        + "You can try again."
+                ]
+            }
+        ]
+    }
+
+    function test_the_views_own_words_are_exactly_these_and_no_others() {
+        var rows = spec.pinnedSentences()
+        for (var i = 0; i < rows.length; i++) {
+            var r = rows[i]
+            var c = outcomeComponent.createObject(null, r.props)
+            var shown = spec.renderedText(c)
+
+            // Core's message removed, leaving only what the VIEW supplied.
+            var mine = r.props.detail === "" ? shown : shown.replace(r.props.detail, "")
+
+            // Hardcoded. Not read from the component, not derived from it.
+            var residue = mine
+            for (var j = 0; j < r.sentences.length; j++) {
+                verify(mine.indexOf(r.sentences[j]) >= 0,
+                       "the '" + r.tag + "' outcome must supply the sentence "
+                       + JSON.stringify(r.sentences[j]) + ", got: " + mine)
+                residue = residue.replace(r.sentences[j], "")
+            }
+
+            // And nothing else of the view's own. Everything left after those
+            // sentences and core's message are removed must be whitespace — so a
+            // sentence added later fails here rather than needing to trip a
+            // phrase list that does not know about it.
+            residue = residue.replace(/\s/g, "")
+            compare(residue, "",
+                    "the '" + r.tag + "' outcome must supply no sentence beyond "
+                    + "those pinned above; if one was added deliberately, the "
+                    + "requirement it answers to is what changes first. Residue: "
+                    + JSON.stringify(residue))
+            c.destroy()
+        }
+    }
+
+    // ---- totality: an outcome the component does not know ---------------
+    //
+    // **The claims table has one row per KNOWN outcome and therefore cannot
+    // report an unknown one.** That is the measuring-instrument question asked
+    // of the table itself: a reviewer added a fourth outcome to
+    // `Composer.applyReply` and the whole suite passed, while the screen
+    // rendered a refusal headline on top of both success sentences.
+    //
+    // These values are deliberately the near-misses rather than nonsense: a
+    // case difference, a trailing space, and a plausible fourth state someone
+    // might add. Each is what a real drift looks like — nobody writes
+    // `outcome = "xyzzy"`, they write `"Refused"` or add `"deferred"` and
+    // forget one branch.
+    function unknownOutcomes() {
+        return ["deferred", "Refused", "REFUSED", "refused ", "stored ",
+                "queued", "pending", "unknown"]
+    }
+
+    function test_an_outcome_the_component_does_not_know_renders_as_a_refusal() {
+        var unknown = spec.unknownOutcomes()
+        var refusalRow = null
+        var rows = spec.pinnedSentences()
+        for (var r = 0; r < rows.length; r++) {
+            if (rows[r].tag === "refused")
+                refusalRow = rows[r]
+        }
+        verify(refusalRow !== null, "the pinned table must carry a refusal row")
+
+        for (var i = 0; i < unknown.length; i++) {
+            var c = outcomeComponent.createObject(null, {
+                outcome: unknown[i],
+                detail: "core said no",
+                subject: "post"
+            })
+            var shown = spec.renderedText(c)
+
+            // It renders the refusal, exactly — the same sentences pinned for
+            // the known refusal, no more and no less.
+            for (var j = 0; j < refusalRow.sentences.length; j++) {
+                verify(shown.indexOf(refusalRow.sentences[j]) >= 0,
+                       "outcome " + JSON.stringify(unknown[i]) + " must render the "
+                       + "refusal sentence " + JSON.stringify(refusalRow.sentences[j])
+                       + ", got: " + shown)
+            }
+
+            // **And nothing from EITHER success.** This is the assertion that
+            // fails against the two-partition version: the refusal headline and
+            // both success sentences rendered together, which claims a post was
+            // not published and is in this machine's log at the same time.
+            verify(shown.indexOf("It is in this machine's log") < 0,
+                   "outcome " + JSON.stringify(unknown[i]) + " must not claim "
+                   + "local storage while announcing a failure, got: " + shown)
+            verify(shown.indexOf("was saved on this machine") < 0,
+                   "outcome " + JSON.stringify(unknown[i]) + " must not claim a "
+                   + "save, got: " + shown)
+            verify(shown.indexOf("was already published") < 0,
+                   "outcome " + JSON.stringify(unknown[i]) + " must not claim a "
+                   + "prior publish, got: " + shown)
+            verify(shown.indexOf(spec.deliveryDenial()) < 0,
+                   "outcome " + JSON.stringify(unknown[i]) + " must not carry the "
+                   + "success denial, which is owed to a success and not to a "
+                   + "refusal, got: " + shown)
+
+            // **And core's message survives.** The old shape suppressed it,
+            // because `detail`'s element was gated on the other partition — so
+            // an unknown outcome swallowed the one thing that would explain it.
+            verify(shown.indexOf("core said no") >= 0,
+                   "outcome " + JSON.stringify(unknown[i]) + " must still show "
+                   + "core's message, got: " + shown)
+            c.destroy()
+        }
+    }
+
+    function test_an_unknown_outcome_is_indistinguishable_from_a_refusal() {
+        // The property stated directly rather than inferred from the sweep
+        // above: an unknown outcome must reach the SAME rendering as the known
+        // refusal, so there is no fourth thing on screen for a reader to
+        // interpret. Anything else would be a state the copy was never written
+        // for.
+        var known = outcomeComponent.createObject(null,
+            { outcome: "refused", detail: "core said no", subject: "post" })
+        var unknown = outcomeComponent.createObject(null,
+            { outcome: "deferred", detail: "core said no", subject: "post" })
+
+        compare(spec.renderedText(unknown), spec.renderedText(known),
+                "an outcome the component does not know must render exactly as "
+                + "a refusal does")
+        known.destroy(); unknown.destroy()
+    }
+
+    // The empty outcome renders nothing at all. Without this, a component that
+    // showed its refusal wording before anything was submitted would pass every
+    // other test in this file: they all submit first.
+    function test_an_unsubmitted_composer_displays_no_outcome_at_all() {
+        var c = outcomeComponent.createObject(null,
+            { outcome: "", detail: "", subject: "post" })
+        compare(spec.renderedText(c).replace(/\s/g, ""), "",
+                "nothing submitted yet must render no outcome text")
+        c.destroy()
+    }
+
+    // The two reply refusals the view cannot tell apart, presented identically.
+    // This is the sibling of the test above and it is kept because it pins a
+    // different property: not WHAT the view says, but that it says the SAME
+    // thing regardless of which prose core sent — i.e. no branch on wording.
+    //
+    // The two messages are chosen to be maximally different in the ways a
+    // branch would key on: different length, different words, one naming an op
+    // type and one not. Two near-identical messages would let a branch that
+    // matched on a shared substring survive.
+    function test_the_two_reply_refusals_are_rendered_identically_but_for_cores_text() {
+        var notHeld = spec.submitAgainst(
+            '{"error":"no such op is held by this peer"}',
+            { kind: "reply", parentOp: "cc".repeat(32) })
+        var notAPost = spec.submitAgainst(
+            JSON.stringify({ error: "the op held for that id is a Vote, not a Post, "
+                                  + "and a reply may only name a post as its parent" }),
+            { kind: "reply", parentOp: "cc".repeat(32) })
+
+        verify(notHeld.outcomeDetail !== notAPost.outcomeDetail,
+               "precondition: the two refusals must differ, or this proves nothing")
+
+        var a = spec.renderedText(notHeld).replace(notHeld.outcomeDetail, "CORE")
+        var b = spec.renderedText(notAPost).replace(notAPost.outcomeDetail, "CORE")
+        compare(a, b, "the view must not branch on core's message text")
+
+        // Both keep the draft and a retry — the reading safe under either, since
+        // the view has no discriminant to tell which refusal it received.
+        compare(notHeld.draft, "identical text")
+        compare(notAPost.draft, "identical text")
+        compare(notHeld.submittable, true)
+        compare(notAPost.submittable, true)
+
+        notHeld.destroy(); notAPost.destroy()
+    }
+
+    // A reply and a post refused by the identical core message differ ONLY in
+    // the view's own word for the affordance. Nothing else about a refusal may
+    // depend on which was submitted — the spec states every rule about refusals
+    // once, for both.
+    function test_a_post_and_a_reply_refusal_differ_only_in_the_subject_word() {
+        var message = '{"error":"the keystore is unreadable"}'
+        var post  = spec.submitAgainst(message)
+        var reply = spec.submitAgainst(message, { kind: "reply", parentOp: "cc".repeat(32) })
+
+        var a = spec.renderedText(post).replace(/post/g, "SUBJECT")
+        var b = spec.renderedText(reply).replace(/reply/g, "SUBJECT")
+        compare(a, b,
+                "a post and a reply refusal must be presented the same way")
+
+        // The precondition that makes the substitution meaningful: the two
+        // renderings genuinely differ before it. Without this the compare above
+        // would pass against a component that ignored `kind` entirely.
+        verify(spec.renderedText(post) !== spec.renderedText(reply),
+               "precondition: the two must differ before the substitution, or "
+               + "this test passes for the wrong reason")
+
+        post.destroy(); reply.destroy()
+    }
+}

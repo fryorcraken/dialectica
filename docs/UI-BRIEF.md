@@ -466,6 +466,30 @@ to owner-only and replace the key".
 **Never gate on a build flag, and never show a compose box that cannot be
 submitted** — it loses whatever the user typed. Surface the reason instead.
 
+**What the composer does with the author's own text, which is the opposite of
+what obligation 1 below asks for peer text.** It publishes it **exactly as
+typed** — an op is signed over its bytes, so a composer that stripped a
+zero-width space would publish, under the author's signature, something they did
+not write. What it does instead is *warn*: a draft containing characters the
+sanitiser would remove gets a count before submission, because the author is the
+only person who can still change the text, and the warning does not block
+sending.
+
+**That warning covers removals only, and the shortfall is deliberate.** The
+sanitiser's other half — marking letters from a minority script mixed into
+another, the Cyrillic-"а"-in-a-Latin-word case — is a judgement over the whole
+string, and no core method sanitises draft text, so the interface would have to
+reimplement that judgement and would silently disagree with the core about real
+drafts. **So a draft mixing confusable scripts is not warned about.** A reader
+seeing that post later still gets the marked chips, because display-side
+sanitising is unaffected; it is only the author who is not told in advance.
+
+**Also cleared up: what happens to the draft after sending.** It is cleared only
+when something new was actually stored. On a refusal, and on a repeat publish
+that stored nothing new, the box keeps what was typed — in the first case it is
+the only copy, and in the second the author most likely meant to write something
+different and needs the text to edit.
+
 **What a successful submit does and does not establish: see rendering obligation
 7.** It means the post is in this device's log, and nothing more — not that it
 was sent, and not that anyone else can see it. That governs the wording on the
@@ -474,6 +498,26 @@ before designing the submit flow rather than after.
 
 **Two obligations the core creates and cannot meet itself.** Both come from the
 publish contract (`content-authoring`), and neither is visible from a screenshot.
+**Both are now contracted on the interface side by the `composer-view` spec**,
+along with a third the section below did not name: a successful publish says the
+content was saved on this machine and must never say it was sent, delivered or
+seen by anyone. Publishing and delivering are two events at two times, and
+delivery is not wired at all yet — so "sent" is a claim nothing checks.
+
+**And that third one is not satisfied by saying nothing — the interface must say
+the opposite, in so many words.** Alongside a successful publish it has to state
+that whether any other peer received the content is not something it can report.
+Declining to mention delivery is not enough: someone watching a forum post submit
+successfully assumes it went somewhere, so silence leaves the wrong belief in
+place while breaking no rule.
+
+Why this one is worth a positive obligation when the others are prohibitions: the
+author genuinely cannot find out. Delivery is not wired, the publish reply says
+nothing about it by design, and a long-but-legal post is stored locally and then
+silently refused by every peer that receives it — so **a censored post and a
+delivered one look identical from the author's side.** The interface is the only
+place that can be admitted, and an obligation phrased only as "do not claim
+delivery" is discharged by a screen that says nothing at all.
 
 **1. Posting the same thing twice posts once, and the interface has to handle
 it.** A post is named by a hash of its own content, and nothing in that content
@@ -486,9 +530,18 @@ someone deliberately writing "agreed" twice in one thread, which is ordinary
 forum behaviour. The core reports which of the two happened; **the interface
 decides what the person sees**, and the failing design is the one that reports
 success and shows nothing new, because the person concludes their post vanished.
-Reasonable answers: say so plainly ("you already posted this"), or scroll to and
-highlight the existing post. **Do not** show a spinner that resolves to nothing,
-and do not show a generic error — nothing failed.
+**Do not** show a spinner that resolves to nothing, and do not show a generic
+error — nothing failed.
+
+**What `composer-view` settled, and why the other option was dropped.** This
+section used to offer two reasonable answers: say so plainly, or scroll to and
+highlight the existing post. Only the first ships. The second is a behaviour the
+view can perform for a post and **not** for a reply — the feed lists thread
+heads, so a deduplicated reply has no row to scroll to — and requiring a
+behaviour half the surface cannot meet is how a spec acquires a requirement no
+test can satisfy honestly. So the spec requires a third message, distinguishable
+from both the fresh-success and the refusal messages, saying the content was
+already published.
 
 This is a known gap with a known fix (a timestamp or nonce inside the post), and
 it is deliberately not fixed yet. Design for the behaviour that exists.
@@ -500,10 +553,20 @@ forum where two people legitimately hold different sets of posts — the reply i
 **refused**.
 
 So a reply control can fail for a reason that is nobody's fault and is temporary.
-The message must say that: the post being replied to has not arrived here yet, try
-again shortly. It must not read as an error the person caused, and **the draft must
-survive** — this is the one refusal that is expected to succeed on a retry, so
-discarding what they typed is the worst possible response to it.
+It must not read as an error the person caused, and **the draft must survive** —
+this is the one refusal that is expected to succeed on a retry, so discarding what
+they typed is the worst possible response to it.
+
+**A correction to what this section used to ask for.** It previously said the
+message must name this specific cause. The interface cannot: the core does
+distinguish "parent not held" from "target is not a post", but only as different
+prose inside one error shape that carries no machine-readable discriminant, and a
+caller must not branch on message wording. So the `composer-view` spec requires
+the reading that is safe either way — **every** reply refusal shows the core's
+message, keeps the draft, and keeps a retry available. Offering a retry that
+cannot succeed costs one press; withholding one from the common, temporary case
+would be much worse. Naming the cause needs a discriminant on the wire, which is a
+core change nobody has made.
 
 ### Moderation
 
@@ -591,6 +654,25 @@ Removal is moderation, which is a different and binding thing.
 **5. Distinguish an empty result from a failed one.**
 A storage failure must never render as an empty feed. An empty feed and "we
 could not read the store" look identical and mean opposite things.
+
+**5b. One broken row breaks one row — it neither disappears nor takes the feed
+with it.**
+Posts arrive from peers, so a row can be missing a field the interface wanted.
+**Show the row and switch off just the control that cannot work** — a vote
+control with nothing to vote on goes dead rather than clickable-but-inert.
+
+The two tempting alternatives are both worse, and for reasons specific to this
+project rather than general tidiness. **Hiding the row** silently removes
+somebody's post, which is the exact outcome a censorship-resistant forum exists
+to prevent — and the reader cannot tell a hidden row from a row nobody wrote.
+**Failing the whole read** hands every peer a free way to blank your feed by
+sending one malformed row, and lands you back in obligation 5, showing "could not
+read the store" when the store read fine.
+
+So design rows to tolerate a missing piece: a control that can be present but
+dead, and a row that still reads properly without it. This is not hypothetical —
+two rows missing their identifier were found sharing a single vote slot, so a
+vote on one marked the other.
 
 **6. A generated name is never unique and never an identifier — the address is.**
 This is obligation 2b again, now applying to the thing **every post is
@@ -802,12 +884,26 @@ it.** The design is:
 >   Design for its absence. If a later change exposes one, it is safe only
 >   presented as a count, never as a position, a rank, or a reason this post
 >   appears where it does.
+>
+>   **The absence is now contracted, in the `composer-view` spec**: the control
+>   displays no score at all, and specifically not a zero. A zero is a number, so
+>   it reads as a tally — the claim that this post is known to have received no
+>   votes, which is false as soon as any peer has voted. Note this cuts against
+>   the reference mockup, which shows a score of 12 beside every post; that part
+>   of the mockup is not implementable and is not a target.
+>
+>   The same spec limits the "safe" half above: the viewer's own vote is shown
+>   back **only for votes this view published while it is open**, because no call
+>   returns earlier ones. A control that appeared to remember across a reload
+>   would be the interface inventing state.
 > - **Not safe:** anything suggesting the vote moved the post, changed what anyone
 >   else sees, or fed an ordering. It did not. No "trending", no arrow, no implied
 >   effect on the feed.
 >
-> **Do not let this leak into the ordering controls either.** The feed offers two
-> orderings and neither is vote-based; a "top" or "best" option must not appear.
+> **Do not let this leak into the ordering controls either.** No ordering the
+> feed offers is vote-based; a "top" or "best" option must not appear. (The core
+> computes exactly one ordering today, so the feed shows one — built from a model
+> so that a second can arrive without the layout changing.)
 
 **One axis — up and down, as on Reddit — plus two things that are not votes.**
 
