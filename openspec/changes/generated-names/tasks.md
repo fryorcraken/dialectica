@@ -10,7 +10,15 @@
       auditable: a reviewer can trace an entry to a census file and a census file
       to its source. Yields were 17,349 / 1,892 / 1,131, so every list was cut
       down rather than padded up.
-- [ ] tests — `tester`
+- [x] tests — `tester` — Two gaps closed, both measured: a wordlist **reordering**
+      was invisible (exchanging places 100/101 left the suite green), and the
+      **collision** case had no fixture. The colliding pair was found by searching
+      the shipped 2³³ scheme rather than stubbing the derivation. Mutations run
+      with predictions stated first; one prediction was wrong and is recorded.
+      **Three gaps stay open and are reviewer-visible rather than fixed**:
+      `feed.rs:292` cites a test that does not exist, and neither the scheme
+      version nor a wordlist removal can be varied without widening the API for
+      tests alone.
 - [ ] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
 - [ ] review: readability — `code-reviewer`
