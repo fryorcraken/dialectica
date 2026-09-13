@@ -20,7 +20,17 @@
       version nor a wordlist removal can be varied without widening the API for
       tests alone.
 - [x] review: correctness — `code-reviewer`
-- [ ] review: security — `code-reviewer`
+- [x] review: security — `code-reviewer` — Seven findings in
+      `findings/security.md`, two high. A **fabricated placeholder name** replacing
+      the `feed.rs:293` failure path ships on the wire with **946 of 946** tests
+      green — the spec forbids a placeholder in terms, and the comment citing a
+      test that covers it names a test that does not exist. And
+      `tst_identicon.qml:103` is **one-sided**: it hardcodes the displayed byte
+      groups instead of deriving them from `Theme.headChars`, so setting
+      `headChars: 24` puts the mark's whole `4..11` window back on screen with all
+      **42** QML tests green. Clean: the ASCII bidi screen (verified per entry —
+      every non-ASCII byte in the wordlists is an em-dash in a doc comment), the
+      malformed-key path, and the multiply-not-add domain-separation argument.
 - [x] review: readability — `code-reviewer` — 15 findings in
       `findings/readability.md`. The module's numeric claims are the problem: the
       denylist arithmetic in `names.rs:358-362` is the paragraph PLAN.md struck
