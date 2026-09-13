@@ -23,7 +23,11 @@
 - [x] review: readability — `code-reviewer`
 - [x] review: architecture — `code-reviewer`
 - [x] review: spec-test — `spec-test-reviewer`
-- [ ] review: design — `design-reviewer`
+- [x] review: design — `design-reviewer` — `findings/design.md`. Seven boxes, all
+      `dev-writer`'s. The big one: **rendering obligation 10 is not in `design.md`
+      at all**. Also a `UI-BRIEF.md` contract whose `fillHeight` promise is false
+      in the only call shape the tree has — measured, `filler.h=0` in a
+      `Main.qml`-shaped harness. §4's six figures all reproduce; PLAN.md is clean.
 - [ ] findings all ticked, `findings/` deleted — `closer`
 - [ ] `openspec validate --strict`, then `archive` — `closer`
 
