@@ -1,0 +1,219 @@
+# Stoa list and join screens — design
+
+## Context
+
+See `proposal.md` — *Why*, and its three divergences from the mockup. The spec
+(`specs/stoa-navigation-view/spec.md`) is the contract. What follows is only what
+the code had to decide that neither document settles.
+
+Three constraints shape every decision below.
+
+1. **`list_stoas` returns `{"stoa","foundingTitle"}` and no genesis record.** The
+   core retains the record; the listing does not hand it back. Verified against
+   `dialectica/rust-lib/src/lib.rs:170`. So the view holds a record only for a
+   Stoa it *just created or just joined in this session*, and the spec's share
+   and feed-navigation requirements are conditional on that.
+2. **Basecamp gives the QML engine no network and no filesystem.** Any clipboard
+   has to come out of the Qt modules CI installs — `qt6-declarative` plus the
+   `qtquick`, `qtquick-controls`, `qtquick-layouts`, `qtquick-templates` and
+   `qtquick-window` QML modules (`.github/workflows/ci.yml`). `Qt.labs.platform`
+   is not among them.
+3. **The wire carries bare hex, with no `stoa:` prefix.** `join_stoa` takes
+   `{"stoa":"<hex>","genesis":"<hex>"}`; a grep of `dialectica/` finds no `stoa:`
+   literal anywhere. The mockup's `stoa:b02d…` is a display flourish, which
+   `AddressLabel.abbreviate` already tolerates via its optional `^([a-z]+:)?`
+   group. Nothing the view sends back to core may carry one.
+
+## Goals / Non-Goals
+
+**Goals**
+
+- Two screens — the list and the join preview — plus a create affordance and a
+  share affordance, all reachable from `Main.qml` without a developer-supplied
+  Stoa.
+- A share format whose output is exactly the input the paste field accepts, so
+  the round trip is one decision rather than two that can drift apart.
+- Three read states on the list that cannot collapse into each other, in the
+  shape `FeedScreen` established.
+
+**Non-Goals**
+
+- **No core change.** The `list_stoas` gap is reported, not closed.
+- **No second address abbreviation.** `AddressLabel` owns the 8-8-6 form.
+- **No current title, no per-row held-post count, no `nothing received yet`.**
+  Divergences 2 and 3 in the proposal; the positions are left empty rather than
+  filled with something else.
+- **No restyle.** Every visual decision comes from `Theme` and the existing
+  components.
+
+## Decisions
+
+### D1 — The shareable thing is a JSON object, one line, bare hex inside
+
+`{"stoa":"<full hex>","genesis":"<full hex>"}`, serialised with
+`JSON.stringify`, is what the share produces and what the paste field parses.
+
+**Why JSON.** It is the one encoding both ends of this round trip already have —
+`JSON.parse` in the view, `serde` in the core — so neither end needs a parser
+written for this feature, and a parser written for this feature is a parser that
+can disagree with itself between the share and the paste. It is also
+*self-describing*: a user who pastes half of it gets a parse failure naming the
+input as malformed, where a positional format (`stoa:<hex>:<hex>`) would silently
+accept a truncated second field as a short record and push the failure into the
+core, which would then refuse it as a verification mismatch — the one failure the
+spec requires be kept distinct from a malformed paste.
+
+**Alternatives considered.**
+
+- *A `stoa:` URI carrying both halves* — `stoa:<addr>?g=<genesis>`. Prettier, and
+  it matches the mockup's visual. Rejected: it needs percent-decoding and a query
+  parser in QML, both hand-written, for no property JSON does not already have.
+  The mockup's `stoa:` string is a *display* abbreviation of the address alone,
+  which the spec forbids as a shareable thing regardless, so matching it visually
+  buys nothing.
+- *The address and record as two separate paste fields.* Rejected: it doubles the
+  number of ways a user can pair the wrong halves, and the whole point of the
+  share is that one copy produces one paste.
+- *Base64 of the JSON.* Rejected: it makes the address unreadable in the shared
+  string, and the address is the half a recipient is supposed to be able to eye
+  against the one they were expecting.
+
+**The prefix is stripped on the way in, never added on the way out.**
+`parseReference` accepts an address written `stoa:ab12…` because a user may have
+copied one from a screen, and normalises it to bare hex before it reaches core.
+`shareTextFor` writes bare hex. A prefix that survived into `join_stoa` would be
+a hash that verifies against nothing, surfacing as a verification failure —
+exactly the wrong one of the spec's three outcomes.
+
+### D2 — The clipboard is a hidden `TextEdit`, selected and copied
+
+`ClipboardSink.qml`: a zero-size, non-visible `TextEdit` with a `copy(text)`
+function that assigns `text`, `selectAll()`, `copy()`, `deselect()`.
+
+**Why.** `TextEdit` is in QtQuick proper, which the view already imports, so this
+adds no module to the flake and nothing to CI's install list. `Qt.labs.platform`'s
+`Clipboard`, and a `QClipboard` exposed from C++, both would; and the view has no
+C++ at all, which is the property the core/UI split exists to preserve.
+
+**Why a component rather than a call at each site.** `AddressLabel.copyRequested()`
+has three receivers in this change (a list row, the preview's address, the create
+outcome's address) and the spec requires what is copied to differ from what is
+*displayed* at two of them — the display is abbreviated, the copy is the full
+share string. Putting the sink in one file means the "what actually gets copied"
+decision is made once, and `copyText` stays the one property that answers it.
+
+**What this cannot do, and the test says so.** Under `QT_QPA_PLATFORM=offscreen`
+there is no system clipboard, so a test can assert *what the sink was asked to
+copy* and not *what landed on the clipboard*. The sink therefore records its last
+argument in a `lastCopied` property — which is the testable half — and the
+unverifiable half is named in the test file rather than asserted around.
+
+### D3 — Each screen holds one `readState` string, as `FeedScreen` does
+
+`"unread" | "ok" | "failed"` on the list; `"empty" | "previewing" | "malformed" |
+"joining" | "joined" | "failed"` on the join screen.
+
+The spec's hardest requirement on the list is that three outcomes never render
+alike, and the reason `FeedScreen` uses one variable rather than several booleans
+is that no combination of flags can then put two states on screen at once. The
+same argument applies here and applies harder on the join screen, where the
+states include *two different failures that must look different from each other*.
+A `malformed` that is a separate string from `failed` cannot accidentally render
+through the same branch; a pair of `isMalformed`/`hasError` booleans can, and the
+bug would be a missing `&& !`.
+
+`joined` is a state and not a boolean for the same reason: the spec forbids
+rendering success on the strength of having dispatched the call, and a state
+machine that can only be in `joining` *or* `joined` makes that a property of the
+shape rather than of remembering to guard.
+
+### D4 — The "same title, different Stoa" comparison is over titles only
+
+`JoinScreen.lookalikes` filters the held listing for `foundingTitle === preview's
+foundingTitle && stoa !== preview's stoa`.
+
+The spec calls this out as the one place consulting the held listing is required,
+distinguished from the inference it forbids elsewhere. The code keeps them apart
+structurally: `lookalikes` is computed from titles and never read after a join,
+and the join outcome is computed from `reply.ok` alone and never reads
+`lookalikes` or `heldStoas`. Two functions, neither of which can reach the other's
+input.
+
+The address-equal case (`stoa === preview's stoa`) is excluded by the filter, so
+"a Stoa you already hold at the same address" renders no lookalike panel — which
+is the spec's second scenario, satisfied by construction rather than by a guard.
+
+### D5 — `Main.qml` becomes a two-state navigator, and its Stoa properties go
+
+`Main.qml` keeps one property, `chosen`, which is either `null` or
+`{stoa, foundingTitle, genesis}`. The feed renders only when it is non-null.
+
+The spec forbids a defaulted Stoa property on the top-level view, and the reason
+is that a second source for the value is a build that can ship a hardcoded Stoa.
+Removing the properties is what makes that unrepresentable — there is no longer a
+place to put one. `chosen.genesis` is `""` where the view holds no record, which
+`FeedScreen` already passes through to core unchanged; the core then refuses it
+and the feed renders that refusal, which the spec names as the honest outcome.
+
+**`Main.qml` does not gain a `StackView`.** It is in QtQuick.Controls, which CI
+does install — but a two-screen navigator whose entire state is "is `chosen`
+null" needs no stack, no history and no transitions, and a `StackView` would add
+a push/pop lifecycle that can disagree with `chosen` about which screen is up.
+One `visible:` binding each cannot.
+
+### D6 — `Core.qml` gains exactly three wrappers, and `perPage` is the view's
+
+`createStoa(title)`, `joinStoa(stoa, genesis)`, `listStoas(page, perPage)`.
+
+The spec requires each core method be named in one place, which is what these
+are for. `listStoas` takes `perPage` from the caller rather than defaulting it
+inside the wrapper, because the wrapper's job is to name a method and shape a
+request — choosing how many rows a screen shows is the screen's job, and a
+default buried in the wrapper is a number two screens would silently share.
+
+## Risks / Trade-offs
+
+- **The share affordance is absent on most rows, and that looks like a bug.** →
+  It is the spec's required rendering, and the absence is explained in the
+  apparatus column rather than left to be inferred. The real fix is the core
+  piece that widens the listing item; until then the honest rendering is the one
+  that cannot produce an unjoinable string.
+- **A user who joins a Stoa can share it, and after a restart cannot.** → Same
+  cause, same fix. Noted here because it is the shape in which the gap will be
+  reported as a defect, and the report will be correct.
+- **`TextEdit.copy()` is untestable headless.** → The sink records what it was
+  asked to copy, the tests assert on that, and the test file says plainly which
+  half is unverified. The alternative — asserting nothing and claiming coverage —
+  is the defect family this repo has shipped before.
+- **The lookalike panel reads the listing, which may have failed.** → When the
+  listing failed, `heldStoas` is `[]` and no lookalike is shown. That is a
+  false *negative* (a real lookalike goes unmentioned), never a false positive,
+  and it is the safe direction: a panel that appeared because of a failed read
+  would be asserting a comparison nothing performed.
+
+## Behaviour the spec did not decide
+
+Four choices below are observable behaviour the spec is silent on. Each has a
+`NO SPEC:`-marked test in `tst_stoa_screens.qml`, and each is a decision the
+spec-writer should evaluate rather than a settled one.
+
+- **The reference encoding.** The spec requires both halves and names no format.
+  D1 chose JSON. This is the one with a compatibility cost: a user who has
+  already copied a reference holds a string in this shape, so changing it later
+  strands them. It is worth being in the spec.
+- **An empty paste field.** Refused as not-a-reference, rather than the button
+  quietly doing nothing. The spec's three paste outcomes do not cover it.
+- **A creation success carrying no `stoa` field.** Treated as a failure. The
+  spec requires the returned address be rendered and does not say what happens
+  when there is none to render.
+- **A reference half that is present but is not a string** — a number, an object,
+  an array. Refused rather than coerced, so nothing but a string reaches the
+  core. The spec says the view's check is limited to "whether the input carries
+  the two halves at all", which does not settle what "carries" means for a
+  non-string.
+
+## Open Questions
+
+None. The one genuinely open item — whether `list_stoas` gains the retained
+genesis record — is a core change this piece does not make, and the spec is
+written to be correct either way.

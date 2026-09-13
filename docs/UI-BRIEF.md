@@ -274,6 +274,17 @@ this is *not* the global-count rule: a count of what this machine holds would be
 perfectly legitimate to show, and this one is simply not computed. Design the row
 so such a number could appear later without the layout changing.
 
+**A row can be shared from only when this copy holds the Stoa's genesis record,
+and today that means only Stoas created or joined in the current session.** The
+core retains every joined Stoa's record, but the membership listing hands back
+the address and the founding title and not the record — so after a restart the
+view holds no record for any row. Since a shareable thing has to carry both
+halves (see *Joining a Stoa*), **the share affordance is absent on most rows, and
+its absence is the correct rendering rather than an error**. Do not design a
+disabled or explanatory share control in that position; design a row where the
+control is simply not there, and expect it to become universal when the listing
+starts returning the retained record.
+
 ### Joining a Stoa — a security surface, not a form
 
 An address is a copyable string that is **self-authenticating**: pasting it is
@@ -286,6 +297,25 @@ over; it cannot reconstruct one. So the join flow needs the **founding record**
 as well as the address — which means whatever a user shares, and whatever an
 in-post affordance carries, has to carry both. A screen designed around a
 single pasteable field cannot work.
+
+**The shape chosen is a one-line JSON object**, `{"stoa":"…","genesis":"…"}`,
+bare hex in both fields and the address unabbreviated. It is what the copy
+affordance produces and what the paste field accepts — one decision seen from
+each end, so the two cannot drift. Two consequences for a designer: the pasted
+string is long and opaque and should be given a field that wraps rather than one
+sized for a short token, and the field's label must not say "address", which asks
+for input whose successful-looking form can never join anything. The `stoa:`
+display prefix stays a *reading* aid; it is stripped from anything sent onward
+and never added to anything produced.
+
+**What the address proves must be stated exactly.** The bundle's join note says
+pasting the address "is itself the verification", and that overreaches. The check
+is a hash comparison between the two inputs the *user* supplied and consults no
+registry, peer, or network — so it proves the record shown is the one that
+address names, and nothing about whether that address is the one the user was
+meant to receive. A reader who pasted a hostile address and saw a verified record
+has verified the attacker's record against the attacker's address, successfully.
+Copy on this screen must say what remains unverified, not only what was checked.
 
 **Requirements:**
 - Show what is being joined **before** joining it.
