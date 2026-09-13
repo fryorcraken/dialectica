@@ -3920,9 +3920,10 @@ That principle earned its place immediately, and against the template itself:
   correct build. Check by shape, and re-derive every inherited assertion
   against what this repo actually produces.
 - **Assert against a derived number, never a literal.** The test-count check
-  compares cargo's result against the count of `#[test]` attributes in `src/`,
-  so it cannot rot. A hardcoded floor that nothing keeps in sync is itself a
-  false green.
+  compares cargo's result against a count of `#[test]` attributes derived from
+  the Rust tree, so it cannot rot. A hardcoded floor that nothing keeps in sync
+  is itself a false green. Read the workflow for which paths it walks — naming
+  them here would be a second copy that drifts.
 
 **Deliberately not built, each with its re-entry condition** (recorded at the
 foot of the workflow too):

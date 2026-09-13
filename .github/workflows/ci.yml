@@ -717,7 +717,7 @@ jobs:
               declared += len(re.findall(r"^\s*#\[test\]\s*$", p.read_text(), re.M))
 
           print(f"tests reported by cargo: {ran}")
-          print(f"#[test] functions in src: {declared}")
+          print(f"#[test] functions in the Rust tree ({tree}): {declared}")
 
           if declared == 0:
               print("::error::no #[test] functions found — has the suite been deleted, "

@@ -14,10 +14,29 @@
 //!   and revising are exercised only as fixtures — an op is constructed and
 //!   appended directly, never through whatever public write entry point arrives.
 //!   When one does, it gets its own section (see the sectioning rule below).
-//! - **`list_stoas` and membership.** Neither exists yet:
-//!   `grep -rn "list_stoas\|listStoas"` over `dialectica/` finds only a line in
-//!   `docs/PLAN.md`'s JSON contract. There is nothing here to cover because there
-//!   is nothing there to call.
+//! - **`list_stoas` and membership.** Neither exists yet: `grep -rn
+//!   "list_stoas\|listStoas"` over `dialectica/` **and** `docs/` finds nothing in
+//!   `dialectica/` but these comment lines, and in `docs/` only the `listStoas()`
+//!   line of PLAN.md's JSON contract. There is nothing here to cover because
+//!   there is nothing there to call. Both roots matter: run it over `dialectica/`
+//!   alone and it returns only itself, which confirms nothing.
+//! - **The capability probe, and this one is a GAP rather than an absence.**
+//!   `wire::get_capabilities` and `wire::capability_for` are public in the same
+//!   module as the `list_threads_from_request` this file reaches, and
+//!   `openspec/specs/posting-capability/spec.md:53` requires six reasons be
+//!   distinguishable, three of which are properties of a FILE: "the keystore's
+//!   permissions are too open", "the keystore's directory is writable by others",
+//!   and "the keystore is unreadable or malformed". A file property is precisely
+//!   what an in-memory per-change suite cannot pin and what this target exists
+//!   for, and the fixture cost here is near zero — this file already writes
+//!   keystores to disk and already sets `0o700`.
+//!
+//!   So this line is an admission, not a boundary. It is the same shape as the
+//!   gap that put `list_threads_from_request` in scope: public on `main`, with
+//!   this file stopping one layer below it and saying nothing. Naming it is the
+//!   minimum; closing it needs whoever owns `posting-capability` to say which of
+//!   the six states a test may construct, since three of them are reached by
+//!   making a file hostile rather than by calling anything.
 //! - **Transport.** Nothing here sends or receives an op over the network. An
 //!   arriving op is modelled as an `append` with an `Arrival`, which is what the
 //!   store sees, and not as anything a peer did.
@@ -106,12 +125,15 @@
 //! reverted. A test nobody has watched fail is a test nobody knows works.
 //!
 //! Each row carries the failure PREDICTED before the run and the failure
-//! OBSERVED after it. The four notes under the table are the rows where the two
-//! disagreed, and three of those disagreements changed this file — a prediction
+//! OBSERVED after it. The notes below the table are the rows where the two
+//! disagreed, and most of those disagreements changed this file — a prediction
 //! that misses is the most useful row in the table, because it is the one that
-//! found something.
+//! found something. No count is quoted here: the notes are numbered where they
+//! stand, and a tally in this paragraph would go stale the next time one is
+//! added, which it has.
 //!
-//! **EACH ROW WAS MEASURED ONCE, on the date its group says, and nothing keeps
+//! **EACH ROW WAS MEASURED ONCE, at the commit its group heading names, and
+//! nothing keeps
 //! this table true.** There is no gate that re-runs these and no test that fails
 //! when a row goes stale — and most rows name implementation symbols
 //! (`feed::list_threads`, `moderation::resolve`, `Moderators::contains`,
@@ -120,14 +142,14 @@
 //!
 //! **What a later author owes it:** if you add a test here, you owe this table
 //! nothing — a row is a record of one experiment, not a coverage claim, and
-//! re-running eleven mutations to add one test would be a tax nobody would pay.
+//! re-running the whole table to add one test would be a tax nobody would pay.
 //! What you owe is the same discipline for YOUR test: mutate the thing it
 //! claims to cover, predict the failure, watch it, and add a row saying so. If
 //! you RENAME or MOVE something the table names, fix the row in that commit or
 //! delete it; a row pointing at a symbol that no longer exists is worse than no
 //! row, because it reads as though somebody checked.
 //!
-//! ## Measured at commit `9bb2bc1`, when this file was added — eleven mutations
+//! ## Measured at commit `9bb2bc1`, when this file was added
 //!
 //! | Mutation | Predicted | Observed |
 //! |---|---|---|
@@ -143,7 +165,7 @@
 //! | the paging slice loses one row per page | paging test alone | that test alone, first page 2 rows vs 3 — as predicted |
 //! | `SqliteOpLog::open` ignores its path and opens `:memory:` | ~15 of 20 | **18 of 20** — see note 3; re-run at 24 tests in the group below |
 //!
-//! ## Measured when the review findings were addressed — seven mutations
+//! ## Measured at commit `1342aa9`, the readability and architecture findings
 //!
 //! The suite was 20 tests when the group above was run and is 24 now, so the
 //! `:memory:` row was re-run rather than left to read as though it still
@@ -159,7 +181,7 @@
 //! | `SqliteOpLog::open` refuses a path that does not exist | the created-file test **at its own assertion**, plus fixture-guard deaths | 18 of 24: the split test died on `a missing store is created, not refused`, the other 17 at the `dir.store()` helper — see note 4 |
 //! | `SqliteOpLog::open` ignores its path and opens `:memory:` (re-run) | more than 18, since two wire tests reach a file | **20 of 24**, then **21 of 24** — see note 4 |
 //!
-//! ## Measured when the correctness and security findings were addressed — four mutations
+//! ## Measured at commit `f007bcd`, the correctness and security findings
 //!
 //! The suite is 25 tests now: `two_temp_dirs_with_the_same_tag_get_different_unguessable_names`
 //! was added with the fixture change the security findings asked for.
@@ -171,13 +193,48 @@
 //! | `moderation::resolve` checks authority AFTER taking the leading `Moderate` (re-run, to test whether the OTHER guard has the same defect) | the forged-hide test at its `resolve` assertion, NOT at its `iter_target` guard | exactly that, 1 of 24, `Unmoderated` vs `Hidden(..)` at the named claim. **The two guards are not the same case**, so this was one line and not a pattern |
 //! | `TempDir::new`'s `set_permissions(0o700)` replaced by `0o777` | the two keystore tests, at `Keystore::open` and NOT at `Keystore::create` | exactly that: `DirectoryWritableByOthers { mode: 511 }` at the two `open`/reopen call sites. `0o777` rather than deleting the call, because a deleted call inherits whatever the temp directory's default mode is — which could already be private and would make the probe pass for the wrong reason |
 //!
-//! Two mutations of the new fixture test itself, since a test pinning a fixture
-//! property is the easiest kind to write unfalsifiably:
+//! Two more at the same commit `f007bcd`, mutating the new fixture test itself,
+//! since a test pinning a fixture property is the easiest kind to write
+//! unfalsifiably:
 //!
 //! | Mutation | Predicted | Observed |
 //! |---|---|---|
 //! | `TempDir::new` reverted to `dialectica-e2e-<pid>-<tag>` | `assert_ne!` on the two paths | that assertion, both `"/tmp/dialectica-e2e-2431642-x"` — as predicted |
 //! | the random suffix narrowed from 8 bytes to 2 | the LENGTH assertion, since two 2-byte names still differ | that assertion, `21` vs `33` — as predicted, so the two halves discriminate independently |
+//!
+//! ## Measured at commit `5323b57`, the spec-test findings
+//!
+//! One mutation, applied twice to separate its halves. The suite is 26 tests now:
+//! `the_json_envelope_reports_the_page_that_was_asked_for_and_whether_more_follows`
+//! was added because a review proved the envelope had **no coverage at this
+//! seam** — see note 6, which is the most useful row this table has.
+//!
+//! | Mutation | Predicted | Observed |
+//! |---|---|---|
+//! | the feed reply emits `"page": 0, "hasMore": false` as literals | the envelope test at its `page` assertion on page 1, `0` vs `1` | that test alone, 1 of 26, but at the **`hasMore` assertion on page 0** — `Bool(false)` vs `Bool(true)`. See note 6 |
+//! | `"page": 0` alone, `has_more` restored | the `page` assertion on page 1, `0` vs `1` | exactly that, `Number(0)` vs `Number(1)` — so the two halves discriminate independently and neither rides on the other |
+//!
+//! **Note 6 — the mutation this file could not kill, and why the fixture was the
+//! reason.** A review replaced `"page": page.page, "hasMore": page.has_more` in
+//! `wire::feed_page_json` with the literals `0` and `false`, and **all 25 tests
+//! here passed.** Repo-wide only one test died, and it uses a `MemoryOpLog` —
+//! so the JSON-against-a-real-file seam this section exists to own had no
+//! envelope coverage at all.
+//!
+//! The cause was not a missing assertion. `a_request_naming_a_stoa_on_disk…`
+//! asserts both fields; it reads **page 0 of a one-post store**, where the
+//! correct answer *is* `0` and `false`. Two explanations, one answer — this
+//! file's own stated defect family, at the outermost boundary the crate has.
+//! A fixture, not an assertion, is what was wrong.
+//!
+//! So the new test uses five posts at `perPage: 2`: three pages, a non-zero
+//! index, `hasMore` true on one read and false on another. No single constant
+//! satisfies both ends. The prediction then missed on WHICH assertion fires
+//! first — page 0 is read before page 1 and its `hasMore` is genuinely `true`,
+//! so the `hasMore` half fires an iteration earlier than the `page` half. That
+//! miss is why the mutation was re-run with `page` alone: a test killed only by
+//! the `hasMore` literal would leave `page` unproven, and the second row is what
+//! shows it is not.
 //!
 //! **Note 1 — a mismatch that was a defect in this file.** The `contains`
 //! mutation was predicted to kill two tests. It killed one, and it killed it at
@@ -293,10 +350,15 @@ use std::path::{Path, PathBuf};
 
 /// `op.rs`'s per-field decode cap, from §4.4's 150 KiB SDS message limit.
 ///
-/// **Hardcoded, and deliberately not imported** — it is private, and importing
-/// it would be worse if it were not: a test phrased in terms of the constant
-/// moves with the constant, so a cap that drifted upward would still pass. This
-/// number is the requirement; the code either meets it or does not.
+/// **Hardcoded because an integration test cannot see a private `const` at all.**
+/// That is the whole reason, and it is enough of one — the answer is about
+/// **reach**, not about strength.
+///
+/// It is specifically NOT that this file is the only guard against a drifted cap.
+/// `op.rs::the_field_cap_is_pinned_to_a_known_answer` asserts
+/// `MAX_FIELD_LEN == 150 * 1024` and `stoa.rs` asserts `MAX_TITLE_BYTES == 1024`,
+/// both hardcoded, both for exactly that purpose, so a drifted cap has two other
+/// tests to argue with before it reaches this one.
 ///
 /// **Do not update this to match the code.** If they disagree, one of them is a
 /// bug and this file is the half that is not allowed to blink.
@@ -862,8 +924,8 @@ fn a_store_stamping_our_layout_without_our_tables_is_refused_as_mislabelled() {
 fn a_store_that_is_not_a_database_is_a_storage_failure_and_not_an_empty_feed() {
     // The fourth way a read can fail, and the one most likely to be swallowed:
     // the path exists and holds bytes that are not SQLite at all. This must not
-    // come back as an empty feed, which is §11.1 obligation 5 — "an empty feed is
-    // indistinguishable from a Stoa nobody has posted in".
+    // come back as an empty feed: an empty result and a failed one mean opposite
+    // things, so they have to differ in KIND rather than in message.
     //
     // Paired with the empty-store test above: same API calls, same shape of
     // answer wanted, and the two must differ in KIND. That pairing is what makes
@@ -1128,7 +1190,9 @@ fn the_moderator_set_of_a_genesis_record_is_exactly_its_creator() {
     );
     assert!(
         !moderators.contains(&outsider.public_key()),
-        "nobody else is — the initial set is the creator alone (§6)"
+        "nobody else is — the initial set is the creator alone, which is \
+         `moderation-resolution`'s \"A Stoa's moderator set is derived from its \
+         genesis record\""
     );
     // The set belongs to the Stoa the record addresses. Re-derived from the
     // record rather than read off the `Moderators`, so a `stoa()` returning
@@ -1955,13 +2019,128 @@ fn a_request_naming_a_stoa_on_disk_comes_back_as_the_feed_in_json() {
 }
 
 #[test]
+fn the_json_envelope_reports_the_page_that_was_asked_for_and_whether_more_follows() {
+    // THE ENVELOPE, over a store that can tell a real answer from a constant.
+    //
+    // The rival explanation excluded — and it is the one that got past review
+    // here: that `page` and `hasMore` are ECHOED rather than computed. The happy
+    // path above reads page 0 of a one-post store, where the correct answer is
+    // `page: 0, hasMore: false` — which is exactly what a handler emitting fixed
+    // literals writes. Both assertions there agree with a broken handler, and a
+    // reviewer proved it: replacing `"page": page.page, "hasMore": page.has_more`
+    // in `wire.rs` with `0` and `false` passed all 25 tests in this file.
+    //
+    // So this fixture is built so neither constant is the right answer:
+    //
+    //   * FIVE posts at `perPage: 2`, so the feed has three pages.
+    //   * Read at page **1**, a non-zero index a hardcoded `0` cannot produce.
+    //   * `hasMore` asserted **true** on that read (page 2 remains) and **false**
+    //     on the last page, so a hardcoded `false` fails the first and a
+    //     hardcoded `true` fails the second. One constant cannot satisfy both.
+    //
+    // `items` is asserted at each page too, because "reports page 1" is a claim
+    // about the envelope and "serves page 1's rows" is a claim about the read —
+    // an envelope that counted correctly while serving page 0's rows would pass
+    // the first alone.
+    let dir = TempDir::new("wire-pagination");
+    let author = a_key(1);
+    let genesis = a_genesis(&author.public_key(), "Agora");
+    let stoa = genesis.address().expect("a short title encodes");
+
+    let mut store = dir.store();
+    for n in 0..5u8 {
+        store
+            .append(
+                a_post(&stoa, &author, &format!("post {n}")),
+                Arrival::unordered(),
+            )
+            .expect("storable");
+    }
+    drop(store);
+
+    let path = dir.file(TempDir::CONVENTIONAL_STORE);
+    let genesis_hex = hex::encode(genesis.canonical_bytes().expect("a short title encodes"));
+    let request = |page: usize| {
+        format!(
+            r#"{{"stoa":"{}","genesis":"{genesis_hex}","page":{page},"perPage":2}}"#,
+            stoa.to_hex()
+        )
+    };
+    let read = |page: usize| -> serde_json::Value {
+        let reply = wire::list_threads_from_request(&request(page), || SqliteOpLog::open(&path));
+        serde_json::from_str(&reply).expect("every reply is valid JSON, whatever happened")
+    };
+
+    // Expected lengths derived by hand from five rows at two per page, NOT read
+    // back from the store: pages 0 and 1 hold two each, page 2 holds the fifth,
+    // and only the last has nothing after it.
+    let cases = [(0usize, 2usize, true), (1, 2, true), (2, 1, false)];
+    for (page, expected_len, expected_more) in cases {
+        let v = read(page);
+        assert!(
+            v.get("error").is_none(),
+            "page {page} of a readable store must not be the error shape, got {v}"
+        );
+        assert_eq!(
+            v["page"],
+            serde_json::json!(page),
+            "the envelope must report the page ASKED FOR, not a constant: page {page} gave {v}"
+        );
+        assert_eq!(
+            v["hasMore"],
+            serde_json::json!(expected_more),
+            "hasMore must be computed from what remains: page {page} gave {v}"
+        );
+        assert_eq!(
+            v["items"].as_array().expect("items is an array").len(),
+            expected_len,
+            "and the rows must be that page's rows: page {page} gave {v}"
+        );
+    }
+
+    // The three pages must also TILE, so "page 1 reported 1" cannot be satisfied
+    // by an envelope counting correctly over page 0's rows three times over.
+    let mut seen: Vec<String> = (0..3)
+        .flat_map(|page| {
+            read(page)["items"]
+                .as_array()
+                .expect("items is an array")
+                .iter()
+                .map(|row| {
+                    row["body"]["text"]
+                        .as_str()
+                        .expect("a body is a string")
+                        .to_string()
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    seen.sort_unstable();
+    assert_eq!(
+        seen,
+        vec!["post 0", "post 1", "post 2", "post 3", "post 4"],
+        "the JSON pages must tile the feed exactly — no gap, no repeat"
+    );
+}
+
+#[test]
 fn a_store_on_disk_that_is_not_a_database_reaches_the_view_as_the_error_shape() {
     // THE SEAM THIS SECTION EXISTS FOR, and the one a test at `feed::list_threads`
     // can only half-prove. `a_store_that_is_not_a_database_is_a_storage_failure…`
     // above shows the read returns `Err`; it cannot show what a view receives,
-    // because `Err` is not a JSON reply. §11.1 obligation 5 is about what the
-    // reader sees — "an empty feed is indistinguishable from a Stoa nobody has
-    // posted in" — so the obligation is only discharged at this layer.
+    // because `Err` is not a JSON reply. The obligation is about what the READER
+    // sees — `docs/UI-BRIEF.md`'s rendering obligation 5, "Distinguish an empty
+    // result from a failed one", which says in terms that a storage failure must
+    // never render as an empty feed — so it is only discharged at the layer that
+    // produces what the reader is shown. The obligation number is UI-BRIEF's own
+    // and not a PLAN section: an earlier version of this comment cited "§11.1
+    // obligation 5", and `docs/PLAN.md` says at §11's head that §11.1 arrives
+    // with the `vouching-state` change and is absent until it merges.
+    //
+    // The promoted half of the same rule is `module-wire-contract`'s "Failure is
+    // always the error shape, and never a partial success", which is what the
+    // assertions below actually check; UI-BRIEF says why a view cannot recover
+    // from getting it wrong.
     //
     // Same fixture as that test deliberately: identical bytes on disk, one layer
     // further out, so the pair shows the failure surviving the JSON crossing

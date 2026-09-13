@@ -44,11 +44,35 @@ file to say what it covers.
 different things, and the mapping between them is real behaviour, not plumbing.
 Mutating `list_threads_from_request` to return an empty page instead of
 `error_json` on a failed store open kills the new wire test **while the
-`feed::list_threads`-level test one layer down stays green**. So §11.1
-obligation 5 — "an empty feed is indistinguishable from a Stoa nobody has posted
-in" — is an obligation about what a *reader* sees, and could not be discharged at
-the layer the file stopped at. Renaming would have documented the gap; extending
-closed it.
+`feed::list_threads`-level test one layer down stays green**. That measurement is
+the whole argument: the seam is real behaviour, and no test below it can see the
+seam. Renaming would have documented the gap; extending closed it.
+
+The obligation that makes the seam *matter* is about what a **reader** sees — a
+storage failure must never render as an empty feed, because an empty result and a
+failed one look identical and mean opposite things. That is written down in
+`docs/UI-BRIEF.md`, under "Non-negotiable rendering obligations", as
+**"Distinguish an empty result from a failed one"**.
+
+**A correction worth keeping, because the defect is the interesting part.** This
+entry, and two comments in the test file, originally cited that obligation as
+"§11.1 obligation 5" in `docs/PLAN.md`, with a quoted phrase attached. **No such
+section exists** — PLAN.md says in its own words that §11.1 arrives with the
+`vouching-state` change and is not in the file until that lands, and the quoted
+phrase returns zero hits from a grep over PLAN.md and all of `docs/`. The
+citation originated in this piece's own `findings/architecture.md` and was
+carried into the code and into this file **on trust**. A reviewer's citation is
+not a verified one, and a finding is evidence for the fixer rather than a source
+the fixer may cite onward.
+
+The substance was real all along and is cited above by obligation **name**, not
+number: UI-BRIEF's list contains a "2b", so its numbering is not stable enough to
+cite, which is the same decay
+[`.claude/agents/README.md`](../../../.claude/agents/README.md)'s "a spec must
+never cite a PLAN section number" exists to prevent. **The argument for extending
+did not depend on the citation** — it rests on the mutation above, which was
+measured rather than quoted. The citation only ever named why the distinction was
+worth a layer; the reason the layer was needed was the green test one level down.
 
 The rename was not wholly rejected: the header now carries an explicit "what this
 does not cover" section naming the publish path, `list_stoas`, membership,
@@ -168,14 +192,26 @@ boundaries" over a section holding four.
 
 ### Date the mutation table, and say what a later author owes it
 
-The table is eleven (now eighteen) rows of measured mutations, and nothing keeps it
-true — no gate re-runs it, and most rows name implementation symbols a rename
-silently invalidates. Rather than delete it or pretend it is current, it is grouped
-by when each group was measured, with the commit named.
+The table is rows of measured mutations, and nothing keeps it true — no gate
+re-runs it, and most rows name implementation symbols a rename silently
+invalidates. Rather than delete it or pretend it is current, it is grouped by when
+each group was measured, **and every group heading names the commit it was measured
+at**, so a row's tree is locatable from `git` alone.
+
+No total is quoted here or in the header. The table grew twice and the prose
+describing it was re-derived neither time, so the counts in both places went stale
+and were corrected in review — which is the argument for not carrying a count at
+all rather than for carrying a fresher one.
+
+The commit is what a group is dated by, not the review round it happened in.
+"Measured when the review findings were addressed" was the original phrasing for
+two of the groups, and it is not resolvable to a tree once `findings/` is deleted
+before merge — which is this piece's own next step. A row whose measurement cannot
+be located reads as though somebody checked.
 
 **What a later author owes it is stated explicitly, because the honest answer is
-"almost nothing":** adding a test does not oblige anyone to re-run eleven
-mutations — that would be a tax nobody would pay, and the table would rot anyway.
+"almost nothing":** adding a test does not oblige anyone to re-run the table —
+that would be a tax nobody would pay, and the table would rot anyway.
 What is owed is the same discipline for the new test, and fixing or deleting a row
 whose symbol you rename. A row pointing at a symbol that no longer exists is worse
 than no row, because it reads as though somebody checked.
