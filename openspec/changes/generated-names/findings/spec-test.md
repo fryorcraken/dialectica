@@ -73,7 +73,7 @@ makes the contradiction below sharper rather than softer.
       A test must compute the displayed byte set from the three `Theme`
       properties and assert it disjoint from `4..12`. Severity: high.
 
-- [ ] **`spec-writer`** — spec.md:599 vs `openspec/specs/thread-read/spec.md:169`
+- [x] **`spec-writer`** — spec.md:599 vs `openspec/specs/thread-read/spec.md:169`
       — **two live `SHALL`s in direct opposition, and the tests enforce the one
       this change loses.** This change: "***Every* reply in which core reports who
       authored something SHALL carry that author's display name alongside the
@@ -100,6 +100,21 @@ makes the contradiction below sharper rather than softer.
       the universal quantifier collides with at least two live capabilities and
       should be narrowed rather than left to be read charitably. Severity: high —
       this is the one finding that blocks on its own.
+
+      **FIXED — this change's requirement narrowed; `thread-read` untouched.**
+      The requirement is now "A reply reporting an author SHALL carry either the
+      name or the key it derives from": a reply carrying only an address owes the
+      name, and a reply carrying the public key **SHALL NOT** also carry it,
+      because two derivable identifiers on the wire could disagree and the
+      recipient could not tell which was wrong. The old universal quantifier was
+      reasoned entirely from the address-only case, which is why the narrow
+      reading was the intended one — `thread-read` ships `authorKey` precisely so
+      a holder can derive the name. Under the rule as restated, `thread-read` and
+      `identity-onboarding` are both **satisfying** it rather than excepted from
+      it, so the second instance you flag dissolves without amending that
+      capability either. Two scenarios added: "A reply carrying the author's key
+      carries no name" and "A reply carrying only an address carries the name".
+      The suite that pins the thread item's key set stays correct as written.
 
 - [ ] **`tester`** — `names.rs:1336` `a_refused_pair_leaves_both_of_its_words_drawing_freely`
       — **the test cannot fail on the property it names.** Its body is
@@ -183,13 +198,24 @@ makes the contradiction below sharper rather than softer.
       question for the next reader. Severity: medium-high. (Four other reviewers
       found this; the measurement above is my own run, not a relay.)
 
-- [ ] **`spec-writer`** — spec.md:658, "A reply with no author carries no name
+- [x] **`spec-writer`** — spec.md:658, "A reply with no author carries no name
       field", and spec.md:746, "A name is unchanged by every surrounding state" —
       **neither scenario has a test.** A repo-wide grep finds no test deriving a
       name twice across differing Stoa/moderator/identity state, and none reading
       a reply that reports no author and checking for the absence of a name field.
       Both are testable as written; report so the spec-writer can confirm they are
       wanted before the `tester` writes them. Severity: low.
+
+      **CONFIRMED WANTED — both stay, and both are now load-bearing.** "A name is
+      unchanged by every surrounding state" is what makes the determinism claim
+      checkable against the *surroundings* rather than only against repetition,
+      and it sits under a requirement that now also states the derivation is
+      total over well-formed keys with malformed input as its only failure — so
+      the `tester` writing it also pins that there is no state-dependent refusal.
+      "A reply with no author carries no name field" is now one of four scenarios
+      under a requirement whose whole content is which reply shape carries what,
+      and it is the only one covering the omit-rather-than-null case the module's
+      reply contract turns on. Both to the `tester`.
 
 ## Clean, and why
 

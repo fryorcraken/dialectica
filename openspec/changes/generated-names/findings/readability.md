@@ -156,7 +156,7 @@ run. Every one rests on a file read in this tree.
       family as the two above, split out because it is in test comments a fixer
       would otherwise not open.
 
-- [ ] **`spec-writer`** — `docs/UI-BRIEF.md:124` — the brief hands a designer two
+- [x] **`spec-writer`** — `docs/UI-BRIEF.md:124` — the brief hands a designer two
       specimen names the core cannot produce.
       **Scenario:** it offers *measured aporia of lampsacus*, *brittle kairos of
       abdera* and *luminous stasis of delos* as what an identity looks like. The
@@ -171,7 +171,23 @@ run. Every one rests on a file read in this tree.
       the same change that invalidates it, and this change is what shipped the
       lists that invalidate it.
 
-- [ ] **`spec-writer`** — `spec.md:163`, `228`, `327`, `357`, `537-538`, `575` —
+      **FIXED.** Line 124 now reads *pensive aporia of lampsakos*, *quipful
+      ismene of korykos*, *luminous stasis of delos* — your verified one kept,
+      and the two replacements chosen for provenance rather than plausibility:
+      `quipful ismene of korykos` is `PINNED_NAME_FOR_KEY_4` in `names.rs`, a
+      name the shipped scheme actually derives, and `pensive` (adjectives 5155) /
+      `aporia` (nouns 129) / `lampsakos` (places 528) are each verified by index.
+      Also fixed at line 19 (the same specimen in the header block) and line 143
+      (*pensive aporia lampsakos* for the connector-dropped form). Line 19's
+      `§5.2.1` citation was repointed at the spec in the same pass, since the
+      shed moves that heading.
+
+      **Two additions beyond what you raised**, both consequences of this pass:
+      the brief now describes the per-word gloss affordance (fetched on request,
+      noun and place only, adjectives never), and the header block now names the
+      spec rather than PLAN.md as the authority on the name's shape.
+
+- [x] **`spec-writer`** — `spec.md:163`, `228`, `327`, `357`, `537-538`, `575` —
       the contract carries the same unreachable examples, so a fixer correcting
       the code has no authoritative spelling to correct them *to*.
       **Scenario:** the spec was written before the wordlists existed, so its
@@ -181,6 +197,40 @@ run. Every one rests on a file read in this tree.
       **Measured:** `measured`, `brittle`, `damp` and `lampsacus` all absent from
       the shipped lists, as above. **Severity: low as a defect, high as a
       blocker** — fix this one first or the code fixes will re-copy it.
+
+      **FIXED, and fixed first, for the reason you give.** Every example in the
+      spec is now a word verified present by index in the shipped arrays. The
+      authoritative spellings a `dev-writer` should copy:
+
+      | Slot | Word | Index |
+      |---|---|---|
+      | adjective | `pensive` | `adjectives.rs:5155` |
+      | adjective | `luminous` | `adjectives.rs:4338` |
+      | adjective | `restless` | `adjectives.rs:6210` |
+      | noun | `aporia` | `nouns.rs:129` |
+      | noun | `stasis` | `nouns.rs:924` |
+      | noun | `zenon` | `nouns.rs:1042` |
+      | place | `lampsakos` | `places.rs:528` |
+      | place | `delos` | `places.rs:213` |
+      | place | `kition` | `places.rs:454` |
+
+      Full names used: *pensive aporia of lampsakos* (the workhorse, replacing
+      *measured aporia of lampsacus* throughout), *luminous stasis of delos*, and
+      *pensive zenon of kition of lampsakos* for the two-places hazard — which is
+      now a **better** illustration than *measured zeno of citium of lampsacus*,
+      because `zenon` and `kition` are both real entries under the kappa rule, so
+      the example shows a source's qualified form colliding with real list
+      contents rather than with invented ones.
+
+      **Two further fabrications found in the same sweep and fixed**, neither in
+      your list: `alexandria troas` and `heraclea pontica` appear at spec lines
+      500 and 571 as the multi-word-place examples and are **both absent** from
+      `places.rs` — they survive only in that file's header comment. Real
+      multi-word entries are `lokroi epizephyrioi` (567), `antiocheia maiandros`
+      (113), `arsinoe kyprou` (139), `euxeinos pontos` (292) and five others; the
+      spec now uses the first two. Worth flagging to the `dev-writer`: the header
+      comment at `places.rs:16` illustrates the internal-space rule with the two
+      absent ones, which is the same defect one layer down.
 
 ## A named constant that documents an invariant it does not enforce
 

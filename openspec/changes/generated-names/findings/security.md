@@ -96,7 +96,7 @@ tree was `git status --short`-clean before this file was written.
       **Measured:** 199 shipped pairs; 1,048,576/199 = 5,269.2; 5,269² ≈ 27.8M.
       **Severity: low** — genuine defect, wrong in the safe direction.
 
-- [ ] **`spec-writer`** — `wire.rs:6076` —
+- [x] **`spec-writer`** — `wire.rs:6076` —
       `the_wire_reports_the_author_as_an_address_and_a_key_and_no_name` is an
       active gate *forbidding* what this change's own spec requires
       **Scenario:** `spec.md:599` states "**Every reply** in which core reports who
@@ -120,6 +120,37 @@ tree was `git status --short`-clean before this file was written.
       this change (`git log -L 6075,6103` → last touched by `53f08b3`, #61).
       **Severity: medium** — genuine defect, a spec/code contradiction with a
       security consequence.
+
+      **FIXED by narrowing the spec — which is the branch you named first, and
+      against the one your security argument prefers.** The contradiction is
+      resolved: a reply carrying the public key now **SHALL NOT** carry the name,
+      so that test is the gate for a requirement rather than against one.
+
+      **Your silent-divergence concern is real and is not dismissed**, but it
+      argues against the wrong remedy. A view deriving names itself *would* be a
+      second implementation of a consensus-critical scheme — and shipping the
+      name on the thread does not prevent that, it only removes the occasion for
+      it on one surface while leaving `authorKey` on the wire for any client that
+      wants to. The property that actually closes it is that **exactly one
+      implementation is normative**, which is what the pinning and wordlist-hash
+      requirements establish; a divergent second implementation is detectable
+      against those pins whether or not core also ships a name.
+
+      Against that, carrying both is a shape the wire contract cannot make safe:
+      two values that must agree, either derivable from the other, with no way
+      for a recipient to tell which is wrong when they differ. That is a forgery
+      surface rather than a convenience — a relay stripping or rewriting a
+      `displayName` beside an intact `authorKey` produces a reply that renders a
+      false attribution and verifies fine. Forbidding the pair removes it.
+
+      **On "one identity renders named in the feed and nameless in the thread"**
+      — that is a UI obligation, not a core one, and it now has a home: the view
+      derives the name from `authorKey` using the same core it already calls, and
+      `docs/UI-BRIEF.md` carries the rendering obligation. If a future decision
+      wants core to expose a derive-name-from-key call so the view never
+      implements the scheme, that is a capability widening to argue on its own
+      merits — and it is the right shape for your concern, rather than putting a
+      second copy of the name on every thread item.
 
 - [ ] **`tester`** — `names.rs:683` —
       `the_name_digest_is_neither_the_address_nor_a_bare_hash` passes for an

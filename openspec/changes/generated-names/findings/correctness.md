@@ -55,7 +55,7 @@ with a new worktree and `cargo` fails at manifest resolution without it.)
       a reader would check does not. Severity: **medium** — the number is the
       justification for the reserve being one draw rather than two.
 
-- [ ] **`spec-writer`** — `wire.rs:1724-1740` — the thread reply reports an author
+- [x] **`spec-writer`** — `wire.rs:1724-1740` — the thread reply reports an author
       and carries no display name, and a test asserts the name's *absence*
       **Scenario:** the spec requires "Every reply in which core reports who
       authored something SHALL carry that author's display name alongside the
@@ -70,6 +70,18 @@ with a new worktree and `cargo` fails at manifest resolution without it.)
       say a reply carrying the *key* discharges it, or this reply needs the field.
       Severity: **medium** — a requirement and a test that contradict each other,
       whichever way it resolves.
+
+      **FIXED — the first of your two branches, and you identified it exactly.**
+      The spec now says a reply carrying the key discharges the obligation, and
+      goes one step further than your framing: such a reply **SHALL NOT** carry
+      the name, because two derivable identifiers on the wire that must agree and
+      could disagree is a worse shape than either alone. So
+      `the_wire_reports_the_author_as_an_address_and_a_key_and_no_name` is not
+      merely tolerated by the contract — it is now the test for a requirement.
+      Your reading that the thread item's reasoning "is a different reasoning
+      from the feed's" was the right observation: the difference is that the feed
+      row carries no key, which is what makes the name necessary there and
+      forbidden here.
 
 - [ ] **`dev-writer`** — `names.rs:122,299` — `NAME_DIGEST_BOUND` constrains nothing
       in a release build; the real bound is the two literal offsets

@@ -160,7 +160,7 @@ than silently colliding with this scheme's.
 A name SHALL consist of exactly three drawn words in a fixed order — an adjective
 from the adjective list, a noun from the noun list, and a place from the place
 list — joined by the fixed connector `of` between the noun and the place, as in
-*measured aporia of lampsacus*.
+*pensive aporia of lampsakos*.
 
 **There are three slots, not four.** The connector is fixed literal text emitted
 unconditionally between the noun and the place; it reads no hash bytes and carries
@@ -178,13 +178,9 @@ power of two below what its source yields, never padded up to reach one**. The
 direction matters — a list with headroom discards real candidates, which costs
 only choice, where a padded list ships entries invented to fill it.
 
-**The adjective slot is open and the two Greek slots carry the register.** An
-earlier shape capped the adjective list at 256 to hold a uniform Greek-adjacent
-register and, with that cap, needed a fourth word to reach an acceptable
-collision rate. The cap was self-imposed rather than a limit of the sources: the
-adjective slot admits any English adjective, which moves it five doublings, and
-the register is carried instead by the *X of Y* shape and the two Greek words in
-it.
+**The adjective slot admits any English adjective**, which is what puts 8,192
+within reach of the sources and lets three slots carry the whole space. Nothing
+constrains which adjectives are eligible.
 
 #### Scenario: A derived name has three drawn words and the connector
 
@@ -225,7 +221,7 @@ name that a reader uses to tell two otherwise similar names apart.
 **The connector is the one exception, and it is a relaxation rather than a
 loosening of the rule.** It reads no hash bytes and carries no entropy, so a
 caller too cramped to render it may omit it: the information content of
-*measured aporia lampsacus* is identical and no reader is misled about who
+*pensive aporia lampsakos* is identical and no reader is misled about who
 published something. This is the only part of a name that may be dropped, and it
 is droppable precisely because it is the only part that is not derived.
 
@@ -272,20 +268,46 @@ produce different names for one key, which is the failure this whole scheme
 exists to prevent; a bounded slice is also what makes the derivation checkable
 against a fixed expected value at all.
 
-Beyond the bound the derivation SHALL fail loudly rather than read further.
+**The bound SHALL be 6, and the three draws SHALL consume bytes `0..6`
+exactly.** Two bytes feed the adjective, two the noun, two the place, and the
+derivation reads no seventh byte under any input.
 
-The bound SHALL leave a reserve sufficient for one complete redraw of all three
-slots, which the denylist requires. The reserve SHALL be stated as part of the
-scheme: it is consumed only on a refusal, so the number of bytes a name consumes
-is data-dependent rather than fixed, and the bound is what keeps it finite.
+**The bound is exactly what the derivation consumes, and it names no byte the
+derivation does not read.** A bound stated wider than the draws would record a
+boundary nothing enforces — a range read by nothing, which the next reader takes
+as load-bearing and designs around. A scheme that later wants more bytes is a
+new scheme version by the freezing requirement below, which is where that
+decision belongs rather than in a range set aside now against a use nobody has.
+
+**The name's window and the mark's are not comparable ranges, and this must not
+be read as though they were.** The name reads a prefix of the **name digest**;
+the mark reads a window of the **address**, which is a different digest under a
+different separator. The two are independent because of that separation and not
+because their byte ranges avoid each other — so the costs of grinding for a
+lookalike name and for a lookalike mark multiply rather than add, and that holds
+whichever bytes either reads. A byte reservation *between* them would do no
+work, which is a claim this scheme has already had to retract once.
+
+Beyond the bound the derivation SHALL fail loudly rather than read further. With
+the draws fixed at `0..6` of a 32-byte digest this path is not reachable through
+any key or any digest, and it is stated as a requirement on the derivation's
+shape rather than as a behaviour a test can provoke: what it forbids is an
+implementation that reads on, and a second implementation that read further
+would produce a different name for the same key.
+
+**Every draw is a single unconditional reduction.** The number of bytes a name
+consumes is therefore fixed rather than data-dependent, every index of every
+list is reachable, and the `2^33` space is reached exactly rather than
+approximately — so the collision figures in the requirement above hold without a
+caveat, and no draw is ever skipped in a way that would make one word rarer than
+another.
 
 **The step that turns a digest into three words SHALL be exercisable over a
 supplied digest**, separately from hashing a key. This is a testability
-obligation rather than a surface to expose to callers: a refused first draw, an
-exhausted reserve, and a byte read past the bound are all reachable through a
-chosen digest and reachable through a chosen *key* only by grinding for one. A
-scheme whose failure paths can only be reached by grinding is a scheme whose
-failure paths no test covers.
+obligation rather than a surface to expose to callers: reaching a chosen slot
+combination through a chosen *key* means grinding for one, so the pinning and
+uniformity requirements below are checkable only if a digest can be supplied
+directly.
 
 #### Scenario: Each slot varies independently of the others
 
@@ -302,121 +324,55 @@ failure paths no test covers.
 
 #### Scenario: The derivation reads no byte past its bound
 
-- **WHEN** two digests agree on every byte inside the bound and differ beyond it
+- **WHEN** two digests agree on bytes `0..6` and differ on **every** byte from 6
+  onward
 - **THEN** the names derived from them are equal
 
-#### Scenario: Exhausting the reserve fails rather than reading on
+#### Scenario: The bytes a name consumes do not vary with the digest
 
-- **WHEN** the slot-selection step is exercised over a digest whose first draw and
-  whose one reserved redraw both land on refused combinations
-- **THEN** it reports a failure
-- **AND** returns no name
+- **WHEN** names are derived over many digests
+- **THEN** each reads the same six bytes as every other, so no input makes the
+  derivation consume more
 
-Reaching this through a key would mean grinding for one, so the slot-selection
-step SHALL be exercisable over a supplied digest. Without that the bound and the
-loud failure are unreachable in a test and so are claims nothing can check.
+### Requirement: Nothing filters a drawn name
 
-### Requirement: A refused combination redraws all three slots, deterministically
+The derivation SHALL return the three words its draws select, whatever those
+three words are. It SHALL hold no list of refused combinations, SHALL never
+retry a draw, and SHALL never substitute, suppress or reorder an output for what
+the words are, what they mean, what they connote, whom they name, or what they
+spell together.
 
-The scheme SHALL carry a denylist of refused noun–place pairs, and a derivation
-landing on one SHALL redraw **all three** slots from the reserved bytes rather
-than redrawing only the offending slot.
+**Owner decision, recorded rather than argued.** The requirement above forbids
+keeping a word out of a list. This forbids the other shape the same rule takes —
+leaving every word in and refusing what they combine into. The two are one
+decision and are stated as two requirements because they are two places an
+implementation could put a filter.
 
-**The denylist SHALL hold every noun–place pair that spells a real figure's
-canonical name, and nothing else.** The *X of Y* shape can produce exactly how a
-historical figure is conventionally cited — *straton of lampsacus* is how Straton
-of Lampsacus is actually referred to — so a user drawing that pair has every post
-signed with a real person's full canonical identifier.
+**Exactly one rule refuses anything anywhere in this contract**, and it is the
+requirement below that no wordlist entry may contain the connector as a word.
+That is a rule about the shape of an entry rather than about any word's meaning,
+and it exists because an entry carrying ` of ` renders as two places on one
+name. Nothing else in this capability keeps anything out.
 
-**This is not a screen on meaning and it is not an exclusion**, which is the
-distinction the previous requirement turns on. No entry is kept out of any list
-for what it says, what it connotes or whom it names; both halves of a refused pair
-stay in their lists and draw freely elsewhere. What is refused is a *composition*
-that states a falsehood about who is posting — an attribution rather than a tone —
-and it is refused because the pair is enumerable by lookup rather than judged
-word by word. Widening the noun slot to any attested noun enlarges this family
-along with everything else, since every named historical Greek entering the list
-brings its canonical places with it.
+**What this buys is a scheme with no conditional path at all.** Every draw is
+one unconditional reduction, so the derivation is total over well-formed keys,
+consumes a fixed six bytes, reaches every index of every list, and hits the
+`2^33` space exactly. A second implementation agrees with this one by reducing
+three 16-bit values — there is no table of pairs it must also hold, and no
+shared table that could drift between peers and rename somebody.
 
-The arithmetic is what makes it a requirement rather than a nicety, and it is
-stated as an order of magnitude because the figure follows from the list contents
-rather than fixing them. Taking a few hundred of the 1,024 nouns to be named
-historical Greeks, each with on the order of one canonically associated place —
-usually a birthplace, sometimes a second where they taught — the family runs to
-hundreds of pairs. Against `1024 x 1024` = 1,048,576 possible noun–place
-combinations that is on the order of a tenth of a percent of draws, so a handful
-of identities in every few thousand would otherwise carry a real figure's name.
-That is a steady arrival rather than a corner case.
+#### Scenario: Every combination the draws select is returned
 
-**The denylist's size is not a requirement and SHALL NOT be pinned**, because it
-is a consequence of how many named Greeks the noun list happens to hold. What is
-required is that the family be complete for the list as shipped.
+- **WHEN** the slot-selection step is exercised over digests selecting many
+  different noun–place combinations
+- **THEN** each returns the words its draws selected
+- **AND** none is substituted, suppressed or replaced by a second draw
 
-**Only the pair is refused, never the words.** The adjective is irrelevant to
-this family, and both halves stay in their lists — so *straton of abdera* and
-*measured aporia of lampsacus* both draw normally. Removing either word would
-cost two entries per figure, buy nothing, and be exactly the exclusion the
-previous requirement forbids.
+#### Scenario: A name is a function of six bytes and nothing else
 
-Redrawing the whole name is what keeps termination arithmetic. A refused pair is
-refused for the combination, so changing one half can land on a second refused
-pair and the loop's termination becomes a property of the denylist's shape rather
-than of the byte budget.
-
-One redraw is sufficient rather than merely convenient. At a refusal rate on the
-order of a tenth of a percent, a second consecutive refusal — which is what
-exhausts the reserve — is the square of that, arriving about once per million
-identities. The reserve does not need to grow, and this holds across any denylist
-of that order rather than depending on its exact size.
-
-The redraw SHALL be a function of the digest alone, so that every peer skips
-identically. A redraw introducing fresh randomness or a nonce would break the
-determinism every other requirement here rests on.
-
-The scenarios below exercise the slot-selection step over supplied digests, for
-the reason the byte-budget requirement gives: reaching a refused draw through a
-key would mean grinding for one.
-
-#### Scenario: A refused combination is never returned
-
-- **WHEN** the slot-selection step is exercised over a digest whose first draw
-  lands on a refused combination
-- **THEN** the name returned is not that combination
-
-#### Scenario: A redraw is deterministic
-
-- **WHEN** the slot-selection step is exercised twice over one digest whose first
-  draw is refused
-- **THEN** both yield the same name
-
-#### Scenario: A redraw replaces every slot
-
-- **WHEN** the slot-selection step is exercised over a digest whose first draw is
-  refused
-- **THEN** all three words are the ones the reserved bytes select
-- **AND** the result is not the first draw with a single slot substituted, which
-  is checked by constructing the digest so that those two differ
-
-#### Scenario: A noun-place pair naming a real figure is refused
-
-- **WHEN** the slot-selection step is exercised over a digest drawing a noun and
-  a place that together spell a real figure's canonical name
-- **THEN** that pair is not returned
-- **AND** the same noun paired with a different place still draws normally, so
-  the refusal is on the pair rather than on either word
-
-#### Scenario: An unrefused draw ignores the reserve
-
-- **WHEN** the slot-selection step is exercised over a digest whose first draw is
-  not refused, and again over a digest differing from it only in the reserved
-  bytes
-- **THEN** the two names are equal, so an unrefused draw does not consult the
-  reserve
-
-#### Scenario: No name a key can reach is a refused combination
-
-- **WHEN** names are derived for many distinct public keys
-- **THEN** none of the names returned is on the denylist
+- **WHEN** two digests agree on bytes `0..6`
+- **THEN** the names derived from them are equal, whatever the words drawn are,
+  so no property of the drawn words feeds back into the derivation
 
 ### Requirement: The derivation is pinned to fixed expected names
 
@@ -438,22 +394,24 @@ wrong order — the count and the thing being counted come from one source. A
 written-down name is produced independently, so a change to the number of words,
 to the order of the slots, or to the connector between them fails it.
 
-Pinned cases SHALL include a key whose first draw is refused, so that the redraw
-path is pinned and not only the common one.
+**Pinned cases SHALL span the lists rather than clustering**, reaching a low and
+a high index in each of the three slots, so that a pin is evidence about the
+index arithmetic and not only about one region of one list. There is one
+derivation path and no second one to pin separately: with no refusal and no
+retry, every key exercises the same six bytes and the same three reductions.
 
 #### Scenario: A fixed key yields a fixed name
 
 - **WHEN** a name is derived for a fixed public key
 - **THEN** it equals a name written down independently of this implementation
 
-#### Scenario: The redraw path is pinned
+#### Scenario: A pinned name is reproducible from its digest by hand
 
-- **WHEN** the slot-selection step is exercised over a fixed digest whose first
-  draw lands on a refused combination
-- **THEN** the name it yields equals a name written down independently of this
-  implementation
-- **AND** that written-down name is the one the reserved bytes select, not the
-  refused draw
+- **WHEN** a pinned case's digest is taken, its three 16-bit draws are read from
+  bytes `0..6`, and each is reduced into its list by hand
+- **THEN** the three words reached are the pinned name's three words, so the pin
+  checks the index arithmetic rather than agreeing with the implementation that
+  produced it
 
 #### Scenario: A wordlist reordering is visible
 
@@ -479,23 +437,19 @@ entry SHALL be a real word, person or place rather than an invented one.
 Those three — **ASCII-transliterable, deduplicated and attested** — are the only
 screens that apply to a list, and all three are mechanical: **none asks what a
 word means, what register it carries, or what it says about the person carrying
-it.** There SHALL be no pronounceability screen, no length screen, no familiarity
-screen, no register screen, no tone screen, and no list of excluded words of any
-kind. **If a word is being kept out for any reason other than those three, that
-is the mistake rather than the word.** Every successive draft of this contract
-that added a fourth filter was withdrawn on challenge — familiarity, which cut
-the place list by 28%; a rebadged "legibility", which cut it by 88%; a
-single-word rule, which made 1,024 places look unreachable; and a tone-and-
-authority apparatus. The long tail is deliberately in, and the consequence is
-accepted rather than argued away — some names will be legible but hard to tell
-apart.
+it.** A word SHALL NOT be kept out of a list for any other reason, and **a word
+being kept out for any other reason is the mistake rather than the word.**
+
+The long tail is deliberately in, and its cost is accepted rather than argued
+away: some names will be legible and still hard to tell apart, and the mark and
+the address are what carry a reader through that rather than a shorter list.
 
 **An entry MAY contain an internal space**, because a Greek place is often named
-in two words — `alexandria troas`, `heraclea pontica`. A single-word rule is one
-of the screens this requirement forbids, and it is the costly one: an earlier
-draft imposed it, and a census written against that draft put the place list's
-honest yield well below 1,024 because multi-word toponyms were being discarded by
-a rule the design never stated.
+in two words — `lokroi epizephyrioi`, `antiocheia maiandros`. A rule admitting
+only single-word entries would be one this requirement forbids, and it is an
+expensive one: it puts the place list's honest yield well below 1,024 by
+discarding multi-word toponyms, so a census taken under it measures a pool the
+contract does not describe.
 
 ASCII is a bidi decision rather than a typographic preference. These are the one
 piece of rendered text this project fully composes from a fixed list, so keeping
@@ -533,9 +487,8 @@ Greek thought alone is what an earlier draft did, and it is a far narrower pool
 than any attested noun — the mythological and concrete pools were absent from it
 entirely and are the larger half of what the slot now draws on.
 
-**No slot is screened for register**, the adjective slot included. The register is
-carried by the *X of Y* shape and the two Greek words in it, so `brittle`,
-`luminous` and `damp` draw alongside `attic` and `measured`.
+**No slot is screened for register**, the adjective slot included, so `luminous`,
+`pensive` and `restless` draw alongside any other English adjective.
 
 #### Scenario: Every entry is ASCII and lowercase
 
@@ -555,6 +508,86 @@ carried by the *X of Y* shape and the two Greek words in it, so `brittle`,
 - **WHEN** each list is compared against itself
 - **THEN** no entry appears twice in a list
 
+### Requirement: Every noun and every place carries a one-sentence gloss, served on request
+
+Every entry of the **noun** list and every entry of the **place** list SHALL
+carry a short gloss in English saying what the word means or where the place is.
+Core SHALL expose a way to ask for the gloss of a word the derivation drew, and
+SHALL answer for any entry of either list.
+
+**The adjective list SHALL NOT carry glosses.** An English adjective needs no
+translation for an English-speaking reader, where a Greek noun does. Glossing all
+three lists would be five times the work for a reader who already knows the word,
+and a gloss on `pensive` that says what `pensive` means is noise that teaches a
+reader to stop reading the ones that are not.
+
+**A name the reader cannot interpret is doing half its job.** A reader shown
+*pensive aporia of lampsakos* can tell that identity from another, which is the
+recognition job, but has no way to learn what `aporia` is or where `lampsakos`
+was — and the view cannot look it up. The QML sandbox denies the view both the
+network and the filesystem outside its plugin directory, so a gloss is not
+something a view could fetch, bundle or infer. If it does not come from core it
+does not exist.
+
+**The gloss SHALL be requested per word rather than returned beside every name.**
+A reply carrying an author's name SHALL NOT carry that name's glosses. The feed
+caps a page at 100 rows, so bundling would put up to 200 glosses on a single
+reply — mostly repeated across rows that share a word, and nearly all of them
+never read, because a gloss is what a reader wants for the one name they paused
+on. That is the whole page's weight spent on the exception. Asking per word also
+keeps the gloss out of the name's own contract: the requirement above on what a
+reply reporting an author carries is unchanged by this one, and a gloss is never
+part of what a name *is*.
+
+**A gloss SHALL NOT participate in the derivation**, SHALL NOT be drawn, and
+SHALL NOT change which word an index selects. It is display material attached to
+an entry, so changing a gloss is not a change to the lists and does not mint a
+new scheme version — which is the opposite of every other change to an entry, and
+is stated because the freezing requirement below would otherwise be read as
+covering it. What SHALL NOT change without a version bump is the word a gloss is
+attached to.
+
+**A gloss SHALL be ASCII**, for the reason the ASCII screen above gives: it is
+rendered text this project composes, so keeping it ASCII keeps a bidi override
+and a homoglyph off the surface entirely rather than mitigating them.
+
+#### Scenario: Every noun and every place has a gloss
+
+- **WHEN** every entry of the noun list and of the place list is examined
+- **THEN** each carries a gloss
+- **AND** each gloss is non-empty
+
+#### Scenario: A gloss is returned for a drawn word
+
+- **WHEN** a gloss is asked for by naming an entry of the noun list, and
+  separately an entry of the place list
+- **THEN** a gloss is returned for each
+
+#### Scenario: A word outside the two glossed lists is refused rather than guessed
+
+- **WHEN** a gloss is asked for by naming a word that is in neither the noun list
+  nor the place list
+- **THEN** the reply is a refusal
+- **AND** it is not an empty gloss or an invented one
+
+#### Scenario: An adjective carries no gloss
+
+- **WHEN** a gloss is asked for by naming an entry of the adjective list that is
+  in neither Greek list
+- **THEN** the reply is the same refusal, so the adjective list is not glossed by
+  omission of a check
+
+#### Scenario: A name reply carries no glosses
+
+- **WHEN** a reply carrying an author's display name is read and every field is
+  enumerated
+- **THEN** no gloss appears in it
+
+#### Scenario: Every gloss is ASCII
+
+- **WHEN** every gloss of every glossed entry is examined
+- **THEN** each contains only ASCII characters
+
 ### Requirement: No noun entry contains the connector
 
 No entry of the noun list SHALL contain the connector as a separate word — that
@@ -562,7 +595,8 @@ is, no noun entry SHALL contain the substring formed by a space, the connector,
 and a space.
 
 An entry may still hold an internal space; this constrains what that space may
-sit beside rather than forbidding one, so `alexandria troas` is unaffected.
+sit beside rather than forbidding one, so a two-word entry such as
+`lokroi epizephyrioi` is unaffected.
 
 **The constraint is on the noun list only, and that is the whole of what is
 decided here.** The place slot is the last word of the name, so a place carrying
@@ -572,7 +606,7 @@ therefore left open rather than ruled on, and a list that happens to contain non
 satisfies this requirement as written.
 
 The reason is the *X of Y* shape rather than anything about the words. A noun
-entry carrying the connector renders as *measured zeno of citium of lampsacus*,
+entry carrying the connector renders as *pensive zenon of kition of lampsakos*,
 which reads as two places attached to one name and leaves a reader unable to tell
 which of them the place slot supplied. Widening the noun slot to named historical
 Greeks, mythological figures and concrete nouns is what makes this reachable:
@@ -580,8 +614,12 @@ those are exactly the entries a source is liable to supply already qualified by 
 place. The constraint is on the entry's spelling and is therefore checkable
 against the shipped list, unlike the attestation obligation above.
 
-This is a rule about one literal substring and **not a reintroduction of a
-semantic screen**: what the noun means is still no part of whether it is in.
+**This is the only rule in this capability that keeps anything out, and it is a
+rule about one literal substring.** What a noun means is no part of whether it
+is in: the bare form of a qualified entry — `zenon` where a source offered
+`zenon of kition` — is in the list and draws normally. The requirement is on how
+an entry is spelled, so it is checkable against the shipped list, unlike the
+attestation obligation above.
 
 #### Scenario: No noun entry carries the connector as a word
 
@@ -594,26 +632,66 @@ semantic screen**: what the noun means is still no part of whether it is in.
 - **THEN** no name's second word group contains the connector, so no name reads as
   carrying two places
 
-### Requirement: A name is returned wherever core returns an author, beside the address
+### Requirement: A reply reporting an author SHALL carry either the name or the key it derives from
 
-Every reply in which core reports who authored something SHALL carry that
-author's display name alongside the author's address, and SHALL NOT carry the
-name in place of the address.
+A reply in which core reports who authored something SHALL put the caller in a
+position to render that author's name. It SHALL do so by carrying **either** the
+author's display name **or** the author's public key, and it SHALL carry the
+author's address in both cases. A reply carrying neither the name nor the key is
+the one shape this requirement forbids.
 
-This is what the caller cannot do for itself. A name derives from a public key; a
-reply reporting an author reports an **address**, which is a hash and from which
-no key is recoverable. So a caller holding only an address cannot compute the
-name, and a reply carrying only the address has handed the caller a value it
-cannot render an attribution from. Core holds the key — the signed op carries
-it — so core renders the name.
+**The obligation is discharged by the key, and this is what decides which
+surfaces owe a name.** A name derives from a public key. A reply reporting an
+author always reports an **address**, which is a hash from which no key is
+recoverable — so a reply carrying *only* an address has handed the caller a
+value it cannot render an attribution from, and core, which holds the key
+because the signed op carries it, SHALL render the name there. A reply already
+carrying the public key has handed the caller the derivation's own input, and
+the caller can compute the name for itself; that reply SHALL NOT also carry the
+name.
 
-The address SHALL remain present in every such reply. The name is added beside it
-and never substituted for it, which is what the requirement below on what a name
-is not depends on.
+**Both halves matter, and the second is a prohibition rather than a
+permission.** Sending the name beside the key it derives from puts two values on
+the wire that must agree and could disagree, where the recipient has no way to
+tell which is wrong. So the two surfaces are not free variants of one another: a
+reply carrying the key is required *not* to carry the name, and this is what
+keeps the `thread-read` capability's closed field set and this capability's
+obligation consistent rather than merely compatible.
 
-The name SHALL be the one this capability's derivation produces for the public
-key that signed, rather than a value stored with the content or carried by any
-op. A name travelling as data is a name a relay could strip or forge.
+**This is the narrow reading, and it is the intended one.** An earlier statement
+of this requirement was universally quantified — every reply reporting an author
+carries a name — while being reasoned entirely from the address-only case. That
+made it contradict `thread-read`, which requires that no thread item carry a
+derived display name and ships `authorKey` on every item precisely so a holder
+can derive one. Both cannot hold; the argument above is the one that was always
+being made, so the quantifier moves rather than the other capability.
+
+**Under the rule as now stated, the two capabilities that decline to carry a
+name are both satisfying it rather than excepted from it.** `thread-read` ships
+the public key on every item, and `identity-onboarding` ships it on every slate
+candidate and on the identity in use — so in both the caller holds the
+derivation's input and the prohibition above, not an exemption, is what keeps
+the name off those replies. Neither needs amending, and a future reply reporting
+an author by address alone owes a name without either being revisited.
+
+**Core SHALL expose a way to derive a name from a public key**, so that a caller
+holding a reply of the second kind can render an attribution without
+implementing the scheme. This is what makes the prohibition above affordable
+rather than a cost pushed onto the view: the alternative to core answering is a
+second implementation of a consensus-critical derivation, in a language holding
+none of the wordlists, which is the silent-divergence failure the pinning
+requirements exist to prevent. One normative implementation, reachable by every
+caller, is the property that matters — not which reply a name happens to ride
+on.
+
+The address SHALL remain present in every such reply. Where a name is carried it
+is added beside the address and never substituted for it, which is what the
+requirement below on what a name is not depends on.
+
+Where a name is carried, it SHALL be the one this capability's derivation
+produces for the public key that signed, rather than a value stored with the
+content or carried by any op. A name travelling as data is a name a relay could
+strip or forge.
 
 Where a reply reports no author, it SHALL carry no name. A field that would be
 meaningless is omitted rather than sent as an empty or null value, which is the
@@ -654,6 +732,28 @@ would pass on a row that named the wrong author's key.
 - **WHEN** two posts signed by one key are read in a feed
 - **THEN** both rows carry the same display name
 - **AND** both carry the same author address
+
+#### Scenario: A reply carrying the author's key carries no name
+
+- **WHEN** a reply that reports an author by public key as well as by address is
+  read, and every field of the item reporting that author is enumerated
+- **THEN** it carries no display name field
+- **AND** the public key it carries is the one the derivation takes as input, so
+  the name the caller derives from it is the name for that author
+
+#### Scenario: A reply carrying only an address carries the name
+
+- **WHEN** a reply that reports an author by address alone is read
+- **THEN** it carries a display name for that author
+- **AND** the address is present beside it
+
+#### Scenario: A caller can derive the name a key-carrying reply omits
+
+- **WHEN** a reply reporting an author by public key is read, and core is asked
+  for the name of the key that reply carries
+- **THEN** a name is returned
+- **AND** it is the name a reply of the address-only kind would have carried for
+  that same author, so the two surfaces render one identity identically
 
 #### Scenario: A reply with no author carries no name field
 
@@ -736,12 +836,16 @@ A name SHALL be derivable for any well-formed public key, including one belongin
 to no identity this peer has seen. There is nothing to look up, so there is
 nothing that could fail **to be found**.
 
-This is about lookup and not about totality, and the distinction matters because
-two other requirements do specify failures. A derivation can still fail because
-the input is not a well-formed key, and it can still fail because the denylist
-reserve was exhausted — neither is a key being unknown, and neither is relaxed
-here. What this forbids is a derivation that refuses a key for not being
-recognised.
+**The derivation SHALL be total over well-formed keys.** Every well-formed key
+yields a name, and **malformed key material is the only failure this capability
+has** — the requirement below specifies it. There SHALL be no other error
+condition, and in particular no failure that a well-formed key belonging to a
+real identity could reach: an error variant no input can produce is an
+unreachable branch that a reader takes as evidence the failure exists, and a
+caller handles a case that cannot arrive.
+
+What this requirement forbids is a derivation that refuses a key for not being
+*recognised*, which is a different thing from refusing bytes that are not a key.
 
 #### Scenario: A name is unchanged by every surrounding state
 
@@ -799,8 +903,7 @@ presented as one attributable to somebody.
 Any change to the scheme SHALL mint a new version rather than edit the current
 one. A change SHALL include: removing a word from any of the three lists, adding
 one, reordering a list, changing a list's size, changing the number of slots,
-changing which bytes a slot reads, changing the connector, and changing the
-denylist.
+changing which bytes a slot reads, and changing the connector.
 
 **Changing a list's size is a scheme change even when it looks like a
 correction.** The sizes are what make the reduction unbiased, so taking the

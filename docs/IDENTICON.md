@@ -35,9 +35,10 @@ These get conflated, so they are separated here deliberately.
 
 **The combined row deliberately names no figure.** Earlier revisions pinned
 ~2^36 and ~2^38.6 here; both were the mark multiplied by a name space this note
-does not own, and both went stale when PLAN.md changed — see the note below and
-the worked example further down. **Multiply ~12,400 (2^13.6) by the name space in
-PLAN.md §5.2.1**, which is the only place that figure is current.
+does not own, and both went stale when that space changed — see the note below
+and the worked example further down. **Multiply ~12,400 (2^13.6) by the name
+space in the `generated-names` spec**, which is the only place that figure is
+current.
 
 > **Several figures in earlier revisions of this note were wrong, and the
 > corrections are recorded in place rather than quietly replaced.** Two rounds of
@@ -612,7 +613,8 @@ one.** The two multiply, and the pair collides only when both collide.
 of this note multiplied against 2^25 and quoted a combined 2^38.6 — but that
 was the *superseded three-word* scheme, and the figure was already stale when
 it merged. A number owned by another document does not belong pinned in this
-one; **read the current space from PLAN.md §5.2.1 and multiply by 2^13.6.**
+one; **read the current space from the `generated-names` spec and multiply by
+2^13.6.**
 
 Worked for the three-word scheme at the time of writing (2^33), so the method is
 checkable rather than merely asserted:
@@ -729,8 +731,8 @@ grinding for a lookalike grinds only those fixed positions and gets the hidden
 ones free.
 
 **The bundle is grindable at any of the sizes this note has quoted** — 2^38.6
-when that figure was pinned here, 2^46.6 at the name space PLAN.md §5.2.1 now
-carries — with unlimited address regeneration. The conclusion has survived every
+when that figure was pinned here, 2^46.6 at the name space the `generated-names`
+spec now carries — with unlimited address regeneration. The conclusion has survived every
 restatement of the number, which is the point: this defeats casual impersonation,
 not a motivated attacker, and the address remains the identity.
 

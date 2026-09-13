@@ -74,34 +74,41 @@
 - [ ] findings all ticked, `findings/` deleted — runner
 - [ ] `openspec validate --strict`, then `archive` — runner
 
-## Two owner decisions taken after the reviewers were dispatched
+## Three owner decisions, all now in the spec
 
-Recorded here rather than acted on, because the flow's rule is that a spec must
-not move while agents are reading it. Both land **after** the six findings files
-are in, as a `spec-writer` pass and then a `dev-writer` pass.
+The `spec-writer` pass has landed all three. What follows is the record of what
+was decided; the contract is in the spec and the reasoning belongs in
+`design.md`. A `dev-writer` pass implements them.
 
-**1. Nouns and places each need a one-sentence gloss, and nothing provides one.**
-The lists are `pub const NOUNS: &[&str]` — bare words. A user is shown *measured
-aporia of lampsakos* and has no way to learn what `aporia` or `lampsakos` mean,
-and the QML sandbox forbids a view from looking anything up, so the gloss can
-only come from core. **Scoped to noun and place only**: an English adjective
-needs no translation for an English-speaking reader, where a Greek noun does.
-That is ~2,048 short glosses, not 10,240, and it changes the wordlist shape from
-`&[&str]` to a pair and widens the reply beside `displayName`.
+**3. No filter on any word and no filter on any output.** The true-attribution
+denylist is deleted along with the redraw, the reserve bytes and
+`ReserveExhausted` — see section 3 below. The accepted consequence is that an
+identity may derive to a real historical figure's canonical name and, there
+being no rotation, sign every post with it. **Exactly one rule keeps anything
+out**: no wordlist entry may contain the connector as a word, which is a rule
+about an entry's spelling and not about any word's meaning.
 
-**2. §5.2.1 must be SHED into the spec and `design.md`, not corrected in place.**
-This is the flow's standing rule (`.claude/agents/README.md`, "PLAN.md sheds in
-two directions") and this change did the opposite: its exclusion apparatus was
-*edited* in PLAN.md when it should have moved out. §5.2.1 currently runs
-**lines 956–1994, about a fifth of the whole document**, and nearly all of it is
-now either behaviour the spec owns or reasoning `design.md` owns.
+**1. Nouns and places each need a one-sentence gloss.** A user shown *pensive
+aporia of lampsakos* has no way to learn what `aporia` or `lampsakos` mean, and
+the QML sandbox forbids a view looking anything up, so the gloss can only come
+from core. **Scoped to noun and place only** — an English adjective needs no
+translation for an English-speaking reader. ~2,048 glosses, not 10,240.
 
-What stays in PLAN.md is what is **not built yet**, plus one line saying the
-thing exists — never why it works that way. Keeping a second copy of the
-reasoning is the failure mode this rule exists to prevent: two copies drift and
-the wrong one gets read, which is exactly what happened here when a spec invented
-a single-word screen PLAN.md never had and a census blocked the change against
-it.
+**Fetched per word, not bundled.** The spec requires core to answer a gloss
+request for any entry of either Greek list, and forbids a name-carrying reply
+from carrying glosses: the feed caps a page at 100 rows, so bundling would put
+up to 200 glosses on one reply, mostly repeated and nearly all unread. A gloss
+does not participate in the derivation, and changing one is **not** a scheme
+version bump — which is the opposite of every other change to an entry.
+
+**2. PLAN.md's section on what an identity is called has been SHED.** It ran
+1,039 lines (956–1994, about a fifth of the document) and now runs 135. The
+derivation, byte budget, arithmetic, list sizes and screens are the spec's; the
+reasoning behind each is `design.md`'s. What stayed in PLAN.md is what is not
+built (two open questions), the grinding threat-model conclusion — which is
+about the product rather than this derivation, and whose answer is *nothing in
+this scheme defends against impersonation; the address is the identity* — and
+the rendering obligations bound for §11.1.
 
 ## Implementation
 
@@ -164,20 +171,30 @@ it.
       16-bit range and **counts into a vector** rather than asserting from the
       arithmetic, since the arithmetic is what is under test
 
-## 3. The denylist and the redraw
+## 3. Removing the denylist and the redraw
 
-- [x] 3.1 `names/denylist.rs` holds 199 sorted `(noun, place)` pairs, generated
-      from `tmp/attributions.txt`. Sortedness is asserted with a strict `<` over
-      `windows(2)`, which checks sorted **and** deduplicated in one pass — and it
-      is the precondition `binary_search` needs, which an unsorted array would
-      break *silently*
-- [x] 3.2 Whole-name redraw from the reserve.
-      `a_refused_pair_redraws_every_slot_from_the_reserve` constructs the digest so
-      the two draws differ in **all three** slots, so a scheme substituting only
-      the offending pair fails it
-- [x] 3.3 `NameError::ReserveExhausted` on two refused draws, reached through a
-      constructed digest — through a key it is reachable only by grinding
-- [x] 3.4 `an_unrefused_draw_never_consults_the_reserve` varies only bytes 6..11
+**Owner ruling: no filter on any word and no filter on any output.** Tasks 3.1
+to 3.4 built a denylist of noun–place pairs and the whole-name redraw that
+served it. All of it comes out. The spec now requires that nothing filters a
+drawn name, and the only rule left that keeps anything out is the ` of `
+spelling rule on wordlist entries.
+
+- [ ] 3.1 Delete `names/denylist.rs` and every reference to it
+- [ ] 3.2 Delete the redraw: `draw_at` is called once, at offset 0, and there is
+      no second draw and no refusal check
+- [ ] 3.3 Delete `NameError::ReserveExhausted`. It has no remaining trigger, and
+      an error variant no input can produce is an unreachable branch a reader
+      takes as evidence the failure exists
+- [ ] 3.4 Delete the tests that covered the refusal, the redraw and the reserve —
+      `a_refused_pair_redraws_every_slot_from_the_reserve`,
+      `exhausting_the_reserve_fails_rather_than_reading_on`,
+      `an_unrefused_draw_never_consults_the_reserve`,
+      `the_redraw_path_is_pinned_to_a_written_down_name`,
+      `a_refused_pair_leaves_both_of_its_words_drawing_freely`,
+      `the_denylist_is_sorted_deduplicated_and_in_range`
+- [ ] 3.5 `NAME_DIGEST_BOUND` becomes **6**, and it must bound something rather
+      than be asserted against its own literal — the readability finding on the
+      tautological `debug_assert_eq!` applies to the new constant too
 
 ## 4. The pins
 
@@ -185,11 +202,16 @@ it.
       wordlists from the **text files** and does the index arithmetic itself rather
       than calling `name_from_digest`. `the_name_scheme_is_pinned_to_known_answers`
       pins the common path and the digest separately;
-      `the_redraw_path_is_pinned_to_a_written_down_name` pins the redraw;
       `the_pinned_name_is_derivable_by_hand_from_the_pinned_digest` re-derives the
       indices in the test and asserts them as literals.
       **Proved by mutation**: renaming one noun entry (`karpos`) failed both pins
       and the character sweep — 3 failures, 29 passes
+- [ ] 4.2 **Re-pin after the denylist comes out.** Any pinned case whose name was
+      produced by a redraw now derives from its first draw instead, so the
+      written-down name changes. Re-derive with `tmp/pin.rs` rather than by
+      running the implementation and copying what it prints, which is the whole
+      point of the pin. The spec now also requires pinned cases to span the lists
+      — a low and a high index in each slot — rather than clustering
 
 ## 5. The feed row
 
@@ -201,6 +223,26 @@ it.
 - [x] 5.3 `a_rows_name_follows_the_key_that_signed_not_the_rows_position` exchanges
       the two posts' order, and asserts the two pinned names differ so the check is
       not trivially satisfied by one name matching both branches
+
+## 5b. The glosses, and deriving a name from a key
+
+- [ ] 5b.1 Every noun and every place carries a gloss. The wordlist shape changes
+      from `&[&str]` to a pair; **the adjective list does not change** and carries
+      no glosses. ~2,048 glosses, sourced rather than recalled — the attestation
+      argument applies to a gloss exactly as it does to a word, and a fabricated
+      gloss is likewise invisible to a reviewer and uncatchable by a test
+- [ ] 5b.2 A gloss lookup by word, answering for any entry of either Greek list
+      and **refusing** anything else — including an adjective, which is the case
+      that distinguishes a real check from one that returns empty for a miss
+- [ ] 5b.3 Glosses are ASCII, asserted over every entry, for the same bidi reason
+      the word lists are
+- [ ] 5b.4 No name-carrying reply gains a gloss field. The feed row keeps exactly
+      the fields it has plus `displayName`
+- [ ] 5b.5 **A way to derive a name from a public key**, so a caller holding a
+      key-carrying reply can render an attribution without reimplementing the
+      scheme. This is what makes forbidding name-and-key-together affordable
+      rather than a cost pushed onto the view, and it is the answer to the
+      security reviewer's silent-divergence concern
 
 ## 6. The identicon window
 

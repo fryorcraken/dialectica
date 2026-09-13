@@ -32,22 +32,18 @@ from it would pre-answer "does the name change under rotation?" by accident.
 ## What Changes
 
 - **A derivation from a public key to a three-word name**, in the form
-  *measured aporia of lampsacus*. A fixed 32-byte domain separator, distinct from
-  every address prefix, hashed with the key; three disjoint 16-bit draws select an
-  adjective from 8,192, a noun from 1,024 and a place from 1,024, joined by the
-  fixed connector `of`. Deterministic, stateless, and identical on every peer
-  forever — a name is not published and cannot be, because a published name is
-  one two peers could disagree about.
+  *pensive aporia of lampsakos*. A fixed 32-byte domain separator, distinct from
+  every address prefix, hashed with the key; three disjoint 16-bit draws over
+  bytes `0..6` select an adjective from 8,192, a noun from 1,024 and a place
+  from 1,024, joined by the fixed connector `of`. Deterministic, stateless, and
+  identical on every peer forever — a name is not published and cannot be,
+  because a published name is one two peers could disagree about.
 
-- **A true-attribution denylist on noun–place pairs.** The *X of Y* shape can
-  spell a real figure's canonical name — *straton of lampsacus* — which would sign
-  a user's every post with a real person's identifier. On the order of a tenth of
-  a percent of draws — a handful of identities in every few thousand. **This is
-  not an exclusion and not a screen on meaning**: both words stay in their lists
-  and draw freely elsewhere; what is refused is a composition that states a
-  falsehood about who is posting, and it is enumerable by lookup rather than
-  judged word by word. The denylist's exact size follows from how many named
-  Greeks the noun list holds and is deliberately not pinned.
+- **Nothing filters a drawn name.** Every draw is one unconditional reduction:
+  no denylist, no refused combination, no retry, no second draw. The derivation
+  is total over well-formed keys, consumes a fixed six bytes, and reaches the
+  `2^33` space exactly. **Owner decision: no filter on any word and no filter on
+  any output.**
 
 - **The feed row gains a `displayName` beside its `author`.** This is the crux of
   the change. `list_threads` returns an address; the name comes from a key; so
@@ -57,18 +53,27 @@ from it would pre-answer "does the name change under rotation?" by accident.
   builds the row. **The address stays** — the name is added beside it, never in
   place of it.
 
+- **A reply carrying the author's public key carries no name**, because the
+  caller can derive one and two derivable identifiers on the wire could
+  disagree. This is what keeps `thread-read` and `identity-onboarding` — both of
+  which ship the key — satisfying this capability rather than excepted from it.
+
+- **Every noun and every place carries a one-sentence gloss**, served per word on
+  request rather than bundled beside a name. A user shown a Greek noun has no
+  way to learn what it means, and the QML sandbox forbids the view looking
+  anything up. Adjectives carry no gloss: an English word needs no translation
+  for an English-speaking reader.
+
 - **The false comment in `feed.rs` is corrected**, because a spec that contradicts
   a doc comment loses to the comment for the next reader of the code.
 
 - **Three curated wordlists** — 8,192 English adjectives, 1,024 ancient Greek
   nouns, 1,024 Greek places real and mythological. **Exactly three screens apply,
-  all mechanical**: ASCII-transliterable, deduplicated, and attested. **There are
-  no exclusions.** No familiarity, register, length, pronounceability or tone
-  screen, no authority or project-vocabulary list, and no figure kept out for
-  being an argument — every draft that added a fourth filter was withdrawn on
-  challenge. The lists and the scheme are versioned together and effectively
-  frozen: removing one word reindexes the list and renames every identity that
-  drew at or after it, on updated peers only.
+  all mechanical**: ASCII-transliterable, deduplicated, and attested. A word is
+  never kept out of a list for what it means, names or connotes. The lists and
+  the scheme are versioned together and effectively frozen: removing one word
+  reindexes the list and renames every identity that drew at or after it, on
+  updated peers only.
 
 - **The noun slot is any attested ancient Greek noun**, across four pools on equal
   footing: abstractions, named historical Greeks, mythological figures, and
@@ -77,10 +82,12 @@ from it would pre-answer "does the name change under rotation?" by accident.
   from it and are the larger half.
 
 - **No noun entry may carry the connector as a word**, so that no name renders as
-  *measured zeno of citium of lampsacus*. This is a rule about one literal
+  *pensive zenon of kition of lampsakos*. This is a rule about one literal
   substring, checkable against the shipped list, and it is what the widened noun
   slot makes reachable: a source supplying named Greeks is liable to supply them
-  already qualified by a place.
+  already qualified by a place. **It is the only rule in this change that keeps
+  anything out**, and the bare form — `zenon` — stays in the list and draws
+  normally.
 
 - **The three recognition channels must read disjoint inputs**, and one pair
   currently does not. See below — this is the part with a possible `dialectica-ui`
@@ -98,7 +105,7 @@ already carries the input. No identicon, no rotation, no UI work.
 **New Capabilities**
 
 - `generated-names` — the derivation from a public key to a display name: the
-  domain separation, the byte budget, the list sizes, the denylist redraw, the
+  domain separation, the byte budget, the list sizes, the glosses, the
   determinism contract, and what the name may not be used for.
 
 **Modified Capabilities**
@@ -116,16 +123,15 @@ change first writes a feed capability inherits it rather than restating it.
   `dialectica/rust-lib/dialectica-core/src/`.
 - `wire.rs`'s feed page serialisation gains one field per row; `feed.rs`'s
   `FeedRow` gains one field and loses a false doc comment.
-- **10,240 curated words plus the true-attribution denylist are the bulk of the
-  work**, and they are curation rather than design. The sources and the three
-  screens are fixed; the words are not written. **Withdrawing the exclusions made
-  this job smaller rather than larger** — the screening that dominated the
-  estimate, judging tone and connotation across millions of word junctions, is
-  gone. What is left is looking words up: tedious and checkable rather than a
-  judgement per entry. The denylist needs a canonical place for each named Greek
-  in the noun list, which is the same kind of lookup.
-- `docs/PLAN.md` §5.2.1's derivation, byte budget, arithmetic and list sizes
-  become spec prose and are struck through there, pointing here.
+- **10,240 curated words plus ~2,048 glosses are the bulk of the work**, and they
+  are curation rather than design. The sources and the three screens are fixed.
+  The job is looking words up — tedious and checkable rather than a judgement per
+  entry.
+- `docs/PLAN.md`'s section on what an identity is called sheds its derivation,
+  byte budget, arithmetic and list sizes here, and its reasoning to `design.md`.
+  What stays there is what is not built, plus the threat-model conclusion about
+  grinding and the rendering obligations, which are about the product rather than
+  about this derivation.
 - `docs/UI-BRIEF.md` obligation 6's parenthesis says core "must return" the name.
   After this change it does, so the obligation reads as met rather than
   outstanding.
@@ -153,7 +159,7 @@ cap was self-imposed — nothing in the design required a Greek adjective — an
 withdrawing it moves the slot from 2^8 to 2^13. PR #27's own summary is the part
 worth keeping: *"the arithmetic is sound and the premise is a preference wearing
 the costume of a fact."* The register did not disappear with the cap; it moved to
-the *X of Y* shape and the two Greek words in it, so *brittle kairos of abdera*
+the *X of Y* shape and the two Greek words in it, so *luminous stasis of delos*
 still does not read as a gamertag.
 
 **I re-derived every figure by hand rather than taking them from #27**, and all
@@ -166,14 +172,10 @@ holds: adjective +5, second-adjective-to-place +2, noun +1 is eight doublings,
 and `2^25 x 2^8 = 2^33`. **These are unaffected by the widened noun slot**, which
 changes what the 1,024 nouns are and not how many there are.
 
-**The denylist figures are not re-derived here, because their premise is gone.**
-They rested on "roughly 800 of the 1,024 nouns are named Greeks", which followed
-from a noun slot holding only abstractions and thinkers. With four pools the
-proportion is a consequence of curation rather than an input to it, so the spec
-states the family as an order of magnitude — a tenth of a percent of draws — and
-pins no count. The conclusion the figure was used for survives unchanged either
-way: one redraw is enough, because a second consecutive refusal is the square of
-a rate of that order.
+**These figures now hold exactly rather than approximately.** With no refused
+region and no retry, every one of the `2^33` combinations is reachable and
+equally likely, so the birthday arithmetic above describes the shipped scheme
+without a correction term.
 
 **So three words costs twice the collision rate of four (0.145% against 0.073%)
 and buys a word off every feed row.** That is the trade, stated plainly; it is
@@ -260,11 +262,11 @@ a plain error: the number now checks out, which invites the rest to be trusted.
 
 - **`tmp/ui-design/handoff/reference/reference-design.dc.html`** renders
   `vermilion patient sandworm` and `slow cobalt lamplighter` on its identity
-  slate. These are **three-word names from the withdrawn science-fiction draft** —
-  PLAN.md names the first by name as the register it rejected. They are three
-  words, so they now pass a word count, and they remain the wrong shape entirely:
-  no `of`, no place, no Greek. **The correct form is *measured aporia of
-  lampsacus*.** Treat that screen as a layout reference and never a content one.
+  slate. These are **three-word names from a withdrawn science-fiction draft**.
+  They are three words, so they now pass a word count, and they remain the wrong
+  shape entirely: no `of`, no place, no Greek. **The correct form is *pensive
+  aporia of lampsakos*.** Treat that screen as a layout reference and never a
+  content one.
 
 - **`copy.json` line 4** claims the key "cannot be linked to you anywhere else",
   which PLAN.md §5.2 forbids saying of the MVP. Not this piece's to fix, but it is

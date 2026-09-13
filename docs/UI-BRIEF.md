@@ -20,14 +20,15 @@ argument between positions.
 > reconciled against **PLAN.md §7.2-§7.3** (votes and vouching), **§9.1**
 > (the Phase 3 API) and **§5.2.1** (what an identity is called).
 >
-> **The generated name's shape is settled as of §5.2.1**: three words —
-> **adjective + Greek noun + "of" + Greek place**, as in *measured aporia of
-> lampsacus* — derived from the key and never typed. Earlier versions of this
-> block said "adjectives plus a noun" and then "four words — two adjectives and
-> two nouns"; both are superseded, and the four-word version was the one this
-> brief was designed against for a while. The *word lists* remain curation work,
-> but the shape, the sizes and the sources are decided. `git log docs/PLAN.md`
-> answers what has landed; this block does not try to.
+> **The generated name's shape is settled, and the `generated-names` spec is
+> now the authority on it** rather than PLAN.md: three words — **adjective +
+> Greek noun + "of" + Greek place**, as in *pensive aporia of lampsakos* —
+> derived from the key and never typed. Earlier versions of this block said
+> "adjectives plus a noun" and then "four words — two adjectives and two nouns";
+> both are superseded, and the four-word version was the one this brief was
+> designed against for a while. The word lists are written and the sizes are
+> fixed. `git log docs/PLAN.md` answers what has landed; this block does not try
+> to.
 >
 > Also reconciled against **§9.2** (the first release's scope), which suspends
 > one property this brief previously stated as fact — see the box below.
@@ -127,7 +128,7 @@ switched on, and switching it on later is not a redesign.
 
 **Identities have generated names, and this is new.** An identity renders as
 **an adjective, a Greek noun, the word "of", and a Greek place** — something like
-*measured aporia of lampsacus*, *brittle kairos of abdera* or *luminous stasis of
+*pensive aporia of lampsakos*, *quipful ismene of korykos* or *luminous stasis of
 delos* — computed from the key itself. Nobody types a name; there is no registry to hold
 one, and a typed name carried between Stoas would undo the unlinkability above
 with a text field — which is a reason that outlives the first release's
@@ -140,13 +141,26 @@ why the words look the way they do:
 
 > The noun and the place are ancient Greek; the adjective is English.
 
+**Core also serves a gloss for each individual noun and place**, and this is
+worth designing an affordance for. A user shown *pensive aporia of lampsakos*
+has no way to learn what `aporia` means or where `lampsakos` was — the view
+cannot look anything up, so if core does not supply it the user cannot find out.
+Two things about how it arrives shape the design:
+
+- **It is fetched per word, on request** — not carried with the name. So it
+  suits a tap, a hover or a detail view, and it is not free to render 50 rows'
+  worth of glosses in a feed.
+- **Only the noun and the place have one.** The adjective is English and carries
+  no gloss, so an affordance that implies all three words are explainable will
+  come up empty on the first one.
+
 **Three content words, and they all matter — but the `of` is free.** The
 adjective, the noun and the place are each an independent draw and each is part of
 what makes accidental collisions rare (see below), so **do not truncate or elide
 any of them, and never cut one mid-word**: dropping the tail removes the place,
 which is a third of what distinguishes one name from another and is often the only
 part that differs between two similar names. **The one thing a cramped row may
-drop is the connector** — *measured aporia lampsacus* loses nothing, because "of"
+drop is the connector** — *pensive aporia lampsakos* loses nothing, because "of"
 is fixed literal text and carries no information. If a row cannot hold three
 words, the row is wrong.
 

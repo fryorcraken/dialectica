@@ -38,7 +38,7 @@ at `24faad7`. Baseline re-run in this worktree: `918 + 28 = 946`, 0 failed.
       policies are not merely undocumented, they are written down as two
       contradictory live requirements.
 
-- [ ] **`spec-writer`** — `openspec/specs/thread-read/spec.md:192` vs
+- [x] **`spec-writer`** — `openspec/specs/thread-read/spec.md:192` vs
       `openspec/changes/generated-names/specs/generated-names/spec.md:597` — two
       **live** requirements now contradict each other outright
       **Scenario:** the merged `thread-read` capability requires
@@ -66,6 +66,18 @@ at `24faad7`. Baseline re-run in this worktree: `918 + 28 = 946`, 0 failed.
       spans two capability files, which is weaker still.
       **Severity: high** — a merged change would ship two requirements that
       cannot both hold, with the losing one enforced by a green test.
+
+      **FIXED — `generated-names` amended, `thread-read` left alone.** You framed
+      this as "one of the two has to be amended in this change", and the one that
+      moved is this change's. The requirement now keys on what the reply carries:
+      a reply with only an address owes the name, a reply carrying the public key
+      is forbidden from carrying it. `thread-read`'s requirement and its scenario
+      at :192 are both untouched and both now describe a reply that *complies*.
+      Your previous finding — that the two surfaces enforce opposite
+      architectures — is the `dev-writer`'s, and this resolution settles which
+      architecture it should converge on: `thread_page_json` is already right,
+      and what needs a recorded decision is `feed.rs` shipping a name because the
+      feed row carries no key, not the thread shipping none.
 
 - [ ] **`dev-writer`** — `names/adjectives.rs`, `names/nouns.rs`,
       `names/places.rs`, `names/denylist.rs` — the provenance chain D1 rests on
