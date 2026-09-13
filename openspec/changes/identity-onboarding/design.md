@@ -711,14 +711,45 @@ check is still the right one; the second reading is `git diff <the commit you
 merged> HEAD --stat`, which is what distinguishes the two.
 
 **Noted, not fixed: the three `publish*` methods are not in
-`every_request_taking_method` either.** They read fields of their requests and
-they route through `Request::parse`, so they are envelope-checked — but they are
-unswept, so the five sweeps say nothing about them. That is the same obligation
-this entry describes being missed a second time, by a different piece, which is
-evidence about the mechanism rather than about either author: a doc comment saying
-"nothing checks this" is load-bearing and has now been walked past twice. It
-belongs to `authoring-content`, which has already merged, so fixing it here would
-put another piece's gap in this diff.
+`every_request_taking_method`, and they do not reach `Request::parse` at all.**
+An earlier version of this entry said they "route through `Request::parse`, so
+they are envelope-checked — but they are unswept". **The first half was wrong, and
+it inverted the severity**, so the correction is the part worth keeping.
+
+`publish_post`, `publish_reply` and `publish_vote` (`wire.rs:1756`, `:1793`,
+`:1833`) each open with `parsed_object(request)` — `wire.rs:1705-1707`, which is
+`serde_json::from_str` into a bare `Value` and nothing else. `Request::parse`
+appears at `wire.rs:110`, `:249`, `:788`, `:1016`, `:1144`, `:1314` and `:1881`;
+none of those is a publish handler. So the two properties the envelope exists to
+provide are both absent from the publish surface:
+
+- **No by-name non-object refusal.** `[]` reaches a field read and comes back with
+  a missing-field message, not `REQUEST_NOT_AN_OBJECT`.
+- **No `MAX_REQUEST_BYTES` cap.** An oversized request is parsed and served. That
+  is the measured amplification `every_request_taking_method_refuses_an_oversized_request`
+  was written against (`wire.rs:7207-7235`) — 64 MiB in, a 373-byte reply — on
+  three methods that sweep does not reach.
+
+So this is not a testing gap with a working check behind it. It is
+`the_sixth_method_the_boundary_does_not_stop` — the residual the envelope's own
+`design.md` recorded, that "nothing obliges a handler to hold a `Request` at all"
+— **live on `main`, three times over.** The one property that does hold is the
+JSON-object reply shape: `parsed_object`'s error arm goes through `error_json`, and
+`every_handler_answers_with_a_json_object_for_any_request_shape` (`wire.rs:7984-7992`)
+covers the three by hand. That sweep is the reason the absence is invisible — the
+publish methods appear in a sweep, just not in the one that would catch this.
+
+**Still not fixed here, and the reason is unchanged by the correction:** it belongs
+to `authoring-content`, which has already merged, so the fix is a change to that
+piece's handlers and its `parsed_object` helper, not a hunk in this diff. What the
+correction changes is the urgency of the follow-up, not its owner.
+
+That the same obligation was missed twice — once by this branch's three handlers in
+the merge, once by `authoring-content`'s three — is evidence about the mechanism
+rather than about either author: a doc comment saying "nothing checks this" is
+load-bearing, and it has now been walked past twice. The durable lesson is that
+`every_request_taking_method`'s list is the only thing standing between a new
+handler and an unbounded request, and a list is not a type.
 
 **One test-fixture defect surfaced in the merge and is fixed here**, because it
 would otherwise have been inherited as a flake. `OnboardingDir::new` derives its
@@ -798,9 +829,116 @@ architecture review flagged the *path* trio as speculatively added when only one
 its three had a caller, and this is the same observation arriving from the other
 direction. A later change should retire them or say why they stay.
 
+**Deferred to that later change, with the full count, so it is not rediscovered:**
+architecture review's A6 asked the API-surface question from both ends, and the fix
+pass moved the answer. Where it stands now:
+
+- **`Keystore::stoa_address_at_path` gained a production caller** — `posting_identity`
+  uses it, because the A1 fix needed exactly that method. So one of the two additions
+  the finding called "the trio-for-symmetry pattern" was not speculative after all;
+  it was needed by a defect nobody had found when the finding was written. Worth
+  recording because it is the honest counterweight to the rule: symmetry is a weak
+  argument for a public method, and it was right here by luck rather than by
+  reasoning.
+- **`Keystore::stoa_key_at_path` (`keystore.rs:758`) still has no handler caller**,
+  and the finding's "used only by tests" needs one correction to be exactly true:
+  `stoa_public_key_at_path` calls it one line down (`keystore.rs:764`), so it is not
+  dead code, it is a `pub` method whose only *external* callers are tests in
+  `keystore.rs` and `wire.rs`. That is what makes it a live question rather than a
+  deletion: making it private is the cheap answer and it costs those tests the
+  ability to reach a `SecretKey` at a path. It is a public method returning a
+  `SecretKey` on the secret-holding type, which is the surface `keystore.rs:727`'s
+  "there is no accessor for the root itself, and that is deliberate" argument is
+  narrow about.
+- **`IdentityStore::all_paths` stays and needs no defence.** The spec requires the
+  record be readable in full so it can later be exported; a method is how that is
+  discharged. Architecture review agreed.
+- So the retirement question is **four methods, not three**: the pathless trio plus
+  `stoa_key_at_path`. Whoever takes it should decide them together, because they are
+  one question — how much of `Keystore`'s surface exists for tests — and answering it
+  three-at-a-time is how the count drifted in the first place.
+
+**Why none of it is done here.** Deleting public methods from the secret-holding
+type, in a change whose `proposal.md` declares `keystore` untouched, is the same
+silent widening the finding objects to, run in reverse. The deletion is small; the
+contract change it implies is not, and it needs a proposal that says so.
+
+**The half that is genuinely unresolved is the proposal's, and it is `spec-writer`'s
+to fix.** `proposal.md:52-57` lists `keystore` under "Not modified, deliberately —
+unchanged." The **file format** is unchanged, which is what that paragraph argues
+about. The **type's API** is not: `stoa_key_at_path`, `stoa_public_key_at_path`,
+`stoa_address_at_path`, `slate_for`, `slate_from_nonce` and module-level
+`protection_from_env` are six new public items. A reader taking "keystore —
+unchanged" at face value will not expect them. Recorded here because it is the same
+format-versus-API conflation that made A1's "derivation untouched" claim wrong —
+same paragraph, same failure mode, twice — and a document that gets it wrong twice
+is telling you the distinction needs stating rather than assuming.
+
 **Two SQLite files where there was one** → One more open on the keep path, and
 one more file for a backup to remember. Accepted against bricking every existing
 op log, which is the alternative.
+
+**`identity_store.rs` is a second copy of `log/sqlite.rs`'s open-and-triage
+machinery, and a `versioned_sqlite` helper is the reshape that would remove it** →
+**Deferred to its own change, deliberately, and this is the record of that.**
+
+The decision above — that the path record is its own SQLite file — is the decision
+this cost. Architecture review enumerated eight items that now exist twice,
+structure for structure: `LAYOUT_VERSION` and its pinning test
+(`identity_store.rs:58`, `:1076` against `log/sqlite.rs:74`, `:899`), the
+`storage()` error adapter, `in_memory()` and its doc argument, `from_connection`'s
+version triage, `check_layout` with its `LIMIT 0` and its
+`QueryReturnedNoRows`-is-success convention (`identity_store.rs:274` against
+`log/sqlite.rs:330`), `create_schema` with pragma-last and `ROLLBACK`-on-failure
+(`:311` against `:411`), the `UnknownLayoutVersion` /
+`LayoutDoesNotMatchItsVersion` arms, and the `TempDir` test fixture.
+
+**The cost is concrete rather than aesthetic.** The pragma-last invariant now exists
+twice, each under its own shouting comment (`identity_store.rs:302` and
+`log/sqlite.rs`'s equivalent). A change that learns something new about SQLite
+version stamping — that `user_version` should be read inside a transaction, say —
+has to find and fix both, and the second is findable only by already knowing it
+exists. A third store inherits nothing and writes a third copy.
+
+**The reshape is a `versioned_sqlite` helper**: open, triage the version,
+create-or-check, with the layout claim and the schema string passed in. After it,
+`identity_store.rs` is a schema string, two statements and a decode guard —
+genuinely the "table with two columns" this document elsewhere describes.
+
+**Why it is not done here.** The finding's own ordering argument is what rules it
+out, and it cuts the other way from the way it reads:
+
+- It is a refactor of `log/sqlite.rs`, a file this change does not otherwise touch,
+  arriving in a pass already carrying four high-severity defect fixes. CLAUDE.md's
+  rule is make-room-then-change, and a reshape that lands *after* the change it was
+  supposed to make room for is no longer a refactor commit — it is a rewrite of the
+  op log's open path bundled with a feature, reviewable for neither.
+- Done first, `identity_store.rs` would have been written thin. Done last, it is a
+  rewrite of a file whose tests are the only thing standing between the op log and a
+  silently unopenable store — and it would have to be reviewed as such, in the same
+  diff as the session reshape and two moved derivations.
+
+**Where it goes:** a no-behaviour-change change of its own, taking `log/sqlite.rs`
+and `identity_store.rs` together, with every gate green on the refactor alone. It is
+the precondition for a third store, so the next store is the forcing event if
+nothing else is.
+
+**The related duplication, recorded rather than removed:** the `Drop`-guard temp
+directory fixture is in its fourth copy — `keystore.rs:1466`, `log/sqlite.rs:864`,
+`identity_store.rs:1086`, and `wire.rs:2536` as `OnboardingDir`. Four copies is the
+textbook instance of CLAUDE.md's fourth-guard rule, and `wire.rs`'s own comment
+identifies itself as a copy of the others and proceeds anyway. The comments now name
+all four, so whoever needs a fifth decides deliberately instead of discovering the
+count. Unifying them is test scaffolding and can ride along with the
+`versioned_sqlite` change or go on its own; what must not happen again is a fifth
+copy written by someone who could not see there were four.
+
+**One claim in this document was wrong in the other direction, and is corrected
+above**: the entry on `check_layout` previously said `identity.sqlite` had no
+`check_layout` equivalent, recorded as a known asymmetry rather than a copy. It has
+one. The guard was declined in design, written during implementation, and the
+reversal never carried back — the direction that fails nothing, because a document
+claiming *less* than the code does breaks no test.
 
 **`identity.sqlite`'s `check_layout` proves its columns exist and nothing about
 their constraints** → This entry previously said the store had **no**
@@ -823,3 +961,37 @@ its own change, and the disk-content family it belongs to is the same one
 `path_from_row`'s bound belongs to. **Recorded so the next reader knows the
 one-path-per-Stoa invariant is a property of files *this build* wrote, not of every
 file it will open.**
+
+**Why "its own change" rather than a guard added here**, since the rest of this
+family *was* closed in this pass and a reader is entitled to ask what makes this one
+different. `path_from_row`'s bound is a value range — a comparison against a
+constant this build owns, with one right answer. This one is not:
+
+- The check has to read schema rather than data. Either `sqlite_master`'s stored DDL
+  text or `PRAGMA index_list` / `index_info`, and neither gives a clean yes/no:
+  string-matching DDL is matching SQLite's formatting of someone else's `CREATE
+  TABLE`, and `index_list` requires knowing which of the auto-indexes SQLite creates
+  for a `PRIMARY KEY` on a `BLOB` column counts as the right one.
+- It then has to decide **what a legitimate older file may look like**. `check_layout`
+  exists so a file this build did not write can still be opened when it matches; a
+  constraint check that is too strict refuses a good file, which is a worse failure
+  than the one it prevents, and there is no migration path to fall back on
+  (`log/sqlite.rs:405-409`, `:591`).
+- And it has to settle a **second behaviour question in the same area**, which the
+  finding raised and which is not decidable from the spec as written: what
+  `all_paths` should do when the table hands back two rows for one Stoa. Today
+  `path_for`'s `query_row(...).optional()` (`identity_store.rs:441`) takes whichever
+  row SQLite returns first and discards the rest, and `all_paths` — documented as the
+  export path (`identity_store.rs:472`) — returns both. An export carrying two contradictory
+  paths for one Stoa cannot be restored unambiguously, so "refuse the store at open"
+  and "refuse at read, per Stoa" are different contracts with different failure
+  surfaces, and picking one is a spec decision rather than a dev one.
+
+That is a schema-verification design, not a guard, and it wants a proposal of its
+own. **Where it goes:** the change that adds it should take the constraint check and
+the `all_paths` duplicate-row contract together, because closing one without the
+other leaves the export question answered by accident. `LAYOUT_VERSION`'s hardcoded
+pinning assertion (`identity_store.rs:1076`) is the model for how to pin whatever
+that change decides — it is pinned against a known answer rather than against what
+the code produced, which is why `cargo mutants` not mutating `const`s does not
+weaken it.

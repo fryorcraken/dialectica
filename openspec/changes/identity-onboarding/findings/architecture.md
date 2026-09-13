@@ -360,7 +360,7 @@ constant and a divergence would be cosmetic" is not a reason to leave it.
 
 ---
 
-- [ ] **A5 — `identity_store.rs` is a second copy of `log/sqlite.rs`'s store machinery, and `design.md` claims it is not**
+- [x] **A5 — `identity_store.rs` is a second copy of `log/sqlite.rs`'s store machinery, and `design.md` claims it is not**
 
 **For: `dev-writer`**, with a note for **`spec-writer`** on the design record
 **Severity: medium — genuine defect of shape**
@@ -450,9 +450,39 @@ Left open because a reviewer reading a ticked box here would reasonably conclude
 duplication was addressed. One table in it was corrected; the eight rows of duplicated
 machinery are all still there.
 
+**Deferred — and now actually written down, which the previous pass did not do.** The
+pass above reasoned the deferral correctly and then left it only here, in a directory
+the runner deletes before merge. That is a drop, not a defer: the eight rows of
+duplicated machinery would have gone unrecorded the moment `findings/` went.
+
+`design.md`'s Risks / Trade-offs now carries it, in the entry beginning
+*"`identity_store.rs` is a second copy of `log/sqlite.rs`'s open-and-triage machinery,
+and a `versioned_sqlite` helper is the reshape that would remove it"*, placed directly
+after the "Two SQLite files where there was one" entry — because that decision is what
+this duplication cost, and the two belong beside each other. It records all eight
+duplicated items, the concrete cost (the pragma-last invariant existing twice, each
+under its own shouting comment, so a future SQLite lesson has to find both), the
+`versioned_sqlite` shape itself, both reasons it is not done in this pass, and where it
+goes: a no-behaviour-change change taking `log/sqlite.rs` and `identity_store.rs`
+together, with a third store as the forcing event. The `TempDir` fourth copy is
+recorded in the same entry rather than as a separate note, since it is the same rule.
+
+**Line numbers were re-measured rather than copied.** The finding's `identity_store.rs`
+citations had drifted — the fix pass moved the file substantially — so the design.md
+entry cites current lines: `check_layout` at `:274` (not `:238-249`), `create_schema`
+at `:311`, the pragma-last comment at `:302`, the `LAYOUT_VERSION` pinning test at
+`:1076`, `TempDir` at `:1086`. `log/sqlite.rs`'s numbers were unchanged and verified.
+`keystore.rs:1436` and `wire.rs:1620` from the `TempDir` list are now `:1466` and
+`:2536`. The finding's reasoning holds at every one; only the addresses moved.
+
+Nothing here was reconsidered as belonging in this piece. The finding's own ordering
+argument is what rules it out, and it got stronger rather than weaker: the pass this
+box sat through added four high-severity fixes, so a `log/sqlite.rs` rewrite would now
+arrive in an even less reviewable diff.
+
 ---
 
-- [ ] **A6 — Three public API surfaces added with no production caller**
+- [x] **A6 — Three public API surfaces added with no production caller**
 
 **For: `dev-writer`**
 **Severity: low — genuine defect of shape (speculative widening)**
@@ -511,6 +541,43 @@ paragraph argues about; the **type's API** is not"* — is exactly the distincti
 
 Left open because the API surface question is unresolved either way: one item gained a
 caller, three lost theirs, and the proposal still says none of it happened.
+
+**Deferred, with the full count written into `design.md` so it is not recounted a
+third time.** The pass above was right that the deletion is not this change's, and it
+did record the pathless trio — but only the pathless trio. A6's own subjects,
+`stoa_key_at_path` and the proposal's `keystore — unchanged` claim, had no durable
+home, and `findings/` is deleted at merge.
+
+`design.md`'s Risks / Trade-offs now carries all of it, appended to the existing
+*"`Keystore::stoa_key`, `stoa_public_key` and `stoa_address` now have no production
+caller"* entry rather than as a second entry, because it is one question asked from
+two ends and splitting it is how the count drifted. It records: that
+`stoa_address_at_path` gained a production caller in `posting_identity` (with the
+honest reading — symmetry was a weak argument that happened to be right, not a
+vindicated one); that `stoa_key_at_path` still has no handler caller; that `all_paths`
+needs no defence; that the retirement question is therefore **four** methods, not
+three, and must be decided together; why the deletion needs a proposal rather than a
+commit; and the format-versus-API conflation that the proposal still carries.
+
+**One correction to the finding, which I could not tick honestly without making.** A6
+says `stoa_key_at_path` is *"used only by `keystore.rs`'s own tests and by `wire.rs`'s
+tests"*. Grepping the whole tree: `stoa_public_key_at_path` calls it at
+`keystore.rs:764`, one line below its definition at `:758`. So it is not test-only
+code — it is a `pub` method with a production caller inside the same type and no
+*external* caller but tests. That changes the remedy rather than the verdict: making
+it private is the cheap answer, and its cost is that those tests lose the ability to
+reach a `SecretKey` at a path. `design.md` states it that way. The finding's
+conclusion — that this is speculative public surface — stands; the evidence line
+needed one word changed.
+
+Line numbers were re-measured: the finding's `keystore.rs:728/:733/:739` are now
+`:758/:763/:769`, and `:697-700` is `:727`. `IdentityStore::all_paths` is at
+`identity_store.rs:472`, not `:371`.
+
+The **proposal correction remains `spec-writer`'s** and is not discharged by this
+box — `proposal.md:52-57` still says `keystore` is unchanged. It is named in
+`design.md` so the next reader sees the claim is known-wrong rather than trusted, but
+a design.md note is not a fixed proposal. Flagged in my report.
 
 ---
 

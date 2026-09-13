@@ -315,7 +315,7 @@ Restoring the per-call mint fails that test plus two others and **nothing else i
 
 ---
 
-- [ ] **S4 — `check_layout` does not prove the PRIMARY KEY, so "one path per Stoa" is not structural on read-back (MEDIUM)**
+- [x] **S4 — `check_layout` does not prove the PRIMARY KEY, so "one path per Stoa" is not structural on read-back (MEDIUM)**
 
 **For: `dev-writer`, with a scenario for `tester`.**
 
@@ -387,6 +387,48 @@ and not for every file it will open.
 
 It is left unticked because that is a record, not a fix, and a ticked box here would
 tell a reviewer the read path refuses a constraint-less table. It does not.
+
+**Deferred, and now ticked — with the entry above extended to carry the two things it
+was missing.** This is the one of my three boxes whose deferral *had* been written:
+`design.md`'s Risks / Trade-offs entry beginning *"`identity.sqlite`'s `check_layout`
+proves its columns exist and nothing about their constraints"* already stated the
+mechanism, the measured consequence, and that the fix is its own change. The pass
+above was accurate about where it lives.
+
+Two gaps closed, both of which a later reader would otherwise have had to rediscover
+from this file that no longer exists:
+
+1. **Why "its own change" rather than a guard added here** — the entry asserted it
+   without arguing it, which is weak given that the rest of this disk-content family
+   *was* closed in the same pass. `design.md` now gives the three reasons: the check
+   must read schema rather than data (`sqlite_master` DDL text, or `index_list` /
+   `index_info`, with no clean yes/no for a `PRIMARY KEY` on a `BLOB`); it must decide
+   what a legitimate older file may look like, against a store with no migration path
+   to fall back on (`log/sqlite.rs:405-409`, `:591`, both re-read and confirmed); and
+   too strict a check refuses a good file, which is the worse of the two failures.
+2. **The `all_paths` duplicate-row question**, which this finding raised — *"an export
+   carrying two contradictory paths for one Stoa is an export that cannot be restored
+   unambiguously"* — and which the design entry did not mention at all. It is now
+   recorded as the second behaviour question in the same area, with the point that
+   "refuse at open" and "refuse at read, per Stoa" are different contracts and picking
+   one is a spec decision rather than a dev one. `design.md` says the closing change
+   must take both together, because closing one alone answers the export question by
+   accident.
+
+The entry also keeps this finding's own observation that `LAYOUT_VERSION`'s hardcoded
+pinning assertion is the model for pinning whatever that change decides — pinned
+against a known answer rather than against what the code produced, which is why
+`cargo mutants` not mutating `const`s does not weaken it.
+
+Line numbers re-measured against the current tree: `check_layout` is now
+`identity_store.rs:274` (the finding cites `:238-249`), `path_for` `:441`, `all_paths`
+`:472` (cited `:356-370`), the `LAYOUT_VERSION` pinning test `:1076` (cited
+`:807-814`). The reproduction and the reasoning hold at every one; only the addresses
+moved, because the fix pass grew the file.
+
+Not reconsidered as belonging in this piece. If anything the second question makes it
+less suitable: it needs a spec decision, and a spec must not move while code is
+written against it.
 
 ---
 
