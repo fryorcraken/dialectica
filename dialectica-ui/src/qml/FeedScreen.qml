@@ -40,7 +40,59 @@ ScreenFrame {
     // The posting gate. Probed on every render, never cached across one —
     // PLAN.md §9.1: "caching it across a keystore change is how a button
     // outlives the key that justified it."
+    //
+    // **Always `{canPost: <bool>, reason: <string>}`, both fields always
+    // present.** Every assignment goes through `capabilityFrom()`, so a reader
+    // of this property does not have to know which branch produced it.
     property var capability: ({ canPost: false, reason: "" })
+
+    // One probe reply, normalised into the one shape above.
+    //
+    // **This used to be two shapes and the difference was invisible at the use
+    // site.** The open arm assigned `probe.value` wholesale — whatever object
+    // core sent, with whatever fields — while the closed arm constructed a
+    // view-owned object. So `reason` was a guaranteed string on one path and
+    // possibly absent on the other, and the closed gate's `Text` needed a
+    // `!== undefined` guard that read as defending the closed branch while
+    // actually defending the open one. Review measured it: removing that guard
+    // emitted `Unable to assign [undefined] to QString` on fourteen tests,
+    // every one an OPEN-gate case, because QML evaluates the closed body's
+    // bindings even while that body is invisible.
+    //
+    // That is CLAUDE.md's named shape — a guard restated per consumer because
+    // the data structure does not hold the invariant — and it is the same
+    // "establish the value where it is produced" move `voteTarget()` makes for
+    // a row, applied one level up to the probe reply. A second consumer of
+    // `capability.reason` now inherits the invariant instead of rediscovering
+    // it, and the guard becomes unnecessary rather than merely explained.
+    //
+    // **Fail closed, and `=== true` is what makes that structural.** A probe
+    // that could not be reached, answered with something that is not a probe
+    // reply, or answered with an object carrying neither an affirmative
+    // capability nor a reason must all reach the SAME state as a probe
+    // reporting "not possible" — because the gate's whole point is that a box
+    // the user can type into can actually submit. `canPost !== true` covers
+    // every one of those without a branch per shape: absent, `undefined`,
+    // `"true"`, `1` and `null` are all not-`true`.
+    //
+    // A probe that supplied no reason leaves `reason` empty rather than
+    // inventing text: the spec forbids substituting a reason of the view's own,
+    // and an empty reason is a visible gap in core's answer rather than a
+    // plausible sentence covering for one.
+    function capabilityFrom(probe) {
+        var granted = probe.ok && probe.value.canPost === true
+        var supplied = probe.ok
+            ? (typeof probe.value.reason === "string" ? probe.value.reason : "")
+            : probe.error
+
+        return {
+            canPost: granted,
+            // An open gate carries no reason: there is no blockage to name, and
+            // a leftover reason beside an open composer would describe a state
+            // the reader is not in.
+            reason: granted ? "" : (typeof supplied === "string" ? supplied : "")
+        }
+    }
 
     // Whether the closed gate's guidance is revealed. A view-local disclosure,
     // reset on nothing — it says nothing about the world, so there is nothing
@@ -179,20 +231,8 @@ ScreenFrame {
         // box the user can type into can actually submit. `canPost !== true`
         // covers every one of those without a branch per shape: absent,
         // `undefined`, `"true"`, `1` and `null` are all not-`true`.
-        var probe = Core.getCapabilities(screen.stoaAddress)
-        screen.capability = (probe.ok && probe.value.canPost === true)
-            ? probe.value
-            : ({
-                canPost: false,
-                // A reason from whichever source has one. A probe that supplied
-                // no reason leaves this empty rather than inventing text: the
-                // spec forbids substituting a reason of the view's own, and an
-                // empty reason is a visible gap in core's answer rather than a
-                // plausible sentence covering for one.
-                reason: probe.ok
-                    ? (typeof probe.value.reason === "string" ? probe.value.reason : "")
-                    : probe.error
-            })
+        screen.capability = screen.capabilityFrom(
+            Core.getCapabilities(screen.stoaAddress))
 
         var reply = Core.listThreads({
             stoa: screen.stoaAddress,
@@ -660,7 +700,14 @@ ScreenFrame {
         // one nobody checked against what the probe can actually establish, and
         // both of those make the delivery promise described above.
         Text {
-            text: screen.capability.reason !== undefined ? screen.capability.reason : ""
+            // No `!== undefined` guard, and its absence is the point:
+            // `capabilityFrom()` makes `reason` a string on every path, so
+            // there is nothing here to defend against. The guard that used to
+            // stand here read as protecting this closed branch and actually
+            // protected the open one — a reader following the comment would
+            // have concluded it was redundant and deleted it for the wrong
+            // reason. The invariant now lives where the value is made.
+            text: screen.capability.reason
             font: Theme.bodySmall
             color: Theme.inkSoft
             wrapMode: Text.WordWrap

@@ -826,6 +826,96 @@ TestCase {
         }
     }
 
+    // ---- totality: an outcome the component does not know ---------------
+    //
+    // **The claims table has one row per KNOWN outcome and therefore cannot
+    // report an unknown one.** That is the measuring-instrument question asked
+    // of the table itself: a reviewer added a fourth outcome to
+    // `Composer.applyReply` and the whole suite passed, while the screen
+    // rendered a refusal headline on top of both success sentences.
+    //
+    // These values are deliberately the near-misses rather than nonsense: a
+    // case difference, a trailing space, and a plausible fourth state someone
+    // might add. Each is what a real drift looks like — nobody writes
+    // `outcome = "xyzzy"`, they write `"Refused"` or add `"deferred"` and
+    // forget one branch.
+    function unknownOutcomes() {
+        return ["deferred", "Refused", "REFUSED", "refused ", "stored ",
+                "queued", "pending", "unknown"]
+    }
+
+    function test_an_outcome_the_component_does_not_know_renders_as_a_refusal() {
+        var unknown = spec.unknownOutcomes()
+        var refusalRow = null
+        var rows = spec.pinnedSentences()
+        for (var r = 0; r < rows.length; r++) {
+            if (rows[r].tag === "refused")
+                refusalRow = rows[r]
+        }
+        verify(refusalRow !== null, "the pinned table must carry a refusal row")
+
+        for (var i = 0; i < unknown.length; i++) {
+            var c = outcomeComponent.createObject(null, {
+                outcome: unknown[i],
+                detail: "core said no",
+                subject: "post"
+            })
+            var shown = spec.renderedText(c)
+
+            // It renders the refusal, exactly — the same sentences pinned for
+            // the known refusal, no more and no less.
+            for (var j = 0; j < refusalRow.sentences.length; j++) {
+                verify(shown.indexOf(refusalRow.sentences[j]) >= 0,
+                       "outcome " + JSON.stringify(unknown[i]) + " must render the "
+                       + "refusal sentence " + JSON.stringify(refusalRow.sentences[j])
+                       + ", got: " + shown)
+            }
+
+            // **And nothing from EITHER success.** This is the assertion that
+            // fails against the two-partition version: the refusal headline and
+            // both success sentences rendered together, which claims a post was
+            // not published and is in this machine's log at the same time.
+            verify(shown.indexOf("It is in this machine's log") < 0,
+                   "outcome " + JSON.stringify(unknown[i]) + " must not claim "
+                   + "local storage while announcing a failure, got: " + shown)
+            verify(shown.indexOf("was saved on this machine") < 0,
+                   "outcome " + JSON.stringify(unknown[i]) + " must not claim a "
+                   + "save, got: " + shown)
+            verify(shown.indexOf("was already published") < 0,
+                   "outcome " + JSON.stringify(unknown[i]) + " must not claim a "
+                   + "prior publish, got: " + shown)
+            verify(shown.indexOf(spec.deliveryDenial()) < 0,
+                   "outcome " + JSON.stringify(unknown[i]) + " must not carry the "
+                   + "success denial, which is owed to a success and not to a "
+                   + "refusal, got: " + shown)
+
+            // **And core's message survives.** The old shape suppressed it,
+            // because `detail`'s element was gated on the other partition — so
+            // an unknown outcome swallowed the one thing that would explain it.
+            verify(shown.indexOf("core said no") >= 0,
+                   "outcome " + JSON.stringify(unknown[i]) + " must still show "
+                   + "core's message, got: " + shown)
+            c.destroy()
+        }
+    }
+
+    function test_an_unknown_outcome_is_indistinguishable_from_a_refusal() {
+        // The property stated directly rather than inferred from the sweep
+        // above: an unknown outcome must reach the SAME rendering as the known
+        // refusal, so there is no fourth thing on screen for a reader to
+        // interpret. Anything else would be a state the copy was never written
+        // for.
+        var known = outcomeComponent.createObject(null,
+            { outcome: "refused", detail: "core said no", subject: "post" })
+        var unknown = outcomeComponent.createObject(null,
+            { outcome: "deferred", detail: "core said no", subject: "post" })
+
+        compare(spec.renderedText(unknown), spec.renderedText(known),
+                "an outcome the component does not know must render exactly as "
+                + "a refusal does")
+        known.destroy(); unknown.destroy()
+    }
+
     // The empty outcome renders nothing at all. Without this, a component that
     // showed its refusal wording before anything was submitted would pass every
     // other test in this file: they all submit first.

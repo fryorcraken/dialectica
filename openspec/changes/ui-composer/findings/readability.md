@@ -19,7 +19,7 @@ Correctness and security findings were read first; nothing below repeats one.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `PublishOutcome.qml:55-59` vs `35` — the headline and
+- [x] **`dev-writer`** — `PublishOutcome.qml:55-59` vs `35` — the headline and
       `isRefusal` read an unrecognised `outcome` in **opposite directions**, so
       an unknown value renders a refusal headline on top of both success
       sentences
@@ -57,6 +57,37 @@ Correctness and security findings were read first; nothing below repeats one.
       rather than on the negation of a third, so both halves partition the space
       the same way and an unknown value renders the refusal wording alone.
 
+      **Fixed** in the commit carrying this tick, and the diagnosis is exactly
+      right — including that the header comment reads as a closed set over a
+      space that is not one.
+
+      I took the architecture box's framing of the same defect rather than the
+      one-line fix suggested here, because the two boxes are one defect seen from
+      two angles and the deeper reading subsumes this one. Keying the qualifier
+      and the denial positively would have made the five elements agree *today*,
+      but each would still derive the classification independently — five
+      derivations to keep in step, which is how they fell out of step in the
+      first place. Instead `state` is computed once as a total classification
+      whose fall-through is `"refused"`, and every element keys on it. Both
+      halves then partition the space the same way because there is only one
+      partition.
+
+      The fall-through direction is deliberate: an outcome the component does not
+      understand is one where it cannot honestly claim anything was stored, and
+      claiming less than happened is recoverable where claiming storage that did
+      not happen is not.
+
+      **The tests that fail without it**, both new:
+      `test_an_outcome_the_component_does_not_know_renders_as_a_refusal` sweeps
+      eight near-miss values — a case difference, a trailing space, a plausible
+      fourth state — and asserts each renders the refusal's pinned sentences,
+      nothing from either success, and **core's `detail` still visible**, which
+      is the half your finding caught that a rendering check alone would miss.
+      `test_an_unknown_outcome_is_indistinguishable_from_a_refusal` states the
+      property directly. Measured by reverting `state` to a bare alias of
+      `outcome`: both fail, and the failure output reproduces your three-line
+      contradiction verbatim.
+
 - [ ] **`tester`** — `tst_composer_claims.qml:752-794` — `pinnedSentences()` has
       one row per **known** outcome and nothing pins what an unknown one renders,
       so the contradiction above is invisible to the suite
@@ -77,7 +108,7 @@ Correctness and security findings were read first; nothing below repeats one.
       question asked of the claims table rather than of a helper — the table
       cannot report a row it does not have.
 
-- [ ] **`dev-writer`** — `FeedScreen.qml:663` — the guard on
+- [x] **`dev-writer`** — `FeedScreen.qml:663` — the guard on
       `capability.reason` is live for a reason its comment does not give, and
       the comment beside it describes the opposite path
       **Scenario:** the `!== undefined` test reads as defending the closed
@@ -98,7 +129,30 @@ Correctness and security findings were read first; nothing below repeats one.
       one, and the finding is that the "why" a reader would ask for is the one
       thing not written down.
 
-- [ ] **`dev-writer`** — `Composer.qml:17` — "a post must not have one" is
+      **Fixed** in the commit carrying this tick — by removing the guard rather
+      than by writing down its "why", which is the resolution the architecture
+      box's first finding points at and the one that leaves nothing to explain.
+
+      `capabilityFrom()` now constructs one shape from the probe, so `reason` is
+      a string on every path and there is no longer anything here to defend
+      against. Your prediction about a reader deleting it was going to come true
+      eventually; it is now safe to have deleted, and the line where it stood
+      carries a short note saying the invariant moved to where the value is made.
+
+      I reproduced your measurement while proving the new tests fail: with
+      `capabilityFrom` reverted to pass `probe.value` through on the open arm and
+      the guard gone, the runner emits
+      `FeedScreen.qml:709: Unable to assign [undefined] to QString` on the
+      open-gate cases exactly as you describe.
+
+      **The test that fails without it:**
+      `test_every_probe_answer_yields_both_fields_with_the_right_types` asserts
+      `typeof reason === "string"` across ten probe replies including
+      `{"canPost":true}`. It reports `Actual (): undefined` against the two-shape
+      version — which is the assertion your finding is really about, since the
+      warning itself is invisible to a passing suite.
+
+- [x] **`dev-writer`** — `Composer.qml:17` — "a post must not have one" is
       stated as an invariant and nothing establishes it
       **Scenario:** the comment on `kind` reads *"A reply needs `parentOp`; a
       post must not have one"*, but `parentOp` is a plain settable property and
@@ -112,6 +166,27 @@ Correctness and security findings were read first; nothing below repeats one.
       comment should say what is true — that `parentOp` is read only when `kind`
       is `"reply"` and is otherwise ignored — or the component should make an
       ignored parent impossible.
+
+      **Fixed** in the commit carrying this tick, taking the second of your two
+      resolutions: `replyParent` is a readonly deriving `kind === "reply" ?
+      parentOp : ""`, and `submit()` sends that. A post's parent is no longer
+      "ignored" — it is not reachable.
+
+      I chose making it true over making the comment true because this repo
+      prefers an invariant held by construction to one described, and because the
+      sentence that was there is exactly the kind a future call site trusts. The
+      comment now says what the code does and records what the old one claimed,
+      so the next reader knows the difference was noticed rather than never
+      considered.
+
+      **The tests that fail without it:**
+      `test_a_post_given_a_parent_does_not_carry_it_anywhere` constructs
+      `Composer { kind: "post"; parentOp: "dd…" }`, asserts `replyParent` is `""`
+      and that no `parent` key reaches `callModule`. Measured against
+      `replyParent: root.parentOp`: fails with `Actual (): dddd…`, `Expected ():`.
+      `test_a_reply_still_carries_its_parent` is the negative control, since a
+      derivation that emptied every parent would satisfy the first test and break
+      replying entirely.
 
 ## What is clean
 

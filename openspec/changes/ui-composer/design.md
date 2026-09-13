@@ -41,6 +41,34 @@ hanging it off the condition that defines who is owed it is how it cannot.** The
 same reasoning is why it is not in the apparatus column — see the closed-gate note
 below.
 
+### The one-value invariant belongs in the component, not only in its caller
+
+The section below argues that one string makes two outcomes on screen at once
+impossible. **That argument was about `Composer.outcome` and it held only
+there.** `applyReply` is total — every exit sets one of four strings — but
+`PublishOutcome` is a separately registered QML type whose `outcome` is a public
+writable property, and it partitioned the value space **twice, along different
+seams**: three elements asked "is it one of the two successes?", two asked "is it
+the one refusal?".
+
+Those are different partitions, so a value in neither positive case satisfied
+both negations and rendered the refusal headline above both success sentences —
+"Your post was not published." directly above "It is in this machine's log." —
+with core's `detail` suppressed, because that element was gated the other way. A
+reviewer measured it for `"deferred"`, `"Refused"`, `"refused "` and `"stored "`,
+and confirmed a fourth outcome added to `applyReply` left the whole suite green.
+
+**The lesson is about where an invariant lives, not about a missing branch.** A
+component whose correctness is a property of who calls it is correct by luck; the
+thread screen will be the second caller when the reply composer lands there, and
+it would have inherited the rendering without the guarantee.
+
+So `PublishOutcome` now computes `state` once — a total classification whose
+fall-through is `"refused"` — and every element keys on it. The fall-through
+direction is the honest one: an outcome the component does not understand is one
+where it cannot claim anything was stored, and claiming less than happened is
+recoverable where claiming storage that did not happen is not.
+
 ### The three publish outcomes are one value, not three booleans
 
 The spec's hardest requirement to hold by construction is "the three outcomes are
@@ -238,6 +266,37 @@ inventing state core never reported.
 `recordVote()` builds a new object and assigns it. Mutating in place would update
 the model and repaint nothing, which is the failure mode where the feature looks
 broken in exactly the way that is hardest to attribute.
+
+### The probe reply is normalised at the boundary, like a row's vote target
+
+`capability` used to hold **two differently-shaped objects**: `probe.value`
+wholesale when the gate opened, and a constructed `{canPost, reason}` when it
+closed. One property, two shapes, and the shape decided by a condition the reader
+of the property cannot see.
+
+The cost was already in the file. The closed gate's reason `Text` carried a
+`!== undefined` guard that was **dead against the closed arm** — which always
+supplied a string — and live only because the open arm could omit `reason`. QML
+evaluates that binding even while the closed body is invisible, so removing the
+guard emitted `Unable to assign [undefined] to QString` on fourteen tests, every
+one an *open*-gate case. A reader following the comment beside it would have
+concluded it was redundant and deleted it for the wrong reason.
+
+That is CLAUDE.md's named shape: a guard restated per consumer because the data
+structure does not hold the invariant. `capabilityFrom()` now constructs one
+shape from the probe in one place, so `reason` is a string on every path, the
+guard is **unnecessary rather than explained**, and a second consumer inherits the
+invariant instead of rediscovering it.
+
+**It is the same move as `voteTarget()`, one level up.** That one establishes a
+row's op where the value is produced; this one establishes the probe's answer the
+same way. Having made it for peer rows and not for the probe reply left the view
+holding two positions about one reply — validating the shape of what core sends
+in one place while taking it on trust in another.
+
+An open gate also carries **no** reason now. There is no blockage to name, and a
+leftover reason beside an open composer would describe a state the reader is not
+in.
 
 ### The closed gate keeps `FeedScreen`'s existing pattern and corrects its copy
 

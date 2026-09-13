@@ -14,10 +14,32 @@ import QtQuick.Layouts
 ColumnLayout {
     id: root
 
-    // "post" or "reply". A reply needs `parentOp`; a post must not have one.
+    // "post" or "reply", deciding exactly one thing: which core method
+    // `submit()` calls. Every rule the spec states about a refusal, a draft or
+    // a byte count is the same rule for both, which is why one component serves
+    // both modes rather than two components sharing a base.
     property string kind: "post"
+
     property string stoaAddress: ""
+
+    // The op a reply answers. **Read only when `kind` is "reply"**, and an
+    // earlier comment here claimed more than that — it said "a post must not
+    // have one", stated as an invariant that nothing established. A
+    // `Composer { kind: "post"; parentOp: "deadbeef" }` was accepted and
+    // silently dropped the parent: no warning, no refusal, no test. A sentence
+    // that reads as a constraint the component enforces, when it enforces
+    // nothing, is worse than no sentence — the next person writes a call site
+    // trusting it.
+    //
+    // `replyParent` below is what makes it true rather than merely stated: a
+    // parent belonging to a post is not "ignored", it is not reachable.
     property string parentOp: ""
+
+    // The parent that actually reaches core, which is "" for a post whatever
+    // `parentOp` holds. One expression rather than a rule to remember at each
+    // call site, so a stray parent on a post is unrepresentable downstream
+    // instead of dropped somewhere the caller cannot see.
+    readonly property string replyParent: root.kind === "reply" ? root.parentOp : ""
 
     // The draft, and **the field is the single place it lives**.
     //
@@ -171,7 +193,7 @@ ColumnLayout {
             return
 
         var reply = root.kind === "reply"
-            ? Core.publishReply(root.stoaAddress, root.parentOp, root.draft)
+            ? Core.publishReply(root.stoaAddress, root.replyParent, root.draft)
             : Core.publishPost(root.stoaAddress, root.draft)
 
         root.applyReply(reply)

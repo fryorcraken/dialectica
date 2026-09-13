@@ -558,6 +558,68 @@ TestCase {
         return false
     }
 
+    // ---- the probe reply is normalised into ONE shape --------------------
+    //
+    // `capability` used to hold two differently-shaped objects depending on
+    // which branch assigned it: `probe.value` wholesale when the gate opened,
+    // a constructed `{canPost, reason}` when it closed. Every reader then had
+    // to know which one it got, and the closed gate's reason `Text` carried a
+    // `!== undefined` guard that was dead against the closed arm and live only
+    // because the open arm could omit `reason`.
+    //
+    // These assert the shape rather than the rendering, because the shape is
+    // what a second consumer will rely on.
+
+    function test_every_probe_answer_yields_both_fields_with_the_right_types() {
+        // Including the shapes nobody designed for. A `capability` whose
+        // `reason` is `undefined` assigns to a QString binding and warns at
+        // runtime; a test that only checked rendering would not see it.
+        var answers = [
+            '{"canPost":true,"identity":"deadbeef"}',   // open, no reason field
+            '{"canPost":true}',                          // open, nothing else
+            '{"canPost":false,"reason":"No keystore found."}',
+            '{"canPost":false}',                         // closed, no reason
+            '{}',
+            '{"canPost":"true"}',
+            '{"canPost":1}',
+            '{"canPost":null}',
+            '{"canPost":false,"reason":42}',             // reason not a string
+            '{"error":"the keystore could not be read"}'
+        ]
+
+        for (var i = 0; i < answers.length; i++) {
+            var screen = makeScreen({
+                "get_capabilities": answers[i],
+                "list_threads": spec.twoRows()
+            })
+            var cap = screen.capability
+
+            compare(typeof cap.canPost, "boolean",
+                    "canPost must be a real boolean for " + answers[i])
+            compare(typeof cap.reason, "string",
+                    "reason must always be a string — never undefined, which "
+                    + "assigns to a QString binding and warns: " + answers[i])
+            screen.destroy()
+        }
+    }
+
+    function test_an_open_gate_carries_no_leftover_reason() {
+        // There is no blockage to name, and a reason beside an open composer
+        // would describe a state the reader is not in. Pre-normalisation the
+        // open arm passed core's object through, so any `reason` core happened
+        // to send survived into an open gate.
+        var screen = makeScreen({
+            "get_capabilities": '{"canPost":true,"identity":"aa","reason":"stale text"}',
+            "list_threads": spec.twoRows()
+        })
+        compare(screen.capability.canPost, true)
+        compare(screen.capability.reason, "",
+                "an open gate must carry no reason")
+        verify(spec.renderedText(screen).indexOf("stale text") < 0,
+               "and none may reach the screen")
+        screen.destroy()
+    }
+
     function test_a_probe_with_neither_capability_nor_reason_closes_the_gate() {
         // Fail closed on a shape nobody designed for. `canPost !== true` covers
         // absent, "true", 1 and null without a branch per shape.

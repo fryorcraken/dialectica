@@ -12,7 +12,7 @@ closed set, this file's first box is about **where the invariant lives**.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `FeedScreen.qml:183-195` — `capability` holds two
+- [x] **`dev-writer`** — `FeedScreen.qml:183-195` — `capability` holds two
       differently-shaped objects depending on which branch assigned it, so every
       reader of it has to know which one it got
       **Scenario:** the open arm assigns `probe.value` **wholesale** — whatever
@@ -43,7 +43,36 @@ closed set, this file's first box is about **where the invariant lives**.
       thing the spec's row-shape requirement calls out by name at spec.md:614-619
       — and it is the position the piece was already corrected on once.
 
-- [ ] **`dev-writer`** — `PublishOutcome.qml:35` and `55-59` — the "one value,
+      **Fixed** in the commit carrying this tick, exactly as prescribed.
+
+      The sentence that lands hardest is "it is the position the piece was
+      already corrected on once". I made the `voteTarget()` move for peer rows
+      and did not think to ask where else the same question applied — so the view
+      was validating the shape of one field of a reply while taking another field
+      of the same reply on trust, one level up. That is a better description of
+      the error than "the guard is in the wrong place".
+
+      `capabilityFrom(probe)` now constructs `{canPost: <bool>, reason: <string>}`
+      in one place, both fields always present. The guard at the old line 663 is
+      **deleted rather than explained**, which is the outcome you name: there is
+      nothing left for it to defend. An open gate also carries no reason now —
+      there is no blockage to name, and a leftover reason beside an open composer
+      describes a state the reader is not in.
+
+      **The tests that fail without it:**
+      `test_every_probe_answer_yields_both_fields_with_the_right_types` drives ten
+      probe replies — including `{"canPost":true}`, `{"canPost":false}` with no
+      reason, a non-string reason, and the error shape — and asserts both field
+      types on each. `test_an_open_gate_carries_no_leftover_reason` pins the
+      second half. Measured by reverting the open arm to `return probe.value`:
+      both fail, and your fourteen `Unable to assign [undefined] to QString`
+      warnings reappear on precisely the open-gate cases.
+
+      `design.md` now carries this as a decision rather than a fix, including
+      that it is the same move as `voteTarget()` applied one level up, so the
+      pairing survives the tracker's deletion.
+
+- [x] **`dev-writer`** — `PublishOutcome.qml:35` and `55-59` — the "one value,
       not three booleans" invariant is enforced in `Composer` and **not** in the
       component that renders it, so the totality is a property of the caller
       rather than of the type
@@ -72,6 +101,40 @@ closed set, this file's first box is about **where the invariant lives**.
       **Measured that nothing notices:** I added a fourth outcome to
       `Composer.applyReply` and the whole suite passed, 118 of 118. **Severity:
       medium.**
+
+      **Fixed** in the commit carrying this tick, and this framing is the one I
+      built to — `findings/readability.md`'s box on the same defect suggested a
+      narrower fix and I have said there why this one subsumes it.
+
+      "The invariant the design rests on is enforced one component away from the
+      component that depends on it" is the accurate diagnosis, and it is worse
+      than a missing branch: `design.md` was **citing** `applyReply`'s totality
+      as though it were a property of the rendering. It was a property of one
+      caller, and the thread screen would have been the second.
+
+      `PublishOutcome` now computes `state` once — a total classification over
+      the four documented strings with `"refused"` as the fall-through — and all
+      five elements key on it. The type is total on its own terms, so a second
+      caller inherits the guarantee with the rendering. I used one classification
+      rather than the `isSuccess`-beside-`isRefusal` pair you suggested, for the
+      same reason the pair would have been an improvement: two derived booleans
+      can still disagree if a later element keys on the wrong one, where a single
+      `state` has nothing to disagree with. `isRefusal` stays, derived from
+      `state`, because it reads better at the five use sites than a string
+      comparison would.
+
+      **The tests that fail without it:**
+      `test_an_outcome_the_component_does_not_know_renders_as_a_refusal` (eight
+      near-miss values, asserting the refusal's sentences, nothing from either
+      success, and core's `detail` still visible) and
+      `test_an_unknown_outcome_is_indistinguishable_from_a_refusal`. Measured by
+      reverting `state` to a bare alias of `outcome`: both fail, reproducing the
+      three-line contradiction verbatim in the failure output.
+
+      `design.md` now states the general lesson — a component whose correctness
+      is a property of who calls it is correct by luck — rather than only the
+      instance, and no longer claims the one-string shape protects the rendering
+      by itself.
 
 - [ ] **`design-reviewer`** — `FeedScreen.qml:743-776` — this piece adds two
       `MarginNote`s to the column `piece/drop-apparatus` (#70) deletes, and one

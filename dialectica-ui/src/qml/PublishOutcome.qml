@@ -17,6 +17,9 @@ import QtQuick.Layouts
 //   "stored"    the op was newly stored on this machine
 //   "existing"  the op already existed; nothing new was written
 //   "refused"   the publish did not happen; `detail` says what core said
+//
+// **Anything else is rendered as a refusal**, and that totality is this
+// component's own, not its caller's. See `state` below.
 ColumnLayout {
     id: root
 
@@ -32,7 +35,45 @@ ColumnLayout {
     // view's own word for its own affordance, never anything core supplied.
     property string subject: "post"
 
-    readonly property bool isRefusal: root.outcome === "refused"
+    // ---- the classification, made ONCE ----------------------------------
+    //
+    // **Every element below keys on this, and none of them re-derives it.**
+    // That is the fix for a defect review found, and the defect is worth
+    // recording because the shape is subtle and the code looked right.
+    //
+    // `outcome` used to be partitioned TWICE, along different seams: the
+    // headline asked "is it one of the two successes?" and fell through to the
+    // refusal wording, while `isRefusal` asked "is it the one refusal?" and the
+    // sentences below keyed on its negation. Those are different partitions of
+    // one value space, so a value in neither positive case — `"deferred"`,
+    // `"Refused"`, `"refused "` — satisfied the refusal headline AND both
+    // success sentences, rendering "Your post was not published." directly above
+    // "It is in this machine's log." That is the exact contradiction the
+    // one-string design was adopted to make unrepresentable, and `detail` was
+    // suppressed at the same time because it was gated the other way — so the
+    // one thing that would explain the state was the one thing withheld.
+    //
+    // **The invariant belonged here and was living in the caller.**
+    // `Composer.applyReply` is total and writes only the four strings above, so
+    // nothing reached this on the tree as shipped — but this is a separately
+    // registered QML type with `outcome` as a public writable property, and a
+    // second caller (the thread screen, when the reply composer lands there)
+    // would inherit the rendering without inheriting the guarantee. A component
+    // whose correctness is a property of who calls it is a component that is
+    // correct by luck.
+    //
+    // So the classification is a value, computed once, and it is **total**: the
+    // fall-through is "refused" rather than an error case, because an outcome
+    // this component does not understand is one where it cannot honestly claim
+    // anything was stored. Claiming less than happened is recoverable; claiming
+    // storage that did not happen is not.
+    readonly property string state: root.outcome === "stored"
+                                 || root.outcome === "existing"
+                                 || root.outcome === "refused"
+        ? root.outcome
+        : "refused"
+
+    readonly property bool isRefusal: root.state === "refused"
 
     visible: root.outcome !== ""
     spacing: 6
@@ -52,9 +93,9 @@ ColumnLayout {
     // refusal is wrong; nothing new was written, so reporting a fresh success
     // leaves the user looking for a post that will never appear.
     Text {
-        text: root.outcome === "stored"
+        text: root.state === "stored"
                 ? "Your " + root.subject + " was saved on this machine."
-            : root.outcome === "existing"
+            : root.state === "existing"
                 ? "This " + root.subject + " was already published."
             : "Your " + root.subject + " was not published."
         font: Theme.body
@@ -76,7 +117,7 @@ ColumnLayout {
     // "it is now below" is a claim the view cannot establish.
     Text {
         visible: !root.isRefusal
-        text: root.outcome === "existing"
+        text: root.state === "existing"
                 ? "The identical content is already in this machine's log, under the same op id. Nothing new was written."
                 : "It is in this machine's log."
         font: Theme.bodySmall

@@ -575,6 +575,46 @@ TestCase {
         reply.destroy()
     }
 
+    function test_a_post_given_a_parent_does_not_carry_it_anywhere() {
+        // The comment on `parentOp` used to claim "a post must not have one" as
+        // though the component enforced it. It did not: a stray parent was
+        // accepted and silently dropped. `replyParent` makes the claim true —
+        // a post's parent is not ignored, it is not reachable.
+        var post = makeComposer({ "publish_post": '{"opId":"aa","wasNew":true}' },
+                                { kind: "post", parentOp: "dd".repeat(32) })
+
+        compare(post.parentOp, "dd".repeat(32), "the property still holds it")
+        compare(post.replyParent, "",
+                "but a post's effective parent is empty whatever it holds")
+
+        post.draft = "top level"
+        post.submit()
+
+        compare(spec.lastCall.method, "publish_post")
+        var sent = JSON.parse(spec.lastCall.args[0])
+        compare(sent.parent, undefined,
+                "no parent may reach core on a post — core refuses a post "
+                + "naming one, so a stray parent would be a refusal the user "
+                + "could not explain")
+        post.destroy()
+    }
+
+    function test_a_reply_still_carries_its_parent() {
+        // The negative control: `replyParent` must not have made every parent
+        // unreachable, which would pass the assertion above for the wrong
+        // reason and break replying entirely.
+        var reply = makeComposer({ "publish_reply": '{"opId":"bb","wasNew":true}' },
+                                 { kind: "reply", parentOp: "cc".repeat(32) })
+        compare(reply.replyParent, "cc".repeat(32))
+
+        reply.draft = "a reply"
+        reply.submit()
+
+        var sent = JSON.parse(spec.lastCall.args[0])
+        compare(sent.parent, "cc".repeat(32), "a reply's parent must reach core")
+        reply.destroy()
+    }
+
     function test_the_published_signal_fires_on_a_success_and_not_on_a_refusal() {
         // The signal is what drives the feed's re-read, so a refusal firing it
         // would re-read for nothing and a success not firing it would leave the
