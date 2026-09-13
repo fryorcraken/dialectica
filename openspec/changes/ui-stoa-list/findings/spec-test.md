@@ -189,7 +189,7 @@ Four of five survived. Each survivor is a box.
       and is the same family of rendering obligation this capability already
       owns.
 
-- [ ] **`dev-writer`** — `openspec validate --strict` **fails on this change
+- [x] **`dev-writer`** — `openspec validate --strict` **fails on this change
       today**, blocking the runner's final gate
       **Scenario:** `tasks.md` has two sections numbered `## 9` — "Making the
       absence assertions honest about the apparatus" (line 148) and "The tester's
@@ -200,6 +200,24 @@ Four of five survived. Each survivor is a box.
       not cosmetic.
       **Severity:** low, but it is a hard block on merge and costs one renumber.
       Addressed to `dev-writer` as the owner of `tasks.md`.
+
+      **Fixed** in the commit carrying this file. Reproduced first —
+      `openspec validate ui-stoa-list --strict` exited 1 with exactly the six
+      warnings named — then the tester's section renumbered `## 9` → `## 10` and
+      its seven task IDs `9.x` → `10.x`. Now: `Change 'ui-stoa-list' is valid`.
+
+      The tester's section was the one renumbered rather than mine, for two
+      reasons: it is second, so its IDs are the duplicates the validator
+      reports; and its prose cites "4.6's test" and "6.5's test", which are my
+      section numbers and stay correct under this change. Nothing of the
+      reviewer's or the tester's wording was edited — only the numerals.
+
+      Worth recording as a process observation rather than a defect: the
+      collision happened because two agents appended a top-level section to the
+      same file without either reading the other's, and neither `qmllint`, the
+      QML suite, nor CI can see it. The only gate that can is the one the runner
+      runs last. A `tasks.md` section numbered from the file's current maximum
+      rather than from what the author last wrote would make it unrepresentable.
 
 - [ ] **`spec-writer`** — spec.md:427-432 states a prohibition its own scenario
       requires violating, and a reader could resolve the ambiguity either way

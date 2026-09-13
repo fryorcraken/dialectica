@@ -179,7 +179,7 @@ a defect that was never about the apparatus at all.
       registry", which is legitimate copy. Caught by the assertion failing on its
       first run.
 
-## 9. The tester's pass
+## 10. The tester's pass
 
 Six tests added, each proved to fail by a mutation that the 47 tests already
 here left green. **Three of the six close a defect of the same family as the
@@ -187,21 +187,21 @@ dev-writer's seventh mutation** — a test asserting the SOURCE where the
 requirement is about the RENDER — and three close a test that pinned a literal
 or a difference where the requirement is about meaning.
 
-- [x] 9.1 `test_no_share_button_is_on_screen_for_a_row_whose_record_is_not_held`.
+- [x] 10.1 `test_no_share_button_is_on_screen_for_a_row_whose_record_is_not_held`.
       The existing test asserts `canShare()`, which is the computation and not
       the screen. Mutation: `visible: screen.canShare(row.rowStoa)` →
       `visible: true`. All 47 prior tests passed with a share offered for a Stoa
       the view holds no record for — the third failure this test file's own
       header names as what it exists to catch. Observed: 2 buttons, expected 1.
-- [x] 9.2 `test_the_joined_outcome_is_reported_on_screen_and_not_only_in_a_property`.
+- [x] 10.2 `test_the_joined_outcome_is_reported_on_screen_and_not_only_in_a_property`.
       Mutation: the joined panel's `visible:` → `false`. All 47 passed while
       nothing on screen reported the join; `joinState` held `"joined"` and the
       user was told nothing. Observed: 0 panels, expected 1.
-- [x] 9.3 `test_no_feed_is_on_screen_before_a_stoa_has_been_chosen`. The existing
+- [x] 10.3 `test_no_feed_is_on_screen_before_a_stoa_has_been_chosen`. The existing
       test asserts `screenShown === "list"`, a derived string. Mutation:
       `FeedScreen`'s `visible:` → `true`. All 47 passed with a feed rendering
       for the empty address at startup. Observed: 1 feed, expected 0.
-- [x] 9.4 `test_no_digit_is_rendered_that_the_reply_did_not_supply`. The
+- [x] 10.4 `test_no_digit_is_rendered_that_the_reply_did_not_supply`. The
       strengthening of 4.6, which the dev-writer named as their least confident
       test and correctly said could not catch a count rendered as a bare `31` in
       a row's margin. Stated as a relation instead of a phrase blocklist: every
@@ -211,7 +211,7 @@ or a difference where the requirement is about meaning.
       naming `31`; **4.6's test passes against the same mutation**, in the same
       run. The residue it still cannot see — a count spelled in words, or in
       non-digit glyphs — is named in the test rather than left to be assumed.
-- [x] 9.5 `test_a_malformed_paste_and_an_unverified_record_say_different_things_to_do`.
+- [x] 10.5 `test_a_malformed_paste_and_an_unverified_record_say_different_things_to_do`.
       The existing test asserts the two refusals are DIFFERENT, which is the
       defect the sibling `thread-read` piece shipped: misinforming strings are
       still distinct strings. This asserts what each must and must not imply —
@@ -220,7 +220,7 @@ or a difference where the requirement is about meaning.
       retry. Mutation: reworded the malformed-paste reason to "This reference
       does not hash to its address." The existing distinctness test **passed**;
       this one failed.
-- [x] 9.6 `test_the_address_note_cannot_be_simplified_into_an_unqualified_verified`.
+- [x] 10.6 `test_the_address_note_cannot_be_simplified_into_an_unqualified_verified`.
       6.5's test pins three substrings, so it fails on a reword and passes on a
       misinformation. This asserts the three things the copy cannot lose — the
       scope of the proof, the named remainder, the explicit bound on what was
@@ -229,7 +229,7 @@ or a difference where the requirement is about meaning.
       ending "This is a verified record and a verified Stoa." **6.5's test
       passed**; this one failed. A `text: "Verified."` simplification fails both.
 
-- [x] 9.7 Implementation restored after every mutation, proved with
+- [x] 10.7 Implementation restored after every mutation, proved with
       `git diff --stat -- dialectica-ui/src` returning empty rather than from
       memory.
 
