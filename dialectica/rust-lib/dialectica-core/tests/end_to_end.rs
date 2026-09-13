@@ -159,6 +159,26 @@
 //! | `SqliteOpLog::open` refuses a path that does not exist | the created-file test **at its own assertion**, plus fixture-guard deaths | 18 of 24: the split test died on `a missing store is created, not refused`, the other 17 at the `dir.store()` helper — see note 4 |
 //! | `SqliteOpLog::open` ignores its path and opens `:memory:` (re-run) | more than 18, since two wire tests reach a file | **20 of 24**, then **21 of 24** — see note 4 |
 //!
+//! ## Measured when the correctness and security findings were addressed — four mutations
+//!
+//! The suite is 25 tests now: `two_temp_dirs_with_the_same_tag_get_different_unguessable_names`
+//! was added with the fixture change the security findings asked for.
+//!
+//! | Mutation | Predicted | Observed |
+//! |---|---|---|
+//! | `Moderators::contains` returns `true` unconditionally (re-run, BEFORE the guard moved) | 2 of 24, the hide test at its fixture guard | exactly that — `22 passed; 2 failed`, the hide test at `the fixture's outsider must not be a moderator`. Note 1's remedy had been applied to only one of its two halves |
+//! | the same mutation, AFTER the guard moved below the assertions | still 2, but the hide test on the RESOLUTION | `Ok(Hidden(Entry{..action: Hide..}))` vs `Ok(Unmoderated)` — the substance of the requirement, as predicted. See note 5 |
+//! | `moderation::resolve` checks authority AFTER taking the leading `Moderate` (re-run, to test whether the OTHER guard has the same defect) | the forged-hide test at its `resolve` assertion, NOT at its `iter_target` guard | exactly that, 1 of 24, `Unmoderated` vs `Hidden(..)` at the named claim. **The two guards are not the same case**, so this was one line and not a pattern |
+//! | `TempDir::new`'s `set_permissions(0o700)` replaced by `0o777` | the two keystore tests, at `Keystore::open` and NOT at `Keystore::create` | exactly that: `DirectoryWritableByOthers { mode: 511 }` at the two `open`/reopen call sites. `0o777` rather than deleting the call, because a deleted call inherits whatever the temp directory's default mode is — which could already be private and would make the probe pass for the wrong reason |
+//!
+//! Two mutations of the new fixture test itself, since a test pinning a fixture
+//! property is the easiest kind to write unfalsifiably:
+//!
+//! | Mutation | Predicted | Observed |
+//! |---|---|---|
+//! | `TempDir::new` reverted to `dialectica-e2e-<pid>-<tag>` | `assert_ne!` on the two paths | that assertion, both `"/tmp/dialectica-e2e-2431642-x"` — as predicted |
+//! | the random suffix narrowed from 8 bytes to 2 | the LENGTH assertion, since two 2-byte names still differ | that assertion, `21` vs `33` — as predicted, so the two halves discriminate independently |
+//!
 //! **Note 1 — a mismatch that was a defect in this file.** The `contains`
 //! mutation was predicted to kill two tests. It killed one, and it killed it at
 //! `assert!(!moderators.contains(..))` — a FIXTURE GUARD, which aborts its test
@@ -168,6 +188,12 @@
 //! `the_moderator_set_of_a_genesis_record_is_exactly_its_creator` was added in
 //! response, asserting both directions of the predicate directly. Re-running the
 //! mutation then killed two tests, one of them on the behavioural claim.
+//!
+//! **That remedy was half of one, and note 5 is the other half.** Adding a test
+//! beside the weak one does not strengthen the weak one: the guard was still
+//! sitting in front of the assertions it blocked, so `a_hide_by_a_non_moderator…`
+//! went on dying before it observed anything. A review measured exactly that and
+//! the fix is recorded in note 5.
 //!
 //! **Note 2 — a mismatch that reordered a test.** The `INSERT OR REPLACE`
 //! mutation killed the right test at the wrong assertion: `Appended::Stored` vs
@@ -204,6 +230,27 @@
 //!   is the behaviour that test asserts; there is no rival explanation for it to
 //!   exclude. A test that survives because the mutation does not change what it
 //!   claims is a passing test, not a weak one.
+//!
+//! **Note 5 — a fixture guard belongs AFTER the assertions it guards, and this
+//! file learned that twice.** Note 2 moved the `Appended` values below the
+//! metadata check for this reason; the identically-shaped guard in
+//! `a_hide_by_a_non_moderator_leaves_the_thread_visible` was left in place, and a
+//! review measured the consequence: under the `contains` mutation the test died at
+//! the guard and observed neither the resolution nor the feed, so the two
+//! assertions carrying the requirement had never been watched fail. Moved below
+//! them, the same mutation fails on `Hidden(..)` vs `Unmoderated`.
+//!
+//! **The generalisation was checked before it was drawn, and it does not hold.**
+//! The one other guard of the same surface shape — the `iter_target` ordering
+//! check in `a_forged_hide_does_not_displace…` — is correctly placed, because the
+//! mutation that test is aimed at changes `resolve` and cannot change the store's
+//! ordering: the guard passes under it and the substantive assertion fires
+//! (measured, above). A guard in front of its assertions is a defect only when a
+//! plausible defect makes the guard fail *first*; where the guard fires only under
+//! a different layer's defect, it is the more useful message. So "move every
+//! guard to the end" is the wrong rule. The right one is: **ask which mutation
+//! would trip this guard, and whether that is the same mutation the test is
+//! aimed at.**
 //!
 //! # A defect this file found, and did not fix
 //!
@@ -262,21 +309,47 @@ const TITLE_CAP: usize = 1024;
 
 /// A temporary directory that removes itself, named per test.
 ///
-/// Named per test so that `cargo test`'s default parallelism cannot make two
-/// tests share a store, and so a failure leaves one identifiable directory
-/// rather than a shared one two tests raced over.
+/// **The name carries a per-test tag AND 8 bytes of randomness**, and the two do
+/// different jobs. The tag makes a directory identifiable while a test is
+/// running — under `--nocapture` or a debugger, you can tell which test owns
+/// which path. The randomness is what makes the name unguessable, and that is a
+/// security property rather than a tidiness one: two of the tests below write an
+/// **unencrypted Ed25519 root secret** into this directory. With a name any
+/// local user could compute — the old form was
+/// `dialectica-e2e-<pid>-<literal from the source>`, and a pid is readable from
+/// `/proc` — an attacker could race the gap between the `remove_dir_all` and the
+/// `create_dir_all` below and capture that secret, or make the test panic by
+/// pre-placing a directory. Randomising removes the race rather than narrowing
+/// it, and it also means the `remove_dir_all` cannot delete a caller-owned tree
+/// that happened to collide (a recycled pid, an aborted run's leftovers).
 ///
-/// Mode `0o700` is not tidiness: `Keystore::create` refuses a keystore whose
-/// containing directory is group- or other-writable, so a default-mode temp
-/// directory would fail the keystore tests for a reason that has nothing to do
-/// with what they assert.
+/// This is the shape `keystore.rs`'s own in-crate `TempDir` already uses, for
+/// the same reason. `getrandom` and `hex` are ordinary dependencies of this
+/// crate, so no dev-dependency is added — matching that fixture's recorded
+/// refusal to take `tempfile`.
+///
+/// **A failing test does NOT leave its directory behind**, and do not write that
+/// it does: [`Drop::drop`] below calls `remove_dir_all` unconditionally, and a
+/// panicking `#[test]` unwinds by default (no `panic = "abort"` profile is set),
+/// so the cleanup runs on the failure path too. Only a `SIGKILL` leaves one.
+///
+/// Mode `0o700` is not tidiness, but the call it is load-bearing for is
+/// **`Keystore::open`, not `Keystore::create`.** `create` checks only
+/// `path.exists()` and then writes; the directory-mode check lives in
+/// `read_checked`, which `open` and `is_encrypted` reach and `create` does not.
+/// So removing the `set_permissions` call below does not break a `create` — it
+/// breaks the *reopen* in both
+/// `a_keystore_on_disk_signs_a_post_that_a_reopened_store_still_attributes_to_it`
+/// and `the_same_keystore_posts_under_different_addresses_in_two_stoas`, which is
+/// where to look when one of them starts refusing a keystore.
 struct TempDir(PathBuf);
 
 impl TempDir {
     fn new(name: &str) -> Self {
+        let mut suffix = [0u8; 8];
+        getrandom::fill(&mut suffix).expect("the fixture's directory name needs randomness");
         let mut path = std::env::temp_dir();
-        path.push(format!("dialectica-e2e-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&path);
+        path.push(format!("dialectica-e2e-{name}-{}", hex::encode(suffix)));
         std::fs::create_dir_all(&path).expect("a temporary directory is creatable");
         #[cfg(unix)]
         {
@@ -333,6 +406,64 @@ impl TempDir {
 impl Drop for TempDir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// The fixture's own unpredictability, pinned — **this is a test ABOUT the
+/// fixture**, which is why it sits here rather than under a boundary section.
+///
+/// Two tests below write an unencrypted root secret into a `TempDir`, so the
+/// directory name being unguessable is a security property of this file and not
+/// a detail of it. Nothing else in the suite would notice if the randomness
+/// stopped arriving: every test would still pass against a fully predictable
+/// name, which is exactly how the predictable form survived review in the first
+/// place. So the property gets an assertion of its own.
+///
+/// **Two `TempDir`s built with the SAME tag** — the rival explanation this
+/// excludes is that the paths differ because the tags differ, which is what a
+/// two-different-tags fixture would prove instead, and which holds with no
+/// randomness at all.
+///
+/// The expected length is derived by hand from the format rather than from the
+/// code: `dialectica-e2e-` (15) + the tag + `-` (1) + 8 bytes as hex (16). With
+/// the tag `"x"` that is 15 + 1 + 1 + 16 = **33**. A `getrandom::fill` that
+/// silently wrote nothing would keep the length and lose the difference; a
+/// dropped `hex::encode` would keep the difference and lose the length.
+#[test]
+fn two_temp_dirs_with_the_same_tag_get_different_unguessable_names() {
+    let a = TempDir::new("x");
+    let b = TempDir::new("x");
+
+    assert_ne!(
+        a.0, b.0,
+        "the same tag must not produce the same path, or the name is predictable"
+    );
+
+    for dir in [&a, &b] {
+        let name = dir
+            .0
+            .file_name()
+            .expect("a temp directory has a final component")
+            .to_str()
+            .expect("the name is ASCII by construction");
+        assert_eq!(
+            name.len(),
+            33,
+            "the name must carry the tag AND 16 hex characters of randomness: {name}"
+        );
+        assert!(
+            name.starts_with("dialectica-e2e-x-"),
+            "the tag must still be readable in the name, for identifying a running test: {name}"
+        );
+        let random_half = &name["dialectica-e2e-x-".len()..];
+        assert!(
+            random_half.chars().all(|c| c.is_ascii_hexdigit()),
+            "the suffix must be hex, not a pid or a counter: {random_half}"
+        );
+        assert_ne!(
+            random_half, "0000000000000000",
+            "an all-zero suffix is what a no-op `getrandom::fill` leaves behind"
+        );
     }
 }
 
@@ -1038,10 +1169,6 @@ fn a_hide_by_a_non_moderator_leaves_the_thread_visible() {
     let store = dir.reopen(store);
 
     let moderators = Moderators::of(&genesis).expect("moderators");
-    assert!(
-        !moderators.contains(&rando.public_key()),
-        "the fixture's outsider must not be a moderator"
-    );
     assert_eq!(
         moderation::resolve(&store, &moderators, &post_id),
         Ok(Moderation::Unmoderated),
@@ -1053,6 +1180,17 @@ fn a_hide_by_a_non_moderator_leaves_the_thread_visible() {
         bodies(&page),
         vec!["survives"],
         "an unauthorised hide must not remove a thread"
+    );
+
+    // The fixture's premise, asserted AFTER the two claims above and not before
+    // them — see note 5 in this file's header for the measurement that moved it,
+    // and for why the same move is NOT right for the guard in
+    // `a_forged_hide_does_not_displace…`. Kept rather than deleted: under a defect
+    // in `Moderators::authorises` rather than in `contains`, the assertions above
+    // still fire and this guard is the message that tells the two apart.
+    assert!(
+        !moderators.contains(&rando.public_key()),
+        "the fixture's outsider must not be a moderator"
     );
 }
 

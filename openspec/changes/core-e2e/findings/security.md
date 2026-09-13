@@ -10,7 +10,7 @@ here is reachable from a peer. What it *can* do is write a real Ed25519 root sec
 in the clear to a real file in a shared, world-writable directory, which is what
 both entries are about.
 
-- [ ] **`tester`** — `end_to_end.rs:276-288` — `TempDir::new` builds a **fully
+- [x] **`tester`** — `end_to_end.rs:276-288` — `TempDir::new` builds a **fully
       predictable path** in the shared temp directory and then writes an
       unencrypted keystore root secret into it, where **the same crate's own
       in-crate fixture already uses 8 bytes of randomness for the identical job**.
@@ -44,7 +44,45 @@ both entries are about.
       the next one is written against.
       **Severity:** low.
 
-- [ ] **`tester`** — `end_to_end.rs:279` — the unconditional `remove_dir_all` at
+      **FIXED, as the finding prescribed.** `TempDir::new` now reads
+
+          let mut suffix = [0u8; 8];
+          getrandom::fill(&mut suffix).expect("the fixture's directory name needs randomness");
+          path.push(format!("dialectica-e2e-{name}-{}", hex::encode(suffix)));
+
+      which is `keystore.rs:1319-1322`'s shape with the per-test tag kept, because
+      the tag and the randomness do different jobs (identifying a running test
+      versus being unguessable) and the doc now says which is which. Confirmed the
+      no-new-dependency claim rather than taking it: `getrandom` and `hex` are
+      ordinary `[dependencies]` in `dialectica-core/Cargo.toml` (lines 118 and 110),
+      and the crate has no `[dev-dependencies]` table at all, so an integration
+      target in the same package reaches them.
+
+      **The property is now pinned by a test, which it was not before.** Nothing
+      else in the suite would go red if the randomness stopped arriving — every
+      test passes against a fully predictable name, which is how the old form
+      survived. So
+      `two_temp_dirs_with_the_same_tag_get_different_unguessable_names` asserts it,
+      built to exclude the rival explanation that the paths differ because the
+      tags differ (both `TempDir`s use the tag `"x"`), and with the expected name
+      length derived by hand from the format rather than from the code:
+      `dialectica-e2e-` (15) + `x` (1) + `-` (1) + 16 hex characters = 33.
+
+      Proved it can fail, twice:
+
+      - Reverted `TempDir::new` to the old `dialectica-e2e-<pid>-<tag>` form.
+        **Predicted** the `assert_ne!` on the two paths. **Observed** that
+        assertion, both sides `"/tmp/dialectica-e2e-2431642-x"` — as predicted.
+      - Narrowed the suffix from 8 bytes to 2, which keeps the paths distinct so
+        the `assert_ne!` still passes. **Predicted** the length assertion.
+        **Observed** it, `left: 21` / `right: 33` — as predicted. So the two halves
+        of the test discriminate independently rather than one carrying the other.
+
+      Note what this test does NOT claim: it pins that the name is random and
+      wide, not that `getrandom` is a good CSPRNG. That is `getrandom`'s property
+      and not something a fixture test can or should assert.
+
+- [x] **`tester`** — `end_to_end.rs:279` — the unconditional `remove_dir_all` at
       the top of `TempDir::new` recursively deletes a caller-owned tree if the
       predictable name ever collides, and discards its error (`let _ =`).
       **Scenario:** pids are recycled. Any directory that happens to sit at
@@ -56,6 +94,22 @@ both entries are about.
       discharged by the same edit.
       **Severity:** low — a hazard to a developer's machine rather than to the
       product, but it is a recursive delete of an unverified path.
+
+      **FIXED, by the same edit as the box above, and then one step further: the
+      `remove_dir_all` is gone rather than guarded.** The finding is right that
+      randomising the name closes this — but a recursive delete of an unverified
+      path that is also now unreachable is a line with no job left, and leaving it
+      in place would leave the hazard one accidental de-randomisation away. It
+      existed only to clear a collision the predictable name made likely; with 8
+      bytes of randomness there is nothing to clear, and `create_dir_all` on a name
+      nothing else holds cannot collide.
+
+      `Drop::drop`'s `remove_dir_all` stays, and is a different thing: it deletes a
+      path this fixture created and holds, at the end of the test that owns it.
+
+      No new assertion for this box — the property is "the fixture does not delete
+      a path it did not create", and the line that could is no longer there for a
+      test to catch. The deletion is visible in the diff, which is the evidence.
 
 ## Verified clean — no action needed
 

@@ -132,13 +132,52 @@ the false statement the row exists to prevent.
       nothing answers. Verified by the added fixture guard, which fails under that
       mutation and raises its kill count from 20 to 21 of 24.
 
-## 7. Gates
+## 7. The correctness and security findings
 
-- [x] 7.1 `cargo test -p dialectica -p dialectica-core` — 530 passed, 0 failed.
-- [x] 7.2 `rustfmt --check --config skip_children=true` clean on the test file;
-      nothing pre-existing reformatted.
-- [x] 7.3 `cargo clippy --all-targets -- -D warnings` clean. The six remaining
+Four boxes, all addressed to `tester`, all closed. The measurements live in
+`findings/correctness.md` and `findings/security.md` beside the reviewer's own
+text; this section records only what was done.
+
+- [x] 7.1 Move `a_hide_by_a_non_moderator_leaves_the_thread_visible`'s fixture
+      guard below the resolution and feed assertions — verified by re-running the
+      `Moderators::contains → true` mutation before and after: the hide test dies
+      at the guard beforehand and on `Hidden(..)` vs `Unmoderated` afterwards.
+- [x] 7.2 Check whether the finding generalises to the other same-shaped guard. It
+      does not: the `iter_target` guard in `a_forged_hide_does_not_displace…` is
+      correctly placed, measured independently by the authority-after-taking
+      mutation, which fails that test at its own `resolve` assertion. One line, not
+      a pattern — recorded in the test file's note 5.
+- [x] 7.3 Replace both false claims in the `TempDir` doc — verified: `create` was
+      read to check only `path.exists()`, `check_directory_mode` was traced to
+      `read_checked` (i.e. `open`/`is_encrypted`) only, and the `0o777` probe failed
+      both keystore tests at their `open` call sites with
+      `DirectoryWritableByOthers { mode: 511 }`. The "a failure leaves a directory"
+      half was disproved by `Drop::drop`'s unconditional `remove_dir_all` plus the
+      absence of any `panic = "abort"` profile.
+- [x] 7.4 Randomise the temp directory name with 8 bytes from `getrandom`, matching
+      `keystore.rs:1319-1322`, and drop the unconditional `remove_dir_all` that the
+      predictable name made necessary. No new dependency: `getrandom` and `hex` are
+      ordinary `[dependencies]` of this crate. Closes both security boxes, which the
+      reviewer wrote as two because one edit discharges both.
+- [x] 7.5 Pin the randomness with
+      `two_temp_dirs_with_the_same_tag_get_different_unguessable_names`, since no
+      other test in the suite would notice if it stopped arriving — verified by two
+      mutations, the reverted pid-based name (fails the `assert_ne!`) and a 2-byte
+      suffix (fails the length assertion at 21 vs 33).
+
+## 8. Gates
+
+- [x] 8.1 `cargo test -p dialectica -p dialectica-core` — **531 passed**, 0 failed
+      (506 in-crate + 25 in `tests/end_to_end.rs`). The baseline was 530; the one
+      added test is 7.5's.
+- [x] 8.2 `rustfmt --check --config skip_children=true` clean on the test file;
+      nothing pre-existing reformatted. `moderation.rs` was mutated and restored,
+      and `git diff` shows it byte-identical — its own `rustfmt --check` reports
+      pre-existing differences in `#[cfg(test)]` code this change did not touch,
+      left alone deliberately.
+- [x] 8.3 `cargo clippy --all-targets -- -D warnings` clean. The six remaining
       warnings are the staged upstream SDK's and pre-date this change.
-- [x] 7.4 No `ignore`-fenced doc block added — verified by `grep -n '```'` over the
+- [x] 8.4 No `ignore`-fenced doc block added — verified by `grep -n '```'` over the
       test file returning nothing, so no doc-test is registered and the count gate
-      is unaffected.
+      is unaffected. The count gate itself needs no edit: it counts `#[test]`
+      occurrences under an rglob, so 7.5's test is counted and run.

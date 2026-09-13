@@ -10,7 +10,7 @@ for work that is done.
 Baseline measured in this worktree: `506 passed` (in-crate) + `24 passed`
 (`tests/end_to_end.rs`) = **530**, matching `tasks.md` §7.1.
 
-- [ ] **`tester`** — `end_to_end.rs:1041` — `a_hide_by_a_non_moderator_leaves_the_thread_visible`
+- [x] **`tester`** — `end_to_end.rs:1041` — `a_hide_by_a_non_moderator_leaves_the_thread_visible`
       still dies at its fixture guard, so the resolution claim it is named for is
       never exercised. This is the **same shape the file's own note 1 diagnosed,
       fixed in only one of its two places**: the new test
@@ -39,7 +39,35 @@ Baseline measured in this worktree: `506 passed` (in-crate) + `24 passed`
       **Severity:** medium — a genuine defect in the new file, of the precise
       family the file's header says it was shaped to avoid.
 
-- [ ] **`tester`** — `end_to_end.rs:263-272` — the `TempDir` doc gives two reasons
+      **FIXED.** The guard now sits after the `resolve` and feed assertions, kept
+      rather than deleted for the reason the finding gives. Reproduced the
+      measurement first, then watched it change:
+
+      - Mutation `Moderators::contains → true`, guard still in front. **Predicted**
+        `22 passed; 2 failed`, the hide test at line 1041 on "the fixture's
+        outsider must not be a moderator". **Observed** exactly that — the
+        reviewer's count and failure site both reproduce.
+      - Same mutation, guard moved below. **Predicted** still 2 failures, but the
+        hide test now on the resolution. **Observed** line 1041,
+        `left: Ok(Hidden(Entry { .. action: Hide .. }))` vs `right:
+        Ok(Unmoderated)`, message "a hide from a non-moderator binds nothing" —
+        as predicted, and as the finding's own second measurement said it would.
+
+      Implementation restored; `git diff --stat` shows the test file only.
+
+      **The generalisation was checked and does NOT hold**, which is worth
+      recording because "move every fixture guard to the end" is the tempting
+      wrong rule. Re-ran the table's row-3 mutation (authority checked after
+      taking the leading `Moderate`) against the forged-hide test, whose
+      `iter_target` guard has the identical surface shape. **Predicted** it fails
+      at its own `resolve` assertion, not at the guard. **Observed** `23 passed;
+      1 failed` at line 1148, `Unmoderated` vs `Hidden(..)` — so this reviewer's
+      "only one needs moving" is independently confirmed. The file's note 5 now
+      records both halves and states the rule the two cases actually share: ask
+      which mutation would trip the guard, and whether it is the mutation the test
+      is aimed at.
+
+- [x] **`tester`** — `end_to_end.rs:263-272` — the `TempDir` doc gives two reasons
       for the fixture's design and both are false against the code beneath them.
       Survived the readability pass unchanged. A reader trusting either will draw a
       wrong conclusion about the fixture, and one of them invites removing a line
@@ -64,6 +92,32 @@ Baseline measured in this worktree: `506 passed` (in-crate) + `24 passed`
       **Severity:** low as behaviour, medium as a claim — both halves are
       falsifiable statements about the code and both are false, which is the defect
       family `1342aa9` was specifically addressing elsewhere in this same file.
+
+      **FIXED.** Both halves re-derived before rewriting, since replacing a false
+      claim with an unchecked one would be the same defect:
+
+      - **(a)** `Drop::drop` calls `remove_dir_all` unconditionally, and
+        `grep -rn "panic" rust-lib/Cargo.toml` returns nothing, so there is no
+        `panic = "abort"` profile and a panicking `#[test]` unwinds. The doc now
+        says a failing test does NOT leave its directory, and says not to write
+        that it does.
+      - **(b)** Read `Keystore::create` (`keystore.rs:683`) — `path.exists()` and
+        then `write_to`, no mode check. Traced `check_directory_mode`: its only
+        caller is `read_checked` (`keystore.rs:1003`), reached from lines 661 and
+        675, i.e. `open` and `is_encrypted`. Then probed rather than reasoned:
+        replaced `set_permissions(0o700)` with `0o777`. **Predicted** both keystore
+        tests fail at their `open`/reopen call and neither at `create`. **Observed**
+        exactly that — `end_to_end.rs:514` and `:559`, both
+        `DirectoryWritableByOthers { mode: 511 }`, which are the `Keystore::open`
+        lines. The doc now names `open` and names the two tests that break.
+
+      `0o777` rather than deleting the call, deliberately: a deleted call inherits
+      whatever `std::env::temp_dir()`'s default mode is, which could already be
+      private and would make the probe pass for the wrong reason — this repo's own
+      defect family. Restored to `0o700` afterwards.
+
+      The rewritten doc also carries the security findings' reasoning, since the
+      same function changed for both.
 
 ## Already fixed on this branch — no box
 
