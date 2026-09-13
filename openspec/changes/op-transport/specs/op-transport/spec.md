@@ -20,7 +20,8 @@ The boundary with three neighbouring capabilities is drawn deliberately, and the
 - **Whether a hashed content topic buys the anonymity intended.** That a Stoa's title does not appear in a topic is checkable; the size of the set a hashed topic hides a peer within is a property of the deployed network.
 - **That the message-size limit contracted below equals what the network validates against.** The limit arrives from no transport interface — nothing in the delivery contract states one — so a peer has no second value to compare its own against. The requirement below pins the constant so a local edit fails loudly; whether the network has since moved is observable only against a live node, and a peer over-sending or needlessly refusing because of a drifted network limit is a failure this capability cannot detect.
 - **The node's configuration** — which network, which mode, which entry nodes — beyond the lifecycle contracted below.
-- **Observing that the shared delivery node was left running.** The node is never reached from this capability's own surface, so the requirement "The delivery node is shared and is never stopped by this peer" is contracted below as a prohibition on what this application's lifecycle handlers may call, and is discharged by reading them. What it would take to observe the failure is a second module in the same context losing its delivery, which is a property of a deployed context. This is named here rather than left to read as covered.
+- **Observing that the shared delivery node was left running.** The node is never reached from this capability's own surface, so the requirement "The delivery node is shared and is never stopped by this peer" is contracted below as a prohibition on what this application may call, and is discharged by reading it. What it would take to observe the failure is a second module in the same context losing its delivery, which is a property of a deployed context. This is named here rather than left to read as covered.
+- **The lifecycle handlers that must drive a close.** This application has no shutdown handler and no leave-Stoa handler, so the two events the requirement "A channel is closed when a user leaves a Stoa and on shutdown" names have no site at which they are observed. **Excluding the site is not excluding the obligation**: that requirement states the obligation and contracts the two close operations a handler will need, and the requirement "The delivery node is shared and is never stopped by this peer" names the handlers as a fourth owed thing beside the three owed for a delivery outcome. Supplying them is not this change's work, and no scenario below is phrased over either event, because one phrased over an event with no site would pass by never firing.
 - **Attachments and any content addressed outside an op.** A payload here is one op's wire form.
 - **What a channel is opened for.** Which Stoas a peer holds, what joining one means, and where a Stoa's genesis record is stored belong to the Stoa-lifecycle capability. This capability contracts only that an inbound op never causes a peer to hold a Stoa it did not already hold.
 
@@ -429,18 +430,22 @@ Consequently, releasing what a Stoa's channel holds SHALL be done by closing the
 
 **This requirement is a prohibition on a call, and it binds the code that can make that call — which is not the code the requirements above contract.** No part of this capability's own surface starts, stops or counts nodes: the node is reached only from the adapter that carries this application's lifecycle handlers. So the obligation is stated here, where the reasoning for it lives, and discharged there.
 
-**A peer cannot observe compliance, and no scenario below claims it can.** What it would take is a second module in the same context noticing its delivery had gone, which is a property of a deployed context rather than of this capability. The obligation is consequently that a stop call **SHALL NOT appear** in this application at all: a prohibition on the code rather than on an outcome, checkable by reading the lifecycle handlers and not by exercising them. A change that adds one satisfies every other requirement in this capability and breaks this one, and nothing in this capability's surface will say so.
+**A peer cannot observe compliance, and no scenario below claims it can.** What it would take is a second module in the same context noticing its delivery had gone, which is a property of a deployed context rather than of this capability. The obligation is consequently that a stop call **SHALL NOT appear** in this application at all: a prohibition on the code rather than on an outcome, checkable by reading the application and not by exercising it. A change that adds one satisfies every other requirement in this capability and breaks this one, and nothing in this capability's surface will say so.
 
-#### Scenario: No stop call exists in this application's lifecycle handlers
+**The prohibition is on the whole application, not on a handler, because this application has no lifecycle handler to read.** A scope statement rather than a licence: the adapter that would carry a shutdown handler and a leave-Stoa handler does not exist, so a requirement phrased as a property of those handlers would be satisfied by their absence and would keep reading as satisfied after one was written that violated it. Phrased over the application, the prohibition is checkable now — no site in it stops a node and no site constructs one — and stays checkable when the handlers land. **A fourth thing is consequently owed alongside the three named by "A successful publish is a statement about the local log and nothing more": the lifecycle handlers themselves, which this change does not supply.** It is a distinct gap from those three, which are about a delivery outcome; this one is about there being no site at which shutdown or leaving a Stoa is observed at all.
 
-- **WHEN** the handlers this application runs on shutdown, and on a user leaving a Stoa, are examined for what they call
-- **THEN** neither stops the delivery node
-- **AND** neither creates a node of its own
-- **AND** the shutdown handler closes the channels this peer opened
+Whether a handler, once written, closes this peer's channels is contracted by "A channel is closed when a user leaves a Stoa and on shutdown" and SHALL NOT be restated here. This requirement is about the node.
+
+#### Scenario: No site in this application stops or creates a delivery node
+
+- **WHEN** this application is examined for what it does with a delivery node
+- **THEN** no site in it stops a node
+- **AND** no site in it creates a node of its own
+- **AND** the examination is over the whole application rather than over a lifecycle handler, because there is no lifecycle handler for shutdown or for leaving a Stoa
 
 ### Requirement: A channel is closed when a user leaves a Stoa and on shutdown
 
-A Stoa's channel SHALL be closed when the user leaves that Stoa, and every open channel SHALL be closed when the application shuts down.
+A Stoa's channel SHALL be closed when the user leaves that Stoa, and every open channel SHALL be closed when the application shuts down. **That is an obligation this change does not discharge, and it is stated as an obligation rather than narrowed to what exists**: the two operations it needs are supplied and contracted below, and the handler that must invoke them is the fourth owed thing the previous requirement names. A change that writes a shutdown handler which closes nothing breaks this requirement, which is why it is not rewritten into a statement about the operations alone.
 
 Both cases are one situation: a channel must not outlive the application that opened it. A channel left open keeps the shared node working on behalf of a Stoa belonging to an application nobody has open — holding filter subscriptions and the remote peer slots serving them, or running the topic's handler chain and synchronisation loops locally.
 
@@ -450,22 +455,25 @@ A channel closed SHALL be reopenable under the same identity, because a user may
 
 Closing a channel SHALL NOT discard, alter or hide the ops already stored from it. The ops are the peer's, and leaving a Stoa is a statement about what it listens to rather than about what it has seen.
 
-#### Scenario: Leaving a Stoa closes its channel
+**What is checkable here is the record of which channels are open, and closing one Stoa's channel and closing every open channel are the two operations over it.** The events that must drive them — a user leaving a Stoa, and the application shutting down — have no site in this application, which is the gap the previous requirement names as owed. So the scenarios below are stated over the two operations rather than over the two events: they pin that closing one channel closes that one and no other, and that closing every channel yields the identifier of each so that a caller can act on it, which is what the absent handler will need. **What no scenario here claims is that any handler invokes either operation**, because none does, and a scenario phrased over the event would pass by never firing.
 
-- **WHEN** a user leaves a Stoa whose channel is open
-- **THEN** that channel is closed
-- **AND** no other Stoa's channel is closed
+#### Scenario: Closing one Stoa's channel closes that one and no other
 
-#### Scenario: Shutdown closes every open channel
+- **WHEN** several Stoas' channels are open and one Stoa's channel is closed
+- **THEN** that channel is no longer open
+- **AND** every other Stoa's channel is still open
 
-- **WHEN** the application shuts down with channels open for several Stoas
-- **THEN** each is closed
+#### Scenario: Closing every open channel yields each channel's identifier
 
-#### Scenario: A Stoa can be rejoined without a restart
+- **WHEN** channels are open for several Stoas and every open channel is closed
+- **THEN** no channel is open
+- **AND** what is reported names each closed channel's identifier, so that a caller can act on each at the transport
 
-- **WHEN** a user leaves a Stoa and rejoins it in the same session
-- **THEN** a channel is opened under the same channel identifier as before
-- **AND** no restart is required
+#### Scenario: A channel closed can be reopened under the same identifier
+
+- **WHEN** a Stoa's channel is closed and then opened again in the same session, deriving its identity afresh as a rejoin would
+- **THEN** it is open under the same channel identifier as before
+- **AND** nothing about the reopening requires a restart or distinguishes it from the first open
 
 #### Scenario: Closing a channel keeps the ops received on it
 

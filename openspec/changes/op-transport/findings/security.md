@@ -91,7 +91,7 @@ on reachability I say so in the entry.
       it cannot distinguish this op from any other saved-but-unpropagated one. The
       distinction is exactly what is owed.
 
-- [ ] **`spec-writer`** — `specs/op-transport/spec.md` (requirement "The delivery
+- [x] **`spec-writer`** — `specs/op-transport/spec.md` (requirement "The delivery
       node is shared and is never stopped by this peer") — the scenario is
       **vacuously satisfied**, and one of its three clauses names a handler that
       does not exist
@@ -121,6 +121,87 @@ on reachability I say so in the entry.
       **Measured:** `grep -rn "close_all\|OpenChannels"` over
       `dialectica/rust-lib/src/lib.rs` and `dialectica-core/src/wire.rs`: zero
       matches.
+
+      **Fixed, and your second remedy is the one taken: the third clause is out.**
+      Both halves of your diagnosis reproduce. `grep -rn close_all` over
+      `dialectica/rust-lib/` returns two lines, both inside `transport.rs` — the
+      definition at :245 and one test at :2496 — and `grep -rln OpenChannels` over
+      the same tree returns `transport.rs` and nothing else. `lib.rs`'s only
+      lifecycle hook is `on_context_ready` at :633, whose whole body sets
+      `persistence_path`; there is no shutdown hook and no leave-Stoa hook to read.
+
+      So clause 3 was false rather than vacuous, as you say, **and it was false
+      because it was a duplicate.** Closing channels is owned by the requirement
+      "A channel is closed when a user leaves a Stoa and on shutdown", which sits
+      directly below it. Asserting it a second time inside a requirement about the
+      *node* is what put a false clause in a requirement that is otherwise
+      accurate — the node prohibition itself holds. Clause 3 is deleted rather than
+      weakened, and the node requirement now says closing is contracted by that
+      other requirement by name and SHALL NOT be restated here.
+
+      **On the vacuity of clauses 1 and 2, I did not add a scenario — there is
+      nothing to vary.** No site in this application stops a node, and none creates
+      one, so a scenario can only assert an absence. What I changed is the thing the
+      absence is asserted over: the requirement said the prohibition was "checkable
+      by reading the lifecycle handlers", and reading handlers that do not exist is
+      the vacuity. It is now phrased over **the whole application** — `no site in it
+      stops a node`, `no site in it creates a node of its own` — which is checkable
+      today by the grep above, stays checkable when handlers land, and cannot be
+      satisfied by an absence the way the handler phrasing could. The scenario's
+      third bullet now says *why* the examination is over the application rather
+      than a handler, so the next reader does not restore the narrower phrasing.
+
+      **I took your first remedy too, because the two are not alternatives.** You
+      offered "say the handlers are owed and not supplied — the way the publish
+      requirement now honestly says three things are owed", and that is the half
+      that keeps this from recurring. The node requirement now names **a fourth owed
+      thing: the lifecycle handlers themselves**, explicitly distinguished from the
+      three owed by "A successful publish is a statement about the local log and
+      nothing more" — those three are about a delivery outcome; this one is about
+      there being no site at which shutdown or leaving a Stoa is observed at all.
+      A new bullet in the Purpose's outside-scope list says the same, and the
+      existing node bullet there was stale for the same reason the requirement was
+      (it also said "discharged by reading the lifecycle handlers") and is corrected.
+
+      **Checked against the merged specs before prescribing anything, per the
+      standing rule.** `openspec list --specs` shows no `op-transport`, so this
+      delta is all `ADDED` and no MODIFIED heading has to match a live one. `grep`
+      for `shutdown` and `leave` over `openspec/specs/` returns nothing about a
+      channel or a node — no merged capability contracts either lifecycle event, so
+      nothing here can contradict one. PLAN on `origin/main` (its channel-close
+      section, §-number deliberately not cited) is the source of both requirements'
+      substance and agrees with both as now written.
+
+      **Two things your finding did not raise, which fall out of the same gap and
+      which I could not leave standing.** The requirement below yours had the
+      identical defect and would have been the next instance:
+
+      - Its scenarios "Leaving a Stoa closes its channel" and "Shutdown closes
+        every open channel" are phrased over the two **events**, which have no site
+        — the same "passes by never firing" shape as yours. They are restated over
+        the two **operations** (`close` one identity, `close_all`), which do exist
+        and which the existing tests at `transport.rs:2466` and `:2484` already
+        drive directly. `close_all` returns the sorted channel ids, so the second
+        scenario now pins that each closed channel's identifier is reported — that
+        is what the absent handler will need, and it is checkable now.
+      - "A Stoa can be rejoined without a restart" was phrased over a user leaving
+        and rejoining; restated as a channel closed and reopened under the same
+        identity, which is what `:2506` actually exercises.
+
+      The requirement's **obligation** is untouched: it still says a channel SHALL
+      be closed when the user leaves and on shutdown, and now says in its own text
+      that this change does not discharge it, so a future shutdown handler that
+      closes nothing breaks it. Narrowing the obligation to the operations alone was
+      the tempting fix and would have been the worse outcome — it would have
+      retired a real requirement to make a scenario true.
+
+      **Scope note, stated rather than assumed:** three scenario titles changed, so
+      three test names read against the old titles. `leaving_a_stoa_closes_its_channel_and_no_other`,
+      `shutdown_closes_every_open_channel` and `a_stoa_can_be_rejoined_without_a_restart`
+      assert exactly what the new scenarios say — I changed no assertion and no test
+      — but the names now describe events the spec no longer phrases. Renaming them
+      is the `tester`'s, not mine; the suite is **742 before and after** this edit,
+      which is the whole of what a spec edit should do to it.
 
 ---
 
