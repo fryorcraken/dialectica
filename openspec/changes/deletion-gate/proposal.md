@@ -159,9 +159,12 @@ None.
 ## Impact
 
 - `.github/workflows/ci.yml` gains one step and one `with:` key.
-- `.claude/agents/closer.md` gains one rule, on the closer authoring commits to
-  a PR it would otherwise merge. It is folded in here rather than split out;
-  the argument is in the next section.
+- `.claude/agents/closer.md` gains two things: one rule on the closer authoring
+  commits to a PR it would otherwise merge, and one line on archiving a
+  `skip_specs: true` change. Both are folded in here rather than split out; the
+  arguments are in the last two sections.
+- `docs/OPENSPEC-ARCHIVE.md` gains the same zero-delta note in its reference
+  form, beside the `## Purpose` traps.
 - **Every open PR is affected on its next run.** At the time of writing every
   open branch is clean under the three-dot measure — the eight firings were
   caught and rebased by hand — so this should land green rather than firing
@@ -191,6 +194,12 @@ agent-file change are different review surfaces, and #59 landed the closer's fil
 on its own — but it is weaker here than the coupling, because a reviewer reading
 either half alone would ask for the other.
 
+The same reasoning carries the archive note in the section below, which arrived
+from the same closer for the same reason: it found a gap in its own checklist
+and refused to fix it itself. Three documentation edits that all answer "what
+must a closer do about a merge or an archive nobody else has read" are one
+review surface, not three.
+
 The rule, as added to `closer.md`'s "What you never do" neighbourhood:
 
 > The closer may author a fix to its own checklist or its own file, and must
@@ -201,3 +210,79 @@ The rule, as added to `closer.md`'s "What you never do" neighbourhood:
 The final clause is the closer's own addition and is the sharpest part: without
 it the rule produces a correct handoff that the runner cannot act on, because
 "this PR needs a second reader" does not say *which lines* lacked one.
+
+## Archiving a change that has no spec delta
+
+**Neither archive document mentions this case.** `grep -c "skip_specs"` and
+`grep -c "schema"` over `.claude/agents/closer.md` and
+`docs/OPENSPEC-ARCHIVE.md` on `origin/main` return **zero in all four**. Since
+#59 moved the archive stage row to the `closer`, that agent now reaches a
+zero-delta change with nothing in its checklist to say what to do.
+
+This is live rather than hypothetical: `piece/seed-store` (PR #66) and **this
+piece** are both `skip_specs: true` with no `specs/` directory, so the first
+closer to meet one is the one closing one of these two.
+
+The cost is already paid once. The drafts of this proposal asserted
+`skip_specs: true` in prose while `.openspec.yaml` did not exist, and
+`openspec validate deletion-gate --strict` failed with "Change must have at
+least one delta" — a message that names deltas and never mentions the marker.
+
+### What the note must say, and one thing to verify first
+
+Three claims, each checked rather than assumed:
+
+- **A `skip_specs: true` change archives normally.** `archive` moves the folder
+  to `openspec/changes/archive/<date>-<name>/`; there is simply no delta-merge
+  prompt, because `openspec show <name> --json --deltas-only` reports
+  `deltaCount: 0`. Nothing extra is required.
+- **`schema:` must accompany the marker or it is silently ignored**, and the
+  resulting `--strict` failure presents as two problems when it is one: the
+  marker reported as ignored, then a failure for having no deltas. One cause.
+- **There is also a `--skip-specs` CLI flag**, whose name collides with the YAML
+  key (`openspec archive --help`). This is worth naming because the closer will
+  otherwise have to guess whether it is required. With the marker set correctly
+  it is **not** needed — validation passes and the delta count is zero without
+  it — so the note should say the file is the mechanism and the flag is not a
+  substitute for it.
+
+**One thing the `dev-writer` must verify rather than inherit from me.** The
+`core-e2e` change is the only archived zero-delta precedent, and
+`git log --diff-filter=A -- openspec/changes/archive/2026-09-13-core-e2e/`
+shows it landing **inside** the squash merge `b85111d`, not as a separate
+post-merge commit. Every earlier change archived that way too, spec-bearing
+ones included — so that is a pre-#59 habit, not evidence about zero-delta
+changes specifically. Do not cite `core-e2e` as showing how the archive
+*commit* should be made; cite it only for the marker. Re-run that command
+before writing the note.
+
+### Placement: both files, and what stops them drifting
+
+Put the **full note in `docs/OPENSPEC-ARCHIVE.md`**, beside the `## Purpose`
+traps in "Four traps, none visible from the files" — it is the same kind of
+fact, a mechanical trap invisible from the artifacts. Put **one line in
+`closer.md`** that says a zero-delta change archives normally and points at the
+page.
+
+Two copies drifting is a failure this repo has named, so the split is
+deliberately *not* two copies. `closer.md` already carries the pattern and its
+own justification for it:
+
+> Most of this step's traps are there and none of them are visible from the
+> files; this section does not restate them, because two copies drift and the
+> reader who finds the stale one cannot tell.
+
+So the anti-drift mechanism is that **only one file carries the reasoning**.
+`closer.md` gets a pointer and a single fact — enough to stop an agent
+mid-task concluding a zero-delta change cannot be archived — and every
+detail, the `schema:` requirement and the flag collision included, lives in
+one place. A pointer cannot contradict the page it points at.
+
+The `closer.md` line, for the `dev-writer` to place in step 5 beside the
+existing "read the page in full" instruction:
+
+> **A change with no spec delta archives normally.** `skip_specs: true` in its
+> `.openspec.yaml` is the marker, there is no delta-merge prompt to take, and
+> the `--skip-specs` flag is not needed when the marker is set. The marker is
+> silently ignored without a `schema:` key beside it — see
+> `docs/OPENSPEC-ARCHIVE.md`.
