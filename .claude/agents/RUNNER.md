@@ -1,16 +1,9 @@
 # The runner's own file
 
 Every other file in this directory is read by the agent it names. This one is
-read by the session that dispatches them — the **runner** — which until now was
-the only participant in the flow with no file of its own, and made the mistakes
-that follow from that: it spawned no agent and did the work itself, it lost track
-of whether an agent was still running, and it opened **fourteen PRs for five
-pieces**, twelve of which were closed unmerged and redone.
+read by the session that dispatches them — the **runner**.
 
-Those three are one failure. **The runner's obligations were written as asides
-inside documents addressed to subagents**, so the rule that would have prevented
-each was in a file the runner had no reason to open. If you are the runner, this
-file is yours; read it before your first dispatch.
+If you are the runner, this file is yours; read it before your first dispatch.
 
 [`README.md`](README.md) is still the flow. This file says only what the runner
 does, and each rule here names the failure it exists to prevent.
@@ -18,7 +11,7 @@ does, and each rule here names the failure it exists to prevent.
 ## The four things a runner may do
 
 A runner **dispatches, reads files, tracks state, and reports**. That is the
-whole list. Two consequences worth stating because both have been broken:
+whole list. Two consequences follow:
 
 - **The runner does not write the work.** Not the spec, not the code, not the
   tests, not the findings fixes — not even "just this one small edit" while an
@@ -67,55 +60,36 @@ grep -c "^## Stages" openspec/changes/<name>/tasks.md
 ```
 
 A `0` there means the piece is invisible to your tracking, not that it is done.
-Both changes in flight when this file was written predate the rule and answer
-`0`; a change started today has no such excuse, and the `spec-writer` writes the
-block before anyone else touches the file.
+Changes predating the rule answer `0`; a change started today should not, since
+the `spec-writer` writes the block before anyone else touches the file.
 
 ## Is an agent still working on this?
 
-This is the question the runner got wrong most often, and the honest answer is
-that **you cannot tell from your own context** — a dispatched agent returns a
-report when it finishes and is otherwise silent, so "I dispatched one" and "one
-is running" feel identical from the inside.
+**`ListAgents`.** It lists every agent you have running, and a piece that is not
+in that list has none — whatever you remember dispatching.
 
-So do not infer it. **Establish it:**
+Then, depending on what it says:
 
-1. **`ListAgents`** — this is the direct answer, and it is cheap. A piece whose
-   agent is not in that list has no agent running, whatever you remember.
-2. **`SendMessage` to continue it, rather than `Agent` to start a new one.** A
-   continued agent still holds its worktree and its measurements; a new one gets
-   your summary of them, which is the decay this flow has been bitten by
-   repeatedly. If an agent is running, talk to it.
-3. **Set a reminder while you wait.** A 5–10 minute `ScheduleWakeup` or `Monitor`
-   is what turns "I think something is happening" into a scheduled check. Without
-   it a stalled agent and a working one look the same for an hour.
+- **An agent is running: `SendMessage` to it.** Do not start a second with
+  `Agent`. A continued agent still holds its worktree and its measurements; a
+  new one gets your summary of them, and a summary decays.
+- **Nothing is running and the row is unticked: dispatch.**
+- **Either way, set a 5–10 minute `ScheduleWakeup` or `Monitor` before you
+  wait.** A dispatched agent is silent until it finishes, so a stalled one and a
+  working one look identical until you check.
 
-**Never dispatch a second agent for a stage that already has one.** Two writers
-on one piece share a worktree, an index and a branch — and none of that surfaces
-as a git conflict; it surfaces as a spec that moved while code was written
-against it. When in doubt, `ListAgents` first and dispatch second.
+Continuing rather than starting a second matters because two writers on one
+piece share a worktree, an index and a branch — and none of that surfaces as a
+git conflict. It surfaces as a spec that moved while code was written against
+it.
 
-**A stage with no agent and no tick is yours to dispatch now.** That is the
-signal the stage block exists to give you; the failure it caught here was a
-piece that reached the edge of merge with zero reviewers.
+## One piece is one PR
 
-## One piece is one PR — and the runner is who breaks this
-
-This event is worth stating exactly, because the shape is seductive and it will
-present itself again. On 2026-09-12, between 09:00 and 10:08, five pieces were
-taken through spec, then dev, then tests. Each stage looked like a finished unit
-of work, so each got its own branch and its own PR — `spec/identity` (#32), then
-`dev/identity` (#40), then `test/identity` (#46). Fourteen PRs for five pieces;
-twelve were closed unmerged and redone as `piece/*`.
-
-Check it rather than believe it:
-
-```
-gh pr list --state all --limit 80 --json number,headRefName,state
-```
-
-The stage-named branches are still in that list, and the twelve `CLOSED` rows
-are the cost.
+The shape that breaks this: a piece goes through spec, then dev, then tests, and
+**each stage looks like a finished unit of work** — so each gets its own branch
+and its own PR, `spec/identity` then `dev/identity` then `test/identity`. Three
+PRs for one piece, none of them reviewable, because the contract, the code and
+the tests that prove they match are in three places.
 
 **A stage is not a unit of review.** The unit is a behaviour change with its
 contract and its tests attached, because a reviewer must be able to see they
@@ -143,9 +117,9 @@ different name.
 
 **A brief points at the work; it does not contain it.** Name the piece, the
 worktree, and the file to read — never paraphrase a finding into the brief. A
-relayed claim decays: four of this flow's own briefs carried numbers that were
-stale or wrong by the time an agent re-derived them. Give the path and the
-command, not the conclusion.
+relayed claim decays: a number you carry into a brief was measured at some
+earlier moment, and the agent acting on it cannot tell how stale it is. Give the
+path and the command, not the conclusion.
 
 Every brief carries the worktree instruction, because it is what keeps an agent
 out of the shapes that cost a permission click:
@@ -169,7 +143,7 @@ agent that calls it, which is why the instruction belongs in the brief.
 |---|---|---|
 | `spec-writer` / `dev-writer` / `tester` | **one per piece, one in total** | they share the piece's worktree; they can share it only because they never overlap |
 | reviewers | **up to six, in parallel** | a tree each, a findings file each, no shared line |
-| `closer` | one, and last | it decides nothing; it reports back |
+| `closer` | one, never beside a writer | it decides nothing; it reports back |
 
 **Launch `code-reviewer` once per dimension** — correctness, security,
 readability, architecture — naming the dimension in the prompt. One agent asked
@@ -184,19 +158,16 @@ which is more expensive than the wait it was trying to avoid.
 **Prune a worktree as soon as its branch is merged or abandoned**
 (`git worktree remove <path>`). Every stale checkout is a full copy of the repo,
 so a recursive grep hits each one — and a citation taken from a stale copy reads
-exactly like a citation from the real tree. This has already produced wrong
-citations here.
+exactly like a citation from the real tree.
 
-`git worktree list` is the check, and the honest way to read it is against the
-open-PR count: a tree whose piece has no open PR and no running agent is either
-merged or abandoned, and either way it is prunable. When this file was written
-that comparison gave 36 worktrees against 6 open PRs — the gap is what not
-pruning at merge time accumulates to, and it is why a recursive grep from the
-repo root now reads dozens of stale copies of every file.
+`git worktree list` is the check, read against the open-PR count: a tree whose
+piece has no open PR and no running agent is merged or abandoned, and either way
+it is prunable. A gap between those two counts is accumulated cleanup, and it
+grows quietly — nothing fails, the recursive greps just get less trustworthy.
 
 Prune at merge time, when you still know which tree was which.
 
-## The runner's last dispatch is the `closer`
+## The `closer` is the last dispatch of a *green* piece
 
 Watching a CI run is the cheapest work in this flow and the runner is the most
 expensive context to spend on it. Dispatch the `closer` when every review row is
@@ -204,5 +175,39 @@ ticked; it archives, watches CI and merges.
 
 What does not delegate is authority: the `closer` reports a red run, a stale
 branch or an unticked box **back to you** rather than repairing it, and it
-dispatches nobody. A report from the `closer` is the start of your next
-dispatch.
+dispatches nobody. It is the last dispatch only when the piece merges.
+
+### When the `closer` reports red, dispatch a writer — do not fix it yourself
+
+A red run is the most tempting moment in the flow to break the first rule in
+this file, because the failing lines are right there in the report and the fix
+often looks like one line. Fix it yourself and it lands in no worktree, ticks no
+row, and is reviewed by nobody — and the `closer` refused it for that exact
+reason, having neither read nor written the change.
+
+So the report routes onward. Read the failing job, then dispatch into the
+piece's existing worktree on `piece/<name>`:
+
+| What failed | Who |
+|---|---|
+| implementation, build, clippy, fmt | `dev-writer` |
+| a test — wrong assertion, missing case, a test that cannot fail | `tester` |
+| the contract is wrong, not the code | `spec-writer`, and the fixer afterwards — never both at once |
+
+**One writer at a time still holds.** The reviewers are done and the `closer` is
+parked, so the piece is idle — but it is idle, not free: dispatch one writer,
+wait for it, then re-dispatch the `closer`. Do not run the `closer` alongside a
+writer fixing the thing it reported.
+
+**Give the writer the evidence, not your reading of it.** The run URL and the
+job name, which the `closer` already put in its report. A paraphrased failure
+arrives without the log the fixer needs, and it goes and reads it anyway.
+
+**Re-dispatch the `closer` afterwards** — it re-runs its own checks from the
+top. A piece does not merge because the fix looked right; it merges because the
+`closer` saw it green.
+
+Two cases that are not a writer's to fix, and come back to you instead: a
+**stale branch** needs a rebase onto current `main`, which is the runner's call
+because a rebase rewrites a pushed branch; and an **unticked box** means a
+finding was never answered, so it routes to whoever the finding names.

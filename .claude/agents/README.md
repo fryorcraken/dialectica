@@ -8,12 +8,7 @@ per-role models and tool limits.
 > **If you are the session dispatching these agents, read
 > [`RUNNER.md`](RUNNER.md) first — it is written for you, and this file is not.**
 >
-> Everything below is addressed to the agent it names. The runner's own
-> obligations used to live here only as asides, which is why three of them were
-> missed repeatedly: the runner did the work itself instead of dispatching, lost
-> track of whether an agent was still running, and opened eleven PRs for four
-> pieces. A rule in a file its reader has no reason to open is a rule that does
-> not bind.
+> Everything below is addressed to the agent it names.
 
 ## The documents, and what each is for
 
