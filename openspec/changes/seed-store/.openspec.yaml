@@ -1,0 +1,20 @@
+# `schema` is REQUIRED for this file to be valid change metadata, and without it
+# `skip_specs` is silently NOT HONOURED — `openspec validate --strict` reports
+# the marker as ignored and then fails for having no deltas, which reads as two
+# problems rather than one. It must name a known schema; this project's is the
+# built-in `spec-driven`, set in `openspec/config.yaml`.
+schema: spec-driven
+
+# No spec delta: this change adds a developer tool, not a requirement.
+#
+# The seeder is a `cargo run --example` binary. It calls only the public API
+# that `stoa-membership`, `content-authoring`, `keystore`, `identity-onboarding`
+# and `module-wire-contract` already contract, and it adds no method, no field
+# and no reply shape to the module surface. A view cannot reach it: it is not a
+# dispatch handler and is not linked into the module image.
+#
+# The marker is the honest answer rather than a workaround. A requirement added
+# so validation passes would put a clause in the contract describing a tool
+# rather than the system — and worse, would contract an example's stdout, which
+# is the one part of this change that should stay free to change.
+skip_specs: true

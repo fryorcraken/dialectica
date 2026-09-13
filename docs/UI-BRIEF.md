@@ -311,14 +311,27 @@ A title, and nothing else. The creator's key comes from the user's own keystore
 and **cannot be supplied** — a Stoa created under someone else's key is one the
 creator cannot moderate, and its address cannot be un-minted.
 
-**The key recorded as creator is the same key the user posts under**, which is
-the one identity constraint 2 describes. It matters here because a Stoa's creator
-is its sole moderator: a creator key the user does not sign with would be a Stoa
-nobody can moderate, permanently, since the creator is fixed inside the address.
-Nothing on this screen shows any of that today — moderation is out of the first
-release — but a later "you moderate this Stoa" badge will be answering the same
-question, so do not design as though the creator and the poster could be
-different people.
+**One person, one identity — but today, more than one key.** Constraint 2's "one
+identity per person" still holds: there is one root secret and one human behind
+everything a peer publishes. What does *not* hold is that the creator and the
+poster are the same **key**. The record names one derivation and the publish path
+signs with another, so a Stoa's creator is not the key its own user posts under.
+
+**The consequence is that moderation does not bind today.** A Stoa's creator is
+its sole moderator and is fixed inside the address forever, so a hide published
+through the module against a Stoa this peer created is **refused** — the signing
+key is not the creator the record names. This is a known gap under review, not a
+design intention: `ci.yml` carries a named exemption calling it *"three
+derivations for one user"*, and `openspec/changes/seed-store/design.md` records it
+with the measurement. Which key a publish signs with is an open spec question.
+
+**What that means for you.** Still do not design as though the creator and the
+poster could be different **people** — that remains the intent and the thing a
+later "you moderate this Stoa" badge will answer. But do not build a screen that
+*asserts* the user moderates what they created, because right now they do not, and
+copy claiming a capability the user does not have is the failure this brief treats
+as the serious one. Nothing on this screen shows any of it today — moderation is
+out of the first release — which is why the gap costs nothing yet.
 
 **Requirements:**
 - **Show the new Stoa's address after creating it.** It is the only way to share
