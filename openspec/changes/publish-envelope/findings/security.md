@@ -104,7 +104,7 @@ at 736 + 26 before any mutation. Worktree deleted on completion.
       Not a defect this change introduced — one it claimed to fix. The claim was
       the error, and the claim is gone.
 
-- [ ] **`tester`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:7541` — the
+- [x] **`tester`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:7541` — the
       envelope sweep can be evaded, so a future method can reach the wire
       unvalidated with the gate green
       **Scenario (security framing; the correctness file carries the parser
@@ -125,6 +125,43 @@ at 736 + 26 before any mutation. Worktree deleted on completion.
       defect `design.md` §1 cites as the reason this reshape happened at all.
       **Severity: high** — the gate is load-bearing for "never trust an inbound
       message" across the whole future surface, and it fails open.
+
+      **CLOSED — the gate no longer fails open, measured on both of your shapes
+      and on a third.** The mechanics and the two mutation transcripts are in
+      the correctness file's two boxes; what follows is the part that is a
+      *security* answer rather than a parser one, because your framing is the
+      one that matters and it deserves more than a cross-reference.
+
+      **Your framing was "it fails open", and that is the property that
+      changed.** The old parser was a **filter**, and a filter's failure mode is
+      silence: an unrecognised method is simply absent from the result, and an
+      absent method is indistinguishable from a method that takes no request.
+      The replacement is a **classifier** — every `fn` in the trait lands in
+      exactly one of three buckets, and the third bucket is a panic naming the
+      method and its parameter list. So an unfamiliar shape is now a red gate
+      rather than an omission. That is the difference between failing open and
+      failing closed, and it is structural rather than a matter of having
+      patched two spellings.
+
+      I verified it fails closed on a shape nobody has filed:
+      `fn publish_moderation(&mut self, request: &str) -> String;` lands in the
+      unclassified bucket and panics naming it. A `&str` request is a perfectly
+      plausible future declaration, and the gate refuses to guess about it.
+
+      **`publish_moderation` was the right method to probe with, and that still
+      holds.** Your point that this is not hypothetical — it is the operation
+      CLAUDE.md's second standing rule governs, and `design.md` §1 names it as
+      the reason the reshape happened — is why I used your exact method name in
+      all three mutations rather than a neutral one. An unswept moderation
+      handler would be an unvalidated moderation handler, which is the
+      authorisation defect the standing rule exists to prevent.
+
+      **What this gate still does not do, stated so the close is not read as
+      wider than it is.** It asserts a request-taking method is *in the sweep*.
+      The sweep then checks the size cap, the non-object refusal and the three
+      distinct messages. It does **not** check that a future method authorises
+      its caller — no gate here does, and moderation will need one. That is the
+      next piece's, not a gap this box leaves behind.
 
 ## What I verified and found clean
 

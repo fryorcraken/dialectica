@@ -124,7 +124,7 @@ on completion.
       `design.md` saying it is still the `design-reviewer`'s open box; this one
       was the contract's silence and is closed.
 
-- [ ] **`tester`** — `every_request_taking_method_refuses_an_oversized_request`
+- [x] **`tester`** — `every_request_taking_method_refuses_an_oversized_request`
       cannot distinguish a cap checked before the parse from one checked after,
       and its comment claims the property it cannot observe
       **Scenario:** the test's own doc (`wire.rs:8421-8425`) argues the cap exists
@@ -153,7 +153,56 @@ on completion.
       the division honest. (Unticked because the `unfixed-test-patterns-get-copied`
       note applies: this is the doc the fifteenth method's author will read.)
 
-- [ ] **`tester`** — `tasks.md` 8.6 is the only row standing between a typo and
+      **FIXED — the doc now states the division, and I reproduced your mutation
+      first rather than editing a comment on your say-so.**
+
+      **Measured, and it matches your report exactly.** Moving
+      `request.len() > MAX_REQUEST_BYTES` to after `serde_json::from_str` in
+      `wire/request.rs::parse` turns **2 red, 735 green**:
+      `an_oversized_request_is_refused_before_it_is_parsed` and
+      `the_adapters_early_stoa_read_crosses_the_same_envelope_the_handler_does`,
+      both reporting
+      `{"error":"invalid JSON: key must be a string at line 1 column 2"}` where
+      the size refusal was required. **This sweep stayed green**, which is the
+      whole finding. Restored; `git status --porcelain` empty.
+
+      **What I wrote, and why more than the one sentence you asked for.** You
+      asked for a pointer at the test that owns the ordering. I wrote that, plus
+      the reason the pointer is needed, because you filed this under
+      `unfixed-test-patterns-get-copied` and the thing that gets copied is the
+      *reasoning*, not the cross-reference. A future author who reads only "see
+      that other test" learns which test to look at; one who reads "this fixture
+      is valid JSON, so both orderings agree on it" learns the property that
+      makes a fixture able to discriminate — which is what stops them writing the
+      fifteenth method's test the same way. The comment now says, in the test
+      itself:
+
+      - what this test owns: **every method is bounded**;
+      - what it cannot own and why: the fixture is valid JSON, so both orderings
+        return the size refusal and the assertion cannot tell them apart — with
+        the mutation result recorded, so the claim is measured rather than
+        argued;
+      - which two tests own the ordering, and the technique that lets them
+        (oversized **and unparseable**, the only way the order is observable
+        from a return value);
+      - the general lesson, stated as such: a fixture on which two
+        implementations agree cannot distinguish them.
+
+      **I did not weaken the test to match its doc, and did not add a fixture to
+      it.** Making this sweep oversized-and-unparseable would break it: the
+      sweep's value is that it runs over every method's real entry point, and an
+      unparseable fixture would collapse fourteen methods' distinct paths into
+      one `Request::parse` assertion that the two ordering tests already make
+      better. The division of labour is correct as built; only its description
+      was wrong. That is your reading too, and measurement confirmed it.
+
+      **One correction to your citation**, since lines have drifted on this
+      branch: the test's doc is at `wire.rs:8414` onward, not `8421-8425`, and
+      the ordering test is in `wire/request.rs:311` rather than in `wire.rs` —
+      `wire.rs:7503` is the comment that names it. Your reasoning is unaffected;
+      I flag it only so the next reader does not follow the number.
+
+- [x] **`tester`** — `tasks.md` 8.6 is the only row standing between a typo and
       the wire, and the piece's last commit widened what it has to catch
       **Scenario:** `tasks.md` 8.6 is unticked deliberately and correctly, and it
       names the risk: 7.6 deleted `publishing`'s `method` parameter and changed its
@@ -177,6 +226,44 @@ on completion.
       only gate that compiles the edited file, and a green `cargo test` on this PR
       says nothing about it. Flagged as a `tester` box so it is not lost when
       `findings/` is deleted at merge.
+
+      **CLOSED as an instruction delivered, with nothing written in the tests —
+      which is what you asked for and I agree with.** There is no test to add:
+      you are right that the instrument does not exist locally, and a test
+      written here that appeared to cover the adapter would be worse than the
+      gap, because it would close the question while measuring nothing.
+
+      **Where the instruction now lives, and why there rather than only here.**
+      Your own sentence is the reason — *"so it is not lost when `findings/` is
+      deleted at merge"* — and a `tester` box in a deleted file is exactly as
+      lost as no box at all. So it is now on the **`closer`'s own row** in
+      `tasks.md`'s Stages block:
+
+      > `- [ ] CI green, PR merged — closer.` **Watch `Build LGX` by name, not
+      > "CI green".** … Task 7.6 deleted `publishing`'s `method` parameter and
+      > changed its three call sites there, so a typo in the last commit to
+      > touch the adapter is a compile error no local gate and no other CI job
+      > can see.
+
+      That is the line the `closer` reads while deciding whether CI is green, so
+      the instruction arrives at the moment it is acted on rather than in a file
+      they may have already deleted. `tasks.md` also survives into the archive,
+      where 8.6's fuller account keeps the reasoning; the Stages row points at
+      it rather than duplicating it.
+
+      **8.6 itself stays unticked**, deliberately and for your reason: it is an
+      observation about a CI run that has not happened yet, and the `closer` is
+      the only one positioned to tick it. A `tester` ticking a row about a gate
+      they cannot run would be precisely the tick the gate exists to prevent.
+
+      **What I verified rather than relayed.** I confirmed
+      `dialectica/rust-lib/src/lib.rs` is `cfg(logos_scaffold)` and that the
+      local suite compiles none of it — the three mutations in the correctness
+      boxes above are the proof, since each edited that file's dispatch trait
+      and the crate still built and ran, which is only possible because the
+      trait declaration is read as **text** by `include_str!` while the impl
+      below it is gated out. So the file really is unchecked by everything I can
+      run, and Build LGX really is the only thing that compiles it.
 
 ## My judgement on the CI text gate as an instrument
 

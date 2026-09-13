@@ -8436,6 +8436,33 @@ mod tests {
         // the envelope bounds every request-taking method, including one written
         // next month. If this test ever has to be edited to exempt a method,
         // that is the signal that the method reached around the type.
+        //
+        // WHAT THIS TEST OWNS, AND WHAT IT DOES NOT — read this before trimming
+        // it or copying its shape for a fifteenth method.
+        //
+        // It owns EVERY METHOD IS BOUNDED. It does NOT own the ordering, and it
+        // cannot: the ~2N-heap paragraph above is only true if the length check
+        // runs BEFORE the parse, and this fixture is VALID JSON, so both
+        // orderings return the size refusal for it and the assertion below
+        // cannot tell them apart. Measured rather than reasoned: moving
+        // `request.len() > MAX_REQUEST_BYTES` to after `serde_json::from_str` in
+        // `wire/request.rs` leaves this test GREEN.
+        //
+        // The ordering is owned by two tests that feed in something both
+        // oversized AND UNPARSEABLE, which is the only way the order is
+        // observable from a return value — `wire::request::tests::
+        // an_oversized_request_is_refused_before_it_is_parsed` inside
+        // `Request::parse`, and
+        // `the_adapters_early_stoa_read_crosses_the_same_envelope_the_handler_does`
+        // on the adapter's path. That same mutation turns both red naming
+        // `invalid JSON`. So the coverage is complete across the three tests;
+        // what was wrong was this comment implying one test carried all of it.
+        //
+        // The general lesson, and the reason it is written here rather than in a
+        // findings file that is deleted at merge: a fixture on which two
+        // implementations agree cannot distinguish them. "Refused: yes" is true
+        // under both orderings, so a test that asserts only the refusal is
+        // measuring the cap's existence and nothing about when it is paid.
         let oversized = format!(r#"{{"junk":"{}"}}"#, "x".repeat(MAX_REQUEST_BYTES));
         assert!(oversized.len() > MAX_REQUEST_BYTES);
         for (name, method) in every_request_taking_method() {

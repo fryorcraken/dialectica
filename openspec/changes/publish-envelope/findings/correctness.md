@@ -105,7 +105,7 @@ believed, and the tree was mutated only in my own worktree, which is deleted.
       one this change introduced, it is one the change claimed to fix. The claim
       was the error.
 
-- [ ] **`tester`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:7541` —
+- [x] **`tester`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:7541` —
       the sweep parser is evaded by a wrapped signature, silently
       **Scenario:** `the_dispatch_traits_request_taking_methods` matches
       `signature.starts_with("&mut self, request: String) -> String;")` on a
@@ -132,7 +132,47 @@ believed, and the tree was mutated only in my own worktree, which is deleted.
       across the whole trait body before matching (collapse the body to one
       line per `fn … ;` by splitting on `;` rather than on `\n`).
 
-- [ ] **`tester`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:7541` —
+      **FIXED by the `dev-writer`'s classifier, and now MEASURED rather than
+      taken on trust.** Your finding was filed at `35fc859` against the text
+      filter; `d055c0c` replaced it with the classifier at
+      `wire.rs:7938` (your citation `7541` has drifted — the function moved,
+      the finding did not). The `spec-writer` declined to tick this without a
+      measurement, which was the right call, so I re-ran your exact evasion
+      rather than reading the new code and agreeing with it.
+
+      **The mutation, and the observed failure.** I added your probe verbatim to
+      the dispatch trait in `dialectica/rust-lib/src/lib.rs`:
+
+      ```
+      fn publish_moderation(
+          &mut self,
+          request: String,
+      ) -> String;
+      ```
+
+      `the_sweep_covers_every_request_taking_method_the_dispatch_trait_declares`
+      went **red**, naming the method:
+
+      ```
+      these methods are on the dispatch surface and are NOT swept for the
+      request envelope: ["publish_moderation"]
+      ```
+
+      Predicted and observed agree: the classifier strips comments, joins the
+      trait body into one line and splits on `fn ` rather than on `\n`, so the
+      wrap is gone before anything is matched. The mutation was restored with
+      `git checkout --` and `git status --porcelain` is empty.
+
+      **What else could have produced that red, checked rather than assumed.**
+      A test that failed merely because the trait changed would be worthless
+      here. It did not: the failure names `publish_moderation` specifically and
+      comes from the sweep-coverage assertion, not from the `unclassified` panic
+      and not from a compile error. The rustfmt trailing comma — which the
+      `dev-writer` records as having put an ordinary wrapped method in the
+      unclassified bucket on the first cut — is handled, so this red is the one
+      the box is about rather than a parser failing for the wrong reason.
+
+- [x] **`tester`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:7541` —
       the sweep parser is also evaded by renaming the parameter
       **Scenario:** the match is on the literal text `request: String`. A method
       declared `fn publish_moderation(&mut self, req: String) -> String;` is a
@@ -145,6 +185,47 @@ believed, and the tree was mutated only in my own worktree, which is deleted.
       `String) -> String` with the parameter name unconstrained.
       **Severity: medium** — less likely than a rustfmt wrap, but it is the
       cheaper of the two to fix and the same class.
+
+      **FIXED, and MEASURED separately from the box above** — which is your own
+      point that one fix does not imply the other, honoured rather than assumed
+      away. I declared exactly your probe:
+
+      ```
+      fn publish_moderation(&mut self, req: String) -> String;
+      ```
+
+      `the_sweep_covers_every_request_taking_method_the_dispatch_trait_declares`
+      went **red** with the identical message:
+
+      ```
+      these methods are on the dispatch surface and are NOT swept for the
+      request envelope: ["publish_moderation"]
+      ```
+
+      The classifier keys on the parameter's **type** and ignores its name
+      entirely (`wire.rs:8018-8023`: `Some((_param_name, ty)) if ty.trim() ==
+      "String"`), so `req: String` and `request: String` are the same dispatch
+      surface to it, which is what they are to the compiler. Restored; tree
+      clean.
+
+      **And the third mutation neither of us named — the instrument's own
+      input.** Pinning a filter from both sides is no use if what feeds it can
+      be emptied, so I mutated the corpus-builder rather than the trait:
+      `let normalised = String::new()`, which is the "filter runs over nothing"
+      shape that has passed a full suite on a sibling branch here. It fails
+      **loudly**, at `wire.rs:8045`:
+
+      ```
+      no request-taking method was found in the trait declaration — the
+      signature shape this test reads by has changed, so it is now measuring
+      nothing rather than failing
+      ```
+
+      So the `!found.is_empty()` backstop — which you correctly said could not
+      catch a *partial* change of shape — does catch a total loss of the corpus,
+      and the classifier's `unclassified` panic covers the partial case the
+      backstop cannot. The two together are why all three mutations are red.
+      Restored; tree clean.
 
 - [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:7541` —
       the parser's own failure mode is undetectable from its assertion text

@@ -14,7 +14,12 @@
       surface" is and to record the upstream premise the anti-staleness gate
       rests on. `.openspec.yaml` keeps the old reasoning with what it missed.
 - [x] design + code — `dev-writer`
-- [ ] tests — `tester`
+- [x] tests — `tester`. The `dev-writer` wrote these while implementing; this
+      pass kept every one, added no test, and changed one **comment**. What it
+      did instead was **measure**: the five `tester` findings across three review
+      files were all either "a fix landed, nobody re-ran the evasion" or "this is
+      an instruction, not a test". Every tick rests on a mutation run and watched
+      failing, restored, with the tree verified clean — see §9.
 - [x] review: correctness — `code-reviewer`
 - [x] review: security — `code-reviewer`
 - [x] review: readability — `code-reviewer`
@@ -22,7 +27,14 @@
 - [x] review: spec-test — `spec-test-reviewer`
 - [ ] review: design — `design-reviewer`
 - [ ] findings all ticked, `findings/` deleted — `closer`
-- [ ] CI green, PR merged — `closer`
+- [ ] CI green, PR merged — `closer`. **Watch `Build LGX` by name, not "CI
+      green".** It is the ONLY gate that compiles `dialectica/rust-lib/src/lib.rs`
+      — `cargo test` does not compile `cfg(logos_scaffold)` code at all, so a
+      fully green suite says nothing about that file. Task 7.6 deleted
+      `publishing`'s `method` parameter and changed its three call sites there, so
+      a typo in the last commit to touch the adapter is a compile error no local
+      gate and no other CI job can see. See 8.6 for what stands in Build LGX's
+      place for the half it cannot check (order of operations, not compilation).
 - [ ] `openspec validate --strict`, then `archive` — `closer`
 
 ## 1. The refactor, which must be green on its own
@@ -184,4 +196,51 @@ arguments that could disagree.
       implied: dropping `publishing`'s `method` parameter changes an adapter
       signature and its three call sites, in the file `cargo test` does not
       compile. A typo there is a **compile error only Build LGX will see**.
-      Unticked deliberately: it is the `closer`'s CI row to observe.
+      Unticked deliberately: it is the `closer`'s CI row to observe, and the
+      Stages block now says so on the `closer`'s own row rather than only here.
+
+## 9. Acting on review: the `tester` findings, closed by measurement
+
+The five `tester` boxes were not authorship work. Three were filed at `35fc859`
+against code `d055c0c` had already replaced, and the right response to those is
+to **re-run the evasion**, not to read the new code and agree with it — a tick
+nobody measured is the tick the gate exists to prevent. One was a test-doc fix.
+One was an instruction with nothing to write.
+
+Every tick below rests on a mutation applied, run, watched failing, and restored
+with `git status --porcelain` verified empty. Run the suite with
+`cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica -p dialectica-core`
+— the `-p` flags are load-bearing, since without them cargo tests the outer
+package and reports `ok` having run almost nothing.
+
+- [x] 9.1 `correctness.md` wrapped-signature evasion: added the reviewer's
+      four-line `publish_moderation` to the dispatch trait. The sweep fails
+      naming `["publish_moderation"]`. The classifier joins the trait body and
+      splits on `fn `, so the wrap is gone before matching.
+- [x] 9.2 `correctness.md` renamed-parameter evasion: declared
+      `fn publish_moderation(&mut self, req: String) -> String;`. Same red, same
+      message. The match is on the parameter's **type**; the name is ignored.
+- [x] 9.3 The mutation neither reviewer named — **the instrument's own input**.
+      Pinning a filter from both sides is worthless if the corpus feeding it can
+      be emptied, which is a shape that has passed a full suite on a sibling
+      branch here. Setting the normalised trait body to `String::new()` fails
+      loudly at the `!found.is_empty()` backstop. So the backstop covers total
+      corpus loss and the `unclassified` panic covers the partial-shape case;
+      neither alone is enough, which is why both exist.
+- [x] 9.4 `security.md`'s box is the same gate under a security framing, and the
+      property that changed is **fails open → fails closed**: a filter's failure
+      mode is silence, a classifier's is a panic naming the method. Verified on
+      a shape nobody had filed — `request: &str` lands in the unclassified
+      bucket and reports
+      `["publish_moderation (parameters \`request: &str\`)"]`.
+- [x] 9.5 `spec-test.md`'s oversized-sweep doc. Reproduced the reviewer's
+      mutation first: moving the length check after `serde_json::from_str` in
+      `wire/request.rs::parse` turns **2 red** — the two tests whose fixture is
+      oversized **and unparseable** — and leaves
+      `every_request_taking_method_refuses_an_oversized_request` **green**,
+      because its fixture is valid JSON and both orderings agree on it. The
+      coverage is complete across the three tests; the comment implying one test
+      carried all of it was the defect. Doc corrected in place, no test changed
+      and none weakened.
+- [x] 9.6 `spec-test.md`'s Build LGX instruction, delivered to the Stages block
+      rather than left in `findings/`, which is deleted at merge.
