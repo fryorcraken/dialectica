@@ -14,13 +14,14 @@ argument between positions.
 > reconciled against **PLAN.md §7.2-§7.3** (votes and vouching), **§9.1**
 > (the Phase 3 API) and **§5.2.1** (what an identity is called).
 >
-> **The generated name's vocabulary is settled as of §5.2.1**: four words — two
-> adjectives and two nouns — drawn from Greek philosophy and letters, derived
-> from the key and never typed. An earlier version of this block called the
-> wordlist provisional and the shape "adjectives plus a noun"; both are
-> superseded. The *word counts* remain curation work, but the shape, the sizes
-> and the source are decided. `git log docs/PLAN.md` answers what has landed;
-> this block does not try to.
+> **The generated name's shape is settled as of §5.2.1**: three words —
+> **adjective + Greek noun + "of" + Greek place**, as in *measured aporia of
+> lampsacus* — derived from the key and never typed. Earlier versions of this
+> block said "adjectives plus a noun" and then "four words — two adjectives and
+> two nouns"; both are superseded, and the four-word version was the one this
+> brief was designed against for a while. The *word lists* remain curation work,
+> but the shape, the sizes and the sources are decided. `git log docs/PLAN.md`
+> answers what has landed; this block does not try to.
 >
 > Also reconciled against **§9.2** (the first release's scope), which suspends
 > one property this brief previously stated as fact — see the box below.
@@ -119,28 +120,36 @@ switched on, and switching it on later is not a redesign.
   will need reopening.
 
 **Identities have generated names, and this is new.** An identity renders as
-**two adjectives and two nouns drawn from Greek philosophy and letters** —
-something like *measured attic thales praxis* or *sober ionic stoic kairos* —
+**an adjective, a Greek noun, the word "of", and a Greek place** — something like
+*measured aporia of lampsacus*, *brittle kairos of abdera* or *luminous stasis of
+delos* —
 computed from the key itself. Nobody types a name; there is no registry to hold
 one, and a typed name carried between Stoas would undo the unlinkability above
 with a text field — which is a reason that outlives the first release's
 suspension of it, since a name field would make the property unrestorable rather
 than merely switched off.
 
-**The register is deliberate and it is the point: sober, plain, adult.** The
-adjectives are geographic and temperamental (`attic`, `ionic`, `doric`,
-`measured`, `sober`, `patient`, `laconic`); the nouns pool the vocabulary of
-Greek thought (`logos`, `praxis`, `techne`, `aporia`, `kairos`) with thinkers
-and writers (`thales`, `hypatia`, `solon`, `sappho`). **If a name reads like a
-fantasy handle, something has gone wrong** — an earlier draft drew on science
-fiction and produced *vermilion patient sandworm*, which is why this note
-exists.
+**The register is deliberate and it is the point: sober, plain, adult — but only
+two of the three words carry it.** The **noun** pools the vocabulary of Greek
+thought (`logos`, `praxis`, `techne`, `aporia`, `kairos`) with thinkers and
+writers (`thales`, `hypatia`, `solon`, `sappho`), and the **place** is a Greek
+place, real or mythological (`lampsacus`, `abdera`, `delos`, `elea`). The
+**adjective is any English adjective** and is not screened for register at all, so
+`brittle`, `luminous` and `damp` draw alongside `measured` and `attic`. What
+carries the classical register is the *X of Y* shape and the two Greek words in
+it. **If a name reads like a fantasy handle, something has gone wrong** — an
+earlier draft drew on science fiction and produced *vermilion patient sandworm*,
+which is why this note exists.
 
-**It is four words, and they all matter.** This is longer than a typical
-username and the length is not decorative: it is what makes accidental
-collisions rare (see below). **Do not truncate or elide it** — dropping the tail
-removes one of the two nouns, which is most of what distinguishes one name from
-another.
+**Three content words, and they all matter — but the `of` is free.** The
+adjective, the noun and the place are each an independent draw and each is part of
+what makes accidental collisions rare (see below), so **do not truncate or elide
+any of them, and never cut one mid-word**: dropping the tail removes the place,
+which is a third of what distinguishes one name from another and is often the only
+part that differs between two similar names. **The one thing a cramped row may
+drop is the connector** — *measured aporia lampsacus* loses nothing, because "of"
+is fixed literal text and carries no information. If a row cannot hold three
+words, the row is wrong.
 
 **An identicon is intended alongside the name, and designing it is part of your
 work.** A small visual glyph derived from the same key, giving recognition a
@@ -180,12 +189,21 @@ Two consequences for you:
   answers afterwards. Refreshing is unlimited and is never refused for having
   been pressed too often.
 - **A name is not unique and not an identifier** — see obligation 6 below.
-  Accidental collisions are now rare: in a Stoa of a thousand the chance two
-  people share a name is **about 0.003%**, and at five thousand **about 0.07%**.
-  (The superseded science-fiction scheme — three words, 2²⁴ — gave 3% at a
-  thousand and better than even at five thousand. The fourth word is what bought
-  the change.) **Rare is not never**, and none of it touches deliberate
-  impersonation — which is the whole of obligation 6.
+  Accidental collisions are rare: in a Stoa of a thousand the chance two people
+  share a name is **about 0.006%**, and at five thousand **about 0.15%**. (The
+  superseded science-fiction scheme — three words over much smaller lists — gave
+  3% at a thousand and better than even at five thousand. Far larger word lists
+  are what bought the change, not more words.) **Rare is not never**, and none of
+  it touches deliberate impersonation — which is the whole of obligation 6.
+
+  Two caveats worth having, because they both bear on what a row must show.
+  **These figures are a floor, not a prediction**: users refresh until they like a
+  name, so the names actually kept cluster, and PLAN.md's plausible worst case is
+  roughly **0.29%** at five thousand. And **an exact collision is not the only way
+  two names get confused** — the place list deliberately keeps entries most
+  readers cannot pronounce or tell apart, so two names differing only in the place
+  can read as one. Neither is fixed by anything you can do to the name; both are
+  fixed by the address being on screen.
 
 ### 3. Posts are never edited in place
 
@@ -622,7 +640,8 @@ never cross Stoas, so the privacy property in constraint 2 is not what rules
 this out — do not reach for it here.)*
 
 And a bigger name space is not the lever it appears to be: **the space was
-enlarged roughly a thousandfold and this paragraph did not change.** It lengthens
+enlarged about five-hundredfold against the earliest scheme, then halved again in
+a later revision, and this paragraph did not change either time.** It lengthens
 the odds of an *accidental* collision, which is worth doing and is all it does;
 it costs a deliberate impersonator only a constant factor, because refresh is
 unlimited. Treat "two identities can present the same name" as permanent.
@@ -655,7 +674,9 @@ the numbers. Does nothing else, and nothing at all about impersonation.
 **2. The identicon** — intended, and yours to design. A glyph derived from the
 same key, shown with the name. It earns its place on *accidental* collisions:
 two people who happen to share a name still look different at a glance, because
-name and glyph come from separate parts of the hash and vary independently.
+name and glyph come from **two separate hashes** of the same key and so vary
+independently — not from separate parts of one hash, which an earlier version of
+this line said and which is a different and weaker claim.
 **It is nonetheless forgeable in exactly the way the name is.** An attacker
 grinds for a key whose name *and* glyph both read close — a two-channel search
 instead of a one-channel search, which raises their cost by a factor and changes
