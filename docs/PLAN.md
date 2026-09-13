@@ -2,9 +2,23 @@
 
 A decentralized forum on the Logos stack. Δ.
 
-This document records decisions and the reasoning behind them. It is not a
-status tracker: it says why things are the way they are, not how far along they
-are. Facts a command can answer do not belong here.
+**This is a roadmap of desired features, and a plan can always fail.** It is not
+a specification and it is not a contract. **The user's wishes and the actual
+implementation ALWAYS override this document** — when either disagrees with what
+is written here, this document is what is wrong, and the fix is to correct it,
+not to argue from it.
+
+Read it that way before citing it. A long argument recorded here is still only an
+argument someone found convincing at the time; it carries no authority over a
+decision made since, and several positions in this document have already been
+reversed outright. Where a section has been overtaken, the reasoning is struck
+through rather than deleted, so that a reader can see what was thought and what
+replaced it — but **struck-through text is history, never a requirement.**
+
+What this document is *for*: it records decisions and the reasoning behind them,
+so that a choice which looks arbitrary can be checked against why it was made. It
+is not a status tracker — it says why things are the way they are, not how far
+along they are. Facts a command can answer do not belong here.
 
 ---
 
@@ -1229,21 +1243,27 @@ below. Stated once, plainly:
 | Slot | Source | Screened for |
 |---|---|---|
 | adjective | **any English adjective** | ASCII-transliterable, deduplicated |
-| noun | **Greek only** — the vocabulary of Greek thought, plus named thinkers, writers, mathematicians, physicians and historians | the same two, plus the exclusions below |
-| place | **Greek places, real and mythological** | the same two, plus the exclusions below |
+| noun | **any attested ancient Greek noun** — abstractions, named Greeks, mythological figures, and ordinary concrete nouns alike | the same two |
+| place | **Greek places, real and mythological** | the same two |
 
-**Only two screens apply to any list, and there are no others:**
+**Only three screens apply to any list, and there are no others:**
 
 1. **ASCII-transliterable** — the name is ASCII by design (see the bidi
    paragraph below), so a word that cannot be written in ASCII is out.
-2. **Deduplicated** — one entry per place, per person, per word.
+2. **Deduplicated** — one entry per place, per person, per word, and one spelling
+   per entry.
+3. **Attested** — the word is real. The only screen with any judgement in it, and
+   the only defence against a list padded with invented entries.
 
-**No pronounceability screen, no length screen, no familiarity screen, no
-register screen.** Two earlier drafts of this section imposed a third filter and
-both were withdrawn on challenge — familiarity, which cut the place list by 28%,
-and then "legibility", which cut it by 88%. Neither survives. **If a word is
-being excluded for any reason other than the two above, that is the mistake, not
-the word.**
+**All three are mechanical: none asks what a word means or what it says about the
+person carrying it.** No pronounceability screen, no length screen, no
+familiarity screen, no register screen, no tone screen, and no exclusions — see
+"Nothing is excluded from the lists" below. Successive drafts imposed a fourth
+filter and every one was withdrawn on challenge: familiarity, which cut the place
+list by 28%; "legibility", which cut it by 88%; a single-word rule, which made
+1,024 places look unreachable; and finally the whole tone-and-authority exclusion
+apparatus. **If a word is being excluded for any reason other than the three
+above, that is the mistake, not the word.**
 
 **An earlier draft of this section drew on ten science-fiction book universes.**
 That is withdrawn entirely — no SF vocabulary survives, and neither do the
@@ -1258,25 +1278,10 @@ It is the *X of Y* shape and the two Greek words in it. *brittle kairos of abder
 has an English adjective a Greek list would never have supplied, and it still does
 not read as a gamertag, because the last three quarters of it are classical.
 
-One constraint survives the change intact, and two are retired by it:
-
-- **A name may describe a texture, never a verdict.** Derived in the earlier
-  draft as the rule behind the tone exclusions, and still the load-bearing test
-  for the whole list. `attic` is a texture; `plato` is a verdict. Note what this
-  is *not*: it is a screen on what a word says about its bearer, not on how
-  obscure the word is. An unrecognisable word describes nothing and therefore
-  passes.
-- **~~The words must survive being torn out of context.~~ Retired**, and this is
-  the retirement that produced everything else in this revision. It read: a
-  wordlist entry is read by people who have not read Diogenes Laertius, so
-  `attic`, `stoic` and `thales` work alone where a minor scholiast's name is
-  noise. **It is withdrawn because it is the familiarity screen under another
-  name**, and the owner rejected that screen twice — once when it cut the place
-  list by 28% and again when a rebadged version cut it by 88%. The tail is in.
-- **~~No single source may dominate.~~ Retired.** It existed because a name
-  drawn from one universe reads as an allegiance the user did not declare. The
-  noun and the place have one source, so there is nothing to balance; the
-  adjective has no source at all, being any English adjective.
+Earlier drafts imposed constraints on what a word may *mean* — familiarity,
+legibility, register, tone, "survives being torn out of context", "no single
+source may dominate". **None survives.** The only screens are ASCII,
+deduplication and attestation; see "Nothing is excluded from the lists" below.
 
 **Public domain by two and a half thousand years**, which retires the trademark
 paragraph the SF list needed: there is no estate, no mark, and no proprietor.
@@ -1285,13 +1290,20 @@ English — `stoic`, `attic`, `praxis`, `ethos` are English words with Greek
 parents. That is a pleasant property of part of the list and **no longer a
 selection criterion**, per the retirement above.
 
-**The nouns pool two kinds of word**, and the pool is wider than the four-word
-scheme's was, because the noun slot now carries more of the space:
+**The noun slot takes any attested ancient Greek noun**, which is four pools
+rather than the two an earlier draft named:
 
 | Kind | What it supplies | Examples |
 |---|---|---|
 | the vocabulary of Greek thought | philosophical and technical abstractions | `logos`, `ethos`, `kairos`, `praxis`, `techne`, `aporia`, `kanon`, `stasis`, `arete`, `episteme` |
 | named Greeks | thinkers, writers, mathematicians, physicians, historians | `thales`, `hypatia`, `solon`, `sappho`, `theophrastos`, `eratosthenes`, `kleanthes`, `pyrrhon` |
+| mythological figures | heroes, titans, nymphs, muses, named monsters | `prometheus`, `daidalos`, `orpheus`, `kassandra`, `antigone` |
+| ordinary concrete nouns | objects, animals, plants, materials, crafts, ships, music, measures | `amphora`, `trireme`, `lyra`, `kithara`, `chiton`, `stylos` |
+
+**The last two were absent from an earlier draft and are the larger half.** That
+draft read "the vocabulary of Greek thought" as the whole of the noun slot, which
+is a narrow technical vocabulary; any ancient Greek noun is a far larger pool,
+and it is what makes 1,024 comfortable rather than a stretch.
 
 **The place slot is new, and it takes Greek places real and mythological.**
 Poleis, regions, islands and sanctuaries — `lampsacus`, `abdera`, `delos`,
@@ -1300,11 +1312,7 @@ the same footing rather than as a supplement. Real and imagined places are not
 distinguished in the list and a reader is not told which they were handed; both
 read as origin, which is the only thing the slot is doing.
 
-**A small number of noun entries are excluded because they read as an argument
-rather than a name** — Plato, Aristotle and Socrates above all, whose mere
-invocation is a move in a debate, so a user rendered *sober plato of athens* is
-handed standing they did not earn. The exclusion is deliberately short: a handful
-of the most invoked figures, and everything arguable is kept.
+**Every attested name is in**, `platon`, `aristoteles` and `sokrates` included.
 
 **The adjective slot no longer carries the register, and that is the point of the
 revision.** The four-word scheme spent its effort on an adjective list in one
@@ -1349,99 +1357,23 @@ fully settled a form, the settled form wins — `thales`, `solon`, `sappho`,
 between two spellings of a word that is in either way; it is **not** a screen on
 whether the word is in, and must not be read as one.
 
-#### What is excluded from the lists, and why
+#### Nothing is excluded from the lists
 
-These are the rules the curation work is bound by. They are stated here rather
-than left to the person writing the lists, because **each one was reached by an
-argument that is not recoverable from the word it excludes.**
+**Owner decision, recorded not argued: there are no exclusions.** A noun is in if
+it is an attested ancient Greek noun; a place is in if it is an ancient Greek or
+mythological place; an adjective is in if it is an English adjective. Nothing
+else decides.
 
-**1. The project's own vocabulary.** A Greek wordlist inside a project whose
-vocabulary is Greek will collide with it, and the collision is worst in a feed,
-where every row attributes a post to one of these names.
+Three screens and only three, all mechanical:
 
-| Excluded | Why |
-|---|---|
-| `stoa` | the core concept (§1). *measured stoa of abdera* reads as a Stoa rather than a person, and the place slot makes it worse rather than better, because *X of Y* is exactly how a Stoa would be named. **Excluded from the noun list and from the place list.** `stoic` survives as an adjective, where it is one word among eight thousand and cannot be read as naming a thing. |
-| `dialectic`, `dialectical` | the project's name and its method. A user called *dialectic* sounds like the application speaking. |
-| `delta` | the logo (§8.1). Same failure. |
-| `genesis` | names the founding record (§5.1), the most load-bearing term in the address construction. |
-| `agora` | **kept, and flagged first-to-drop.** It is common enough English to survive and is not a term of art in this design — but `docs/UI-BRIEF.md` uses "Join *Agora*?" as its worked example of a forgeable Stoa title. If the picker ever reads ambiguously, this is the first noun to remove. |
-
-**2. Words that assert authority.** `moderator`, `archon`, `ephor`,
-`magistrate`, `strategos` — and, now that the adjective slot is open English,
-`official`, `verified`, `certified`, `admin` and anything else that reads as a
-status. A non-moderator generated as *calm archon of elea* has been handed
-apparent standing **by the wordlist**, which is precisely
-what §5.2.1's rendering obligations exist to prevent — a name is never a
-credential. This is the exclusion most likely to be re-proposed by someone who
-likes the word, and it is also where the authority-name exclusion below comes
-from: the two are the same failure reached by different doors.
-
-**3. A few names that are an argument rather than a name.** **Plato, Aristotle,
-Socrates**, and anything else whose invocation is itself a move in a debate: a
-user rendered *sober plato of elea* is signed by Plato on every post, and someone
-disagreeing with them is visually disagreeing with Plato. They neither earned it
-nor chose it, but they benefit from it.
-
-**Deliberately a short list.** Everything arguable is **kept** — the noun list was
-chosen for its size, and a cautious sweep through the canon would undo exactly
-what it was chosen for. The long tail is the point: *sober thales of miletos* is
-still Greek and still serious, and nobody treats "Thales said so" as an argument.
-**Obscurity is not a reason to exclude**; being an argument is, and only a handful
-of names are.
-
-**4. Connotation.** The name is assigned-then-chosen, so a user cannot be blamed
-for the word they were handed — but **the system can be blamed for generating
-it**, and "the hash chose it" is not a defence anyone accepts. Rejected by
-category, because the categories outlast the examples:
-
-- **Boasts** — `titan`, `colossus`, `olympian`, `paragon`, `sovereign`. A name
-  that congratulates its bearer is embarrassing to everyone who did not pick it.
-- **Tyranny and violence** — `tyrant`, `despot`, `nemesis`, `scourge`,
-  `hecatomb`, and the `furies`. `tyrant` is the clearest case in the whole list:
-  a live political insult in English, generated by the system and attached to a
-  participant in a **political argument forum**, which is a system defaming a
-  user.
-- **Disorder as an accusation** — `chaos`, `discord`, `eris`, `strife`. In a
-  forum whose subject is disagreement these read as a verdict on the person.
-- **Pathology and death** — `plague`, `miasma`, `lethe`, `thanatos`, `charon`,
-  `hades`. Grim attached to a human being who is about to post.
-- **Anything mapping onto a real group** — `barbarian` (Greek for the people who
-  did not speak Greek: an ethnic slur with a classical wrapper), `helot`,
-  `pariah`, `metic`. The etymology is interesting and irrelevant; the English
-  word lands as the English word.
-- **Sexual and bodily** — `satyr`, `priapic`, `bacchant`. Named so the next
-  person adding words does not rediscover it.
-
-**These four exclusions are not the withdrawn screens, and the distinction is the
-whole of what this subsection is for.** A tone exclusion asks *what does this word
-say about the person wearing it*; the withdrawn screens asked *will a reader
-recognise this word*. The first is a claim the system would be making on a user's
-behalf and the system is answerable for it. The second is not a claim at all, and
-withdrawing it is what opened the adjective slot and shrank the name to three
-words.
-
-**The open adjective slot enlarges exclusion 4's job considerably**, and that is
-its real cost. Screening 256 hand-chosen Greek-register adjectives for tone is an
-afternoon; screening English down to 8,192 is not, because English carries slurs,
-bodily words, clinical words and words that are insults only when applied to a
-person — `obese`, `senile`, `deranged`, `pathetic` — none of which the four-word
-scheme's source material could produce. **The headroom is what makes this
-tractable**: the estimate below is 15,000–25,000 candidates for 8,192 slots, so
-the screen can be generous and still fill the list, which is the opposite of the
-position the Greek adjective list was in.
-
-**Two kept after argument, recorded because they are the near-misses.**
-`chimera` and `hydra` are monsters but not insults in English — fully absorbed
-as "a thing of mixed parts" and "a problem that regrows", neither a claim about
-the person. **`siren` was dropped** despite the same absorption, because
-attached to a person it is gendered in a way the others are not.
-
-**The rule underneath all of it, which is the thing to keep if the lists are ever
-rebuilt from scratch: a generated name may describe a texture, never a verdict.**
-`attic`, `measured`, `tidal` and `spare` describe nothing about their bearer.
-`heroic` and `craven` both do, in opposite directions, and both are wrong for the
-same reason. `attic` is a texture; `plato` is a verdict.
+1. **ASCII-transliterable**, per the convention above — a bidi decision, and the
+   reason a Greek word can be absent from these lists at all.
+2. **Deduplicated** — one entry per word, per person, per place, and one spelling
+   per entry.
+3. **Attested** — the word is real. This is the whole of the quality bar now, and
+   it is the one that needs care: **a fabricated Greek word reads exactly like a
+   real one**, so no reviewer can catch it by reading the list and no test can
+   catch it at all. Source the lists; do not recall them.
 
 #### The arithmetic, and why the name is three words
 
@@ -1576,13 +1508,15 @@ published count was read, not that a list exists — no list is written.
   historians, and drawing technical and philosophical vocabulary from
   Liddell–Scott–Jones, might plausibly yield 1,200–1,600 more. **Taking 1,024
   leaves comfortable headroom** even against the low end of the estimate.
-- **Adjectives: ~15,000–25,000 candidates, ESTIMATED.** Anchored on WordNet's
-  roughly **21,500 adjective lemmas**, adjusted down for the tone exclusions above
-  and for lemmas that are not usable as a bare modifier. This figure is an estimate
-  and it is **not load-bearing**: taking 8,192 leaves headroom of better than 2:1
-  against the bottom of the range, so the estimate would have to be wrong by more
-  than half before the size became unreachable. The four-word scheme's 256 had no
-  such margin, which is why its estimate *was* load-bearing and this one is not.
+- **Adjectives: ~20,000+ candidates, ESTIMATED.** Anchored on WordNet's roughly
+  **21,500 adjective lemmas**, adjusted down only for lemmas that are not usable
+  as a bare modifier. **The range widened when the exclusions were withdrawn** —
+  an earlier figure of 15,000–25,000 was discounted for tone screening that no
+  longer applies. This figure is an estimate and it is **not load-bearing**:
+  taking 8,192 leaves headroom of better than 2:1, so the estimate would have to
+  be wrong by more than half before the size became unreachable. The four-word
+  scheme's 256 had no such margin, which is why its estimate *was* load-bearing
+  and this one is not.
 
 ##### Three things the figures above do not model
 
@@ -2010,11 +1944,16 @@ says, which is that section's general shape:
   correlation one screenshot away. Not decided; it is a real convenience against
   a real hazard, and it wants the owner's judgement rather than a default.
 - **The list contents.** The *sizes* are decided — **8,192 adjectives, 1,024 nouns,
-  1,024 places** — and so are the sources, the two screens, the transliteration
-  convention and the exclusion rules. What is not written is the **10,240 words**
-  themselves, nor the ~960-entry true-attribution denylist, both of which are
-  curation work rather than design work and both of which are now substantially
-  larger jobs than the four-word scheme's 768.
+  1,024 places** — and so are the sources, the three screens and the
+  transliteration convention. There are no exclusion rules. What is not written is
+  the **10,240 words** themselves, nor the true-attribution denylist, both of
+  which are curation work rather than design work.
+
+  **Withdrawing the exclusions made this job smaller, not larger.** The screening
+  that dominated the estimate — vetting English for slurs and clinical words,
+  judging tone across 8.4 million adjective–noun junctions — is gone. What is left
+  is looking words up, which is tedious and checkable rather than a judgement per
+  entry.
 
   **The sizes are load-bearing, but for a different reason than the four-word
   draft's were.** Those were the honest ceilings of their sources, so touching them
