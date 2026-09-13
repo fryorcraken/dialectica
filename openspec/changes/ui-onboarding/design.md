@@ -261,7 +261,7 @@ Stoa wired shows a failure card before it shows anything else. That is the same
 trade `FeedScreen` already makes for the same reason — a view given nothing
 says so rather than looking empty.
 
-### The launch branch is per-Stoa, and what a reconciliation must not lose
+### The launch branch asks once, because the MVP has one identity per peer
 
 `Main` here owns the identity decision for a Stoa supplied from outside.
 `piece/ui-stoa-list` gives `Main` a navigator instead and removes `stoaAddress`
@@ -271,19 +271,42 @@ line-by-line merge of the two files compiles, and then `askWhoAmI()` guards on
 a property the other branch deleted — a failed identity check on every cold
 start, reported by no gate that reads only one branch.
 
-Which shape wins is not decided here, and deliberately not: a unilateral
-accommodation of a branch that may itself move would make this `Main` answer to
-a navigator that does not exist in this tree.
+Which shape `Main` takes is not decided here. What *is* decided, and is what a
+reconciliation needs, is when the question gets asked.
 
-What is decided here, and is what the reconciliation needs:
+**The MVP asks once, at launch, and the question takes no Stoa.** An earlier
+draft of this section reasoned the opposite — that because `whoAmI(stoa)` takes
+a Stoa the branch must be re-asked wherever a Stoa becomes current. That reads
+the scope off the method signature, and the signature is ahead of the product:
+the MVP ships **one identity per user across every Stoa**, so there is exactly
+one answer to "who am I" for the whole session and no Stoa can change it.
+Asking per-Stoa would be a call whose parameter cannot alter the reply.
 
-- **The question is per-Stoa, not per-app.** `whoAmI(stoa)` takes a Stoa, and
-  the requirement that the branch be re-asked rather than remembered means it is
-  asked wherever a Stoa becomes current — not once at startup. So after a
-  navigator exists, `askWhoAmI()` belongs where a Stoa is chosen and
-  `identityState` becomes a property of the chosen-Stoa screen rather than of
-  `Main`. `"unknown"` already exists for "not asked yet", so a navigator that has
-  chosen nothing is representable without a new state.
+**This is an MVP waypoint, not the destination, and PLAN.md §5.2 is where that
+is recorded rather than re-argued here.** That section's title is *"Scope: one
+identity per Stoa, permanent"* — that is the design. Its subsection *"The MVP
+ships ONE identity per user, and this section is the destination"* records the
+owner's decision and states plainly that *"the MVP is a waypoint on the way
+there, not a change of mind"*. §9.2 lists per-Stoa identity as out of the MVP.
+Read §5.2 before treating per-peer identity as settled; it is not.
+
+Three consequences that matter to anyone reconciling this file:
+
+- **What arrives with per-Stoa identity is a flow, not a crypto change.** §5.2
+  is explicit that `derive_stoa_key(root, stoa_address)` is already built and
+  tested in `dialectica-core`'s `identity.rs`, that one identity per user means
+  **not calling it**, and that switching it back on needs no wire-format change,
+  no address change and no new primitive. What is deferred is *"the flows, not
+  the crypto"*: creating or joining a Stoa has to ask **which** identity, so a
+  create-or-select step at both of those moments, plus a keystore holding more
+  than one identity. `docs/UI-BRIEF.md` §2 already tells the designer this is
+  coming and that a join flow assuming one possible identity forever will need
+  reopening — so a navigator built now should expect a chooser to land between
+  "a Stoa was picked" and "the screen for it opens".
+- **`"unknown"` still earns its place.** It means "not asked yet", which is
+  reachable before `Component.onCompleted` runs today and is exactly the state a
+  navigator needs while nothing has been chosen. No new state is required in
+  either shape, which is why this decision does not constrain which `Main` wins.
 - **Three behaviours are the contract, and each has a test that fails loudly if
   the reconstruction drops it**, which is the good outcome and the reason to run
   `dialectica-ui/tests/run-qml-tests.sh` after the merge rather than trusting a
@@ -292,6 +315,39 @@ What is decided here, and is what the reconciliation needs:
   absent cases route to onboarding with the reason held unparsed
   (`test_an_unloadable_identity_also_shows_onboarding_with_its_own_reason`); and
   a failed report shows neither branch (`test_a_failed_report_shows_neither_branch`).
+
+#### `whoAmI` still takes a Stoa, and narrowing it is a separate piece
+
+Under per-peer identity the `stoa` parameter cannot change the answer, so the
+signature is wider than the product needs. **Narrowing it does not belong to
+this change**, and the reason is that it is not a parameter deletion:
+
+- Core's `who_am_i` genuinely *uses* the Stoa. `wire.rs`'s `whoami_for` looks up
+  `store.path_for(stoa)` in a per-Stoa `IdentityStore` and derives the reported
+  key with `stoa_public_key_at_path(stoa, path)`. Dropping the parameter means
+  deciding what replaces the two-store split, which address a user is reported
+  to have, and what happens to the `NO_CHOICE_FOR_THIS_STOA` state.
+- That state is **shared with `getCapabilities`**, deliberately, *"so the two
+  methods cannot describe one situation in two ways"*. Narrowing one method
+  alone would break that pairing; narrowing both is a core API change.
+- CLAUDE.md's rule is that the core API *"is a contract that outlives any
+  particular UI"* and changing it is *"a decision to make on purpose rather than
+  a side effect"*. This is a view change. Reshaping the wire from here would be
+  exactly the side effect that rule forbids.
+
+So the view keeps passing the Stoa it was given, which is what the spec requires
+(*"each request is a JSON object carrying that Stoa"*) and what
+`test_the_identity_report_request_carries_the_stoa_it_asks_about` pins. Passing
+the wrong Stoa is still a real defect today, because core still reads the store
+entry the parameter names — the parameter being unable to change the *product's*
+answer is a statement about how many identities exist, not about what core does
+with the value.
+
+**The durable question this leaves open**, for whoever takes the core API: under
+one identity per user, is `who_am_i`'s Stoa parameter a harmless carrier of the
+destination's shape, or a field that will be read as a scope guarantee the MVP
+does not provide? It should be answered when the per-Stoa flows land, since that
+is the change that makes the parameter load-bearing again.
 
 ### A spec'd obligation never rests only on the apparatus column
 

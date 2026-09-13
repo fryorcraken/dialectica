@@ -92,9 +92,18 @@ TestCase {
         // carries the fields its method reads" names the identity-report call
         // alongside the slate call.
         //
-        // Identity is per-Stoa (`whoAmI(stoa)`), so a report for the wrong Stoa
-        // is not a near-miss: it is the branch being decided by somebody else's
-        // keystore.
+        // A report for the wrong Stoa is not a near-miss: core's `who_am_i`
+        // reads `path_for(stoa)` out of a per-Stoa store and derives the key it
+        // reports from that Stoa, so a wrong address decides the branch from a
+        // different store entry.
+        //
+        // This holds even though the MVP ships ONE identity per user across
+        // every Stoa (PLAN.md §5.2, "The MVP ships ONE identity per user, and
+        // this section is the destination"). That is a waypoint, not the design:
+        // per-Stoa identity is where this goes, and core's signature already has
+        // its shape. So the request must carry the Stoa either way — under the
+        // MVP because core reads it, and afterwards because it selects the
+        // identity.
         var app = makeMain({
             "who_am_i": '{"hasIdentity":false,"reason":"no keystore exists at /x/keys"}'
         })

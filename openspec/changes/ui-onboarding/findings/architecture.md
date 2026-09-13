@@ -176,7 +176,7 @@ Baseline: **99 QML tests across 6 spec files, all passing**.
       fails 4 tests under the `kept !== true` mutation. This finding is about the
       *next* caller, and nothing in this piece's suite can reach them.
 
-- [ ] **`dev-writer`** — `Main.qml:26`, `:48`, `:77-121` — the launch branch and
+- [x] **`dev-writer`** — `Main.qml:26`, `:48`, `:77-121` — the launch branch and
       `piece/ui-stoa-list` have each rewritten `Main.qml` around an incompatible
       idea of what `Main` owns, and neither accommodates the other
       **Scenario:** this piece gives `Main` a `stoaAddress` property (line 26),
@@ -255,6 +255,85 @@ Baseline: **99 QML tests across 6 spec files, all passing**.
       to run the suite after the merge rather than trusting a clean rebase.
       **Verified the three tests exist** at `tst_launch_branch.qml:132`, `:155`
       and `:181` before citing them, rather than copying the names across.
+      **Fixed** — the question that kept this box open has been answered by the
+      owner, so the half that was undecidable is now recorded rather than
+      deferred. Your citations still land: `Main.qml:26` is
+      `property string stoaAddress: ""`, `:48` is `identityState`, and `:77-121`
+      is `askWhoAmI()` with the `stoaAddress === ""` guard at `:78`.
+      **The answer is that identity is per-peer for the MVP.** `whoAmI()` is
+      asked once at launch and takes no Stoa, so this piece's launch-branch
+      shape — one ask, at startup, for the whole session — is right, and the
+      reconstruction note that said otherwise was wrong. The previous pass
+      reasoned the scope off the method signature (*"`whoAmI(stoa)` takes a
+      Stoa, so the question is per-Stoa"*), and the signature is ahead of the
+      product: with one identity per user across every Stoa, the parameter
+      cannot change the reply.
+      **Recorded as an MVP waypoint, not as a settled design**, which is the
+      part that matters. `design.md`'s section — now *"The launch branch asks
+      once, because the MVP has one identity per peer"* — cites merged
+      `docs/PLAN.md` §5.2 rather than re-deriving anything: the section's own
+      title is *"Scope: one identity per Stoa, permanent"*, its subsection
+      *"The MVP ships ONE identity per user, and this section is the
+      destination"* states *"the MVP is a waypoint on the way there, not a
+      change of mind"*, and §9.2 lists per-Stoa identity as out of the MVP. It
+      also carries §5.2's reversal path — `derive_stoa_key(root, stoa_address)`
+      is built and tested in `dialectica-core`'s `identity.rs`, one identity per
+      user means *not calling it*, and switching it back on needs no
+      wire-format change, no address change and no new primitive — and §5.2's
+      *"the deferred work is the flows, not the crypto"*: a create-or-select
+      identity step when creating or joining a Stoa, plus a keystore holding
+      more than one identity. So a reader arriving at "identity is per-peer"
+      meets the destination and the reversal path in the same paragraph.
+      **On the sibling collision, which is the rest of your finding: nothing in
+      `Main.qml` changed**, and the coordinator still owns which shape `Main`
+      takes. What the answer removes is the *sequencing hazard you named* — you
+      wrote that after `ui-stoa-list` the launch branch *"becomes a per-Stoa
+      question asked at a point the navigator does not currently have"*. Under
+      per-peer identity there is no such point to find: the ask stays at launch
+      and a navigator needs no new state, because `"unknown"` already means "not
+      asked yet". That is recorded as a consequence in `design.md` precisely so
+      the reconciliation is not re-derived from the signature a second time.
+      Your three contract tests are unchanged and still named there, with the
+      instruction to run the suite after the merge rather than trusting a clean
+      rebase.
+      **On `whoAmI`'s signature — judged, and deliberately NOT narrowed here.**
+      Under per-peer identity the `stoa` parameter cannot change the answer, so
+      it is wider than the product needs. It is not a parameter deletion: core's
+      `whoami_for` (`wire.rs`) reads `store.path_for(stoa)` from a per-Stoa
+      `IdentityStore` and derives the reported key with
+      `stoa_public_key_at_path(stoa, path)`, and its `NO_CHOICE_FOR_THIS_STOA`
+      state is shared with `getCapabilities` *"so the two methods cannot
+      describe one situation in two ways"*. Narrowing it means deciding what
+      replaces the two-store split and touching a sibling method — a core API
+      change, which CLAUDE.md says is *"a decision to make on purpose rather
+      than a side effect"* of a view change. It is a separate piece, the
+      reasoning is in `design.md` under *"`whoAmI` still takes a Stoa, and
+      narrowing it is a separate piece"*, and the open question it leaves is
+      recorded there rather than left with me.
+      **`tst_launch_branch.qml`'s comment at the Stoa-carrying test was the one
+      code-adjacent site repeating the superseded claim**, so it now says why
+      the request must carry the Stoa under *both* scopes: today because core
+      reads the value, and after the flows land because it selects the identity.
+      The assertion is untouched and still passes — only its justification
+      moved, since the old one would have read as a scope guarantee.
+      **Checked for orphaned citations before rewriting**, per the repo rule.
+      `spec-test.md:144` uses "identity is per-Stoa" to argue the severity of a
+      wrong-Stoa request. That argument survives the waypoint — core still reads
+      the store entry the parameter names — so nothing is stranded, and it is
+      another reviewer's text, which I have left alone and am flagging here
+      instead. `design-review.md:276` describes the old `design.md` wording and
+      is now a description of a superseded version; also left alone.
+      **`docs/UI-BRIEF.md` needed no change**, checked rather than assumed: §2
+      (`:97-119`) already ships the waypoint framing — one identity per person
+      in the first release, unlinkability *"suspended, not abandoned"*, and the
+      create-or-select step named as what arrives with per-Stoa identity, with a
+      warning that a join flow assuming one possible identity forever will need
+      reopening. It agrees with PLAN.md §5.2 and with this change.
+      **No new test.** What changed is prose and one comment; the behaviour this
+      box turns on is already pinned by the three contract tests you named and by
+      `test_the_identity_report_request_carries_the_stoa_it_asks_about`.
+      `dialectica-ui/tests/run-qml-tests.sh` runs green across all six spec
+      files.
 
 - [x] **`dev-writer`** — `OnboardingScreen.qml:707-747` — the screen's three
       `MarginNote` entries sit in an `apparatus` property that
