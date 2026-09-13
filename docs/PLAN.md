@@ -887,9 +887,13 @@ not already leak") is exactly the premise the MVP removes.
 
 **A display name is generated from the identity's public key, never typed.**
 Words drawn from Greek philosophy and letters — *measured attic stoic*, *sober
-ionic thales* — not `user_8f3a` and not a handle someone registered. The shape
+ionic thales* — not `user_8f3a` and not a handle someone registered. ~~The shape
 is settled below and is **four words**, for reasons that are arithmetic rather
-than aesthetic.
+than aesthetic.~~ **Built — see the `generated-names` spec**, which carries the
+derivation, the four-word shape, the list sizes, the byte budget, the denylist
+redraw and the versioning rule as requirements. The arithmetic that chose four
+words is in that change's `design.md`; what remains below is the reasoning that
+is not a requirement anywhere.
 
 **But a user is not handed one.** ~~At onboarding they are shown a slate of five
 generated identities and pick one, and they may refresh the slate as many times
@@ -957,50 +961,29 @@ version is tempted to let people carry between Stoas.
 
 #### The derivation
 
-```
-name = words(H(NAME_PREFIX || public_key))
-```
+~~`name = words(H(NAME_PREFIX || public_key))`, with `NAME_PREFIX` a fixed 32-byte
+domain separator, versioned; deterministic and total; derived from the public key
+rather than the address; domain-separated from every address prefix; index
+extraction from distinct hash bytes per slot.~~ **All five are requirements — see
+the `generated-names` spec.**
 
-with `NAME_PREFIX` a fixed 32-byte domain separator in the style §5.1 already
-uses for addresses — versioned, so a future wordlist or scheme mints different
-names from identical keys rather than silently colliding with this one.
-
-Four properties this has to have, each of which decides something:
-
-- **Deterministic and total.** The same key yields the same name on every peer,
-  forever, with no lookup and no state. This is why it is a hash of the key and
-  not an op: **a name is not published and cannot be**, because a published name
-  is one two peers could disagree about, and two peers rendering one identity
-  differently is a bug users report as impersonation.
-- **Derived from the public key, not from the address.** The address is already
-  `H(prefix || genesis_record)` and §5.1 keeps that record extensible against a
-  future key log. Deriving the name from the *key* means a name tracks the key
-  that signs, which is what a reader is actually being shown. If rotation ever
-  lands (§5.3), this is the seam where the question "does the name change?"
-  arrives, and it should arrive loudly rather than being pre-answered here by
-  an accident of which input was hashed.
-- **Distinct domain separation from every address prefix.** `identity.rs`
-  already keeps author and Stoa addresses in separate domains so no byte string
-  is both. The name domain joins that set for the same reason.
-- **Index extraction is from distinct hash bytes per slot**, so that the two
-  adjectives and the two nouns are independent draws rather than four views of
-  the same bits.
+One consequence worth keeping here because it is about §5.3 rather than about the
+derivation: deriving from the *key* means that if rotation ever lands, the seam
+where "does the name change?" arrives is visible, rather than pre-answered by an
+accident of which input was hashed.
 
 ##### The byte budget, and where the name's independence from the mark comes from
 
-`H` is SHA-256, so the name's digest is **32 bytes**. The name consumes a fixed
-slice of them:
+~~`H` is SHA-256, so the name's digest is **32 bytes**, and the name consumes a
+fixed slice of them: one byte per adjective index, two per noun index, six as a
+re-derivation reserve for the denylist, and the name stops at byte 12.~~ **The
+bound, the distinct-bytes-per-slot rule, the one-redraw reserve and the loud
+failure past the bound are requirements — see the `generated-names` spec**; the
+exact slice is in that change's `design.md`.
 
-| Bytes | Use |
-|---|---|
-| `0` | first adjective index (256 entries, 8 bits, one byte exactly) |
-| `1` | second adjective index |
-| `2..4` | first noun index (512 entries needs 9 bits; take 2 bytes and reduce) |
-| `4..6` | second noun index |
-| `6..12` | **re-derivation reserve** for the denylist, below |
-| `12..32` | unused by the name scheme |
-
-**The name stops at byte 12.** Bytes `12..32` of *this* digest are simply unread.
+What is kept here is the correction below, because it is a record of two
+documents inventing the same wrong mechanism rather than a fact about the
+scheme.
 
 **Correcting the reason an earlier draft of this subsection gave, because the
 conclusion was right and the mechanism was invented.** That draft described
@@ -1319,6 +1302,22 @@ while the adjective list cannot grow at all, and 2²⁵ at three words leaves
 
 **Therefore the name is four words: two adjectives and two nouns.**
 
+**A live counter-argument, kept because it was never refuted.** PR #27
+(closed; branch `docs/three-word-name` kept) proposes three words — adjective +
+noun + `of` + place, at 2¹³ × 2¹⁰ × 2¹⁰ = 2³³, giving 0.145% at 5,000. It was
+closed **for process reasons and not on the merits**: "per the decision to build
+from specs rather than from these PRs", with the branch kept "if it is wanted
+later".
+
+Its point lands on this subsection rather than on its arithmetic, every figure of
+which it grants. The four-word case rests on capping the adjective list at 256 to
+hold a uniform register, and **that cap is a taste judgement rather than a limit
+of the sources** — withdrawing it moves one slot from 2⁸ to 2¹³. In its words:
+*"the arithmetic is sound and the premise is a preference wearing the costume of
+a fact."* So what decides the word count is the register rule above, not the
+collision table below. Anything revisiting the count revisits the register rule
+first, and either way it is a scheme version bump.
+
 ```
 S = 256 × 256 × 512 × 512 = 2³⁴ = 17,179,869,184
 ```
@@ -1552,51 +1551,20 @@ touches the control being limited.
 
 #### Word-level failure modes
 
-- **Combinations, not just words.** Two individually innocuous adjectives can
-  compose into a slur or an insult aimed at a real group. Vetting single words
-  is insufficient; the generated *combination* is what ships. **The fourth word
-  makes this materially harder**, and that is the one real cost of the shape
-  chosen above: 256² ordered adjective pairs was already past hand review, and
-  the noun pair adds 512² more, with the adjective–noun and noun–noun junctions
-  on top. A pooled noun list of thinkers and abstractions is also more exposed
-  than a list of one kind, because a proper name beside an abstract noun can
-  compose into a reading neither word carries alone. So the practical
-  requirement is a denylist applied at generation — a derived name landing on a
-  refused combination **redraws all four slots** from the next six hash bytes,
-  deterministically, so every peer skips identically. The byte budget above bounds
-  this at one re-draw and requires a loud failure beyond it; the denylist matters
-  more at four words than it did at three.
-- **The lists are versioned and effectively frozen, and a word removal is a
-  scheme version bump.** This is the most operationally important line in the
-  section, so it is worth spelling out the mechanism rather than asserting the
-  rule. `name = words(H(NAME_PREFIX || public_key))` maps hash bytes to list
-  indices, so removing one word **reindexes the list** and every identity whose
-  name drew on an index at or after the removed one now renders differently.
-  That happens **on peers that have updated and not on peers that have not** —
-  so the same key renders as two different people depending on who is looking,
-  which is the two-peers-disagree failure this whole scheme exists to avoid, and
-  which users report as impersonation.
+~~**Combinations, not just words** — a denylist applied at generation, redrawing
+all four slots deterministically so every peer skips identically.~~
+~~**The lists are versioned and effectively frozen**, and any change to them —
+removal, addition, reordering, size, word count, byte budget — mints a new
+version rather than editing the current one, because reindexing a list renames
+everyone who drew past the change, on updated peers only.~~
+~~**ASCII-only**, so a generated name can never itself carry a bidi override or a
+homoglyph.~~ **All three are requirements — see the `generated-names` spec.**
 
-  So `NAME_PREFIX` is versioned, and **any change to the lists — a removal, an
-  addition, a reordering, a size change, a change to the number of words, or a
-  change to the byte budget above — mints a new version rather than editing the
-  current one.** The byte budget belongs in that list for the same reason as the
-  rest: moving the name's slice re-reads different bytes and so renames everyone.
-  It does **not** disturb the mark, which reads a different digest entirely. The
-  version bump is
-  what stops the disagreement: it makes the old and new schemes distinct
-  derivations rather than two peers' answers to one question. It is also why the
-  *first* version must be conservative: shipping a word that has to come out
-  later is not a patch, it is a migration in which everybody's name changes at
-  once.
-- **ASCII-only, and this is a bidi decision rather than a parochial one.** These
-  are display strings composed by us from a fixed list, so unlike post bodies
-  they are the one piece of rendered text the project fully controls. Keeping
-  them ASCII means a generated name can never itself carry a bidi override or a
-  homoglyph — it removes the attack from this surface entirely rather than
-  mitigating it. **The bidi obligation still applies to everything a name is
-  rendered *next to*** (§11.1), which is the usual case, and a name sitting
-  beside an attacker-controlled body can still be visually captured by it.
+One half of the ASCII point is *not* in that spec and is a rendering obligation
+rather than a core one: **the bidi obligation still applies to everything a name
+is rendered *next to*** (§11.1). A name sitting beside an attacker-controlled
+body can still be visually captured by it, and controlling our own display
+strings does nothing about that.
 
 #### Rendering obligations this creates
 
