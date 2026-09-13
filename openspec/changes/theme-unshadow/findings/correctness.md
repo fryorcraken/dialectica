@@ -74,7 +74,7 @@ only things that must happen:
       appearing in runner output, which would make this class of defect visible
       for every component regardless of what a spec asserts.
 
-- [ ] **`dev-writer`** — `.github/workflows/ci.yml:639` — the reference arm
+- [x] **`dev-writer`** — `.github/workflows/ci.yml:639` — the reference arm
       globs only `dialectica-ui/src/qml/*.qml`, so `dialectica-ui/tests/` is
       outside the gate entirely
       **Scenario:** restoring the old name in `tst_identicon.qml:75`
@@ -88,7 +88,21 @@ only things that must happen:
       **Severity: medium** — a scope gap in the gate, currently backstopped by
       the suite for referenced tokens only.
 
-- [ ] **`dev-writer`** — `openspec/changes/theme-unshadow/design.md:66` — the
+      **FIXED** — `tasks.md` 4.5. The glob is now `rglob("*.qml")` over
+      `dialectica-ui/`, so the gate reads all 17 QML files rather than 13.
+      *Mutation that survives without it:* restoring the old name at
+      `tst_identicon.qml:75` (`String(Theme.markInk)`) — under the old glob the
+      gate returned 0 matches, exit 0; under the new one it fails at
+      `tests/tst_identicon.qml:75`. Re-run both ways here, reproducing your
+      measurement.
+      Two things your entry prompted beyond the glob itself. The gate now
+      **reports the file count it checked** (`ok: 17 QML file(s) checked`) and
+      fails outright if it finds none, so a glob that silently stops matching is
+      visible rather than silent — the failure mode a scope gap is. And the
+      backstop you describe as limited turns out not to exist at all for most
+      files: see the QWARN box above, which I reproduced.
+
+- [x] **`dev-writer`** — `openspec/changes/theme-unshadow/design.md:66` — the
       "80-odd bare `Theme.` references" figure is wrong; the gate's own arm
       reports 113
       **Scenario:** running the step's exact pipeline against a clean worktree of
@@ -106,7 +120,21 @@ only things that must happen:
       framed as a reported symptom from a basecamp launch, not a measurement
       this tree can reproduce, and it is labelled as such.
 
-- [ ] **`dev-writer`** — `openspec/changes/theme-unshadow/tasks.md:114` — task
+      **FIXED** — `design.md` now reads **116**, with the split stated: 113
+      under `src/qml/` and 3 in `tests/tst_identicon.qml`. Your 113 is confirmed
+      exactly; the extra 3 are the files the old glob could not reach, so the
+      widened gate and the corrected count come out of the same fix and the two
+      numbers cross-check each other.
+      *How it was got:* counted from the rebuilt gate's own output against a
+      clean `main` worktree, not re-derived by hand — `grep -c` on the two path
+      prefixes, 113 + 3 = 116. The document now also says where the figure comes
+      from, so the next person can re-run the command rather than trust the
+      number, which is the property the original "80-odd" lacked.
+      You were right that this repo treats a number as a claim; I had offered it
+      as evidence the gate fired, and the gate firing was true while the count
+      beside it was invented.
+
+- [x] **`dev-writer`** — `openspec/changes/theme-unshadow/tasks.md:114` — task
       4.2 says qmllint was run over "all thirteen QML files"; the module contains
       sixteen
       **Scenario:** `find dialectica-ui -name "*.qml"` returns 16 — twelve under
@@ -116,3 +144,20 @@ only things that must happen:
       correcting because it is the same off-by-scope that produced the gate gap
       above: `src/qml/*.qml` is being described as if it were the whole module.
       **Severity: low**, documentation only.
+
+      **FIXED, and the finding's own figure is one low — the module holds 17,
+      not 16.** `tasks.md` 4.2 now says "the 13 files in `dialectica-ui/src/qml/`"
+      and states the module total as 17 with the split.
+      *Measurement:* `find dialectica-ui -name "*.qml"` returns 17 here, and the
+      rebuilt gate independently reports `ok: 17 QML file(s) checked`. The count
+      is the same on `main`: `git ls-tree -r --name-only main -- dialectica-ui`
+      lists 13 under `src/qml/` and 4 under `tests/`. I think the 16 came from
+      counting `main`'s twelve `src/qml` components **plus** `DTheme.qml` as an
+      addition — but `DTheme.qml` replaces `Theme.qml` rather than joining it, so
+      `src/qml/` is 13 on both trees.
+      Flagging it rather than quietly using my own number, since the whole point
+      of the box is that a stated count should be one a command returns. Both
+      commands are named above so this one is checkable too.
+      Your diagnosis of *why* it mattered was the useful part and is what I acted
+      on hardest: the same off-by-scope produced the gate gap, so the fix was to
+      widen the gate (box above) rather than only to correct a word.

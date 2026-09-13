@@ -62,45 +62,85 @@ is therefore the static `no QML type name collides with the host` step in
 `ci.yml`.
 
 **It was proven to fail before it was trusted.** Run against `main` — the tree
-carrying the defect — all three of its arms fire: the `Theme.qml` filename, the
-`qmldir` declaration, and 80-odd bare `Theme.` references. Run against this
-tree, it passes. That is a gate with a demonstrated failing case, not a step
-that has only ever been seen green.
+carrying the defect — it exits 1 reporting the `qmldir` singleton as
+un-prefixed and **116 lines** carrying a bare `Theme` reference (113 under
+`src/qml/`, 3 in `tests/tst_identicon.qml`). Run against this tree, it passes.
+That is a gate with a demonstrated failing case, not a step that has only ever
+been seen green.
 
-### Why the gate excludes comment lines
+The figure is the gate's own output, counted. An earlier draft of this document
+said "80-odd", which no reading of the command produces; the correctness review
+measured 113 for the `src/qml/` scope and that half is confirmed here exactly.
 
-`DTheme.qml`'s own header explains the collision at length and quotes `Theme.x`
-while doing so. Without the `grep -v` on a leading `//`, the gate would be
-permanently red on a file that is correct — which is the fastest way to get a
-gate deleted, and would make this whole step worse than nothing.
+### What the gate checks, and why it stopped enumerating
 
-That exclusion is exercised rather than dead: `grep -n "[^A-Za-z]Theme\."` over
-`DTheme.qml` returns two comment lines today, so the arm is doing work on every
-run.
+The first version banned a **list** of five names basecamp was known to occupy.
+The security review rejected that as the `hand-maintained sweep lists go stale
+silently` pattern, and it is right: the list is correct only until basecamp
+registers a sixth name, and nothing in CI can notice that it has. The verified
+launch log for this change shows the host registering `LogosButton.qml`, so the
+namespace demonstrably holds names beyond any five someone thought of.
 
-**It has a known false positive, documented rather than fixed.** Only a *leading*
-`//` is excluded, so a bare `Theme.` inside a `/* */` block comment, or in a
-trailing comment after code on the same line, fails the arm while being
-perfectly correct. Narrowing the exclusion to real bindings needs a QML parser,
-which is the elaborate thing this gate deliberately is not — the whole step is a
-grep whose failure names a file small enough to read. The cost of the limitation
-is therefore a few seconds of diagnosis, and the step's comment says so
-explicitly so that a red is checked against the cited line before anyone goes
-looking for a collision that is not there.
+**The gate now enforces the prefix convention**, which is what the design
+actually relies on — "a name nothing in the host can claim cannot be shadowed by
+anything basecamp adds later". A rule that every declared singleton is
+`D`-prefixed is total over host registrations that have not happened yet, where
+a list is total over none of them.
 
-### The rename's completeness is checked by the existing suite
+`Core` is grandfathered, with the reason in the step rather than as a bare name:
+it predates the convention, this piece deliberately did not rename it, and it is
+itself the evidence that the host does not claim every plausible name. That is
+also why it is a grandfather clause and not a precedent — "basecamp has no
+`Core` today" is exactly the kind of fact the prefix rule exists to stop
+depending on. `DCore` is the right end state and belongs to a piece of its own.
 
-A missed reference would leave a bare `Theme` in a file, which under
-`qmltestrunner` resolves to nothing at all — so the component tests fail with
-`Theme is not defined` rather than passing with a wrong value. The four existing
-spec files still pass after the rename, `tst_identicon.qml` among them, and that
-file reads six palette constants through the singleton. Combined with the CI
-gate's reference arm returning empty, the rename is covered from both directions.
+### Comments are stripped once, and the false positive is gone
 
-This is worth stating plainly because it is the *only* thing the test layer
-checks here. **What the tests cover:** that every reference resolves, and that
-the identicon's ink indexing still lands on the same seven constants.
-**What they cannot see:** the collision itself, for the reason measured above.
+The previous version bolted a `grep -v ':[0-9]*: *//'` onto the one arm that
+needed it, and documented the resulting false positive: a bare `Theme.` in a
+`/* */` block comment, or trailing a line of code, failed the arm while being
+correct.
+
+The gate now strips comments — `//` to end of line, and `/* */` however many
+lines it spans — **once, up front**, so every check runs against clean source.
+This is `piece/publish-envelope`'s shape, and the reason to prefer it is not
+style: there is one place to be right about what a comment is, and the next
+check added to this step inherits it instead of re-deriving it.
+
+Measured: both comment forms that used to fail the old regex now pass, and the
+`DTheme.qml` header — which quotes `Theme.x` twice while explaining the
+collision — is clean without needing an exclusion written for it. Block comments
+are replaced by the newlines they spanned, so every reported line number still
+points at the line a human will find in the file.
+
+### What actually checks the rename, and what does not
+
+**The suite is not a second line of defence, and an earlier draft of this
+document said it was.** That claim — that the CI arm and the component tests
+cover the rename "from both directions" — is false, and the correctness review
+measured why: `qmltestrunner` reports a `ReferenceError` raised inside an
+instantiated component as a **QWARN, not a failure**. Reproduced here: the
+column-0 mutation in `MarginNote.qml` printed `ReferenceError: Theme is not
+defined` dozens of times across the `FeedStates` spec, and the runner still
+reported `12 passed, 0 failed`, whole suite exit 0.
+
+So the two do not cover each other; they shared a blind spot. The suite catches
+a stale reference **only** when it sits inside a `compare()` — as
+`tst_identicon.qml`'s palette assertions do, which is why that one spec does
+fail on a stale reference while the rest stay green.
+
+That leaves the honest division:
+
+- **The CI gate** is what checks the rename's completeness, across all 17 QML
+  files in the module. It is the only check that sees a stale reference in a
+  component no spec asserts against.
+- **The suite** pins that the identicon's ink indexing still lands on the same
+  seven constants, and would fail on a stale reference inside its own
+  assertions.
+- **Neither can see the collision itself**, for the reason measured above.
+
+Making the runner fail on a `ReferenceError` in its output would close this
+properly and is `tester`'s box in `findings/correctness.md`, not this one's.
 
 ## Dead ends, recorded so they are not re-walked
 

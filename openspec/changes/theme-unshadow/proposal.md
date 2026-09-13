@@ -48,8 +48,13 @@ diff doing three things cannot be reviewed for any of them.
   palette — wire-visible frozen constants — is byte-identical, so no identity's
   mark changes appearance.
 - **A CI gate is added**, `no QML type name collides with the host`, which fails
-  on a `.qml` file or `qmldir` entry named after a type basecamp registers, and
-  on any surviving bare `Theme.` reference in the view.
+  when a `qmldir` singleton is not `D`-prefixed, when a declared singleton's file
+  is missing, or when any QML file in the module still references a bare `Theme`.
+  It enforces the **prefix convention** rather than a list of known host names,
+  because a list is correct only until the host registers a name nobody put on
+  it; it reads every `.qml` under `dialectica-ui/`, tests included; and it strips
+  comments once up front so a file's own prose about the collision cannot trip
+  it.
 - **No behaviour changes anywhere else.** Nothing in `dialectica/` is touched,
   no core method moves, no QML file gains or loses an element.
 

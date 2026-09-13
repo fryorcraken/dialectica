@@ -323,6 +323,20 @@ These are structural and bite at build time, not review time.
   the static `no QML type name collides with the host` step in `ci.yml`, proven
   to fail on a tree carrying the old name.
 
+  **Nor is the QML suite a backstop**, which is worth knowing before reading a
+  green run as coverage: `qmltestrunner` reports a `ReferenceError` inside an
+  instantiated component as a **QWARN, not a failure**. A stale singleton
+  reference in a component no spec asserts against prints the error dozens of
+  times and still exits 0. Only a reference inside a `compare()` fails a spec.
+
+  **The gate enforces the `D` prefix rather than a list of host names.** An
+  earlier version banned five names basecamp was known to occupy, which is the
+  `hand-maintained sweep lists go stale silently` trap: correct only until the
+  host registers a sixth, with nothing able to notice. A prefix rule is total
+  over registrations that have not happened yet. `Core` is grandfathered with
+  its reason in the step — if you add a singleton, add the `D`, do not add an
+  exemption.
+
 ## Scaffold: what `lgs` does and does not do
 
 `lgs new` **cannot generate a module project** — its templates are LEZ zkVM

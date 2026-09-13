@@ -43,7 +43,7 @@ on in this lane.
 
 ---
 
-- [ ] **`dev-writer`** — `.github/workflows/ci.yml:611` — the host-name list is
+- [x] **`dev-writer`** — `.github/workflows/ci.yml:611` — the host-name list is
       hand-maintained with no mechanism to notice it has gone stale, which is the
       failure mode this repo has already recorded
       **Scenario:** the arm bans exactly `Theme Style Palette Colors Typography`.
@@ -67,3 +67,28 @@ on in this lane.
       fix is correct. It is filed because the gate is presented as the thing
       preventing recurrence, and in its current shape it prevents recurrence only
       of the five names someone already knew about.
+
+      **FIXED, and adopted as the gate's organising idea rather than patched** —
+      `tasks.md` 4.7. The five-name list is gone. The gate now requires every
+      `singleton` line in `qmldir` to declare a `D`-prefixed type, which is the
+      check you argued for: total over host registrations that have not happened,
+      where the list was total over none of them.
+      *Mutation that survives without it:* declaring `singleton Button 1.0
+      Button.qml` — passes the old arm (not among the five) and fails the new one
+      with a message naming `DButton`. Your `LogosButton.qml` observation from
+      the launch log is what makes that mutation the realistic one rather than a
+      contrived one.
+      **One thing your entry did not anticipate, and it shaped the fix:** `Core`
+      is a singleton this piece deliberately does not rename, so a bare prefix
+      rule fails on the tree it ships with. I caught that by running the rule
+      before writing the outcome here. Rather than drop the rule, `Core` is
+      grandfathered **with its reason in the step**, and the comment says
+      explicitly that it is a grandfather clause and not a precedent — that
+      "basecamp has no `Core` today" is exactly the kind of fact the prefix rule
+      exists to stop depending on, that `DCore` is the right end state, and that
+      the fix for a second such name is the `D` rather than a second exemption.
+      That keeps one name in a set, which is weaker than zero; but it is a set
+      whose growth is called out as the wrong move at the point someone would
+      make it, where the old list invited growth as its intended use.
+      The prefix rule also subsumes part of the correctness lane's column-0
+      finding: a bare `Theme` is by construction not `D`-prefixed.

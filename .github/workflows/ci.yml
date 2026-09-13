@@ -592,7 +592,7 @@ jobs:
       # "stage a competitor and watch it win" is not a reproduction, and an
       # afternoon spent building one produces two green runs and no finding.
       #
-      # WHY THIS IS A GREP AND NOT A QML TEST follows directly from where the
+      # WHY THIS IS STATIC AND NOT A QML TEST follows directly from where the
       # collision lives. Under `qmltestrunner` the host is simply absent, so
       # `DTheme` always resolves to our own file and an assertion like
       # `verify(DTheme.paper !== undefined)` passes no matter what — a check
@@ -600,49 +600,150 @@ jobs:
       # component layer is structurally blind here, and a static check is the
       # honest gate rather than a second-best one.
       #
-      # What a static check CAN see is whether we reintroduced a name known to
-      # collide. The list is names basecamp is known to occupy; add to it
-      # whenever a launch log shows one of ours resolving to a
-      # `qrc:/qt/qml/Logos/...` path.
+      # AND THE SUITE IS NOT A SECOND LINE OF DEFENCE, which review established
+      # and is worth knowing before trusting a green run. `qmltestrunner`
+      # reports a `ReferenceError` raised inside an instantiated component as a
+      # QWARN, not a failure: a stale `Theme` reference in `MarginNote.qml`
+      # printed `ReferenceError: Theme is not defined` dozens of times across
+      # the `FeedStates` spec and the runner still reported 0 failed, exit 0.
+      # The suite only catches a stale reference that sits inside a `compare()`.
+      # So this step and the suite share a blind spot rather than covering each
+      # other, and this step is the one that has to be right.
+      #
+      # WHAT A STATIC CHECK CAN SEE, and the shape it took after review.
+      #
+      # The first version of this gate ENUMERATED host names — a list of five
+      # that basecamp was known to occupy. The security review rejected that as
+      # the `hand-maintained sweep lists go stale silently` pattern this project
+      # has already been bitten by: the list is correct only until basecamp
+      # registers a sixth name, and nothing in CI can detect that it has. The
+      # verified launch log for this change shows the host registering
+      # `LogosButton.qml` under `qrc:/qt/qml/Logos/`, so the namespace
+      # demonstrably holds component-shaped names beyond any five.
+      #
+      # So the gate enforces THE CONVENTION instead, which is what actually
+      # defends us: every singleton we declare carries a `D` prefix. That is
+      # total over host registrations that have not happened yet, where a list
+      # is total over none of them. `design.md` already named the prefix as the
+      # defence; this makes the gate check the thing the design relies on.
+      #
+      # COMMENTS ARE STRIPPED ONCE, UP FRONT, rather than filtered per-check.
+      # This is `piece/publish-envelope`'s shape and it is better than the
+      # `grep -v` this step used to bolt onto the one arm that needed it: there
+      # is one place to be right about what a comment is, and the next check
+      # added here inherits it instead of re-deriving it. The old form also had
+      # two false negatives and one false positive that the stripping approach
+      # simply does not have — see below.
       - name: no QML type name collides with the host
         run: |
-          set -eu
-          status=0
-          for name in Theme Style Palette Colors Typography; do
-            if [ -e "dialectica-ui/src/qml/$name.qml" ]; then
-              echo "::error file=dialectica-ui/src/qml/$name.qml::'$name' is a type name basecamp also registers — it will be shadowed and every property will read as undefined at runtime. Prefix it (DTheme, DStyle, …)."
-              status=1
-            fi
-            if grep -rn "^singleton $name \|^$name " dialectica-ui/src/qml/qmldir >/dev/null 2>&1; then
-              echo "::error file=dialectica-ui/src/qml/qmldir::qmldir declares '$name', a name basecamp also registers"
-              status=1
-            fi
-          done
-          # And no file may REFERENCE a bare `Theme.` — the symptom side of the
-          # same defect, which would mean a stale reference survived a rename.
+          python3 - <<'PY'
+          import pathlib, re, sys
+
+          status = 0
+          qml_root = pathlib.Path("dialectica-ui")
+
+          # EVERY .qml in the module, not just `src/qml/*.qml`. The previous
+          # form globbed `src/qml/*.qml`, which left `dialectica-ui/tests/`
+          # outside the gate entirely — a correctness finding, since the step is
+          # written as the authority on "no surviving bare `Theme.` reference in
+          # the view" and did not read four of the module's sixteen QML files.
+          # rglob also reaches a subdirectory under `src/qml/`, should one ever
+          # be added; the old glob could not.
+          qml_files = sorted(qml_root.rglob("*.qml"))
+          if not qml_files:
+              print("::error::no QML files found — this gate measured nothing")
+              sys.exit(1)
+
+          # `//` to end of line, and `/* */` however many lines it spans.
+          # Replacing a block comment with a blank line per line it covered
+          # keeps every subsequent line number honest, so an error message
+          # cites the line a human will find in the file.
+          def strip_comments(src):
+              src = re.sub(r"/\*.*?\*/",
+                           lambda m: "\n" * m.group(0).count("\n"),
+                           src, flags=re.S)
+              return re.sub(r"//.*$", "", src, flags=re.M)
+
+          # ---- 1. every singleton we declare is D-prefixed --------------------
           #
-          # Comment lines are excluded, because DTheme.qml's own header explains
-          # the collision at length and names `Theme.x` while doing so. Without
-          # the exclusion this gate would be permanently red on a file that is
-          # correct, which is the fastest way to get a gate deleted. `grep -v` on
-          # a leading `//` is crude but exactly matches how these files comment.
+          # `Core` is grandfathered, and the exemption is written here with its
+          # reason rather than left as a bare name in a list.
           #
-          # KNOWN FALSE POSITIVE, so a red here is diagnosed in seconds rather
-          # than investigated as a defect: only a LEADING `//` is excluded, so a
-          # bare `Theme.` inside a `/* */` block comment, or in a trailing
-          # comment after code on the same line, fails this arm while being
-          # perfectly correct. If this goes red, read the cited line first — if
-          # it is prose rather than a binding, the fix is the comment style (move
-          # it to a `//` line of its own), not the code. Narrowing the exclusion
-          # to real bindings needs a QML parser, which is the elaborate thing
-          # this gate deliberately is not.
-          if grep -rn "[^A-Za-z]Theme\." dialectica-ui/src/qml/*.qml \
-               | grep -v ':[0-9]*: *//' | grep . ; then
-            echo "::error::a QML file references a bare 'Theme.' — dialectica's tokens are 'DTheme.'; a bare Theme resolves to basecamp's singleton"
-            status=1
-          fi
-          [ "$status" -eq 0 ] && echo "ok: no QML type name collides with the host"
-          exit "$status"
+          # It predates this convention and `piece/theme-unshadow` deliberately
+          # did not rename it: that piece's scope was the one collision that
+          # stopped the screen rendering, and a diff doing two things cannot be
+          # reviewed for either. `Core` is also the evidence that the host does
+          # NOT claim every plausible name — it resolved correctly throughout
+          # the outage, in the same files, under the same imports, purely
+          # because basecamp has no `Core`.
+          #
+          # That is exactly why the exemption is a grandfather clause and not a
+          # precedent: "basecamp has no `Core` TODAY" is a fact with no
+          # expiry date attached, and the whole point of the prefix rule is to
+          # stop depending on such facts. Renaming it to `DCore` is the right
+          # end state and belongs to a piece of its own. Do not add a second
+          # name here — add the `D` instead.
+          GRANDFATHERED = {"Core"}
+
+          qmldir = qml_root / "src/qml/qmldir"
+          for n, line in enumerate(qmldir.read_text().splitlines(), 1):
+              if line.startswith("#") or not line.strip():
+                  continue
+              parts = line.split()
+              if parts[0] == "singleton" and len(parts) >= 2:
+                  name = parts[1]
+                  if name in GRANDFATHERED:
+                      continue
+                  if not re.fullmatch(r"D[A-Z][A-Za-z0-9]*", name):
+                      print(f"::error file={qmldir},line={n}::singleton '{name}' "
+                            "is not D-prefixed. Basecamp registers its own QML "
+                            "types in the host's C++ type registration, and a "
+                            "name it also uses resolves to ITS object — every "
+                            "property then reads undefined at runtime. The `D` "
+                            "is what makes the name unclaimable. Rename to "
+                            f"'D{name}'.")
+                      status = 1
+
+          # ---- 2. the file backing each singleton exists ----------------------
+          # A qmldir naming a file that is not there fails at load, not here,
+          # and the load failure is the one basecamp makes hard to see.
+          for line in qmldir.read_text().splitlines():
+              parts = line.split()
+              if len(parts) == 4 and parts[0] == "singleton":
+                  target = qmldir.parent / parts[3]
+                  if not target.exists():
+                      print(f"::error file={qmldir}::declares '{parts[3]}', "
+                            "which does not exist")
+                      status = 1
+
+          # ---- 3. no binding reaches a bare, unprefixed `Theme` ---------------
+          #
+          # ANCHORED AT LINE START, which the previous regex was not. It used
+          # `[^A-Za-z]Theme\.`, requiring a character before `Theme` — so a
+          # binding split across two lines, with `Theme.note` at column 0, was
+          # invisible to it. That is not a hypothetical: it is a genuinely
+          # broken binding (the property resolves `undefined` at runtime, the
+          # exact defect this piece exists to prevent) and it passed this gate,
+          # qmllint AND the QML suite all green. Measured on this tree.
+          #
+          # `\b` on the trailing side catches `Theme` split from `.ink`, the
+          # other line-break form that escaped the old regex.
+          pattern = re.compile(r"(?<![A-Za-z])Theme\b")
+          for path in qml_files:
+              code = strip_comments(path.read_text())
+              for n, line in enumerate(code.splitlines(), 1):
+                  if pattern.search(line):
+                      print(f"::error file={path},line={n}::references a bare "
+                            "'Theme' — dialectica's tokens are 'DTheme'. A bare "
+                            "Theme resolves to basecamp's singleton, so every "
+                            "token read from it is undefined at runtime.")
+                      status = 1
+
+          if status == 0:
+              print(f"ok: {len(qml_files)} QML file(s) checked, "
+                    "every singleton D-prefixed, no bare Theme reference")
+          sys.exit(status)
+          PY
 
       # The component tests. `REQUIRE_QML_TESTS=1` so a missing or
       # wrong-major-version runner FAILS rather than skipping: a job that

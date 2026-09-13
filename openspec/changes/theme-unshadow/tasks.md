@@ -25,6 +25,23 @@ is in `design.md` and in section 3 below; a `tester` asking it independently is
 the point of the row. It is not struck through because this is not a case of
 "does not apply": the stage applies and has not been done.
 
+**Note for whoever takes the two `tester` boxes in `findings/correctness.md`,
+so neither is re-done from scratch:**
+
+- The **first** box (the reference arm's regex missing a column-0 `Theme.`) is
+  **already fixed in the code** — `tasks.md` 4.4, anchored to
+  `(?<![A-Za-z])Theme\b`, with both of the reviewer's mutations re-run against
+  the new gate and caught. The box stays unticked because it is not
+  `dev-writer`'s to tick and a `tester` should confirm the fix independently
+  rather than inherit my measurement. What is left there is verification, not
+  repair.
+- The **second** box (a `ReferenceError` in an instantiated component is a QWARN,
+  not a failure) is **untouched and is real work.** It lives in
+  `run-qml-tests.sh`, which this piece does not modify. `design.md`'s false
+  "covered from both directions" claim — which that box is the evidence for —
+  **is** corrected here, under "What actually checks the rename, and what does
+  not", since the prose was mine even though the runner fix is not.
+
 ## 1. The rename
 
 - [x] 1.1 `git mv dialectica-ui/src/qml/Theme.qml dialectica-ui/src/qml/DTheme.qml`
@@ -108,14 +125,75 @@ the point of the row. It is not struck through because this is not a case of
 
 - [x] 4.1 `dialectica-ui/tests/run-qml-tests.sh` — **41 passed, 0 failed**, across
       4 spec files (`tst_core_call` 13, `tst_feed_states` 12, `tst_identicon` 7,
-      `tst_sanitised_text` 9). This is not a formality: a missed reference leaves a
-      bare `Theme` that resolves to nothing under the runner, so the suite would
-      fail with `Theme is not defined` rather than pass with a wrong value.
-- [x] 4.2 `qmllint --unqualified disable -I <qml dir>` over all thirteen QML files
-      — clean, no output. The flag is the repo's existing one, for the
-      `logosModule` bridge qmllint cannot see; it was not widened for this change.
+      `tst_sanitised_text` 9).
+      **An earlier version of this row overclaimed and is corrected**: it said a
+      missed reference "would fail with `Theme is not defined` rather than pass
+      with a wrong value". That is true only where the reference sits inside a
+      `compare()`. `qmltestrunner` reports a `ReferenceError` in an instantiated
+      component as a QWARN, so the same stale reference in `MarginNote.qml`
+      leaves the suite green — measured, see 4.4. The suite's real contribution
+      here is pinning the identicon ink indexing; the CI gate is what checks the
+      rename's completeness.
+- [x] 4.2 `qmllint --unqualified disable -I <qml dir>` over the **13 files in
+      `dialectica-ui/src/qml/`** — clean, no output. The flag is the repo's
+      existing one, for the `logosModule` bridge qmllint cannot see; it was not
+      widened for this change.
+      **Scope corrected**: this row previously said "all thirteen QML files",
+      describing `src/qml/*.qml` as if it were the whole module. The module holds
+      **17** — 13 under `src/qml/` plus 4 under `tests/` — verified by
+      `find dialectica-ui -name "*.qml"` and by `git ls-tree -r main`, which
+      shows the same 13 + 4 split (`main` has `Theme.qml` where this tree has
+      `DTheme.qml`, so the count is 17 on both). The review's figure of 16 is one
+      low. This is the same off-by-scope that produced the gate gap in 4.5, which
+      is why it was worth chasing to an exact number rather than softening the
+      wording.
 - [x] 4.3 `git diff origin/main --stat` read before committing, and every listed
       file confirmed as one this change meant to touch.
+
+## 4b. Rebuilding the gate after correctness and security review
+
+- [x] 4.4 **Anchor the reference check**, closing the finding's headline defect.
+      The old regex `[^A-Za-z]Theme\.` required a character before `Theme`, so a
+      binding split across two lines with `Theme.note` at column 0 was invisible
+      to it. Reproduced before fixing: the gate's arm returned **0 matches, exit
+      0**, `qmllint` **exit 0**, and `run-qml-tests.sh` **41 passed, exit 0** —
+      three green gates over a genuinely broken binding. The second form,
+      `Theme` split from `.ink` across a newline, was equally invisible.
+      Now `(?<![A-Za-z])Theme\b`; both mutations are caught at
+      `MarginNote.qml:40`, and both were re-run after the fix to confirm it.
+- [x] 4.5 **Widen the scope to every QML file in the module.** The old glob read
+      `src/qml/*.qml` only, leaving `dialectica-ui/tests/` outside the gate
+      entirely — verified by restoring the old name in `tst_identicon.qml:75`,
+      which left the gate at 0 matches, exit 0. Now an `rglob("*.qml")` over
+      `dialectica-ui/`, which also reaches a subdirectory under `src/qml/` should
+      one ever be added. Same mutation now fails at
+      `tests/tst_identicon.qml:75`. The gate reports the file count it checked,
+      so a glob that silently stops matching is visible rather than silent.
+- [x] 4.6 **Strip comments once, up front**, rather than filtering per-check —
+      `piece/publish-envelope`'s shape, adopted because there is one place to be
+      right about what a comment is and the next check inherits it. This also
+      **removes the false positive** the previous version documented rather than
+      fixed: a bare `Theme.` in a `/* */` block comment and one trailing a line
+      of code both now pass, where the old `grep -v` on a leading `//` caught
+      neither. Measured both forms. Block comments are replaced by the newlines
+      they spanned so reported line numbers stay honest.
+- [x] 4.7 **Enforce the prefix convention instead of enumerating host names**,
+      closing the security box. The old arm banned five names basecamp was known
+      to occupy; the gate now requires every `singleton` in `qmldir` to be
+      `D`-prefixed, which is total over host registrations that have not happened
+      yet. `Core` is grandfathered **with its reason written in the step** — it
+      predates the convention, this piece deliberately did not rename it, and it
+      is itself the evidence that the host does not claim every name. The
+      comment says explicitly that it is a grandfather clause and not a
+      precedent, and that the fix for a second name is the `D`, not a second
+      exemption.
+- [x] 4.8 **Re-prove the whole gate both ways after the rewrite.** Against the
+      `main` checkout: exit 1, reporting the un-prefixed `qmldir` singleton and
+      **116** bare-reference lines — 113 under `src/qml/` (matching the review's
+      independent count exactly) plus the 3 in `tests/` the old scope could not
+      see. Against this tree: exit 0, `ok: 17 QML file(s) checked`. Suite still
+      41 passed; `qmllint` still clean; working tree confirmed byte-clean after
+      every mutation via `git status --short`.
 
 ## 5. Documentation
 
