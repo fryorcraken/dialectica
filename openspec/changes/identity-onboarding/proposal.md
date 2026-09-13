@@ -36,6 +36,16 @@ change.
 
 ## Capabilities
 
+**Each claim below is now derived from `git diff origin/main HEAD -- <path>` rather
+than from recollection, because recollection got every one of them wrong.** As first
+written this proposal claimed `getCapabilities`'s derivation was unchanged, that
+`posting-capability`'s derivation was untouched, and that `keystore` was unchanged —
+all three false, each found separately and after the code existed. The third also
+made a fourth claim false by implication: the pathless `Keystore` trio it described
+as still in use now has no production caller. The corrected text is what follows; the
+method is the durable part, since a capability claim is a statement about a diff and
+can only be checked by reading one.
+
 **New Capabilities**
 
 - `identity-onboarding` — how a user acquires an identity: what a slate is, what
@@ -53,12 +63,44 @@ change.
 
 **Not modified, deliberately**
 
-- `keystore` — unchanged. What is stored is still a single root secret from which
-  per-Stoa identities are derived, and this change stores no per-Stoa key. The
-  path metadata is not keystore content: it is not secret, it is not required to
-  be encrypted, and putting it in the keystore file would widen a format whose
-  every field is currently accounted for by a test asserting no room for
-  anything else.
+- `keystore` — **no delta, and its public surface did change.** These are two
+  different claims and an earlier draft of this section collapsed them into
+  "unchanged", which was false.
+
+  **What the capability requires is untouched**, which is why there is no delta:
+  what is stored is still a single root secret from which per-Stoa identities are
+  derived, this change stores no per-Stoa key, and the file format is
+  byte-identical. The path metadata is not keystore content — it is not secret,
+  it is not required to be encrypted, and putting it in the keystore file would
+  widen a format whose every field is currently accounted for by a test asserting
+  no room for anything else.
+
+  **What the type exposes is wider**, and a reader comparing the module against
+  this proposal must not be told otherwise. `Keystore::generate` now returns
+  `Result<Self, RandomnessUnavailable>` rather than `Self`, because this change
+  put the mint behind two handlers on every fresh install and so made
+  `SecretKey::generate`'s panic reachable from a dispatch path; `KeystoreError`
+  gains a `NoRandomness` variant to carry it. Five methods are added:
+  `stoa_key_at_path`, `stoa_public_key_at_path` and `stoa_address_at_path` — the
+  existing trio with the path input this change adds — plus `slate_for` and
+  `slate_from_nonce`, which take the *operation* in rather than handing the root
+  out, so the rule that nothing outside the type sees the root survives. The free
+  function `protection_from_env` lands here rather than in the adapter so that
+  passphrase byte handling is decided in one place.
+
+  None of that is a requirement the `keystore` spec states, so restating it as a
+  delta would leave the contract exactly as it is — the same argument made for
+  `posting-capability` below.
+
+  **The false claim was load-bearing, which is why correcting it is not merely
+  tidying.** `tasks.md` declines to retire the pathless `stoa_key` /
+  `stoa_public_key` / `stoa_address` trio — which this change leaves with no
+  production caller, both live call sites now being the `_at_path` forms — on the
+  stated ground that "this change's proposal declares `keystore` untouched".
+  A sentence that was not true had become the recorded reason for a deferral. The
+  deferral still stands, and its actual reason is the one worth keeping: retiring
+  three public methods from the secret-holding type is a deletion that deserves
+  its own change and its own review, not a side effect of adding a path input.
 - `posting-capability` — **no delta, and not because nothing about the probe
   changes.** Its shape and its reasons are untouched, and a keystore existing is a
   state it already describes. Which key the probe reports *does* change, from the
