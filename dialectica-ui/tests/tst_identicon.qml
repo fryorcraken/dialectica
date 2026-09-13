@@ -95,11 +95,64 @@ TestCase {
         m.destroy();
     }
 
+    // The byte set the abbreviation puts on screen, COMPUTED from the three
+    // DTheme properties that decide it rather than written down.
+    //
+    // `AddressLabel.abbreviate` shows `body.substr(0, h)`, then `mid` chars
+    // starting at `floor((len - mid) / 2)`, then the last `t`. Two hex chars per
+    // byte, so a displayed char range maps to bytes by integer division.
+    //
+    // This mirrors the production arithmetic, which is the one thing a test of
+    // this shape cannot avoid doing — but it reads its inputs from the same
+    // singleton the component does, so widening a group moves both together.
+    function displayedBytes() {
+        var chars = 64;                     // a 32-byte address in hex
+        var h = DTheme.headChars, mid = DTheme.middleChars, t = DTheme.tailChars;
+        var start = Math.floor((chars - mid) / 2);
+        var shown = {};
+        for (var i = 0; i < h; i++) shown[Math.floor(i / 2)] = true;
+        for (var j = start; j < start + mid; j++) shown[Math.floor(j / 2)] = true;
+        for (var k = chars - t; k < chars; k++) shown[Math.floor(k / 2)] = true;
+        return shown;
+    }
+
+    // **The abbreviation side of the disjointness requirement**, which nothing
+    // asserted before: the previous gate flipped a hardcoded set of displayed
+    // bytes and checked the mark did not move, so it could only see the MARK
+    // widening onto the abbreviation and never the abbreviation widening onto
+    // the mark. Setting `DTheme.headChars: 24` put the mark's entire 4..11
+    // window back on screen with all 42 QML tests green — the exact defect this
+    // change exists to remove, restored in full and invisible.
+    //
+    // Asserted as a computed relation: the mark reads bytes 4..11, and no byte
+    // in that window may be in the displayed set, whatever the three properties
+    // are set to.
+    function test_no_byte_the_mark_reads_is_ever_displayed() {
+        var shown = displayedBytes();
+        for (var b = 4; b <= 11; b++) {
+            verify(!shown[b],
+                   "byte " + b + " is read by the mark AND displayed by the "
+                   + "abbreviation (head " + DTheme.headChars + ", middle "
+                   + DTheme.middleChars + ", tail " + DTheme.tailChars + ") — "
+                   + "an attacker grinding a lookalike mark can read their "
+                   + "progress off the rendered address");
+        }
+        // The fixture must be measuring something: if the displayed set were
+        // empty this would pass vacuously.
+        var count = 0;
+        for (var key in shown) count++;
+        compare(count, 11, "the abbreviation should display 11 bytes: "
+                           + "4 head + 4 middle + 3 tail");
+    }
+
     // The disjointness the whole window move exists to produce, asserted as a
     // RELATION rather than as a restatement of the window. Changing any byte the
     // abbreviation displays must leave every selector alone — which is what makes
     // the mark a genuinely second channel rather than a restatement of what is
     // already on screen.
+    //
+    // This is the MARK side. The abbreviation side is the test above; both are
+    // needed, and for a while only this one existed.
     function test_no_byte_the_abbreviation_displays_reaches_the_mark() {
         var a = mark(fixed);
         // Each group the abbreviation displays is flipped to ff, and the mark's

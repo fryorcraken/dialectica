@@ -26,7 +26,20 @@ tree was `git status --short`-clean before this file was written.
       **Measured:** 946 of 946 tests pass under this mutation (918 + 28, 0 failed).
       **Severity: high** — genuine defect, not a preference.
 
-- [ ] **`dev-writer`** — `feed.rs:292` — the comment cites a test that does not
+      **Note from `dev-writer`, not a tick — this box is yours.** The path is
+      **deleted** in `118daa9` and the mutation you describe is no longer
+      expressible. `display_name` returns `DisplayName` rather than
+      `Result<DisplayName, NameError>`, so there is no `Err` arm to
+      `unwrap_or` a fabricated name into; and under the scope cut no reply
+      carries a display name at all, so `list_threads` derives nothing.
+
+      Your framing is what made the case for fixing it by construction rather
+      than by adding a test: this is "the one security property of the
+      malformed/failed-input requirement that reaches a *user's screen*". A test
+      over that branch would have guarded a path that should not exist; removing
+      the path removes the class.
+
+- [x] **`dev-writer`** — `feed.rs:292` — the comment cites a test that does not
       exist anywhere in the repository
       **Scenario:** the comment closes with "See
       `a_row_whose_name_cannot_be_derived_is_dropped_rather_than_faked`."
@@ -38,6 +51,25 @@ tree was `git status --short`-clean before this file was written.
       the placeholder mutation went unnoticed.)
       **Measured:** 1 occurrence repo-wide, in the comment.
       **Severity: medium** — genuine defect.
+
+      **Fixed** in `118daa9`: the comment and the branch it described are both
+      deleted. `grep -rn "a_row_whose_name_cannot_be_derived_is_dropped_rather_than_faked"`
+      now returns only the four findings files quoting it.
+
+      **Your framing is the one I want on the record**, because it is the part
+      that generalises past this branch: the citation "is the reason the
+      placeholder mutation went unnoticed". A comment naming a test is a claim a
+      reader checks by reading rather than by running, and it closes the question
+      for everyone downstream — which is worse than silence. Four reviewers hit
+      the branch and the citation is why none of the earlier passes did.
+
+      I have taken that as a rule rather than a one-off repair. Every "see
+      `<test>`" I wrote in this pass names a test I confirmed exists, and where I
+      wanted to point at a property rather than a test I said so in words
+      instead. The two new cross-references — to
+      `a_real_figures_canonical_citation_is_returned_like_any_other_draw` and to
+      `the_feed_reply_is_the_ecosystems_pagination_shape` — were both checked by
+      running them.
 
 - [ ] **`tester`** — `tst_identicon.qml:103` —
       `test_no_byte_the_abbreviation_displays_reaches_the_mark` is one-sided: it
@@ -59,7 +91,33 @@ tree was `git status --short`-clean before this file was written.
       requirement (`spec.md:57-99`) is the one security property this change adds
       to the UI, and half of what could break it is unguarded.
 
-- [ ] **`dev-writer`** — `names.rs:358-362` — the denylist arithmetic reinstates a
+      **Note from `dev-writer` — this box is the `tester`'s to tick, and I have
+      not ticked it.** Recording what I found and added, so whoever closes it is
+      not measuring a tree that has moved under them.
+
+      **The gap is closed, and by then it was closed three times over.** When I
+      came to fix this I found the `tester` had already added
+      `test_the_mark_and_the_abbreviation_share_no_byte` and
+      `test_the_byte_probes_find_the_windows_they_should`, both of which compute
+      the displayed set rather than hardcoding it. I added a third,
+      `test_no_byte_the_mark_reads_is_ever_displayed`, before noticing the other
+      two — it derives the displayed bytes from `DTheme.headChars` /
+      `middleChars` / `tailChars` and asserts none falls in the mark's `4..11`.
+
+      **Measured, on your exact mutation.** With `DTheme.headChars: 24`: **3 of
+      12 identicon tests fail**, where the whole suite was green when you filed
+      this. Mine reports *"byte 4 is read by the mark AND displayed by the
+      abbreviation (head 24, middle 8, tail 6)"*. Reverted after measuring; all 9
+      spec files and 209 assertions pass on the restored tree.
+
+      **Whether to keep all three is a judgement for the `tester`**, and I would
+      lean to keeping mine only if the failure message earns its place — it names
+      the offending byte and the three settings that caused it, where the
+      siblings name the byte and the two sets. If that is not worth a third test,
+      delete it; the property is covered either way and I would rather say so
+      than defend a test I added redundantly.
+
+- [x] **`dev-writer`** — `names.rs:358-362` — the denylist arithmetic reinstates a
       premise `docs/PLAN.md` explicitly struck through, and the shipped list is
       ~4.8x smaller than the figure the comment derives everything from
       **Scenario:** `is_refused`'s doc comment states "roughly 800 of the 1,024
@@ -80,7 +138,26 @@ tree was `git status --short`-clean before this file was written.
       stated justification for the denylist being mandatory (an impersonation
       control), and because the same figure feeds the next finding.
 
-- [ ] **`dev-writer`** — `names.rs:195-197` — `NameError::ReserveExhausted`'s rate
+      **Fixed** in `118daa9` by deleting the denylist, the comment and the
+      control together, under the owner's no-filter ruling.
+
+      **You identified the mechanism, and it is worth separating from the
+      arithmetic.** The comment did not merely hold a wrong number — it
+      reinstated a premise PLAN.md had struck through and annotated with "**The
+      premise is withdrawn**". A retracted claim that reappears in code as
+      current fact is a specific failure mode: the retraction lives in one
+      document and the assertion in another, and the code is what the next reader
+      believes.
+
+      That is now recorded where it survives this change's deletion.
+      `design.md` D11 carries the same lesson for a different figure — its table
+      claimed an adjective yield of 17,349 that no file reproduces and that
+      contradicted D12's own verifiable chain in the same document. Corrected to
+      11,467 with the chain named, and the correction states which of the two
+      sections is the authority, so the next disagreement resolves rather than
+      recurring.
+
+- [x] **`dev-writer`** — `names.rs:195-197` — `NameError::ReserveExhausted`'s rate
       is derived from the withdrawn 960 and is wrong by a factor of ~23
       **Scenario:** the doc comment states "Arrives about once in 1.2 million
       identities: a first draw is refused about once in 1,090, and this needs two
@@ -95,6 +172,18 @@ tree was `git status --short`-clean before this file was written.
       standing trap is exactly a fabricated number in a comment.
       **Measured:** 199 shipped pairs; 1,048,576/199 = 5,269.2; 5,269² ≈ 27.8M.
       **Severity: low** — genuine defect, wrong in the safe direction.
+
+      **Fixed** in `118daa9` by deletion — the variant, the rate and the
+      silent-drop path it governed are all gone, and the derivation is now total,
+      so there is no rate to state.
+
+      **The sentence I want to keep is yours**: "it is a number a future reader
+      will size a decision against, and this repo's standing trap is exactly a
+      fabricated number in a comment." That is the reason a *safe-direction*
+      error still had to be fixed rather than noted, and it is why I removed
+      every derived rate from the module instead of correcting this one. A figure
+      that is wrong in the safe direction is still a figure someone budgets
+      against.
 
 - [x] **`spec-writer`** — `wire.rs:6076` —
       `the_wire_reports_the_author_as_an_address_and_a_key_and_no_name` is an

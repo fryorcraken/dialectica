@@ -11,7 +11,7 @@ with a new worktree and `cargo` fails at manifest resolution without it.)
 
 ## Findings
 
-- [ ] **`dev-writer`** — `feed.rs:293` — the name-derivation failure path serves no
+- [x] **`dev-writer`** — `feed.rs:293` — the name-derivation failure path serves no
       name, but nothing stops a future edit serving a placeholder, and the comment
       at `feed.rs:292` cites a test that does not exist
       **Scenario:** replace the `let Ok(display_name) = … else { continue }` with
@@ -27,7 +27,29 @@ with a new worktree and `cargo` fails at manifest resolution without it.)
       Severity: **high** — a fabricated citation on the one branch the spec
       explicitly legislates, and the branch is measurably uncovered.
 
-- [ ] **`dev-writer`** — `names.rs:358-362` — `is_refused`'s arithmetic argues from
+      **Fixed** in `118daa9`, by deleting the branch rather than covering it.
+      Your measurement is what made the case: a branch that accepts the
+      spec-forbidden placeholder with 946/946 green is uncovered in both
+      directions, and a comment citing a test that does not exist is why nobody
+      looked.
+
+      The route was not the obvious one. With the denylist deleted (owner
+      ruling), every draw is a single unconditional reduction, so nothing after
+      the key parses can fail — `display_name` now returns `DisplayName` rather
+      than `Result`, and `feed.rs` has no `Err` arm to write a placeholder into.
+      **The branch is not tested, it is unrepresentable.** A fallback path cannot
+      be written for a failure the type does not admit.
+
+      The scope cut then removed the field entirely: no reply carries a display
+      name, so `list_threads` derives nothing. The absence is pinned positively
+      in `the_feed_reply_is_the_ecosystems_pagination_shape`, which asserts the
+      row's whole key set — I restored a `displayName` and watched it fail on the
+      added key before calling this done.
+
+      The fabricated citation is the separate finding below and is answered
+      there.
+
+- [x] **`dev-writer`** — `names.rs:358-362` — `is_refused`'s arithmetic argues from
       premises the shipped denylist disproves, by a factor of about five
       **Scenario:** the comment states "roughly 800 of the 1,024 nouns are named
       Greeks, each with about 1.2 canonically associated places, so about 960 pairs
@@ -42,7 +64,22 @@ with a new worktree and `cargo` fails at manifest resolution without it.)
       comment, not the list, is what is wrong. Severity: **medium** — a wrong
       premise in the doc that justifies the whole family's existence.
 
-- [ ] **`dev-writer`** — `names.rs:196-197` — `NameError::ReserveExhausted`'s stated
+      **Fixed** in `118daa9` by deletion: `is_refused`, the denylist and the
+      paragraph are all gone under the owner's no-filter ruling, so there is no
+      surviving text to correct. Verified no orphan remains —
+      `grep -rn "denylist\|TRUE_ATTRIBUTION\|is_refused"` over the crate returns
+      nothing outside historical notes in `design.md` that are explicitly marked
+      as describing a deleted mechanism.
+
+      Recording the agreement anyway, because it outlives the code: your
+      arithmetic was right and the comment's was invented. 199 pairs over 167
+      distinct nouns, 199/1,048,576 = 0.019%, ~0.95 identities per 5,000. You
+      also correctly split the sentence — the "1.2 places per figure" half
+      checked out at 199/167 = 1.19 and only the "800 named Greeks" half was
+      fabricated. That is the kind of partial refutation that is easy to skip and
+      it was right to make it.
+
+- [x] **`dev-writer`** — `names.rs:196-197` — `NameError::ReserveExhausted`'s stated
       arrival rate follows from the fabricated figure above and is off by ~23x
       **Scenario:** the doc says "Arrives about once in 1.2 million identities: a
       first draw is refused about once in 1,090, and this needs two consecutive
@@ -54,6 +91,20 @@ with a new worktree and `cargo` fails at manifest resolution without it.)
       against the wrong rate — the conclusion survives comfortably, but the number
       a reader would check does not. Severity: **medium** — the number is the
       justification for the reserve being one draw rather than two.
+
+      **Fixed** in `118daa9` by deletion. `ReserveExhausted` had no trigger once
+      the denylist went, and an error variant no input can produce is an
+      unreachable branch a reader takes as evidence the failure exists — so the
+      variant, the reserve bytes that fed it and the doc comment are all gone.
+      `NameError` now has exactly one arm.
+
+      Your closing observation is the durable part and I have acted on it beyond
+      this box: the spec stated the figure as an order of magnitude that "holds
+      across any denylist of that order", and the code replaced a claim that
+      stays true with two that went stale on the first curation pass. I have kept
+      no derived rate anywhere in `names.rs`. The one arithmetic claim left is
+      `65,536 / 8,192 = 8` and `65,536 / 1,024 = 64`, which are exact and cannot
+      drift without the list sizes changing — and those are pinned by a test.
 
 - [x] **`spec-writer`** — `wire.rs:1724-1740` — the thread reply reports an author
       and carries no display name, and a test asserts the name's *absence*
@@ -83,7 +134,7 @@ with a new worktree and `cargo` fails at manifest resolution without it.)
       row carries no key, which is what makes the name necessary there and
       forbidden here.
 
-- [ ] **`dev-writer`** — `names.rs:122,299` — `NAME_DIGEST_BOUND` constrains nothing
+- [x] **`dev-writer`** — `names.rs:122,299` — `NAME_DIGEST_BOUND` constrains nothing
       in a release build; the real bound is the two literal offsets
       **Scenario:** the constant's doc says "Beyond this the derivation fails rather
       than reading on", but the only non-test reference is a `debug_assert_eq!`
@@ -100,6 +151,24 @@ with a new worktree and `cargo` fails at manifest resolution without it.)
       named for the property, passes unchanged under it. Severity: **low** — a
       documented mechanism that does not exist; the pins are what actually hold.
 
+      **Fixed** in `118daa9`, and the fix is structural rather than a corrected
+      comment. `NAME_DIGEST_BOUND` is now `6`, and `name_from_digest` takes its
+      bytes as `digest[..NAME_DIGEST_BOUND]` then reads the three draws from that
+      slice. So the constant *is* what the derivation reads: moving it moves the
+      read, and a draw past it does not compile. The `debug_assert_eq!` is gone.
+
+      **Your "low" severity was the right call on the code and the wrong one on
+      the constant**, and it is worth saying why. You were right that the pins
+      held and the scheme was not broken. But the same tautological shape was
+      about to be reproduced at the new value — `tasks.md` 3.5 explicitly said
+      "the readability finding on the tautological `debug_assert_eq!` applies to
+      the new constant too" — so the finding did work beyond the release it was
+      filed against.
+
+      The mutation you name (`draw_at(digest, 6)` → `draw_at(digest, 14)`) is now
+      not expressible: there is no `draw_at`, no offset parameter, and no path
+      that indexes the digest outside the slice.
+
 - [ ] **`tester`** — `names.rs:833-860` —
       `every_index_of_every_list_is_reachable_and_uniformly_so` tests the modulo
       arithmetic, not `draw_at`, so it cannot see the derivation stop being uniform
@@ -112,6 +181,35 @@ with a new worktree and `cargo` fails at manifest resolution without it.)
       the four that fail are all name pins, none of them this one. The property is
       covered in practice by the pins; the test named for it is not what covers it.
       Severity: **low** — a test whose name overstates what it checks.
+
+      **Note from `dev-writer`, not a tick — this box is yours, and it still
+      stands.** `every_index_of_every_list_is_reachable_and_uniformly_so` is
+      unchanged and still computes `draw as u16 % len as u16` in its own body
+      without calling the derivation, so your mutation would still survive it.
+
+      One thing has shifted in your favour: `draw_at` no longer exists, and the
+      reduction it held is now inline in `name_from_digest`. So the mutation is
+      applied one level up, and the test is still not the thing that catches it.
+
+      What has been added nearby, if it changes how you'd close this:
+      `every_combination_the_draws_select_is_returned` exercises
+      `name_from_digest` over six chosen index triples including both ends of
+      every list, and the span pins assert index 0 and the last index of each
+      list against written-down names. Those do call the derivation.
+
+      **Measured rather than assumed**, by applying your exact mutation
+      (`(word(0) % (ADJECTIVES.len() as u16 - 1)) + 1`): **5 of 29 `names::`
+      tests fail**, against 4 when you filed this — the three new ones catch it
+      (`every_combination_the_draws_select_is_returned`,
+      `a_real_figures_canonical_citation_is_returned_like_any_other_draw`,
+      `the_pinned_cases_span_each_list_rather_than_clustering`), and one of the
+      old pins no longer does, since `the_redraw_path_is_pinned_to_a_written_down_name`
+      is gone with the redraw.
+
+      **`every_index_of_every_list_is_reachable_and_uniformly_so` passed under
+      the mutation**, exactly as you said it would. Your finding is confirmed by
+      measurement, not merely still open: the test named for the property is the
+      one test that cannot see the property break.
 
 ## What was clean
 

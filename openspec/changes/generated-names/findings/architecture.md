@@ -8,7 +8,7 @@ at `24faad7`. Baseline re-run in this worktree: `918 + 28 = 946`, 0 failed.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `wire.rs:1724` / `thread.rs:148` — the second
+- [x] **`dev-writer`** — `wire.rs:1724` / `thread.rs:148` — the second
       author-reporting surface was never considered, and the two now enforce
       *opposite* architectures
       **Scenario:** `feed_page_json` computes the name in core and ships
@@ -37,6 +37,33 @@ at `24faad7`. Baseline re-run in this worktree: `918 + 28 = 946`, 0 failed.
       which file the change started in. See the next finding: the two surfaces'
       policies are not merely undocumented, they are written down as two
       contradictory live requirements.
+
+      **Fixed** in `118daa9`, and **`thread.rs` is the surface that was right.**
+      The feed row's `displayName` is deleted; no reply carries a name, on any
+      surface. The two architectures no longer disagree because one of them is
+      gone, and the one that survived is the one you identified as coherent.
+
+      **This finding changed the shape of the change**, and it is worth being
+      precise about how. You wrote that the seam actually chosen "was chosen
+      without noticing the other row shape exists" — which was true, and the
+      owner's scope cut then went further than converging the two: it ruled that
+      the name never travels at all. `thread.rs:144`'s sentence, the one you
+      quoted as the policy the feed now violated, is the contract for every
+      reply.
+
+      **Your diagnosis of the mechanism is the part I want recorded**, because
+      it is the reusable half: an API widening made "by accident of which file
+      the change started in". The derivation reached one author-reporting surface
+      because that was the file the work began in, and the second surface was
+      never weighed. The `design.md` D8 entry now records both the wrong turn and
+      why the premise behind it (a feed row carries an address, from which no key
+      is recoverable) was correct while the conclusion was not — the fix is to
+      stop dropping the key, not to start sending names.
+
+      That fix is **not** in this change: putting `authorKey` on a feed row
+      changes the `author` field's contract and touches several merged specs, so
+      it is filed as its own piece. Recorded as a live gap in D8 and in the
+      Risks section rather than left implicit.
 
 - [x] **`spec-writer`** — `openspec/specs/thread-read/spec.md:192` vs
       `openspec/changes/generated-names/specs/generated-names/spec.md:597` — two
@@ -79,7 +106,7 @@ at `24faad7`. Baseline re-run in this worktree: `918 + 28 = 946`, 0 failed.
       and what needs a recorded decision is `feed.rs` shipping a name because the
       feed row carries no key, not the thread shipping none.
 
-- [ ] **`dev-writer`** — `names/adjectives.rs`, `names/nouns.rs`,
+- [x] **`dev-writer`** — `names/adjectives.rs`, `names/nouns.rs`,
       `names/places.rs`, `names/denylist.rs` — the provenance chain D1 rests on
       is entirely outside the repository, and disappears when the author's
       worktree is pruned
@@ -108,7 +135,41 @@ at `24faad7`. Baseline re-run in this worktree: `918 + 28 = 946`, 0 failed.
       right, but its stated justification requires the generator and its inputs
       to be tracked, and they are not.
 
-- [ ] **`dev-writer`** — `design.md:64-71` (D2) — the module boundary for
+      **Fixed** in `118daa9`. The generator and its inputs are now tracked inside
+      the crate:
+
+      - `dialectica-core/wordlists/{adjectives,nouns,places}.txt`
+      - `dialectica-core/examples/gen_wordlists.rs` — emits the three modules
+      - `dialectica-core/examples/pin_name.rs` — computes a pinned name from a
+        digest without linking the crate
+
+      **Verified rather than asserted**, since the whole point is that the source
+      must reproduce the pins: `sha256sum` over the three tracked files gives
+      `8c998df4…de8b2`, `9c082a49…30c79` and `bed08389…815f1`, matching
+      `PINNED_ADJECTIVES_SHA256`, `PINNED_NOUNS_SHA256` and
+      `PINNED_PLACES_SHA256` byte for byte. So the three commands `names.rs`
+      tells a reviewer to run now work on a fresh checkout — repointed at the new
+      paths in the same commit.
+
+      Both programs are `cargo run --example`, which is a stronger form of the
+      fix than committing the old files would have been: the earlier `tmp/gen.rs`
+      also hardcoded one machine's absolute worktree path, so it was unrunnable
+      by anyone but its author even where it existed. Paths are now
+      `CARGO_MANIFEST_DIR`-relative.
+
+      `attributions.txt` is deliberately **not** carried over — it was the
+      denylist's source and the denylist is deleted.
+
+      **"Its stated justification requires the generator and its inputs to be
+      tracked, and they are not" is the finding in one line**, and it is a
+      decision-versus-artefact mismatch rather than a missing file: the argument
+      for `&[&str]` over `include_str!` was auditability, and auditability that
+      evaporates at merge is not a reason for anything. D1 now records the
+      correction, including the sharper version of your point — that after the
+      worktree is pruned the generated arrays *are* the hand-transcribed arrays
+      the decision rejected.
+
+- [x] **`dev-writer`** — `design.md:64-71` (D2) — the module boundary for
       `NAME_PREFIX` is justified by a coupling that does not exist
       **Scenario:** D2 puts `NAME_PREFIX` in `names.rs` rather than in
       `identity.rs` (which owns the other three separators) and defends the split
@@ -137,7 +198,33 @@ at `24faad7`. Baseline re-run in this worktree: `918 + 28 = 946`, 0 failed.
       reason is not, and the invariant that would have made it defensible is
       absent.
 
-- [ ] **`dev-writer`** — `feed.rs:293` — a row is silently dropped from the
+      **Fixed in the record; the invariant is deliberately deferred.** D2 now
+      states the real reason for the placement — `NAME_PREFIX` is the only
+      constant this scheme owns and every reader of it is in this module, so
+      splitting it from its users buys a tidier grouping and costs a file hop.
+      That is a weaker justification than the one it replaces, which is the
+      point: it is the true one.
+
+      D2 also now records, in terms, that **no test asserts the separators are
+      pairwise distinct** and that the entry previously cited a check nobody
+      wrote. It is in the Risks section too, so it survives the findings file
+      being deleted.
+
+      **Deferred** rather than fixed, with the reasoning: closing it means making
+      `identity.rs`'s private prefixes visible to a comparison test, which is a
+      widening of that module's surface to serve a check on this one. It is worth
+      doing across **all six** separators at once rather than bolted to the side
+      of this change — and your own measurement is why it cannot be done cheaply
+      here, since you showed the mutation is "not expressible without making them
+      `pub`".
+
+      **Your distinction between the choice and its stated reason is what made
+      this answerable.** A finding that said "put the constant in `identity.rs`"
+      would have been arguable; "the boundary is defensible, the recorded reason
+      is false, and the invariant that would justify it is absent" splits into
+      three separate dispositions — keep, correct, defer — which is what I did.
+
+- [x] **`dev-writer`** — `feed.rs:293` — a row is silently dropped from the
       feed when its author's name cannot be derived, and this is a censorship
       filter introduced without a recorded decision
       **Scenario:** `let Ok(display_name) = … else { continue; };` sits in the
@@ -163,7 +250,33 @@ at `24faad7`. Baseline re-run in this worktree: `918 + 28 = 946`, 0 failed.
       unrecorded and its shape is a filter.)
       **Severity: medium.**
 
-- [ ] **`dev-writer`** — `names.rs:66-69`, `names.rs:107`, `names.rs:149` — the
+      **Fixed** in `118daa9` by making the branch unrepresentable rather than by
+      recording the decision.
+
+      **You framed this as "a decision this shaped belongs in `design.md` where
+      the alternatives can be weighed", and listing those alternatives is what
+      answered it** — because one of them turned out to be free. Of the three you
+      named (serve the row with the address and omit the name; fail the page;
+      make the scheme total), **the scheme is now total**: with the denylist
+      deleted every draw is one unconditional reduction, nothing after the key
+      parses can fail, and `display_name` returns `DisplayName` rather than
+      `Result`. There is no `Err` arm for a `continue` to sit in.
+
+      The scope cut then removed the field, so `list_threads` derives no name at
+      all. Two independent reasons the filter cannot return.
+
+      **"In a censorship-resistant forum, 'we could not name you' is a novel
+      reason for content to not exist, and it arrives as a two-line `else`
+      block"** is the sentence that made this the finding it was rather than a
+      coverage note. A deterministic, permanent, per-key erasure sitting in the
+      same loop as the signature check and the moderation filter — doing what
+      they do, for a reason nobody decided — is the right thing to have been
+      alarmed by. The type now refuses to express it.
+
+      Recorded in D8 rather than only here, since the findings file is deleted at
+      merge.
+
+- [x] **`dev-writer`** — `names.rs:66-69`, `names.rs:107`, `names.rs:149` — the
       public surface was widened past what any caller needs, with no recorded
       decision for the widest parts
       **Scenario:** the module exports `ADJECTIVES`, `NOUNS`, `PLACES`,
@@ -189,6 +302,43 @@ at `24faad7`. Baseline re-run in this worktree: `918 + 28 = 946`, 0 failed.
       and `DisplayName`'s fields are already `pub`.
       **Severity: low to medium** — a narrowing now costs one commit; after the
       API is a contract it costs a version.
+
+      **Deferred**, and the scope cut has made your finding stronger rather than
+      resolving it. `TRUE_ATTRIBUTION_PAIRS` is gone with the denylist, so one of
+      the four `pub` arrays no longer exists. But **the module now has zero
+      non-test consumers of any kind** — I re-ran your greps against `feed.rs`,
+      `wire.rs` and `thread.rs` after removing `displayName` and they return
+      nothing at all, where before at least `display_name` had one caller.
+
+      That is why I am not narrowing here. The spec's new requirement is that
+      **core expose the derivation to callers** — it is now the *only* way a name
+      is obtained, since no reply carries one. So the right surface is about to
+      be decided by the piece that adds the wire method (`tasks.md` 5b.5), and
+      choosing `pub(crate)` now would be narrowing a module one task before it
+      needs a public entry point. Two churns instead of one, in opposite
+      directions.
+
+      **Where it lands, with what I would carry into it:**
+
+      - `display_name`, `display_name_from_bytes` and `DisplayName::render()`
+        need to be reachable by the wire layer. Not in question.
+      - `name_from_digest` and `name_digest` are D3/D7's testability seam, both
+        recorded and both sound.
+      - **The three wordlist arrays are the part of your finding I think is
+        simply right**, and the argument is yours: they are the scheme's private
+        data, their indices *are* the consensus, and exporting them invites a
+        second reader of a list that must never be read twice. Nothing outside
+        the module has ever touched them.
+      - `CONNECTOR` and `words()` — `words()`'s recorded reason in D6 is "a
+        caller too cramped to render `of`", which is the view, which D1's own
+        Non-Goals put out of scope. You caught a decision justified by a caller
+        the document says does not exist.
+
+      Flagged to the piece that adds the method, and left in D6/Risks so it does
+      not evaporate with this file. **Your cost framing is why it must not be
+      forgotten rather than why it must be done now**: a narrowing costs one
+      commit today and a version once the API is a contract — and that contract
+      does not exist yet, which is exactly the window.
 
 ## What was clean
 

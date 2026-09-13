@@ -243,6 +243,29 @@ connector literally does not exist in the data.
 `words()` returns the three, so a caller too cramped to render `of` has the
 spec's permitted relaxation without core deciding for it.
 
+**The module's `pub` surface is wider than any caller needs, and narrowing it is
+deferred to the piece that adds the wire method.** Right now `names` has **zero**
+non-test consumers: nothing in `feed.rs`, `wire.rs` or `thread.rs` reaches
+`ADJECTIVES`, `NOUNS`, `PLACES`, `CONNECTOR`, `words()`, `name_digest`,
+`name_from_digest` or `display_name_from_bytes`. The spec now requires core to
+expose the derivation — it is the only way a name is obtained — so the public
+entry point is about to be decided by that piece, and narrowing one task before
+it needs widening would be two churns in opposite directions.
+
+What that piece should settle, recorded so it is not re-derived:
+
+- `display_name`, `display_name_from_bytes` and `render()` are what a caller
+  needs. `name_from_digest` and `name_digest` are the testability seam D3 and D7
+  record.
+- **The three wordlist arrays should not be `pub`.** They are the scheme's
+  private data, their *indices* are the consensus, and exporting them invites a
+  second reader of a list that must never be read twice. `pub(crate)` serves
+  every present use, and the crate's own tests reach them through `use super::*`
+  regardless.
+- `words()`'s justification above is "a caller too cramped to render `of`" —
+  which is the view, which this document's own Non-Goals put out of scope. Either
+  the reason or the method should go.
+
 ### D7. Malformed key material never reaches the derivation, and `display_name` returns no `Result`
 
 `display_name` takes a `&PublicKey`, which cannot be constructed from malformed
@@ -407,6 +430,32 @@ regions (`india`, `persis`, `sarmatia`, `baktria`). The first two families are
 the deduplication screen applied *in substance* — shipping them would pass a
 naive string comparison while violating dedup in fact, which the spec names as a
 way to fake a full list.
+
+**The place list deduplicates by PLACE, not by NAME, and that is a decision with
+a real alternative.** A toponym family that a source names several ways —
+`apollonia illyria`, `apollonia pontike`, `apollonia kyrenes` and three more —
+collapses to a single entry, `apollonia`. Where the qualified form is the only
+form a source offers, the qualified form *is* the entry: `lokroi epizephyrioi`,
+`antiocheia maiandros`, `arsinoe kyprou`, `euxeinos pontos`, `seleukeia
+kalykadnos` all ship, because there is no bare name for them to collapse into.
+
+The alternative was one entry per **name**, keeping `apollonia illyria` and
+`apollonia pontike` as two distinct draws. It was available and would have
+yielded a larger list — six extra entries from `apollonia` alone, six from
+`herakleia`, four from `chersonesos`, and so on. It was rejected because the
+spec's dedup screen asks for "one entry per place", and six spellings of one
+Illyrian colony is one place. Shipping all six would pass a naive string
+comparison while violating the screen in substance, which the spec names as a way
+to fake a full list.
+
+**The cost is honest and worth stating**: the reading taken is what makes 1,024
+a thin margin rather than a comfortable one. The looser reading would have
+cleared the target easily — which is exactly why it is the wrong reason to
+choose it.
+
+*This rule lived only in `tmp/places-census/collapse-map.txt`, which is
+gitignored, so the decision would have vanished at merge along with the
+alternative it ruled out. Recorded here for that reason.*
 
 **The enumerated cut list accounts for 61 of those 107, not all of them**, and
 that gap is stated rather than papered over. This entry presents the margin as

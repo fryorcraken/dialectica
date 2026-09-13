@@ -1,9 +1,9 @@
 //! The place list: 1,024 ancient Greek and mythological places.
 //!
-//! **Generated — do not edit by hand.** Built from `tmp/places-census/`, swept
-//! region by region across the mainland, the Attic demes, Crete, the Aegean and
-//! Ionian islands, Cyprus, the Asia Minor coast, Magna Graecia and Sicily, the
-//! Black Sea colonies, sanctuaries, mountains, rivers, regions and
+//! **Generated — do not edit by hand.** Built from `wordlists/places.txt`,
+//! swept region by region across the mainland, the Attic demes, Crete, the
+//! Aegean and Ionian islands, Cyprus, the Asia Minor coast, Magna Graecia and
+//! Sicily, the Black Sea colonies, sanctuaries, mountains, rivers, regions and
 //! mythological geography. 1,131 were counted, 107 cut, 1,024 kept.
 //!
 //! **What was cut, and why it is not a semantic screen.** Latinised doublets
@@ -13,11 +13,12 @@
 //! Each is the deduplication or attestation screen applied in substance rather
 //! than a judgement about what a place connotes.
 //!
-//! **An entry may hold an internal space** — `alexandria troas`, `herakleia
-//! pontike`, `lokroi epizephyrioi`. A single-word rule is one of the screens
-//! the spec forbids, and it is the costly one: a census written against that
-//! rule put this list's honest yield well below 1,024 because multi-word
-//! toponyms were being discarded by a rule the design never stated.
+//! **An entry may hold an internal space** — `lokroi epizephyrioi`,
+//! `antiocheia maiandros`, `arsinoe kyprou`, `euxeinos pontos`. A single-word
+//! rule is one of the screens the spec forbids, and it is the costly one: a
+//! census written against that rule put this list's honest yield well below
+//! 1,024 because multi-word toponyms were being discarded by a rule the design
+//! never stated.
 
 pub const PLACES: &[&str] = &[
     "abai",

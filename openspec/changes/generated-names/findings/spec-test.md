@@ -51,6 +51,19 @@ makes the contradiction below sharper rather than softer.
       a SHA-256 over the pairs in order, written down from the generator's source
       text, not from hashing the array. Severity: high.
 
+      **Note from `dev-writer`, not a tick — this box is yours.** The denylist is
+      **deleted** in `118daa9` under the owner's no-filter ruling, along with
+      `is_refused`, the redraw, the reserve bytes and `ReserveExhausted`. There
+      are no 199 pairs left to pin, so the fix you prescribe has nothing to
+      apply to.
+
+      Your reasoning is why it could be deleted cleanly rather than needing the
+      pin: a consensus-critical constant that nothing pins, and whose
+      *completeness* was a claim about the world no test could check, is a shared
+      table that could drift between peers and rename somebody. That is recorded
+      in `design.md` D5 as one of the deletion's benefits, crediting the
+      mechanism you identified.
+
 - [ ] **`tester`** — `dialectica-ui/tests/` — **the abbreviation side of the
       channel-disjointness requirement has no test at all.** `AddressLabel.qml`
       has no `tst_` file. `tst_identicon.qml` asserts disjointness only from the
@@ -134,6 +147,18 @@ makes the contradiction below sharper rather than softer.
       it names. Severity: medium — this is the "two explanations, one answer"
       family in `.claude/agents/README.md`.
 
+      **Note from `dev-writer`, not a tick.** The test is **deleted** in
+      `118daa9` with the denylist it iterated.
+
+      Your diagnosis stands on its own and I have applied it elsewhere:
+      `NOUNS.contains(&NOUNS[i])` is `true` for every in-range index, so the
+      assertion could not fail for the reason its name gave. Where I needed a
+      similar claim in the replacement tests I pinned **written-down words** —
+      `a_real_figures_canonical_citation_is_returned_like_any_other_draw`
+      asserts the rendered string `"pensive zenon of kition"` and the literal
+      indices `(5136, 1015, 431)`, both produced by `examples/pin_name.rs`
+      off-implementation, rather than asking the arrays about themselves.
+
 - [ ] **`tester`** — spec.md:826, "A different scheme version gives a different
       name for one key" — **no test, and the `tasks.md` claim that it needs the
       API widened for tests alone is wrong.** `NAME_PREFIX` is module-private but
@@ -197,6 +222,24 @@ makes the contradiction below sharper rather than softer.
       never written — which is worse than silence, because it closes the
       question for the next reader. Severity: medium-high. (Four other reviewers
       found this; the measurement above is my own run, not a relay.)
+
+      **Note from `dev-writer`, not a tick.** Both the branch and the citation
+      are **deleted** in `118daa9`, and the branch is now unrepresentable rather
+      than untested: with the denylist gone the derivation cannot fail for a
+      well-formed key, so `display_name` returns `DisplayName` rather than
+      `Result` and there is no `Err` arm for a placeholder to occupy. The scope
+      cut then removed the field, so no feed row derives a name at all.
+
+      What replaces it, in case you want to verify rather than take it: the
+      absence is pinned positively by
+      `the_feed_reply_is_the_ecosystems_pagination_shape`, which asserts the feed
+      row's whole key set — I restored a `displayName` and watched it fail on the
+      added key. `FeedRow` is also destructured exhaustively in two tests, so a
+      re-added field stops them compiling.
+
+      Your framing of *why* it mattered — "worse than silence, because it closes
+      the question for the next reader" — is quoted in `design.md` and is the
+      rule I worked to for every cross-reference in this pass.
 
 - [x] **`spec-writer`** — spec.md:658, "A reply with no author carries no name
       field", and spec.md:746, "A name is unchanged by every surrounding state" —

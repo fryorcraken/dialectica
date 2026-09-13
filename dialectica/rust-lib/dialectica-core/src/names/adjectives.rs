@@ -1,14 +1,15 @@
 //! The adjective list: 8,192 English adjectives.
 //!
 //! **Generated — do not edit by hand.** Built from `/usr/share/dict/words` by
-//! `tmp/gen.rs`, so every entry traces to a dictionary on disk rather than to
-//! anyone's recall. That is what the spec's attestation screen asks for and it
-//! is the one screen no test can check.
+//! `examples/gen_wordlists.rs` and kept in `wordlists/adjectives.txt`, so every
+//! entry traces to a dictionary on disk rather than to anyone's recall. That is
+//! what the spec's attestation screen asks for and it is the one screen no test
+//! can check.
 //!
 //! The slot is open: **any English adjective**, with no tone, register,
-//! familiarity or pronounceability screen. `brittle`, `luminous` and `damp`
-//! draw alongside `measured`. The register of a name is carried by the
-//! *X of Y* shape and the two Greek words in it, not by this list.
+//! familiarity or pronounceability screen. `luminous`, `pensive` and `restless`
+//! draw alongside any other. The register of a name is carried by the *X of Y*
+//! shape and the two Greek words in it, not by this list.
 //!
 //! The size is exactly 8,192 because `65,536 / 8,192 = 8`, so a 16-bit draw
 //! reduced by `%` is exactly uniform and no word is favoured. Changing the size

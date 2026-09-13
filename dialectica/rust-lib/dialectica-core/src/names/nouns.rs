@@ -1,6 +1,6 @@
 //! The noun list: 1,024 attested ancient Greek nouns.
 //!
-//! **Generated — do not edit by hand.** Built from `tmp/nouns-census/`, whose
+//! **Generated — do not edit by hand.** Built from `wordlists/nouns.txt`, whose
 //! four pools were written region by region and deduplicated before selection:
 //! abstractions, named historical Greeks, mythological figures, and ordinary
 //! concrete nouns. 1,892 were counted and 1,024 kept, so the list was **cut
@@ -13,15 +13,16 @@
 //! `stoa`, `agora`, `archon`, `tyrannos`, `platon`, `aristoteles` and
 //! `sokrates` are all in. Every successive draft that added a fourth filter —
 //! familiarity, legibility, a single-word rule, a tone-and-authority
-//! apparatus — was withdrawn on challenge. Only three screens apply:
-//! ASCII-transliterable, deduplicated, attested.
+//! apparatus, a refused-combination denylist — was withdrawn on challenge.
+//! Only three screens apply: ASCII-transliterable, deduplicated, attested.
 //!
-//! **No entry carries the connector as a word.** A source supplying named
-//! Greeks supplies them already qualified — `zenon kitieus`, `straton
-//! lampsakenos` — and such an entry would render *measured zeno of citium of
-//! lampsacus*, two places attached to one name. The qualified forms were cut
-//! and the bare names kept, which is what makes the noun-place denylist the
-//! thing that handles this family, at the pair level where it belongs.
+//! **No entry carries the connector as a word**, and this is the ONLY rule in
+//! the capability that keeps anything out. A source supplying named Greeks
+//! supplies them already qualified — `zenon kitieus`, `straton lampsakenos` —
+//! and an entry spelled `zenon of kition` would render *pensive zenon of kition
+//! of lampsakos*, two places attached to one name with no way for a reader to
+//! tell which the place slot supplied. The bare names stay and draw normally:
+//! what a noun means is no part of whether it is in.
 
 pub const NOUNS: &[&str] = &[
     "acheron",

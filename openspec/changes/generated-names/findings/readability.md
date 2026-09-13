@@ -14,7 +14,7 @@ run. Every one rests on a file read in this tree.
 
 ## Comments that argue from numbers the shipped data disproves
 
-- [ ] **`dev-writer`** — `names.rs:358-362` — `is_refused`'s doc comment states
+- [x] **`dev-writer`** — `names.rs:358-362` — `is_refused`'s doc comment states
       the denylist arithmetic that `PLAN.md` struck through and `proposal.md`
       explicitly withdrew, and every figure in it is wrong for the list as
       shipped.
@@ -35,7 +35,18 @@ run. Every one rests on a file read in this tree.
       persuasive paragraph in the module and it is the one that was retracted
       upstream.
 
-- [ ] **`dev-writer`** — `names.rs:196-197` — `NameError::ReserveExhausted`'s doc
+      **Fixed** in `118daa9` by deletion, with the denylist it justified.
+
+      **"The single most persuasive paragraph in the module and it is the one
+      that was retracted upstream" is the finding**, and the arithmetic is only
+      its evidence. Persuasiveness is what carried a withdrawn premise back into
+      the code and kept it there through several passes — a paragraph that reads
+      as settled reasoning does not invite the grep that would disprove it. I
+      have kept that in mind while rewriting: `design.md` D5 now records the
+      deletion as an owner *ruling* rather than re-arguing the case, precisely so
+      there is no persuasive paragraph for a later reader to inherit and defend.
+
+- [x] **`dev-writer`** — `names.rs:196-197` — `NameError::ReserveExhausted`'s doc
       comment quotes two derived rates that inherit the withdrawn 960 premise.
       **Scenario:** it reads *"Arrives about once in 1.2 million identities: a
       first draw is refused about once in 1,090."* 1,048,576 / 960 ≈ 1,092, so
@@ -52,7 +63,18 @@ run. Every one rests on a file read in this tree.
       code replaced a claim that stays true with two that went stale on the first
       curation pass. **Severity: high.**
 
-- [ ] **`dev-writer`** — `feed.rs:281-282` — the same withdrawn "1.2 million"
+      **Fixed** in `118daa9` by deletion.
+
+      **"The contract is better than the code here" is the most useful sentence
+      in this file** and I have applied it as a rule rather than to this comment.
+      The spec stated an order of magnitude and said why that form survives
+      curation; the code restated it as two precise derived figures, which is
+      strictly more fragile and no more informative. `names.rs` now carries no
+      derived rate at all. The only arithmetic left is `65,536 / 8,192 = 8` and
+      `65,536 / 1,024 = 64` — exact, and unable to drift without the list sizes
+      changing, which a test pins.
+
+- [x] **`dev-writer`** — `feed.rs:281-282` — the same withdrawn "1.2 million"
       figure is repeated in `list_threads`, so correcting `names.rs` alone leaves
       a second copy.
       **Scenario:** *"A derivation failure here is the denylist reserve being
@@ -62,9 +84,19 @@ run. Every one rests on a file read in this tree.
       **Severity: medium** — flagged separately because it is a second file and a
       fix to `names.rs` will not touch it.
 
+      **Fixed** in `118daa9`: the whole comment block and the `continue` it
+      justified are deleted from `list_threads`.
+
+      **Filing this separately was the right call and it worked.** A fix to
+      `names.rs` would not have touched it — and the reason it mattered is the
+      one you name: this figure was what a reader used to judge whether the
+      silent `continue` beneath it was acceptable. A wrong number is doing real
+      work when it is the premise of a "this is rare enough not to worry about"
+      argument, which is exactly what it was.
+
 ## A citation to a test that does not exist
 
-- [ ] **`dev-writer`** — `feed.rs:292` — the `NO SPEC:` block's closing "See"
+- [x] **`dev-writer`** — `feed.rs:292` — the `NO SPEC:` block's closing "See"
       names a test that exists nowhere in the repository.
       **Scenario:** the comment ends *"See
       `a_row_whose_name_cannot_be_derived_is_dropped_rather_than_faked`."* A
@@ -80,9 +112,26 @@ run. Every one rests on a file read in this tree.
       does forbid a placeholder and says nothing about a feed's handling of an
       underivable row, so the `NO SPEC:` classification itself is correct.
 
+      **Fixed** in `118daa9`: comment, citation and branch all deleted.
+
+      **Your distinction between the two defects is the one that made this
+      actionable**, and it is worth restating: "a comment asserting a test exists
+      is a readability defect independent of the coverage gap, and the fix is to
+      the comment either way." The `tester` had already recorded the coverage gap
+      as reviewer-visible, which is the sort of note that reads as *handled*. It
+      was not — and separating the false citation from the missing test is what
+      kept the question open until it could be closed properly.
+
+      **You were also right that the `NO SPEC:` classification itself was
+      sound.** That mattered for how I fixed it: the marker was doing its job
+      (flagging a real gap in the contract), and the spec has since closed the
+      gap by ruling that no reply carries a name at all. So the right outcome was
+      not "correct the citation" but "the unspecified behaviour has been
+      specified and the code implementing it is gone".
+
 ## The running example cannot be produced by the code it illustrates
 
-- [ ] **`dev-writer`** — `names.rs:9`, `names.rs:153`, `names.rs:725`,
+- [x] **`dev-writer`** — `names.rs:9`, `names.rs:153`, `names.rs:725`,
       `feed.rs:133` — the canonical example name *measured aporia of lampsacus*
       is unreachable: neither `measured` nor `lampsacus` is in the shipped lists.
       **Scenario:** a reader learning the scheme from `names.rs`'s module header
@@ -99,7 +148,26 @@ run. Every one rests on a file read in this tree.
       example in the module is a name the module cannot emit, which is exactly the
       shape of claim a reader cannot check without doing what I just did.
 
-- [ ] **`dev-writer`** — `names.rs:344-347` and `names.rs:353` — the
+      **Fixed** in `118daa9`. Every site now reads *pensive aporia of lampsakos*,
+      and each word was verified by index before I wrote it: `pensive`
+      adjective 5136, `aporia` noun 102, `lampsakos` place 505.
+
+      **A trap worth recording, because I nearly shipped it in the fix.** Those
+      indices are *array* indices; a `grep -n` hit gives a **file line**, and the
+      literals start at line 19 of `adjectives.rs`, 27 of `nouns.rs` and 23 of
+      `places.rs`. I first wrote `pensive` as 5155 — its grep line — into a test
+      that builds a digest selecting that index, which would have selected a
+      different word entirely. Caught by re-deriving through
+      `examples/pin_name.rs` rather than by rereading. The offsets are now noted
+      in the one test comment that cites indices, since "read a grep hit as an
+      index" is precisely how a confident wrong number gets written down.
+
+      `names.rs:725`'s token-count example was the worst of the four for the
+      reason you give — it computes off the example as though it were a real
+      draw — and it now uses a real multi-word place (`lokroi epizephyrioi`,
+      verified present) so the "4 versus 5 tokens" arithmetic is checkable.
+
+- [x] **`dev-writer`** — `names.rs:344-347` and `names.rs:353` — the
       true-attribution argument is worked entirely in a transliteration the lists
       do not use, so the one example that would let a reader verify the denylist
       does not match any entry in it.
@@ -115,7 +183,21 @@ run. Every one rests on a file read in this tree.
       to"*, keeping the Latinised form only for the English prose), so the two
       files disagree about the same example. **Severity: medium.**
 
-- [ ] **`dev-writer`** — `names/adjectives.rs:9` — the module header names three
+      **Fixed** in `118daa9` by deletion — `is_refused` and the denylist are gone
+      under the owner's no-filter ruling, so neither passage survives.
+
+      **Your observation that `denylist.rs:11` got it right is why this is not
+      simply "deleted, moot".** Two files carrying the same example, one correct
+      and one not, is a drift signal rather than a typo — it means the example
+      was restated from memory in the second place rather than copied from the
+      first. The convention that survived into the new text is the one
+      `denylist.rs` was using: **transliteration for list entries, Latinised only
+      for English prose about a real person.** So `design.md` D5 says "*straton
+      of lampsakos* and the like" for the drawn name and "Straton of Lampsacus
+      died around 269 BC" for the historical figure, which is the distinction
+      your finding isolates.
+
+- [x] **`dev-writer`** — `names/adjectives.rs:9` — the module header names three
       adjectives as examples of the open slot and two of them are not in the file.
       **Scenario:** *"`brittle`, `luminous` and `damp` draw alongside
       `measured`."* A reader sampling the list to check the "no register screen"
@@ -127,7 +209,25 @@ run. Every one rests on a file read in this tree.
       illustrated (no register screen) is true, which is what makes the false
       examples costly: they are the only evidence offered for a true claim.
 
-- [ ] **`dev-writer`** — `names/places.rs:16` — the "an entry may hold an internal
+      **Fixed** in `f0c9fda`. The header now reads *"`luminous`, `pensive` and
+      `restless` draw alongside any other"* — the three the spec itself uses,
+      each verified present.
+
+      **The fix had to be to the generator, not the file**, and that is worth
+      recording because it is a trap in this change's own shape: `adjectives.rs`
+      carries "**Generated — do not edit by hand**", so an edit to the header
+      would have been silently reverted by the next `cargo run --example
+      gen_wordlists`. The doc strings live in `examples/gen_wordlists.rs` and the
+      file was regenerated. I confirmed the regeneration touched only comments by
+      re-running `every_wordlist_is_pinned_entry_by_entry_and_in_order`, which
+      hashes every entry in order and still passes.
+
+      Your last sentence is the reason this was not cosmetic: *"they are the only
+      evidence offered for a true claim."* A reader checking whether the register
+      screen was really dropped has nothing but those examples, and two of three
+      failing a grep is worse for that claim than offering none.
+
+- [x] **`dev-writer`** — `names/places.rs:16` — the "an entry may hold an internal
       space" claim names three examples, of which only one is in the list.
       **Scenario:** *"An entry may hold an internal space — `alexandria troas`,
       `herakleia pontike`, `lokroi epizephyrioi`."* A reader checking that the
@@ -142,7 +242,20 @@ run. Every one rests on a file read in this tree.
       kept, `gortynia`/`piraeus`/`lelantine` cut), which is the standard the space
       example should meet.
 
-- [ ] **`dev-writer`** — `names.rs:722-726` and `names.rs:1168-1172` — two test
+      **Fixed** in the generator and regenerated. The header now names four real
+      multi-word entries — `lokroi epizephyrioi` (567), `antiocheia maiandros`
+      (113), `arsinoe kyprou` (139), `euxeinos pontos` (292) — each verified by
+      grep before writing, with the file lines shown here rather than passed off
+      as indices.
+
+      **"Which is the standard the space example should meet" is the most useful
+      part of this box.** You did not just report a wrong example; you pointed at
+      a correct one four lines above it in the same file and said *match that*.
+      That converts a defect report into a rule, and it is the rule I applied
+      across the whole pass — every example I wrote or kept was checked with a
+      grep, and the ones I could not verify I removed rather than softened.
+
+- [x] **`dev-writer`** — `names.rs:722-726` and `names.rs:1168-1172` — two test
       comments illustrate multi-word-place behaviour with `alexandria troas` and
       `heraclea pontica`, neither of which is in `PLACES`.
       **Scenario:** `a_name_is_three_drawn_words_and_a_fixed_connector` explains
@@ -155,6 +268,21 @@ run. Every one rests on a file read in this tree.
       real multi-word entries are listed above. **Severity: low** — same defect
       family as the two above, split out because it is in test comments a fixer
       would otherwise not open.
+
+      **Fixed.** Both now use `lokroi epizephyrioi`, verified present at
+      `places.rs:567`.
+
+      **Splitting this out is exactly why it got fixed**, and the reasoning
+      deserves to outlive the box. Fixing the module header and the wordlist
+      headers touches `names.rs`'s prose and two generated files; nothing in that
+      path opens a test body four hundred lines down. A fixer working from the
+      other three findings would have closed them and left these two standing,
+      and the second one is the load-bearing justification for why an internal
+      space is permitted at all.
+
+      "Low severity, split out because a fixer would otherwise not open it" is a
+      better judgement than folding it into the box above with the same severity
+      as the rest.
 
 - [x] **`spec-writer`** — `docs/UI-BRIEF.md:124` — the brief hands a designer two
       specimen names the core cannot produce.
@@ -234,7 +362,7 @@ run. Every one rests on a file read in this tree.
 
 ## A named constant that documents an invariant it does not enforce
 
-- [ ] **`dev-writer`** — `names.rs:109-122` and `names.rs:299` —
+- [x] **`dev-writer`** — `names.rs:109-122` and `names.rs:299` —
       `NAME_DIGEST_BOUND` carries a 14-line doc comment describing the bound as
       the thing that keeps the derivation finite, but nothing in the derivation
       reads it, and the one line that mentions it is an assertion that cannot
@@ -257,9 +385,28 @@ run. Every one rests on a file read in this tree.
       told the invariant is enforced by a constant and it is enforced by two
       literals elsewhere.
 
+      **Fixed** in `118daa9`. The constant is `6` and `name_from_digest` now
+      slices `digest[..NAME_DIGEST_BOUND]`, reading its three draws from that
+      slice. The `debug_assert_eq!` is gone and there are no offset literals left
+      — `draw_at` itself is deleted, since with no redraw there is no second call
+      site to factor out.
+
+      **"A reader is told the invariant is enforced by a constant and it is
+      enforced by two literals elsewhere" is a defect class, not a comment
+      defect**, and I have treated it as one. The rule I took from it: a named
+      constant must be *load-bearing in the operation it names*, or it is
+      documentation wearing a type. Your mutation — `(0, 6)` → `(0, 8)`, bound
+      silently becomes 14 while the constant, its doc and its assert all still
+      say 12 — is now not expressible, because there is no offset parameter for
+      it to move.
+
+      Worth noting the finding outlived the code it was filed against: `tasks.md`
+      3.5 carried it forward explicitly to the new value, so the tautology would
+      otherwise have been reproduced at `6`.
+
 ## The replaced tests: the prose names a term the assertion omits
 
-- [ ] **`dev-writer`** — `names.rs:1259-1272` — the comment explaining the
+- [x] **`dev-writer`** — `names.rs:1259-1272` — the comment explaining the
       three deleted tests names five terms as what they asserted absent, then the
       loop pins only four of them present, and the missing one is `strategos`.
       **Scenario:** the comment says *"Those asserted that `stoa`, `platon`,
@@ -280,9 +427,25 @@ run. Every one rests on a file read in this tree.
       set. **Severity: medium** — the comment is accurate about history and
       inaccurate about what the code beneath it does.
 
+      **Fixed**: `strategos` is now in the loop, with a comment saying why it is
+      there so a later tidier does not drop it again as redundant.
+
+      **This is the sharpest finding in the file and it is the smallest.** The
+      test's own justification is *"pinned as PRESENT rather than merely 'not
+      asserted absent', because a curation pass that quietly dropped them would
+      otherwise reintroduce the withdrawn screen with every test still green"* —
+      and the one term the comment singled out by name was the one the loop did
+      not cover. The gap was in the exact shape the comment was written to close.
+
+      You also verified the historical claim at `d1e6506` rather than taking the
+      comment's word for which tests had existed, which is what makes "accurate
+      about history and inaccurate about what the code beneath it does" a
+      statement rather than an impression. That precision is why the fix is one
+      word rather than a rewrite.
+
 ## A transcription in design.md that would not compile
 
-- [ ] **`dev-writer`** — `design.md:66` — the recorded `NAME_PREFIX` has seven
+- [x] **`dev-writer`** — `design.md:66` — the recorded `NAME_PREFIX` has seven
       trailing nulls where the code has six, in a sentence that asserts the value
       is 32 bytes.
       **Scenario:** the design records the separator as
@@ -300,9 +463,27 @@ run. Every one rests on a file read in this tree.
       wrong in the document that explains it is the kind of thing that gets copied
       back.
 
+      **Fixed** in `118daa9`. D2 now records six NULs and shows the arithmetic
+      (26 + 6 = 32) so the next reader can check it rather than count characters.
+      The correction is stated as a correction, with the wrong value named, since
+      a silently-fixed constant leaves a reader who remembers the old one unsure
+      which is current.
+
+      **Your severity is right and your reason for flagging it anyway is the one
+      that matters.** "The kind of thing that gets copied back" is exactly the
+      risk: `design.md` is the document a future reader reaches for when asking
+      what version 1 was, and this brief's own instructions told me to fix the
+      recorded literal — so the wrong value was already one step from being
+      propagated as the authority.
+
+      The same box also surfaced a second defect in D2 that the design reviewer
+      filed separately: the entry justified its module placement by citing an
+      `identity.rs` assertion that does not exist. Both are answered in that box;
+      recorded here so the two are not read as one fix.
+
 ## A worked example that changes transliteration mid-sentence
 
-- [ ] **`dev-writer`** — `names/nouns.rs:19-22` and `names.rs:1231-1236` — the
+- [x] **`dev-writer`** — `names/nouns.rs:19-22` and `names.rs:1231-1236` — the
       "no noun carries the connector" rationale names its inputs in Greek
       transliteration and its output in Latinised English, so the example does not
       demonstrate the substitution it describes.
@@ -320,6 +501,28 @@ run. Every one rests on a file read in this tree.
       **Severity: low.** Stylistic-adjacent, but it is the only explanation of why
       a whole class of source entries was cut, so a reader who cannot follow it
       cannot check the decision.
+
+      **Fixed** in both places, and the example got strictly better in the
+      process. Both now use `zenon of kition` → *pensive zenon of kition of
+      lampsakos*, where **`zenon` (noun 1015) and `kition` (place 431) are both
+      real shipped entries** under the kappa rule. So the example no longer
+      demonstrates a collision with invented words: it shows a source's qualified
+      form colliding with actual list contents, which is the hazard the rule
+      exists for.
+
+      **"Stylistic-adjacent, but it is the only explanation of why a whole class
+      of source entries was cut" is the right weighting**, and it is why this got
+      a real fix rather than a transliteration sweep. The ` of ` spelling rule is
+      now the **only** rule in the capability that keeps anything out — the
+      denylist that used to share that job is deleted — so this passage carries
+      more weight than when you filed it, not less. A reader who cannot follow it
+      cannot check the one remaining exclusion in the whole scheme.
+
+      There is now also a test that exercises it from the other side:
+      `a_real_figures_canonical_citation_is_returned_like_any_other_draw` pins
+      that the bare `zenon` and `kition` **do** draw together and render
+      normally, so the rule's scope — an entry's spelling, never a word's
+      meaning — is asserted rather than only explained.
 
 ---
 
