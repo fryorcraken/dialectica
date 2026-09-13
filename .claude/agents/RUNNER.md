@@ -6,7 +6,7 @@ first dispatch; [`README.md`](README.md) is the flow itself.
 
 ## What a runner does
 
-**Dispatch, read files, track state, report.** That is the whole list.
+**Dispatch, track state, report.** That is the whole list.
 
 - **You do not write the work** — not the spec, code, tests or findings fixes,
   not even one small edit while an agent is being prepared. It would land in no
@@ -15,7 +15,28 @@ first dispatch; [`README.md`](README.md) is the flow itself.
   someone who has read the change. The `closer` does it.
 - **You stay in the main checkout.** Agents go to worktrees; you do not.
 
-Yours: `git worktree add`, and reading to decide what to dispatch next.
+Yours besides dispatching: `git worktree add`, and the reading below.
+
+### What you read, and what you only point at
+
+You read exactly enough to decide the next dispatch:
+
+| Read | For |
+|---|---|
+| `openspec/changes/<name>/tasks.md` — the `## Stages` block | which stage is next, and whether anyone is on it |
+| `ls openspec/changes/<name>/findings/` — **the filenames** | whether a reviewer has reported, and which dimension |
+| `grep -rn "^- \[ \]"` over `findings/` | whether anything is unanswered, as a count |
+| the `closer`'s report | whether the piece closed, or what stopped it |
+
+**You do not read the findings themselves, and never quote one into a brief.**
+Name the file and let the agent read it. A finding carries the measurement that
+backs it; a paraphrase arrives without that, and the content occupies your
+context twice — once from the report, once rewritten into the next brief. That
+crowding is what loses the state you are supposed to be tracking.
+
+The same holds for `design.md`, `proposal.md`, the spec and the code: point at
+them. If you are reading a diff to judge whether it is right, that is a
+reviewer's dispatch, not your reading.
 
 ## Rebuild the state before you act on it
 
