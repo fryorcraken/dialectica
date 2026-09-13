@@ -3349,25 +3349,40 @@ should not pre-empt it.
 
 #### 2. What a thread view is
 
-A thread view renders **current versions** (§5.7), and the design tension is
-that "current" is not the whole truth a reader or a moderator needs.
+~~A thread view renders **current versions** (§5.7), and the design tension is
+that "current" is not the whole truth a reader or a moderator needs.~~
 
-`getThread` returns the root post plus its replies, paginated, each item
-carrying:
+**The thread read is contracted — see the `thread-read` spec.** It says what
+identifies a thread and that the identifier does not move when the root is
+revised; that membership is derived from the parent chain and a post's own
+`thread` field is never trusted; that the items are flat, each naming its
+parent, in the system's order with the root first; that pages tile with no gap
+and no repeat; that a hidden root is returned marked rather than dropped while a
+hidden reply is omitted by default; that an absent thread is refused where an
+empty one is served; that the moderation state is three-valued and names its
+deciding op; and that an author is reported as an address **and** a public key,
+because the generated name derives from the key and the mark from the address.
+The reasoning for each is in the `thread-read` change's `proposal.md` and
+`design.md`.
 
-- the post's id **as a thread position** — the original's op id, which is what a
-  reply names as its parent and what never changes across edits
-- the **current version's** op id, which is what a moderator acts on and what
+~~`getThread` returns the root post plus its replies, paginated, each item
+carrying:~~
+
+- ~~the post's id **as a thread position** — the original's op id, which is what a
+  reply names as its parent and what never changes across edits~~
+- ~~the **current version's** op id, which is what a moderator acts on and what
   changes every time the post is edited. These are two fields because they are
   two facts; `revision::CurrentVersion` carries both for exactly this reason,
-  and collapsing them would force every caller to re-derive one.
-- body and attachments, from the current version
-- `isRevised`
-- the author address
-- the parent post's id, so the view can render the reply structure
-- moderation state
+  and collapsing them would force every caller to re-derive one.~~
+- ~~body and attachments, from the current version~~
+- ~~`isRevised`~~
+- ~~the author address~~ — **superseded**: an address alone cannot produce the
+  generated name, which derives from the public key. The read returns both.
+- ~~the parent post's id, so the view can render the reply structure~~
+- ~~moderation state~~
 
-**The moderation state must name its deciding op, not be a boolean.**
+~~**The moderation state must name its deciding op, not be a boolean.**~~
+**Contracted**; the argument below is kept only where it is still live.
 `moderation::Moderation` is a three-state enum — `Unmoderated`, `Hidden(op)`,
 `Unhidden(op)` — and the API should carry the same three states rather than
 flattening them. A boolean loses two things a view needs: the distinction
@@ -3530,11 +3545,10 @@ listThreads({stoa, order, page, perPage, includeHidden})
                             -> {"items":[{thread, currentVersion, body, attachments,
                                           author, isRevised, replyCount, lastReply}],
                                 page, hasMore}
-getThread({stoa, thread, page, perPage, includeHidden})
-                            -> {"items":[{post, currentVersion, parent, body,
-                                          attachments, author, isRevised,
-                                          moderation:{state, decidedBy}}],
-                                page, hasMore}
+getThread  -- superseded; see the `thread-read` spec for the contracted shape.
+           -- Two departures from the sketch that was here: the author is an
+           -- address AND a public key, since the generated name derives from
+           -- the key; and there is no `order`, as for the feed.
 ```
 
 `isGenesisFallback` is the field worth defending: §5.7 says a reader prefers
@@ -3628,12 +3642,14 @@ being asked for rather than discovering it from a stalled view.
   reading by `Address` rather than by target, and reusing the authority check
   unchanged. `iter_target` cannot serve it, because a metadata op's
   `Entry::target()` is `None` by design.
-- **There is no thread read.** `iter_stoa` returns every op in a Stoa;
-  `iter_target` returns the ops acting on one op. Neither answers "the posts
-  whose `thread` is T", which is what a thread view is. That is a projection
-  index rather than a trait method — §3.3 puts read traffic on the materialised
-  view — but it is the first query the projection must serve and it does not
-  exist yet in any form.
+- ~~**There is no thread read.**~~ **Contracted by the `thread-read` spec**, and
+  the shape it asks the projection for is not the one this bullet assumed. The
+  query is *not* "the posts whose `thread` field is T": that field is the
+  author's own claim, and an inbound op may name a thread its parent does not
+  belong to. Membership is derived by following parents to a root, so what the
+  projection must serve efficiently is a lookup by **parent**, not by thread.
+  Whoever builds it should read that spec's membership requirement before
+  choosing an index.
 - **There is no reply count and no most-recent-reply.** §7.2's `active` ordering
   needs the second, and both are folds over ops the resolvers do not perform.
   Both must also be **of non-hidden replies**, which makes them folds over
@@ -3656,11 +3672,13 @@ being asked for rather than discovering it from a stalled view.
   first instance of that as a feed field is how it gets designed badly. What
   would decide it: a first user reading a Stoa with more than a screenful of
   threads. Until then the question is theoretical.
-- **Whether a thread view paginates by reply order or by reply tree.** A flat
-  chronological list paginates cleanly and renders reply structure poorly; a
-  tree renders well and has no natural page boundary. This plan does not choose,
-  because the choice depends on how deep real threads get, and nobody has run
-  one. What would decide it: Stage A running against a Stoa with real traffic.
+- ~~**Whether a thread view paginates by reply order or by reply tree.**~~
+  **Settled by the `thread-read` spec, in the direction that keeps the question
+  open where it matters.** The read returns a flat page in which each item names
+  its parent, so a view computes the nesting it wants and core reports no depth.
+  The reasoning — including that the design bundle's screen 05 nests by an
+  indent over a linear sequence, which this shape serves — is in that change's
+  `proposal.md`.
 - **What a feed ordering is allowed to be called while no Lamport value
   arrives.** This is the sharpest unresolved thing in the section, and the first
   draft of it was wrong in a way worth recording. §7.2 defines `new` as "Lamport
@@ -3707,9 +3725,10 @@ being asked for rather than discovering it from a stalled view.
 > `content-authoring` spec — written the way this section says a delta should be:
 > alongside the thing it contracts. The argument below is why *this section* was
 > not itself a delta, and it still holds for everything here that remains
-> unbuilt: the feed and thread reads, `revisePost`, `getPostHistory`, the
-> moderation calls, and the two orderings, which are still an open question
-> rather than a requirement.
+> unbuilt: `revisePost`, `getPostHistory`, the moderation calls, and the two
+> orderings, which are still an open question rather than a requirement. **The
+> thread read now has a delta too** — the `thread-read` spec. **The feed read
+> still has none**, and that is the named debt below rather than an oversight.
 
 
 `.claude/agents/README.md` puts PLAN.md and the specs in different jobs: PLAN.md
