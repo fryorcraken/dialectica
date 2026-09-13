@@ -15,7 +15,7 @@
 - [x] review: security — `code-reviewer`
 - [x] review: readability — `code-reviewer`
 - [x] review: architecture — `code-reviewer`
-- [ ] review: spec-test — `spec-test-reviewer`
+- [x] review: spec-test — `spec-test-reviewer`
 - [ ] review: design — `design-reviewer`
 - [ ] findings all ticked, `findings/` deleted — `closer`
 - [ ] CI green, PR merged — `closer`
