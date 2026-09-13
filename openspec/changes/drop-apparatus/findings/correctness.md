@@ -132,6 +132,12 @@ and the Feed-section clause names the specific trap.
       whether the non-empty feed owes a locality line is a requirement question,
       not a QML one.
 
+      **Left open — `spec-writer`'s.** Noted from `dev-writer`, `291c719`: I did
+      not touch `FeedScreen.qml`, so `:302-351` and the `visible` binding are
+      exactly as you measured them. `design.md` §2's `ON WHAT YOU HOLD` row still
+      carries the narrowing pointer at this box, so the question is not orphaned
+      if this file is deleted before it is answered.
+
 - [ ] **`tester`** — `dialectica-ui/tests/` — nothing pins the one piece of
       interface text this change creates, nor the `implicitHeight` it fixes
       **Scenario:** delete `FeedScreen.qml:225-233` (the "Not newest first…"
@@ -146,6 +152,31 @@ and the Feed-section clause names the specific trap.
       `frame.implicitHeight > 0` and that it grows with `rows.length` is cheap,
       needs no rendering, and would have failed on `main`.
       **Severity: medium.**
+
+      **Left open — `tester`'s.** A test that must be *proven to fail* is not
+      mine to write, and writing it badly would be worse than leaving the box.
+      Two notes from `dev-writer`, `291c719`, so whoever takes it is not working
+      from stale pointers:
+
+      - **`ScreenFrame.qml:43` has moved.** The `implicitHeight` binding you name
+        is now at **line 28** (`implicitHeight: body.implicitHeight + 2 *
+        Theme.cardPaddingY`); the `body.height` binding is at **79**. I rewrote
+        the comment block — the two bindings themselves are unchanged, so both
+        mutations you describe still reproduce.
+      - **The probe technique works, contrary to the comment repeated in several
+        test files.** QtTest measures height with the root given a size: a
+        `TestCase` with `width`/`height` set and `when: windowShown`, then
+        `createTemporaryObject`. I used exactly that to re-measure the escape
+        hatch (`implicitHeight` 156 plain, 176 with a trailing spacer, and rows
+        at y=111/393 versus y=0/60 at `height: 600`), which is the same shape a
+        test for `frame.implicitHeight > 0` and its growth with `rows.length`
+        would need. Worth knowing before concluding it cannot be tested here.
+      - There is now a **third** assertion worth pinning alongside your two: that
+        a trailing `Item { Layout.fillHeight: true }` inflates `implicitHeight`
+        by `Theme.blockGap` while `Layout.fillHeight` on a real child does not.
+        That is the defect `findings/readability.md`'s first box filed, and it is
+        currently prevented by a comment only. Measured numbers are in
+        `design.md` §4.
 
 - [x] **`dev-writer`** — `design.md` §2 / commit message — the `ON THE MARK`
       "never a proof" proposition has no surviving rendered text

@@ -35,7 +35,7 @@ spacer, 176 with one — exactly `blockGap`).
 
 ## Findings
 
-- [ ] **`dev-writer`** — `ScreenFrame.qml:82-85` — the escape hatch the comment
+- [x] **`dev-writer`** — `ScreenFrame.qml:82-85` — the escape hatch the comment
       prescribes re-introduces the 20px defect the same comment rejects, and says
       nothing about it
       **Scenario:** a screen author hits the scatter, reads line 82 ("**If you
@@ -62,7 +62,35 @@ spacer, 176 with one — exactly `blockGap`).
       `blockGap` on `implicitHeight` and that the `fillHeight`-on-a-real-child
       form does not.
 
-- [ ] **`dev-writer`** — `openspec/changes/drop-apparatus/design.md:35` — the
+      **Fixed** in `291c719`. I re-measured rather than taking the figures, and
+      added the third row your probe did not need — the form the comment should
+      recommend — so the comparison is between the two remedies rather than
+      against the broken case. One run, two 40px rows, Qt 6.10.3:
+
+      | Form | `implicitHeight` | rows at `height: 600` |
+      |---|---|---|
+      | no slack-absorbing child | 156 | y=111, y=393 |
+      | trailing `Item { Layout.fillHeight: true }` | **176** | y=0, y=60 |
+      | `Layout.fillHeight` on a real child | **156** | y=0, y=60 |
+
+      Your 156/176 reproduces exactly, and the delta is `Theme.blockGap`. The
+      third row is what makes this a defect rather than a trade: the
+      `fillHeight`-on-a-real-child form fixes the scatter at **no** cost to
+      `implicitHeight`, so the comment was not offering two options with
+      different prices — it was offering the right answer and a strictly worse
+      one, unlabelled.
+
+      The comment now names `Layout.fillHeight` on a real child as *the* fix and
+      says what the spacer costs and why (`spacing` gap entering
+      `body.implicitHeight`). It no longer reads as a choice. Recorded in
+      `design.md` §4 under *The two escape hatches are not equivalent*, with the
+      table, so it survives the deletion of this file.
+
+      The general lesson is written there too: a reader who hits a symptom takes
+      whichever remedy needs least judgement, so offering two and warning about
+      neither means the cheaper-looking one gets picked.
+
+- [x] **`dev-writer`** — `openspec/changes/drop-apparatus/design.md:35` — the
       `ON THE MARK` row cites a `UI-BRIEF.md` line range that is right on no
       branch, under a heading that says which branch it is from
       **Scenario:** §2 states "Line numbers are `origin/main`'s" (`:30`) and then
@@ -83,7 +111,28 @@ spacer, 176 with one — exactly `blockGap`).
       **Severity: low**, and it is a documentation defect rather than a code one.
       Naming the heading instead of the line range would not rot.
 
-- [ ] **`dev-writer`** — `ScreenFrame.qml:4-12, 23-29, 36-85` — 74 of 102 lines
+      **Fixed** in `291c719`, by naming the heading as you suggest. Verified
+      independently before changing anything: `git grep -n "attack is purely
+      social" origin/main -- docs/UI-BRIEF.md` gives **622**, the same grep on
+      this branch gives **590**, and the citation said 584-593. Wrong on the
+      basis the section declares, near-right on the branch by coincidence —
+      exactly as filed.
+
+      The row now cites **"Brief obligation 6"** with its heading quoted
+      verbatim — *"A generated name is never unique and never an identifier —
+      the address is."* — and names **layer 2, the identicon**, within its
+      four-layer list. I confirmed that heading string is present on the branch
+      (`grep -n "A generated name is never unique"` → 585) and it is the text of
+      the obligation rather than my paraphrase, so a reader can find it with a
+      grep on any branch.
+
+      I checked the two sibling citations you said were fine rather than
+      assuming: `:86-88` is line **87** on `origin/main` (the sentence wraps,
+      which is why a grep for the whole phrase misses it), and the Feed section
+      heading is at **327**, inside the cited `:331-375` bracket. Both left as
+      they are — your assessment holds.
+
+- [x] **`dev-writer`** — `ScreenFrame.qml:4-12, 23-29, 36-85` — 74 of 102 lines
       are comment, and four passages narrate what the file used to be
       **Scenario:** `grep -c "^\s*//"` gives **74** against `grep -c ""` = **102**
       — 73% comment, wrapping 16 lines of QML. Four separate passages tell the
@@ -109,6 +158,42 @@ spacer, 176 with one — exactly `blockGap`).
       to cut the historical narration, keep the two operative paragraphs, and
       leave the archaeology in `design.md` §4 where a reader who wants it will
       look.
+
+      **Fixed** in `291c719`, as asked: the historical narration is cut, the two
+      operative paragraphs are kept, and `design.md` §4 gained a closing
+      paragraph saying the comment shrank and what it kept, so the archaeology
+      has a stated home rather than merely still existing in `git log`.
+
+      Measured before and after with your own commands — `grep -c "^\s*//"`
+      against `grep -c ""`:
+
+      | | comment lines | total | QML body |
+      |---|---|---|---|
+      | before | 74 | 102 | 28 |
+      | after | 53 | 81 | 28 |
+
+      The 21 lines removed are all comment; the QML is byte-identical apart from
+      the header. `grep -n "used to be\|Previously\|this replaced\|was tried\|
+      two-column"` over the file now returns nothing — all four passages you
+      listed are gone, plus the `:77-80` spacer paragraph, whose surviving
+      content moved into the escape hatch where it is now operative advice
+      rather than history.
+
+      **One thing I did not do, and the reason.** Your ask implies the ordering
+      problem too — the operative paragraphs were buried after three paragraphs
+      of history. Cutting the history fixes that as a side effect, so I did not
+      also reorder: the file now opens with what the card is, points at the
+      brief section for the contract, and the two remaining blocks are the
+      `implicitHeight` rationale and the `body.height` rationale, each attached
+      to the line it explains. Moving them further would separate a comment from
+      its code, which is the trade the other direction.
+
+      Related, and the reason this box and `architecture.md`'s first box were
+      answered in one commit: the header no longer tries to *be* the contract.
+      It points at `docs/UI-BRIEF.md`'s *What `ScreenFrame` gives you* and asks
+      that the two be kept in step. Some of the 21 lines went because the
+      contract they were carrying now lives somewhere a screen author reaches
+      without opening this file.
 
 ## Areas that were clean
 

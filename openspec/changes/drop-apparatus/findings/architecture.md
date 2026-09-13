@@ -25,7 +25,7 @@ registrations whose files went. Nothing here is over-built.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `dialectica-ui/src/qml/ScreenFrame.qml` — the shell's
+- [x] **`dev-writer`** — `dialectica-ui/src/qml/ScreenFrame.qml` — the shell's
       contract exists only inside the shell, and the three branches building on it
       will not meet it
       **Scenario:** `grep -rn "ScreenFrame"` over `docs/`, `dialectica-ui/` and
@@ -65,7 +65,61 @@ registrations whose files went. Nothing here is over-built.
       from content; a `fillHeight` child gets real slack; do not set an explicit
       height) is cheap and is the thing that survives archival.
 
-- [ ] **`dev-writer`** — `docs/UI-BRIEF.md:468-485` — the general rule is
+      **Fixed** in `291c719`, in the place you name and with the three bullets
+      you name. `docs/UI-BRIEF.md` gains a section **What `ScreenFrame` gives
+      you, and the one thing it asks**, placed immediately after the apparatus
+      box under *Non-negotiable rendering obligations* — the rule about
+      discharging an obligation *in the screen* leads directly into the shell
+      screens are built in, so a reader meets them together.
+
+      It states: the card reports its own height from content and that is what
+      makes a feed scroll; a `Layout.fillHeight` child gets real slack; **do not
+      give a `ScreenFrame` an explicit height**; and if you must, put
+      `Layout.fillHeight` on the child that absorbs the slack — never a trailing
+      `Item`, with the reason, which is the readability box's defect stated where
+      the person who would hit it reads.
+
+      **Stating it was not sufficient on its own**, which is the part I want on
+      record. A rule in a document nobody opens is the failure you filed, so
+      three edits make it reachable rather than merely present:
+
+      - the brief's opening now declares **two audiences**, naming the QML
+        implementer explicitly and pointing at the section — previously the file
+        announced itself as a brief for UI design, so an implementer had no
+        reason to read past the first paragraph;
+      - `CLAUDE.md`'s "Where to look for what" row now says **before writing a
+        QML screen** alongside the existing trigger, since "any change that
+        alters what the UI must show, hide or refuse to claim" is not how
+        implementing a mockup reads — your other box's point, and the same edit
+        answers both;
+      - `ScreenFrame.qml`'s header points at the section and asks that the two be
+        kept in step, so the file no longer tries to be the contract and a reader
+        who does open it is sent to the shared copy.
+
+      Recorded in `design.md` §4 under *Where the shell's contract lives*, with
+      your evidence written in — the four call sites holding by luck, and the
+      `ui-onboarding` author re-deriving the rule and keeping the note anyway,
+      which is the cleanest demonstration that the rule was in the wrong place.
+      Two alternatives are recorded as rejected: leaving it in the comment block
+      (the arrangement that produced the gap), and a spec delta (the contract is
+      about how a QML shell is used, not observable forum behaviour, and
+      `.openspec.yaml` sets `skip_specs: true`).
+
+      **I did not edit the other branches**, per the dispatch. The question this
+      answers is where *this* piece records the contract; whether those four call
+      sites are correct is theirs to check against a rule that now exists.
+
+      **What this does not do, stated plainly so the box is not read as more than
+      it is.** This is documentation, not construction. The invariant still holds
+      by authors reading and complying rather than by the type system — a screen
+      can still set `height:` and scatter, and nothing fails. Making it hold by
+      construction would mean `ScreenFrame` refusing or absorbing an explicit
+      height, which is a behaviour change to a shared shell with four in-flight
+      call sites and belongs in its own change with its own spec question. What
+      changed is that the next author is now told, which is what the box asked
+      for.
+
+- [x] **`dev-writer`** — `docs/UI-BRIEF.md:468-485` — the general rule is
       recorded for the designer but not for the QML author, who is the one who
       broke it
       **Scenario:** the box added under *Non-negotiable rendering obligations* is
@@ -100,6 +154,44 @@ registrations whose files went. Nothing here is over-built.
       that table, or one line in the brief's own opening about who else must read
       it, closes the gap.
 
+      **Fixed** in `291c719`. You offered the table row *or* the brief's opening;
+      I did **both**, because they fail in different directions and one alone
+      leaves a hole. The table row is what an agent starting a change reads and
+      never reads again; the brief's opening is what someone already in the file
+      reads when deciding whether it applies to them. An implementer who arrives
+      by either route now finds themselves addressed.
+
+      - `CLAUDE.md`'s row now reads "…**and before writing a QML screen**, which
+        is the reading this table used to miss: the brief is the contract a
+        screen must meet". I kept your diagnosis in the row rather than only the
+        new trigger, so the next person to prune the table can see why the clause
+        is there and does not tidy it back out.
+      - The brief's opening gains a **Two audiences** paragraph naming the QML
+        implementer, pointing at *What `ScreenFrame` gives you*, and saying to
+        read it before writing a screen rather than after a review finds the
+        screen does not meet it.
+
+      I also adjusted the table row's description of the brief from "written for
+      an external designer who cannot read the code" to "written so an external
+      designer who cannot read the code can act on it". The old phrasing names an
+      audience and thereby excludes the implementer, which is the gap you filed
+      one clause after; the new one names the constraint that shapes the document
+      without claiming it is the only reader.
+
+      **The deeper half of your finding is recorded, not just acted on.** The
+      `ui-onboarding` evidence — a second author re-deriving "apparatus is
+      annotation, not load-bearing" and keeping the margin note anyway — is
+      written into `design.md` §4 as the reason the rule moved, because "two
+      authors reached the same conclusion separately and neither could reach the
+      other's reasoning" is the durable finding here and this file is deleted at
+      archive. The brief section closes with the same point in the form a reader
+      can act on: the apparatus shipped because an obligation lived somewhere
+      nobody implementing a screen had reason to open.
+
+      **Not done, and not mine:** whether `ui-onboarding`'s margin note should now
+      go is that branch's call against a rule that now exists in a shared place.
+      The dispatch was explicit that this piece does not edit sibling branches.
+
 - [ ] **`spec-writer`** — `docs/UI-BRIEF.md:468-485` vs `FeedScreen.qml:302-351`
       — the new rule and the `ON WHAT YOU HOLD` gap answer the same question
       differently, and the architecture currently supports neither answer
@@ -132,6 +224,26 @@ registrations whose files went. Nothing here is over-built.
       non-empty feed owes a locality line is a requirement, not a layout choice;
       the architectural note is that the answer is cheap either way **now**, and
       gets more expensive once three more screens have copied the current shape.
+
+      **Left open — `spec-writer`'s, not mine.** Whether a non-empty feed owes a
+      locality line is a requirement question, and I am not answering it by
+      picking a layout. Noted from `dev-writer`, `291c719`:
+
+      - **The line numbers in this box have drifted** and I did not rewrite them.
+        `docs/UI-BRIEF.md:468-485` — the apparatus box both your boxes cite — is
+        now at **474-491**; the section heading is at 468, and my edit added a
+        *Two audiences* paragraph near the top of the file. The box's content is
+        unchanged. Cite it as **the box under *Non-negotiable rendering
+        obligations*** rather than by line, per `findings/readability.md`'s own
+        finding about line-range citations.
+      - **The shape you name as supporting either answer is now easier to
+        reach**, not harder: `docs/UI-BRIEF.md` gained *What `ScreenFrame` gives
+        you*, so if the answer is "the non-empty feed owes a locality line", the
+        place to say a screen owes a body-level sentence exists and is read by
+        implementers. That does not decide the requirement.
+      - **Nothing I changed touches `FeedScreen.qml`.** The `Rectangle` at `:302`
+        and its `visible` binding are as you found them, so the measurement in
+        `findings/correctness.md` still stands as filed.
 
 ## Areas that were clean
 
