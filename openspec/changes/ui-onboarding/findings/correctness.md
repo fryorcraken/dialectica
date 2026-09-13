@@ -9,7 +9,7 @@ Baseline before any mutation: 91 QML tests across 6 spec files, all passing
 
 ## Defects
 
-- [ ] **`dev-writer`** — `OnboardingScreen.qml:306` — `-1` is both the
+- [x] **`dev-writer`** — `OnboardingScreen.qml:306` — `-1` is both the
       "nothing selected" sentinel and a value a reply's `index` field can take,
       so a candidate carrying `index:-1` renders as SELECTED while nothing is
       selected
@@ -40,6 +40,33 @@ Baseline before any mutation: 91 QML tests across 6 spec files, all passing
       The fix is to stop overloading `-1`: hold selection as a separate
       "something is selected" fact, or refuse a candidate whose `index` is not a
       non-negative integer at the point `candidates` is assigned.
+      **Fixed** in `1d91627`, by the second route you name — refusal at the
+      point `candidates` is assigned. `isCandidate()` runs over every entry
+      before anything is stored and requires an object carrying a non-negative
+      integer `index` and a non-empty string `address`; a slate containing one
+      that fails is the failed state. The sentinel is now a named
+      `nothingSelected` rather than a literal at six sites, so the two are
+      readable as different things wherever they are compared.
+      Three tests fail without it. `test_no_row_reads_as_chosen_while_nothing_is_selected`
+      asserts your measurement directly — 0 visible SELECTED markers on a normal
+      slate, 0 on one carrying `index:-1` — and it counts what an OBSERVER sees
+      by walking the tree for a shown `SELECTED`, because a test comparing
+      `selectedIndex` to `-1` passed throughout the defect: `selectedIndex` was
+      never wrong, the row was.
+      `test_the_keep_guard_refuses_at_the_sentinel_even_when_a_row_carries_it`
+      records something your write-up implies but does not state, and it is
+      worse than cosmetic: with the check removed, a keep request **reaches the
+      bridge** while nothing is selected (measured: 1 where 0 is required). So
+      this was a path to storing an identity the user did not choose, not only a
+      dead button.
+      I rejected the range-check-at-the-render-site alternative for the reason
+      your severity note implies: it leaves a candidate on screen the user can
+      see and cannot choose, which is the same dead end with a narrower blast
+      radius. A non-numeric sentinel (`null`/`undefined`) was also rejected —
+      `selectedIndex` is an `int` property, so QML coerces and reintroduces `0`
+      as the collision, which is strictly worse because `0` is a valid index.
+      Recorded in `design.md` under "Selection is a candidate's own index, and
+      the sentinel is unaddressable", with both rejected alternatives.
 
 - [ ] **`tester`** — `tst_onboarding_states.qml` — the `selectedIndex < 0` guard
       in `keepSelected()` is untested; removing it leaves the whole suite green
@@ -56,8 +83,28 @@ Baseline before any mutation: 91 QML tests across 6 spec files, all passing
       succeed at the sentinel — i.e. a candidate carrying `index:-1` — which is
       the same fixture the defect above needs.
       **Severity: medium** as a test gap; it is what let the defect above ship.
+      **Note from `dev-writer` — this box is left OPEN and is `tester`'s, but
+      the line it names no longer exists.** Fixing the defect above changed the
+      shape of this gap, so read this before writing the test:
+      Your diagnosis was right and the fixture you suggest is now impossible by
+      construction — `isCandidate()` refuses a negative index at the boundary,
+      so no candidate can carry the sentinel and `candidateAt(-1)` can never
+      succeed. That made the first guard genuinely unreachable rather than
+      merely untested, so I did not add a fixture to reach it: **I collapsed the
+      two guards into one.** With the sentinel unaddressable, "is something
+      selected" and "does the selection name a candidate" are the same question,
+      and `candidateAt()` answers it. A guard that can only be true when another
+      is is not a guard.
+      So the mutation to run is now `if (candidate === null)` →
+      `if (false)` at what is currently `OnboardingScreen.qml:237`, and I have
+      verified it **fails 2 tests** (`test_keeping_is_refused_by_the_view_while_nothing_is_selected`
+      and `test_the_keep_guard_refuses_at_the_sentinel_even_when_a_row_carries_it`)
+      where the old two-guard arrangement left the suite green. The gap you
+      measured is closed, but **I am not ticking your box** — whether the
+      coverage is now adequate is your call, not mine, and you may want a test
+      that pins the collapse itself rather than inheriting mine.
 
-- [ ] **`dev-writer`** — `OnboardingScreen.qml:302-360` — a candidate that is
+- [x] **`dev-writer`** — `OnboardingScreen.qml:302-360` — a candidate that is
       not an object throws in the delegate and still reaches the slate phase
       **Scenario:** a slate reply of
       `{"slate":"s1","count":3,"candidates":[null,"str",{"index":0}]}`. The
@@ -74,8 +121,25 @@ Baseline before any mutation: 91 QML tests across 6 spec files, all passing
       *elements* are unreadable is the same confusion one level down. The
       existing check establishes that `candidates` is a list, not that its
       entries are candidates.
+      **Fixed** in `1d91627`, by the same `isCandidate()` sweep as the defect
+      above — your framing that this is "the same confusion one level down" is
+      why it is one mechanism rather than two.
+      `test_a_candidate_that_is_not_an_object_is_a_failure_not_a_blank_row`
+      fails without it, on your exact `[null,"str",{...}]` reply, and the five
+      QWARN lines you measured are gone from the run.
+      I added a third clause you did not ask for and should know about: a
+      candidate whose `address` is missing or not a string is also refused. The
+      spec calls the address "the only unforgeable way to tell two candidates
+      apart", so a candidate without one is not something a user can choose
+      between — it renders as a row with a blank where the deciding value goes,
+      which is the blank-row outcome you describe arriving by a different route.
+      `test_a_candidate_without_a_usable_address_is_a_failure` covers both
+      spellings.
+      Refusing the whole slate rather than dropping the bad entry is deliberate:
+      dropping would silently show four of five and make "the count comes from
+      the reply" false.
 
-- [ ] **`dev-writer`** — `OnboardingScreen.qml:164-166` — a non-string `reason`
+- [x] **`dev-writer`** — `OnboardingScreen.qml:164-166` — a non-string `reason`
       renders as `[object Object]` on the refused screen
       **Scenario:** `keep_identity` answers `{"kept":false,"reason":{"code":7}}`.
       `reply.value.reason !== undefined` is true, so `String(reply.value.reason)`
@@ -89,8 +153,25 @@ Baseline before any mutation: 91 QML tests across 6 spec files, all passing
       **Severity: low-medium.** The same `String()` coercion at line 114
       (`slateId`) and in `Main.qml:110` (`identityReason`) has the same shape;
       the fix is to treat a non-string as absent rather than to stringify it.
+      **Fixed** in `1d91627`, at all three sites you name, by the policy you
+      name: a non-string is absent, never stringified.
+      `test_a_non_string_reason_does_not_render_as_object_Object` fails without
+      it on your `{"code":7}` reply, and asserts both halves — that
+      `[object Object]` is absent AND that the screen still says something,
+      since a blank would be its own defect.
+      The two sibling sites resolve differently, which is a decision rather than
+      an inconsistency and is recorded in `design.md`: `identityReason` becomes
+      `""`, honestly "the module gave no reason this view could read" — a
+      placeholder identical for every unreadable reason would distinguish
+      nothing, and distinguishing the two absent cases is that field's whole
+      job. But `slateId` is a **failure**, not a fallback, because it is the
+      value a later keep sends back to core to say which set the selection was
+      made against; there is no honest default for that, and a stringified one
+      would be sent to core as if it were a set identifier.
+      `test_a_non_string_slate_identifier_is_not_stringified_into_a_request`
+      covers it.
 
-- [ ] **`dev-writer`** — `OnboardingScreen.qml:113-118` — `requestSlate()`'s
+- [x] **`dev-writer`** — `OnboardingScreen.qml:113-118` — `requestSlate()`'s
       success path clears `refusal` and `failure` but not `keptIdentity`
       **Scenario:** keep a candidate (`phase` becomes `"kept"`, `keptIdentity`
       holds an address), then press "Try again" or otherwise call
@@ -105,6 +186,16 @@ Baseline before any mutation: 91 QML tests across 6 spec files, all passing
       `keptIdentity`. It is a latent inconsistency in the state machine the spec
       asks to be single-valued, and the next reader of `keptIdentity` inherits a
       stale value for free.
+      **Fixed** in `1d91627`: `requestSlate()`'s success path nulls
+      `keptIdentity`, so both exits from a state now clear the same things.
+      `test_a_new_slate_clears_a_previously_kept_identity` fails without it —
+      keep, then `requestSlate()`, then assert `keptIdentity` is null while
+      `phase` is `"slate"`.
+      Agreed on the reasoning rather than only the symptom: the spec asks this
+      machine to be single-valued, and a second stale answer sitting beside the
+      one value is exactly how the next reader is made wrong for free. Recorded
+      in `design.md` alongside the `phase` decision so the invariant is stated
+      where the machine is described, not only where it was violated.
 
 - [ ] **`spec-writer`** — `OnboardingScreen.qml:627` and
       `tst_onboarding_states.qml:647` — the shipped copy asserts "the same four
@@ -130,6 +221,27 @@ Baseline before any mutation: 91 QML tests across 6 spec files, all passing
       names ship, and a test written to keep it wrong. The durable fix is to
       state no count in either the copy or the assertion — a pin on a number
       fails on reword rather than on misinformation.
+      **Fixed** in `1d91627` by `dev-writer`, taking your durable fix exactly:
+      no count in the copy and none in the assertion. The margin note now reads
+      "may hold the same name", and
+      `test_the_uniqueness_note_states_the_obligation_without_a_word_count`
+      asserts the three obligations (not unique / not identifiers / the address
+      distinguishes) and then sweeps for eight count spellings — "two words"
+      through "five words" and their numeral forms — so it fails on the
+      reintroduction of ANY number rather than pinning one. That is the
+      difference your last sentence asks for: it catches misinformation instead
+      of catching a reword.
+      **Box addressing:** this box names `spec-writer`, and the coordinator
+      dispatched it to me as a `dev-writer` item — the two disagree. I acted on
+      it because the fix is entirely in code I own (`OnboardingScreen.qml` and
+      `tst_onboarding_states.qml`, the two files your scenario cites) and
+      because leaving a known-wrong count in shipping copy to await a handoff
+      was the worse outcome. **Nothing here touches the spec**, so if
+      `spec-writer` was wanted for something in `specs/` — the scenario's
+      wording, say — that part is untouched and still open. Flagged to the
+      coordinator in my report rather than silently absorbed.
+      Recorded in `design.md`: the count's three moves, and why the obligation
+      does not depend on it.
 
 ## What was clean
 
