@@ -14,8 +14,8 @@
 - [x] review: architecture — `code-reviewer`
 - [x] review: spec-test — `spec-test-reviewer`
 - [x] review: design — `design-reviewer`
-- [ ] findings all ticked, `findings/` deleted — runner
-- [ ] `openspec validate --strict`, then `archive` — runner
+- [x] findings all ticked, `findings/` deleted — runner
+- [x] `openspec validate --strict`, then `archive` — runner
 
 **The `tester` row covers two passes**, and section 7 is the second. The first
 built `check_bindings` and its test (section 6). The second came back after
@@ -493,7 +493,7 @@ steps after it**. Diagnosis and the rejected alternatives are in `design.md`,
       `tst_check_qml_members.sh` all four cases pass, `run-qml-tests.sh` 4 spec
       files / 41 passed / 0 failed, both on Qt 6.10.3. The workflow parses as
       YAML and the `qml` job still lists all six original steps.
-- [ ] 8.8 **Only CI can confirm the pin in action.** The flag's presence at
+- [x] 8.8 **Only CI can confirm the pin in action.** The flag's presence at
       6.8.3 is settled by Qt's source, but nothing local exercises
       `install-qt-action` itself: that it installs on the runner, puts the
       tools on `PATH`, and supplies the GL/xcb libraries `qmltestrunner` needs
@@ -605,7 +605,7 @@ actually checked.
       `tst_check_bindings.sh` all eight, `run-qml-tests.sh` 9 spec files / 204
       passed / 0 failed. `yamllint -d relaxed` reports only line-length
       warnings. All on Qt 6.10.3.
-- [ ] 10.7 **Only CI can confirm 6.8.3 accepts the replacement.** Every
+- [x] 10.7 **Only CI can confirm 6.8.3 accepts the replacement.** Every
       measurement above is on 6.10.3, the only Qt available locally. That
       `--missing-property warning` and `-W 0` both work at 6.8.3 is read from
       that version's own help output in the failing run's log (which lists the
@@ -613,3 +613,33 @@ actually checked.
       WAS reproduced locally — it lives in the probe, not in Qt — but the fix
       passing on the pinned Qt stays unproven until a run goes green. This row
       stays unticked alongside 8.8 for that reason.
+
+## 11. The run went green, so 8.8 and 10.7 are ticked
+
+Run **34762530270** on `81ce3de`, the branch tip. Both rows above named the same
+condition — a green run on the pinned Qt — and both are ticked on it. Their
+prose is left as written, per 9's convention: it is accurately about the tree it
+was written against, and a row whose text silently changes meaning is the thing
+that convention exists to stop.
+
+The evidence is read **off the job's own log**, not inferred from its exit, which
+is the distinction 10.3 was written about:
+
+- `qmllint 6.8.3` and `qmlformat 6.8.3`, resolved out of
+  `/home/runner/work/dialectica/Qt/6.8.3/gcc_64/bin/` — so 8.4's assertion that
+  the discovery landed on the pinned Qt fired against the real thing.
+- `ok: qmllint runs the member gate's --missing-property/-W invocation` — the
+  fixed preflight, **linting a generated file** rather than appending `--help`.
+  This is 10.7's open question answered by execution rather than by reading
+  6.8.3's help output: the level `warning` with `-W 0` is accepted by the pinned
+  binary when actually asked to lint.
+- The five steps that skipped on every prior run executed with real output:
+  `ok: a member that exists on DTheme — accepted` (the gate's own tests),
+  `ok: 19 QML file(s) checked, every member read off a known type exists`,
+  `qmllint`, the runner's undefined-binding check, the component suite on
+  `QtTest library 6.8.3`, and `ok: all 9 QML spec file(s) ran`.
+
+**What this does not prove** is anything about the collision itself, which no CI
+job can see — the host is absent under `qmltestrunner`, as the design records at
+length. The green confirms the gates run on the pinned Qt; it does not widen what
+they measure.
