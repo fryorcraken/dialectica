@@ -28,7 +28,7 @@ answered in entry 3 below from the opposite direction.
 
 ---
 
-- [ ] **`dev-writer`** — `design.md:247-249` and `seed_store.rs:568-570` — "core has no
+- [x] **`dev-writer`** — `design.md:247-249` and `seed_store.rs:568-570` — "core has no
       thread read, `piece/thread-read` is still in flight" is **false on `origin/main`**,
       and it is the stated reason the weakest assertion in the file was written the way
       it was
@@ -85,7 +85,40 @@ answered in entry 3 below from the opposite direction.
       **Severity: high — a recorded decision whose justification no longer holds, on the
       assertion covering the one property this tool exists to produce.**
 
-- [ ] **`dev-writer`** — `seed_store.rs:177-183` — `SEEDED_PATH = 0`'s docstring gives a
+      **Fixed in part, deferred in part** — and the split is forced by where the
+      branches are, not chosen.
+
+      **Fixed:** the false sentence is gone from both places. `design.md`'s entry
+      now says `read_thread` merged as #61 (`53f08b3`), immediately after this
+      branch's merge base `733544d`, and says plainly that the earlier claim was
+      true when written and is false now. The code comment at the assertion site
+      says the same. Verified before writing it: `git merge-base piece/seed-store
+      origin/main` is `733544d`, and `git log --oneline -3 origin/main` shows
+      `53f08b3` and `f1b3a5e` above it.
+
+      Both places also now carry the part the finding's own argument rests on and
+      neither document stated: **`OpLog::get` checks the store, not the reader.**
+      It hands back the raw op, so the two fields compared are two fields this
+      program wrote, and a claim-trusting reader and a parent-walking reader give
+      the same answer against a store whose chain is correct — so passing says
+      nothing about what a UI renders.
+
+      **Deferred, and here is where it lives:** the assertion is not moved onto
+      `read_thread`, because **`read_thread` does not exist on this branch.**
+      Verified rather than assumed — `dialectica-core/src/thread.rs` is absent in
+      this worktree and `lib.rs` declares no `thread` module; `git show
+      origin/main:.../thread.rs` is where I read `read_thread`'s signature at
+      `:448`. Moving the assertion requires the two branches to meet, and this
+      piece's brief is explicit that nothing may be pulled, merged or rebased in.
+
+      So it is recorded as the follow-up in two durable places rather than left in
+      this tracker, which is deleted at archive: `design.md`'s entry names the
+      edit and lists every argument `read_thread` takes as already in scope at the
+      assertion site, and the code comment says the same to a reader who never
+      opens `design.md`. The remaining work after the branches meet is one loop
+      rewritten.
+
+- [x] **`dev-writer`** — `seed_store.rs:177-183` — `SEEDED_PATH = 0`'s docstring gives a
       reason that is **false**, and the real decision is not in `design.md` at all
       **Scenario:** the constant is documented as:
 
@@ -131,7 +164,29 @@ answered in entry 3 below from the opposite direction.
       **Severity: medium — a false justification on a constant, plus an unrecorded
       decision with a real rejected alternative.**
 
-- [ ] **`dev-writer`** — `design.md` has no entry for **what the report is allowed to
+      **Fixed.** Both halves.
+
+      **The docstring** now says the opposite of what it said: zero is *not* a
+      path onboarding produces, with the mechanism (`SHA256(prefix || nonce ||
+      index)`, first four bytes big-endian, top bit masked) and the ~2⁻³¹ figure.
+
+      **I re-ran the measurement rather than quoting yours**, per this repo's "run
+      the claim, don't read it" rule — a throwaway example over 2000 generated
+      nonces, deleted afterwards. Zero hits, and three sample slates:
+      `[1336077579, 1318252717, 831137178, 537227485, 647957063]`,
+      `[766249687, 2014285701, …]`, `[855138262, 91996491, …]`. Different nonces
+      from yours, same conclusion.
+
+      **The Decisions entry** is new, under "`SEEDED_PATH = 0`, a path onboarding
+      cannot produce". It names the constraint (seeder and probe must agree; the
+      value must be reproducible because a person pastes the output), both
+      alternatives with what ruled each out, and the cost in your own terms — that
+      a test assuming "any recorded path came from a slate" would be wrong about
+      seeded stores. Your "unreachability is arguably the better property" reading
+      is recorded as an argument that exists but was *not* the deciding reason,
+      rather than promoted into one it never was.
+
+- [x] **`dev-writer`** — `design.md` has no entry for **what the report is allowed to
       claim**, which is the gap the high-severity readability finding fell through
       **Scenario:** the review brief asks specifically whether `design.md` records a
       decision about what the printed report may assert. It does not — and that absence
@@ -166,7 +221,27 @@ answered in entry 3 below from the opposite direction.
       **Severity: medium — a gap where no decision was made, in the one output no
       assertion covers. Not a contradiction; a missing entry.**
 
-- [ ] **`dev-writer`** — `design.md:146-149` and `seed_store.rs:146-150` — "**six** of the
+      **Fixed.** New Decisions entry, "What the report may claim: only values an
+      assertion pinned", recording the rule in the terms you set it: eleven claims
+      pinned by a running assertion and the report's prose the twelfth; the rule
+      that the report prints only asserted values; what that forecloses —
+      authorship summaries beginning "every" cannot be written, so the line becomes
+      a per-author breakdown or nothing; and the rejected alternative, free prose
+      checked by review, which is what was in place and what shipped a
+      high-severity false claim through five reviewers with every gate green.
+
+      The entry also carries the structural half you identified from the other
+      direction, because it is the reason the rule is needed rather than a
+      preference: `contains` is existential where the claim was universal, so no
+      `contains` check could ever have contradicted it.
+
+      `readability.md` entry 1 is now the consequence of this entry rather than a
+      one-off, which is what you asked for. The report's per-author counts are
+      **read back from the store** by a `seeded_ops_by` helper rather than
+      restated from the writes above, so a figure it prints is a reading that can
+      be wrong and be caught.
+
+- [x] **`dev-writer`** — `design.md:146-149` and `seed_store.rs:146-150` — "**six** of the
       crate's **eight** error types" is wrong in both figures; it is **ten of twelve**
       **Scenario:** the `Result<(), String>` entry opens:
 
@@ -217,7 +292,25 @@ answered in entry 3 below from the opposite direction.
       **Severity: medium — a wrong figure in the entry that sizes a follow-up change, and
       a count where a command belongs.**
 
-- [ ] **`dev-writer`** — `docs/UI-BRIEF.md:296-299` asserts the property this change
+      **Fixed, and I re-counted rather than taking your figure.** Both greps run
+      against this worktree: twelve `pub` error types, and `impl std::error::Error`
+      exactly twice (`membership.rs:274`, `log/mod.rs:262`). Ten of twelve, and
+      your four unlisted — `AddressError`, `KeyError`, `OpIdError`, `OpError` —
+      are all present. Your count is right.
+
+      **Both `design.md` and the module docstring now state the relation and name
+      the commands**, rather than carrying a corrected number that would rot the
+      same way: "every public error type in `dialectica-core` except `OpLogError`
+      and `MembershipError`", with the two greps beside it. The types this program
+      actually touches are still listed, because that list is what makes the `?`
+      argument concrete.
+
+      The `design.md` entry keeps the wrong figure visible as the reason for the
+      change — it records that the previous "six of eight" understated the
+      deferral's scope by four types, which is the direction that gets a deferred
+      change mis-planned. The argument itself needed no edit, as you said.
+
+- [x] **`dev-writer`** — `docs/UI-BRIEF.md:296-299` asserts the property this change
       exists to document as **false**, and the brief is not fixed in this change
       **Scenario:** the brief's "Creating a Stoa" section tells the external designer:
 
@@ -273,7 +366,43 @@ answered in entry 3 below from the opposite direction.
       **Severity: medium — a live document contradicting the change that documented the
       contradiction, in the section a designer reads before drawing the creation screen.**
 
-- [ ] **`dev-writer`** — `seed_store.rs:644-649` re-derives the probe's address instead of
+      **Fixed**, and along the lines you set: the factual claim goes, the design
+      instruction stays.
+
+      **Grepped for citers before touching the prose**, because a false claim here
+      has been the stated reason for a deferral elsewhere and removing one has
+      stranded a deferral before. Nothing outside the brief and this findings file
+      cites the sentence — checked across `docs/`, `openspec/` and `dialectica/`.
+      Confirmed your PLAN.md point too: it is asserted on the brief's own
+      authority, so there is no disagreement to resolve and PLAN.md does not need
+      to win one.
+
+      What the section now says, in the order you proposed:
+
+      - **Constraint 2 still holds and is separated from the false part.** One
+        person, one identity, one root secret — that was never wrong. What does
+        not hold is that creator and poster are the same **key**.
+      - **The consequence is named**: a hide against a Stoa this peer created is
+        refused, because the signing key is not the creator the record names.
+      - **It is a known gap under review, not an intention**, citing `ci.yml`'s
+        named exemption ("three derivations for one user") and this change's
+        `design.md`, so the next person finds the reasoning rather than
+        re-deriving it.
+      - **The design instruction survives verbatim in intent**: do not design as
+        though the creator and the poster could be different *people*.
+      - **One thing added beyond your sketch**, because the brief's own constraint
+        2 makes it the sharper obligation: do not build a screen that *asserts*
+        the user moderates what they created. The brief already treats "the
+        interface must not tell a user they have a property they do not have" as
+        the one failure that could actually harm someone, and this is an instance
+        of it. Say so if you read that as overreach.
+
+      The neighbouring claim at `:292-294` — the creator's key comes from the
+      user's own keystore and cannot be supplied — was checked and left, because it
+      is still true: it is a different derivation off the same root, not a
+      different person's key.
+
+- [x] **`dev-writer`** — `seed_store.rs:644-649` re-derives the probe's address instead of
       calling `wire::posting_identity`, which is an unrecorded decision against the
       pattern `keystore.rs` exists to forbid
       **Scenario:** `design.md`'s "Both author addresses are printed" entry says the
@@ -319,6 +448,36 @@ answered in entry 3 below from the opposite direction.
       call site that no gate compares to the other two.
       **Severity: medium — an unrecorded choice against a named repo pattern, in the one
       position where a composite function exists to prevent it.**
+
+      **Fixed** by taking your first option: the seeder calls
+      `wire::posting_identity(&address, &keystore, &paths)`. The hand derivation
+      and the `recorded` binding it needed are both gone.
+
+      **It closed `spec-test.md` entry 1 as a side effect, which neither finding
+      predicted and is the more valuable half.** That entry's `assert_ne!` compared
+      two values this example derived itself, so it asserted a property of Ed25519
+      derivation rather than of the module. Routing the left operand through
+      `posting_identity` puts a value the *module* produces on one side — so the
+      same mutation the spec-test reviewer ran now fails the seeder instead of
+      passing it. Run, not reasoned: `wire.rs:324` changed to
+      `keystore.stoa_public_key(stoa).address().to_hex()`, and the seeder panicked
+      at the `assert_ne!` with both operands printed identical and the message
+      naming what to delete. `wire.rs` restored; `git diff --stat` shows it
+      untouched.
+
+      One correction to your scenario, which does not change the conclusion:
+      `posting_identity` returns `Result<String, String>` rather than an address
+      type, so `signing_address` is now compared as hex on both sides. The error
+      arm is mapped into the program's `why`-style prefix, which preserves the
+      property the hand derivation's `ok_or_else` was there for — an unreadable
+      path fails here rather than on screen.
+
+      `design.md`'s "Both author addresses are printed" entry now records the
+      choice with your `keystore.rs:448-453` quote as the reason, and names the
+      rejected alternative — keep the hand derivation and record why — with what
+      ruled it out: `posting_identity` reads the recorded path itself, so it makes
+      the dependency on the identity record explicit too, and it makes "matches the
+      module at each position" literally true rather than coincidentally true.
 
 ## What is in good shape
 

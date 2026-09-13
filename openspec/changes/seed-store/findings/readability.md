@@ -18,7 +18,7 @@ to the visitor did not carry its consequences into the prose or the report.
 
 ---
 
-- [ ] **`dev-writer`** — `seed_store.rs:722` — the report says "every seeded op is
+- [x] **`dev-writer`** — `seed_store.rs:722` — the report says "every seeded op is
       by \<one address\>", and that is false for the **majority** of the ops it
       just wrote
       **Scenario:** the report prints
@@ -77,7 +77,40 @@ to the visitor did not carry its consequences into the prose or the report.
       visitor's. Printing a fourth labelled address costs one `println!` and the
       visitor's address is already computed at `:670` for the assertion.
 
-- [ ] **`dev-writer`** — `seed_store.rs:100` — the module docstring makes the same
+      **Fixed**, and reproduced first: a `--fresh` run before any edit printed the
+      three labelled addresses with the visitor's among none of them, exactly as
+      you measured.
+
+      The block now prints **four** addresses with a per-author op count against
+      each, and no "every" anywhere:
+
+      ```
+      author addresses — the first three DISAGREE, which is the known gap:
+        getCapabilities reports  7066f1af…
+        founder signs ops with   f577f34e…  (4 of 9 ops)
+        record names as creator  ed297c91…
+        and a second identity, so author attribution is visible rather than uniform:
+        visitor's ops are by     0a2d32f0…  (5 of 9 ops)
+      ```
+
+      4 and 5, matching your count from the source.
+
+      **The counts are read back from the store**, by a `seeded_ops_by(log, hex)`
+      helper over `OpLog::iter`, not restated from the writes above. That is
+      deliberate and is the difference between this block and the sentence it
+      replaced: a figure read back can be wrong and be caught, where "every seeded
+      op is by X" was a claim nothing in the program could contradict.
+
+      **And the reword is now backed by an assertion**, which `spec-test.md` entry
+      3 is the box for: the distinct-author set over all nine ops must be exactly
+      the founder's signing address and the visitor's. Your own point is why — a
+      reword alone would go false the next time an op moves between identities,
+      which is precisely how this defect arrived.
+
+      `design.md` carries the general rule under "What the report may claim", so
+      this is a consequence of a recorded decision rather than a one-off patch.
+
+- [x] **`dev-writer`** — `seed_store.rs:100` — the module docstring makes the same
       false uniform-authorship claim, one level up
       **Scenario:** `:99-102` reads *"every seeded post's `author` in the feed is
       the *signing* address, and `getCapabilities` reports a *different* one."*
@@ -94,7 +127,21 @@ to the visitor did not carry its consequences into the prose or the report.
       **Severity: medium — documentation, but it is the paragraph the file's own
       report block points at.**
 
-- [ ] **`dev-writer`** — `seed_store.rs:551-552` — the `ops == 9` assertion message
+      **Fixed.** The sentence now reads *"the **founder's** posts carry the
+      signing address as their feed `author`"* rather than "every seeded post's".
+
+      You were right to make this a separate box, and it earned the separation: I
+      would have missed it working from the report line alone, since it is 620
+      lines up and the two share no phrasing.
+
+      A second paragraph follows it, saying that the visitor's ops carry the
+      visitor's address and that there are **more of them** — four and five of the
+      nine — so a reader meets the asymmetry in the preamble rather than being
+      surprised by it in a feed row. It names the regression as the reason the
+      paragraph exists, cites this finding, and says the distinct-author set is now
+      asserted, which a `contains` check structurally cannot do.
+
+- [x] **`dev-writer`** — `seed_store.rs:551-552` — the `ops == 9` assertion message
       contradicts itself on failure, in the one output a broken run produces
       **Scenario:** the message is
       `"two roots, three replies and four votes is nine ops, not {ops}"`, where
@@ -127,7 +174,29 @@ to the visitor did not carry its consequences into the prose or the report.
       exists to produce, and this piece's whole architecture rests on those
       assertions being the only thing that makes a bad run loud.**
 
-- [ ] **`dev-writer`** — `seed_store.rs:220` — `no---fresh` in the help text reads
+      **Fixed** by dropping the interpolation from both, as you proposed. And I
+      re-ran your reproduction rather than trusting the reasoning — same mutation,
+      expected count raised to 10:
+
+      ```
+      assertion `left == right` failed: two roots, three replies and four votes is nine ops
+        left: 9
+       right: 10
+      ```
+
+      The message now explains the expectation and `assert_eq!` supplies the
+      numbers, with nothing fighting the two lines below it. Restored to `9` and
+      the seeder exits 0.
+
+      The sibling at `:544-549` is fixed in the same way — *"the seeded feed must
+      hold two thread heads, one per root"*, which also says **why** two rather
+      than just restating the number, since that is the custom message's only
+      remaining job.
+
+      A comment above the pair records the rule so the next assertion added here
+      is not written in the old shape.
+
+- [x] **`dev-writer`** — `seed_store.rs:220` — `no---fresh` in the help text reads
       as a typo, and the paragraph it sits in is the one review asked for
       **Scenario:** `--help` prints, verbatim:
 
@@ -148,6 +217,30 @@ to the visitor did not carry its consequences into the prose or the report.
       the placeholder hides the expansion; only running `--help` shows it.
       **Severity: low — cosmetic, but both are in the help text, which is the one
       thing a user reads before deciding whether to delete their store.**
+
+      **Both fixed**, and verified by running `--help` rather than by reading the
+      source, which is the only way either was visible in the first place.
+
+      `no---fresh` is now *"The path without `--fresh` promises …"*, your wording.
+
+      The long line is fixed by **breaking the list onto its own indented lines**
+      rather than by shortening it, since the expansion is four filenames and no
+      phrasing makes them fit:
+
+      ```
+      --fresh deletes the four files this tool writes, before seeding:
+        identity.key
+        identity.sqlite
+        stoas.sqlite
+        ops.sqlite
+      Without it, an existing store is REFUSED and nothing is written.
+      ```
+
+      Every line of `--help` is now inside the block's ~70-column wrap, and the
+      four names are scannable rather than comma-run-on — which matters more here
+      than the wrap, since this is the list a person checks before deleting. The
+      call site carries a comment saying the length is only visible by running
+      `--help`, because the source line looks short and the placeholder hides it.
 
 ## What was clean
 

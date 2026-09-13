@@ -27,7 +27,7 @@ piece does ship actually fail?* — and the answer for the flagship one is no.
 
 ---
 
-- [ ] **`dev-writer`** — `seed_store.rs:673-678` and `design.md:141-144` — the
+- [x] **`dev-writer`** — `seed_store.rs:673-678` and `design.md:141-144` — the
       `assert_ne!(posting_address, signing_address, …)` **cannot fail the day the
       gap closes**, which is the one thing `design.md` claims for it. It asserts a
       property of Ed25519 key derivation, not a property of the module.
@@ -97,6 +97,52 @@ piece does ship actually fail?* — and the answer for the flagship one is no.
       guard that does not invalidate, in the file whose entire argument is that
       its assertions are what make a bad run loud.**
 
+      **Fixed**, by your own suggested route: the left operand is now produced by
+      the module rather than re-derived by the example.
+
+      ```rust
+      let posting_address = wire::posting_identity(&address, &keystore, &paths)
+          .map_err(|e| format!("asking the probe which identity it reports: {e}"))?;
+      let signing_address = keystore.stoa_public_key(&address).address().to_hex();
+      ```
+
+      **Re-ran your exact mutation rather than reasoning that it would now fire.**
+      `wire.rs:324` changed to `Ok(Some(_path)) =>
+      Ok(keystore.stoa_public_key(stoa).address().to_hex())`, then `--fresh` into a
+      scratch directory:
+
+      ```
+      thread 'main' panicked at dialectica-core/examples/seed_store.rs:817:5:
+      assertion `left != right` failed: the probe and the publish path have stopped
+      disagreeing — the three-derivations gap is closed, so this assertion and the
+      paragraph it documents should both go
+        left: "5712ce79bba122688915063b384e93b1be44592f3719656accfa8caef74a8339"
+       right: "5712ce79bba122688915063b384e93b1be44592f3719656accfa8caef74a8339"
+      ```
+
+      The seeder now exits 101 where it exited 0, and the message names what to
+      delete. `wire.rs` restored — `git diff --stat` shows only the example, the
+      brief and `design.md`, and the suite is back to 733 + 26.
+
+      **Note it also happens to close the finding `design.md` entry 6 filed
+      independently** — the probe's address was the one derivation position with a
+      named composite function that this file bypassed. Neither finding predicted
+      the other; one fix answers both, and that is not a coincidence: the
+      re-derivation is *why* the assertion was comparing two of the example's own
+      values instead of one of the module's.
+
+      **Your framing is recorded, not just the fix.** `design.md`'s entry now
+      states that the old operands were two HD derivations off one root, that the
+      assertion therefore asserted a property of Ed25519 derivation rather than of
+      dialectica, and that the pre-existing `wire.rs` test is what actually guards
+      the property — so nobody reads `design.md:141` and believes the seeder pins
+      something `wire.rs`'s suite is pinning. The code comment at the assertion
+      carries the same, citing this entry.
+
+      One thing you flagged that I could **not** close: this assertion still only
+      fires for someone who runs the program. That is box 2 below, and it stays
+      open.
+
 - [ ] **`tester`** — the piece ships **nine assertions that no gate ever
       executes**, and the `tests` row is correctly unticked; this is the box that
       records what the missing stage must cover.
@@ -154,6 +200,32 @@ piece does ship actually fail?* — and the answer for the flagship one is no.
       this defect while every existing assertion stayed green.
       **Severity: medium — the check is cheap and the defect it would have caught
       shipped at high severity.**
+
+      **`dev-writer` note — not an outcome, and this box stays open because it is
+      addressed to `tester`.**
+
+      The assertion you specify is now **in the seeder**, written as you described
+      it: distinct authors across all nine ops via `OpLog::iter`, asserted to be a
+      set of exactly two, naming both.
+
+      Proved it can fail, in both directions, rather than asserting that it can:
+
+      - **a third author** — a generated `stranger` signing one of the four votes
+        — panics with three hex addresses on the left and two on the right;
+      - **the collapse** — the second root published by the founder — panics, but
+        at the *earlier* `authors.contains(&visitor_address)` feed assertion, so
+        the pair catches it together rather than the set assertion catching it
+        alone. Worth knowing if you build the integration test: the set assertion
+        is the one that survives a change that leaves the feed rows alone and moves
+        only replies or votes.
+
+      **This does not close your box, and I have not ticked it.** Your point is
+      that the check must live somewhere a gate executes, and the seeder is the
+      target CI compiles and never runs — which is exactly box 2. An assertion in
+      `examples/` is the same blind spot the defect arrived through. The
+      `tests/end_to_end.rs` shape you describe is still the work; what this gives
+      you is the assertion already written and already shown discriminating, to
+      port rather than to design.
 
 ## What was clean
 

@@ -16,7 +16,7 @@ both our packages with `--all-targets -- -D warnings`.
 
 ---
 
-- [ ] **`dev-writer`** — `seed_store.rs:200` + `:431` — `store_files` exists to be
+- [x] **`dev-writer`** — `seed_store.rs:200` + `:431` — `store_files` exists to be
       the one place the four names live, and the op log is then spelled a second
       time outside it
       **Scenario:** `store_files` (`:192-202`) is introduced with a docstring
@@ -62,7 +62,31 @@ both our packages with `--all-targets -- -D warnings`.
       **Severity: medium — a latent silent-failure shape in the file whose whole
       argument is that names are derived and not chosen.**
 
-- [ ] **`dev-writer`** — `design.md:169-186` — the "what CI cannot see" section is
+      **Fixed**, taking your second option and one step further: a
+      `const OPS_LOG: &str = "ops.sqlite"` **plus** an `ops_log_path(dir)` helper,
+      with `store_files` and the open both calling the helper. The name is now
+      spelled exactly once in this file.
+
+      The helper rather than the bare constant at both sites, because `store_files`
+      is called before `main` has a directory — `usage()` calls it with an empty
+      path to print the filenames — so binding the path once in `main` and passing
+      it was not available. Keeping it a function keeps both callers **deriving**,
+      rather than one deriving and one receiving, which is the distinction the
+      finding is about.
+
+      Your "singular *this* is wrong" reading is now literally true rather than
+      aspirationally so, and `OPS_LOG`'s docstring carries **both** directions of
+      the silent failure in your words — `--fresh` deleting a file the program does
+      not write on one side, the refusal check going blind on the other, with the
+      note that every assertion passes either way because they read back through
+      the same handle. That is the part a reader cannot recover from the code.
+
+      `design.md` records it under "`ops.sqlite` is spelled once, in the one place
+      with no upstream owner", including your count of four hand-copies across the
+      tree and the pointer to `wire.rs`'s prior finding — so if the op log ever
+      gets a `core` accessor, `OPS_LOG` is what it replaces.
+
+- [x] **`dev-writer`** — `design.md:169-186` — the "what CI cannot see" section is
       the right section and is missing a gate: `cargo fmt` never reaches this file
       **Scenario:** the section names two gates that do compile the example and is
       candid that nothing *runs* it. Both halves are true and I reproduced the
@@ -102,6 +126,30 @@ both our packages with `--all-targets -- -D warnings`.
       `design.md`, not a code change.
       **Severity: low — documentation of a gate boundary, in the document whose job
       is to draw that boundary honestly.**
+
+      **Fixed**, and I re-ran your measurement rather than quoting it. Same
+      invocation with `-v` against this worktree:
+
+      ```
+      [custom-build (2021)] .../dialectica/rust-lib/build.rs
+      [staticlib (2021)]    .../dialectica/rust-lib/src/lib.rs
+      ```
+
+      Two files, neither in `dialectica-core`. Confirmed.
+
+      `design.md`'s section now ends with your sentence in its own paragraph — of
+      CI's three Rust gates, two compile this file and the third cannot see it —
+      plus the `-v` measurement, the note that the example is `rustfmt`-clean today
+      so this is not a red-CI problem, and the explicit statement that the
+      underlying gap is pre-existing, repo-wide, and **not** this piece's to fix.
+
+      The module docstring carries the same paragraph, because a reader who opens
+      the file and never reads `design.md` is exactly the reader who would assume a
+      `fmt` regression here turns CI red.
+
+      The section's final paragraph is reworded from "what CI cannot see" to "what
+      **none of the three** can see", so the two limits — a gate that cannot reach
+      the file, and no gate that runs the program — do not read as one claim.
 
 ## What was clean, and the judgements the brief asked for
 

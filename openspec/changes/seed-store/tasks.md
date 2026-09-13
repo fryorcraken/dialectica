@@ -93,9 +93,11 @@ is the correct outcome; the file says so at the top.
       the consequence in words; `design.md` gains a section.
 - [x] **Nesting unasserted.** Added `parent`/`thread` assertions over all three
       replies, read back through `OpLog::get`. The reviewer's suggested route — a
-      thread read — does not exist in core (`feed.rs` has `list_threads` only;
-      `piece/thread-read` is in flight), so that correction is recorded in the
-      finding. Measured discriminating.
+      thread read — was recorded here as not existing in core, which was true at
+      the time and is **not true now**: it merged as #61 (`53f08b3`), one commit
+      past this branch's merge base. See the design round below; the correction
+      that went back to the correctness reviewer was right when written and has
+      been superseded. Measured discriminating.
 - [x] **Both feed rows had one author.** `second_root` is now the visitor's, so
       the docstring's two-identity claim is true in the feed; the assertion checks
       both rows by lookup rather than indexing `items[0]`.
@@ -121,3 +123,68 @@ is the correct outcome; the file says so at the top.
       both packages, suite 733 + 26 unchanged, seeder exercised on a fresh
       directory, an existing store, `--fresh`, a world-writable directory and a
       non-dialectica directory.
+
+### Acting on review (readability + architecture + spec-test + design, 12 boxes)
+
+Ten `dev-writer` boxes closed; two `tester` boxes left open, and the reason each
+stays open is appended to it in `findings/spec-test.md`.
+
+- [x] **The report's false universal.** "Every seeded op is by ⟨one address⟩" was
+      false for five of nine ops. Reproduced before editing. The block now prints
+      four labelled addresses with a per-author op count against each, counted back
+      from the store by `seeded_ops_by` rather than restated from the writes.
+- [x] **An assertion over the distinct-author *set*.** The two checks beside the
+      claim were `authors.contains(...)` — existential where the claim was
+      universal, so no `contains` could ever contradict it. Added a set assertion
+      over all nine ops via `OpLog::iter`. Proved it fails: a third author panics;
+      the collapse to one author panics at the feed assertion just above it.
+- [x] **The `assert_ne!` that could not fire.** Its two operands were keystore
+      derivations this example made itself, so it asserted that two HD paths
+      differ. The left operand is now `wire::posting_identity`'s own answer — the
+      module's value, not a re-derivation of it. Re-ran the reviewer's mutation at
+      `wire.rs:324`: the seeder now exits 101 where it exited 0, printing the
+      message that names what to delete. `wire.rs` restored.
+- [x] **The probe's address, re-derived by hand.** Same edit. The two agreed,
+      which was the problem — `keystore.rs:448-453` records that two call sites
+      agreeing is not one derivation, after such a pair re-diverged with every gate
+      green, and this file is compiled by no test and run by no gate.
+- [x] **`ops.sqlite` spelled twice.** `const OPS_LOG` plus an `ops_log_path(dir)`
+      helper that `store_files` and the open both call. A helper rather than a
+      bound path because `usage()` calls `store_files` before `main` has a
+      directory.
+- [x] **The module docstring's uniform-authorship claim**, 620 lines above the
+      report line and sharing no phrasing with it. Corrected, plus a paragraph on
+      the four/five split so a reader meets the asymmetry in the preamble.
+- [x] **Assertion messages that fight `assert_eq!`.** Dropped `", not {found}"`
+      from both counts; re-ran the reviewer's reproduction to see the message read
+      correctly on failure.
+- [x] **`no---fresh` and a 121-character help line.** Fixed by wording and by
+      breaking the filename list onto indented lines. Verified by running `--help`,
+      which is the only way either was visible.
+- [x] **`SEEDED_PATH = 0`'s false docstring.** Zero is not a path onboarding
+      produces. Re-measured over 2000 generated nonces: zero hits. Docstring
+      corrected and a Decisions entry added with both alternatives and the cost.
+- [x] **Two wrong figures**, "six of eight" error types where it is ten of twelve.
+      Re-counted; replaced the number with the relation and the two greps that
+      answer it, in both `design.md` and the module docstring.
+- [x] **`design.md` had no rule about what the report may claim**, which is the gap
+      the false universal fell through. New Decisions entry recording the rule,
+      what it forecloses, and the rejected alternative.
+- [x] **The `cargo fmt` gate cannot reach this crate.** Re-ran `cargo fmt … -v`:
+      two files, neither in `dialectica-core`. Recorded in `design.md` and the
+      module docstring as a pre-existing repo-wide gap, not this piece's to fix.
+- [x] **The "core has no thread read" justification**, false since #61. Removed
+      from `design.md` and the code. The assertion is **not** moved onto
+      `read_thread`: it does not exist on this branch, whose merge base predates
+      the merge, and this piece may not pull `main` in. The follow-up is recorded
+      in `design.md` and at the assertion site, with every argument `read_thread`
+      takes noted as already in scope.
+- [x] **`docs/UI-BRIEF.md` told the designer creator and poster are the same key.**
+      Grepped for citers first — nothing outside the brief and the findings file.
+      The factual claim is replaced by what is true (they are different keys today,
+      so moderation does not bind, a known gap under review, citing `ci.yml`'s
+      exemption and this `design.md`); the design instruction about different
+      *people* survives.
+- [x] Re-ran the gates: seeder green on a fresh directory, `--help` checked by
+      running it, `rustfmt --check` clean on the example, `clippy --all-targets -D
+      warnings` clean for `dialectica-core`, suite 733 + 26 unchanged.

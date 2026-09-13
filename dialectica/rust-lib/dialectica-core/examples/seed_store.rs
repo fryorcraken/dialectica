@@ -97,12 +97,22 @@
 //! (`findings/security.md` entry 4).
 //!
 //! **The visible consequence, and the reason it is printed rather than hidden:**
-//! every seeded post's `author` in the feed is the *signing* address, and
+//! the *founder's* posts carry the *signing* address as their feed `author`, and
 //! `getCapabilities` reports a *different* one. A UI developer who saw only the
 //! second would conclude the feed was attributing their own posts to a stranger.
 //! Both are printed, side by side and labelled as the known gap, and the program
 //! asserts they still disagree — so the day the spec settles it, this fails loudly
 //! and tells whoever fixed it that these paragraphs are now stale.
+//!
+//! **The visitor's ops carry the visitor's address, and there are more of them
+//! than the founder's.** Four of the nine ops are the founder's and five are the
+//! visitor's, which is the whole point of seeding from two identities — so the
+//! report labels four addresses rather than three, and no line claims a single
+//! author for the store. An earlier version of this paragraph and of the report
+//! said "every seeded op is by" one address; that was true only while both roots
+//! were the founder's, and it went false without any assertion noticing
+//! (`findings/readability.md` entry 1). The distinct-author set is now asserted,
+//! which is what a `contains` check structurally cannot do.
 //!
 //! # Public API only, no test-only back doors
 //!
@@ -127,7 +137,16 @@
 //!
 //! So this file cannot stop compiling without turning the Rust job red, and adding
 //! a third step to build examples would have been a gate duplicating two that
-//! already work. What CI cannot see is whether the program still *does anything
+//! already work.
+//!
+//! **CI has a third Rust gate and it cannot see this file at all.**
+//! `cargo fmt --manifest-path dialectica/rust-lib/Cargo.toml --check` does not
+//! follow the path dependency into `dialectica-core`, so no file in this crate is
+//! format-checked. Run it with `-v` and it names two files, `build.rs` and
+//! `src/lib.rs`. That is a pre-existing repo-wide gap rather than this piece's, but
+//! a reader who assumes a `rustfmt` regression here turns CI red would be wrong.
+//!
+//! What CI cannot see is whether the program still *does anything
 //! useful* — nothing runs it — and that is a real limit rather than one this change
 //! closes: the assertions below are what makes a run fail loudly, and a run is a
 //! person typing the command.
@@ -143,18 +162,24 @@
 //!
 //! # Why this returns `Result<(), String>` rather than `Box<dyn Error>`
 //!
-//! **Six of the crate's eight error types do not implement `std::error::Error`.**
-//! Only `OpLogError` and `MembershipError` do, so the obvious
-//! `Box<dyn std::error::Error>` signature does not compile against
-//! `KeystoreError`, `GenesisError`, `IdentityStoreError`, `Refusal`,
-//! `RandomnessUnavailable` or `OnboardingError`.
+//! **Every public error type in this crate except `OpLogError` and
+//! `MembershipError` lacks a `std::error::Error` impl**, so the obvious
+//! `Box<dyn std::error::Error>` signature does not compile against the ones this
+//! program touches — `KeystoreError`, `GenesisError`, `IdentityStoreError`,
+//! `Refusal`, `RandomnessUnavailable`, `OnboardingError` — nor against the rest.
+//!
+//! Stated as a relation rather than as a count, because a count is something a
+//! command can answer and goes quietly wrong as types are added:
+//! `grep -rn "pub enum .*Error\|pub struct .*Error" dialectica-core/src/` against
+//! `grep -rn "impl std::error::Error" dialectica-core/src/`. A count written here
+//! once already understated the scope of the deferral below by four types.
 //!
 //! That is a real gap in the public API and it is deliberately **not fixed here**.
-//! Adding six trait impls widens the crate's public surface, which this project
+//! Adding the trait impls widens the crate's public surface, which this project
 //! treats as a decision to take on purpose rather than as a side effect of one
 //! caller wanting `?` — and this piece is a developer tool that changes no
 //! behaviour, so smuggling an API widening into it is precisely the shape the
-//! change flow exists to catch. Every one of the six implements `Display`, so
+//! change flow exists to catch. Every one of them implements `Display`, so
 //! `.map_err(|e| e.to_string())` costs one call and nothing else.
 //!
 //! Recorded here rather than left as a puzzle: the next person to want `?` across
@@ -173,14 +198,39 @@ use dialectica_core::membership::{self, Membership, MembershipStore};
 use dialectica_core::moderation::Moderators;
 use dialectica_core::op::VoteDirection;
 use dialectica_core::stoa::{Genesis, Policy};
+use dialectica_core::wire;
 
 /// The derivation path recorded for the seeded Stoa.
 ///
-/// Zero is the first candidate of a slate, which is what a user pressing through
-/// onboarding without deliberating would land on. The value matters only in that
-/// the seeder and the probe must agree, and they agree because both read this
-/// record rather than assuming a number.
+/// **Zero is not a path onboarding produces**, and an earlier version of this
+/// comment claimed the opposite — that it was "the first candidate of a slate".
+/// `onboarding::derive_path` is `SHA256(prefix || nonce || index)`, first four
+/// bytes big-endian with the top bit masked, so a slate's candidates are
+/// pseudorandom values below 2³¹ and index 0 lands on path 0 with probability
+/// ~2⁻³¹. Measured over 2000 nonces: never.
+///
+/// The value matters only in that the seeder and the probe must agree, and they
+/// agree because both read this record rather than assuming a number. `design.md`
+/// records why a fixed path was chosen over deriving a slate, and what it costs.
 const SEEDED_PATH: u32 = 0;
+
+/// The op log's filename, which is the one name here with no `core` accessor.
+///
+/// A constant rather than two `dir.join("ops.sqlite")` calls, because
+/// [`store_files`] exists to be the single site for these names and the op log is
+/// the one entry that most needs it: the other three come from a `core` function,
+/// so a rename upstream moves them, while this one moves by hand. Spelled twice it
+/// fails silently in both directions — change `store_files` alone and `--fresh`
+/// deletes a file this program does not write, while the seeded store is one
+/// `--fresh` will not clean and the adapter will not open; change the open alone
+/// and the refusal check stops seeing an existing op log, so "a half-seeded
+/// directory is not a state this program can produce" quietly stops holding. Every
+/// assertion passes either way, because they read back through the same handle.
+///
+/// The adapter spells it inline too (`dialectica/rust-lib/src/lib.rs`), and
+/// `wire.rs` records that as the remaining unowned one of the three store names.
+/// If that ever gets a `core` accessor, this constant is what it replaces.
+const OPS_LOG: &str = "ops.sqlite";
 
 /// Every file this program writes, as the adapter names them.
 ///
@@ -196,9 +246,18 @@ fn store_files(dir: &Path) -> Vec<(&'static str, PathBuf)> {
         ("membership store", membership::membership_path_in(dir)),
         // The op log's name is the one value here with no `core` accessor: the
         // adapter spells `dir.join("ops.sqlite")` inline. Copied rather than
-        // derived, and flagged as such — if that ever moves, this moves by hand.
-        ("op log", dir.join("ops.sqlite")),
+        // derived, and flagged as such — if that ever moves, `OPS_LOG` moves by
+        // hand, and it is the only place in this file that spells the name.
+        ("op log", ops_log_path(dir)),
     ]
+}
+
+/// The op log's path, for the one caller that opens it and for [`store_files`].
+///
+/// Both go through here so the refusal check, `--fresh`, and the open cannot name
+/// different files — see [`OPS_LOG`] for what each half of that divergence breaks.
+fn ops_log_path(dir: &Path) -> PathBuf {
+    dir.join(OPS_LOG)
 }
 
 fn usage() -> String {
@@ -211,18 +270,23 @@ fn usage() -> String {
          the failure would be silent. The running module logs its real path at\n\
          startup: \"dialectica ready: instance ... (persistence: ...)\".\n\
          \n\
-         --fresh deletes the four files this tool writes ({}) before seeding.\n\
+         --fresh deletes the four files this tool writes, before seeding:\n\
+         {}\n\
          Without it, an existing store is REFUSED and nothing is written.\n\
          \n\
          --fresh DELETES FIRST AND CHECKS AFTERWARDS. The assertions that make a\n\
          bad run fail run at the end, over ops already written, so a run that\n\
          fails one leaves a half-seeded directory and the old store is gone. The\n\
-         no---fresh path promises \"nothing was written\"; this one cannot.",
+         path without --fresh promises \"nothing was written\"; this one cannot.",
+        // One filename per line, indented. Joined with ", " on the line above, the
+        // expansion ran past 120 characters and broke a block hard-wrapped at ~70
+        // — a length only visible by running `--help`, since the source line is
+        // short and the placeholder hides it.
         store_files(Path::new(""))
             .iter()
-            .map(|(_, p)| p.display().to_string())
+            .map(|(_, p)| format!("  {}", p.display()))
             .collect::<Vec<_>>()
-            .join(", ")
+            .join("\n")
     )
 }
 
@@ -233,6 +297,20 @@ fn usage() -> String {
 /// "unable to open database file" without a prefix names none of the four.
 fn why<T, E: std::fmt::Display>(what: &str, r: Result<T, E>) -> Result<T, String> {
     r.map_err(|e| format!("{what}: {e}"))
+}
+
+/// How many ops in the store one address authored.
+///
+/// Counted from the store rather than from what this program believes it wrote, so
+/// the report's per-author figures are readings and not restatements of the code
+/// above them. That is the whole difference between this block and the summary
+/// sentence it replaced: a number read back can be wrong and be caught, whereas
+/// "every seeded op is by X" was a claim nothing in the program could contradict.
+fn seeded_ops_by<L: OpLog>(log: &L, address_hex: &str) -> Result<usize, String> {
+    Ok(why("counting one author's ops", log.iter())?
+        .iter()
+        .filter(|e| e.op.op.author.address().to_hex() == address_hex)
+        .count())
 }
 
 fn main() -> Result<(), String> {
@@ -426,10 +504,10 @@ fn main() -> Result<(), String> {
     let founder = keystore.stoa_key(&address);
     let visitor = why("minting the visitor's key", SecretKey::generate())?;
 
-    let mut log = why(
-        "opening the op log",
-        SqliteOpLog::open(&dir.join("ops.sqlite")),
-    )?;
+    // Through `ops_log_path`, the same function `store_files` uses, so the file
+    // this opens is by construction the file the refusal check saw and `--fresh`
+    // would have deleted.
+    let mut log = why("opening the op log", SqliteOpLog::open(&ops_log_path(&dir)))?;
 
     // ── A forum with real structure ───────────────────────────────────────
     //
@@ -541,15 +619,20 @@ fn main() -> Result<(), String> {
     // Asserted rather than merely printed, so a broken seeder exits non-zero instead
     // of emitting plausible output. Both numbers are hardcoded from the writes above
     // rather than read back from the same call being checked.
+    //
+    // The messages EXPLAIN the expectation and interpolate nothing. `assert_eq!`
+    // already prints `left` and `right`, and a "not {found}" suffix over the found
+    // value reads backwards on failure — "is nine ops, not 9" tells the reader nine
+    // is wrong when nine is what the store holds and the expectation is what moved
+    // (`findings/readability.md` entry 3).
     assert_eq!(
         feed.items.len(),
         2,
-        "the seeded feed must hold two thread heads, not {}",
-        feed.items.len()
+        "the seeded feed must hold two thread heads, one per root"
     );
     assert_eq!(
         ops, 9,
-        "two roots, three replies and four votes is nine ops, not {ops}"
+        "two roots, three replies and four votes is nine ops"
     );
 
     // ── The nesting, which the two counts above cannot see ────────────────
@@ -565,9 +648,22 @@ fn main() -> Result<(), String> {
     // publish calls returned ids; asking the store what it actually holds under each
     // is what makes this a check on the store rather than on local variables.
     //
-    // NOT through a thread read, because `dialectica-core` has none: `feed.rs`
-    // exposes `list_threads` and nothing else, and the thread read is `piece/thread-read`,
-    // still in flight. When it lands, this is the assertion to move onto it.
+    // **This checks the STORE, not the READER, and that is its limit.** `OpLog::get`
+    // hands back the raw op, so the two fields compared below are two fields this
+    // program itself wrote. A reader placing posts by the claimed `thread` field and
+    // a reader deriving membership by walking parents give the same answer against a
+    // store whose chain is correct — so passing this says nothing about what a UI
+    // renders.
+    //
+    // `core::thread::read_thread` is the assertion this wants to be: it is what
+    // `listThread` calls, it derives membership by walking parents, and its own
+    // docstring says the claimed field decides nothing. **It exists on `main`
+    // (`piece/thread-read`, merged as #61) and not on this branch**, whose merge base
+    // predates it — an earlier version of this comment said core had none, which was
+    // true when written and is not now. Every argument `read_thread` takes is already
+    // in scope here (`log`, `moderators`, `address`, each root's `OpId`), so moving
+    // this loop onto it is a small edit once the branches meet. Whoever rebases or
+    // follows on: that is the edit, and `design.md` records why it was not made here.
     for (what, id, expected_parent, expected_thread) in [
         ("reply", reply.id, first_root.id, first_root.id),
         // The one that discriminates. At two levels "the parent's id" and "the
@@ -638,24 +734,29 @@ fn main() -> Result<(), String> {
     // left, in the shape that cannot rot: the day it is fixed, this fails and says
     // what to delete.
 
-    // The probe's half: the address `getCapabilities` will report for this Stoa must
-    // be one the store has a path for. Read back from the record rather than reusing
-    // the constant, so a path that cannot be read fails here instead of on screen.
-    let recorded =
-        why("reading the chosen path back", paths.path_for(&address))?.ok_or_else(|| {
-            "reading the chosen path back: the path just recorded is absent".to_string()
-        })?;
-    let posting_address = keystore.stoa_address_at_path(&address, recorded);
-    let signing_address = keystore.stoa_public_key(&address).address();
-
-    // The feed's `author` is the SIGNING address, not the one the probe reports.
-    // Asserted rather than assumed, and asserted against a value this program did
-    // not compute for the occasion: the row comes back out of the store.
+    // The probe's half, THROUGH THE MODULE'S OWN FUNCTION rather than re-derived.
     //
-    // This holds the known three-derivations gap in place, deliberately. If it ever
-    // fails, the gap has been CLOSED — that is good news — and the thing to do is
-    // delete this assertion along with the paragraph in the report below, not to
-    // adjust the comparison until it passes again.
+    // `wire::posting_identity` is what `get_capabilities` calls, it is `pub`, and it
+    // takes exactly the three values already in scope. Re-spelling its body here —
+    // `keystore.stoa_address_at_path(&address, recorded)` — is what this used to do,
+    // and the two agreed, which is the problem rather than the reassurance:
+    // `keystore.rs` records that "two call sites that agree is not the same thing as
+    // one derivation", after a pair of them re-diverged with every gate green. This
+    // file is compiled by no test and run by no gate, so a third hand copy here is
+    // the same shape in the same blind spot (`findings/design.md` entry 6).
+    //
+    // It reads the recorded path itself, so a path that cannot be read fails here
+    // rather than on screen — the property the hand derivation was reading it for.
+    let posting_address = wire::posting_identity(&address, &keystore, &paths)
+        .map_err(|e| format!("asking the probe which identity it reports: {e}"))?;
+    let signing_address = keystore.stoa_public_key(&address).address().to_hex();
+    let visitor_address = visitor.public_key().address().to_hex();
+
+    // The feed's `author` is the SIGNING address for the founder's row and the
+    // VISITOR's for the visitor's. Asserted rather than assumed, and asserted against
+    // values this program did not compute for the occasion: the rows come back out of
+    // the store.
+    //
     // Over BOTH rows, by looking each up rather than indexing. `items[0]` used to
     // carry this alone, and while the two roots shared an author that was an
     // assertion whose index could not matter — `items[1]` said the same thing. Now
@@ -663,13 +764,56 @@ fn main() -> Result<(), String> {
     // feed's ordering is not baked in either.
     let authors: Vec<&str> = feed.items.iter().map(|r| r.author.as_str()).collect();
     assert!(
-        authors.contains(&signing_address.to_hex().as_str()),
+        authors.contains(&signing_address.as_str()),
         "the founder's root must be attributed to the key it was signed with; got {authors:?}"
     );
     assert!(
-        authors.contains(&visitor.public_key().address().to_hex().as_str()),
+        authors.contains(&visitor_address.as_str()),
         "the visitor's root must be attributed to the visitor; got {authors:?}"
     );
+
+    // ── Who authored the store, as a SET rather than as an example ────────
+    //
+    // The two `contains` assertions above are existential — each says "at least one
+    // row has this author" — and the report's prose used to say "**every** seeded op
+    // is by" one address. No `contains` check can ever contradict an "every" claim,
+    // so the false sentence and the green assertions were consistent by construction:
+    // both hold whether the store has one author or two. That is this repo's recorded
+    // defect family, and it is how `c2bf6f5` moved a root to the visitor and left the
+    // prose claiming uniform authorship with every assertion still passing
+    // (`findings/spec-test.md` entry 3, `findings/readability.md` entry 1).
+    //
+    // So: the distinct authors across ALL nine ops, read back through `OpLog::iter`,
+    // asserted to be exactly the two this program signed with — which fails if a
+    // later change moves an op between identities, adds a third, or collapses the two
+    // into one, whether or not anybody updates the prose.
+    let mut seeded_authors: Vec<String> = why("reading the ops back", log.iter())?
+        .iter()
+        .map(|e| e.op.op.author.address().to_hex())
+        .collect();
+    seeded_authors.sort();
+    seeded_authors.dedup();
+    let mut expected_authors = vec![signing_address.clone(), visitor_address.clone()];
+    expected_authors.sort();
+    assert_eq!(
+        seeded_authors, expected_authors,
+        "the seeded store must carry exactly two distinct authors, the founder's \
+         signing address and the visitor's — the report names both and claims no \
+         single author for the store"
+    );
+
+    // The self-invalidating half, and the operands are the MODULE's two positions.
+    //
+    // This used to compare `stoa_address_at_path` against `stoa_public_key`, both
+    // called by this example on its own keystore — two HD derivations off one root,
+    // which differ for the same reason any two do. Nothing the module did was on
+    // either side, so it asserted a property of Ed25519 derivation rather than of
+    // dialectica: review closed the real gap at `wire.rs:324` and this program exited
+    // 0 with every assertion green, still printing MODERATION DOES NOT WORK about a
+    // gap that no longer existed (`findings/spec-test.md` entry 1).
+    //
+    // `posting_address` is now `wire::posting_identity`'s own answer, so closing the
+    // gap moves it and this fires.
     assert_ne!(
         posting_address, signing_address,
         "the probe and the publish path have stopped disagreeing — the \
@@ -708,22 +852,31 @@ fn main() -> Result<(), String> {
         }
     );
     println!();
-    // BOTH author addresses, because they DISAGREE and a reader who saw only one
-    // would spend an afternoon on it. `getCapabilities` reports the first, and every
-    // seeded op is authored by the second, because the module derives a posting
-    // identity at one position and signs at another — the three-derivations gap
-    // `ci.yml` carries a named exemption for. Nothing here can close it: which key a
-    // publish signs with is a spec question.
+    // EVERY address this store has, because the three that disagree are the reason
+    // this program prints anything and the fourth is the one a reader meets in the
+    // feed without warning. The module derives a posting identity at one position and
+    // signs at another — the three-derivations gap `ci.yml` carries a named exemption
+    // for. Nothing here can close it: which key a publish signs with is a spec
+    // question.
     //
-    // Verified by running it, not inferred: the feed read below reports the signing
-    // address as each row's `author`, and it is not the probe's.
-    println!("author addresses, which do not agree — this is the known gap:");
-    println!("  getCapabilities reports  {}", posting_address.to_hex());
-    println!("  every seeded op is by    {}", signing_address.to_hex());
+    // **Every line here is a value an assertion above pinned, and none is a summary.**
+    // The predecessor of this block said "every seeded op is by <one address>", which
+    // was a universal claim no assertion in the file could contradict, and it went
+    // false the day a root moved to the visitor. The per-author counts below are
+    // spelled out rather than summarised for the same reason: a breakdown is a claim
+    // the distinct-author assertion can fail on, and prose about "every" op is not.
+    // `design.md` records this as a rule rather than as a one-off fix.
+    let founder_ops = seeded_ops_by(&log, &signing_address)?;
+    let visitor_ops = seeded_ops_by(&log, &visitor_address)?;
+    println!("author addresses — the first three DISAGREE, which is the known gap:");
+    println!("  getCapabilities reports  {posting_address}");
+    println!("  founder signs ops with   {signing_address}  ({founder_ops} of {ops} ops)");
     println!(
         "  record names as creator  {}",
         genesis.creator.address().to_hex()
     );
+    println!("  and a second identity, so author attribution is visible rather than uniform:");
+    println!("  visitor's ops are by     {visitor_address}  ({visitor_ops} of {ops} ops)");
     // THE CONSEQUENCE, because the three addresses above are only interesting for
     // what they cause. `Moderators::authorises` gates on the signing author, the
     // record names a different key, so no moderation this peer publishes binds.
