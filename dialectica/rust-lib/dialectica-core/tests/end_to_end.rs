@@ -639,7 +639,7 @@ fn a_keystore_on_disk_signs_a_post_that_a_reopened_store_still_attributes_to_it(
     let key_path = dir.file("identity.key");
 
     // Mint and write the keystore. Nothing is read back from this handle.
-    let minted = Keystore::generate();
+    let minted = Keystore::generate().expect("the test host has randomness");
     minted
         .create(&key_path, &Unlock::Unencrypted)
         .expect("a keystore is creatable in a 0700 directory");
@@ -721,6 +721,7 @@ fn the_same_keystore_posts_under_different_addresses_in_two_stoas() {
     let dir = TempDir::new("per-stoa-address");
     let key_path = dir.file("identity.key");
     Keystore::generate()
+        .expect("the test host has randomness")
         .create(&key_path, &Unlock::Unencrypted)
         .expect("a keystore is creatable");
     let ks = Keystore::open(&key_path, &Unlock::Unencrypted).expect("the keystore opens");
