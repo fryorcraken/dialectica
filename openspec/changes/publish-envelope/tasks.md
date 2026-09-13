@@ -176,14 +176,20 @@ arguments that could disagree.
 
 ## 8. The gates, and what each cannot see
 
-- [x] 8.1 `cargo test -p dialectica -p dialectica-core`: 737 + 26, green.
+- [x] 8.1 `cargo test -p dialectica -p dialectica-core`: green. Re-run after the
+      design-review findings; the six tests §10 adds are in the total.
 - [x] 8.2 `cargo clippy -p dialectica-core --all-targets -- -D warnings`: clean.
 - [x] 8.3 `cargo fmt --check`: `wire.rs` clean. The ten other files it reports
       in this crate are the pre-existing set CI cannot reach at all — the gate
       does not follow path dependencies — and are not this change's to fix.
+      Re-confirmed as pre-existing by stashing this change and re-running: the
+      reported diff is byte-identical with and without it, and every file in it
+      is one this change does not touch.
 - [x] 8.4 Run the adapter gate's own Python locally, since CI is the only thing
       that checks the adapter: passes, and fails on `35fc859`.
-- [x] 8.5 Run the test-count gate's logic locally: 763 declared, 763 ran.
+- [x] 8.5 The test-count gate needs no number kept in step: it counts `#[test]`
+      in the tree and compares against what cargo ran, so six added tests move
+      both sides together. Run locally after §10: declared == ran.
 - [ ] 8.6 **Build LGX is the only gate that compiles the adapter, and it proves
       the file COMPILES rather than what order it runs in.** That distinction is
       not academic: both adapter findings passed every green gate on this PR,

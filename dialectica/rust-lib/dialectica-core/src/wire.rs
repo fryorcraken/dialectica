@@ -1951,9 +1951,27 @@ fn required_direction(parsed: &Request) -> Result<crate::op::VoteDirection, Stri
 /// calls this reshape its precondition.
 ///
 /// So the guards are not called by each handler; they are what constructing the
-/// value *is*. A handler holding a `PublishRequest` provably went through all
-/// three, and a fourth publish operation inherits them without its author
+/// value *is*, and a fourth publish operation inherits them without its author
 /// knowing this decision happened.
+///
+/// **What the compiler actually forces, and what it does not**, stated here for
+/// the reason `every_request_taking_method`'s doc states the same kind of limit:
+/// a guarantee claimed wider than it holds is worse than one known to be
+/// partial. An earlier version of this paragraph said a handler holding a
+/// `PublishRequest` *"provably went through all three"*. It does not. Of the
+/// three, exactly **one** is forced by the type: `fields` is a [`Request`], and
+/// a `Request` cannot exist without [`Request::parse`]. The other two —
+/// `reject_forbidden_fields` and `parse_stoa` — are run by [`PublishRequest::parse`]
+/// and by nothing the type insists on, so a struct literal written inside this
+/// module skips both and names a `stoa` the request never carried. Design review
+/// built one and it compiled.
+///
+/// The exposure is bounded and worth being exact about rather than alarmed by:
+/// `publishing` is the only construction site in the crate, it goes through
+/// `parse`, and the struct's fields are private to this module. So this is a
+/// convention the module boundary keeps rather than a property the type proves,
+/// and the future handler written inside `wire.rs` — which is where handlers go
+/// — is the shape that could break it.
 ///
 /// # It is built on [`Request`], and that is what puts the publish path inside
 /// the envelope
@@ -7928,19 +7946,68 @@ mod tests {
     /// # Its preconditions, stated because a guard with undocumented limits is
     /// worse than one known to be partial
     ///
-    /// It assumes the trait declaration is Rust that rustfmt produced, that
-    /// each method declaration ends in `;`, and that a request parameter is
-    /// typed `String` by value. A method taking `&str`, or `impl Into<String>`,
-    /// or two parameters, lands in the "something else" bucket and **fails
-    /// loudly** rather than passing — which is the correct direction for a
-    /// shape nobody has considered, and is the property the first version
-    /// lacked.
+    /// It assumes the trait declaration is Rust that rustfmt produced and that
+    /// a request parameter is typed `String` by value. A method taking `&str`,
+    /// or `impl Into<String>`, or two parameters, lands in the "something else"
+    /// bucket and **fails loudly** rather than passing — which is the correct
+    /// direction for a shape nobody has considered, and is the property the
+    /// first version lacked.
+    ///
+    /// **A declaration not ending in `;` is a fourth bucket, not a
+    /// precondition.** An earlier version listed "a declaration ending in `;`"
+    /// alongside the other two preconditions and claimed *"anything else fails
+    /// loudly instead of passing"*. That was false of this one: the `;`-less
+    /// arm was a bare `continue`, so a defaulted method added to the trait
+    /// **passed** this gate — measured by design review, which added a
+    /// defaulted `publish_moderation` and watched the sweep stay green. Worse,
+    /// a defaulted method whose body happened to contain a `;` failed in the
+    /// *returns* bucket, telling the reader its return type was unrecognised
+    /// when what was unrecognised was that it had a body at all. Both are the
+    /// *"a filter's failure mode is silence"* shape this function was rewritten
+    /// to eliminate, surviving in the one branch the rewrite did not convert.
+    /// A defaulted method is now recognised **as defaulted**, whether or not
+    /// its body contains a `;`, and checked against the exclusion below.
     fn the_dispatch_traits_request_taking_methods() -> Vec<String> {
+        request_taking_methods_declared_in(ADAPTER_SOURCE)
+    }
+
+    /// The methods the generator's premise excuses from the wire, by name.
+    ///
+    /// The premise is upstream behaviour, not a property of this module, so it
+    /// is stated with its citation rather than asserted:
+    /// `logos-module-builder` is pinned in `dialectica/flake.nix` at
+    /// `9f420c2901e35a16ba8fc77383e796480000a1d2`, and the `lidl-gen` Rust
+    /// frontend it supplies skips a trait method carrying a default body when
+    /// deriving the `.lidl` — *"required methods (no default body) are the
+    /// module's IPC methods. Methods WITH default bodies (e.g. the framework's
+    /// `on_context_ready`) are not part of the contract."*
+    ///
+    /// **Why the list is by name rather than a filter.** A filter would let any
+    /// future defaulted method leave the swept surface silently, which is the
+    /// failure this whole function exists to prevent. Naming them means a
+    /// defaulted method arriving in the trait turns this test **red naming
+    /// it**, and whoever adds it has to say out loud that the generator's
+    /// premise covers it — which is the event a pin bump would make false, and
+    /// the one `module-wire-contract` requires be visible rather than silent.
+    const NOT_EMITTED_ONTO_THE_WIRE: [&str; 1] = ["on_context_ready"];
+
+    /// The classifier itself, over source text rather than over
+    /// `ADAPTER_SOURCE`.
+    ///
+    /// **Taking the source as a parameter is what makes the buckets
+    /// testable.** While it read the `include_str!` constant directly, the only
+    /// way to exercise a branch was to edit `dialectica/rust-lib/src/lib.rs`
+    /// and revert it — a mutation probe, which is how the silent `;` arm was
+    /// found and also how it stayed unfixed, since no committed test could
+    /// reach it. `the_classifier_buckets_each_declaration_shape` now feeds
+    /// synthetic declarations through this and asserts each bucket, including
+    /// the two shapes that used to pass or misdiagnose.
+    fn request_taking_methods_declared_in(source: &str) -> Vec<String> {
         // The trait DECLARATION, not the impl — the impl repeats every
         // signature, and counting both would double every name. The declaration
         // is also the authority: a method declared and not implemented does not
         // compile, so it cannot be the shorter of the two.
-        let (_, after) = ADAPTER_SOURCE
+        let (_, after) = source
             .split_once("pub trait DialecticaModule")
             .expect("the adapter must declare the dispatch trait");
         let (body, _) = after
@@ -7964,23 +8031,45 @@ mod tests {
 
         let mut found = Vec::new();
         let mut unclassified = Vec::new();
+        let mut defaulted: Vec<String> = Vec::new();
 
         // Split on `fn ` rather than on lines, so wrapping is irrelevant.
         for piece in normalised.split("fn ").skip(1) {
             let Some((name, rest)) = piece.split_once('(') else {
+                unclassified.push(format!("{piece} (no parameter list)"));
                 continue;
             };
             let name = name.trim();
 
-            // A defaulted method carries a body, so its declaration does not
-            // end at a `;`. `on_context_ready` is the only one today, and this
-            // keeps it out without naming it.
-            let Some((params_and_ret, _)) = rest.split_once(';') else {
+            // Everything between the parens, whitespace already normalised.
+            let Some((params, after_params)) = rest.split_once(')') else {
+                unclassified.push(format!("{name} (parameter list is not closed)"));
                 continue;
             };
-            // Everything between the parens, whitespace already normalised.
-            let Some((params, ret)) = params_and_ret.split_once(')') else {
-                continue;
+
+            // A DEFAULTED METHOD IS ITS OWN BUCKET, decided here — before the
+            // return type is read — because what distinguishes it is having a
+            // body, and reading a body as a return type is what produced the
+            // wrong diagnosis this arm used to give. `{` before `;` is a body;
+            // `;` first is a declaration. Deciding it on whichever comes first
+            // is what makes the recognition independent of whether the body
+            // happens to contain a `;`.
+            let ends_declaration = after_params.find(';');
+            let opens_body = after_params.find('{');
+            let ret = match (ends_declaration, opens_body) {
+                (Some(semi), Some(brace)) if brace < semi => {
+                    defaulted.push(name.to_string());
+                    continue;
+                }
+                (Some(semi), _) => &after_params[..semi],
+                (None, Some(_)) => {
+                    defaulted.push(name.to_string());
+                    continue;
+                }
+                (None, None) => {
+                    unclassified.push(format!("{name} (neither `;` nor a body)"));
+                    continue;
+                }
             };
             if ret.trim() != "-> String" {
                 unclassified.push(format!("{name} (returns `{}`)", ret.trim()));
@@ -8022,6 +8111,37 @@ mod tests {
                 _ => unclassified.push(format!("{name} (parameters `{rest_of_params}`)")),
             }
         }
+
+        // THE DEFAULTED BUCKET, STATED RATHER THAN DROPPED. A defaulted method
+        // is off the wire only because the pinned generator does not emit it,
+        // which is upstream behaviour this crate cannot observe. So the premise
+        // is named in the message with its citation, and the set it excuses is
+        // named in `NOT_EMITTED_ONTO_THE_WIRE` — a new defaulted method is red
+        // here rather than an unnoticed subtraction from the swept surface.
+        // `module-wire-contract` requires exactly this: the check SHALL be able
+        // to state the assumption and SHALL fail visibly rather than silently.
+        let unexcused: Vec<&String> = defaulted
+            .iter()
+            .filter(|name| !NOT_EMITTED_ONTO_THE_WIRE.contains(&name.as_str()))
+            .collect();
+        assert!(
+            unexcused.is_empty(),
+            "the dispatch trait declares method(s) with a DEFAULT BODY that \
+             this check does not excuse: {unexcused:?}\n\nA defaulted method is \
+             treated as off the wire on an upstream premise, not on anything \
+             this crate can see: `logos-module-builder` is pinned in \
+             `dialectica/flake.nix` at \
+             `9f420c2901e35a16ba8fc77383e796480000a1d2`, whose `lidl-gen` Rust \
+             frontend skips a trait method carrying a default body when \
+             deriving the `.lidl` — \"required methods (no default body) are \
+             the module's IPC methods. Methods WITH default bodies (e.g. the \
+             framework's `on_context_ready`) are not part of the contract.\"\n\n\
+             If that premise still holds for the method(s) above, add each to \
+             `NOT_EMITTED_ONTO_THE_WIRE` and say so. If the pin has moved, \
+             re-read the frontend first: a generator that emits defaulted \
+             methods puts them on the wire unswept, which is what this \
+             assertion exists to make visible rather than silent."
+        );
 
         // THE LOUD FAILURE THAT REPLACES A SILENT OMISSION. A method whose
         // shape this parser does not recognise is the exact case that made the
@@ -8121,6 +8241,163 @@ mod tests {
              size cap, the non-object refusal or the three distinct messages \
              for."
         );
+    }
+
+    /// A synthetic trait declaration, so a bucket can be exercised without
+    /// editing the adapter and reverting it.
+    ///
+    /// The `\n}\n` terminator and the `pub trait DialecticaModule` opener are
+    /// what the classifier splits on, so both are spelled here exactly as the
+    /// real declaration carries them.
+    fn a_trait_declaring(methods: &str) -> String {
+        format!("pub trait DialecticaModule: Send + 'static {{\n{methods}\n}}\n")
+    }
+
+    #[test]
+    fn a_defaulted_method_is_recognised_as_defaulted_whether_or_not_its_body_has_a_semicolon() {
+        // THE REGRESSION TEST FOR THE SILENT PASS. Design review measured both
+        // halves of this by adding a defaulted `publish_moderation` to the real
+        // trait: the body WITHOUT a `;` passed the sweep outright, and the body
+        // WITH one failed in the `returns` bucket reporting
+        // `publish_moderation (returns \`-> String { let _ = request\`)` —
+        // diagnosing a return type when what was unrecognised was that the
+        // method had a body. Both shapes must now land in the defaulted bucket,
+        // which is what makes the recognition independent of where the first
+        // `;` happens to fall.
+        for body in [
+            "{ let _ = request; String::new() }",
+            "{ request }",
+            "{}",
+            "{ let a = 1; let b = 2; String::new() }",
+        ] {
+            let source = a_trait_declaring(&format!(
+                "    fn version(&mut self) -> String;\n\
+                 \x20   fn ping(&mut self, request: String) -> String;\n\
+                 \x20   fn publish_moderation(&mut self, request: String) -> String {body}"
+            ));
+            let outcome = std::panic::catch_unwind(|| request_taking_methods_declared_in(&source));
+            let payload = outcome.expect_err(&format!(
+                "a defaulted method must not pass silently — body {body} did"
+            ));
+            let message = payload
+                .downcast_ref::<String>()
+                .expect("the panic payload must be a String");
+            // WHICH panic matters, not merely that one happened. The `;`-body
+            // shape already panicked before this fix — in the RETURNS bucket,
+            // with the wrong diagnosis. Asserting the defaulted message is what
+            // distinguishes the fix from the defect it replaces, and asserting
+            // the absence of the returns wording is what stops a future
+            // reordering from quietly restoring the misdiagnosis.
+            assert!(
+                message.contains("with a DEFAULT BODY that this check does not excuse"),
+                "body {body} must be diagnosed as defaulted, got: {message}"
+            );
+            assert!(
+                !message.contains("(returns `"),
+                "body {body} must not be diagnosed by its return type, got: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_defaulted_bucket_excuses_only_the_methods_the_generators_premise_covers() {
+        // `on_context_ready` is defaulted and IS excused, so the real
+        // declaration's shape passes. This is the other direction of the test
+        // above: the bucket must not be so loud that the legitimate exclusion
+        // fails too.
+        let source = a_trait_declaring(
+            "    fn ping(&mut self, request: String) -> String;\n\
+             \x20   fn on_context_ready(&mut self, _ctx: &RustModuleContext) {}",
+        );
+        assert_eq!(request_taking_methods_declared_in(&source), vec!["ping"]);
+    }
+
+    #[test]
+    fn the_classifier_buckets_each_declaration_shape() {
+        // The buckets that were already right, pinned from a committed test
+        // rather than from a mutation probe someone has to remember to revert.
+        // Each of these used to be reachable only by editing the adapter.
+        let request_taking = a_trait_declaring(
+            "    fn ping(&mut self, request: String) -> String;\n\
+             \x20   fn renamed(&mut self, req: String) -> String;\n\
+             \x20   fn version(&mut self) -> String;",
+        );
+        // The rename evasion stays closed: matched on the TYPE, not the name.
+        // `version` takes no request, so it is outside by signature.
+        assert_eq!(
+            request_taking_methods_declared_in(&request_taking),
+            vec!["ping", "renamed"]
+        );
+
+        // A wrapped signature is the same declaration once whitespace is
+        // normalised, trailing comma included.
+        let wrapped = a_trait_declaring(
+            "    fn wrapped(\n        &mut self,\n        request: String,\n    ) -> String;\n\
+             \x20   fn ping(&mut self, request: String) -> String;",
+        );
+        assert_eq!(
+            request_taking_methods_declared_in(&wrapped),
+            vec!["ping", "wrapped"]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "whose shape this parser does not recognise")]
+    fn a_borrowed_request_parameter_fails_loudly_rather_than_passing() {
+        // `request: &str` is the third evasion decision 6 names. It must reach
+        // the unclassified panic, not be dropped.
+        let source = a_trait_declaring(
+            "    fn ping(&mut self, request: String) -> String;\n\
+             \x20   fn borrowed(&mut self, request: &str) -> String;",
+        );
+        let _ = request_taking_methods_declared_in(&source);
+    }
+
+    #[test]
+    #[should_panic(expected = "with a DEFAULT BODY that this check does not excuse")]
+    fn an_unexcused_defaulted_method_names_itself_and_cites_the_generator_pin() {
+        // The message must NAME the method and STATE the premise with its
+        // citation, which is what `module-wire-contract` requires of anything
+        // checking this contract's coverage of the surface. The `should_panic`
+        // string pins the first half; `the_defaulted_panic_states_the_premise_
+        // and_its_citation` pins the rest, because a `should_panic` matcher
+        // reads a prefix and would not notice the citation being dropped.
+        let source = a_trait_declaring(
+            "    fn ping(&mut self, request: String) -> String;\n\
+             \x20   fn publish_moderation(&mut self, request: String) -> String { request }",
+        );
+        let _ = request_taking_methods_declared_in(&source);
+    }
+
+    #[test]
+    fn the_defaulted_panic_states_the_premise_and_its_citation() {
+        // A message that fails visibly is not enough on its own: the spec asks
+        // the check to be able to STATE the assumption it rests on. So the
+        // panic must carry the generator, the pinned revision and the method's
+        // name — a reader who has just bumped the pin needs all three to know
+        // whether the premise still holds. Asserted on the message rather than
+        // trusted to the doc comment, because a doc comment is not what a
+        // failing author reads.
+        let source = a_trait_declaring(
+            "    fn ping(&mut self, request: String) -> String;\n\
+             \x20   fn publish_moderation(&mut self, request: String) -> String { request }",
+        );
+        let panic_message = std::panic::catch_unwind(|| request_taking_methods_declared_in(&source))
+            .expect_err("an unexcused defaulted method must panic");
+        let message = panic_message
+            .downcast_ref::<String>()
+            .expect("the panic payload must be a String");
+        for required in [
+            "publish_moderation",
+            "lidl-gen",
+            "9f420c2901e35a16ba8fc77383e796480000a1d2",
+            "NOT_EMITTED_ONTO_THE_WIRE",
+        ] {
+            assert!(
+                message.contains(required),
+                "the defaulted panic must state {required:?}, got: {message}"
+            );
+        }
     }
 
     /// A request each method would serve, so a refusal in the sweeps below is

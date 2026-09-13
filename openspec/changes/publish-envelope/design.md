@@ -9,8 +9,34 @@ the threshold: *"when you find yourself writing the fourth slightly-different
 copy of a guard, that is the signal to reshape rather than to add a fourth
 test"*. `PublishRequest::parse` runs the envelope, the forbidden-field guard and
 the `stoa` read, so those are not something a handler calls — they are what
-constructing the value is. A handler holding a `PublishRequest` provably went
-through all three.
+constructing the value is.
+
+**Be exact about which of the three the type forces, because an earlier version
+of this sentence was not.** It said a handler holding a `PublishRequest`
+*"provably went through all three"*. Design review checked by compiling one and
+it does not: exactly **one** of the three is forced, the envelope, because
+`fields` is a `Request` and a `Request` cannot exist without `Request::parse`.
+`reject_forbidden_fields` and `parse_stoa` are run by `PublishRequest::parse`
+and by nothing the type insists on — the struct's fields are private to the
+module, and every publish handler lives in that module, so a struct literal
+written there skips both and can name a `stoa` the request never carried.
+
+The live risk is low and the reason is worth stating rather than glossing:
+`publishing` is the only construction site, and it goes through `parse`. What
+this is, is the recorded *reason* being stronger than the mechanism, inside a
+decision whose whole subject is preferring a data shape over a checked branch —
+so overstating it would be the same error as the one being fixed.
+`every_request_taking_method`'s doc already makes the honest version of this
+concession about a neighbouring type (*"what the compiler still cannot force"*),
+and this now matches it: the guarantee is a convention the module boundary keeps,
+not a property the type proves.
+
+**Making it a property is available and was not taken.** Giving `PublishRequest`
+a private constructor in a module of its own would force all three by
+construction. It is deferred with decision 8's reshape rather than separately,
+because the architecture review's parallel observation applies — the handlers'
+signatures move in both, and doing them apart pays the `Handler`-type and
+sweep-fixture cost twice.
 
 Two reasons it is more than tidying, both from PLAN.md §9.2 rather than invented
 here:
@@ -49,9 +75,16 @@ three follow from the envelope type the crate already had:
 
 `Request::parse` already checks the size **before** calling `from_str`, which is
 the property the cap exists for — its own test,
-`an_oversized_request_is_refused_before_it_is_parsed`, pins the ordering by
-feeding in something both oversized and unparseable and asserting which refusal
-comes back. The publish path inherits that rather than re-deriving it.
+`an_oversized_request_is_refused_before_it_is_parsed`
+(`dialectica-core/src/wire/request.rs`), pins the ordering by feeding in
+something both oversized and unparseable and asserting which refusal comes back.
+The publish path inherits that rather than re-deriving it.
+
+**The cap row above describes the code, not the whole decision.** Read alone it
+presents the cap as an implementation detail this path inherited. It is now a
+contracted obligation across the request-taking surface, specified as a bracket
+rather than as a number — see decision 9, which is where that choice and its
+costs live.
 
 ### 3. `required_stoa` is deleted rather than converted
 
@@ -177,10 +210,46 @@ the unclassified bucket, failing loudly.
 
 **Its preconditions, stated rather than left implicit**, because the brief is
 right that a guard with undocumented limits is worse than one known to be
-partial: it assumes rustfmt-shaped Rust, a declaration ending in `;`, and a
-request parameter typed `String` by value. Anything else fails loudly instead of
-passing, which is the correct direction for a shape nobody has considered — and
-is precisely the property the first version lacked.
+partial: it assumes rustfmt-shaped Rust and a request parameter typed `String`
+by value. Anything else fails loudly instead of passing, which is the correct
+direction for a shape nobody has considered — and is precisely the property the
+first version lacked.
+
+**An earlier version of this paragraph listed a third precondition — "a
+declaration ending in `;`" — and the claim was false of it.** Design review
+measured both halves: a defaulted `publish_moderation` with no `;` in its body
+**passed** the sweep, leaving a request-taking method on the dispatch trait and
+absent from `every_request_taking_method`; one whose body did contain a `;`
+failed, but in the *returns* bucket, reporting `publish_moderation (returns
+`-> String { let _ = request`)` — diagnosing a return type when what was
+unrecognised was that the method had a body. So the one shape that failed did so
+by accident of where the first `;` fell, and told the reader the wrong thing. It
+was the *"a filter's failure mode is silence"* shape this whole rewrite exists to
+eliminate, surviving in the one branch the rewrite did not convert.
+
+**A default body is now a bucket, not a precondition**, which is what the claim
+above needed to become true. The arm is decided on whether `{` or `;` comes
+first, so recognition does not depend on the body's contents, and a defaulted
+method is checked against `NOT_EMITTED_ONTO_THE_WIRE` — a list of names rather
+than a filter, so a *new* defaulted method is a red test naming it.
+
+**That discharges a spec obligation rather than only a review finding.**
+`module-wire-contract` requires that anything checking this contract's coverage
+of the surface "SHALL be able to state that assumption and SHALL fail visibly
+rather than silently if a generator that no longer honours it puts a defaulted
+method on the wire". Both halves are now the panic's message: it names the
+method, names `lidl-gen`, and quotes the frontend's own doc at the revision
+`dialectica/flake.nix` pins. The assumption is upstream behaviour this crate
+cannot observe, so stating it with a citation is the only honest form — a bare
+assertion would survive a pin bump unchanged, and the pin bump is exactly the
+event that would make it false.
+
+**The classifier takes its source as a parameter**, so the buckets are reachable
+from a committed test instead of only from a mutation probe. That is not tidying:
+while it read the `include_str!` constant directly, the only way to exercise a
+branch was to edit `dialectica/rust-lib/src/lib.rs` and revert it — which is how
+the silent arm was found and also why it stayed unfixed, since nothing committed
+could reach it. A probe that has to be reverted is a test nobody runs twice.
 
 ### 7. The adapter reads its Stoa through `core`, so the envelope is crossed once
 
@@ -250,6 +319,62 @@ all.
 **What it is not:** a defect this change introduced. It predates the piece; the
 piece's error was claiming to have fixed it.
 
+### 9. The request bound is promoted into the contract, and as a bracket rather than a number
+
+Two decisions, both made in `510259c` and both argued at length in
+`proposal.md:120-166` without reaching a decision record. They are one entry
+because the second only arises once the first is taken.
+
+**The bound is promoted into `module-wire-contract` rather than the claim being
+softened.** The live alternative was cheaper and would have closed the finding
+that prompted it: spec-test review found this change's headline claim a third
+wrong — two of the three "contract obligations" the publish path was outside
+really were the contract's, but the size cap was in **no merged spec at all**,
+neither in `module-wire-contract` nor in the archived `wire-request-envelope`
+delta that built the envelope. It existed as code carrying a `NO SPEC:` marker
+saying exactly that. Rewording the prose to claim two obligations instead of
+three would have made the sentence true and cost nothing.
+
+What ruled that out is that **the property is the ordering, and the ordering is
+the half a reader cannot infer**. A bound checked after the parse bounds nothing:
+the ~2N transient allocation it exists to refuse has already been paid by the
+time it is consulted, and per `docs/PHASE0-FINDINGS.md` §3 what that costs is not
+an error reply but the module *process* — the caller waits out its timeout and
+every later call reports the module as not loaded. A security property whose
+whole content is "this check runs first" is what a behaviour contract is for;
+left in a code comment, the next implementation is free to get the order wrong
+with every test still green. The moment to pay for that was this change and not a
+later one, because the derived sweep is now the thing a fifteenth method
+inherits, and it would otherwise inherit an unspecified number.
+
+**What it costs, named rather than left to be discovered:** a contract obligation
+that every future request-taking method on the surface inherits, including ones
+whose author never reads this folder.
+
+**The spec states a bracket, not `4 MiB`.** Also a real alternative, and the
+obvious move — the number exists, and `MAX_REQUEST_BYTES`'s own doc derives it
+with the arithmetic shown. It was refused because **a number in a spec is a claim
+no gate reads**: it cannot be violated, only outlived, and it rots silently. So
+the contract fixes that a limit exists, that it is one number, that it is checked
+first, and that it is bounded from both sides — large enough for the biggest op
+`op-format`'s field bounds permit, materially below what costs the module its
+process.
+
+**What that costs is the sharper half of this entry.** The spec cannot be
+violated by a *bad* number, only by an absent or unbracketed one; and the
+compensating obligation — *"An implementation SHALL record where its number sits
+between those two bounds"* — is discharged in a doc comment rather than by a
+gate. That is a real weakness and the trade is deliberate: a wrong number inside
+the bracket is a bug a reader can find, while a right number that has quietly
+stopped being right is one nobody looks for.
+
+**This supersedes how decision 2's table reads.** That table's `| A size cap |
+none; a request over 4 MiB was parsed | refused before the parse |` row is
+accurate about the code and, read alone, presents the cap as an implementation
+detail inherited from `Request::parse`. It stopped being that in `510259c`: the
+ordering is a contracted obligation across the whole request-taking surface, and
+the number's absence from the spec is a choice rather than an omission.
+
 ## Rejected alternatives
 
 ### Adding three entries to the sweep and stopping there
@@ -275,6 +400,26 @@ therefore stated once, for the envelope, rather than left to each method's
 fields to imply."* A rule restated per method is a rule the next method is
 outside — which is the exact failure mode this change is fixing at the test
 layer.
+
+### Restating the generator premise here as well as in the spec
+
+The premise decision 6's defaulted bucket rests on — *a method with a default
+body is not emitted onto the wire* — is recorded in `module-wire-contract`, with
+`lidl-gen` named and the pinned revision cited. Architecture review asked whether
+`design.md` should carry it too. It should not, and the reason is about which
+document each claim belongs to rather than about duplication being untidy.
+
+The premise is a statement about **what the wire surface is**, which is
+`module-wire-contract`'s subject. A second copy here would drift in the worst
+available direction: a `design.md` is **archived and frozen at merge** while the
+spec stays live and is re-read whenever the pin moves. The premise's whole value
+is that a pin bump makes it visibly re-checkable — so a frozen copy is a copy of
+a claim that can no longer be invalidated, which is strictly worse than no copy.
+
+What `design.md` owes instead is what it got: decision 6 now records the
+*property of the classifier* — that a defaulted method is a named bucket rather
+than a silent drop — which is this document's own subject, and points at the spec
+for the premise rather than restating it.
 
 ### Signing with the pathless key and changing the probe to match
 
