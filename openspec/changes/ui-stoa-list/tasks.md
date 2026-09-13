@@ -411,3 +411,39 @@ Numbered from the file's current maximum, per §11's rule.
       the worst of the three: it said "created or joined in the current session",
       which affirmatively misdescribes creation to a designer who cannot read the
       code.
+
+## 14. Claims in the test file that no command can check
+
+Three readability boxes, all addressed to `tester` and all one species: a
+sentence in a test comment asserting a fact that goes stale without failing.
+`CLAUDE.md`'s "do not write down anything a command can answer" is written for
+prose and applies here unchanged — the suite is the command.
+
+- [x] 14.1 The apparatus measurement was stated twice, 157 lines apart, in
+      different words. Kept at the `bodyText` helper where it justifies the
+      subtraction; the header now points there. A duplicated constant is one
+      somebody updates in one place, and the column it measures is scheduled for
+      removal by another piece.
+- [x] 14.2 "All 47 prior tests passed", three times, plus "95 of 95". Restated
+      as the relation — "left the whole suite green with the defect present" —
+      with the number left to the runner. **Worse than the box reported:** the
+      file now defines 64 `test_*` functions, so the figure was stale by
+      seventeen, and the reviewer's own "47" had itself gone stale between the
+      review and this fix. The claim a reader needs — that the mutation was
+      invisible to everything else — survives and does not rot.
+- [x] 14.3 `test_a_record_that_does_not_verify_is_a_failure_distinct_from_a_bad_paste`
+      **removed**, not labelled. The box offered a label; a label does not stop
+      a weak test being the template for the next one, it only warns whoever
+      copies it. Proved lossless before deleting, with two mutations:
+      swallowing the core's refusal now fails **two** tests where the removed one
+      made one assertion, and making the two refusals identical is caught on a
+      meaning check rather than on the inequality the old test asserted. A
+      comment at the section head records what was removed and where each of its
+      assertions now lives.
+- [x] 14.4 Implementation restored after both mutations, proved with
+      `git diff --stat -- dialectica-ui/src` returning empty.
+
+This section removes exactly one test and adds none. Stated as a delta rather
+than as a before-and-after count, which is 14.2's own lesson applied to the
+sentence describing it — `grep -c "function test_"` and the suite are the two
+commands that answer the rest, and neither goes stale.

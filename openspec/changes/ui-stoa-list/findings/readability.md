@@ -121,7 +121,7 @@ command answers.
       and unreachable, while your framing — a reader cannot learn the rule from
       the file — is what made "there is no rule worth learning" the answer.
 
-- [ ] **`tester`** — `tst_stoa_screens.qml:50` and `:207` — the same measurement
+- [x] **`tester`** — `tst_stoa_screens.qml:50` and `:207` — the same measurement
       is stated twice, in different words, 157 lines apart
       **Scenario:** line 50 says *"It is 747 of the 1371 characters a join screen
       renders — measured, not estimated"*; line 207 says *"Measured, not
@@ -135,7 +135,17 @@ command answers.
       **Severity:** low. Keep one, at the `bodyText` helper where it justifies
       the subtraction, and delete the other.
 
-- [ ] **`tester`** — `tst_stoa_screens.qml:1433,1463,1487` — "all 47 prior tests
+      **Fixed**, keeping the copy at `bodyText` exactly as prescribed — that is
+      where the number does work, because it is the argument for subtracting the
+      column at all. The header now says "most of what a whole-screen scan sees"
+      and points at the helper for the figure.
+
+      The reasoning is worth keeping: the apparatus is scheduled for removal by
+      another piece, and a duplicated constant is one somebody updates in one
+      place. That is the same failure mode as the box below — a claim no command
+      can check — and the two arrived together for that reason.
+
+- [x] **`tester`** — `tst_stoa_screens.qml:1433,1463,1487` — "all 47 prior tests
       passed" is stated three times and is already arithmetically impossible
       **Scenario:** three mutation notes each say the mutation *"left all 47
       prior tests passing"*. The file now defines 47 `test_*` functions, so a
@@ -149,7 +159,25 @@ command answers.
       **Severity:** low. No test is weakened by it; it is a maintenance claim
       that rots silently.
 
-- [ ] **`tester`** — `tst_stoa_screens.qml:1045` — a superseded test is left in
+      **Fixed**, all four, as the relation with the number left to the runner:
+      "left the whole suite green with the defect present", and for the reused-
+      instance note, "every test in every spec file passed with that defect
+      present".
+
+      **The finding understates it — the drift was worse than reported.** The
+      file now defines 64 `test_*` functions (`grep -c "function test_"`), so
+      "47 prior" was stale by seventeen rather than merely impossible, and the
+      reviewer's own "47" was itself a snapshot taken mid-review. That is the
+      cleanest possible demonstration of why the number should not have been
+      written down: it went stale between the review and the fix.
+
+      What the sentences are *for* survives intact — that the mutation was
+      invisible to everything else — and that claim is the one a reader needs
+      and the one that does not rot. `CLAUDE.md`'s "name the command instead"
+      applies to test comments exactly as it does to prose, which I had not
+      carried across.
+
+- [x] **`tester`** — `tst_stoa_screens.qml:1045` — a superseded test is left in
       place with nothing marking it as superseded, so a reader learns the weaker
       rule first
       **Scenario:** `test_a_record_that_does_not_verify_is_a_failure_distinct_from_a_bad_paste`
@@ -165,6 +193,37 @@ command answers.
       green. It is a reading-order defect: the repo's own memory note records
       that a known-weak test is the template the next one gets written against,
       and this one is unlabelled.
+
+      **Fixed by removing it**, which is further than the box asked, so the
+      argument matters.
+
+      The finding offers labelling. I took deletion because **a label is a
+      weaker guard than absence** against the exact failure the box cites: if a
+      known-weak test is the template the next one is written against, a comment
+      saying "this one is weak" does not stop it being copied — it only means
+      whoever copies it was warned. The repo's memory note says to fix the
+      family rather than the instance, and the instance here is a whole test.
+
+      **Removal was only available because nothing was lost, and I proved that
+      rather than asserting it.** Two mutations, each aimed at one half of what
+      the removed test did:
+        - *the core's refusal swallowed* — `joinFailureText` bound to
+          "Something went wrong. Please try again." instead of `screen.failure`.
+          **Two** tests fail where the removed one made one assertion:
+          `…say_different_things_to_do` on the same claim it made, and
+          `test_a_failed_join_does_not_report_the_stoa_as_joined` independently.
+        - *the two refusals made identical* — the malformed reason replaced with
+          the core's verification string verbatim, which is precisely the
+          "reads alike" case the removed test existed for. Caught, and caught
+          **earlier** than it would have been: the failure is on "a malformed
+          paste must name what was pasted", a meaning check, rather than on the
+          inequality the old test asserted.
+
+      So coverage strictly increased. What replaced the test is a comment at the
+      section head recording that it was removed, why distinctness was
+      insufficient, and where each of its assertions now lives — which is the
+      cross-reference the box asked for, pointing forward from an absence
+      instead of sideways from a live weak test.
 
 ---
 

@@ -47,11 +47,13 @@ import "../src/qml"
 //
 // One reason it can shrink is already scheduled: the APPARATUS column is
 // annotation explaining the design, not interface, and a separate piece is
-// removing it from the shipped view. It is 747 of the 1371 characters a join
-// screen renders — measured, not estimated — so a whole-screen scan is more
-// than half margin note. `bodyText` exists to scan only what ships. Verified by
-// running this file against a hidden apparatus column: all tests pass, because
-// none of them depends on annotation.
+// removing it from the shipped view. Most of what a whole-screen scan sees on
+// the join screen is margin note rather than anything a user acts on — the
+// measurement is at `bodyText`, where it justifies the subtraction, and is
+// stated once so it cannot go half stale when the column goes. `bodyText`
+// exists to scan only what ships. Verified by running this file against a
+// hidden apparatus column: all tests pass, because none of them depends on
+// annotation.
 //
 // ---- the second family: a literal where a meaning was required -------------
 //
@@ -763,7 +765,8 @@ TestCase {
     // own screen — and `Main.qml` ships ONE reused instance, which is the only
     // configuration a user ever meets. So the suite could be entirely green
     // while a hostile reference rendered under a "Joined." panel it never
-    // earned, and it was: 95 of 95 passed with that defect present.
+    // earned, and it was — every test in every spec file passed with that
+    // defect present.
     //
     // That is the corpus lesson at integration scale. A test exercising a
     // component in a shape the app does not use is testing something the app
@@ -1140,33 +1143,27 @@ TestCase {
     }
 
     // ---- the two failures, kept apart -------------------------------------
-
-    function test_a_record_that_does_not_verify_is_a_failure_distinct_from_a_bad_paste() {
-        var addr = "b02d5e77" + "88".repeat(28)
-        var join = makeJoin({
-            "join_stoa": '{"error":"the genesis record does not hash to this address; '
-                       + 'whoever sent it did not send the record this address names"}'
-        }, { stoaAddress: addr, stoaGenesis: "00ff" })
-        join.join()
-
-        compare(join.joinState, "failed")
-        verify(join.failure.indexOf("does not hash") >= 0,
-               "the core's refusal must be rendered: " + join.failure)
-        var refusal = spec.visibleText(join)
-
-        // The other failure: text that is not a reference at all.
-        var list = makeList({ "list_stoas": '{"items":[],"page":0,"hasMore":false}' })
-        list.pasted = "not a reference"
-        list.preview()
-        var malformed = list.pasteFailure
-
-        verify(refusal !== malformed,
-               "a record that does not verify and a malformed paste must not read alike")
-        verify(refusal.indexOf(malformed) < 0,
-               "nor may one contain the other verbatim")
-        join.destroy()
-        list.destroy()
-    }
+    //
+    // **`test_a_record_that_does_not_verify_is_a_failure_distinct_from_a_bad_paste`
+    // used to live here and has been REMOVED, not merely superseded.** It
+    // asserted that the two refusals differ — which this file's header records
+    // as insufficient, because misinforming strings are still distinct strings,
+    // and a tester demonstrated exactly that on a sibling piece.
+    //
+    // Deleted rather than labelled. A label is a weaker guard than absence: the
+    // repo's own memory records that a known-weak test is the template the next
+    // one gets written against, and a reader arriving here would have met the
+    // rule the file elsewhere says is not enough, 600 lines before meeting the
+    // replacement.
+    //
+    // Nothing was lost with it, which is why removal was available:
+    // `test_a_malformed_paste_and_an_unverified_record_say_different_things_to_do`
+    // below is built on the same fixture and the same core error string, renders
+    // the refusal through `joinFailureText` rather than through a whole-screen
+    // scan, keeps the non-containment check, and adds what the old one could not
+    // ask — what each refusal must and must not IMPLY. The `joinState === "failed"`
+    // assertion it also carried is pinned directly below, in
+    // `test_the_view_does_not_report_a_pair_as_joinable_before_the_core_answers`.
 
     function test_the_view_does_not_report_a_pair_as_joinable_before_the_core_answers() {
         // A well-formed pair whose record does not name the address. The view's
@@ -1671,7 +1668,7 @@ TestCase {
     // is not that requirement: the requirement is that no BUTTON is on screen.
     //
     // Proved: `visible: screen.canShare(row.rowStoa)` → `visible: true` on the
-    // share button left all 47 prior tests passing.
+    // share button left the whole suite green with the defect present.
     function test_no_share_button_is_on_screen_for_a_row_whose_record_is_not_held() {
         var withRecord = "aa".repeat(32)
         var without = "bb".repeat(32)
@@ -1701,8 +1698,8 @@ TestCase {
     // rendering nothing has told the user nothing.
     //
     // Proved: `visible: screen.joinState === "joined"` → `visible: false` on the
-    // joined panel left all 47 prior tests passing, including the two that
-    // assert a repeat join is success.
+    // joined panel left the whole suite green with the defect present —
+    // including the two tests that assert a repeat join is success.
     function test_the_joined_outcome_is_reported_on_screen_and_not_only_in_a_property() {
         var addr = "7f3a91c4" + "ee".repeat(28)
         var screen = makeJoin({
@@ -1725,8 +1722,8 @@ TestCase {
     // a derived string; what the spec forbids is a feed on screen.
     //
     // Proved: `visible: root.screenShown === "feed"` → `visible: true` on the
-    // FeedScreen left all 47 prior tests passing, with the feed rendering for
-    // the empty address at startup.
+    // FeedScreen left the whole suite green with the defect present, the feed
+    // rendering for the empty address at startup.
     function test_no_feed_is_on_screen_before_a_stoa_has_been_chosen() {
         Core.bridge = bridgeFor({ "list_stoas": '{"items":[],"page":0,"hasMore":false}' })
         var view = mainComponent.createObject(null, {})
