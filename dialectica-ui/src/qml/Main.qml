@@ -33,20 +33,20 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: Theme.desk
+        color: DTheme.desk
     }
 
     Flickable {
         anchors.fill: parent
         contentWidth: width
-        contentHeight: frame.implicitHeight + 2 * Theme.cardPaddingY
+        contentHeight: frame.implicitHeight + 2 * DTheme.cardPaddingY
         clip: true
 
         ColumnLayout {
             width: parent.width
             spacing: 0
 
-            Item { Layout.preferredHeight: Theme.cardPaddingY }
+            Item { Layout.preferredHeight: DTheme.cardPaddingY }
 
             FeedScreen {
                 id: frame
@@ -54,10 +54,10 @@ Item {
                 stoaTitle: root.stoaTitle
                 stoaGenesis: root.stoaGenesis
                 Layout.alignment: Qt.AlignHCenter
-                Layout.preferredWidth: Math.min(Theme.cardWidth, root.width - 2 * Theme.cardPaddingX)
+                Layout.preferredWidth: Math.min(DTheme.cardWidth, root.width - 2 * DTheme.cardPaddingX)
             }
 
-            Item { Layout.preferredHeight: Theme.cardPaddingY }
+            Item { Layout.preferredHeight: DTheme.cardPaddingY }
         }
     }
 }

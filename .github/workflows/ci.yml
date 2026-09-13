@@ -218,6 +218,50 @@ jobs:
           done
           [ "$fail" -eq 0 ] && echo "ok: no shadowed component names"
 
+      # The second half of "no QML type of ours may be named X", and it sits
+      # beside the first on purpose: the check above covers names QtQuick
+      # claims, this one covers names BASECAMP claims, and someone adding a
+      # third will look here rather than in two jobs.
+      #
+      # It is in `lint` and not in `qml` because it needs no Qt — it is
+      # `pathlib` and `re` over the checkout — and `lint` installs nothing, so
+      # the cheapest check in the repo now also reports the fastest. It used to
+      # sit in the `qml` job behind a full Qt6 apt-get for no reason.
+      #
+      # WHY IT IS A SCRIPT AND NOT A HEREDOC. It was a heredoc, and a heredoc
+      # cannot be tested: the only way to exercise it was to push a branch and
+      # read a log. Both of the defects the architecture review found — a
+      # prefix rule that read only `singleton` lines, and a reference arm
+      # hardcoded to one name — shipped through review for that reason.
+      #
+      # The gate is now `dialectica-ui/tests/check_qml_names.py`, and its own
+      # tests run FIRST, in the step immediately below: a gate is part of the
+      # measurement, and one narrowed until it matches nothing passes exactly
+      # as quietly as a correct one. That is the standard this repo already
+      # holds `check_bindings` to. The tests pin both directions and require a
+      # FAILURE when the gate's corpus is empty, so a walk that silently stops
+      # matching cannot report clean.
+      #
+      # WHY IT IS A NAME CHECK AT ALL, in one paragraph with a pointer rather
+      # than the fourth copy of the narrative: the collision lives in the host's
+      # C++ type registration, so no component test in this repo can see it —
+      # `qmltestrunner` runs with the host absent, so an assertion like
+      # `verify(DTheme.paper !== undefined)` cannot fail ON THE COLLISION. Note
+      # the qualifier: that assertion is not a check that cannot fail, it is one
+      # blind to this defect specifically, and the overbroad version of the
+      # claim is what left qmllint's `missing-property` unexamined. The
+      # mechanism, the withdrawn precedence premise and the measurements are in
+      # CLAUDE.md's "Module contract traps", which is where a person ADDING a
+      # singleton meets them.
+      #
+      # A red here is diagnosed from the error message alone; it names the file,
+      # the line, the offending name and what to rename it to.
+      - name: the QML type-name gate's own tests
+        run: dialectica-ui/tests/tst_check_qml_names.py
+
+      - name: no QML type name collides with the host
+        run: dialectica-ui/tests/check_qml_names.py dialectica-ui
+
       - name: every QML file importing layouts declares the import
         run: |
           set -eu
@@ -532,6 +576,28 @@ jobs:
       #
       # Named files, absolute intent: never a bare `qmllint` (a bare invocation
       # opens a GUI file picker and hangs a CI runner forever).
+      # The undefined-MEMBER gate, and its own tests first.
+      #
+      # WHAT IT CLOSES, which three steps in this job were green over. With
+      # `color: DTheme.desk` in Main.qml rewritten as `DTheme.noSuchDesk`, the
+      # QML suite passed (no spec instantiates Main.qml, so `check_bindings`
+      # never sees it), the static name gate passed (a D-prefixed typo contains
+      # no bare `Theme`), and the qmllint step below passed WHILE PRINTING the
+      # defect as a warning. `--missing-property error` escalates that one
+      # category and reaches every file in src/qml, not only the ones a spec
+      # constructs.
+      #
+      # It does NOT see the host collision — `-I src/qml` puts our own singleton
+      # on the import path, so qmllint checks a different resolution than the app
+      # performs. A green here says nothing about shadowing. That limit is in the
+      # script's header too, because a gate whose green is mistaken for a broader
+      # guarantee is the failure this repo has already paid for.
+      - name: the QML member gate's own tests
+        run: dialectica-ui/tests/tst_check_qml_members.sh
+
+      - name: every QML member read off our own types exists
+        run: dialectica-ui/tests/check_qml_members.sh
+
       - name: qmllint
         run: |
           set -eu
@@ -567,6 +633,22 @@ jobs:
             exit 1
           fi
           echo "ok: qmllint clean"
+
+      # The runner's own undefined-binding check, tested before the suite that
+      # relies on it. `check_bindings` is what turns a QML binding evaluating to
+      # `undefined` from a QWARN the runner ignores into a failed run — see the
+      # long comment on it in run-qml-tests.sh for why that gap exists.
+      #
+      # It is gated separately because a helper is part of the measurement: a
+      # check narrowed until it matches nothing passes every run exactly as
+      # quietly as a correct one, and the suite it guards would go on reporting
+      # green. This step pins both directions — what it must catch and what it
+      # must not — so a later edit that guts it fails HERE, loudly, rather than
+      # silently widening the blind spot the suite already had.
+      #
+      # Needs no Qt: it runs check_bindings over recorded runner output.
+      - name: the runner's undefined-binding check
+        run: dialectica-ui/tests/tst_check_bindings.sh
 
       # The component tests. `REQUIRE_QML_TESTS=1` so a missing or
       # wrong-major-version runner FAILS rather than skipping: a job that

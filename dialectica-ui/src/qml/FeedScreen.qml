@@ -131,8 +131,8 @@ ScreenFrame {
 
             Text {
                 text: screen.stoaTitle
-                font: Theme.heading
-                color: Theme.ink
+                font: DTheme.heading
+                color: DTheme.ink
                 textFormat: Text.PlainText   // peer-supplied: never rich text
                 visible: screen.stoaTitle !== ""
             }
@@ -159,8 +159,8 @@ ScreenFrame {
             delegate: Text {
                 required property var modelData
                 text: modelData.label
-                font: Theme.bodySmall
-                color: screen.ordering === modelData.key ? Theme.ink : Theme.inkMuted
+                font: DTheme.bodySmall
+                color: screen.ordering === modelData.key ? DTheme.ink : DTheme.inkMuted
                 textFormat: Text.PlainText
             }
         }
@@ -170,8 +170,8 @@ ScreenFrame {
         // reader's affordance, not a moderator privilege.
         Text {
             text: "SHOW HIDDEN"
-            font: Theme.label
-            color: screen.includeHidden ? Theme.accent : Theme.inkMuted
+            font: DTheme.label
+            color: screen.includeHidden ? DTheme.accent : DTheme.inkMuted
             // Explicit even though the text is a literal today. QML's default
             // is AutoText, which SNIFFS its input and switches to rich text
             // when the string looks like markup — so an element left on the
@@ -204,8 +204,8 @@ ScreenFrame {
     ColumnLayout {
         Layout.fillWidth: true
         spacing: 2
-        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: Theme.hairline; color: Theme.ink }
-        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: Theme.hairline; color: Theme.ink }
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: DTheme.hairline; color: DTheme.ink }
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: DTheme.hairline; color: DTheme.ink }
     }
 
     // ---- state: the store could not be read -----------------------------
@@ -217,22 +217,22 @@ ScreenFrame {
     Rectangle {
         visible: screen.readState === "failed"
         Layout.fillWidth: true
-        implicitHeight: failedBody.implicitHeight + 2 * Theme.cardPaddingY
-        color: Theme.field
-        border.width: Theme.border
-        border.color: Theme.accent
+        implicitHeight: failedBody.implicitHeight + 2 * DTheme.cardPaddingY
+        color: DTheme.field
+        border.width: DTheme.border
+        border.color: DTheme.accent
 
         ColumnLayout {
             id: failedBody
             anchors.fill: parent
-            anchors.margins: Theme.cardPaddingY
-            spacing: Theme.itemGap
+            anchors.margins: DTheme.cardPaddingY
+            spacing: DTheme.itemGap
 
             Text {
                 // copy.json `states.failedTitle`
                 text: "The store could not be read, so nothing can be shown."
-                font: Theme.heading
-                color: Theme.accent
+                font: DTheme.heading
+                color: DTheme.accent
                 wrapMode: Text.WordWrap
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
@@ -242,8 +242,8 @@ ScreenFrame {
                 // copy.json `states.failedBody` opens with this sentence, and
                 // it is the load-bearing half: it says what this ISN'T.
                 text: "This is not an empty Stoa. Posts you already hold are on disk and unreadable right now."
-                font: Theme.bodySmall
-                color: Theme.inkSoft
+                font: DTheme.bodySmall
+                color: DTheme.inkSoft
                 wrapMode: Text.WordWrap
                 lineHeight: 1.55
                 textFormat: Text.PlainText
@@ -255,8 +255,8 @@ ScreenFrame {
             // something more soothing and less actionable.
             Text {
                 text: screen.failure
-                font: Theme.address
-                color: Theme.ink
+                font: DTheme.address
+                color: DTheme.ink
                 wrapMode: Text.WrapAnywhere
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
@@ -278,22 +278,22 @@ ScreenFrame {
     Rectangle {
         visible: screen.readState === "ok" && screen.rows.length === 0
         Layout.fillWidth: true
-        implicitHeight: emptyBody.implicitHeight + 2 * Theme.cardPaddingY
-        color: Theme.paper
-        border.width: Theme.hairline
-        border.color: Theme.rule2
+        implicitHeight: emptyBody.implicitHeight + 2 * DTheme.cardPaddingY
+        color: DTheme.paper
+        border.width: DTheme.hairline
+        border.color: DTheme.rule2
 
         ColumnLayout {
             id: emptyBody
             anchors.fill: parent
-            anchors.margins: Theme.cardPaddingY
-            spacing: Theme.itemGap
+            anchors.margins: DTheme.cardPaddingY
+            spacing: DTheme.itemGap
 
             Text {
                 // copy.json `states.emptyTitle`
                 text: "You have not received anything for this Stoa yet."
-                font: Theme.heading
-                color: Theme.ink
+                font: DTheme.heading
+                color: DTheme.ink
                 wrapMode: Text.WordWrap
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
@@ -302,8 +302,8 @@ ScreenFrame {
             Text {
                 // copy.json `states.emptyBody`
                 text: "The store was read without error; it holds no posts for this address. Other peers may hold posts you have not been sent. This is a fact about your copy, not about the Stoa."
-                font: Theme.bodySmall
-                color: Theme.inkSoft
+                font: DTheme.bodySmall
+                color: DTheme.inkSoft
                 wrapMode: Text.WordWrap
                 lineHeight: 1.55
                 textFormat: Text.PlainText
@@ -320,8 +320,8 @@ ScreenFrame {
                 // among bound neighbours is the kind of thing that stays
                 // accurate right up until the visibility condition changes.
                 text: "STORE READ OK · " + screen.rows.length + " POSTS HELD"
-                font: Theme.label
-                color: Theme.inkMuted
+                font: DTheme.label
+                color: DTheme.inkMuted
                 textFormat: Text.PlainText
             }
         }
@@ -335,7 +335,7 @@ ScreenFrame {
         delegate: ColumnLayout {
             required property var modelData
             Layout.fillWidth: true
-            spacing: Theme.itemGap
+            spacing: DTheme.itemGap
 
             PostHeader {
                 identityAddress: modelData.author
@@ -354,8 +354,8 @@ ScreenFrame {
             Text {
                 visible: modelData.isHidden === true
                 text: "HIDDEN BY A MODERATOR · SHOWN BECAUSE YOU ASKED TO SEE HIDDEN POSTS"
-                font: Theme.label
-                color: Theme.accent
+                font: DTheme.label
+                color: DTheme.accent
                 textFormat: Text.PlainText
             }
 
@@ -369,16 +369,16 @@ ScreenFrame {
                 delegate: SanitisedText {
                     required property var modelData
                     value: modelData
-                    bodyFont: Theme.address
-                    bodyColor: Theme.inkMuted
+                    bodyFont: DTheme.address
+                    bodyColor: DTheme.inkMuted
                     Layout.fillWidth: true
                 }
             }
 
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: Theme.hairline
-                color: Theme.rule
+                Layout.preferredHeight: DTheme.hairline
+                color: DTheme.rule
             }
         }
     }
@@ -391,7 +391,7 @@ ScreenFrame {
     RowLayout {
         visible: screen.readState === "ok" && (screen.hasMore || screen.page > 0)
         Layout.fillWidth: true
-        spacing: Theme.itemGap
+        spacing: DTheme.itemGap
 
         FlatButton {
             text: "Previous"
@@ -419,13 +419,13 @@ ScreenFrame {
         Layout.fillWidth: true
         spacing: 6
 
-        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: Theme.hairline; color: Theme.ink }
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: DTheme.hairline; color: DTheme.ink }
 
         Text {
             // copy.json `compose.blockedTitle`
             text: "You cannot reply in this Stoa yet."
-            font: Theme.heading
-            color: Theme.ink
+            font: DTheme.heading
+            color: DTheme.ink
             textFormat: Text.PlainText
         }
 
@@ -434,8 +434,8 @@ ScreenFrame {
         // it here would mean maintaining the same guidance twice.
         Text {
             text: screen.capability.reason !== undefined ? screen.capability.reason : ""
-            font: Theme.bodySmall
-            color: Theme.inkSoft
+            font: DTheme.bodySmall
+            color: DTheme.inkSoft
             wrapMode: Text.WordWrap
             lineHeight: 1.55
             textFormat: Text.PlainText

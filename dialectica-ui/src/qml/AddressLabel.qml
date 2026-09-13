@@ -15,7 +15,7 @@ Text {
         var m = a.match(/^([a-z]+:)?(.*)$/i);
         var prefix = m[1] || "";
         var body = m[2];
-        var h = Theme.headChars, mid = Theme.middleChars, t = Theme.tailChars;
+        var h = DTheme.headChars, mid = DTheme.middleChars, t = DTheme.tailChars;
         if (body.length <= h + mid + t + 4)
             return a;
         var start = Math.floor((body.length - mid) / 2);
@@ -27,8 +27,8 @@ Text {
     property string copyText: address
 
     text: full ? address : abbreviate(address)
-    font: full ? Theme.addressBig : Theme.address
-    color: emphasis ? Theme.accent : Theme.inkMuted
+    font: full ? DTheme.addressBig : DTheme.address
+    color: emphasis ? DTheme.accent : DTheme.inkMuted
     wrapMode: full ? Text.WrapAnywhere : Text.NoWrap
     textFormat: Text.PlainText
 

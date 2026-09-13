@@ -60,7 +60,7 @@ TestCase {
     // and the other selectors here do not touch inks at all. Two explanations,
     // one answer: the classic shape of a test that proves nothing.
     //
-    // So these pin the ladder's INDEXING against the named Theme roles, not
+    // So these pin the ladder's INDEXING against the named DTheme roles, not
     // merely that the three inks differ. The rotation mutation was watched
     // failing here before this was called done.
     function test_a_fixed_address_selects_fixed_values() {
@@ -72,12 +72,12 @@ TestCase {
         compare(m._weave(), 0x13 % 3, "weave");
 
         // byte 14 = 0x0e = 14; 14 % 7 = 0 -> the first ink in the ladder.
-        compare(String(m._inkA()), String(Theme.markInk), "ink A indexing");
+        compare(String(m._inkA()), String(DTheme.markInk), "ink A indexing");
         // byte 15 = 0x0f = 15; 15 % 6 = 3, so B = (0 + 1 + 3) % 7 = 4.
-        compare(String(m._inkB()), String(Theme.markSteel), "ink B indexing");
+        compare(String(m._inkB()), String(DTheme.markSteel), "ink B indexing");
         // byte 13 = 0x0d = 13; 13 % 5 = 3, so the outline walks four steps on
         // from B, skipping A's index 0: 5, 6, then 0 is skipped to 1, then 2.
-        compare(String(m._outlineInk()), String(Theme.markRust), "outline indexing");
+        compare(String(m._outlineInk()), String(DTheme.markRust), "outline indexing");
         m.destroy();
     }
 
