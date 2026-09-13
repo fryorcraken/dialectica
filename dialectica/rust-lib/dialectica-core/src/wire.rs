@@ -1531,6 +1531,12 @@ fn feed_page_json(page: &crate::feed::FeedPage) -> String {
                 "thread": row.thread,
                 "currentVersion": row.current_version,
                 "author": row.author,
+                // Beside the address, never in place of it. A view holding only
+                // an address cannot compute this — the name derives from the
+                // public key and an address is a hash of a record containing one
+                // — which is the whole reason core returns it. See
+                // `crate::names` and `crate::feed::FeedRow::display_name`.
+                "displayName": row.display_name,
                 "body": sanitised_json(&row.body),
                 "attachments": row.attachments.iter().map(sanitised_json).collect::<Vec<_>>(),
                 "isRevised": row.is_revised,
@@ -5680,18 +5686,34 @@ mod tests {
         assert_eq!(v["hasMore"], false);
 
         let row = &v["items"][0];
-        for field in [
-            "thread",
-            "currentVersion",
-            "author",
-            "body",
-            "attachments",
-            "isRevised",
-            "isHidden",
-        ] {
-            assert!(row.get(field).is_some(), "row is missing {field}: {out}");
-        }
+        // The key SET, not merely each key's presence — so an ADDED field fails
+        // this as well as a removed one. Presence-only checking is the gap the
+        // spec-test reviewer measured on the slate reply, by adding a
+        // `displayName` to every candidate and watching the suite stay green.
+        let mut keys: Vec<&str> = row.as_object().unwrap().keys().map(|k| k.as_str()).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "attachments",
+                "author",
+                "body",
+                "currentVersion",
+                "displayName",
+                "isHidden",
+                "isRevised",
+                "thread",
+            ],
+            "the feed row's field set changed: {out}"
+        );
         assert_eq!(row["body"]["text"], "hello");
+
+        // The address is still an address and was not replaced by the name.
+        assert_eq!(
+            row["author"].as_str().unwrap(),
+            feed_key(2).public_key().address().to_hex(),
+            "the name must be added beside the address, never in place of it"
+        );
     }
 
     #[test]

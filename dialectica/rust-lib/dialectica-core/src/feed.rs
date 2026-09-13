@@ -117,11 +117,37 @@ pub struct FeedRow {
     pub current_version: String,
     /// The author's per-Stoa address (§5.2), hex.
     ///
-    /// **An address and never a name.** There are no names in core — the
-    /// generated name is a pure function of this address and is the view's to
-    /// derive. Sending a name from here would put a second, forgeable identifier
-    /// on the wire beside the real one.
+    /// **The address is the identity**, and [`FeedRow::display_name`] is added
+    /// beside it rather than in place of it.
+    ///
+    /// This comment used to read: *"An address and never a name. There are no
+    /// names in core — the generated name is a pure function of this address and
+    /// is the view's to derive."* **Both halves were false, and the comment is
+    /// why the name field was missing for as long as it was.** The name is a
+    /// pure function of the **public key**, not of the address; and a view
+    /// holding only an address therefore *cannot* derive it, because an address
+    /// is a hash from which no key is recoverable. `docs/UI-BRIEF.md` carried
+    /// the correction while the code carried the error, and a reader of the code
+    /// believes the code.
     pub author: String,
+    /// The author's generated display name — *measured aporia of lampsacus*.
+    ///
+    /// **This is the field a view cannot compute for itself**, which is the only
+    /// reason it is here. See [`crate::names`]: a name derives from the public
+    /// key, this row reports an address, and no key is recoverable from an
+    /// address. Core holds the key — the signed op carries it and the signature
+    /// was verified under it — so core renders the name.
+    ///
+    /// **Derived, never carried.** The value is computed from
+    /// `entry.op.op.author` at the moment this row is built. Nothing an op
+    /// contains can influence it, so a name is not a value a relay could strip or
+    /// forge, and there is no second forgeable identifier on the wire.
+    ///
+    /// **Never a substitute for the address.** A name is not unique, is not an
+    /// identifier, and is never numbered to disambiguate a collision. Two
+    /// identities can render the same name; the addresses beside them are what
+    /// tell them apart.
+    pub display_name: String,
     /// The post body, sanitised for display.
     pub body: Sanitised,
     /// Logos Storage CIDs (§4.6), sanitised.
@@ -247,10 +273,32 @@ pub fn list_threads<L: OpLog>(
             continue;
         }
 
+        // The name is derived from the KEY that signed — `entry.op.op.author` is
+        // a `PublicKey`, and `verify()` above has already established that this
+        // op was signed under it. The address on the row is a lossy projection of
+        // the same key, which is why the view cannot do this itself.
+        //
+        // A derivation failure here is the denylist reserve being exhausted, at
+        // roughly one key in 1.2 million. It is NOT a store failure and must not
+        // be reported as one, so it does not become an `Err`: a whole feed
+        // refused because one author drew an unlucky key would render as a broken
+        // Stoa, which is the confusion §11.1 obligation 5 exists to prevent.
+        //
+        // NO SPEC: the spec requires that every reply reporting an author carries
+        // a name and forbids a placeholder, but does not say what a feed does
+        // when one author's name cannot be derived. This drops that row rather
+        // than serving it nameless or inventing a name — a row we cannot render
+        // honestly is one we do not serve. See
+        // `a_row_whose_name_cannot_be_derived_is_dropped_rather_than_faked`.
+        let Ok(display_name) = crate::names::display_name(&entry.op.op.author) else {
+            continue;
+        };
+
         rows.push(FeedRow {
             thread: id.to_hex(),
             current_version: version.current.id().to_hex(),
             author: entry.op.op.author.address().to_hex(),
+            display_name: display_name.render(),
             body: sanitise(version.body()),
             attachments: version.attachments().iter().map(|a| sanitise(a)).collect(),
             is_revised: version.is_revised(),
@@ -600,6 +648,105 @@ mod tests {
         let rows = all_of(&log, false);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].thread, mine.op.id().to_hex());
+    }
+
+    #[test]
+    fn a_row_carries_a_display_name_beside_the_address() {
+        // The crux of the change. `list_threads` returns an address; the name
+        // comes from a key; so a view is stuck unless core closes the gap.
+        //
+        // Pinned to a WRITTEN-DOWN name rather than to `names::display_name`'s
+        // own output: a row built by calling the derivation and then checked by
+        // calling the derivation agrees with itself whatever either does, and
+        // would pass on a row that named the wrong author's key.
+        let head = a_thread(4, "mine");
+        let log = a_log(vec![head]);
+        let rows = all_of(&log, false);
+
+        assert_eq!(rows[0].author, a_key(4).public_key().address().to_hex());
+        assert_eq!(
+            rows[0].display_name,
+            crate::names::tests_support::PINNED_NAME_FOR_KEY_4,
+            "the row's name must be the written-down name for the signing key"
+        );
+        // And the two are different facts: the address did not become the name.
+        assert_ne!(rows[0].display_name, rows[0].author);
+    }
+
+    #[test]
+    fn a_rows_name_follows_the_key_that_signed_not_the_rows_position() {
+        // Exchanging the two posts' order must exchange the two names with them.
+        // A row that took its name from its INDEX passes every single-row test
+        // above and fails this one.
+        let a = a_thread(4, "first");
+        let b = a_thread(5, "second");
+
+        let forwards = all_of(&a_log(vec![a.clone(), b.clone()]), false);
+        let backwards = all_of(&a_log(vec![b.clone(), a.clone()]), false);
+        assert_eq!(forwards.len(), 2);
+
+        // Whatever order the convergent sort puts them in, each row's name
+        // travels with its own author address.
+        for rows in [&forwards, &backwards] {
+            for row in rows.iter() {
+                let expected = if row.author == a_key(4).public_key().address().to_hex() {
+                    crate::names::tests_support::PINNED_NAME_FOR_KEY_4
+                } else {
+                    crate::names::tests_support::PINNED_NAME_FOR_KEY_5
+                };
+                assert_eq!(row.display_name, expected, "name did not follow its key");
+            }
+        }
+        // The two names really are different, so the assertion above is not
+        // trivially satisfied by one name matching both branches.
+        assert_ne!(
+            crate::names::tests_support::PINNED_NAME_FOR_KEY_4,
+            crate::names::tests_support::PINNED_NAME_FOR_KEY_5
+        );
+    }
+
+    #[test]
+    fn two_posts_by_one_author_render_one_name() {
+        let first = a_thread(4, "one");
+        let key = a_key(4);
+        let second = Op {
+            stoa: a_stoa(),
+            author: key.public_key(),
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: "two".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&key);
+        let log = a_log(vec![first, second]);
+
+        let rows = all_of(&log, false);
+        assert_eq!(rows.len(), 2, "the fixture must produce two rows");
+        assert_eq!(rows[0].display_name, rows[1].display_name);
+        assert_eq!(rows[0].author, rows[1].author);
+    }
+
+    #[test]
+    fn a_name_in_a_posts_body_does_not_become_the_rendered_name() {
+        // "A name does not travel as content." An op has no name field to strip
+        // — `OpKind::Post` carries `body`, `attachments`, `thread` and `parent`
+        // and nothing else — so a name-shaped string in a body is body text and
+        // the rendered name is still the one derived from the signing key.
+        //
+        // Satisfied by construction rather than by a filter: there is no field
+        // for a name to arrive in. This asserts the consequence anyway, because
+        // "by construction" is a claim about a data shape that a future field
+        // could silently undo.
+        let head = a_thread(4, "measured aporia of lampsacus");
+        let log = a_log(vec![head]);
+        let rows = all_of(&log, false);
+        assert_eq!(
+            rows[0].display_name,
+            crate::names::tests_support::PINNED_NAME_FOR_KEY_4,
+            "the body's text must not influence the rendered name"
+        );
     }
 
     #[test]
