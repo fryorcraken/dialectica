@@ -891,10 +891,13 @@ ionic thales* — not `user_8f3a` and not a handle someone registered. The shape
 is settled below and is **four words**, for reasons that are arithmetic rather
 than aesthetic.
 
-**But a user is not handed one.** At onboarding they are shown a slate of five
+**But a user is not handed one.** ~~At onboarding they are shown a slate of five
 generated identities and pick one, and they may refresh the slate as many times
-as they like. So a name is *chosen* in the ordinary sense — it carries intent,
-and a user who refreshed forty times meant the one they kept.
+as they like.~~ **Built — see the `identity-onboarding` spec**, which carries both
+the fixed count reported with the set and the unlimited regeneration as
+requirements. What matters here and is not a requirement anywhere: a name is
+*chosen* in the ordinary sense — it carries intent, and a user who refreshed forty
+times meant the one they kept.
 
 **What is being chosen is the key, and the name is the key's shadow.** This
 distinction is not pedantry and it is the single most important sentence in this
@@ -1374,30 +1377,40 @@ number them oppositely and each would be sure the other was the impostor.
 **A second collision question the slate introduces: two identical names in one
 picker.** Five draws from 2³⁴ collide with probability about `5·4/2S` = `10/S` —
 roughly one slate in 1.7 billion, against one in 1.7 million at 2²⁴. A user will
-never see it, and at this size arguably no deployment ever will. **The picker
-still discards and redraws a duplicate**, because the handling is three lines
-and the alternative is a display that reads as broken in the one case it
-appears.
+never see it, and at this size arguably no deployment ever will.
 
-This one *is* worth handling, and it is cheap precisely because it is local:
-the slate is generated on one peer, at one moment, with nothing published. So
-**the picker discards and redraws a duplicate before displaying**, which is a
-presentation rule with no protocol consequence whatsoever — unlike the
-cross-identity collision above, where discarding is impossible because both
-identities already exist and neither peer may decide which one is real. The two
-cases look alike and are not: one is a choice about what to draw, the other is a
-fact about what exists.
+~~**The picker still discards and redraws a duplicate**, because the handling is
+three lines and the alternative is a display that reads as broken in the one case
+it appears. This one *is* worth handling, and it is cheap precisely because it is
+local: the slate is generated on one peer, at one moment, with nothing published.
+So **the picker discards and redraws a duplicate before displaying**, which is a
+presentation rule with no protocol consequence whatsoever.~~
 
-**Regeneration discards keys, and the user cannot see it.** Each refresh mints
+**Built, and not by the picker** — see the `identity-onboarding` spec. Duplicate
+handling is in **core**, and it is an index walk rather than a redraw: the
+derivation walks forward until it has five distinct paths. A redraw would need a
+fresh nonce, which would destroy the reproducibility everything else rests on; the
+archived `design.md` carries that argument. The distinction this section draws
+against the cross-identity case still holds and is why it is kept: one is a choice
+about what to draw, the other a fact about what exists.
+
+~~**Regeneration discards keys, and the user cannot see it.** Each refresh mints
 five keypairs and keeps at most one; the rest are gone, unrecoverable, and were
-never anywhere. This sounds alarming and is not: a discarded key was never an
-identity — it signed nothing, appeared in no op, and no peer ever heard of it.
-There is nothing to lose. **The only case that would matter is if a refresh
-could discard a key the user had already used**, which is why selection and use
-must be one step: an identity becomes real when it signs, and nothing signs
-during onboarding. Whether the keystore writes on every refresh or only on
+never anywhere.~~ ~~Whether the keystore writes on every refresh or only on
 selection is an implementation question with no user-visible consequence, and is
-deliberately not decided here.
+deliberately not decided here.~~
+
+**Both halves are superseded.** A refresh mints **no keypairs**: the five
+candidates are derivation paths over **one** master key, differing by path alone —
+so there are no discarded keys to be invisible about, and a backup is one secret
+rather than five. And the write question **was decided**: nothing writes on
+refresh, structurally, because the slate handler has no store parameter to write
+to. See the `identity-onboarding` spec for both, and its archived `design.md` for
+why five independent roots was rejected.
+
+What survives from this paragraph, because it is the reason the shape is safe:
+**an identity becomes real when it signs, and nothing signs during onboarding.**
+That is now spec prose rather than a plan note.
 
 #### Grinding — and the slate makes this the central finding
 
@@ -4155,7 +4168,11 @@ thing (§2.3).
   unanswered, for the owner's own review** of identity and derivation: *"I would
   expect us to have all root identities using derivation."* Today §5.1's root
   secret is generated (`SecretKey::generate`) and only the per-Stoa key is derived
-  from it (§5.2, `derive_stoa_key`) — and §9.2's MVP does not call even that. The
+  from it — under **two** schemes now, not one: `derive_stoa_key` takes the root and
+  the Stoa, and `derive_stoa_key_at_path` takes a chosen derivation path as a third
+  input, under a bumped salt so the two cannot silently reproduce each other. The
+  path-taking one is what a kept identity uses (see the `identity-onboarding`
+  spec); the pathless one has no production caller left. The
   question is whether a root should itself be a derived child of something
   higher, and what that something is. **Do not answer it here**; it touches §5.1,
   §5.6's keystore and the LEZ key-tree path in the next entry, and the owner has
