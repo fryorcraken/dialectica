@@ -5707,12 +5707,14 @@ mod tests {
 
     #[test]
     fn an_over_long_genesis_hex_string_is_refused_before_it_is_decoded() {
-        // NO SPEC: the spec set bounds no field's length. This is the same
-        // absent decision `MAX_REQUEST_BYTES` is, one layer in — and it is kept
-        // beside the request cap rather than folded into it because they refuse
-        // different things: the request cap bounds what any request may cost,
-        // and this bounds what THIS field may allocate no matter how small the
-        // request around it is.
+        // NO SPEC: the spec set bounds no field's length. This used to read as
+        // "the same absent decision `MAX_REQUEST_BYTES` is, one layer in", and
+        // that half is no longer true — the request bound is now specified in
+        // `module-wire-contract`, and this one is not. The two still refuse
+        // different things, which is why they are kept apart: the request bound
+        // bounds what any request may cost, and this bounds what THIS field may
+        // allocate no matter how small the request around it is. That the outer
+        // one got specified is an argument for specifying this one, not against.
         //
         // The assertion is about ORDERING, which is the only part that matters:
         // the fixture is over-long AND not valid hex. An implementation that
@@ -8411,12 +8413,17 @@ mod tests {
 
     #[test]
     fn every_request_taking_method_refuses_an_oversized_request() {
-        // NO SPEC: the spec set says nothing about a size limit on a request —
-        // not that there is one, not that there is not. This is therefore an
-        // ABSENT decision rather than a rejected one, and the number is
-        // `dev-writer`'s choice pending the spec-writer: 4 MiB, derived in
-        // `MAX_REQUEST_BYTES`'s doc from what a legitimate composed op can
-        // carry.
+        // SPECIFIED, as of this change: `module-wire-contract`'s "A request is
+        // bounded, and the bound is checked before the request is parsed". This
+        // comment carried a `NO SPEC:` marker until then — the limit was an
+        // ABSENT decision, and pinning it across the whole surface is what made
+        // leaving it absent expensive.
+        //
+        // The spec deliberately does NOT fix the number, only that one exists,
+        // that it is checked first, and that it is bracketed: above the largest
+        // op `op-format` permits, materially below what costs the module its
+        // process. 4 MiB is where `MAX_REQUEST_BYTES`'s doc puts it within that
+        // bracket, with the arithmetic shown.
         //
         // What made it necessary is measured rather than theorised: a 64 MiB
         // request padded with one ignored field was ACCEPTED and served, at

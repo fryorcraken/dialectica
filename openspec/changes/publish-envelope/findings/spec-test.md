@@ -26,7 +26,7 @@ on completion.
 
 ## Findings
 
-- [ ] **`spec-writer`** — the request size cap is in **no merged spec at all**,
+- [x] **`spec-writer`** — the request size cap is in **no merged spec at all**,
       and this change extends an unspecified obligation to three more methods
       **Scenario:** `module-wire-contract` states the non-object rule, the
       three-distinct-messages rule and the three null readings, and says nothing
@@ -54,8 +54,27 @@ on completion.
       expensive to revisit. The requirement to write is the cap's *existence* and
       that the length check precedes the parse — the ordering is the security
       property, and it is the half a reader would not infer.
+      **Closed — PROMOTED rather than softened, and the proposal corrected too.**
+      `specs/module-wire-contract/spec.md` now `ADDED`s "A request is bounded, and
+      the bound is checked before the request is parsed": a bound exists, it is
+      **one** number for the surface rather than per method, it is checked
+      **before** the parse, and it is bracketed — above the largest op
+      `op-format` permits, materially below what costs the module its process.
+      The spec deliberately does **not** state 4 MiB; per CLAUDE.md a number in a
+      spec is a claim no gate reads. The reason for promoting rather than
+      correcting-only: the property that matters is the ordering, a bound checked
+      after the parse bounds nothing, and what failing to pay costs is the process
+      rather than the call — which is exactly what a behaviour contract is for.
+      Leaving it in a comment leaves the next implementation free to reorder with
+      every test green. `proposal.md` is corrected as well and now says two of the
+      three were the contract's, so the headline no longer overcounts.
+      `skip_specs: true` is removed from `.openspec.yaml`, which keeps its old
+      reasoning alongside what it missed. `wire.rs:8414`'s `NO SPEC:` marker is
+      replaced by a pointer to the new requirement, and `wire.rs:5710`'s marker —
+      which cited the cap as "the same absent decision, one layer in" — is
+      corrected, since that half stopped being true.
 
-- [ ] **`spec-writer`** — the defaulted-method escape in the sweep classifier
+- [x] **`spec-writer`** — the defaulted-method escape in the sweep classifier
       rests on an **upstream** behaviour that no requirement records and no gate
       in this repo pins
       **Scenario:** `findings/architecture.md`'s open `design-reviewer` box
@@ -84,6 +103,26 @@ on completion.
       stated assumption with its citation) so the premise is reviewable when the
       SDK moves. The `design-reviewer`'s open box covers whether `design.md`
       should say it; this box is that the *contract* does not.
+      **Closed — recorded in `module-wire-contract` as a stated assumption with
+      its citation, not as a bare claim.** The `MODIFIED` "Every method takes JSON
+      and returns JSON" now says what *the surface* is: it SHALL be derivable from
+      one declaration, no method SHALL be on the wire without appearing there, and
+      the generator's rule for excluding plumbing is that a method with a
+      **default body** is not emitted — quoted from `lidl-gen`'s Rust frontend
+      module doc, at the revision `dialectica/flake.nix` pins
+      (`logos-module-builder` at `9f420c2`, which supplies both the generator and
+      the SDK source). Two scenarios carry it: one requiring an omission from the
+      derived check to be reported naming the method, and one stating the
+      defaulted-method exclusion with its citation. Written as "we depend on
+      upstream behaviour X, verified at this revision" rather than "X is true"
+      precisely so a pin bump makes it visibly re-checkable — CLAUDE.md's
+      self-invalidating rule. I re-read the generator myself rather than relying
+      on the citation: `lidl-gen/src/rust_frontend.rs:350-354` is
+      `// Default-bodied methods (framework hooks, helpers) are not part of the
+      IPC contract.` / `if f.default.is_some() { continue; }`, and lines 10-13 of
+      its module doc say the same. The reviewer's reading is accurate.
+      `design.md` saying it is still the `design-reviewer`'s open box; this one
+      was the contract's silence and is closed.
 
 - [ ] **`tester`** — `every_request_taking_method_refuses_an_oversized_request`
       cannot distinguish a cap checked before the parse from one checked after,

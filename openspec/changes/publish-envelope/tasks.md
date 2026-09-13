@@ -1,14 +1,18 @@
 ## Stages
 
-- [x] ~~spec — `spec-writer`~~ — **no delta.** Both contracts already decide
-      what the code was getting wrong: `module-wire-contract` scopes the
-      envelope rule to "every method that reads a field of its request" and
-      names the panic probe as the *only* exception, and `content-authoring`'s
-      "The signing identity is the one the probe reports" settles which key
-      signs. `proposal.md` records the check rather than the conclusion,
-      including why adding a requirement naming these handlers would make the
-      contract weaker. Struck through, per the flow's rule for a piece with no
-      spec delta, so the row is not an unticked one nobody is doing.
+- [x] spec — `spec-writer`. **This row was struck through as "no delta", and
+      spec-test review showed the strike-through was two-thirds right.** The
+      non-object rule and the three-messages rule were already
+      `module-wire-contract`'s, and `content-authoring` already settled which key
+      signs — so no requirement names the publish handlers, which would have made
+      the contract weaker for the reason `proposal.md` quotes. But the **request
+      size bound** was in no merged spec at all, and this change pinned it across
+      the whole request-taking surface. There is now one delta against
+      `module-wire-contract`: the bound `ADDED` (that one exists, that it is one
+      number, that it is checked before the parse, and the bracket it sits in —
+      not the number), and the surface requirement `MODIFIED` to say what "the
+      surface" is and to record the upstream premise the anti-staleness gate
+      rests on. `.openspec.yaml` keeps the old reasoning with what it missed.
 - [x] design + code — `dev-writer`
 - [ ] tests — `tester`
 - [x] review: correctness — `code-reviewer`

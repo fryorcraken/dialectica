@@ -5,25 +5,24 @@
 # built-in `spec-driven`, set in `openspec/config.yaml`.
 schema: spec-driven
 
-# No spec delta: this change fixes code against contracts that were already
-# right, and that was checked rather than assumed.
+# This change carried `skip_specs: true` until spec-test review, and the marker's
+# reasoning was right about two of the three envelope obligations and wrong about
+# the third. Kept here rather than deleted, because the two it was right about are
+# still the reason no requirement names the publish handlers:
 #
-# `module-wire-contract` scopes the request-envelope rule to "every method that
-# reads a field of its request" and names the panic probe as the surface's ONLY
-# exception. The three publish handlers read `stoa`, `body`, `parent`, `target`
-# and `direction`, so they were already inside the rule and already violating
-# it. `content-authoring` likewise already decides which key signs: "WHEN the
-# posting-capability probe reports an identity for a Stoa and a post is then
-# published into that Stoa, THEN the published op's author is the identity the
-# probe reported."
+#   `module-wire-contract` scopes the request-envelope rule to "every method that
+#   reads a field of its request" and names the panic probe as the surface's ONLY
+#   exception. The three publish handlers read `stoa`, `body`, `parent`, `target`
+#   and `direction`, so they were already inside the rule and already violating
+#   it. `content-authoring` likewise already decides which key signs. Adding a
+#   requirement naming these handlers would make the contract WEAKER, and the
+#   requirement says so itself: "This SHALL hold for every such method, whatever
+#   fields that method requires ... The rule is therefore stated once, for the
+#   envelope, rather than left to each method's fields to imply."
 #
-# Adding a requirement naming these handlers would make the contract WEAKER, and
-# the requirement says so itself: "This SHALL hold for every such method,
-# whatever fields that method requires ... The rule is therefore stated once,
-# for the envelope, rather than left to each method's fields to imply." A rule
-# restated per method is a rule the next method is outside — which is the exact
-# failure this change fixes at the test layer.
-#
-# `proposal.md` and `design.md` record the check itself, not just its outcome,
-# so the next reader can see the question was asked.
-skip_specs: true
+# What the marker missed is that the THIRD obligation — the request size cap —
+# was in no merged spec at all. It was a `dev-writer` default carrying a
+# `NO SPEC:` marker, and this change pinned it across the whole surface, which is
+# the moment an absent decision becomes expensive to revisit. So there is now one
+# MODIFIED delta against `module-wire-contract`, and it specifies the envelope's
+# bound rather than the publish handlers.

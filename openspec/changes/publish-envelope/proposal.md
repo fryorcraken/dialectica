@@ -18,7 +18,8 @@ obligations reached them:
   roughly 2N transient heap. `docs/PHASE0-FINDINGS.md` §3 measured what an
   allocation failure in a dispatch handler costs: the module process aborts, the
   caller waits out a 20-second timeout, and every later call reports
-  `MODULE_NOT_LOADED`;
+  `MODULE_NOT_LOADED`. **This third one was not a contract obligation at all
+  until this change made it one** — see below;
 - and all three were **absent from `every_request_taking_method`**, the sweep
   whose whole job is applying those rules across the surface. Five sweeps ran
   green over eleven methods while the surface had fourteen.
@@ -73,34 +74,96 @@ probe reported."*
   omission — the correction for two evasions review measured against the first
   version. Its preconditions are stated in `design.md` §6 rather than implied.
 
-## No spec delta, and the reasoning rather than the conclusion
+## Capabilities
 
-**Whether this needed one was a real question**, because a contract that does
-not reach these handlers would have a gap worth closing as a `MODIFIED`
-requirement. It was checked against the text rather than assumed, and the answer
-is no for both halves.
+### New Capabilities
 
-**`module-wire-contract` already reaches them.** It scopes the envelope rule to
-*"every method that **reads a field** of its request"*, states that scope's
-three cases explicitly, and says the surface carries *"exactly one method in
-that third case: the panic probe"*. The publish handlers read `stoa`, `body`,
-`parent`, `target` and `direction`. They are inside the rule's first case, and
-they were violating it — an implementation defect against a contract that was
-already correct, not a contract that failed to say so.
+None.
+
+### Modified Capabilities
+
+- `module-wire-contract`: the request **size bound** is added as a requirement —
+  that one exists, that it is one number for the surface rather than per method,
+  and that it is checked **before** the request is parsed. And the existing
+  "Every method takes JSON and returns JSON" requirement gains the two sentences
+  that say what *the surface* is: it is derivable from one declaration, and a
+  method the generator does not emit is outside it — recorded with its citation
+  because that behaviour is upstream's, not ours.
+
+## Which obligations were already the contract's, and which was not
+
+**Two of three were. The third was a `dev-writer` default with a `NO SPEC:`
+marker on it, and this change is what made it load-bearing.** An earlier version
+of this proposal counted all three as `module-wire-contract` obligations the
+publish handlers had escaped. That reads as three *contract* violations; it was
+two. Corrected here rather than softened, because the correction is the
+interesting half.
+
+**`module-wire-contract` already reached them, for the non-object rule and the
+three-messages rule.** It scopes the envelope rule to *"every method that **reads
+a field** of its request"*, states that scope's three cases explicitly, and says
+the surface carries *"exactly one method in that third case: the panic probe"*.
+The publish handlers read `stoa`, `body`, `parent`, `target` and `direction`.
+They are inside the rule's first case, and they were violating it — an
+implementation defect against a contract that was already correct.
 
 The requirement is also emphatic on precisely this point: *"This SHALL hold for
 **every** such method, whatever fields that method requires ... The rule is
 therefore stated once, for the envelope, rather than left to each method's
 fields to imply."* Adding a requirement naming the publish handlers would make
 the contract weaker, not stronger: a rule restated per method is a rule the next
-method is outside.
+method is outside. So the delta below names no handler.
 
 **`content-authoring` already decides the signing key**, in the scenario quoted
 above. Nothing about it needed widening; the code needed to catch up with it.
 
-So the delta directory is absent on purpose rather than forgotten, and the
-absence is the finding: two live defects, zero contract changes, because both
-contracts were already right.
+**The size cap was in no merged spec at all.** Not in `module-wire-contract`, not
+in the archived `wire-request-envelope` delta that built the envelope. The one
+place in the merged spec set that bounds a size is `keystore`, and that is about
+a keystore *file's* content — a different thing. The cap existed only as code,
+carrying a `NO SPEC:` marker saying so in as many words, and this change pinned
+it across the whole request-taking surface. That is the moment an absent decision
+stops being cheap to revisit: the sweep is now the thing a fifteenth method
+inherits, and it would inherit an unspecified number.
+
+**So the cap is promoted rather than the prose softened**, for a reason that is
+about the cap and not about tidiness: the property that matters is the
+**ordering**, and the ordering is the half a reader cannot infer. A limit checked
+after the parse bounds nothing — the ~2N allocation it exists to refuse has
+already been paid — and what failing to pay it costs is not an error reply but
+the module process, per `docs/PHASE0-FINDINGS.md` §3. A security property whose
+whole content is "this check runs first" is exactly what a behaviour contract is
+for, and leaving it in a code comment leaves the next implementation free to get
+the order wrong while every test still passes.
+
+What the delta does **not** do is put the number in the spec. It requires that a
+limit exists, that it is one number, that it is checked first, and that it is
+bounded from both sides — large enough for the biggest op `op-format` permits,
+materially below what costs the module its process — and it requires the
+implementation to record where its number sits between those two. A number in a
+spec is a claim no gate reads and that rots in silence; the bracket is the part
+that stays true.
+
+## The anti-staleness gate rests on an upstream premise, now recorded
+
+The sweep that makes the method list unable to go stale classifies every method
+in the dispatch trait, and lets exactly one shape through unswept: a method with
+a **default body**. That is correct — the generator does not put such a method on
+the wire — and it was verified by reading the generator rather than the comment
+asserting it.
+
+But "a defaulted method is not on the module's wire surface" had become a premise
+of this repo's only gate against the method list going stale, and it lived in one
+code comment plus one pinned flake input's source. `logos-module-builder` is
+pinned in `dialectica/flake.nix` and supplies the generator; a bump that started
+emitting defaulted methods would put a request-taking method on the wire with
+every gate in this PR green.
+
+So `module-wire-contract` — the capability that defines what "the surface" is —
+now carries it, as a stated assumption with its citation rather than as a bare
+claim. The difference matters and is CLAUDE.md's rule: *"we depend on upstream
+behaviour X, verified at this revision"* fails visibly when the pin moves;
+*"X is true"* does not fail at all.
 
 ## Impact
 
@@ -112,6 +175,11 @@ contracts were already right.
   ban on the adapter parsing a request at all.
 - `docs/PLAN.md` §9.2 — the prologue reshape struck through as done, the unlock
   ordering written out as what remains.
+- `openspec/specs/module-wire-contract` — one `ADDED` requirement for the request
+  bound, and the surface requirement `MODIFIED` to say what the surface is. No
+  behaviour changes with them: both specify what the code already does, which is
+  the point — an unspecified obligation pinned across fourteen methods is what
+  the delta exists to stop being unspecified.
 - No change to any wire reply a correct caller receives. What changes is which
   requests are refused, what those refusals say, and which key signs.
 
