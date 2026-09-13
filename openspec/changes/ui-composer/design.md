@@ -115,6 +115,92 @@ This is stricter than it has to be today (core always emits the field) and the
 strictness is the point: it is the same "does not rest on a guarantee made one
 module away" argument `FeedScreen`'s `items` guard already makes.
 
+### The draft is cleared on a newly stored op and kept in the other two cases
+
+Three outcomes, three fates for the draft, and they are **not uniform**. Cleared
+on `wasNew: true`; kept on `wasNew: false`; kept on every refusal. The asymmetry
+is the decision rather than an inconsistency, and it is worth stating because it
+looks like an oversight from either end — someone tidying toward "always clear on
+success" or "never clear" would be making it uniform in a direction that is
+wrong.
+
+**Clearing on a newly stored op removes an affordance that is ready to produce a
+confusing outcome.** The same text resubmitted is the same op id, so the second
+submission is a deduplicated no-op reported as "already published" — a state the
+user reached by using a control that looked ready to publish something. Nothing
+is lost by clearing, because the text is published and readable.
+
+**Keeping it in the other two cases is the same reasoning applied to different
+facts.** On a refusal nothing was published, so the draft is the only copy. On a
+deduplicated publish nothing new was written, and a user whose intention was to
+publish something *different* needs the text in front of them to edit — clearing
+takes away exactly what they need.
+
+**The cost, named rather than absorbed:** a user writing a near-identical
+follow-up loses their starting point and retypes it. That is a convenience,
+weighed against an interface offering a control whose use produces a confusing
+no-op.
+
+**This was decided before the spec contracted it, and the record was in the wrong
+place.** The argument lived only in a code comment marked `NO SPEC` — which said
+the opposite of the truth once the spec grew the requirement, and told the next
+reader an unmade decision sat there for them to change. Two reviewers found the
+same gap from opposite directions: the design reviewer that `design.md` carried
+no entry, and the spec-test reviewer that mutations inverting **both halves**
+left the suite green. Unrecorded and unpinned together is a decision made by
+accident, which is what this entry and the tests the tester added now close.
+
+### The vote path ignores `wasNew` where the composer refuses on it
+
+Two publish paths in this change take **opposite policies on the same field**,
+and the divergence is deliberate. The entry above argues that a composer reply
+carrying an `opId` and no `wasNew` is not core's success shape for that call and
+must be refused, and calls the strictness the point. `voteOn` accepts exactly
+that shape: it requires `reply.ok` and a non-empty string `opId`, and never reads
+`wasNew`.
+
+**What makes a vote different is that it has no third outcome to distinguish.**
+For a post, `wasNew` decides between two *user-visible* messages — "saved on this
+machine" and "already published" — and the whole reason the field is read
+strictly is that guessing wrong tells the user a post exists that does not, or
+sends them looking for one that will never appear. A vote has nothing
+corresponding. Published once or published twice, the viewer's vote is on record
+and the control shows the same thing, so the field carries no information this
+view would render. Reading it strictly would mean refusing to show a vote back
+that *was* recorded, which is worse on the only axis available.
+
+The spec does not settle this — `grep -n "wasNew" spec.md` returns nothing — so
+`design.md` is the only place it can live. Without the entry a reader who finds
+the `wasNew === false` rule and then reads `voteOn` sees a rule followed at one
+call site and missed at another, and cannot tell a deliberate divergence from a
+missed one.
+
+### The undo press publishes nothing, and the arrow stays pressable
+
+`VoteControl` emits `voted(0)` when the viewer presses the arrow they already
+voted. `FeedScreen` drops it: `if (direction !== 0)`.
+
+**Core has no vote retraction**, so there is no op that means "I take that back".
+The two alternatives someone will reach for are both wrong, and wrong in a way
+the code cannot show on its own:
+
+- **Publish the opposite direction.** A down-vote is not a retracted up-vote. It
+  is a second, different, signed assertion, and a later scorer reading the log
+  would count it as one.
+- **Publish the same direction again.** It deduplicates to the op already
+  published, so nothing changes and the user is told nothing — an action that
+  looks like it did something.
+
+**The cost, named rather than hidden: the arrow stays pressable and the press
+does nothing at all**, not even a message. That is a dead affordance and it is a
+real cost, accepted because the alternatives publish something false. The honest
+repair needs a retraction op, which is a core change.
+
+**This is the second place the same gap shows.** Moderation reversibility is
+suspended for want of a value that would let an Unhide reverse a Hide; vote
+retraction is that gap again, in the view. A reader finding one should be able to
+find the other, which is why both are named here.
+
 ### The byte count is computed, and the cap is not a number in this file
 
 The spec requires the limit in **UTF-8 bytes**, and requires the behaviour
@@ -249,11 +335,36 @@ trusting another field of the same reply.
 
 So the invariant is now established rather than assumed: `voteTarget(rowData)`
 returns the row's op or `""`, in one place, and both consumers — the control's
-`vote` binding and `voteOn` — go through it. A row with no usable op renders a
-non-interactive control and reaches no call. `voteOn` restates the guard at the
+`vote` binding and `voteOn` — go through it. It guards the row object itself for
+`null` and `undefined` before reaching any field, so it is a rule about rows
+rather than a `currentVersion` special case. `voteOn` restates the guard at the
 call rather than inheriting it from the binding, because it is reachable from
 anywhere in the file and a second caller that skipped `voteTarget` would
 reintroduce both failures silently.
+
+**What a malformed row costs, and who bears it.** Three responses were available
+and the choice is decided by that question rather than by tidiness:
+
+- **Render the row, make its vote control inert** — chosen. The reader keeps
+  peer content they were sent; the only thing withheld is an affordance that
+  could not have worked.
+- **Drop the row.** Rejected: it hides peer content on a censorship-resistant
+  forum, and hides it **silently** — the reader cannot tell a Stoa with nothing
+  in it from one whose rows this peer discarded. That is the confusion this whole
+  screen exists to prevent, reintroduced one level down.
+- **Fail the whole read.** Rejected: it lets any peer blank a feed for free by
+  sending one bad row, and it collides directly with "empty and unreadable must
+  never look alike" — a feed failing on a neighbour's malformed row reads as a
+  broken store.
+
+**"Drop the row" is the one that looks tidiest from inside the code**, which is
+why the alternatives are recorded rather than left implicit. The next person who
+finds a second malformed field will otherwise re-litigate this from scratch and
+is likely to reach for it.
+
+The control goes **non-interactive rather than absent**, so the layout does not
+shift and the row does not silently lose a feature the reader can see on its
+neighbours.
 
 It is written **only** on a success outcome, so a refused vote leaves the map
 untouched and the control shows what it showed before. And it is a plain QML
@@ -344,8 +455,30 @@ a screen that is not one.
 
 So `Composer.qml` is built for both and `FeedScreen` instantiates the post one.
 The reply instantiation arrives with the thread screen, which is a different
-change. The component is tested in both modes, so the reply path is exercised
-rather than merely written.
+change.
+
+**An uninstantiated component's defence is exactly how much of it runs, so the
+tests are named rather than summarised.** "Tested in both modes" would survive a
+future change deleting most of them; these five would not:
+
+- `test_a_reply_still_carries_its_parent` — the parent reaches core
+- `test_a_post_and_a_reply_call_different_methods_with_the_right_fields` — the
+  method name and the absence of a `thread` field
+- `test_no_reply_refusal_blames_the_user_or_claims_permanence` — both reply
+  refusals, driven separately
+- `test_the_two_reply_refusals_are_rendered_identically_but_for_cores_text`
+- `test_a_post_and_a_reply_refusal_differ_only_in_the_subject_word`
+
+The first three are in `tst_composer.qml`, the last two in
+`tst_composer_claims.qml`. `test_a_post_given_a_parent_does_not_carry_it_anywhere`
+covers the post side of the same `replyParent` derivation, so the branch is
+pinned from both directions.
+
+The count is stated as a list because a number goes stale silently: re-derive it
+with `grep -rn 'kind: "reply"' dialectica-ui/tests/` rather than trusting this
+paragraph. (The architecture review said "nine tests"; counting enclosing test
+functions rather than instantiation sites gives these five, and the difference is
+why the list is here instead of a figure.)
 
 This is a scope boundary rather than a gap in the spec: every requirement about
 reply refusals is about what the composer does with a refusal, and the composer

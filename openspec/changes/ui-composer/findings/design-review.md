@@ -74,7 +74,7 @@ code. I found **no** case of the code contradicting a recorded decision.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `design.md` has **no Decisions entry for the
+- [x] **`dev-writer`** — `design.md` has **no Decisions entry for the
       draft-clearing asymmetry**, the one decision in this piece the spec calls
       "the decision rather than an inconsistency"
       The three-way rule — cleared on `wasNew:true`, kept on `wasNew:false`,
@@ -100,7 +100,38 @@ code. I found **no** case of the code contradicting a recorded decision.
       124 with the asymmetry inverted either way, per that reviewer's measured
       mutations.
 
-- [ ] **`dev-writer`** — `FeedScreen.qml:207-210` — the vote path **deliberately
+      **Fixed** in the commit carrying this tick. "Unrecorded and unpinned
+      together is a decision made by accident" is the right description and the
+      one I have carried into the entry itself.
+
+      `design.md` gains **The draft is cleared on a newly stored op and kept in
+      the other two cases**, placed beside the `wasNew` entry since both are
+      about reading that field. It carries the three-way rule, the argument for
+      clearing, the argument for keeping — the same reasoning applied to
+      different facts — and the named cost. It also records *why the record was
+      wrong*: the argument lived in a code comment marked `NO SPEC`, which said
+      the opposite of the truth once the spec grew the requirement.
+
+      The `NO SPEC` marker is removed and replaced with a pointer to the
+      requirement and to `design.md`. That closes `findings/spec-test.md:230`,
+      which is addressed to `spec-writer` and asks for the same removal — I have
+      not ticked their box, but the marker is gone; the second marker at the
+      homoglyph count is untouched and still accurate.
+
+      **The pin half was closed by the tester while I was working, and I verified
+      it by running rather than reading the comment.** Both halves, separately:
+
+      - Deleting `clearDraft()` from the stored arm → 2 fail
+        (`test_the_drafts_fate_differs_across_the_three_outcomes` reporting
+        `Actual (): what the user wrote`, and
+        `test_a_cleared_draft_is_cleared_rather_than_merely_shorter`).
+      - Adding `clearDraft()` to the `existing` arm, which the requirement's own
+        rationale forbids → 2 fail (the same table test on the `existing` row,
+        and `test_a_retained_draft_is_submittable_again_unchanged`).
+
+      So the two halves are now closed together, as you asked.
+
+- [x] **`dev-writer`** — `FeedScreen.qml:207-210` — the vote path **deliberately
       does not consult `wasNew`** where the composer treats a missing `wasNew`
       as a refusal, and `design.md` records only the composer's half
       Two publish paths in one change take **opposite policies on the same
@@ -122,7 +153,24 @@ code. I found **no** case of the code contradicting a recorded decision.
       **Verified:** `grep -n "wasNew" spec.md` returns nothing — the spec does
       not contract this either, so `design.md` is the only place it can live.
 
-- [ ] **`dev-writer`** — `FeedScreen.qml:529-537` — the **undo press publishes
+      **Fixed** in the commit carrying this tick, as **The vote path ignores
+      `wasNew` where the composer refuses on it**.
+
+      Your suggested content is the entry's spine — what makes a vote different
+      is that it has no third outcome to distinguish — and I have taken it with
+      one addition that sharpens why the divergence runs this way rather than the
+      other. For a post, `wasNew` decides between two *user-visible* messages, and
+      reading it strictly protects against telling the user a post exists that
+      does not. A vote has nothing corresponding: published once or twice, the
+      control shows the same thing. So reading it strictly for a vote would mean
+      refusing to show back a vote that *was* recorded — worse on the only axis
+      available, rather than merely unnecessary.
+
+      No test changes: this box is about the record, and the behaviour was
+      already pinned by `test_a_vote_reply_the_view_cannot_interpret_is_not_recorded`
+      (which covers the `opId` half) and `test_a_refused_vote_leaves_the_control_unchanged`.
+
+- [x] **`dev-writer`** — `FeedScreen.qml:529-537` — the **undo press publishes
       nothing**, a choice with a real alternative, recorded nowhere and pinned by
       no test
       `VoteControl` emits `voted(0)` when the viewer presses the arrow they
@@ -147,7 +195,30 @@ code. I found **no** case of the code contradicting a recorded decision.
       suspended for want of a Lamport value; vote retraction is the same gap in a
       second place, and saying so in one line would let a reader find both.
 
-- [ ] **`dev-writer`** — `design.md:221-268` records why the old "the key *is*
+      **Fixed** as a record entry — **The undo press publishes nothing, and the
+      arrow stays pressable** — and **partly deferred** on the test half, which I
+      want to be explicit about rather than let the tick imply otherwise.
+
+      The entry names both alternatives and why each is wrong: publishing the
+      opposite direction is a second signed assertion a later scorer would count
+      as one, and republishing the same direction deduplicates to the existing op
+      so nothing changes and the user is told nothing. It names the cost the way
+      you asked — the arrow stays pressable and the press does nothing at all,
+      not even a message — and says plainly that this is a dead affordance
+      accepted because every alternative publishes something false. The
+      cross-reference to suspended moderation reversibility is there in one line,
+      so a reader who finds either gap can find the other.
+
+      **Deferred, and where:** the behaviour still has no test. `direction !== 0`
+      is view-internal and the spec contracts nothing about it (`grep -n
+      "retraction\|undo"` over spec.md and proposal.md still returns nothing), so
+      a test I wrote today would pin a choice the spec has not made — which is
+      the shape this project's spec-test review looks for hardest. The honest
+      sequence is spec first. It is recorded in `design.md` where a spec-writer
+      will meet it, rather than left in a comment, which is what makes the
+      deferral land somewhere durable rather than nowhere.
+
+- [x] **`dev-writer`** — `design.md:221-268` records why the old "the key *is*
       the post" claim was **false**, but never records the **axis the spec
       contracted** — who bears the cost of one malformed row
       The entry is honest and thorough about the correction, and the code matches
@@ -171,7 +242,34 @@ code. I found **no** case of the code contradicting a recorded decision.
       **Verified:** `grep -n "malformed\|inert"` in `design.md` returns only the
       two lines of the `currentVersion` narrative; neither alternative is named.
 
-- [ ] **`dev-writer`** — `design.md:337-352` claims the reply path "is tested in
+      **Fixed** in the commit carrying this tick. The entry now carries all three
+      responses with the tie-breaker stated as the question that decides them —
+      who bears the cost of one malformed row:
+
+      - render the row with an inert control (chosen): the reader keeps peer
+        content they were sent, and the only thing withheld is an affordance that
+        could not have worked;
+      - drop the row: hides peer content on a censorship-resistant forum, and
+        hides it **silently** — the reader cannot tell a Stoa with nothing in it
+        from one whose rows this peer discarded, which is the confusion this
+        screen exists to prevent, reintroduced one level down;
+      - fail the read: lets any peer blank a feed for free, and collides with
+        "empty and unreadable must never look alike".
+
+      I have kept your sentence that **"drop the row" is the one that looks
+      tidiest from inside the code**, because that is the reason the alternatives
+      need recording at all rather than a stylistic note — it names which way the
+      next person will drift. I also added the line about the control going
+      non-interactive rather than absent, so the layout does not shift and the
+      row does not silently lose a feature visible on its neighbours.
+
+      An earlier version of my answer to the security finding said this decision
+      "belongs in its own change if a reviewer disagrees". That was true about the
+      *broader* question of validating every row field at `reload()`, and it read
+      as though the axis itself were unsettled. The spec has since settled the
+      axis; the entry now reflects that rather than the older hedge.
+
+- [x] **`dev-writer`** — `design.md:337-352` claims the reply path "is tested in
       both modes, so the reply path is exercised rather than merely written" —
       true, but it is the **one claim in this file I could only partly confirm**,
       and it needs a number or a name rather than an adjective
@@ -190,6 +288,27 @@ code. I found **no** case of the code contradicting a recorded decision.
       deleting four of those five tests. Name them, or name the count as the
       architecture file does. **Severity: low** — this is a suggestion about an
       entry that is otherwise correct, not a defect.
+
+      **Fixed** in the commit carrying this tick: the five are named in a list,
+      with the file each lives in, plus
+      `test_a_post_given_a_parent_does_not_carry_it_anywhere` as the post side of
+      the same `replyParent` derivation — so the branch is pinned from both
+      directions.
+
+      **On the count, because it differs from the architecture review's.** I
+      derived it myself rather than copying either figure.
+      `grep -rn 'kind: "reply"' dialectica-ui/tests/` returns **seven**
+      instantiation sites, and mapping each to its enclosing `function test_`
+      gives **five** distinct tests — two of the seven are inside one test
+      (`test_the_two_reply_refusals_are_rendered_identically_but_for_cores_text`
+      builds two composers) and two more inside another
+      (`test_no_reply_refusal_blames_the_user_or_claims_permanence`). So
+      "nine tests" appears to have counted something other than test functions.
+      I have not corrected the architecture file — it is not my text to edit —
+      but `design.md` now names the five rather than asserting any number, and
+      tells the reader the command to re-derive it. That is the better answer to
+      your point than either figure: a list goes stale loudly, where a count goes
+      stale silently.
 
 ## On the two rewritten justifications
 

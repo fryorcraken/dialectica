@@ -228,16 +228,15 @@ ColumnLayout {
         if (reply.value.wasNew === true) {
             root.outcome = "stored"
             root.outcomeDetail = ""
-            // NO SPEC: the spec says what happens to a draft on a REFUSAL (it
-            // survives) and says nothing about one on a success. This clears it.
-            // The argument for clearing: a draft left in the box after a
-            // successful publish is one the user can submit again, and the
-            // second submission is a deduplicated no-op reported as "already
-            // published" — a confusing outcome produced by an affordance that
-            // looked ready. The argument against: a user who wanted to post a
-            // near-identical follow-up has lost their starting point. The first
-            // is a wrong state the interface offers; the second is a
-            // convenience.
+            // **Cleared here and kept in the other two cases**, which is the
+            // spec's "The draft is cleared when the op was newly stored, and
+            // kept otherwise" — the asymmetry is the decision rather than an
+            // inconsistency, and `design.md` carries the argument.
+            //
+            // This carried a `NO SPEC` marker until the spec contracted the
+            // rule in full. Leaving it would have said a decision was unmade
+            // when it is made, contracted and argued, which is how the next
+            // reader concludes they are free to change it.
             root.clearDraft()
             root.published()
             return
