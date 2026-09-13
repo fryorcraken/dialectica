@@ -7668,21 +7668,43 @@ mod tests {
     /// field of its request, add it to this list and give it a fixture in
     /// [`a_served_request`]. That is an obligation, not a courtesy.**
     ///
-    /// Nothing checks it, and the cost was measured rather than imagined: a
-    /// reviewer built a sixth method — a handler parsing `Value` directly with
-    /// all-optional fields, serving `[]` as a request that named nothing — and the
-    /// whole suite passed. An unlisted method is silently unswept, every sweep
-    /// below goes green without it, and a guarantee about five methods reads as a
-    /// guarantee about the surface.
+    /// **Something checks it, and you will meet the check rather than read about
+    /// it.** `the_sweep_covers_every_request_taking_method_the_dispatch_trait_
+    /// declares` reads the dispatch trait's declaration out of the adapter and
+    /// fails **naming your method** if it is on the surface and not in this
+    /// list. Forgetting the list is a red test, not a silent gap. Leaving it out
+    /// but adding it to [`a_served_request`] fails too, from that function's own
+    /// catch-all arm.
     ///
-    /// The compiler cannot force this. Moving `Request` behind a module boundary
-    /// makes it impossible to hold one without the check, but nothing obliges a
-    /// handler to hold one at all — see
-    /// `the_sixth_method_the_boundary_does_not_stop`, which builds that method and
-    /// demonstrates it. And a source-scanning test was rejected for failing on
-    /// unrelated things (see `design.md`'s rejected alternatives). So the
-    /// obligation is written here, where an author adding a method has to be in
-    /// order to add it.
+    /// **The obligation stays written here anyway, because the check tells you
+    /// *that* you forgot and this paragraph tells you *what to do*.** A test
+    /// naming a method is not a place to record why the list exists.
+    ///
+    /// Why the cost is worth naming: it was measured rather than imagined, twice.
+    /// A reviewer built a sixth method — a handler parsing `Value` directly with
+    /// all-optional fields, serving `[]` as a request that named nothing — and
+    /// the whole suite passed. Later, three publish handlers entered this crate's
+    /// wire surface and did not enter this list, so five sweeps ran green over
+    /// eleven methods while the surface had fourteen, and all three bypassed the
+    /// envelope entirely. **That second one is what the trait sweep now
+    /// prevents**, and it is why the sweep exists.
+    ///
+    /// **What the compiler still cannot force**, so that the sweep is not read as
+    /// covering more than it does: nothing obliges a handler to hold a `Request`
+    /// at all. Moving `Request` behind a module boundary makes it impossible to
+    /// hold one *without* the check, and `the_sixth_method_the_boundary_does_not_
+    /// stop` builds the handler that sidesteps the type and demonstrates it
+    /// serving an array. The trait sweep closes the different half — a method
+    /// reaching the *dispatch surface* unswept — so the two together cover
+    /// "declared on the wire" and leave "written in this crate and never
+    /// dispatched" to review.
+    ///
+    /// (An earlier version of this doc said *"Nothing checks it"* and that *"a
+    /// source-scanning test was rejected"*. Both were true when written and false
+    /// by the time they were read — the change that added the sweep left them
+    /// standing, which is this file's own recorded failure family. `design.md`
+    /// decision 6 records why the earlier rejection does not reach the sweep that
+    /// now exists.)
     ///
     /// Two absences are deliberate rather than forgotten, and both are now
     /// governed by the spec rather than chosen here:
@@ -8037,9 +8059,17 @@ mod tests {
         //
         // It is the fourth copy of one guard becoming a data structure. That
         // list's doc said "ADD YOUR METHOD HERE ... Nothing checks it".
-        // Something checks it now, and what it checks against is the dispatch
-        // trait rather than a second hand-written list that could go stale the
-        // same way.
+        // Something checks it now — this — and what it checks against is the
+        // dispatch trait rather than a second hand-written list that could go
+        // stale the same way.
+        //
+        // `every_request_taking_method`'s doc says so too, in the present
+        // tense. It did not for one commit, which readability review caught:
+        // the change that made "nothing checks it" false left the sentence
+        // standing, so an author adding a method read the doc first and learned
+        // the opposite of what holds. Keep the two in step — a test whose
+        // premise is contradicted by the doc it cites is worse than either
+        // alone.
         //
         // The exclusion is NAMED rather than filtered silently, because the
         // spec names it: the envelope rule's third case, a method that takes a

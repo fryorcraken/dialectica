@@ -360,16 +360,49 @@ jobs:
           # through `core::stoa_of` crosses the envelope once. Review caught
           # that; no gate did, because Build LGX proves this file COMPILES and
           # asserts nothing about the order of operations inside it.
-          for want in ("core::keystore::creator_key_in",
-                       "core::wire::get_capabilities_from_stores",
-                       "core::wire::publishing_key",
-                       "core::stoa_of"):
+          #
+          # EACH `want` CARRIES ITS OWN REASON, and that is a fix rather than
+          # tidying. The message used to be one shared string about which key
+          # the creator is, citing 4313cf6 -- so a red on `core::stoa_of`, which
+          # derives no key at all, printed a paragraph about key derivation and
+          # a commit about creator/poster agreement. An author following that
+          # citation read a fix unrelated to the property the call actually
+          # holds. The reasoning above reaches whoever opens this YAML and never
+          # reached the CI log; these strings are what reaches the log.
+          WANTED = {
+              "core::keystore::creator_key_in":
+                  "which key a Stoa's CREATOR is derived from is a decision, and "
+                  "it must live in core where a test can reach it. Deriving it "
+                  "here restores the bug 4313cf6 fixed -- a Stoa's creator named "
+                  "under a key it would never sign with -- with every other gate "
+                  "green.",
+              "core::wire::get_capabilities_from_stores":
+                  "which identity the posting PROBE reports is a decision, and it "
+                  "must live in core where a test can reach it. It was chosen in "
+                  "this file once, under the pathless per-Stoa scheme, while "
+                  "whoAmI used the path-taking one -- so two shipped methods "
+                  "reported two different addresses for one user in one Stoa.",
+              "core::wire::publishing_key":
+                  "which key a PUBLISH signs with is a decision, and it must live "
+                  "in core where a test can reach it. It was `keystore.stoa_key"
+                  "(&stoa)` on a line in this file -- the pathless scheme -- while "
+                  "the probe reported the path-derived one, so every published op "
+                  "was authored by an identity no method on the surface would "
+                  "name. See the_key_a_publish_signs_with_is_the_identity_the_"
+                  "probe_reports.",
+              "core::stoa_of":
+                  "this is an ORDERING requirement, not a derivation one: it is "
+                  "how the adapter's first touch of the request bytes goes through "
+                  "Request::parse. Reading `stoa` any other way here re-opens the "
+                  "envelope bypass -- a non-object answered as a missing field, "
+                  "and an N-byte request fully parsed at ~2N heap BEFORE "
+                  "MAX_REQUEST_BYTES is evaluated, which per PHASE0-FINDINGS 3 "
+                  "aborts the module process rather than returning an error.",
+          }
+          for want, why in WANTED.items():
               if want not in src:
                   print(f"::error file={path}::{want} is gone from the adapter — "
-                        "which key the creator is, and which the poster is, are "
-                        "decisions that must live in core where a test can reach "
-                        "them. Deriving either here restores the bug 4313cf6 fixed, "
-                        "with every other gate green.")
+                        f"{why}")
                   sys.exit(1)
 
           # And it must NOT reach a per-Stoa accessor, which is what the bug did.

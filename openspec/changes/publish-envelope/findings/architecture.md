@@ -5,7 +5,7 @@ sibling file carries readability; correctness and security were reviewed before
 me and I did not re-report their entries). Suite green at **737 + 26**. Every
 probe below was run in my own worktree and reverted; the worktree is deleted.
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/src/lib.rs:804-814` — the three
+- [x] **`dev-writer`** — `dialectica/rust-lib/src/lib.rs:804-814` — the three
       publish arms are three hand-written (name, function) pairs that must agree,
       and this file has already been bitten by exactly that
       **Scenario:** `self.publishing(&request, "publish_post", core::publish_post)`
@@ -38,6 +38,44 @@ probe below was run in my own worktree and reverted; the worktree is deleted.
       signal to reshape. The fix is the one already proven in this crate: delete
       `publishing`'s `method` parameter and label the outer guard
       `"opening the publish path's stores"` or similar.
+
+      **FIXED**, exactly as prescribed, including your suggested label.
+      `publishing`'s `method` parameter is gone, the outer guard reads
+      `core::guarded("opening the publish path's stores", …)`, and the three call
+      sites are now `self.publishing(&request, core::publish_post)` and its two
+      siblings. There is nothing left for a pair to disagree about: the only
+      argument that names the operation *is* the operation.
+
+      Citing `with_membership_store`'s own doc is what made this a five-minute
+      fix rather than a judgement call — the argument was already made, in this
+      crate, with the measured symptom (`panic in open` reported as `panic in
+      list_stoas`) attached. I had written a comment eleven lines away from that
+      doc and reintroduced the shape it records fixing, which is the "unfixed
+      patterns get copied" failure in the direction nobody expects: the fixed one
+      was the neighbour.
+
+      `publishing`'s doc now carries the same section heading the precedent uses
+      — *"There is no `method` parameter, and that is the fix for a parameter
+      nobody could keep right"* — with your `publish_vote`/`publish_post`
+      mismatch as the worked example, and states what the generic label is
+      accurate for: the outer guard can only ever catch `core::stoa_of`,
+      `open_from_env`, `Self::paths` and `SqliteOpLog::open`, because everything
+      after that is inside `core::wire::publishing` where the inner guard names
+      the method.
+
+      **No test can fail on this**, and that is worth stating rather than
+      glossing: `cargo test` does not compile this file, so the mismatch you
+      constructed was never catchable by a test and is not now. What changed is
+      that it is no longer *expressible* — there is no name argument to get
+      wrong. That is the CLAUDE.md preference for a data shape over a checked
+      branch, applied to the one file where a checked branch could never have
+      been checked.
+
+      While in there I also corrected a stale claim in the same doc: it still
+      said threading a parsed Stoa in from the adapter "would put half the
+      request's validation in the one file no test can reach", which `stoa_of`
+      resolved — the read goes through `core` now, and the remaining reshape is
+      decision 8's.
 
 - [ ] **`design-reviewer`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:7954`
       — the classifier's `;` precondition is enforced by a silent `continue`,

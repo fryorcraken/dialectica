@@ -121,20 +121,63 @@ adapter pre-parsed the same bytes before handing them on.
       `design.md` §1 so it no longer claims the reordering happened. Record it
       in `docs/PLAN.md` §9.2 too, since a findings file is deleted at merge.
 
-## 7. The gates, and what each cannot see
+## 7. Acting on review: readability and architecture
 
-- [x] 7.1 `cargo test -p dialectica -p dialectica-core`: 737 + 26, green.
-- [x] 7.2 `cargo clippy -p dialectica-core --all-targets -- -D warnings`: clean.
-- [x] 7.3 `cargo fmt --check`: `wire.rs` clean. The ten other files it reports
+Four `dev-writer` boxes across `findings/readability.md` (3) and
+`findings/architecture.md` (1). No behaviour changes in this round — the defects
+are a stale doc, a misdirecting CI message, an over-long comment, and a pair of
+arguments that could disagree.
+
+- [x] 7.1 **Rewrite `every_request_taking_method`'s doc**, which still said
+      *"Nothing checks it"* and *"a source-scanning test was rejected"* — in the
+      change that made both false. An author reads that heading before the test
+      51 lines below, so they learned the opposite of what holds. It now names
+      the check and what it prints, keeps the obligation (the test says *that*
+      you forgot; the doc says *what to do*), and records the correction in
+      place because this is the file's own documented failure family.
+- [x] 7.2 Point the test's comment back at the doc, so the two are kept in step
+      rather than one quoting the other in a tense it does not use.
+- [x] 7.3 **Give each CI `want` its own reason.** A red on `core::stoa_of` printed
+      a paragraph about key derivation citing `4313cf6` — wrong three ways for a
+      call that derives no key. Verified by running the gate's logic: against
+      `35fc859` it now prints the ordering reason, and against `origin/main`
+      `publishing_key` prints its own. The dict also reports **all** missing
+      wants rather than exiting on the first.
+- [x] 7.4 Check the YAML still parses and the embedded Python still compiles,
+      since 7.3 edits a heredoc inside YAML where a break is not obvious.
+- [x] 7.5 **Cut the `core::stoa_of` call site's comment from 26 lines to 16**,
+      keeping what answers a reader's live question and replacing the defect
+      narration with a pointer at `design.md` decision 7. The narration survives
+      in `stoa_of`'s own doc and in decision 7 — the two places someone asking
+      that question would look.
+- [x] 7.6 **Delete `publishing`'s `method` parameter** and label the outer guard
+      generically. Three hand-written `(name, function)` pairs could disagree —
+      `self.publishing(&request, "publish_vote", core::publish_post)` compiles,
+      publishes a post and misreports every panic — and no gate could see it.
+      This is a defect this crate already found and fixed once, in
+      `with_membership_store`, whose doc records the symptom; the fix transfers
+      exactly. `publish_moderation` would have made it four pairs.
+
+## 8. The gates, and what each cannot see
+
+- [x] 8.1 `cargo test -p dialectica -p dialectica-core`: 737 + 26, green.
+- [x] 8.2 `cargo clippy -p dialectica-core --all-targets -- -D warnings`: clean.
+- [x] 8.3 `cargo fmt --check`: `wire.rs` clean. The ten other files it reports
       in this crate are the pre-existing set CI cannot reach at all — the gate
       does not follow path dependencies — and are not this change's to fix.
-- [x] 7.4 Run the adapter gate's own Python locally, since CI is the only thing
+- [x] 8.4 Run the adapter gate's own Python locally, since CI is the only thing
       that checks the adapter: passes, and fails on `35fc859`.
-- [x] 7.5 Run the test-count gate's logic locally: 763 declared, 763 ran.
-- [ ] 7.6 **Build LGX is the only gate that compiles the adapter, and it proves
+- [x] 8.5 Run the test-count gate's logic locally: 763 declared, 763 ran.
+- [ ] 8.6 **Build LGX is the only gate that compiles the adapter, and it proves
       the file COMPILES rather than what order it runs in.** That distinction is
       not academic: both adapter findings passed every green gate on this PR,
       including Build LGX, and were caught by a reviewer reading the call order.
       What now stands in its place is the CI gate at 6.3 plus the `core` test at
       6.2 — neither of which executes the adapter either, which is why it took
-      both. Unticked deliberately: it is the `closer`'s CI row to observe.
+      both.
+
+      **§7 raises the stakes on this row**, and says so rather than leaving it
+      implied: dropping `publishing`'s `method` parameter changes an adapter
+      signature and its three call sites, in the file `cargo test` does not
+      compile. A typo there is a **compile error only Build LGX will see**.
+      Unticked deliberately: it is the `closer`'s CI row to observe.

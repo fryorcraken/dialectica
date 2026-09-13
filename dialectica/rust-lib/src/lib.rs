@@ -470,10 +470,41 @@ impl Dialectica {
     /// The signing key is per-Stoa (PLAN.md §5.2), so the Stoa has to be known
     /// before the key can be derived — and the handler parses the request
     /// properly, refusing forbidden fields and naming its own failures. So this
-    /// reads the Stoa cheaply to derive a key, and the handler re-reads it as
-    /// part of the parse it owns. The alternative, threading a parsed Stoa in
-    /// from here, would put half the request's validation in the one file no
-    /// test can reach.
+    /// reads the Stoa through [`core::stoa_of`], and the handler re-reads it as
+    /// part of the parse it owns. Both go through `Request::parse` and the
+    /// single `parse_stoa`, so the two reads cannot disagree and both are
+    /// bounded by the request cap; the cost is CPU on a request already proved
+    /// small. Threading a parsed request in from here instead is the reshape
+    /// `design.md` decision 8 defers, and it moves the handlers' signatures.
+    ///
+    /// # There is no `method` parameter, and that is the fix for a parameter
+    /// nobody could keep right
+    ///
+    /// This took the method name and passed it to [`core::guarded`], while
+    /// `core::wire::publishing` *also* calls `guarded` with its own hardcoded
+    /// name — so the guard was nested and the outer name was a second,
+    /// caller-supplied copy of something the inner one already knew. It could
+    /// disagree and nothing would notice:
+    /// `self.publishing(&request, "publish_vote", core::publish_post)` compiles,
+    /// runs, publishes a post, and reports a panic in the keystore open as
+    /// `panic in publish_vote`. No gate can see it — `cargo test` does not
+    /// compile this file, the CI text gates check only which `core::` names
+    /// appear, and Build LGX proves it compiles.
+    ///
+    /// **This exact defect was already found and fixed once in this repo**, in
+    /// `core::wire::with_membership_store`, whose doc records it: five
+    /// hand-written pairs that had to be kept in step for no gain, and a panic
+    /// in `open` reported as `panic in list_stoas`. The fix proven there
+    /// transfers exactly, and `publish_moderation` would have made it four pairs
+    /// here — which is the count this change's own thesis calls the signal to
+    /// reshape.
+    ///
+    /// The outer guard stays and owns a **generic label**. The only panics it
+    /// can catch that the inner one cannot are in `core::stoa_of`,
+    /// `open_from_env`, `Self::paths` and `SqliteOpLog::open` — everything after
+    /// that is inside `core::wire::publishing`, where the handler's own guard
+    /// names the method — so the label is accurate for everything it can ever
+    /// report.
     ///
     /// # Delivery's outcome is discarded, deliberately
     ///
@@ -487,7 +518,7 @@ impl Dialectica {
     /// sink is a no-op that logs. A no-op is honest; inventing a channel-naming
     /// scheme here would be two peers computing different values and opening
     /// channels nobody else is in — silently, and permanently.
-    fn publishing<F>(&mut self, request: &str, method: &str, handler: F) -> String
+    fn publishing<F>(&mut self, request: &str, handler: F) -> String
     where
         F: FnOnce(
             &str,
@@ -504,33 +535,23 @@ impl Dialectica {
         };
         let dir = std::path::PathBuf::from(dir);
 
-        core::guarded(method, || {
+        core::guarded("opening the publish path's stores", || {
             // The Stoa, read only far enough to derive a key — THROUGH `core`,
-            // which is the whole of the correction here.
+            // so this is the adapter's first and only touch of the bytes and it
+            // crosses the request envelope.
             //
-            // This was a bare `serde_json::from_str` and a four-arm `stoa`
-            // ladder written out on these lines, and it SHADOWED every envelope
-            // fix in this change on the shipped module. An array was answered
-            // `missing field: stoa` here and never reached
-            // `REQUEST_NOT_AN_OBJECT`; and an N-byte request was fully parsed at
-            // ~2N transient heap before `MAX_REQUEST_BYTES` was ever evaluated,
-            // so the cap bounded only a SECOND parse of bytes already paid for
-            // and the PHASE0-FINDINGS §3 abort it exists to prevent was
-            // untouched. `dialectica-core` was correct in isolation and the
-            // module was not — the exact failure mode this file's own header
-            // warns about, since nothing here is compiled by `cargo test`,
-            // clippy, fmt or `cargo mutants`.
+            // It reads the Stoa and NOTHING else: the forbidden-field guard and
+            // every required-field read stay the handler's, because an adapter
+            // validating a second time is the two-readers-of-one-field shape
+            // that put this path outside the envelope to begin with.
             //
-            // `core::stoa_of` goes through `Request::parse`, so the adapter's
-            // early read and the handler's later one cannot disagree, and the
-            // size cap is evaluated first on both. It reads the Stoa and
-            // nothing else: the forbidden-field guard and every required-field
-            // read stay the handler's, because an adapter validating a second
-            // time is the two-readers-of-one-field shape that produced this.
-            //
-            // `the_adapters_early_stoa_read_crosses_the_same_envelope_the_
-            // handler_does` is what pins it from a gate that runs; CI's
-            // adapter-derivation gate is what holds this file to calling it.
+            // What holds it: `the_adapters_early_stoa_read_crosses_the_same_
+            // envelope_the_handler_does` pins the behaviour from a gate that
+            // runs, and CI's adapter-derivation gate both requires this call
+            // and bans `serde_json::from_str` in this file. Why it is shaped
+            // this way, and what the bare parse it replaced cost, is
+            // `design.md` decision 7 — not repeated here, where the question a
+            // reader has is what this line does rather than what a commit did.
             let stoa = match core::stoa_of(request) {
                 Ok(a) => a,
                 Err(e) => return e,
@@ -802,15 +823,15 @@ impl DialecticaModule for Dialectica {
     }
 
     fn publish_post(&mut self, request: String) -> String {
-        self.publishing(&request, "publish_post", core::publish_post)
+        self.publishing(&request, core::publish_post)
     }
 
     fn publish_reply(&mut self, request: String) -> String {
-        self.publishing(&request, "publish_reply", core::publish_reply)
+        self.publishing(&request, core::publish_reply)
     }
 
     fn publish_vote(&mut self, request: String) -> String {
-        self.publishing(&request, "publish_vote", core::publish_vote)
+        self.publishing(&request, core::publish_vote)
     }
 
     fn on_context_ready(&mut self, ctx: &RustModuleContext) {

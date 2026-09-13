@@ -6,7 +6,7 @@ me and I did not re-report their entries). Suite green at **737 + 26** before an
 mutation, which is the count `tasks.md` 7.1 claims. Every probe below was run in
 my own worktree and reverted; the worktree is deleted.
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:7671`
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:7671`
       and `:7682` — the sweep list's doc still says nothing checks it, in the
       same change that made something check it
       **Scenario:** `every_request_taking_method`'s doc comment reads
@@ -33,7 +33,42 @@ my own worktree and reverted; the worktree is deleted.
       to say what now holds: add your method here, and if you do not, the trait
       sweep fails naming it.
 
-- [ ] **`dev-writer`** — `.github/workflows/ci.yml:363-373` — a red on
+      **FIXED**, and this is the finding I am least comfortable having earned:
+      the change whose whole thesis is that a hand-maintained claim goes stale
+      silently left a stale claim standing about its own mechanism. Your
+      diagnosis of the reading order is the part that makes it a defect rather
+      than untidiness — 7665 is the heading addressed to that author, and they
+      reach it before the test 51 lines below.
+
+      The doc now says what holds, in the present tense and in the same order a
+      reader arrives: the obligation, then **"Something checks it, and you will
+      meet the check rather than read about it"**, naming the test and what it
+      prints. It also names the second failure mode you did not have to find —
+      adding a method to the list *without* a fixture fails from
+      `a_served_request`'s catch-all.
+
+      Three things I kept rather than cut. The obligation paragraph stays,
+      because the test tells an author *that* they forgot and the doc tells them
+      *what to do*. The measured costs stay (the reviewer's sixth method, and
+      this change's own three handlers), because they are why the sweep exists.
+      And the honest limit stays, sharpened: the compiler still cannot force a
+      handler to hold a `Request` at all, so the trait sweep closes "reached the
+      dispatch surface unswept" and `the_sixth_method_the_boundary_does_not_stop`
+      still marks the half it does not close.
+
+      The correction is recorded in place rather than silently — a parenthetical
+      saying both sentences were true when written and false when read — because
+      that is this file's own documented failure family and the next author
+      should see it happened here too.
+
+      **The test comment now points back.** It quoted the doc in the past tense
+      while the doc disagreed; it now says the two must be kept in step, and why
+      a test whose premise its cited doc contradicts is worse than either alone.
+      No test change was needed — this is a doc defect, and `grep -n "Nothing
+      checks it"` now returns only the live doc's own parenthetical and the
+      test's quotation of it, both past-tense.
+
+- [x] **`dev-writer`** — `.github/workflows/ci.yml:363-373` — a red on
       `core::stoa_of` prints a message entirely about key derivation
       **Scenario:** the `want` loop now guards four strings, and two of them —
       `core::wire::publishing_key` and `core::stoa_of` — were added by this
@@ -61,7 +96,40 @@ my own worktree and reverted; the worktree is deleted.
       per-want reason, e.g. a `{want: reason}` dict, so each red says why *that*
       call must be in the adapter.
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/src/lib.rs:508-533` — a 26-line
+      **FIXED**, as the `{want: reason}` dict you suggested. Your three-ways-wrong
+      breakdown is what made this worth more than a reworded sentence: a citation
+      that sends an author to an unrelated commit is worse than no citation,
+      because they spend the minute *and* arrive somewhere wrong.
+
+      Each of the four now carries its own reason, and I checked each by running
+      the gate's own logic rather than by reading it. Against `35fc859`,
+      `core::stoa_of` now prints:
+
+      `core::stoa_of is gone from the adapter — this is an ORDERING requirement,
+      not a derivation one: it is how the adapter's first touch of the request
+      bytes goes through Request::parse. Reading \`stoa\` any other way here
+      re-opens the envelope bypass -- a non-object answered as a missing field,
+      and an N-byte request fully parsed at ~2N heap BEFORE MAX_REQUEST_BYTES is
+      evaluated, which per PHASE0-FINDINGS 3 aborts the module process rather
+      than returning an error.`
+
+      No key derivation, no `4313cf6`. Against `origin/main` I confirmed
+      `publishing_key` prints its own — the pathless-versus-path-derived
+      disagreement, naming the regression test — and that the two pre-existing
+      wants keep theirs, including `4313cf6` where it *is* the right citation.
+
+      **One thing your finding surfaced that was not in it.** The old `for` loop
+      `sys.exit(1)`s on the first missing want, so a red reported one of several.
+      A dict iteration reports all four before exiting: against `origin/main`
+      both `publishing_key` and `stoa_of` now print, where before an author
+      would have fixed one and re-run CI to discover the other.
+
+      **And a check the edit itself needed**, since this is a Python heredoc
+      inside YAML where a break is not obvious on sight: I parsed `ci.yml` with
+      `yaml.safe_load`, extracted the step's `run:`, and `compile()`d the
+      embedded script. Both pass.
+
+- [x] **`dev-writer`** — `dialectica/rust-lib/src/lib.rs:508-533` — a 26-line
       comment on a 4-line call, of which ~20 lines are the history of a defect
       already fixed
       **Scenario:** the `core::stoa_of` call site carries 26 lines of comment for
@@ -84,6 +152,31 @@ my own worktree and reverted; the worktree is deleted.
       that answer a reader's live question are buried under three that answer a
       question about a commit. The fix is to keep 524-533 and cut 511-522 to a
       pointer at `design.md` decision 7.
+
+      **FIXED**, and taken exactly as prescribed — the two paragraphs that answer
+      a reader's live question kept, the three narrating the old defect replaced
+      by a pointer at `design.md` decision 7. 26 comment lines became 16
+      (`lib.rs:539-554`, counted rather than estimated), and the sentence that
+      does the work now leads rather than follows.
+
+      Your framing of *which* question a reader of that line has is what decided
+      it. I had been writing for a reviewer of the diff, who wants to know what
+      changed and why; the person who reads that line next year wants to know
+      what it does and what stops it regressing. Those are different documents,
+      and the second belongs at the call site. The last clause says so in the
+      code — "the question a reader has is what this line does rather than what a
+      commit did" — so the next author has the rule rather than only its result.
+
+      Your count of four copies was right and I checked it before cutting: the
+      narration survives in `core::stoa_of`'s doc and in `design.md` decision 7,
+      which are the two places someone asking *that* question would look. The
+      `ci.yml` copy stays too, since it is the reason a gate exists rather than a
+      duplicate of the call site's.
+
+      **Not deferred as a preference**, though you filed it as one: the change's
+      own thesis is that documentation which does not earn its place is how a
+      false claim survives, and the finding above on this same branch is that
+      failure in its live form.
 
 ## What I checked and found clean
 
