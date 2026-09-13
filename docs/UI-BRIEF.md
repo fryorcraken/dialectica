@@ -337,12 +337,47 @@ Copy on this screen must say what remains unverified, not only what was checked.
   address inside it is carried **in full** — the 8-8-6 abbreviation is a
   recognition aid for a reader looking at a screen, and is lossy for anything
   meant to be pasted.
-- **The join confirmation cannot show a current title yet, and must not caption
-  the founding one as though it were.** Nothing resolves the moderator-signed
-  metadata op, so the founding title is the only title there is. A panel
-  captioned "current title" filled with the founding value asserts that nobody
-  has renamed the Stoa — which is exactly the thing no peer on this build has
-  checked. Reserve the position; do not fill it.
+- **The join confirmation shows NO title at all before a join, and this is the
+  single most surprising thing on the screen — design for it.** Both title
+  positions are empty on a preview, for two different reasons, and a designer who
+  assumes one filled panel and one reserved will design a screen that never
+  renders.
+
+  *No current title*: nothing resolves the moderator-signed metadata op, so no
+  peer on this build knows what a Stoa is called now. A panel captioned "current
+  title" filled with the founding value would assert that nobody has renamed the
+  Stoa — exactly the thing nothing has checked. Reserve the position; do not fill
+  it.
+
+  *No founding title either*: the only call that reports a founding title is the
+  one that joins. The title is inside the founding record the reader was handed,
+  and the interface cannot read it — decoding that record is the core's job and
+  the view has no access to it. So on a preview there is nothing to put in the
+  founding panel, and a caption reading "founding title" over blank space tells
+  the reader this Stoa's title **is** blank. That is a legal value (a Stoa can be
+  created with an empty title, and the list renders such a row), so the reader
+  cannot tell "empty" from "unknown" — and on the screen where they decide whether
+  to trust an address, those mean opposite things.
+
+  **What the preview must do instead**: show the address, and say in words that
+  it cannot tell the reader what this Stoa is called or whether they already hold
+  one presenting the same title, and that joining is what answers both. The
+  absence needs a voice, not a blank panel. After a join succeeds the founding
+  title arrives and can be labelled as founding.
+
+  This is a constraint of the current API, not a permanent property — see
+  PLAN.md's `getStoa`. When a call can describe a reference without joining it,
+  the founding panel fills at preview time and this paragraph shrinks to the
+  current-title half.
+
+- **The same-title warning arrives after the join on this build, not before it.**
+  The requirement below — two Stoas may present the same name, show something that
+  distinguishes them — is implemented, and it compares titles, so it cannot run
+  while there is no title. A reader previewing an impersonating Stoa therefore
+  sees no warning *at the moment they decide*. Do not design the preview so that
+  an absent warning reads as a clean result: a reader who infers "checked, nothing
+  found" has been misled by a check that never ran, which is the impersonation
+  arriving through the defence rather than around it.
 - **Joining a Stoa the user is already in is not an error.** The core reports the
   same success either way, deliberately: a pasted address is exactly the input
   someone supplies twice, and it changes nothing about what is already held. Do

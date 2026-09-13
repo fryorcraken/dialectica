@@ -6,7 +6,7 @@ See `proposal.md` — *Why*, and its three divergences from the mockup. The spec
 (`specs/stoa-navigation-view/spec.md`) is the contract. What follows is only what
 the code had to decide that neither document settles.
 
-Three constraints shape every decision below.
+Four constraints shape every decision below.
 
 1. **`list_stoas` returns `{"stoa","foundingTitle"}` and no genesis record.** The
    core retains the record; the listing does not hand it back. Verified against
@@ -19,10 +19,26 @@ Three constraints shape every decision below.
    `qtquick-window` QML modules (`.github/workflows/ci.yml`). `Qt.labs.platform`
    is not among them.
 3. **The wire carries bare hex, with no `stoa:` prefix.** `join_stoa` takes
-   `{"stoa":"<hex>","genesis":"<hex>"}`; a grep of `dialectica/` finds no `stoa:`
-   literal anywhere. The mockup's `stoa:b02d…` is a display flourish, which
-   `AddressLabel.abbreviate` already tolerates via its optional `^([a-z]+:)?`
-   group. Nothing the view sends back to core may carry one.
+   `{"stoa":"<hex>","genesis":"<hex>"}`, and **no core path produces or accepts a
+   `stoa:` display prefix on an address** — grep `dialectica/` for `stoa:` and
+   the one hit is `rust-lib/src/lib.rs`'s `error_json(&format!("stoa: {e}"))`,
+   an error-message prefix rather than a wire format. (An earlier version of this
+   paragraph offered that grep as returning nothing, which it does not; the
+   conclusion is unchanged and the citation was wrong.) The mockup's `stoa:b02d…`
+   is a display flourish, which `AddressLabel.abbreviate` already tolerates via
+   its optional `^([a-z]+:)?` group. Nothing the view sends back to core may
+   carry one.
+4. **No core call answers a founding title for a reference this peer has not
+   joined.** `join_stoa` is the only method that returns a `foundingTitle` for a
+   given `(stoa, genesis)` pair — `list_stoas` answers for Stoas already held and
+   `create_stoa` for one just made, and neither can be asked about a pasted
+   reference. The title *is* inside the genesis record the user pasted, so this is
+   a gap in the API rather than in the data; closing it in the view would mean
+   decoding core's genesis encoding in QML, which is a second implementation of an
+   encoding whose one authority is the core. That is the constraint the core/UI
+   split exists to hold, and the same argument that keeps address verification out
+   of `StoaReference.parse`. **D11 is what this forces, and it is the largest
+   single consequence in this document.**
 
 ## Goals / Non-Goals
 
@@ -251,10 +267,15 @@ A failed reload deliberately does not blank the previous page — a failure must
 not destroy a good listing underneath a banner — so the screen held rows that
 `readState` said were not read, and safety depended on **every reader**
 remembering `readState === "ok" ? rows : []`. That guard was already written
-twice, in two files: once on the `Repeater` model 213 lines from the state making
-it necessary, and again in `Main.qml`. Two copies is CLAUDE.md's signal to let
-the data absorb it; a third reader would have had to know to write it a third
-time, and the one who forgets renders a listing the screen has said was unread.
+twice, in two files: once on the `Repeater` model at the far end of the file from
+the state making it necessary, and again in `Main.qml`. (This said "213 lines"
+and the file gives 283 — `git show a9888f8:dialectica-ui/src/qml/StoaListScreen.qml`
+and grep `readState`. The argument never rested on the digit, so the digit is
+gone rather than corrected; a number nobody re-derives is a claim that rots.)
+
+Two copies is CLAUDE.md's signal to let the data absorb it; a third reader would
+have had to know to write it a third time, and the one who forgets renders a
+listing the screen has said was unread.
 
 The rename is the load-bearing half. `rows` invited the wrong read; `lastListing`
 makes a reader ask "last as of when?" before using it. Both call-site guards are
@@ -327,11 +348,81 @@ This is the same family as the four instances found in review — assert the
 property the user is affected by, not the value feeding it — with the corpus
 playing the part the binding plays elsewhere.
 
+### D11 — The preview has no title, and says so rather than captioning a blank
+
+`JoinScreen`'s founding-title panel is conditional on `titleKnown`
+(`foundingTitle !== ""`), and a `titleUnknownNote` renders in its place. Both
+bind to the one derived property, so they cannot both show or both hide.
+
+**This is the resolution of a defect a design review found by driving the real
+screen, and the defect is the most serious thing this change shipped.** D4's
+`lookalikes` returns `[]` when `foundingTitle === ""`, and D8 made `foundingTitle`
+a derivation of `currentOutcome`, which is `null` until a join reply exists. Each
+decision is right on its own; together they meant the lookalike panel — the
+impersonation defence, whose entire purpose is to warn a reader **before** they
+commit — could only render **after** they had committed.
+
+Measured through `Main.qml`'s real paste route, a held *Nym Research* in the
+listing and an attacker's same-titled reference in the field:
+
+```
+before join():  foundingTitle=<>              lookalikes=0  panel=0  heldStoas=1
+after  join():  foundingTitle=<Nym Research>  lookalikes=1  panel=1
+```
+
+The warning was real and arrived one action too late to be a warning.
+
+**Why the suite did not see it, and this generalises past this change.** Every
+lookalike and founding-title test reached the screen through
+`joinComponent.createObject(null, {foundingTitle: …})`. QML accepts a props value
+as a **readonly** property's initial value, so those fixtures hold a title
+alongside a `null` outcome — **a pair the shipped screen cannot construct**. They
+proved something true of a state that does not exist. That is this repo's one
+test defect family in its purest form: a fixture where two explanations give the
+same answer. The two new tests go through the paste route instead, and both were
+watched failing before this decision was written.
+
+**"Revert D8" is not the fix**, and checking that mattered: `git show 8de7571`
+has the same structure, with `foundingTitle` written only inside `join()`. D8 made
+the impossibility permanent rather than introducing it.
+
+**Alternatives considered.**
+
+- *Relax D4's guard so the comparison runs on an empty title.* Rejected, and it
+  is the trap rather than the near miss: `""` matches every untitled Stoa in the
+  listing, so the panel would fire on Stoas that present no lookalike at all —
+  a false positive on the one screen whose warnings must be believed.
+- *Carry a title over from the last outcome when this reference has none.*
+  Rejected for the reason D8 exists: it captions an untrusted address with a name
+  the user already trusts, which is the impersonation the panel exists to expose,
+  delivered by the view itself and invisible to the comparison because both sides
+  would be the same string from the same source.
+- *Decode the genesis record in QML to read its title.* Rejected — constraint 4.
+  A second implementation of core's encoding, in the module that has no business
+  holding one.
+- *Leave the panel empty and say nothing.* Rejected, and this is the option the
+  branch shipped. `FOUNDING TITLE — FIXED FOREVER` over an empty value tells a
+  reader this Stoa's founding title is **blank** — which is a legal value the
+  list renders, so the reader cannot tell it from "not known here", and the two
+  mean opposite things on the screen where they decide whether to trust an
+  address. Equally, an absent lookalike panel reads as "checked, nothing found";
+  a reader who infers that has been misled by a check that never ran, which is
+  the impersonation arriving *through* the defence rather than around it.
+
+**What actually closes it is a core change this piece does not make**: a call
+that answers a founding title for an un-joined reference — `getStoa` in PLAN.md
+§9.1's shape, or a narrower `describe_reference` taking the pair and decoding
+without recording membership. Until one exists, the honest rendering is the one
+that states the absence of a check instead of letting its silence be read as its
+result. **The check is late, not missing**, and the screen now says which.
+
 ## Behaviour the spec did not decide
 
-Four choices below are observable behaviour the spec is silent on. Each has a
-`NO SPEC:`-marked test in `tst_stoa_screens.qml`, and each is a decision the
-spec-writer should evaluate rather than a settled one.
+The choices below are observable behaviour the spec is silent on. Each is marked
+`NO SPEC:` in the code, and each is a decision the spec-writer should evaluate
+rather than a settled one — `grep -rn "NO SPEC:" dialectica-ui/` is the list, not
+a count written here. (It said "Four" and the code marked five; the page size was
+missing, which is the one with the most visible consequence of the set.)
 
 - **The reference encoding.** The spec requires both halves and names no format.
   D1 chose JSON. This is the one with a compatibility cost: a user who has
@@ -347,6 +438,11 @@ spec-writer should evaluate rather than a settled one.
   core. The spec says the view's check is limited to "whether the input carries
   the two halves at all", which does not settle what "carries" means for a
   non-string.
+- **The listing's page size.** `StoaListScreen.perPage` is 25, chosen to fill a
+  card without a scroll at the mockup's 1000px width. It decides how many Stoas a
+  user sees before paging, which is the one user-visible consequence in this
+  section — the others are all failure-handling — and the spec names no page size
+  for this listing.
 
 ## Open Questions
 

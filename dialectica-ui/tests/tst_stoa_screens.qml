@@ -932,6 +932,18 @@ TestCase {
         screen.destroy()
     }
 
+    // **This drives a state the shipped screen reaches only AFTER a join**, and
+    // the route it takes there cannot happen at all.
+    //
+    // `foundingTitle` is `readonly` and derived from `currentOutcome`; QML
+    // accepts a `createObject` props value as a readonly property's INITIAL
+    // value, so this yields a title with a `null` outcome — a pair `Main.qml`
+    // never produces. The assertion below is still worth making: WHEN a title
+    // exists it must be labelled as founding, and that is the requirement. But
+    // it says nothing about whether a title ever exists on a preview, and a
+    // design review found it does not — see
+    // `test_a_preview_before_a_join_carries_no_founding_title_and_says_so`,
+    // which goes through the real paste route, and design.md constraint 4.
     function test_the_founding_title_is_labelled_as_founding() {
         var screen = makeJoin({}, {
             stoaAddress: "aa".repeat(32),
@@ -1254,6 +1266,13 @@ TestCase {
 
     // ---- the lookalike ----------------------------------------------------
 
+    // Same caveat as the founding-title test above, and here it is sharper: the
+    // props route gives this screen a title with a `null` outcome, which is the
+    // state a JOINED screen is in and not the state a preview is in. So this
+    // pins that the comparison WORKS when a title exists — which it does — and
+    // proves nothing about when that is. Through the real route it is only after
+    // a join; `test_the_lookalike_warning_cannot_be_claimed_before_a_join_happens`
+    // is the one that measures the timing.
     function test_a_same_title_stoa_already_held_is_shown_beside_the_preview() {
         var previewed = "b02d5e77" + "bb".repeat(28)
         var held = "7f3a91c4" + "cc".repeat(28)
@@ -1274,6 +1293,175 @@ TestCase {
                && shown.toLowerCase().indexOf("conflict") < 0,
                "neither is a duplicate or a conflict: " + shown)
         screen.destroy()
+    }
+
+    // ---- the two states a real preview can actually be in ------------------
+    //
+    // **Every lookalike and founding-title test above reaches the screen through
+    // `createObject` props, and that route can build a state the shipped screen
+    // cannot.** `foundingTitle` is `readonly` and derived from `currentOutcome`;
+    // QML accepts a props value as a readonly property's INITIAL value, which
+    // yields a title with a `null` outcome — a pair `Main.qml` never produces.
+    // Measured: after `makeJoin({}, {foundingTitle: "Nym Research"})` the screen
+    // reports that title while `outcome` is `null`.
+    //
+    // So those tests prove something about a state that does not exist, and a
+    // design review found the consequence by driving the real thing instead: the
+    // lookalike panel — whose whole purpose is to warn BEFORE the user commits —
+    // could not render until after they had committed, and the founding-title
+    // caption rendered over nothing. The two below go through `Main.qml`'s real
+    // paste route, which is the only route a user has.
+
+    function test_a_preview_before_a_join_carries_no_founding_title_and_says_so() {
+        // The constraint, pinned so nobody later reads the empty panel as a bug
+        // and fills it with something: NO core call answers a founding title for
+        // a reference this peer has not joined. `join_stoa` is the only one that
+        // returns a title for a given pair, and decoding the genesis record in
+        // QML would be a second implementation of core's encoding. See design.md
+        // constraint 4.
+        var attacker = "b02d5e77" + "bb".repeat(28)
+        Core.bridge = bridgeFor({
+            "list_stoas": '{"items":[],"page":0,"hasMore":false}'
+        })
+        var view = mainComponent.createObject(null, {})
+        var list = spec.namedAnywhere(view, "stoaList")[0]
+        var join = spec.namedAnywhere(view, "joinScreen")[0]
+
+        list.pasted = JSON.stringify({ stoa: attacker, genesis: "00ff" })
+        list.preview()
+        compare(view.screenShown, "join", "the real route reaches the preview")
+
+        compare(join.foundingTitle, "",
+                "no call has answered a title for this reference, and none can")
+
+        // **The user-visible half, which is the finding.** A caption reading
+        // FOUNDING TITLE — FIXED FOREVER above an empty value tells a reader the
+        // Stoa's founding title is blank. It is not; it is unknown here.
+        var body = spec.bodyText(join)
+        var titles = spec.visibleNamed(join, "foundingTitleText")
+        verify(titles.length === 0 || titles[0].text !== "",
+               "no title element may render empty under a title caption: <"
+               + (titles.length > 0 ? titles[0].text : "absent") + ">")
+        verify(body.indexOf("FOUNDING TITLE — FIXED FOREVER") < 0,
+               "and the caption must not stand over nothing: " + body)
+
+        // Something has to say WHY, or the absence reads as a broken screen
+        // rather than as a thing this build cannot know.
+        //
+        // **Asserted as a conjunction of claims on ONE element's text**, and
+        // both halves of that shape were forced by a failure.
+        //
+        // The conjunction, rather than one ordered phrase: an earlier version
+        // required `title` and `join` inside one sentence, which the honest copy
+        // fails the moment the writer splits the sentence in two — red on a
+        // reword, green on a lie, this file's second defect family.
+        //
+        // The single element, rather than `bodyText`: with the note HIDDEN a
+        // whole-body version of this still passed, because the apparatus
+        // column's `ON THE TITLE` margin note carries "title" and "chose it
+        // freely" and the address note carries "not checked". A corpus with a
+        // decoy in it proves nothing — and the apparatus is annotation that a
+        // separate piece is removing (design.md D7), so an assertion resting on
+        // it is one that quietly stops proving anything.
+        var notes = spec.visibleNamed(join, "titleUnknownText")
+        compare(notes.length, 1,
+                "the preview must carry a visible statement of why no title is "
+                + "shown, or the empty space reads as a broken screen")
+        var low = notes[0].text.toLowerCase()
+        verify(/\b(founding )?title\b/.test(low),
+               "the copy must name the thing that is missing as a title: " + notes[0].text)
+        verify(/\b(cannot|can't|not|no)\b/.test(low),
+               "and state an absence rather than describing a feature")
+        verify(/\bjoin(ing|ed)?\b/.test(low),
+               "and name joining as what would supply it: " + notes[0].text)
+        // The misinformation this must still catch, verified by planting it: a
+        // caption saying the title is blank, or that there is none. An empty
+        // founding title is a LEGAL value the list renders, so a preview saying
+        // "this Stoa has no title" states a fact about the Stoa that nothing
+        // here checked.
+        verify(!/\b(has no|carries no|without a) (founding )?title\b/.test(low),
+               "the title is unknown here, not known to be absent: " + notes[0].text)
+
+        // And the address — the half that IS trustworthy — is still on screen,
+        // so what the preview shows is the thing worth deciding on.
+        verify(body.indexOf(attacker) >= 0, "the address is rendered in full")
+        view.destroy()
+    }
+
+    function test_the_lookalike_warning_cannot_be_claimed_before_a_join_happens() {
+        // **The impersonation defence does not run at preview time, and the
+        // screen must not imply that it did.** A reader handed a second "Nym
+        // Research" sees no lookalike panel before joining — not because there is
+        // no lookalike, but because nothing here knows this reference's title.
+        //
+        // Measured through the real paste route before the fix:
+        //   foundingTitle=<>  lookalikes=0  panel=0   with heldStoas=1
+        //   after join():     foundingTitle=<Nym Research>  lookalikes=1  panel=1
+        //
+        // So the warning existed and arrived one action too late. This test does
+        // not assert the panel appears early — it cannot, and design.md
+        // constraint 4 records why. It asserts the screen does not silently
+        // present an unrun check as a clean result.
+        var held = "7f3a91c4" + "cc".repeat(28)
+        var attacker = "b02d5e77" + "bb".repeat(28)
+        Core.bridge = bridgeFor({
+            "list_stoas": '{"items":[{"stoa":"' + held + '","foundingTitle":"Nym Research"}],'
+                        + '"page":0,"hasMore":false}',
+            "join_stoa": '{"stoa":"' + attacker + '","foundingTitle":"Nym Research",'
+                       + '"policy":"open"}'
+        })
+        var view = mainComponent.createObject(null, {})
+        var list = spec.namedAnywhere(view, "stoaList")[0]
+        var join = spec.namedAnywhere(view, "joinScreen")[0]
+
+        list.pasted = JSON.stringify({ stoa: attacker, genesis: "00ff" })
+        list.preview()
+
+        compare(join.heldStoas.length, 1,
+                "the listing IS available — the comparison's other half is there")
+        compare(join.lookalikes.length, 0,
+                "and the comparison still cannot run, because this reference has "
+                + "no title to compare")
+        compare(spec.visibleNamed(join, "lookalikePanel").length, 0)
+
+        // The load-bearing assertion: the preview must state that the comparison
+        // has not been made. Silence here is a reader concluding from an absent
+        // warning that they were warned and there was nothing to warn about.
+        //
+        // The comparison is named — a word for comparing, near a word for the
+        // thing compared — and negated. Two separate regexes rather than one
+        // ordered pattern, because either order is honest English and an ordered
+        // one fails on the innocent half of the reword.
+        //
+        // **Asserted on ONE element's text, not on the whole body.** A
+        // whole-body scan passed with the note hidden, because the apparatus
+        // column's `ON THE TITLE` margin note already contains "title" and
+        // "matched against nothing" — a corpus carrying a decoy that satisfies
+        // the pattern without the screen saying the thing. Proved by mutation:
+        // hiding the note left a body-scanned version of this assertion green.
+        // The apparatus is annotation and is being removed (design.md D7), so
+        // an assertion resting on it proves nothing about what ships.
+        var notes = spec.visibleNamed(join, "titleUnknownText")
+        compare(notes.length, 1,
+                "the preview must carry a visible statement of what it could not "
+                + "check")
+        var low = notes[0].text.toLowerCase()
+        verify(/\b(compar\w*|check\w*|match\w*)\b/.test(low),
+               "which must name the comparison: " + notes[0].text)
+        verify(/\bsame[- ]title\b|\btitle\b/.test(low),
+               "and name what is compared")
+        verify(/\b(has not been made|not been made|cannot|has not|is not|nothing)\b/.test(low),
+               "and say it has NOT been made — an unrun check read as a clean "
+               + "result is the impersonation this screen is written against: "
+               + notes[0].text)
+
+        // After the join the comparison DOES run, which is what makes the
+        // absence above a timing fact rather than a missing feature.
+        join.join()
+        compare(join.lookalikes.length, 1,
+                "the comparison runs once a title exists — it is late, not absent")
+        compare(spec.visibleNamed(join, "lookalikePanel").length, 1)
+        view.destroy()
     }
 
     function test_the_same_address_is_not_shown_beside_itself_as_a_second_stoa() {

@@ -3562,13 +3562,36 @@ resolvers do not provide" below.
 **In-post addresses are attacker-supplied content.** §4.8 is explicit and this
 section adds nothing to it except the mechanics: a Stoa address appearing in a
 post body renders as an affordance the reader chooses to act on; acting on it
-shows what is being joined — the Stoa's title and address — **before** joining;
-and nothing auto-joins, ever. The relevant threat is not a malicious Stoa, which
-a reader can leave; it is a reader who does not know they joined one. ~~**This is
-a UI obligation and is not built**, which is why it stays here rather than
-moving.~~ **The obligation is now contracted** by `stoa-navigation-view`'s
-"Joining shows what is being joined, and joins nothing until the user acts";
-what remains unbuilt is only the affordance inside a post body, as §4.8 Phase 1
+shows what is being joined — ~~the Stoa's title and address~~ **the Stoa's
+address; see below for why not its title** — **before** joining; and nothing
+auto-joins, ever. The relevant threat is not a malicious Stoa, which a reader can
+leave; it is a reader who does not know they joined one. ~~**This is a UI
+obligation and is not built**, which is why it stays here rather than moving.~~
+**The address half and the no-auto-join half are now contracted** by
+`stoa-navigation-view`'s "Joining shows what is being joined, and joins nothing
+until the user acts".
+
+**The title half is NOT built, and cannot be on this API.** `join_stoa` is the
+only call that answers a `foundingTitle` for a given `(stoa, genesis)` pair, so a
+preview — which by definition happens before a join — has no title to show. The
+title is inside the genesis record the reader was handed; reading it in the view
+would mean a second implementation of the core's genesis encoding, which §2.1's
+core/UI split forbids. The join screen therefore renders the address and states
+plainly that it cannot tell the reader what the Stoa is called, rather than
+captioning an empty panel. The reasoning is in `ui-stoa-list`'s `design.md` D11.
+
+**What this costs is the same-title warning's timing.** §5.7's point that two
+Stoas may present the same title is contracted and implemented — but the
+comparison is over titles, so on this API it can only run *after* a join rather
+than before one. That makes it a record of what happened rather than a warning
+about what is about to, which is a real weakening of the property this section
+describes. It closes with a core call that answers a founding title for an
+un-joined reference — `getStoa` in §9.1's shape, or something narrower that
+decodes a pair without recording membership. Until then the screen says the check
+has not been made, because an absent warning read as a clean result is worse than
+no warning at all.
+
+What also remains unbuilt is the affordance inside a post body, as §4.8 Phase 1
 now records.
 
 ~~**The obligation this surfaces, also new to §11.1**: a Stoa's *displayed* title
@@ -3578,7 +3601,9 @@ title. The address is the identity and the title is decoration, so a join
 confirmation that shows only a title has shown the reader the forgeable half.~~
 **Contracted across three `stoa-navigation-view` requirements** — the list row
 carrying its address, the preview's full address, and the same-title Stoa shown
-beside a lookalike. It is no longer waiting on §11.1.
+beside a lookalike. It is no longer waiting on §11.1. **The third of those runs
+after a join rather than before one**, for the API reason given above; it is
+implemented and its timing is the open half.
 
 #### 6. The core API this requires
 

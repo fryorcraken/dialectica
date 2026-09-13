@@ -60,10 +60,18 @@ ScreenFrame {
          && screen.outcome.genesis === screen.stoaGenesis)
             ? screen.outcome : null
 
-    // The founding title, where one is known. Today nothing resolves a title
-    // from a genesis record inside the view, so this is "" until a join
-    // succeeds and the reply names it — which is why the founding-title panel is
-    // conditional rather than always filled.
+    // The founding title, where one is known.
+    //
+    // **On this build that means "after a join, and not before" — the preview
+    // has no title at all, and the screen says so rather than captioning a
+    // blank.** This is a constraint of the core API, not an oversight here:
+    // `join_stoa` is the ONLY call that answers a founding title for a given
+    // reference. `list_stoas` answers for Stoas already held and `create_stoa`
+    // for one just made; neither can be asked about a pasted pair. The title IS
+    // inside the genesis record the user pasted, and decoding it here would be a
+    // second implementation of core's encoding — the thing the core/UI split
+    // exists to prevent, and the same argument that keeps address verification
+    // out of `StoaReference.parse`. See design.md constraint 4.
     //
     // Derived, not assigned: it can only ever be the title the core returned for
     // THIS reference. A title carried over from another Stoa would caption an
@@ -73,6 +81,14 @@ ScreenFrame {
     // being compared would be the same string from the same source.
     readonly property string foundingTitle:
         screen.currentOutcome !== null ? screen.currentOutcome.foundingTitle : ""
+
+    // Whether this build knows anything about what this Stoa is called.
+    //
+    // The panel and the not-yet note are two renderings of this one fact, so
+    // they cannot disagree about which is showing — an `implicitHeight`
+    // computed over a hidden panel and a note bound to a different expression
+    // is how a screen ends up with both or neither.
+    readonly property bool titleKnown: screen.foundingTitle !== ""
 
     // A resolved CURRENT title, from a moderator-signed metadata op. Nothing
     // supplies one and nothing on this build can: `stoa-metadata` says plainly
@@ -134,10 +150,26 @@ ScreenFrame {
     // core did — which the reply deliberately does not answer — and `join()`
     // never reads this property or `heldStoas` for that reason.
     //
-    // Note this now depends on the DERIVED `foundingTitle`, so a lookalike can
+    // Note this depends on the DERIVED `foundingTitle`, so a lookalike can
     // only be reported against a title the core returned for the reference on
-    // screen. Previously a carried-over title could suppress the comparison
+    // screen. A carried-over title could otherwise suppress the comparison
     // entirely by making both sides equal.
+    //
+    // **The cost of that correctness is that the comparison cannot run before a
+    // join**, because `foundingTitle` is "" until one succeeds. A design review
+    // measured it through the real paste route: a held *Nym Research* and a
+    // pasted second *Nym Research* gave `lookalikes=0` and no panel at preview
+    // time, then `lookalikes=1` after `join()`. The warning is real and arrives
+    // one action after the decision it exists to inform.
+    //
+    // That is NOT closed by relaxing this guard — comparing against "" would
+    // match every untitled Stoa and comparing against a carried-over title is
+    // the impersonation this derivation prevents. It is closed by a core call
+    // that answers a founding title for an un-joined reference, which does not
+    // exist and which this piece does not add. Until it does, the screen's
+    // obligation is to say the check has not been made rather than to render
+    // the silence of an unrun check as a clean result — which is what
+    // `titleUnknownNote` below does.
     readonly property var lookalikes: {
         var out = []
         if (screen.foundingTitle === "")
@@ -280,7 +312,17 @@ ScreenFrame {
         // The founding title, labelled as FOUNDING. Rendering it unlabelled
         // would discard at the last step the distinction the core puts on the
         // wire by naming the field `foundingTitle` rather than `title`.
+        //
+        // **Conditional on there being one**, which on a preview there is not.
+        // An unconditional caption reading FOUNDING TITLE — FIXED FOREVER over
+        // an empty value tells a reader this Stoa's founding title is blank. An
+        // empty founding title is legal — the genesis record has no minimum
+        // length, and the list renders such a row — so the reader has no way to
+        // tell "" from "not known here", and the two mean opposite things on the
+        // screen where they decide whether to trust an address.
         Rectangle {
+            objectName: "foundingTitlePanel"
+            visible: screen.titleKnown
             Layout.fillWidth: true
             Layout.fillHeight: true
             implicitHeight: foundingBody.implicitHeight + 28
@@ -359,6 +401,56 @@ ScreenFrame {
                     Layout.fillWidth: true
                 }
             }
+        }
+    }
+
+    // ---- what this build does not know about this Stoa yet -----------------
+    //
+    // **The screen states the absence of a check rather than leaving the check's
+    // silence to be read as its result.** Two things are unknown on a preview
+    // and both matter to the decision the user is about to make:
+    //
+    //   - what this Stoa is called. `join_stoa` is the only call that answers a
+    //     founding title, so the title inside the pasted record is not readable
+    //     here. An empty panel captioned FOUNDING TITLE would read as a blank
+    //     title, which is a legal value and a different fact.
+    //   - whether a Stoa already held presents the same title. That comparison
+    //     is over titles, so with no title it cannot run. A reader who sees no
+    //     lookalike warning and infers there is no lookalike has been misled by
+    //     an unrun check — the impersonation this whole screen is written
+    //     against, arriving through the defence rather than around it.
+    //
+    // This is the honest rendering of a constraint, not a placeholder for a
+    // feature. It goes away when a core call can answer a founding title for a
+    // reference this peer has not joined; until then, saying nothing here is the
+    // one option that misinforms.
+    ColumnLayout {
+        objectName: "titleUnknownNote"
+        visible: !screen.titleKnown
+        Layout.fillWidth: true
+        spacing: 6
+
+        Text {
+            text: "NOTHING HERE KNOWS WHAT THIS STOA IS CALLED"
+            font: Theme.label
+            color: Theme.inkMuted
+            textFormat: Text.PlainText
+        }
+
+        Text {
+            objectName: "titleUnknownText"
+            text: "The founding title is inside the record you pasted, and this "
+                + "screen cannot read it — only joining asks for it. So no title "
+                + "is shown, and the same-title comparison against the Stoas you "
+                + "already hold has not been made. If you are expecting this to "
+                + "be a Stoa you have seen before, the address above is the only "
+                + "thing that can tell you."
+            font: Theme.note
+            color: Theme.inkSoft
+            wrapMode: Text.WordWrap
+            lineHeight: 1.5
+            textFormat: Text.PlainText
+            Layout.fillWidth: true
         }
     }
 

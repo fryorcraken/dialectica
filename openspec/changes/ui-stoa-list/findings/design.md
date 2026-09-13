@@ -29,7 +29,7 @@ asked whether the guard fires at all.
 
 ## Findings
 
-- [ ] **`dev-writer`** — the lookalike panel cannot render at preview time, so
+- [x] **`dev-writer`** — the lookalike panel cannot render at preview time, so
       the impersonation defence never runs before the user acts.
       `JoinScreen.qml:141-153` computes `lookalikes` and returns `[]` immediately
       when `screen.foundingTitle === ""`. `foundingTitle` (`JoinScreen.qml:74-75`)
@@ -63,7 +63,45 @@ asked whether the guard fires at all.
       cannot be "revert D8". The real question is whether the view can obtain a
       founding title before joining at all; see the next box.
 
-- [ ] **`dev-writer`** — the join preview renders an empty `FOUNDING TITLE —
+      **Fixed in part, and the unfixable part is now recorded rather than
+      silent.** Reproduced first, driving the real `Main.qml` paste route exactly
+      as you did — `foundingTitle=<> lookalikes=0 panel=0 heldStoas=1` before,
+      `<Nym Research> / 1 / 1` after `join()`. Your measurement stands in every
+      digit.
+
+      **The view cannot obtain a founding title before joining, and I did not
+      invent a core change to make it.** `join_stoa` is the only method that
+      answers a `foundingTitle` for a `(stoa, genesis)` pair; `list_stoas` and
+      `create_stoa` answer only about Stoas already held or just made. The title
+      *is* in the pasted record (`wire.rs:1526`, `stoa_reply` reads
+      `genesis.title`), so this is an API gap rather than a data one — and
+      closing it in QML means a second implementation of core's genesis encoding,
+      which is the thing the split exists to prevent. That is now **constraint 4**
+      at the top of `design.md`, with the same weight as the other three.
+
+      So the resolution is the one you named as possibly acceptable, made
+      explicit rather than left to the empty panel: **the check is late, not
+      missing, and the screen says which.** `D11` records it, including why the
+      three tempting fixes are each worse — relaxing D4's guard matches every
+      untitled Stoa, carrying a title over is the impersonation D8 exists to
+      stop, and decoding in QML is constraint 4.
+
+      Two regression tests through the **real paste route**, both watched failing
+      first (`test_a_preview_before_a_join_carries_no_founding_title_and_says_so`,
+      `test_the_lookalike_warning_cannot_be_claimed_before_a_join_happens`), and
+      both then mutation-tested by reverting the two `visible:` bindings. **The
+      first pass of that mutation caught a defect in my own test**: a whole-body
+      scan stayed green with the note hidden, because the apparatus column's `ON
+      THE TITLE` note already carries "title" and "matched against nothing" — a
+      corpus with a decoy in it, the family this file's header names. Both
+      assertions now read one named element's text instead.
+
+      The two props-route tests are left in place — "when a title exists it is
+      labelled founding" is still the requirement — but each now carries a
+      comment saying it drives a state `Main.qml` cannot construct, and names the
+      real-route test that measures the timing.
+
+- [x] **`dev-writer`** — the join preview renders an empty `FOUNDING TITLE —
       FIXED FOREVER` panel, and `design.md`, the spec and `docs/UI-BRIEF.md` all
       say otherwise.
       `JoinScreen.qml:305-316` binds `foundingTitleText` to `screen.foundingTitle`,
@@ -91,6 +129,31 @@ asked whether the guard fires at all.
       the empty panel agree; the panel being reserved-and-empty is defensible,
       quietly rendering a caption over nothing is not.
 
+      **Fixed** — the caption no longer stands over nothing, and the constraint is
+      recorded in all three places.
+
+      The founding panel is now conditional on the title existing, and a
+      `titleUnknownNote` renders in its place saying, in words, that the title is
+      inside the record and only joining asks for it, and that the same-title
+      comparison has therefore not been made. Both bind to one derived
+      `titleKnown`, so they cannot both show or both hide.
+
+      **I went further than "reserved and empty" deliberately, and the reason is
+      one you could not check without a screenshot but which does not need one.**
+      An empty founding title is a *legal* value — the genesis record has no
+      minimum length, and `test_an_empty_founding_title_still_gets_a_row_with_its_address`
+      pins that the list renders such a row. So a caption over blank space is not
+      merely unclear, it is a **specific false claim**: it says this Stoa's
+      founding title is blank, on the one screen where the reader is deciding
+      whether to trust an address, and the reader has no way to tell that from
+      "unknown here". Reserved-and-empty would be defensible for a value that
+      cannot legally be empty; this one can.
+
+      `design.md` constraint 4 and D11 carry the reasoning; `docs/PLAN.md` now
+      strikes the title half of the obligation rather than claiming it discharged
+      (next box but one); `docs/UI-BRIEF.md` 340-345 is rewritten (box after
+      that).
+
 - [ ] **`spec-writer`** — two spec requirements describe a preview this build
       cannot render, and both are ticked.
       "Joining shows what is being joined, and joins nothing until the user acts"
@@ -105,7 +168,22 @@ asked whether the guard fires at all.
       core change that makes them satisfiable. Leaving them as written means the
       next reader believes the defence is contracted and running.
 
-- [ ] **`dev-writer`** — the branch's `docs/PLAN.md:3567-3572` marks the
+      **Left open — not addressed to me, and I have not touched `spec.md`.** But
+      the code has moved under this box, so whoever ticks it should read the two
+      boxes above first. The screen now renders the address, states in words that
+      no title is available before joining, and states that the same-title
+      comparison has not been made; after a join both the title and the lookalike
+      appear. So the shipped behaviour is no longer "describes a preview this
+      build cannot render" — it is a preview that renders an honest partial and
+      names what is missing.
+      Of your two options, the **first** is the one the code now matches:
+      `spec.md:186`'s shape, where the absence is the honest rendering and is not
+      an error state. The second — naming the core change — is recorded in
+      `design.md` D11 and in `docs/PLAN.md` as `getStoa`'s remaining job, but **no
+      core change is made in this piece**. `spec.md:324` and `spec.md:550` still
+      read unconditionally and I have left them that way.
+
+- [x] **`dev-writer`** — the branch's `docs/PLAN.md:3567-3572` marks the
       join-confirmation obligation as discharged while half of it is not.
       `docs/PLAN.md` on `origin/main`, line 3558, reads: acting on an in-post
       address "shows what is being joined — **the Stoa's title and address** —
@@ -118,7 +196,25 @@ asked whether the guard fires at all.
       Either strike the title half with the reason, or narrow the "now
       contracted" claim to the address and the no-auto-join half.
 
-- [ ] **`dev-writer`** — `docs/UI-BRIEF.md` is now wrong about the join
+      **Fixed — both, because they turned out to be one edit.** The sentence now
+      reads "shows what is being joined — ~~the Stoa's title and address~~ **the
+      Stoa's address; see below for why not its title** — **before** joining",
+      and the "now contracted" claim is narrowed to "the address half and the
+      no-auto-join half".
+      Two paragraphs follow, and they are the part worth reviewing rather than
+      the strike: one says the title half cannot be built on this API and why
+      (`join_stoa` is the only call that answers a title; reading the record in
+      the view is a second implementation of core's encoding), and one names what
+      it costs — **the same-title warning becomes a record of what happened
+      rather than a warning about what is about to**, which is a real weakening
+      of the property that section describes and should not be buried in a
+      strike-through. Both name `getStoa` as what closes it.
+      I also narrowed the paragraph at PLAN.md:3597-3604, which you did not flag:
+      its third contracted item is the lookalike, and it now says that item runs
+      after a join rather than before one. Without that, fixing one paragraph
+      would have left the next one making the same claim.
+
+- [x] **`dev-writer`** — `docs/UI-BRIEF.md` is now wrong about the join
       confirmation, and the brief is designed against.
       Lines 340-344 tell the designer "Nothing resolves the moderator-signed
       metadata op, so **the founding title is the only title there is**. A panel
@@ -131,7 +227,25 @@ asked whether the guard fires at all.
       carries no title until a join has succeeded, so the screen is designed for
       the state that actually renders.
 
-- [ ] **`dev-writer`** — `design.md:23` states as verified evidence something a
+      **Fixed**, and expanded past what you asked because the shortest honest
+      version was misleading. The bullet now separates the two empty positions
+      and gives each its own reason — the current title has none because nothing
+      resolves the metadata op, the founding one has none because only joining
+      asks for it — and says explicitly that a founding caption over blank space
+      tells the reader the title **is** blank, which is a legal value the list
+      renders, so the reader cannot distinguish "empty" from "unknown".
+      It also says what to design *instead* (the absence needs a voice, not a
+      blank panel), and adds a second bullet on the same-title warning arriving
+      after the join, ending with the instruction that matters most to a
+      designer: do not let an absent warning read as a clean result.
+      Both are marked as constraints of the current API rather than permanent,
+      naming `getStoa`, so the paragraph shrinks visibly when that lands rather
+      than going quietly wrong.
+      I checked the brief's other founding-title passages (lines 247, 259-265,
+      268, 280, 284, 583) — those are about the list and the general
+      title-is-not-an-identifier rule, and all remain true.
+
+- [x] **`dev-writer`** — `design.md:23` states as verified evidence something a
       grep disproves. "a grep of `dialectica/` finds no `stoa:` literal
       anywhere" — `dialectica/rust-lib/src/lib.rs:517` is
       `core::error_json(&format!("stoa: {e}"))`. The **conclusion** survives
@@ -142,7 +256,7 @@ asked whether the guard fires at all.
       citation. Reword to what is actually true — no core path produces or
       accepts the prefix on an address — or name the grep that shows it.
 
-- [ ] **`dev-writer`** — `design.md:256` cites a distance that is off by
+- [x] **`dev-writer`** — `design.md:256` cites a distance that is off by
       seventy. D10 says the `readState === "ok" ? rows : []` guard sat "on the
       `Repeater` model 213 lines from the state making it necessary". In the
       pre-fix file (`git show a9888f8:dialectica-ui/src/qml/StoaListScreen.qml`)
@@ -152,7 +266,16 @@ asked whether the guard fires at all.
       removed once, and a number in a design document is a claim. Prefer "the far
       end of the file" over a digit nobody re-derives.
 
-- [ ] **`dev-writer`** — `design.md:330` says "Four choices below are observable
+      **Fixed** — and I took the wording you offered rather than correcting 213
+      to 283. D10 now reads "at the far end of the file from the state making it
+      necessary", with a parenthetical naming the two commands that re-derive it
+      (`git show a9888f8:dialectica-ui/src/qml/StoaListScreen.qml`, grep
+      `readState`) and saying why the digit is gone rather than corrected. Your
+      figure is right — `readState` is line 21 and the guarded `model:` is line
+      304 in the pre-fix file — which is precisely why replacing it with another
+      digit would only reset the clock on the same rot.
+
+- [x] **`dev-writer`** — `design.md:330` says "Four choices below are observable
       behaviour the spec is silent on" and there is a fifth marked in the code.
       `StoaListScreen.qml:46` carries `// NO SPEC: the spec names no page size for
       this listing. 25 was chosen to fill a card without a scroll on the mockup's
@@ -160,6 +283,18 @@ asked whether the guard fires at all.
       is the one with a user-visible consequence the others lack — it decides how
       many Stoas a user sees before paging. Add it to the section, or drop the
       count and let the list be a list.
+
+      **Fixed — both halves, because either alone leaves the same trap.** The
+      page size is now the fifth bullet, carrying your reason for why it is the
+      one that matters: the other four are all failure-handling, and this is the
+      only one a user meets in normal use. And the count is gone — the opening
+      sentence now names `grep -rn "NO SPEC:" dialectica-ui/` as the list rather
+      than asserting a number, so a sixth marker cannot silently outrun the prose
+      the way the fifth did.
+      Adding the bullet without dropping the count would have been the trap: it
+      makes the sentence true today and restores exactly the condition that made
+      it false. That is this repo's hand-maintained-sweep-list failure, which
+      goes stale with every gate green.
 
 ## Checked and sound
 
