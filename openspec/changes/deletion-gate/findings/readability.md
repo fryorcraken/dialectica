@@ -29,7 +29,7 @@ and hands over the exact lines to paste. Nothing below detracts from that.
 
 ## Defects
 
-- [ ] **`dev-writer`** — `.github/scripts/check-claimed-deletions.sh:48`,
+- [x] **`dev-writer`** — `.github/scripts/check-claimed-deletions.sh:48`,
       `75-78`, `93-94`, `157-158` — every `cannot measure` message is multi-line,
       and GitHub keeps only the first line in the annotation, so the shallow
       case's `fetch-depth` fix is discarded before the reader sees it
@@ -64,7 +64,31 @@ and hands over the exact lines to paste. Nothing below detracts from that.
       the suite passes while the annotation a human actually reads does not carry
       it — the test cannot see this.
 
-- [ ] **`dev-writer`** — `.github/scripts/check-claimed-deletions.sh:154-159` —
+      **Fixed** in the commit carrying this tick. This is the best finding on the
+      piece: it is my own thesis arriving one layer up, and my tests were
+      structurally incapable of seeing it. I reproduced it before fixing — the
+      annotation really did read `...so the merge base of`, breaking off exactly
+      where you said.
+      The fix is structural rather than per-message, because patching three
+      strings would leave the next author free to reintroduce it. `cannot_measure`
+      now takes a one-line headline plus optional detail lines and folds any
+      newline in the headline to a space, so a caller who wraps for source
+      readability still emits one annotation line. The shallow headline now leads
+      with the fix: *"the checkout is a shallow clone — set 'fetch-depth: 0' on
+      this job's actions/checkout step."*
+      Test 22 asserts on `annotation_of()` — the first line of each `::error::`,
+      which is what GitHub keeps — rather than on stdout, and checks three
+      properties: the shallow annotation contains `fetch-depth`, every annotation
+      is exactly one line, and (test 23) folding keeps cause and fix together.
+      Verified it fails: restoring the old multi-line string turns tests 22 and 23
+      red while tests 5 and 7 stay green, which is the blindness you identified,
+      demonstrated.
+      **What it still cannot check, per your own note:** it emulates the
+      documented newline rule, it does not observe a rendered annotation panel. A
+      live Actions run remains the only way to see the real thing. I did not close
+      that gap with a weaker check and have said so in design.md §12.
+
+- [x] **`dev-writer`** — `.github/scripts/check-claimed-deletions.sh:154-159` —
       the third guard is the only one with no `── Guard N ──` banner, so a reader
       scanning the script finds two guards where five other documents say three
       **Scenario:** the script carries banner comments `── Guard 1: the clone must
@@ -88,7 +112,18 @@ and hands over the exact lines to paste. Nothing below detracts from that.
       **Severity:** medium — no behavioural defect, but it defeats the design's
       own stated goal of making each guard's distinct job visible from the source.
 
-- [ ] **`dev-writer`** — `.github/scripts/check-claimed-deletions.sh:161-209` —
+      **Fixed** in the commit carrying this tick. Guard 3 now carries a
+      `── Guard 3: the diff itself must succeed ──` banner whose body says what it
+      defends (an unreadable tree in a repository every cheap check calls healthy)
+      rather than leaving the two pinned git settings to dominate the region.
+      `grep -n "Guard 3"` over the script now returns it, so the name five
+      documents use resolves in the source.
+      Your closing observation is the sharpest thing in this sheet and I have
+      quoted it into design.md §2: *the thing hardest to see in the source was the
+      thing the suite was blindest to.* That is not a coincidence and it is worth
+      a reader knowing.
+
+- [x] **`dev-writer`** — `.github/scripts/check-claimed-deletions.sh:161-209` —
       two unrelated comment blocks were merged without a separator, so 22 lines
       documenting the `sed` are read as documenting the `awk` that follows them
       **Scenario:** the block opens at 161 with *"Extract the claims: lines whose
@@ -109,7 +144,16 @@ and hands over the exact lines to paste. Nothing below detracts from that.
       comment block in the file and the one a reader arrives at when diagnosing the
       claim-parsing behaviour, which is where false positives live.
 
-- [ ] **`dev-writer`** — `.github/scripts/check-claimed-deletions.sh:204`,
+      **Fixed** in the commit carrying this tick, and you diagnosed the cause
+      correctly — it was an append, not a choice. Rather than insert the missing
+      `#`, I reordered so each block sits with the code it describes: `── Step 1:
+      remove fenced code blocks ──` above the `awk`, `── Step 2: extract the
+      claims ──` above the `sed`. A reader arriving from a fence-related false
+      positive now meets the fence paragraph first, and the ordering of the
+      comments matches the order of execution, so the drift cannot silently
+      recur the same way.
+
+- [x] **`dev-writer`** — `.github/scripts/check-claimed-deletions.sh:204`,
       `209`, `212` — the variable is named `uncommented_body` but nothing in this
       script strips comments; it holds a body with **code fences** removed
       **Scenario:** the `awk` at 206-209 toggles on ` ``` ` and `~~~` and drops
@@ -126,13 +170,19 @@ and hands over the exact lines to paste. Nothing below detracts from that.
       load-bearing for the one reader trying to work out why their fenced example
       did not count as a claim.
 
+      **Fixed** — renamed to `unfenced_body`, and your reconstruction of how the
+      wrong noun arrived is right: it came from the sibling adapter gate via the
+      §8b analogy. The comment above it now says so explicitly, so a reader
+      grepping this script for "comment" is told there is none to find rather
+      than left inferring it from the two mentions of the *other* gate.
+
 ## On design.md's length — long because it accreted, and the seams are visible
 
 The brief asks whether design.md (355 lines) is long because the subject is or
 because it accreted. It is both, but the accretion is legible in the numbering
 and worth one box, because the structure now actively misdirects:
 
-- [ ] **`dev-writer`** — `openspec/changes/deletion-gate/design.md:105`,
+- [x] **`dev-writer`** — `openspec/changes/deletion-gate/design.md:105`,
       `200`, `243` — the Decisions section's own numbering records the order the
       sections were written rather than the structure of the subject, and §2's
       title is now false
@@ -158,6 +208,22 @@ and worth one box, because the structure now actively misdirects:
       the code that is now wrong, and per this repo's own rules a stale claim in a
       recorded decision is what the next reader trusts.
 
+      **Fixed** in the commit carrying this tick, taking your suggested shape:
+      **(a)** §2 is retitled *"Three independent guards"* and opens with a table
+      of all three and what each catches that the others miss; §11's guard-3
+      content is folded into it, so the guard structure is learned in one place.
+      §11 is now the annotation finding from the top of this sheet.
+      **(b)** §7 is retitled to *"Two ... and both"*, matching what it delivers,
+      with the third pointed at §2 where it now lives beside its guard.
+      **(c)** §8b is renumbered to §9, and 9/10/11 shift up; cross-references in
+      the script and in design.md are updated. I left the findings sheets' `§8b`
+      references alone — editing a reviewer's text to match my renumbering would
+      be the wrong repair, so this note is the mapping.
+      I did not renumber beyond that. The remaining order is still roughly
+      chronological, but every section is now titled truthfully, which was the
+      actual defect; a fuller restructure would churn the diff under the
+      reviewers still to come for no gain a reader would feel.
+
 ## Figures — checked against commands, and one is stale
 
 Per the brief I re-derived every quantity. The design.md table is **sound**:
@@ -172,7 +238,7 @@ claim in `docs/OPENSPEC-ARCHIVE.md` re-derives exactly: `git log --diff-filter=A
 Two figure defects, both in the same family — a number that moved when a branch
 tip did:
 
-- [ ] **`dev-writer`** — `openspec/changes/deletion-gate/design.md:40` — the
+- [x] **`dev-writer`** — `openspec/changes/deletion-gate/design.md:40` — the
       stale `5,034` survives here, one section after the corrected `5,067`
       **Scenario:** line 24 of the same file (§"The near miss") correctly reads
       *"5,067 lines deleted two-dot against 130 three-dot"*. Line 40, in the very
@@ -189,7 +255,15 @@ tip did:
       **Severity:** medium — one of two numbers in a two-number document
       disagreeing with the other is the shape this repo says it fabricates.
 
-- [ ] **`dev-writer`** — `openspec/changes/deletion-gate/proposal.md:32-40` —
+      **Fixed**, and not by substituting 5,067. The sentence's whole move is
+      *this quantity is ambiguous*, so no specific figure was ever load-bearing
+      there and any figure could only rot — it now reads "a five-thousand-line
+      deletion count", with a parenthetical recording that it once quoted 5,034
+      and why a number was the wrong thing to pin. The reproducible pair stays in
+      the measured table two sections above, which is where a reader who wants a
+      number should get one.
+
+- [x] **`dev-writer`** — `openspec/changes/deletion-gate/proposal.md:32-40` —
       the document's headline "run these two commands before believing anything
       below" no longer runs: the branch it names has been deleted
       **Scenario:** the proposal presents a fenced pair of commands against
@@ -211,6 +285,28 @@ tip did:
       **Severity:** medium — the proposal's stated evidentiary basis. Also note
       `proposal.md:70` still cites a third figure, the **6,871**-deletion false
       alarm, for which no reproducing command is given anywhere.
+
+      **Fixed**, taking your durable option rather than pinning a third branch.
+      Confirmed the breakage first: `git rev-parse --verify origin/piece/op-transport`
+      exits 1. The fenced block is now a loop over `git branch -r --list
+      'origin/piece/*'` printing both ranges for whatever is open, so it names no
+      ref that can be pruned. I ran the replacement before shipping it — it works,
+      and `piece/authoring` currently shows 27,075 deletions two-dot against 168
+      three-dot, which is a louder demonstration than the figure it replaces.
+      The paragraph now says outright that the section documented this rot for one
+      figure and then reintroduced it, since that is the lesson rather than the
+      figures. It also states what a reader should conclude if every branch has
+      been rebased and the two forms agree — the healthy state, not a failed
+      reproduction — so an empty result is not read as the argument collapsing.
+      Note this box duplicates one on the architecture sheet addressed to
+      `spec-writer`; `proposal.md` is that role's file. I fixed the text because it
+      was factually broken in my tree and I was editing alongside it. **The
+      `spec-writer` box stays open** — if that role would rather phrase it
+      differently, this is theirs to overrule.
+      The **6,871** figure you flag at line 70 is a real remaining gap. I did not
+      touch it: it is a session observation from before this piece, no command
+      reproduces it, and inventing a citation would be worse than leaving it
+      visibly unsourced. Flagging it rather than closing it.
 
 ## What was clean
 

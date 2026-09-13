@@ -89,6 +89,31 @@
       and both `GIT_CONFIG_*` pointed at empty files, so it cannot depend on a
       developer's git identity as CI cannot.
 
+## 4b. Acting on readability and architecture findings
+
+- [x] 4b.1 Make every `::error::` annotation single-line and carry its own fix.
+      A workflow command is newline-delimited, so the shallow message truncated
+      at "so the merge base of" and `fetch-depth: 0` never reached the reader.
+      Fixed structurally: `cannot_measure` folds newlines in its headline.
+      Verified by tests 22-23, which assert on the first line of each `::error::`
+      rather than on stdout; restoring the old message turns them red while
+      tests 5 and 7 stay green.
+- [x] 4b.2 Give guard 3 a `── Guard 3 ──` banner, so the name five documents use
+      resolves in the source. Verified by `grep -n "Guard 3"`.
+- [x] 4b.3 One `mktemp -d` and one trap, replacing two hand-synced trap lists.
+- [x] 4b.4 Rename `uncommented_body` to `unfenced_body` — nothing here strips a
+      comment — and split the merged comment block into Step 1 (fences) and
+      Step 2 (claims), each above its own code.
+- [x] 4b.5 Document the cwd as the fourth input in the usage block, with the
+      argument for documenting rather than parameterising and the trigger to
+      revisit.
+- [x] 4b.6 Retitle design.md §2 to three guards and fold §11's guard-3 content
+      into it; retitle §7; renumber §8b to §9 and shift 9/10/11 up.
+- [x] 4b.7 Remove the stale `5,034` rather than updating it — the sentence is
+      about ambiguity, so no figure was load-bearing there.
+- [x] 4b.8 Replace proposal.md's pruned-branch verification command with a loop
+      over whatever `origin/piece/*` exists. Verified by running it.
+
 ## 5. The documentation edits
 
 - [x] 4.1 Add the closer-authoring rule to `closer.md`'s "What you never do",

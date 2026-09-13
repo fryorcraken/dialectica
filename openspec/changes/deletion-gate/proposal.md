@@ -26,18 +26,34 @@ since been rebased onto `733544d`, so both diff forms now report 12 deletions
 and the historical 7,071 figure is not reproducible from the repository today.
 It is quoted here as a session observation rather than as something a reader can
 re-derive — which is exactly the kind of number this project treats as a claim
-rather than evidence. What *is* reproducible, on `origin/piece/op-transport` as
-this is written, is the mechanism itself:
+rather than evidence.
+
+**The mechanism, however, is reproducible against any open branch, and the
+instruction is phrased that way on purpose.** An earlier version of this
+paragraph pinned `origin/piece/op-transport` and quoted its 7,101-vs-37 split;
+that branch has since merged and been pruned, so both commands now exit 128 with
+`unknown revision`. The section had already documented exactly this rot for the
+figure *before* it, and then reintroduced it — a piece branch is the
+shortest-lived ref in the repo and its deletion is silent, so naming one is the
+opposite of the self-invalidating form CLAUDE.md asks for. Naming a third would
+buy a few weeks.
+
+So run it against whatever is open, rather than against a name written here:
 
 ```
-git diff origin/main origin/piece/op-transport --shortstat
-  31 files changed, 6577 insertions(+), 7101 deletions(-)
-git diff origin/main...origin/piece/op-transport --shortstat
-  14 files changed, 6449 insertions(+), 37 deletions(-)
+for b in $(git branch -r --list 'origin/piece/*'); do
+  echo "$b"
+  git diff --shortstat origin/main "$b"        # two-dot: also blames what main gained
+  git diff --shortstat "origin/main...$b"      # three-dot: what the branch actually deletes
+done
 ```
 
-Two forms, one branch, a 7,064-line disagreement. Run those two commands before
-believing anything below; they are the whole argument in six lines.
+Any branch cut before a large change landed shows the two forms disagreeing by
+thousands of lines. If every open branch has been rebased past the most recent
+large merge the two will agree, which is itself the healthy state rather than a
+failed reproduction — in that case the argument is re-derivable from
+`design.md`'s measured ten-branch table, taken at a moment when they did not
+agree.
 
 ### Why the four existing jobs are structurally blind to it
 

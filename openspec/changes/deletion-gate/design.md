@@ -37,13 +37,18 @@ might miss, and it is why the range is load-bearing rather than fastidious.
 This answers the obvious objection to automating any of this — *why not just run
 a diff and look?*
 
-"5,034 deletions" reads exactly the same whether the branch rotted or `main`
-grew. A human eyeballing either number reaches the same alarm and **cannot tell
-from the output which they are looking at**; the two cases differ only in which
-range produced them. So a reviewer running the wrong range does not get a
-confused answer, they get a confident wrong one — and `mergeStateStatus` reported
-`UNKNOWN` for all three of the original PRs, so there was no second signal to
-catch it.
+A five-thousand-line deletion count reads exactly the same whether the branch
+rotted or `main` grew. A human eyeballing either number reaches the same alarm
+and **cannot tell from the output which they are looking at**; the two cases
+differ only in which range produced them. So a reviewer running the wrong range
+does not get a confused answer, they get a confident wrong one — and
+`mergeStateStatus` reported `UNKNOWN` for all three of the original PRs, so
+there was no second signal to catch it.
+
+(No figure is quoted in that sentence on purpose. It once read "5,034
+deletions", which was already superseded by the 5,067 measured two sections
+above — a number that is *about* ambiguity is not made truer by pinning it, and
+can only rot. The reproducible pair is in the table above.)
 
 The three-dot range is the only thing that separates the two, which is why this
 is a gate rather than a note in a checklist.
@@ -102,7 +107,20 @@ The cost is one more file and an indirection from the workflow. Accepted,
 because the alternative is a gate whose failure path is asserted rather than
 observed, which is the exact thing this gate exists to prevent elsewhere.
 
-### 2. Two independent guards, because they catch different failures
+### 2. Three independent guards, because they catch different failures
+
+The script refuses to answer unless it could actually look, and it does that in
+**three** places, each catching what the others report as healthy:
+
+| guard | checks | catches what the others miss |
+|---|---|---|
+| 1 | `--is-shallow-repository` | a clone with no fork point; names `fetch-depth` |
+| 2 | both refs resolve, merge base exists | unfetched ref, orphan branch, typo |
+| 3 | the `git diff` itself succeeds | an unreadable tree in a healthy-looking repo |
+
+Guards 1 and 2 are argued below. **Guard 3's reachability was doubted in review
+and is established further down in this same section**, because the question
+"is it dead code?" is only answerable once the first two are understood.
 
 Measured against real shallow clones (`tmp/probe/` during development;
 reproduced as tests):
@@ -149,6 +167,40 @@ a healthy repository and **the gate passes having measured nothing.** That is
 the exact silent-pass this piece exists to prevent, and only the shallow guard
 stops it. Test 6 is therefore not a variation on test 5; it is the only test
 that holds guard 1 up.
+
+**Guard 3 is reachable, and finding out cost a third wrong test.** Review asked
+exactly the right question — dead code, or defence against a case the fixtures
+do not model? The answer is the second. Measured per guard, with one subtree
+object removed from the object store:
+
+| check | result |
+|---|---|
+| guard 2a `rev-parse --verify base^{commit}` | exit 0 — peels a commit only |
+| guard 2a `rev-parse --verify HEAD^{commit}` | exit 0 |
+| guard 2b `merge-base base HEAD` | exit 0 — walks commits, not trees |
+| the diff | **exit 128** — must read the tree |
+
+That is a partially-fetched or corrupted object store: every cheap check says
+the repository is healthy and only the diff disagrees.
+
+**The first version of that test passed for the wrong reason**, which is the
+third instance of this piece's recurring defect and the one I would most want a
+reader to notice. It removed the *root* tree, which in a fresh clone also makes
+`rev-parse --verify` fail — so the script exited 1 at **guard 2**, the assertion
+went green, and the `|| true` mutation still passed 33 of 33. The exit status
+was identical whichever guard fired, so the test could not tell them apart. The
+fixture now removes a *subtree*, and asserts guard 2 still passes before
+asserting the failure, so it cannot silently drift back to measuring guard 2.
+
+Also measured and worth recording: removing the **blob** of the deleted file
+does not reach guard 3 at all, because `--name-only` never reads file contents.
+It is the obvious fixture to reach for and it proves nothing.
+
+Guard 3 now carries a `── Guard 3 ──` banner in the script. It previously had
+none, so five documents named a thing the source did not label — and it was
+precisely the guard that survived a mutation with the suite green, which is to
+say the thing hardest to see in the source was the thing the tests were
+blindest to.
 
 ### 3. `fetch-depth: 0`, not a finite depth
 
@@ -197,10 +249,11 @@ body is attacker-controlled text: `${{ }}` interpolation into a `run:` block is
 shell injection, and this is the one step in the workflow that handles untrusted
 input at all.
 
-### 7. Three of these tests were written wrong first, and all are recorded
+### 7. Two of these tests were written wrong first, and both are recorded
 
-(The third is guard 3's, in §11 — it was found by review rather than by me, and
-it is the same shape as these two.)
+(There is a third, guard 3's, recorded in §2 beside the guard it belongs to
+rather than here — it was found by review rather than by me. All three are the
+same shape.)
 
 Both are the defect family this repo already catalogues — a fixture where two
 explanations give the same answer — and both were found by mutating the script
@@ -240,7 +293,7 @@ the form that actually runs in CI. Reading the base from the event rather than
 hardcoding `origin/main` also means a PR targeting a non-`main` base is measured
 against its own base.
 
-### 8b. Strip the quoting construct once, up front — not per-arm
+### 9. Strip the quoting construct once, up front — not per-arm
 
 The fence-stripping in §Decisions above follows a shape this repo already has,
 and it is worth naming as the pattern rather than leaving each author to
@@ -266,9 +319,20 @@ must be repeated correctly at every site and silently is not. It is the same
 "complexity in the data structure, not the logic" rule CLAUDE.md states, applied
 to text.
 
+**One qualification, from the architecture review, which read both gates rather
+than taking my account of one.** The sibling is not the pure exemplar this
+section first implied: twelve lines after the up-front strip it bolts a named
+per-arm exemption onto the clean buffer
+(`code.replace("keystore.stoa_key(&stoa)", "<exempt: publish path>")`), a
+deliberately temporary single-call-site patch. So the real precedent is *"strip
+once up front, then one documented exception"* rather than *"strip once and
+never touch the buffer again"*. Recorded because a third author copying this
+pattern will meet that exemption and should not conclude the comparison was
+wrong.
+
 If a third such gate is written, this is the shape to copy.
 
-### 9. Two git settings are pinned, because each changes the verdict
+### 10. Two git settings are pinned, because each changes the verdict
 
 Both were found by review, and both are defaults rather than guarantees —
 settable in repo, global or system config, or through `GIT_CONFIG_COUNT`, none
@@ -288,7 +352,7 @@ of which this workflow controls.
   nothing. That is a false positive on a legitimate change plus advice pointing
   away from the problem, and a false positive is what gets a check disabled.
 
-### 10. The tests run in CI, reversing the earlier decision
+### 11. The tests run in CI, reversing the earlier decision
 
 The first version of this design left them out: nothing else in this repo tests
 its CI scripts, and that convention was "not this piece's to set."
@@ -310,34 +374,42 @@ depend on the developer's git config: run with `HOME`, `GIT_CONFIG_GLOBAL` and
 as on a GitHub runner — all 34 assertions still pass. Without that check it
 would have gone red in CI for a reason having nothing to do with the gate.
 
-### 11. Guard 3 is reachable, and finding out cost a third wrong test
+### 12. Every failure message must survive as a one-line annotation
 
-Review asked the right question — dead code, or defence against a case the
-fixtures do not model? The answer is the second, and it is now pinned. Measured
-per guard, with one subtree object removed from the object store:
+Found in review, and it is this piece's own thesis arriving one layer up: the
+gate correctly refused to measure, and then **could not tell anyone how to fix
+it.**
 
-| check | result |
-|---|---|
-| guard 2a `rev-parse --verify base^{commit}` | exit 0 — peels a commit only |
-| guard 2a `rev-parse --verify HEAD^{commit}` | exit 0 |
-| guard 2b `merge-base base HEAD` | exit 0 — walks commits, not trees |
-| the diff | **exit 128** — must read the tree |
+A GitHub workflow command is newline-delimited — `::error::` consumes text up to
+the first `\n`, and the rest becomes ordinary log output. The annotation is what
+GitHub surfaces on the "Files changed" tab and in the check summary, and it is
+all a reader sees unless they open the raw job log. The shallow message spanned
+four source lines, so the annotation was:
 
-That is a partially-fetched or corrupted object store: every cheap check says
-the repository is healthy and only the diff disagrees.
+```
+deletion gate cannot measure this branch — the checkout is a shallow clone, so the merge base of
+```
 
-**The first version of this test passed for the wrong reason**, which is the
-third instance of this piece's recurring defect and the one I would most want a
-reader to notice. It removed the *root* tree, which in a fresh clone also makes
-`rev-parse --verify` fail — so the script exited 1 at **guard 2**, the assertion
-went green, and the `|| true` mutation still passed 33 of 33. The exit status
-was identical whichever guard fired, so the test could not tell them apart. The
-fixture now removes a *subtree*, and asserts guard 2 still passes before
-asserting the failure, so it cannot silently drift back to measuring guard 2.
+Truncated mid-clause, with `fetch-depth: 0` on the next line and therefore
+invisible. A red gate whose advice is truncated gets diagnosed wrongly, and a
+gate diagnosed wrongly gets disabled — the same ending this piece exists to
+prevent, reached by a different road.
 
-Also measured and worth recording: removing the **blob** of the deleted file
-does not reach guard 3 at all, because `--name-only` never reads file contents.
-It is the obvious fixture to reach for and it proves nothing.
+**The fix is structural rather than per-message.** `cannot_measure` now takes a
+one-line headline plus optional detail lines and folds any newline in the
+headline to a space, so a caller that wraps for source readability still emits
+one annotation line. A future message cannot reintroduce the defect by being
+written the natural way. Every other `::error::` in `ci.yml` is single-line, so
+this was the file's only departure from a convention that already existed.
+
+**My tests were structurally unable to see this**, which is the part worth
+recording. Test 5 asserts `fetch-depth` appears in the *combined stdout*; the
+truncation happens between stdout and the annotation, so the suite passed while
+the surface a human reads did not carry the fix. Test 22 now extracts what
+GitHub would keep — the first line of each `::error::` — and asserts on that.
+Its honest limit, stated in the test: it emulates the documented newline rule,
+it does not observe a rendered annotation panel. A live Actions run is still the
+only way to see the real thing.
 
 ## Risks / Trade-offs
 
@@ -352,4 +424,4 @@ It is the obvious fixture to reach for and it proves nothing.
   threshold, which is the case a reader should look at anyway. The earlier
   wording here said this followed from `--diff-filter=D` not including `R`; that
   was the wrong reason and review caught it. It follows from rename *detection*
-  being on, which was a default rather than a guarantee until §9 pinned it.
+  being on, which was a default rather than a guarantee until §10 pinned it.

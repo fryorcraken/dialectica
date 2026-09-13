@@ -1,5 +1,23 @@
 # Architecture findings — `deletion-gate`
 
+> **Note from `dev-writer`, appended without editing anything below.** I ticked
+> the two boxes addressed to me. The third is `spec-writer`'s and stays open —
+> but I have **already rewritten the `proposal.md` passage it names**, because
+> it was factually broken in my tree (`git rev-parse --verify
+> origin/piece/op-transport` exits 1) and I was editing beside it. The fenced
+> block is now a loop over whatever `origin/piece/*` branches exist, so it names
+> no ref that can be pruned; I ran it before shipping it. If `spec-writer` would
+> rather phrase it differently, that is theirs to overrule — the box is left for
+> them to judge, not to redo.
+>
+> On your §8b qualification: **taken, and recorded.** You are right that the
+> sibling bolts a named per-arm exemption onto the clean buffer twelve lines
+> later, so the real precedent is "strip once, then one documented exception"
+> rather than the pure form. I have added that to design.md §9 in your words,
+> because a third author copying the pattern will meet the exemption and should
+> not conclude the design misdescribed it. Thank you for reading both gates
+> rather than ratifying my account of one.
+
 Reviewed at `8ba7f23` in `.claude/worktrees/review-deletion-gate-read`. The suite
 runs green as committed (**34 passed, 0 failed**). The sibling adapter gate that
 design.md §8b compares against is on `main` and I read it directly
@@ -11,7 +29,7 @@ end; only three produced boxes.
 
 ## Defects
 
-- [ ] **`dev-writer`** — `.github/scripts/check-claimed-deletions.sh:4` — the
+- [x] **`dev-writer`** — `.github/scripts/check-claimed-deletions.sh:4` — the
       script's documented signature is three arguments, but it has a fourth,
       undocumented, mandatory input: the caller's working directory
       **Scenario:** the usage line is
@@ -42,7 +60,25 @@ end; only three produced boxes.
       *invokable outside GitHub Actions*, and an invocation contract that omits a
       required input undercuts the reuse the extraction was for.
 
-- [ ] **`dev-writer`** — `.github/scripts/check-claimed-deletions.sh:121-124`
+      **Fixed, by the honest fix rather than the tidy one** — documented, not
+      parameterised, and the reasoning is now in the usage block so a reader can
+      disagree with it. The argument for stopping there: the guards already make a
+      wrong cwd *loud* (you verified this — it exits 1, it cannot exit 0 having
+      measured the wrong repository), so what a fourth argument buys is accuracy in
+      the diagnosis, not safety. Against that it costs a change to both call sites
+      and a wider signature for a script with two callers.
+      The comment names the cost of stopping there, which is the part I would not
+      want a later reader to have to rediscover: the diagnosis a wrong cwd produces
+      today names the *ref* rather than the *directory*, which is the misleading
+      half. And it says when to revisit — if a third caller appears, parameterise
+      it then.
+      You are right that it sits awkwardly with §1's "invokable outside Actions"
+      claim. My view is that the claim survives with the cwd documented, since the
+      test harness is exactly that outside-Actions invoker and it works; what was
+      missing was the contract being *written down*, not the contract being
+      satisfiable. If you read it otherwise, that is worth another round.
+
+- [x] **`dev-writer`** — `.github/scripts/check-claimed-deletions.sh:121-124`
       and `204-205` — the cleanup list is duplicated across two `trap` statements
       that must be kept in sync by hand, which is the fourth-guard-copy shape
       CLAUDE.md names as the signal to reshape
@@ -63,6 +99,19 @@ end; only three produced boxes.
       **Severity:** low — no defect today, and the hazard is latent. Filed because
       it is a two-line reshape and because the duplication is what a later editor
       will copy.
+
+      **Fixed** — one `mktemp -d`, one `trap 'rm -rf "$scratch"' EXIT` set before
+      any file exists, and the four paths derived from it as `$scratch/deleted`
+      and so on. The cleanup invariant now holds by construction and a fifth
+      scratch file inherits it without touching the trap, which is the shape you
+      named.
+      Worth recording that this is the fourth-guard-copy tell arriving in a form I
+      did not recognise while writing it: the second trap *looked* like a complete
+      statement rather than a duplicate, so nothing about it read as a copy. That
+      is why the rule is about the shape and not about how it feels at the time.
+      Also good to have your measurement that nothing leaks today — it means this
+      was genuinely a latent-hazard fix, not a bug fix, and the commit can say so
+      honestly.
 
 - [ ] **`spec-writer`** — `openspec/changes/deletion-gate/proposal.md:32-40` —
       the proposal's one instruction to the reader to verify its central claim

@@ -573,5 +573,102 @@ st=$?
 report "a real claim after a fenced example still counts" 0 "$st" \
     "$(cat "$work/last-output.txt")"
 
+# ── 22. Every annotation is one line, and carries its own fix ─────────────
+# REVIEW FINDING, and the one my own tests were structurally unable to see.
+#
+# A GitHub workflow command is NEWLINE-DELIMITED: `::error::` consumes text up
+# to the first \n, and the rest becomes ordinary log output. The annotation is
+# what GitHub shows on the "Files changed" tab and in the check summary — the
+# only surface a reader who does not open the raw job log ever sees.
+#
+# The shallow message used to span four source lines, so the annotation was:
+#
+#   ...the checkout is a shallow clone, so the merge base of
+#
+# truncated mid-clause, with `fetch-depth: 0` on the next line and therefore
+# invisible. Test 5 greps the COMBINED STDOUT for `fetch-depth`, so it passed
+# while the surface a human reads did not carry the fix. That is this piece's
+# own failure one layer up: the gate refused to measure, then could not say how
+# to fix it.
+#
+# `annotation_of` extracts what GitHub would keep — the first line of each
+# ::error:: — so these assertions read the real surface rather than stdout.
+#
+# WHAT THIS STILL CANNOT CHECK, stated rather than papered over: it emulates
+# GitHub's parsing from the documented newline rule, it does not observe a
+# rendered annotation panel. A live Actions run remains the only way to see the
+# real thing. What it does prove is the property that failed here — that the
+# first line stands alone and carries the actionable word.
+annotation_of() {
+    # The first line of every ::error:: line, with the marker stripped.
+    printf '%s\n' "$1" | awk '/^::error::/ { sub(/^::error::/, ""); print }'
+}
+
+clone_shallow "$work/c22" 1
+run_gate "Deletes: sub/doomed.txt
+"
+ann=$(annotation_of "$(cat "$work/last-output.txt")")
+case "$ann" in
+    *fetch-depth*)
+        passes=$((passes + 1))
+        echo "ok   the shallow annotation itself names fetch-depth" ;;
+    *)
+        failures=$((failures + 1))
+        echo "FAIL the shallow annotation loses fetch-depth to truncation:"
+        printf '     >> %s\n' "$ann" ;;
+esac
+
+# And the annotation must be exactly one line — the general property, so a
+# future message cannot reintroduce the defect in a different place.
+ann_lines=$(printf '%s\n' "$ann" | grep -c .)
+if [ "$ann_lines" -eq 1 ]; then
+    passes=$((passes + 1)); echo "ok   the shallow annotation is a single line"
+else
+    failures=$((failures + 1))
+    echo "FAIL the shallow annotation is $ann_lines lines; GitHub keeps only the first"
+fi
+
+# The same property on every other could-not-look path, so this is a rule about
+# the script rather than a patch to one message.
+clone_full "$work/c22b"
+out=$(sh "$script" origin/no-such-branch origin/feature "$work/body.txt" 2>&1)
+ann=$(annotation_of "$out")
+ann_lines=$(printf '%s\n' "$ann" | grep -c .)
+if [ "$ann_lines" -eq 1 ]; then
+    passes=$((passes + 1)); echo "ok   the missing-ref annotation is a single line"
+else
+    failures=$((failures + 1))
+    echo "FAIL the missing-ref annotation is $ann_lines lines"
+fi
+
+# The unclaimed-deletion red is the common case and must stay single-line too.
+clone_full "$work/c22c"
+run_gate "no claims here"
+ann=$(annotation_of "$(cat "$work/last-output.txt")")
+ann_lines=$(printf '%s\n' "$ann" | grep -c .)
+if [ "$ann_lines" -eq 1 ]; then
+    passes=$((passes + 1)); echo "ok   the unclaimed-deletion annotation is a single line"
+else
+    failures=$((failures + 1))
+    echo "FAIL the unclaimed-deletion annotation is $ann_lines lines"
+fi
+
+# ── 23. A wrapped headline is folded, not truncated ───────────────────────
+# The fix is structural: `cannot_measure` folds newlines in its headline, so a
+# caller that wraps for source readability still emits one annotation line
+# rather than silently losing its tail. Asserting the mechanism directly means a
+# future author who wraps a message does not reintroduce the defect.
+clone_shallow "$work/c23" 1
+run_gate ""
+ann=$(annotation_of "$(cat "$work/last-output.txt")")
+case "$ann" in
+    *"cannot measure"*"fetch-depth"*)
+        passes=$((passes + 1))
+        echo "ok   headline folding keeps cause and fix in one annotation" ;;
+    *)
+        failures=$((failures + 1))
+        echo "FAIL cause and fix are not both in the annotation: $ann" ;;
+esac
+
 printf '\n%s passed, %s failed\n' "$passes" "$failures"
 [ "$failures" -eq 0 ]
