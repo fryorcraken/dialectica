@@ -80,7 +80,7 @@ ScreenFrame {
     signal previewRequested(string stoa, string genesis)
     signal stoaChosen(string stoa, string foundingTitle, string genesis)
 
-    property ClipboardSink clipboard: null
+    property DClipboardSink clipboard: null
 
     Component.onCompleted: screen.reload()
 
@@ -176,7 +176,7 @@ ScreenFrame {
     // ---- pasting --------------------------------------------------------
 
     function preview() {
-        var parsed = StoaReference.parse(screen.pasted)
+        var parsed = DStoaReference.parse(screen.pasted)
         if (!parsed.ok) {
             // Refused BEFORE any call. This is the "not a Stoa reference"
             // outcome, and it is a different thing from a well-formed pair the
@@ -198,16 +198,16 @@ ScreenFrame {
         Text {
             // copy.json `stoaList.title`
             text: "Stoas you hold"
-            font: Theme.display
-            color: Theme.ink
+            font: DTheme.display
+            color: DTheme.ink
             textFormat: Text.PlainText
         }
 
         Text {
             // copy.json `stoaList.subtitle`
             text: "NO DIRECTORY EXISTS · JOIN BY ADDRESS"
-            font: Theme.label
-            color: Theme.inkMuted
+            font: DTheme.label
+            color: DTheme.inkMuted
             textFormat: Text.PlainText
         }
 
@@ -217,8 +217,8 @@ ScreenFrame {
     ColumnLayout {
         Layout.fillWidth: true
         spacing: 2
-        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: Theme.hairline; color: Theme.ink }
-        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: Theme.hairline; color: Theme.ink }
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: DTheme.hairline; color: DTheme.ink }
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: DTheme.hairline; color: DTheme.ink }
     }
 
     // ---- state: membership could not be read ----------------------------
@@ -229,21 +229,21 @@ ScreenFrame {
     Rectangle {
         visible: screen.readState === "failed"
         Layout.fillWidth: true
-        implicitHeight: failedBody.implicitHeight + 2 * Theme.cardPaddingY
-        color: Theme.field
-        border.width: Theme.border
-        border.color: Theme.accent
+        implicitHeight: failedBody.implicitHeight + 2 * DTheme.cardPaddingY
+        color: DTheme.field
+        border.width: DTheme.border
+        border.color: DTheme.accent
 
         ColumnLayout {
             id: failedBody
             anchors.fill: parent
-            anchors.margins: Theme.cardPaddingY
-            spacing: Theme.itemGap
+            anchors.margins: DTheme.cardPaddingY
+            spacing: DTheme.itemGap
 
             Text {
                 text: "Which Stoas you are in could not be read."
-                font: Theme.heading
-                color: Theme.accent
+                font: DTheme.heading
+                color: DTheme.accent
                 wrapMode: Text.WordWrap
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
@@ -255,8 +255,8 @@ ScreenFrame {
                 // already in.
                 text: "This does not mean you are in no Stoas. Stoas you have created or "
                     + "joined are recorded on disk and cannot be listed right now."
-                font: Theme.bodySmall
-                color: Theme.inkSoft
+                font: DTheme.bodySmall
+                color: DTheme.inkSoft
                 wrapMode: Text.WordWrap
                 lineHeight: 1.55
                 textFormat: Text.PlainText
@@ -265,8 +265,8 @@ ScreenFrame {
 
             Text {
                 text: screen.failure
-                font: Theme.address
-                color: Theme.ink
+                font: DTheme.address
+                color: DTheme.ink
                 wrapMode: Text.WrapAnywhere
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
@@ -284,21 +284,21 @@ ScreenFrame {
     Rectangle {
         visible: screen.readState === "ok" && screen.visibleRows.length === 0
         Layout.fillWidth: true
-        implicitHeight: emptyBody.implicitHeight + 2 * Theme.cardPaddingY
-        color: Theme.paper
-        border.width: Theme.hairline
-        border.color: Theme.rule2
+        implicitHeight: emptyBody.implicitHeight + 2 * DTheme.cardPaddingY
+        color: DTheme.paper
+        border.width: DTheme.hairline
+        border.color: DTheme.rule2
 
         ColumnLayout {
             id: emptyBody
             anchors.fill: parent
-            anchors.margins: Theme.cardPaddingY
-            spacing: Theme.itemGap
+            anchors.margins: DTheme.cardPaddingY
+            spacing: DTheme.itemGap
 
             Text {
                 text: "You are not in any Stoa yet."
-                font: Theme.heading
-                color: Theme.ink
+                font: DTheme.heading
+                color: DTheme.ink
                 wrapMode: Text.WordWrap
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
@@ -308,8 +308,8 @@ ScreenFrame {
                 text: "Your membership was read without error and records nothing. "
                     + "There is no directory to browse: a Stoa reaches you because "
                     + "somebody shared it, or because you create one."
-                font: Theme.bodySmall
-                color: Theme.inkSoft
+                font: DTheme.bodySmall
+                color: DTheme.inkSoft
                 wrapMode: Text.WordWrap
                 lineHeight: 1.55
                 textFormat: Text.PlainText
@@ -345,7 +345,7 @@ ScreenFrame {
 
             Identicon {
                 address: row.rowStoa
-                size: Theme.markInList
+                size: DTheme.markInList
             }
 
             ColumnLayout {
@@ -358,8 +358,8 @@ ScreenFrame {
                 // be a title no peer agrees on.
                 Text {
                     text: row.rowTitle
-                    font: Theme.body
-                    color: Theme.ink
+                    font: DTheme.body
+                    color: DTheme.ink
                     // Peer-supplied, unnormalised, carrying whatever characters
                     // its creator typed. Never markup.
                     textFormat: Text.PlainText
@@ -410,7 +410,7 @@ ScreenFrame {
                 kind: "secondary"
                 visible: screen.canShare(row.rowStoa)
                 onClicked: {
-                    var text = StoaReference.shareText(row.rowStoa, screen.genesisFor(row.rowStoa))
+                    var text = DStoaReference.shareText(row.rowStoa, screen.genesisFor(row.rowStoa))
                     if (text !== "" && screen.clipboard)
                         screen.clipboard.copy(text)
                 }
@@ -430,7 +430,7 @@ ScreenFrame {
     RowLayout {
         visible: screen.readState === "ok" && (screen.hasMore || screen.page > 0)
         Layout.fillWidth: true
-        spacing: Theme.itemGap
+        spacing: DTheme.itemGap
 
         FlatButton {
             text: "Previous"
@@ -462,14 +462,14 @@ ScreenFrame {
     // rather than on an answer the core gave.
     ColumnLayout {
         Layout.fillWidth: true
-        spacing: Theme.itemGap
+        spacing: DTheme.itemGap
 
-        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: Theme.hairline; color: Theme.ink }
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: DTheme.hairline; color: DTheme.ink }
 
         Text {
             text: "CREATE A STOA"
-            font: Theme.label
-            color: Theme.inkMuted
+            font: DTheme.label
+            color: DTheme.inkMuted
             textFormat: Text.PlainText
         }
 
@@ -480,17 +480,17 @@ ScreenFrame {
             Rectangle {
                 Layout.fillWidth: true
                 implicitHeight: createField.implicitHeight + 10
-                color: Theme.field
-                border.width: Theme.hairline
-                border.color: Theme.ink
+                color: DTheme.field
+                border.width: DTheme.hairline
+                border.color: DTheme.ink
 
                 TextInput {
                     id: createField
                     anchors.fill: parent
                     anchors.margins: 5
                     text: screen.createTitle
-                    font: Theme.body
-                    color: Theme.ink
+                    font: DTheme.body
+                    color: DTheme.ink
                     clip: true
                     onTextChanged: screen.createTitle = text
                 }
@@ -519,8 +519,8 @@ ScreenFrame {
 
             Text {
                 text: "CREATED — THIS IS ITS ADDRESS"
-                font: Theme.label
-                color: Theme.inkMuted
+                font: DTheme.label
+                color: DTheme.inkMuted
                 textFormat: Text.PlainText
             }
 
@@ -548,16 +548,16 @@ ScreenFrame {
 
             Text {
                 text: "The Stoa was not created."
-                font: Theme.body
-                color: Theme.accent
+                font: DTheme.body
+                color: DTheme.accent
                 textFormat: Text.PlainText
             }
 
             Text {
                 objectName: "createFailureText"
                 text: screen.createFailure
-                font: Theme.address
-                color: Theme.ink
+                font: DTheme.address
+                color: DTheme.ink
                 wrapMode: Text.WrapAnywhere
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
@@ -569,9 +569,9 @@ ScreenFrame {
 
     ColumnLayout {
         Layout.fillWidth: true
-        spacing: Theme.itemGap
+        spacing: DTheme.itemGap
 
-        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: Theme.hairline; color: Theme.ink }
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: DTheme.hairline; color: DTheme.ink }
 
         Text {
             // The mockup's `PASTE AN ADDRESS` is narrowed here, and narrowing it
@@ -579,8 +579,8 @@ ScreenFrame {
             // captioned that way asks for input whose successful-looking form
             // cannot succeed.
             text: "PASTE A STOA REFERENCE — THE ADDRESS AND ITS FOUNDING RECORD"
-            font: Theme.label
-            color: Theme.inkMuted
+            font: DTheme.label
+            color: DTheme.inkMuted
             textFormat: Text.PlainText
         }
 
@@ -591,17 +591,17 @@ ScreenFrame {
             Rectangle {
                 Layout.fillWidth: true
                 implicitHeight: pasteField.implicitHeight + 10
-                color: Theme.field
-                border.width: Theme.hairline
-                border.color: Theme.ink
+                color: DTheme.field
+                border.width: DTheme.hairline
+                border.color: DTheme.ink
 
                 TextInput {
                     id: pasteField
                     anchors.fill: parent
                     anchors.margins: 5
                     text: screen.pasted
-                    font: Theme.address
-                    color: Theme.ink
+                    font: DTheme.address
+                    color: DTheme.ink
                     clip: true
                     onTextChanged: screen.pasted = text
                 }
@@ -622,8 +622,8 @@ ScreenFrame {
             objectName: "pasteFailureText"
             visible: screen.pasteFailure !== ""
             text: screen.pasteFailure
-            font: Theme.bodySmall
-            color: Theme.accent
+            font: DTheme.bodySmall
+            color: DTheme.accent
             wrapMode: Text.WordWrap
             lineHeight: 1.55
             textFormat: Text.PlainText

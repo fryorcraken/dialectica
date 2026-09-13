@@ -21,7 +21,7 @@ import QtQuick.Layouts
 // plus a vote control on each row. There is still no THREAD view, and that is
 // why there is no reply box: this feed lists thread heads, so a reply box under
 // a row would be a thread-view affordance on a screen that is not one.
-// `Composer.qml` supports replying and is tested in that mode; the
+// `DComposer.qml` supports replying and is tested in that mode; the
 // instantiation arrives with the thread screen.
 Item {
     id: root
@@ -91,17 +91,17 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: Theme.desk
+        color: DTheme.desk
     }
 
     // The view's one clipboard, shared by every screen that copies. See
-    // ClipboardSink for why it is a hidden TextEdit and not a platform API.
-    ClipboardSink { id: clipboard }
+    // DClipboardSink for why it is a hidden TextEdit and not a platform API.
+    DClipboardSink { id: clipboard }
 
     Flickable {
         anchors.fill: parent
         contentWidth: width
-        contentHeight: pane.implicitHeight + 2 * Theme.cardPaddingY
+        contentHeight: pane.implicitHeight + 2 * DTheme.cardPaddingY
         clip: true
 
         ColumnLayout {
@@ -109,15 +109,15 @@ Item {
             width: parent.width
             spacing: 0
 
-            Item { Layout.preferredHeight: Theme.cardPaddingY }
+            Item { Layout.preferredHeight: DTheme.cardPaddingY }
 
-            StoaListScreen {
+            DStoaListScreen {
                 id: list
                 objectName: "stoaList"
                 visible: root.screenShown === "list"
                 clipboard: clipboard
                 Layout.alignment: Qt.AlignHCenter
-                Layout.preferredWidth: Math.min(Theme.cardWidth, root.width - 2 * Theme.cardPaddingX)
+                Layout.preferredWidth: Math.min(DTheme.cardWidth, root.width - 2 * DTheme.cardPaddingX)
 
                 onPreviewRequested: (stoa, genesis) => {
                     // Acting on a pasted reference reaches a PREVIEW and joins
@@ -129,7 +129,7 @@ Item {
                 onStoaChosen: (stoa, foundingTitle, genesis) => root.open(stoa, foundingTitle, genesis)
             }
 
-            JoinScreen {
+            DJoinScreen {
                 id: join
                 objectName: "joinScreen"
                 visible: root.screenShown === "join"
@@ -141,7 +141,7 @@ Item {
                 // inherits it rather than having to remember it.
                 heldStoas: list.visibleRows
                 Layout.alignment: Qt.AlignHCenter
-                Layout.preferredWidth: Math.min(Theme.cardWidth, root.width - 2 * Theme.cardPaddingX)
+                Layout.preferredWidth: Math.min(DTheme.cardWidth, root.width - 2 * DTheme.cardPaddingX)
 
                 onJoined: (stoa, foundingTitle, genesis) => {
                     // The record IS held for a Stoa joined in this session — it
@@ -176,7 +176,7 @@ Item {
                 stoaTitle: root.chosen !== null ? root.chosen.foundingTitle : ""
                 stoaGenesis: root.chosen !== null ? root.chosen.genesis : ""
                 Layout.alignment: Qt.AlignHCenter
-                Layout.preferredWidth: Math.min(Theme.cardWidth, root.width - 2 * Theme.cardPaddingX)
+                Layout.preferredWidth: Math.min(DTheme.cardWidth, root.width - 2 * DTheme.cardPaddingX)
 
                 // The route back. `genesisByStoa` lives on the list rather than
                 // here, so reopening a Stoa is as complete as the first open and
@@ -184,7 +184,7 @@ Item {
                 onClosed: root.closeFeed()
             }
 
-            Item { Layout.preferredHeight: Theme.cardPaddingY }
+            Item { Layout.preferredHeight: DTheme.cardPaddingY }
         }
     }
 }

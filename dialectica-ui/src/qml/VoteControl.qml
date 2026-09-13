@@ -39,7 +39,7 @@ Column {
         anchors.horizontalCenter: parent.horizontalCenter
         text: "\u25B2"
         font.pixelSize: 15
-        color: root.vote > 0 ? Theme.ink : Theme.rule2
+        color: root.vote > 0 ? DTheme.ink : DTheme.rule2
         textFormat: Text.PlainText
         MouseArea {
             anchors.fill: parent
@@ -57,8 +57,8 @@ Column {
         height: root.showScore ? implicitHeight : 0
         anchors.horizontalCenter: parent.horizontalCenter
         text: Math.max(0, root.score)        // the floor, applied in one place
-        font: Theme.address
-        color: root.score > 0 ? Theme.ink : Theme.inkMuted
+        font: DTheme.address
+        color: root.score > 0 ? DTheme.ink : DTheme.inkMuted
         textFormat: Text.PlainText
     }
 
@@ -66,7 +66,7 @@ Column {
         anchors.horizontalCenter: parent.horizontalCenter
         text: "\u25BC"
         font.pixelSize: 15
-        color: root.vote < 0 ? Theme.ink : Theme.rule2
+        color: root.vote < 0 ? DTheme.ink : DTheme.rule2
         textFormat: Text.PlainText
         MouseArea {
             anchors.fill: parent

@@ -25,7 +25,7 @@ ScreenFrame {
     // two are stored together and never separately.** This is the fix for a
     // defect found in review, and the shape matters more than the fix:
     //
-    // `stoaAddress` is a BINDING — `Main.qml` ships one reused `JoinScreen` and
+    // `stoaAddress` is a BINDING — `Main.qml` ships one reused `DJoinScreen` and
     // rebinds it whenever a reference is previewed. The outcome used to be
     // independent mutable state (`joinState`, `foundingTitle`, `failure`), so
     // previewing a second reference moved the address and left the outcome
@@ -71,7 +71,7 @@ ScreenFrame {
     // inside the genesis record the user pasted, and decoding it here would be a
     // second implementation of core's encoding — the thing the core/UI split
     // exists to prevent, and the same argument that keeps address verification
-    // out of `StoaReference.parse`. See design.md constraint 4.
+    // out of `DStoaReference.parse`. See design.md constraint 4.
     //
     // Derived, not assigned: it can only ever be the title the core returned for
     // THIS reference. A title carried over from another Stoa would caption an
@@ -131,7 +131,7 @@ ScreenFrame {
     readonly property string failure:
         screen.currentOutcome !== null ? screen.currentOutcome.failure : ""
 
-    property ClipboardSink clipboard: null
+    property DClipboardSink clipboard: null
 
     signal joined(string stoa, string foundingTitle, string genesis)
     signal cancelled()
@@ -252,8 +252,8 @@ ScreenFrame {
             Text {
                 // copy.json `join.eyebrow`
                 text: "YOU ARE ABOUT TO JOIN THIS ADDRESS"
-                font: Theme.label
-                color: Theme.accent
+                font: DTheme.label
+                color: DTheme.accent
                 textFormat: Text.PlainText
             }
 
@@ -269,7 +269,7 @@ ScreenFrame {
                     // What is copied is the SHAREABLE reference, not the bare
                     // address: an address alone cannot be joined by whoever
                     // receives it.
-                    var text = StoaReference.shareText(screen.stoaAddress, screen.stoaGenesis)
+                    var text = DStoaReference.shareText(screen.stoaAddress, screen.stoaGenesis)
                     if (text !== "" && screen.clipboard)
                         screen.clipboard.copy(text)
                 }
@@ -293,8 +293,8 @@ ScreenFrame {
                     + "nothing more. It is not checked against any registry, peer or "
                     + "third party, and nothing here says this is the address you were "
                     + "meant to receive. Everything below the address is unverified."
-                font: Theme.note
-                color: Theme.inkSoft
+                font: DTheme.note
+                color: DTheme.inkSoft
                 wrapMode: Text.WordWrap
                 lineHeight: 1.5
                 textFormat: Text.PlainText
@@ -327,8 +327,8 @@ ScreenFrame {
             Layout.fillHeight: true
             implicitHeight: foundingBody.implicitHeight + 28
             color: "transparent"
-            border.width: Theme.hairline
-            border.color: Theme.ink
+            border.width: DTheme.hairline
+            border.color: DTheme.ink
 
             ColumnLayout {
                 id: foundingBody
@@ -339,16 +339,16 @@ ScreenFrame {
                 Text {
                     // copy.json `join.foundingTitle`
                     text: "FOUNDING TITLE — FIXED FOREVER"
-                    font: Theme.label
-                    color: Theme.inkMuted
+                    font: DTheme.label
+                    color: DTheme.inkMuted
                     textFormat: Text.PlainText
                 }
 
                 Text {
                     objectName: "foundingTitleText"
                     text: screen.foundingTitle
-                    font: Theme.body
-                    color: Theme.ink
+                    font: DTheme.body
+                    color: DTheme.ink
                     // Freely chosen by whoever created the Stoa, matched against
                     // nothing, and carrying whatever characters they typed.
                     // Never markup.
@@ -374,8 +374,8 @@ ScreenFrame {
             Layout.fillHeight: true
             implicitHeight: currentBody.implicitHeight + 28
             color: "transparent"
-            border.width: Theme.hairline
-            border.color: Theme.ink
+            border.width: DTheme.hairline
+            border.color: DTheme.ink
 
             ColumnLayout {
                 id: currentBody
@@ -386,16 +386,16 @@ ScreenFrame {
                 Text {
                     // copy.json `join.currentTitle`
                     text: "CURRENT TITLE — CHOSEN BY A MODERATOR, CHANGEABLE"
-                    font: Theme.label
-                    color: Theme.accent
+                    font: DTheme.label
+                    color: DTheme.accent
                     textFormat: Text.PlainText
                 }
 
                 Text {
                     objectName: "currentTitleText"
                     text: screen.currentTitle
-                    font: Theme.body
-                    color: Theme.ink
+                    font: DTheme.body
+                    color: DTheme.ink
                     textFormat: Text.PlainText
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
@@ -432,8 +432,8 @@ ScreenFrame {
 
         Text {
             text: "NOTHING HERE KNOWS WHAT THIS STOA IS CALLED"
-            font: Theme.label
-            color: Theme.inkMuted
+            font: DTheme.label
+            color: DTheme.inkMuted
             textFormat: Text.PlainText
         }
 
@@ -445,8 +445,8 @@ ScreenFrame {
                 + "already hold has not been made. If you are expecting this to "
                 + "be a Stoa you have seen before, the address above is the only "
                 + "thing that can tell you."
-            font: Theme.note
-            color: Theme.inkSoft
+            font: DTheme.note
+            color: DTheme.inkSoft
             wrapMode: Text.WordWrap
             lineHeight: 1.5
             textFormat: Text.PlainText
@@ -461,9 +461,9 @@ ScreenFrame {
         visible: screen.lookalikes.length > 0
         Layout.fillWidth: true
         implicitHeight: lookalikeBody.implicitHeight + 28
-        color: Theme.field
-        border.width: Theme.hairline
-        border.color: Theme.rule2
+        color: DTheme.field
+        border.width: DTheme.hairline
+        border.color: DTheme.rule2
 
         ColumnLayout {
             id: lookalikeBody
@@ -477,8 +477,8 @@ ScreenFrame {
                 // a conflict to resolve. These are two Stoas; joining the second
                 // does nothing to the first.
                 text: "A STOA YOU ALREADY HOLD PRESENTS THE SAME TITLE"
-                font: Theme.label
-                color: Theme.inkMuted
+                font: DTheme.label
+                color: DTheme.inkMuted
                 textFormat: Text.PlainText
             }
 
@@ -502,8 +502,8 @@ ScreenFrame {
                     Text {
                         text: typeof lookalikeRow.modelData.foundingTitle === "string"
                             ? lookalikeRow.modelData.foundingTitle : ""
-                        font: Theme.body
-                        color: Theme.ink
+                        font: DTheme.body
+                        color: DTheme.ink
                         textFormat: Text.PlainText
                     }
 
@@ -517,8 +517,8 @@ ScreenFrame {
                     Text {
                         // copy.json `join.notThisOne`
                         text: "not this one"
-                        font: Theme.note
-                        color: Theme.accent
+                        font: DTheme.note
+                        color: DTheme.accent
                         textFormat: Text.PlainText
                     }
                 }
@@ -545,16 +545,16 @@ ScreenFrame {
 
         Text {
             text: "This was not joined."
-            font: Theme.heading
-            color: Theme.accent
+            font: DTheme.heading
+            color: DTheme.accent
             textFormat: Text.PlainText
         }
 
         Text {
             objectName: "joinFailureText"
             text: screen.failure
-            font: Theme.address
-            color: Theme.ink
+            font: DTheme.address
+            color: DTheme.ink
             wrapMode: Text.WrapAnywhere
             textFormat: Text.PlainText
             Layout.fillWidth: true
@@ -569,8 +569,8 @@ ScreenFrame {
 
         Text {
             text: "Joined."
-            font: Theme.heading
-            color: Theme.ink
+            font: DTheme.heading
+            color: DTheme.ink
             textFormat: Text.PlainText
         }
 
@@ -581,8 +581,8 @@ ScreenFrame {
             // see, and it says nothing about moderating anything.
             text: "This machine has started collecting this Stoa's records. Nobody was "
                 + "notified and no peer can see that you did this."
-            font: Theme.bodySmall
-            color: Theme.inkSoft
+            font: DTheme.bodySmall
+            color: DTheme.inkSoft
             wrapMode: Text.WordWrap
             lineHeight: 1.55
             textFormat: Text.PlainText
@@ -613,9 +613,9 @@ ScreenFrame {
             // receives it. Same decision as the share on the list.
             text: "Copy a shareable reference"
             kind: "secondary"
-            visible: StoaReference.shareText(screen.stoaAddress, screen.stoaGenesis) !== ""
+            visible: DStoaReference.shareText(screen.stoaAddress, screen.stoaGenesis) !== ""
             onClicked: {
-                var text = StoaReference.shareText(screen.stoaAddress, screen.stoaGenesis)
+                var text = DStoaReference.shareText(screen.stoaAddress, screen.stoaGenesis)
                 if (text !== "" && screen.clipboard)
                     screen.clipboard.copy(text)
             }

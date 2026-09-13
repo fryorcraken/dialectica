@@ -70,10 +70,10 @@ Canvas {
     // rotation applied consistently across all three selectors is otherwise
     // invisible to a distinctness test.
     //
-    // The values are frozen constants in Theme, not tunable tokens.
+    // The values are frozen constants in DTheme, not tunable tokens.
     readonly property var inks: [
-        Theme.markInk, Theme.markIndigo, Theme.markRust, Theme.markGreen,
-        Theme.markSteel, Theme.markLavender, Theme.markSage
+        DTheme.markInk, DTheme.markIndigo, DTheme.markRust, DTheme.markGreen,
+        DTheme.markSteel, DTheme.markLavender, DTheme.markSage
     ]
 
     // ---- address bytes --------------------------------------------------
@@ -302,12 +302,24 @@ Canvas {
             ctx.translate(size / 2, size / 2);
             ctx.rotate(_angleDeg() * Math.PI / 180);
             var dot = Math.max(1, Math.round(pitch * _duty() * 1.6));
-            for (var ry = -size, row = 0; ry < size; ry += period, row++) {
+            // `row` is declared OUTSIDE the for-init, and must stay there. A
+            // comma-separated declaration list in a for-init —
+            // `for (var ry = -size, row = 0; ...)`, which is what this was —
+            // is mis-emitted by qmlformat 6.8.3: it drops the comma and writes
+            // `for (var ry = -sizerow = 0; ...)`, which does not parse. CI's
+            // `QML parses` step runs qmlformat over every file and fails on
+            // exactly that, so the defect is in the FORMATTER's output, not in
+            // this source — which parses clean on both 6.8.3 and 6.10.3, and
+            // round-trips clean on 6.10.3 only. Since `var` is function-scoped
+            // the two forms are equivalent, and this one is portable.
+            var row = 0;
+            for (var ry = -size; ry < size; ry += period) {
                 // Every other row is offset by half a period, so the lattice
                 // reads as a texture rather than as two crossed band families.
                 var shift = (row % 2 === 0) ? 0 : period / 2;
                 for (var rx = -size; rx < size; rx += period)
                     ctx.fillRect(rx + shift, ry, dot, dot);
+                row++;
             }
             ctx.restore();
             break;
@@ -317,7 +329,7 @@ Canvas {
     onPaint: {
         var ctx = getContext("2d");
         ctx.reset();
-        if (size < Theme.markMinDraw)
+        if (size < DTheme.markMinDraw)
             return;   // the caller prints the address instead
 
         // The outline is always drawn, so a mark never bleeds into the row
@@ -334,7 +346,7 @@ Canvas {
         ctx.fillStyle = _inkA();
         ctx.fillRect(0, 0, size, size);
 
-        if (size >= Theme.markMinWeave)   // below this the weave turns to mud
+        if (size >= DTheme.markMinWeave)   // below this the weave turns to mud
             _paintWeave(ctx);
 
         ctx.restore();

@@ -11,7 +11,7 @@ import "../src/qml"
 // they still have; neither can be checked by looking at the happy path.
 TestCase {
     id: spec
-    name: "Composer"
+    name: "DComposer"
 
     property var savedBridge: undefined
     property var lastCall: ({})
@@ -56,7 +56,7 @@ TestCase {
 
     Component {
         id: composerComponent
-        Composer {}
+        DComposer {}
     }
 
     // ---- the UTF-8 byte count ------------------------------------------

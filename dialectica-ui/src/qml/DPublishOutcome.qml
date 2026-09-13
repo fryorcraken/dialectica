@@ -54,7 +54,7 @@ ColumnLayout {
     // one thing that would explain the state was the one thing withheld.
     //
     // **The invariant belonged here and was living in the caller.**
-    // `Composer.applyReply` is total and writes only the four strings above, so
+    // `DComposer.applyReply` is total and writes only the four strings above, so
     // nothing reached this on the tree as shipped — but this is a separately
     // registered QML type with `outcome` as a public writable property, and a
     // second caller (the thread screen, when the reply composer lands there)
@@ -98,8 +98,8 @@ ColumnLayout {
             : root.state === "existing"
                 ? "This " + root.subject + " was already published."
             : "Your " + root.subject + " was not published."
-        font: Theme.body
-        color: root.isRefusal ? Theme.accent : Theme.ink
+        font: DTheme.body
+        color: root.isRefusal ? DTheme.accent : DTheme.ink
         wrapMode: Text.WordWrap
         textFormat: Text.PlainText
         Layout.fillWidth: true
@@ -120,8 +120,8 @@ ColumnLayout {
         text: root.state === "existing"
                 ? "The identical content is already in this machine's log, under the same op id. Nothing new was written."
                 : "It is in this machine's log."
-        font: Theme.bodySmall
-        color: Theme.inkSoft
+        font: DTheme.bodySmall
+        color: DTheme.inkSoft
         wrapMode: Text.WordWrap
         lineHeight: 1.55
         textFormat: Text.PlainText
@@ -161,8 +161,8 @@ ColumnLayout {
     Text {
         visible: !root.isRefusal
         text: "Whether any other peer has received it is not something this software can tell you yet."
-        font: Theme.bodySmall
-        color: Theme.inkSoft
+        font: DTheme.bodySmall
+        color: DTheme.inkSoft
         wrapMode: Text.WordWrap
         lineHeight: 1.55
         textFormat: Text.PlainText
@@ -176,8 +176,8 @@ ColumnLayout {
     Text {
         visible: root.isRefusal && root.detail !== ""
         text: root.detail
-        font: Theme.address
-        color: Theme.ink
+        font: DTheme.address
+        color: DTheme.ink
         wrapMode: Text.WrapAnywhere
         textFormat: Text.PlainText
         Layout.fillWidth: true
@@ -202,8 +202,8 @@ ColumnLayout {
     Text {
         visible: root.isRefusal
         text: "Nothing was published and what you wrote is still here. You can try again."
-        font: Theme.bodySmall
-        color: Theme.inkSoft
+        font: DTheme.bodySmall
+        color: DTheme.inkSoft
         wrapMode: Text.WordWrap
         lineHeight: 1.55
         textFormat: Text.PlainText

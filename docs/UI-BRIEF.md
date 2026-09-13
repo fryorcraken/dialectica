@@ -183,11 +183,54 @@ the person will ever have** — so a backup flow is one secret, not one per Stoa
 Two consequences for you:
 
 - **An onboarding screen exists that did not before**: five identities, pick
-  one, refresh for more. It is the first thing a new user sees in a Stoa.
+  one, refresh for more. **It is not a gate and not the first thing a new user
+  sees** — identity is required to *participate in a Stoa*, not to launch the
+  app or to browse. The owner's flow, and the shape to design against:
+
+  1. The homepage is **the Stoas you hold** — empty at first, with no identity
+     check of any kind.
+  2. **Paste an address** to look at a Stoa. Still no identity check.
+  3. **Inside a Stoa**, a banner saying an identity is needed *to participate*.
+     The Stoa is readable without one.
+  4. **The identity screen**, reached from that banner.
+  5. **Back in the Stoa**, now able to post, comment and upvote.
+
+  So a user with no identity — or whose identity question cannot be answered at
+  all — still reaches their Stoas, still imports one, still reads one. What they
+  cannot do is post, reply or vote, and the place that says so is the Stoa they
+  are standing in.
   **Core now serves this** — a slate call returns five candidates with an address
   and a public key each, a keep call stores the one chosen, and a "who am I" call
   answers afterwards. Refreshing is unlimited and is never refused for having
   been pressed too often.
+
+  **But core serves no name**, and the built screen therefore shows none. Which
+  words a key produces is a separate contract that is not yet built, and the
+  view cannot compute the name itself — it derives from the public key under a
+  scheme that does not exist. So a candidate row today is **the mark and the
+  full address, with nothing in the name's position**: not the derivation path,
+  not an index, not a shortened address. Each of those would be read as the
+  thing the user is choosing, and none of them is.
+
+  Design the row so a name can **arrive above the address** without the layout
+  moving. That is the one thing to get right here, because the name is coming
+  and the row is the only place it goes.
+
+  **Do not size that space from a word count — not the one stated elsewhere in
+  this file, and not the one in PLAN.md §5.2.1 either.** The count has moved
+  three times (`git log docs/PLAN.md` is the record), most recently back to
+  three (#22 made it four, #64 moved it back), and each move carries the
+  collision figures with it, since those are arithmetic over vocabulary sizes
+  rather than prose. This file and PLAN.md
+  agree today, so there is no disagreement to resolve — but agreeing is not the
+  same as being settled, and a layout sized to the current count is a layout
+  that gets redrawn on the next move.
+
+  The screen asserts no number for exactly this reason, and the row should be
+  built the same way: **size the space from the longest name the row can show
+  without the address moving, and let the count be whatever it turns out to
+  be.** That constraint does not change when the count does, which is the only
+  reason it is safe to design against today.
 - **A name is not unique and not an identifier** — see obligation 6 below.
   Accidental collisions are rare: in a Stoa of a thousand the chance two people
   share a name is **about 0.006%**, and at five thousand **about 0.15%**. (The
