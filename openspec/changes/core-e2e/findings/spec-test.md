@@ -194,6 +194,53 @@ repository — `wire::tests::the_index_refusal_says_what_it_actually_refuses`, a
       list entry now says so, so the gap is visible to whoever answers it instead
       of being inferable only by noticing an omission.
 
+      **`spec-writer`'s answer to the contract question, appended without editing
+      the two entries above. All three hostile-file states are legitimately
+      constructible, and the contract already says so.** The question was routed
+      here because it reads as one about scope; it is not, because `keystore` —
+      promoted, not a delta — already specifies each of the three as a scenario
+      whose WHEN clause *is* the construction an integration test would perform:
+
+      - "A keystore readable by others is refused" (`keystore/spec.md:128`),
+        scenario "A world-readable keystore is refused" (`:136`) — WHEN a keystore
+        file's mode grants read access to group or other.
+      - "A keystore in a directory others can write to is refused" (`:153`),
+        scenario "A group- or world-writable directory is refused" (`:163`) — WHEN
+        the keystore's directory grants write access to group or other. That
+        requirement also states the check "SHALL be on write access only", and
+        pairs the refusal with an accepting scenario at `:169`, so a test has both
+        poles.
+      - `posting-capability`'s own "Malformed keystore" scenario
+        (`posting-capability/spec.md:78`) — WHEN the keystore cannot be parsed.
+
+      A requirement that specifies the refusal of a hostile file cannot also
+      forbid constructing one to check the refusal; the scenario would be
+      untestable, which is this repo's most-cited spec defect. So no spec change
+      is needed to warrant the test, and none is made here. Setting a mode on a
+      file the test itself created in its own temp directory is the ordinary
+      fixture these scenarios describe — and `end_to_end.rs` already does exactly
+      this, per `tasks.md` 7.3, whose `0o777` probe failed both keystore tests at
+      their `open` call sites with `DirectoryWritableByOthers { mode: 511 }`. The
+      construction is therefore not merely permitted but already demonstrated in
+      this very file.
+
+      **One real gap found while answering, and it is not the one asked about.**
+      `posting-capability`'s six-reason requirement (`spec.md:53`) has a scenario
+      for five of its six reasons; **"the keystore's directory is writable by
+      others" has none** — `grep -n "directory"` over that file returns only line
+      53, the requirement text itself. The behaviour is contracted in `keystore`
+      as above, so nothing is unspecified; what is missing is the scenario pinning
+      that the *probe* surfaces that state as its own distinguishable reason,
+      which is `posting-capability`'s claim and not `keystore`'s. That is one
+      scenario added to an existing promoted requirement.
+
+      **Not added here**, because this change declares `skip_specs: true` and adds
+      no behaviour; giving it a `posting-capability` delta would contradict its own
+      metadata and promote a requirement past reviewers who read a test target.
+      Recorded in `docs/PLAN.md` §9.1 alongside the two feed/store deferrals so it
+      outlives `findings/`, since it is the same class of debt: a promoted
+      requirement whose enumeration is wider than its scenarios.
+
 - [x] **`tester`** — `end_to_end.rs:17-20` — the reproduction instruction does not
       reproduce what it claims, and is self-referential as scoped.
       The comment says: *"`grep -rn "list_stoas\|listStoas"` over `dialectica/`
@@ -230,7 +277,7 @@ repository — `wire::tests::the_index_refusal_says_what_it_actually_refuses`, a
       uncommitted from the concurrent `dev-writer` when I reached it. I re-ran both
       greps before keeping it and they confirm the new text.
 
-- [ ] **`spec-writer`** — `openspec/specs/` has **no promoted requirement for the
+- [x] **`spec-writer`** — `openspec/specs/` has **no promoted requirement for the
       feed at all**, and 19 of these 25 tests assert against `feed::list_threads`.
       `grep -rln "feed\|thread head\|list_threads"` over `openspec/specs/` returns
       nothing. There is no promoted requirement that a feed lists thread heads and
@@ -254,7 +301,53 @@ repository — `wire::tests::the_index_refusal_says_what_it_actually_refuses`, a
       reviewer has no contract to weigh the change against, which is the failure a
       spec exists to prevent.
 
-- [ ] **`spec-writer`** — `openspec/specs/op-log/spec.md` specifies no
+      **DEFERRED, with a durable home.** The finding is upheld in full: I re-ran
+      the measurement rather than trusting it — `grep -rli "feed"` and
+      `grep -rli "list_threads\|thread head\|listThreads"` over
+      `openspec/specs/` each return **nothing**, across all 12 promoted
+      capabilities (`openspec list --specs`). So the gap is exactly as described.
+
+      **Not written here, and the reason is the piece rather than the finding.**
+      This change declares `skip_specs: true`, adds no behaviour, and is reviewed
+      by agents who read its tests. The feed code merged in `0538c0d` ("Phase 3
+      Stage A: a feed screen…", PR #23) — a different piece, with its own
+      reviewers. Writing the feed contract into this change would promote a
+      behaviour contract for code those reviewers passed, past reviewers who
+      never read it, in a change that declares it changes no spec-level
+      behaviour. That is a worse failure than the gap: an unspecified feed is
+      visibly unspecified, whereas a feed contract written by whoever happened to
+      test it reads as reviewed and is not.
+
+      There is also a positive argument for the deferral, and it is the repo's
+      own. `docs/PLAN.md` §9.1's "Why this section shipped without a spec delta"
+      already rules on this: *"So the specs come per stage, with the change that
+      builds it. Stage A is plausibly two capabilities rather than one — a feed
+      contract and a thread contract — and which it is should be decided by
+      whoever writes it, against the projection that actually exists, not here."*
+      Deciding feed-vs-thread capability split from a test file is precisely the
+      call that paragraph reserves for the change that builds the read. Note
+      `0538c0d` predates OpenSpec adoption in this repo, so **no delta was
+      skipped** — there was no flow to skip one in, which is why this went
+      unnoticed rather than being waved through.
+
+      **Where the deferral now lives**, since `findings/` is deleted at merge:
+      `docs/PLAN.md` §9.1, a new subsection under "Why this section shipped
+      without a spec delta" headed **"The feed read is built and still has no
+      contract — a named debt, not an oversight"**. It carries the six
+      unspecified behaviours as a list (thread heads not replies, tiling and
+      past-the-end, hidden root vs hidden reply, a forged post refused on read,
+      body sanitisation, and the JSON envelope), the reason this piece did not
+      close it, and the cost of leaving it — including this box's own scenario,
+      that a change making the feed list replies contradicts no requirement and
+      is objected to only by a test. It sits in the section that already owns the
+      "no feed delta yet" argument, so whoever writes the Stage A spec meets it
+      where they are already reading.
+
+      No spec text is added by this change, so `openspec validate core-e2e
+      --strict` still reports the change valid with `skip_specs` honoured, and
+      the suite stays at 593.
+
+- [x] **`spec-writer`** — `openspec/specs/op-log/spec.md` specifies no
       file-backed behaviour, so five e2e tests pin store-lifecycle behaviour no
       promoted requirement describes.
       `grep -rn "LAYOUT_VERSION\|layout version\|UnknownLayoutVersion\|LayoutDoesNotMatch\|sqlite"`
@@ -280,6 +373,60 @@ repository — `wire::tests::the_index_refusal_says_what_it_actually_refuses`, a
       into `Storage` on the reasonable grounds that both mean "this file is not
       usable". Nothing in `openspec/specs/` says otherwise; two e2e tests fail and
       the fixer has no requirement to decide whether they were right.
+
+      **DEFERRED to its owner, which is in flight — and the finding's premise is
+      narrower than it reads.** The measurement over `openspec/specs/` is correct
+      and I re-ran it. But the finding scopes its grep to **promoted** specs only,
+      and the behaviour is already contracted in an **in-flight delta** the grep
+      does not reach: `openspec/changes/sqlite-projection/specs/op-log/spec.md`.
+      `openspec list` shows that change at 46/47 tasks. Four of the five tests
+      this box names are covered there:
+
+      - **Layout version refused, naming both numbers** — "Requirement: A
+        persistent log declares the layout it was written with" (`spec.md:140`),
+        whose scenario requires the failure to name "the version found and the
+        version expected" (`:150`).
+      - **Mislabelled store, as a distinct variant** — "Requirement: A persistent
+        log verifies the layout its declared version promises" (`:159`), which
+        states in terms that the refusal "SHALL be distinguishable from the
+        refusal of an unknown layout version" (`:163`). The three-way distinction
+        the box says "exists only in test code" is therefore contracted, and the
+        box's own scenario — a later change collapsing mislabelled into `Storage`
+        — is the exact thing that requirement forbids.
+      - **Not-a-database as a storage failure, not an empty feed** — the delta
+        extends "Every read is defined over the ops the peer happens to hold"
+        with "An implementation whose storage can fail SHALL report that failure
+        as a distinct outcome from an empty result, and SHALL NOT panic" (`:77`),
+        plus the scenario at `:96`.
+      - **Byte-identity across a restart** — "Requirement: A persistent log
+        survives the process that wrote it" (`:124`), plus the delta's added
+        scenario "A persisted op is byte-identical after a restart" (`:30`), which
+        is precisely the half the box correctly notes promoted `op-log` does not
+        cover.
+
+      **One of the five is genuinely unspecified even there**, and I checked
+      rather than assumed: that opening a path holding no store **creates** it
+      rather than refusing it — `a_missing_store_file_is_created_rather_than_refused`.
+      `grep -n "created rather than\|missing\|absent path\|does not exist"` over
+      that delta returns one line, and it is about a layout structure being
+      missing, not a file. So the delta specifies what happens to a store that
+      exists and is wrong, and says nothing about a path where none exists yet.
+
+      **Not written here, for the same reason as the box above** plus a sharper
+      one: writing an `op-log` delta in *this* change while `sqlite-projection`
+      has an unarchived `op-log` delta of its own would give one capability two
+      concurrent deltas from two changes — which is how a requirement gets lost at
+      archive, and `docs/OPENSPEC-ARCHIVE.md` exists because that has happened
+      here. The missing-file requirement belongs in `sqlite-projection`'s delta,
+      beside the three requirements that already describe opening storage.
+
+      **Where the deferral lives:** `docs/PLAN.md` §9.1, in the same new
+      subsection as the box above, under the paragraph beginning "**Store
+      lifecycle is the same shape and is already in hand.**" It names
+      `sqlite-projection`'s delta as the owner, lists the three requirements to
+      read first so nobody re-derives them, and states that the missing-file
+      creation is the one piece absent even there and belongs to that change
+      rather than a later one.
 
 ## Clean, in prose
 

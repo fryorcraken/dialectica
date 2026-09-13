@@ -185,9 +185,9 @@ text; this section records only what was done.
 
 ## 9. The spec-test findings
 
-Seven boxes in `findings/spec-test.md`; **five addressed to `tester` and all five
-closed**, two addressed to `spec-writer` and deliberately left open. The
-measurements are in that file beside the reviewer's text.
+Seven boxes in `findings/spec-test.md`; **five addressed to `tester` and two to
+`spec-writer`, and all seven are now closed**. The measurements are in that file
+beside the reviewer's text.
 
 - [x] 9.1 Close the surviving envelope mutation, which is why this piece was
       extended to the JSON seam in the first place. The review hardcoded
@@ -225,6 +225,37 @@ measurements are in that file beside the reviewer's text.
       `dialectica/` and `docs/`, says what each returns, and states that the
       single-root form "returns only itself, which confirms nothing". Both greps
       re-run here.
+- [x] 9.6 The two `spec-writer` boxes: **both upheld, both deferred to an owner,
+      with the deferral recorded in `docs/PLAN.md` §9.1** under a new subsection
+      "The feed read is built and still has no contract — a named debt, not an
+      oversight". No spec text is added, so `skip_specs: true` stays honest.
+      The feed gap is real and re-measured (`grep -rli` for both "feed" and
+      "list_threads" over `openspec/specs/` returns nothing across all 12 promoted
+      capabilities). It is not written here because the feed merged in `0538c0d`
+      (PR #23) — a different piece with its own reviewers — and because PLAN.md
+      §9.1 already reserves the feed-vs-thread capability split for "whoever writes
+      it, against the projection that actually exists". `0538c0d` predates OpenSpec
+      adoption, so no delta was skipped.
+      The store-lifecycle box's premise is **narrower than it reads**: it greps
+      promoted specs only, and four of its five behaviours are already contracted
+      in `sqlite-projection`'s in-flight `op-log` delta (that change is at 46/47
+      tasks). Only the missing-file-is-created half is unspecified even there, and
+      it belongs to that change. Writing an `op-log` delta here would give one
+      capability two concurrent deltas from two changes.
+- [x] 9.7 Answer the contract question box 9.4 routed to `spec-writer` — may an
+      integration test construct a hostile keystore? **Yes, all three states, and
+      no spec change is needed to warrant it.** `keystore` specifies each as a
+      scenario whose WHEN clause is that construction (`spec.md:128`, `:153`, and
+      `posting-capability/spec.md:78`), and `tasks.md` 7.3's `0o777` probe already
+      demonstrated it in this file. Appended to box 9.4 in the findings file
+      without editing the reviewer's or `tester`'s text.
+      **One real gap found while answering:** `posting-capability`'s six-reason
+      requirement has a scenario for five reasons; "the keystore's directory is
+      writable by others" has none (`grep -n "directory"` over that file returns
+      only line 53, the requirement text). The behaviour is contracted in
+      `keystore`; what is unpinned is that the *probe* reports it as its own
+      reason. One scenario on an existing promoted requirement closes it — recorded
+      in PLAN.md §9.1 beside the other two, not added here.
 
 ## 10. Gates, re-measured after section 9
 
