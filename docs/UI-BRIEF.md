@@ -401,6 +401,11 @@ submitted** — it loses whatever the user typed. Surface the reason instead.
 
 **Two obligations the core creates and cannot meet itself.** Both come from the
 publish contract (`content-authoring`), and neither is visible from a screenshot.
+**Both are now contracted on the interface side by the `composer-view` spec**,
+along with a third the section below did not name: a successful publish says the
+content was saved on this machine and must never say it was sent, delivered or
+seen by anyone. Publishing and delivering are two events at two times, and
+delivery is not wired at all yet — so "sent" is a claim nothing checks.
 
 **1. Posting the same thing twice posts once, and the interface has to handle
 it.** A post is named by a hash of its own content, and nothing in that content
@@ -427,10 +432,20 @@ forum where two people legitimately hold different sets of posts — the reply i
 **refused**.
 
 So a reply control can fail for a reason that is nobody's fault and is temporary.
-The message must say that: the post being replied to has not arrived here yet, try
-again shortly. It must not read as an error the person caused, and **the draft must
-survive** — this is the one refusal that is expected to succeed on a retry, so
-discarding what they typed is the worst possible response to it.
+It must not read as an error the person caused, and **the draft must survive** —
+this is the one refusal that is expected to succeed on a retry, so discarding what
+they typed is the worst possible response to it.
+
+**A correction to what this section used to ask for.** It previously said the
+message must name this specific cause. The interface cannot: the core does
+distinguish "parent not held" from "target is not a post", but only as different
+prose inside one error shape that carries no machine-readable discriminant, and a
+caller must not branch on message wording. So the `composer-view` spec requires
+the reading that is safe either way — **every** reply refusal shows the core's
+message, keeps the draft, and keeps a retry available. Offering a retry that
+cannot succeed costs one press; withholding one from the common, temporary case
+would be much worse. Naming the cause needs a discriminant on the wire, which is a
+core change nobody has made.
 
 ### Moderation
 
@@ -685,12 +700,26 @@ it.** The design is:
 >   its absence. If a later change exposes one, it is safe only presented as a
 >   count, never as a position, a rank, or a reason this post appears where it
 >   does.
+>
+>   **The absence is now contracted, in the `composer-view` spec**: the control
+>   displays no score at all, and specifically not a zero. A zero is a number, so
+>   it reads as a tally — the claim that this post is known to have received no
+>   votes, which is false as soon as any peer has voted. Note this cuts against
+>   the reference mockup, which shows a score of 12 beside every post; that part
+>   of the mockup is not implementable and is not a target.
+>
+>   The same spec limits the "safe" half above: the viewer's own vote is shown
+>   back **only for votes this view published while it is open**, because no call
+>   returns earlier ones. A control that appeared to remember across a reload
+>   would be the interface inventing state.
 > - **Not safe:** anything suggesting the vote moved the post, changed what anyone
 >   else sees, or fed an ordering. It did not. No "trending", no arrow, no implied
 >   effect on the feed.
 >
-> **Do not let this leak into the ordering controls either.** The feed offers two
-> orderings and neither is vote-based; a "top" or "best" option must not appear.
+> **Do not let this leak into the ordering controls either.** No ordering the
+> feed offers is vote-based; a "top" or "best" option must not appear. (The core
+> computes exactly one ordering today, so the feed shows one — built from a model
+> so that a second can arrive without the layout changing.)
 
 **One axis — up and down, as on Reddit — plus two things that are not votes.**
 
