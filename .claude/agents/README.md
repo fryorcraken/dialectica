@@ -244,11 +244,17 @@ Three consequences worth knowing whatever your role:
 
 - **An unticked entry blocks the merge.** A file, not a convention, so a forgotten
   finding stops a PR instead of evaporating.
-- **The gate only sees checkboxes.** `grep -rn "^- \[ \]"` reports a file of
-  headings as clean, so an entry written any other way is invisible to it — this
-  has already happened, with forty findings including four high-severity defects
-  reading as done. Before trusting an empty result, check the files have boxes at
-  all: `grep -rc "^- \[" findings/` should be non-zero for every one.
+- **The gate only sees checkboxes, and only in files that exist.**
+  `grep -rn "^- \[ \]"` reports a file of headings as clean — forty findings
+  including four high-severity defects once read as done that way — and it reports
+  a *missing directory* as clean too, which is how a piece with **no review at
+  all** looks identical to a piece with every finding closed.
+
+  So an empty result is never the whole answer. Check the boxes exist
+  (`grep -rc "^- \[" findings/`, non-zero per file) **and** that a file exists per
+  review row ticked in `tasks.md`. A ticked row with no findings file is a
+  reviewer that reported nothing, which is not the same as a reviewer that found
+  nothing — the second writes a file saying so.
 - **Findings stay attributable**, which is what a rejection needs: a fixer that
   disagrees knows which reviewer to argue with.
 - **Never relay a finding through a brief.** Name the file. A paraphrase arrives
