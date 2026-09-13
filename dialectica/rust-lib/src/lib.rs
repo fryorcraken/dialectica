@@ -382,15 +382,33 @@ struct Dialectica {
 
 #[cfg(logos_scaffold)]
 impl Dialectica {
-    /// The directory the host gave this instance, or the error to return.
+    /// The host's storage directory, or the error shape saying it has not arrived.
     ///
-    /// Factored out at the point CLAUDE.md names: this was the same four lines in
-    /// two handlers and would have been in five. A `Result` whose `Err` arm is
-    /// already the wire reply, following `core::parse_channel_id`, so a caller
-    /// cannot invent a second error shape while converting one.
+    /// **One place, because it is a guard.** CLAUDE.md: "A guard is a job. Keep it
+    /// separate, so 'is it called everywhere?' stays a question with an answer."
+    /// It was two inline copies with identical wording, and every handler that
+    /// reaches storage needs it — so each new one was another copy to keep in
+    /// step, and two of them disagreeing about one state is a user being told
+    /// different things about the same fact.
+    ///
+    /// `Result<PathBuf, String>` with the error arm already being the wire reply,
+    /// following `core::parse_channel_id`: a caller cannot accidentally invent a
+    /// second error shape while converting one.
+    ///
+    /// A `PathBuf` rather than the `String` the callers used to clone, so that
+    /// each one stops spelling `std::path::Path::new(&dir)` for itself.
     ///
     /// It is not in `core` because `core` has no notion of a host handing it a
     /// path — that is the whole reason this adapter exists.
+    ///
+    /// **There were two identical copies of this method** after `stoa-lifecycle`
+    /// merged `main`: this piece factored the guard out into its own
+    /// `impl Dialectica` block at the same time `main` factored it into the block
+    /// above, and a textual merge kept both because they landed at different
+    /// offsets. Both are `cfg(logos_scaffold)`, so `cargo test` and clippy compile
+    /// neither and both gates stayed green — the duplicate only surfaced as E0592
+    /// and E0034 in CI's Build LGX step. It is the same failure mode this file's
+    /// header comment warns about, and it is why the guard lives here, once.
     fn storage_dir(&self) -> Result<std::path::PathBuf, String> {
         match &self.persistence_path {
             Some(dir) => Ok(std::path::PathBuf::from(dir)),
@@ -536,34 +554,6 @@ impl Dialectica {
                 );
             })
         })
-    }
-}
-
-#[cfg(logos_scaffold)]
-impl Dialectica {
-    /// The host's storage directory, or the error shape saying it has not arrived.
-    ///
-    /// **One place, because it is a guard.** CLAUDE.md: "A guard is a job. Keep it
-    /// separate, so 'is it called everywhere?' stays a question with an answer."
-    /// It was two inline copies with identical wording, and every handler that
-    /// reaches storage needs it — so each new one was another copy to keep in
-    /// step, and two of them disagreeing about one state is a user being told
-    /// different things about the same fact.
-    ///
-    /// `Result<PathBuf, String>` with the error arm already being the wire reply,
-    /// following `parse_channel_id`: a caller cannot accidentally invent a second
-    /// error shape while converting one.
-    ///
-    /// A `PathBuf` rather than the `String` the callers used to clone, so that
-    /// each one stops spelling `std::path::Path::new(&dir)` for itself.
-    fn storage_dir(&self) -> Result<std::path::PathBuf, String> {
-        match &self.persistence_path {
-            Some(dir) => Ok(std::path::PathBuf::from(dir)),
-            None => Err(core::error_json(
-                "the host has not yet told this module where its storage is; \
-                 try again once the module is ready",
-            )),
-        }
     }
 }
 
