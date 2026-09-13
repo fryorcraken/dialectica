@@ -275,10 +275,29 @@ impl Dialectica {
     }
 }
 
-// A thin adapter and nothing more. Every method forwards straight into `core`,
-// which is where the guard and the decisions live. If a body here ever grows
-// past one line, that logic belongs in `core` — otherwise it is logic no test
-// can reach.
+// A thin adapter and nothing more. Every method forwards into `core`, which is
+// where the guard and the decisions live, because nothing in this file is reached
+// by `cargo test`, by clippy, by fmt, or by `cargo mutants` — a wrong line here
+// ships with every gate green, and one already did (see
+// `core::keystore::creator_and_poster_in`).
+//
+// THE RULE, stated as what it actually permits. A body here may derive a host path
+// and pass it in; it may not make a decision. `storage_dir()` plus one `core` call
+// is the shape.
+//
+// Counted rather than asserted, because the claim this replaces was a miscount.
+// Of the ten methods below, three — `version`, `ping`, `panic_probe` — are
+// single-line forwards, because they need no path. The other seven are multi-line:
+// five are `storage_dir()` plus a `core` call, `delivery_channel_exists` also
+// because `modules()` calls `lp_*` symbols undefined in a test binary (PLAN.md
+// §2.3), and `on_context_ready` because it is the one setter.
+//
+// This used to say "if a body here ever grows past one line, that logic belongs in
+// `core`", with `delivery_channel_exists` excused as "the one place in this file
+// with more than a forwarding line". Both were false of the file by the time they
+// were read, and three of the multi-line bodies were added by the change that left
+// the claims standing (`findings/readability.md` entry 4). A line count was the
+// wrong test; what a body is allowed to CONTAIN is the right one.
 #[cfg(logos_scaffold)]
 impl DialecticaModule for Dialectica {
     fn version(&mut self) -> String {
@@ -294,11 +313,15 @@ impl DialecticaModule for Dialectica {
     }
 
     fn delivery_channel_exists(&mut self, request: String) -> String {
-        // The one place in this file with more than a forwarding line, and the
-        // only reason is that `modules()` cannot exist in `core` — it calls
-        // `lp_*` symbols undefined in a test binary (PLAN.md §2.3). So the
-        // parts that CAN be tested live in `core` on either side of the call,
-        // and only the call itself is here.
+        // The one body here that is multi-line for a reason other than deriving a
+        // host path: `modules()` cannot exist in `core` — it calls `lp_*` symbols
+        // undefined in a test binary (PLAN.md §2.3). So the parts that CAN be
+        // tested live in `core` on either side of the call, and only the call
+        // itself is here.
+        //
+        // It used to claim to be "the one place in this file with more than a
+        // forwarding line", which was true when written and false by the time it
+        // was read (`findings/readability.md` entry 4).
         //
         // The guard still wraps everything, including the cross-module call: a
         // panic raised while decoding a reply is a panic in a dispatch handler
@@ -373,7 +396,7 @@ impl DialecticaModule for Dialectica {
         // keystore holds the key that becomes the creator, and the membership
         // store holds what was created. `core` cannot know either layout, so the
         // adapter supplies both and `core` decides what their failures mean.
-        core::with_membership_store("create_stoa", &core::membership_path_in(&dir), |store| {
+        core::with_membership_store(&core::membership_path_in(&dir), |store| {
             // The SAME derivation `get_capabilities` above reports — one
             // expression in `core`, not two call sites here agreeing. See
             // `core::keystore::creator_and_poster_in` for why that distinction is
@@ -387,7 +410,7 @@ impl DialecticaModule for Dialectica {
             Ok(d) => d,
             Err(e) => return e,
         };
-        core::with_membership_store("join_stoa", &core::membership_path_in(&dir), |store| {
+        core::with_membership_store(&core::membership_path_in(&dir), |store| {
             core::join_stoa(&request, store)
         })
     }
@@ -397,7 +420,8 @@ impl DialecticaModule for Dialectica {
             Ok(d) => d,
             Err(e) => return e,
         };
-        core::with_membership_store("list_stoas", &core::membership_path_in(&dir), |store| {
+        // The READ half, so this handler's read-only-ness survives the seam.
+        core::with_membership_store_read(&core::membership_path_in(&dir), |store| {
             core::list_stoas(&request, store)
         })
     }

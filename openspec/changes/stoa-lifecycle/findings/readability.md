@@ -20,7 +20,7 @@ core suite passes.
 
 ---
 
-## 1. `create_stoa`'s doc credits `join`'s encode-before-write ordering with a refusal `join` never sees — FALSE PREMISE, verified by running it
+- [x] **1. `create_stoa`'s doc credits `join`'s encode-before-write ordering with a refusal `join` never sees — FALSE PREMISE, verified by running it**
 
 **For:** `dev-writer`
 
@@ -66,11 +66,25 @@ that `create_stoa` actually holds on its own. It also makes
 `MembershipError::UnencodableRecord` look wire-reachable when it is not — see
 entry 5.
 
-**Outcome:**
+**Outcome: FIXED.** The doc now names `create_stoa`'s own `genesis.address()` call
+— `stoa_address(&self.canonical_bytes()?)` — as the mechanism, quotes the measured
+reply, and says explicitly that `join`'s refusal renders a different sentence and
+is never reached on this path.
+
+The same false premise was in `design.md` (*"`Genesis::canonical_bytes()` is
+fallible for an over-cap title, and building the record's bytes is what the store
+needs"*), which the entry did not look at because `design.md` is another reviewer's
+scope. Corrected there too, in the same pass — a code comment and a design document
+telling a reader two different stories about one guarantee is worse than either
+alone.
+
+One cross-reference in the entry is off by one: it points at "entry 5" for the
+`UnencodableRecord` reachability observation, which is entry **6**. Entry 5 is
+`genesis_for`'s stale `joinStoa` sentence. Both are fixed, so nothing turns on it.
 
 ---
 
-## 2. `with_membership_store` says all three handlers take `&mut`; `list_stoas` takes `&` — FALSE PREMISE
+- [x] **2. `with_membership_store` says all three handlers take `&mut`; `list_stoas` takes `&` — FALSE PREMISE**
 
 **For:** `dev-writer`
 
@@ -95,11 +109,25 @@ look at — which discredits the surrounding argument, which is sound.
 **Measurement:** not applicable; this is a signature a reader compares against a
 sentence. `grep -n "pub fn list_stoas" wire.rs` is the whole check.
 
-**Outcome:**
+**Outcome: FIXED, and by changing the code rather than only the sentence.** The
+entry is right that the sentence was doing real work, and
+`findings/architecture.md` entry 4 is the same observation as a shape finding: the
+seam absorbed the difference by widening to `&mut` rather than expressing it.
+
+`with_membership_store` now takes `FnOnce(&mut MembershipStore)` and a new
+`with_membership_store_read` takes `FnOnce(&MembershipStore)`; `list_stoas` reaches
+its store through the read half, in the tests and in the adapter. The doc says which
+handler takes which, and why the split exists — `rusqlite::Connection` is not
+`Sync`, so it buys no concurrency today; what it buys is that the type stops
+asserting something false, and that letting readers proceed while a writer holds the
+lock becomes a change to one function instead of to every adapter arm.
+
+550 tests still pass, which is the expected result: the reshape changes no
+behaviour, only what the signature admits.
 
 ---
 
-## 3. `parse_stoa`'s justification is contradicted three times in its own file — FALSE PREMISE
+- [x] **3. `parse_stoa`'s justification is contradicted three times in its own file — FALSE PREMISE**
 
 **For:** `dev-writer`
 
@@ -133,11 +161,27 @@ and left the other three, which is half the reshape.
 **Measurement:** 4 copies of one three-way parse in one file; 3 of them inline
 and unreachable from the new helper. `grep -c` above is the count.
 
-**Outcome:**
+**Outcome: FIXED — the other half of the reshape done, not the comment softened.**
+The entry's closing line is the instruction I followed: *"this change wrote the
+fourth copy as a helper and left the other three, which is half the reshape."*
+`get_capabilities`, `list_threads_inner` and `list_threads_from_request` now all
+call `parse_stoa`. `grep -c "missing field: stoa" wire.rs` returns **2**: the one
+inside `parse_stoa`, and one inside a doc-comment quoting this finding.
+
+`findings/security.md` entry 6 is the same duplication from the security side and
+is answered by the same change; it adds the detail that makes it worth doing rather
+than tidy — the next tightening of the address parse (a length pre-check ahead of
+`hex::decode`, entry 2 there) would have had to be applied four times.
+
+550 tests pass unchanged, which confirms the entry's own finding that the four
+copies agreed: unifying them altered no behaviour. The doc now claims only what is
+true — that this is the one place the file parses the field — and records that the
+three copies were inherited rather than introduced, with the
+`git show origin/main:… | grep -c` that establishes it.
 
 ---
 
-## 4. The adapter's "every method forwards straight into `core`, one line or it belongs in `core`" is false of six of its own methods — FALSE PREMISE (stale)
+- [x] **4. The adapter's "every method forwards straight into `core`, one line or it belongs in `core`" is false of six of its own methods — FALSE PREMISE (stale)**
 
 **For:** `dev-writer`
 
@@ -169,11 +213,34 @@ claiming there is one exception when there are six.
 change. The "one place in this file" claim at `lib.rs:297` was accurate against
 `origin/main` and is not accurate now.
 
-**Outcome:**
+**Outcome: FIXED, both comments, and the rule restated as the entry suggests.** The
+entry's diagnosis is exactly right — the rule is worth keeping and the sentence
+needed to say what the exception is rather than claim there is one when there are
+several. It now says what a body may **contain** (derive a host path and pass it in;
+never make a decision) instead of counting lines, because a line count was the wrong
+test.
+
+`delivery_channel_exists`'s own "the one place in this file with more than a
+forwarding line" is corrected in the same pass, and now says it is the one body
+multi-line for a reason *other* than deriving a path, with a note that the original
+claim was true when written and false when read.
+
+I recounted rather than copying the entry's figure, per the standing rule that a
+number in a comment is a claim. Of the ten methods in the `impl`, **three** are
+single-line (`version`, `ping`, `panic_probe`) and **seven** are multi-line — the
+entry says six of ten, counting the nine contract methods and excluding
+`on_context_ready` as framework plumbing. Both are defensible reads of "methods";
+the comment now states the breakdown explicitly so no reader has to guess which
+denominator was meant.
+
+The comment also gained the reason the rule matters more here than tidiness, which
+`findings/security.md` entry 3 and `findings/architecture.md` entry 1 established:
+nothing in this file is reached by `cargo test`, clippy, fmt or `cargo mutants`, so
+a wrong line here ships with every gate green — and one already did.
 
 ---
 
-## 5. `genesis_for`'s doc says `joinStoa` "does not exist" — stale, `join_stoa` is 380 lines below it and is a caller
+- [x] **5. `genesis_for`'s doc says `joinStoa` "does not exist" — stale, `join_stoa` is 380 lines below it and is a caller**
 
 **For:** `dev-writer`
 
@@ -201,11 +268,24 @@ than out of scope.
 **Measurement:** 1 stale sentence; the contradicting caller is 386 lines below it
 in the same file.
 
-**Outcome:**
+**Outcome: FIXED**, and the entry's point about *which* justification changed is the
+part I carried across, because it is the part that licenses different follow-up work.
+The doc now says the record is retained per Stoa
+(`MembershipStore::get`), so "there is nowhere else to get one" is no longer true —
+and that `list_threads` deliberately does not read it yet, which is a **scope
+decision rather than an impossibility.** A reader acting on the old text would have
+concluded the lookup was impossible.
+
+`grep -rn "Stage D" dialectica-core/src/` and `grep -n "does not exist"` both now
+return nothing, so the claim is gone rather than relocated.
+
+The same doc was rewritten again in the verification reshape (`genesis_for` now
+returns a `Membership` rather than a bare `Genesis`), so this section carries both
+changes.
 
 ---
 
-## 6. `MembershipError::UnencodableRecord`'s doc describes a caller experience no caller can have
+- [x] **6. `MembershipError::UnencodableRecord`'s doc describes a caller experience no caller can have**
 
 **For:** `dev-writer`
 
@@ -237,11 +317,28 @@ encode side is unreachable too.
 
 **Measurement:** 1 construction site; 0 wire paths reach it; 1 test does.
 
-**Outcome:**
+**Outcome: FIXED**, and the entry's recommendation followed exactly: the variant
+stays, and the doc now says who reaches it. It has a `# Who reaches this, which is
+not a wire caller` section naming a crate-level caller building a `Genesis` by hand,
+and stating why no request can get there — `create_stoa` refuses an over-long title
+at `genesis.address()`, `join_stoa` inside `Genesis::decode`, both before this
+variant is constructible.
+
+The "wire.rs owns that decode and reports it" clause is reworded, because the entry
+is right that it read as an explanation of the decode side when it was in fact the
+reason the encode side is unreachable from the wire.
+
+One thing changed under this entry after it was written, and it makes the doc more
+accurate rather than less: the verification reshape (`findings/spec-test.md` entry 2)
+moved the refusal from `MembershipStore::join` to `Membership::verified`, so the
+construction site the entry counted has moved. `verified` is `pub`, so the
+crate-level caller the entry identifies now reaches it through a documented
+constructor rather than through the write path, which is a cleaner story than the one
+the entry asked me to tell.
 
 ---
 
-## 7. One user-facing sentence is hardcoded twice in two modules, and only one copy is reachable
+- [x] **7. One user-facing sentence is hardcoded twice in two modules, and only one copy is reachable**
 
 **For:** `dev-writer`
 
@@ -274,11 +371,28 @@ other copy exists.
 **Measurement:** 2 hardcoded copies of one sentence, in 2 modules; 1 reachable
 from the wire; 0 tests compare them.
 
-**Outcome:**
+**Outcome: FIXED, by removing the duplication rather than by annotating it** — which
+is one of the two options the entry offers ("the two converge on one constant"), and
+it fell out of a change made for a different reason.
+
+`findings/spec-test.md` entry 2 found that the two *checks* behind these two copies
+could not be told apart by any test. Fixing that made verification a constructor,
+`Membership::verified`, so `genesis_for` no longer has a refusal of its own to spell
+— it delegates and propagates. `grep -rn "does not hash to the Stoa address"
+dialectica/rust-lib/` now returns **two** lines: `membership.rs`'s `Display` arm, and
+the hardcoded expectation in `wire.rs`'s test. One production copy, and the test's
+literal is the pin, which is what it was for.
+
+Worth recording because this entry is the reason I could rule out the other reviewer's
+suggested fix. `findings/spec-test.md` entry 2 proposed distinguishing the two guards
+by asserting *which* message the refusal carries — and this entry is the proof that
+cannot work, because the two messages were byte-identical. A reviewer finding in one
+dimension invalidating a proposed fix in another is worth more than either entry
+alone.
 
 ---
 
-## 8. `membership.rs::list` shadows `offset` with a different type mid-function
+- [x] **8. `membership.rs::list` shadows `offset` with a different type mid-function**
 
 **For:** `dev-writer`
 
@@ -302,7 +416,18 @@ exactly this kind of thing.
 
 **Measurement:** 28 lines and one statement between the two bindings of one name.
 
-**Outcome:**
+**Outcome: FIXED**, taking both halves of what the entry offers rather than one: the
+`usize` binding is renamed `row_offset`, **and** the `i64` conversion moved up to sit
+beside its own computation, so the `prepare` call no longer separates them. The whole
+boundary — `row_offset`, `limit`, `offset` — is now three consecutive lines under the
+comment that explains it.
+
+That also answers the second half of `findings/architecture.md` entry 3, which asked
+for exactly this reordering and noted that `design.md`'s `list` decision already
+claimed it had been done. The claim is now true.
+
+The comment records the shape that was there, so the next reader knows the single
+name was deliberate to remove rather than an accident of this edit.
 
 ---
 

@@ -101,6 +101,24 @@ today (a half-done backfill loses ops the log will receive again; a half-done
 join loses a Stoa the user must re-paste), but the trade is a trade and whoever
 wants that backfill will find it foreclosed here rather than in their own change.
 
+**The convention for where a store's file name is decided: with the store.**
+`membership_path_in` lives in `membership.rs` and `wire` re-exports it, so the
+adapter still reaches `core::membership_path_in`. It was defined in `wire.rs`, whose
+stated job is the wire contract — and a file name on disk is not wire contract, as
+`findings/architecture.md` entry 2 put it; its own docstring claimed to follow
+`keystore::default_path_in` because "the naming convention belongs with the thing
+named" and then did not.
+
+Two of the three stores now follow it (`keystore::default_path_in` → `identity.key`,
+`membership::membership_path_in` → `stoas.sqlite`). **The op log does not**, and that
+is recorded rather than fixed: it names no file at all, and `dir.join("ops.sqlite")`
+is inline in the adapter. Unifying it means adding a function to `log/` and editing a
+`cfg(logos_scaffold)` call site in a module this change does not otherwise touch, so
+it belongs to whoever next works on the op log. The point of writing it down is the
+one the finding makes: a fourth store — the vouching/weight state, or metadata's
+projection — should have a convention to follow rather than a 50/50 choice, and now
+it does, with the single exception named.
+
 ### The record is stored as its canonical bytes, and the address is derived on read
 
 **Chosen:** one row per Stoa: `stoa` (the 32-byte address) as `PRIMARY KEY`, and
@@ -603,6 +621,92 @@ asserts on the observable state the spec constrains.
   and backfill" is foreclosed as one atomic operation. Stated with the file
   decision above; repeated here because it is a trade-off and not only a
   rationale.
+
+- **A failed store open puts the host's filesystem path into the `{"error":…}` a
+  view renders** → **known, unfixed, and left as a family rather than an instance.**
+  `storage()` wraps every `rusqlite::Error` as `Storage(e.to_string())`, and
+  rusqlite's message for a failed open embeds the path it was handed — which is the
+  host-stamped `instance_persistence_path`, carrying the instance id.
+  `findings/security.md` entry 1 measured it through the public API.
+
+  **Why this change does not fix it.** `log/sqlite.rs:716` is the byte-identical
+  `OpLogError::Storage(e.to_string())` and predates this change, so `list_threads`
+  leaks the op store's path the same way; this change copied the pattern rather than
+  introducing it. Closing only the membership copy leaves the template that produced
+  it — MEMORY's *"unfixed test patterns get copied"* — and closing both changes a
+  sibling module's inherited error shape, which is a different change from this one.
+
+  **What holds it until then.** A characterisation test,
+  `membership.rs::an_unopenable_store_puts_the_host_path_into_the_error_a_view_renders`,
+  **asserts the leak** against a directory named
+  `an-instance-id-nobody-should-see`, with a comment saying a fix should invert it to
+  `assert_ne`. So the defect is reproducible rather than remembered.
+
+  The shape the fix should take, recorded so it is not re-derived: `keystore.rs`
+  already has the right posture — `KeystoreError::NotFound`,
+  `PermissionsTooOpen { mode }` and `DirectoryWritableByOthers { mode }` carry the
+  *fact* and never the *path*, held by
+  `no_error_message_carries_key_material_or_a_passphrase`. Both storage modules lack
+  that test, and `every_error_renders_without_leaking_rust_syntax` is not it: its
+  fixture is the hand-written string `"disk on fire"`, so it would pass any path.
+
+- **A peer can hold a Stoa it created under a key it no longer has, and nothing can
+  report it** → the third file, the keystore, has no relationship with the membership
+  store at all. `create_stoa` reads `identity.key`, mints a record naming that key's
+  public half, and writes it to `stoas.sqlite`; nothing ever re-checks the two.
+
+  **Scenario, verified against the code.** A peer creates a Stoa; the user later
+  restores `identity.key` from a different backup or re-runs onboarding, so the root
+  secret changes. `list_stoas` still lists the Stoa and still reports its
+  `foundingTitle` truthfully, and `MembershipStore::get` still verifies — `decode_row`
+  checks **record-against-address** and nothing else, so a changed root secret is
+  invisible to it. But `Moderators::of(genesis).contains(identity_public_key())` is now
+  false: the peer holds a Stoa it created and cannot moderate, and every check in this
+  change passes.
+
+  **Not fixed, and not this change's to fix.** No requirement in `stoa-membership` asks
+  for the comparison, and adding one would widen the surface without a contract behind
+  it. `findings/architecture.md` entry 7 routes the open question to `spec-writer`: is
+  this a state the module must be able to report, or one the spec deliberately says
+  nothing about? Either answer is fine; the silence is not, because the state is
+  reachable, invisible, and its only symptom appears when moderation lands.
+
+  **Distinct from the creator/poster pairing above**, and worth not conflating: that
+  was two derivations of the *current* identity disagreeing, now impossible by
+  construction. This is the current identity disagreeing with a record written in the
+  past — the record is immutable and the key can change under it, so no
+  one-derivation-position fix touches it.
+
+- **No layer caps a request before `hex::decode` allocates from its length** → a 2×
+  memory multiplier on an uncapped request, recorded here because `op.rs`'s version
+  of this gap is written down and the Stoa surface's was not
+  (`findings/security.md` entry 2).
+
+  **Measured, through the public API, with a counting `GlobalAlloc`:** a 20 MiB hex
+  `genesis` field on `join_stoa` peaks at 37,750,303 bytes — **1.80×** the request; a
+  20 MiB `title` on `create_stoa` peaks at 41,944,543 — **2.00×**, the extra copy
+  being `serde_json`'s parsed `String` plus the `s.clone()` at the title read. Both
+  are constant factors of an input the process already holds, so this is a multiplier
+  on an uncapped request rather than an unbounded allocation from a small one.
+  `Genesis::decode` is correct once reached: the title cap is checked *before*
+  `cursor.take(len)`, so the decoder allocates nothing from a length prefix.
+
+  **The negative result is the load-bearing part: there is no cap anywhere.** Not in
+  `core` (no `MAX_REQUEST`, no size constant), not in `docs/PHASE0-FINDINGS.md` (which
+  records no IPC payload bound), and `PLAN.md`'s 150 KiB is **SDS's network message
+  cap** — a different boundary that does not govern a local IPC request.
+
+  **Why not fixed at the decoder.** `stoa.rs` already argues where the cap belongs —
+  *"the right home for that check is the transport boundary, where the SDS frame is
+  actually visible"* — and that holds: this decoder cannot know whether its bytes
+  arrived in one message. A cap here would be the wrong layer; a cap at the transport
+  boundary is a transport change.
+
+  **Severity today is low** because the reachable caller is the local sandboxed QML
+  view, so an attacker needs the IPC socket or the view itself first. **Raise it the
+  moment a peer-facing decode path reaches `genesis_for`** — that is the trigger, and
+  it is the sentence to grep for when transport lands. When the pre-check is added it
+  is now one edit: `parse_stoa` is the single place this file parses the `stoa` field.
 
 ## Unspecified behaviour, marked in the code
 

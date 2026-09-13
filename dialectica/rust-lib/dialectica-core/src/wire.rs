@@ -207,13 +207,9 @@ pub fn get_capabilities(
             Ok(v) => v,
             Err(e) => return error_json(&format!("invalid JSON: {e}")),
         };
-        let stoa = match parsed.get("stoa") {
-            Some(serde_json::Value::String(s)) => match crate::identity::Address::from_hex(s) {
-                Ok(a) => a,
-                Err(e) => return error_json(&format!("stoa: {e}")),
-            },
-            Some(_) => return error_json("stoa must be a string"),
-            None => return error_json("missing field: stoa"),
+        let stoa = match parse_stoa(&parsed) {
+            Ok(a) => a,
+            Err(e) => return e,
         };
         capability_for(&stoa, lookup).to_json()
     })
@@ -346,13 +342,9 @@ fn list_threads_inner<L: crate::log::OpLog>(
             Err(e) => return error_json(&format!("invalid JSON: {e}")),
         };
 
-        let stoa = match parsed.get("stoa") {
-            Some(serde_json::Value::String(s)) => match crate::identity::Address::from_hex(s) {
-                Ok(a) => a,
-                Err(e) => return error_json(&format!("stoa: {e}")),
-            },
-            Some(_) => return error_json("stoa must be a string"),
-            None => return error_json("missing field: stoa"),
+        let stoa = match parse_stoa(&parsed) {
+            Ok(a) => a,
+            Err(e) => return e,
         };
 
         // The Stoa asked for must be the one the genesis record names, or the
@@ -424,13 +416,9 @@ pub fn list_threads_from_request<L: crate::log::OpLog>(
             Ok(v) => v,
             Err(e) => return error_json(&format!("invalid JSON: {e}")),
         };
-        let stoa = match parsed.get("stoa") {
-            Some(serde_json::Value::String(s)) => match crate::identity::Address::from_hex(s) {
-                Ok(a) => a,
-                Err(e) => return error_json(&format!("stoa: {e}")),
-            },
-            Some(_) => return error_json("stoa must be a string"),
-            None => return error_json("missing field: stoa"),
+        let stoa = match parse_stoa(&parsed) {
+            Ok(a) => a,
+            Err(e) => return e,
         };
         // The verified pair; this path wants only the record half.
         let genesis = match genesis_for(&parsed, &stoa) {
@@ -462,7 +450,28 @@ fn parse_index(parsed: &serde_json::Value, field: &str) -> Result<Option<usize>,
             // exactly the set that should be refused: a page of -1 is not a
             // page, and silently clamping it to 0 would serve the first page to
             // a caller who asked for something impossible.
-            Some(v) => Ok(Some(v as usize)),
+            //
+            // `try_from` and not `as`, following `MembershipStore`'s own rule two
+            // files away — *"`try_from` rather than `as` so that a platform where it
+            // could fail says so instead of wrapping."* On this target
+            // `usize == u64` and the conversion is total, so this is not a live bug;
+            // it was the one width-changing `as` in the request path, and it fed the
+            // offset arithmetic `list` takes considerable care over
+            // (`findings/security.md` entry 4). A 32-bit build would have narrowed
+            // `{"page":4294967296}` to 0 and served page 0 while reporting `"page":0`
+            // — the same wrong answer
+            // `a_page_index_too_large_to_offset_answers_empty_rather_than_the_first_page`
+            // exists to prevent one layer down.
+            //
+            // An unrepresentable index is treated as the refusal it is, and shares
+            // the message: a page number this platform cannot hold is not a page
+            // number, exactly as `-1` is not.
+            Some(v) => match usize::try_from(v) {
+                Ok(v) => Ok(Some(v)),
+                Err(_) => Err(error_json(&format!(
+                    "{field} must be a non-negative whole number"
+                ))),
+            },
             None => Err(error_json(&format!(
                 "{field} must be a non-negative whole number"
             ))),
@@ -591,10 +600,20 @@ fn policy_name(policy: crate::stoa::Policy) -> &'static str {
 ///
 /// # The title is refused before anything is recorded
 ///
-/// `Genesis::canonical_bytes` is fallible for a title over the genesis cap, and
-/// `MembershipStore::join` encodes before it writes — so an over-long title
-/// returns before any statement runs. That ordering is what makes "a failed
-/// creation leaves nothing behind" structural rather than a rule to remember.
+/// **By this handler's own `genesis.address()` call**, which is
+/// `stoa_address(&self.canonical_bytes()?)` — fallible for a title over the genesis
+/// cap. It returns `{"error":"title: …"}` below, before the store is reached at
+/// all, which is what makes "a failed creation leaves nothing behind" structural
+/// rather than a rule to remember.
+///
+/// This used to credit `MembershipStore::join`'s encode-before-write ordering, and
+/// that was false: `join` is never reached for an over-long title, and its refusal
+/// renders a different sentence ("that genesis record cannot be encoded, so it
+/// names no Stoa: …") which does not appear. Verified by running it — the reply for
+/// a 1025-byte title is `{"error":"title: title is 1025 bytes, the maximum is
+/// 1024"}`, this function's own prefix (`findings/readability.md` entry 1). The
+/// guarantee was real and the mechanism named was the wrong one, which sends a
+/// reader editing the store to preserve a property that lives here.
 ///
 /// **No bound the genesis record does not have**, which specifically means an
 /// empty title is accepted: the record has no minimum length, the title is not an
@@ -765,19 +784,41 @@ pub fn list_stoas(request: &str, store: &crate::membership::MembershipStore) -> 
     })
 }
 
-/// Open a membership store and hand it to one of the three handlers above.
+/// Open a membership store for writing and hand it to a handler.
 ///
 /// # Why the handlers take a store and this takes a path
 ///
-/// The three handlers take `&mut MembershipStore` because that is the shape worth
-/// testing: creating a Stoa and then listing it is one store used twice, and an
-/// opener closure would make an in-memory store — the one that needs no temporary
-/// directory and no teardown — unusable for exactly the tests that matter most.
+/// `create_stoa` and `join_stoa` take `&mut MembershipStore` because that is the
+/// shape worth testing: creating a Stoa and then listing it is one store used
+/// twice, and an opener closure would make an in-memory store — the one that needs
+/// no temporary directory and no teardown — unusable for exactly the tests that
+/// matter most.
 ///
-/// This function is the adapter's entry point, and it is thin on purpose: open,
-/// delegate. It is generic over the handler rather than written three times,
-/// because "turn a failed open into the error shape" is one job however it is
-/// followed up.
+/// **`list_stoas` takes `&`, not `&mut`, and reaches its store through
+/// [`with_membership_store_read`].** This doc used to say all three handlers take
+/// `&mut`, which was false of `list_stoas` from the moment it was written
+/// (`findings/readability.md` entry 2) — the call compiled because `&mut T` coerces
+/// to `&T`, so nothing failed and the type at the seam simply asserted that all
+/// three write. `findings/architecture.md` entry 4 is the same observation as a
+/// shape finding: the read path was indistinguishable from the write path at the
+/// seam, which is the first thing that has to be distinguishable when two instances
+/// contend for one file and readers should proceed while a writer holds the lock.
+///
+/// # There is no `method` parameter, and that is the fix for a parameter nobody could keep right
+///
+/// This used to take the method name and pass it to [`guarded`], while each of the
+/// three handlers *also* called `guarded` with its own hardcoded name — so the
+/// guard was nested and the outer name was a second, caller-supplied copy of
+/// something the inner one already knew. It could disagree and nothing noticed:
+/// `with_membership_store("list_stoas", …, |s| create_stoa(…, s))` compiled, ran,
+/// and reported a panic in `open` as `panic in list_stoas`
+/// (`findings/architecture.md` entry 5). Five hand-written pairs had to be kept in
+/// step for no gain.
+///
+/// The outer guard stays and owns a generic label. A panic in
+/// `MembershipStore::open` is the only thing it can report that the inner guard
+/// cannot — every other panic is inside the handler, where the handler's own guard
+/// names the method — so the label is accurate for everything it can ever catch.
 ///
 /// **A failed open is the error shape and never an empty answer.** `SqliteOpLog`'s
 /// own documentation makes the argument: an empty listing is indistinguishable
@@ -785,45 +826,78 @@ pub fn list_stoas(request: &str, store: &crate::membership::MembershipStore) -> 
 /// store is broken as a peer that has joined nothing — and the user would be
 /// invited to re-paste every address they hold.
 ///
-/// The guard wraps this too, rather than only the handler inside it: a panic while
-/// opening a store is a panic in a dispatch handler like any other, and it aborts
-/// the module process the same way.
+/// The guard wraps the open too, rather than only the handler inside it: a panic
+/// while opening a store is a panic in a dispatch handler like any other, and it
+/// aborts the module process the same way.
 pub fn with_membership_store(
-    method: &str,
     path: &std::path::Path,
     handler: impl FnOnce(&mut crate::membership::MembershipStore) -> String,
 ) -> String {
-    guarded(method, || {
-        match crate::membership::MembershipStore::open(path) {
+    guarded(
+        "opening the Stoa membership store",
+        || match crate::membership::MembershipStore::open(path) {
             Ok(mut store) => handler(&mut store),
             Err(e) => error_json(&e.to_string()),
-        }
-    })
+        },
+    )
 }
 
-/// The membership store's file name inside a host-supplied directory.
+/// Open a membership store for reading and hand it to a handler.
 ///
-/// A function rather than a literal at the adapter's call site, following
-/// `keystore::default_path_in`: the naming convention belongs with the thing
-/// named, so a rename is one edit rather than a search.
+/// The read half of [`with_membership_store`], separate so that `list_stoas`'s
+/// read-only-ness survives the seam it is reached through rather than being widened
+/// to `&mut` at it (`findings/architecture.md` entry 4).
 ///
-/// **A file of its own, beside the op log's and never inside it.** `design.md` has
-/// the argument; the load-bearing half is that `SqliteOpLog` refuses any layout
-/// version that is not exactly its own, and its schema is created only for a
-/// never-stamped file — so a membership table added there would reach fresh stores
-/// and never an existing one, and the ways round that are a version bump that
-/// makes an existing store permanently unopenable or a silent repair of a file the
-/// op log's layout check exists to refuse.
-pub fn membership_path_in(dir: &std::path::Path) -> std::path::PathBuf {
-    dir.join("stoas.sqlite")
+/// This buys no concurrency today — `rusqlite::Connection` is not `Sync`, and both
+/// halves still open per call. What it buys is that the type stops asserting
+/// something false, and that letting readers proceed while a writer holds the write
+/// lock becomes a change to this function rather than to every arm of the adapter.
+pub fn with_membership_store_read(
+    path: &std::path::Path,
+    handler: impl FnOnce(&crate::membership::MembershipStore) -> String,
+) -> String {
+    guarded(
+        "opening the Stoa membership store",
+        || match crate::membership::MembershipStore::open(path) {
+            Ok(store) => handler(&store),
+            Err(e) => error_json(&e.to_string()),
+        },
+    )
 }
+
+/// Re-exported so the adapter reaches it as `core::membership_path_in`, beside the
+/// handlers it is passed to.
+///
+/// **It lives in [`crate::membership`]**, which is the module that owns the file.
+/// It was defined here, in the module whose stated job is the wire contract — and a
+/// file name on disk is not wire contract. Its own docstring said it followed
+/// `keystore::default_path_in` because "the naming convention belongs with the thing
+/// named", and then did not (`findings/architecture.md` entry 2). Three stores had
+/// three conventions in three layers; two of them now agree, and the third — the op
+/// log's `dir.join("ops.sqlite")`, inline in the adapter — is named in `design.md`
+/// as the remaining one.
+pub use crate::membership::membership_path_in;
 
 /// Pull the Stoa address out of a request, or the error shape to send back.
 ///
-/// Factored out because create does not take one and both of the other two do, and
-/// because the three-way distinction — absent, wrong-typed, not an address — is
-/// the one `module-wire-contract` requires be reported by name. A second copy
-/// would eventually disagree with the first about which of the three it was.
+/// **The only place this file parses the `stoa` field**, which is what makes "is the
+/// address guard called everywhere?" a question with an answer — CLAUDE.md: *"a
+/// guard is a job; keep it separate."* The three-way distinction (absent,
+/// wrong-typed, not an address) is the one `module-wire-contract` requires be
+/// reported by name, and one function is what stops the three answers drifting
+/// apart.
+///
+/// It was written as a helper and then not used by the three inline copies that
+/// already existed — `get_capabilities`, `list_threads_inner` and
+/// `list_threads_from_request`, all inherited rather than introduced
+/// (`git show origin/main:… | grep -c "missing field: stoa"` returned 3). The
+/// original comment here claimed the factoring prevented divergence in a file where
+/// divergence was four-way possible (`findings/readability.md` entry 3,
+/// `findings/security.md` entry 6). The copies agreed, so this was not a live
+/// defect; it is the shape that produces one, and the specific change it made
+/// harder is the next one — a length pre-check ahead of `hex::decode`
+/// (`findings/security.md` entry 2) had to be applied four times and would have been
+/// applied to one.
 fn parse_stoa(parsed: &serde_json::Value) -> Result<crate::identity::Address, String> {
     match parsed.get("stoa") {
         Some(serde_json::Value::String(s)) => {
@@ -2585,10 +2659,9 @@ mod tests {
 
         // The peer is in no Stoa for that address, and the listing does not
         // contain it — asked through the wire, against the same directory.
-        let listing =
-            with_membership_store("list_stoas", &membership_path_in(dir.path()), |store| {
-                list_stoas("{}", store)
-            });
+        let listing = with_membership_store_read(&membership_path_in(dir.path()), |store| {
+            list_stoas("{}", store)
+        });
         let lv: serde_json::Value = serde_json::from_str(&listing).unwrap();
         // The error arm first, spelled out: an implementation that derived
         // membership from those ops can fail EITHER by listing a Stoa nobody
@@ -2614,10 +2687,10 @@ mod tests {
             joined_address, unjoined_address,
             "the fixture's two Stoas must differ, or the assertions below prove nothing"
         );
-        with_membership_store("join_stoa", &membership_path_in(dir.path()), |store| {
+        with_membership_store(&membership_path_in(dir.path()), |store| {
             join_stoa(&join_request(&joined, &joined_address), store)
         });
-        let before = with_membership_store("_probe", &membership_path_in(dir.path()), |store| {
+        let before = with_membership_store_read(&membership_path_in(dir.path()), |store| {
             serde_json::to_string(&store.get(&joined_address).unwrap().unwrap().genesis.title)
                 .unwrap()
         });
@@ -2630,7 +2703,7 @@ mod tests {
             assert_eq!(log.len().unwrap(), 6, "the sixth op must be on the disk");
         }
 
-        let after = with_membership_store("list_stoas", &membership_path_in(dir.path()), |store| {
+        let after = with_membership_store_read(&membership_path_in(dir.path()), |store| {
             list_stoas("{}", store)
         });
         let av: serde_json::Value = serde_json::from_str(&after).unwrap();
@@ -2645,7 +2718,7 @@ mod tests {
             vec![joined_address.to_hex().as_str()],
             "the peer is still in exactly the one Stoa it joined: {after}"
         );
-        let still = with_membership_store("_probe", &membership_path_in(dir.path()), |store| {
+        let still = with_membership_store_read(&membership_path_in(dir.path()), |store| {
             serde_json::to_string(&store.get(&joined_address).unwrap().unwrap().genesis.title)
                 .unwrap()
         });
@@ -2670,7 +2743,7 @@ mod tests {
         let dir = WireTempDir::new("quiet-stoas");
         for n in 0..3 {
             let title = format!("Quiet {n}");
-            with_membership_store("create_stoa", &membership_path_in(dir.path()), |store| {
+            with_membership_store(&membership_path_in(dir.path()), |store| {
                 create_stoa(
                     &serde_json::json!({ "title": &title }).to_string(),
                     || Ok(creator_key()),
@@ -2685,10 +2758,9 @@ mod tests {
                 .expect("a fresh op store is creatable");
             assert_eq!(log.len().unwrap(), 0, "the op store on disk must be empty");
         }
-        let listing =
-            with_membership_store("list_stoas", &membership_path_in(dir.path()), |store| {
-                list_stoas(&serde_json::json!({ "perPage": 20 }).to_string(), store)
-            });
+        let listing = with_membership_store_read(&membership_path_in(dir.path()), |store| {
+            list_stoas(&serde_json::json!({ "perPage": 20 }).to_string(), store)
+        });
         let lv: serde_json::Value = serde_json::from_str(&listing).unwrap();
         assert_eq!(
             lv["items"].as_array().unwrap().len(),
@@ -2828,7 +2900,7 @@ mod tests {
         // and_not_an_empty_feed` carries for the feed, where the reason can be
         // injected because that handler takes a closure and this one takes a path.
         let dir = std::env::temp_dir();
-        let out = with_membership_store("list_stoas", &dir, |store| list_stoas("{}", store));
+        let out = with_membership_store_read(&dir, |store| list_stoas("{}", store));
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("error").is_some(), "got {out}");
         assert!(
@@ -3026,10 +3098,9 @@ mod tests {
 
         // Opening the membership store beside it succeeds and is NOT refused on
         // the grounds that the directory predates membership.
-        let listing =
-            with_membership_store("list_stoas", &membership_path_in(dir.path()), |store| {
-                list_stoas("{}", store)
-            });
+        let listing = with_membership_store_read(&membership_path_in(dir.path()), |store| {
+            list_stoas("{}", store)
+        });
         let v: serde_json::Value = serde_json::from_str(&listing).unwrap();
         assert!(
             v.get("error").is_none(),
@@ -3063,7 +3134,7 @@ mod tests {
 
         let joining = a_joinable_record("The Stoa being joined");
         let joined_address = joining.address().unwrap();
-        let out = with_membership_store("join_stoa", &membership_path_in(dir.path()), |store| {
+        let out = with_membership_store(&membership_path_in(dir.path()), |store| {
             join_stoa(&join_request(&joining, &joined_address), store)
         });
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
@@ -3081,10 +3152,9 @@ mod tests {
         // fails for an implementation deriving membership from the log — which is
         // reachable here and nowhere above, because no test above has both an op
         // store and a membership store in one place.
-        let listing =
-            with_membership_store("list_stoas", &membership_path_in(dir.path()), |store| {
-                list_stoas("{}", store)
-            });
+        let listing = with_membership_store_read(&membership_path_in(dir.path()), |store| {
+            list_stoas("{}", store)
+        });
         let lv: serde_json::Value = serde_json::from_str(&listing).unwrap();
         let addresses: Vec<&str> = lv["items"]
             .as_array()
@@ -3135,7 +3205,7 @@ mod tests {
 
         let joining = a_joinable_record("Somewhere new");
         let address = joining.address().unwrap();
-        let out = with_membership_store("join_stoa", &membership_path_in(dir.path()), |store| {
+        let out = with_membership_store(&membership_path_in(dir.path()), |store| {
             join_stoa(&join_request(&joining, &address), store)
         });
         assert!(
@@ -3177,7 +3247,7 @@ mod tests {
         let dir = WireTempDir::new("restart");
         let path = membership_path_in(dir.path());
 
-        let created = with_membership_store("create_stoa", &path, |store| {
+        let created = with_membership_store(&path, |store| {
             create_stoa(r#"{"title":"The one I made"}"#, || Ok(creator_key()), store)
         });
         let cv: serde_json::Value = serde_json::from_str(&created).unwrap();
@@ -3186,7 +3256,7 @@ mod tests {
 
         let joining = a_joinable_record("The one I joined");
         let joined_address = joining.address().unwrap();
-        let joined = with_membership_store("join_stoa", &path, |store| {
+        let joined = with_membership_store(&path, |store| {
             join_stoa(&join_request(&joining, &joined_address), store)
         });
         assert!(
@@ -3199,7 +3269,7 @@ mod tests {
 
         // Every store object is gone by now — `with_membership_store` opens and
         // drops one per call. Reopen from the path, as a restarted process does.
-        let listing = with_membership_store("list_stoas", &path, |store| {
+        let listing = with_membership_store_read(&path, |store| {
             list_stoas(r#"{"page":0,"perPage":20}"#, store)
         });
         let lv: serde_json::Value = serde_json::from_str(&listing).unwrap();
@@ -3273,7 +3343,7 @@ mod tests {
 
         let survivor = a_joinable_record("The one that is really joined");
         let survivor_address = survivor.address().unwrap();
-        let ok = with_membership_store("join_stoa", &path, |store| {
+        let ok = with_membership_store(&path, |store| {
             join_stoa(&join_request(&survivor, &survivor_address), store)
         });
         assert!(
@@ -3285,13 +3355,13 @@ mod tests {
              join from a store that persists nothing: {ok}"
         );
 
-        let out = with_membership_store("join_stoa", &path, |store| {
+        let out = with_membership_store(&path, |store| {
             join_stoa(&join_request(&impostor, &claimed), store)
         });
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("error").is_some(), "the join must be refused: {out}");
 
-        let listing = with_membership_store("list_stoas", &path, |store| list_stoas("{}", store));
+        let listing = with_membership_store_read(&path, |store| list_stoas("{}", store));
         let lv: serde_json::Value = serde_json::from_str(&listing).unwrap();
         let addresses: Vec<&str> = lv["items"]
             .as_array()
@@ -3489,16 +3559,15 @@ mod tests {
             // and a reply derived from ops would differ.
             assert_eq!(log.len().unwrap(), 3, "the ops must be on the disk");
         }
-        with_membership_store("join_stoa", &membership_path_in(dir.path()), |store| {
+        with_membership_store(&membership_path_in(dir.path()), |store| {
             join_stoa(
                 &join_request(&elsewhere, &elsewhere.address().unwrap()),
                 store,
             )
         });
-        let from_with_ops =
-            with_membership_store("join_stoa", &membership_path_in(dir.path()), |store| {
-                join_stoa(&request, store)
-            });
+        let from_with_ops = with_membership_store(&membership_path_in(dir.path()), |store| {
+            join_stoa(&request, store)
+        });
 
         assert_eq!(
             from_empty, from_holding_it,

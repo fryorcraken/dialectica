@@ -58,7 +58,7 @@ use crate::identity::Address;
 use crate::stoa::{Genesis, GenesisError};
 use rusqlite::{Connection, OptionalExtension};
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// The storage layout this build writes and understands for **memberships**.
 ///
@@ -192,8 +192,22 @@ pub enum MembershipError {
     /// `UndecodableRecord` and rendered "the genesis record could not be read",
     /// which is the opposite operation: the only way to reach it is
     /// [`Genesis::canonical_bytes`] refusing a record — a title over the genesis
-    /// cap — so nothing was ever read. A caller passing a 2000-byte title was
-    /// told its record "could not be read: title is 2000 bytes".
+    /// cap — so nothing was ever read.
+    ///
+    /// # Who reaches this, which is not a wire caller
+    ///
+    /// **A crate-level caller building a `Genesis` by hand**, through
+    /// [`Membership::verified`]. No request can reach it: `create_stoa` refuses an
+    /// over-long title at its own `genesis.address()` call, and `join_stoa` refuses
+    /// one inside `Genesis::decode`, which enforces the same cap — so both wire
+    /// paths return a different message before this variant is constructible.
+    ///
+    /// That distinction is worth stating because the earlier version of this doc
+    /// illustrated the rename with a wire caller's experience — *"a caller passing a
+    /// 2000-byte title was told its record could not be read"* — and no wire caller
+    /// can have it (`findings/readability.md` entry 6). The variant stays: it is the
+    /// honest error for the caller who does reach it, and `membership.rs` is a
+    /// library module whose API is not only the wire.
     ///
     /// Distinct from [`MembershipError::RecordDoesNotMatchAddress`] because they
     /// are different mistakes: this one is a record with no address at all, that
@@ -202,10 +216,10 @@ pub enum MembershipError {
     /// you pasted" needs the two apart.
     ///
     /// There is no decode-side sibling here, and that is not an omission: a
-    /// membership is joined from a `Genesis` this crate already decoded — `wire.rs`
-    /// owns that decode and reports it — and a row read back that does not decode
-    /// is [`MembershipError::CorruptEntry`], which points at the file rather than
-    /// at the caller.
+    /// membership is built from a `Genesis` something else already decoded — for a
+    /// request, `wire.rs` owns that decode and reports it — and a row read back that
+    /// does not decode is [`MembershipError::CorruptEntry`], which points at the
+    /// file rather than at the caller.
     UnencodableRecord(GenesisError),
     /// A retained row could not be read back as a membership.
     ///
@@ -269,6 +283,35 @@ pub struct MembershipPage {
     pub items: Vec<Membership>,
     pub page: usize,
     pub has_more: bool,
+}
+
+impl MembershipPage {
+    /// An empty page that is also the last one.
+    ///
+    /// The answer to every "this page cannot hold anything" case, and a named
+    /// constructor because there are two of them and they mean the same thing:
+    /// [`MembershipStore::list`] reaches it for a `per_page` of zero and for a page
+    /// index whose offset does not fit an `i64`, thirty lines apart and for
+    /// unrelated reasons.
+    ///
+    /// It was the same three-field literal written twice — in the one function
+    /// whose two live bugs were *exactly* a `page` and a `has_more` computed in two
+    /// places that disagreed (`findings/architecture.md` entry 3). Both copies were
+    /// covered by a test, so this is not a coverage fix; it is that "what an empty
+    /// last page reports" was independently mutable when the function means it as
+    /// one fact, and the compiler would not have said so.
+    ///
+    /// `has_more: false` is the load-bearing half: a caller paging until `has_more`
+    /// is false must terminate, and an empty page promising another is an infinite
+    /// loop. `page` is reported verbatim rather than clamped, because the honest
+    /// answer to "which page is this" is the one that was asked for.
+    fn empty_last_page(page: usize) -> Self {
+        MembershipPage {
+            items: Vec::new(),
+            page,
+            has_more: false,
+        }
+    }
 }
 
 /// The Stoas this peer is in, on disk.
@@ -539,15 +582,21 @@ impl MembershipStore {
         // nobody can read. One function, one job — the zero page is a different
         // question from where a page boundary falls.
         //
-        // NO SPEC: the spec does not say what a `per_page` of zero lists, and the
-        // wire never produces one (`clamp_per_page` turns 0 into the default). This
-        // is the answer that cannot hang a caller.
+        // NO SPEC: the spec does not say what a `per_page` of zero lists. This is
+        // the answer that cannot hang a caller — an empty page that is also the
+        // last one, so a caller paging until `has_more` is false terminates.
+        //
+        // The guard is UNCONDITIONAL because this function is `pub` on a `pub mod`,
+        // and that is the whole reason. It used to say the wire never produces a
+        // zero (`clamp_per_page` turns 0 into the default), which inverted the
+        // dependency: `MembershipStore` knows nothing about `wire`, and a storage
+        // module whose correctness argument rests on a caller one layer up invites
+        // someone to delete the guard when that caller changes
+        // (`findings/architecture.md` entry 6). Raising `MAX_PER_PAGE` or letting
+        // `clamp_per_page(Some(0))` pass zero through is an edit in `feed.rs`, and
+        // it must not be able to make this function wrong.
         if per_page == 0 {
-            return Ok(MembershipPage {
-                items: Vec::new(),
-                page,
-                has_more: false,
-            });
+            return Ok(MembershipPage::empty_last_page(page));
         }
 
         // # The two facts about the page boundary are ONE operation
@@ -562,17 +611,6 @@ impl MembershipStore {
         // what comes off is the evidence, and there is no arrangement of the two
         // that contradicts the other. CLAUDE.md's rule — prefer a shape that
         // cannot express the mistake over a guard that checks for it.
-        let offset = page.saturating_mul(per_page);
-
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT stoa, genesis_bytes FROM stoas
-                 ORDER BY stoa ASC
-                 LIMIT ?1 OFFSET ?2",
-            )
-            .map_err(storage)?;
-
         // # Why `per_page` saturates and `page` refuses
         //
         // SQLite's parameters are `i64`, so both have to cross that boundary, and
@@ -589,17 +627,26 @@ impl MembershipStore {
         //   rather than converted becomes negative, and SQLite treats a negative
         //   OFFSET as none at all — serving the FIRST page to a caller who asked
         //   for an impossible one. Empty is the honest reply, so that one refuses.
+        //
+        // The conversion sits beside its own computation, and the `usize` is named
+        // `row_offset` rather than shadowing `offset` with a different type across
+        // the `prepare` call — which is where it was, with a 16-line comment block
+        // between the two bindings of one name (`findings/readability.md` entry 8).
+        let row_offset = page.saturating_mul(per_page);
         let limit = per_page.saturating_add(1).min(i64::MAX as usize) as i64;
-        let offset = match i64::try_from(offset) {
+        let offset = match i64::try_from(row_offset) {
             Ok(o) => o,
-            Err(_) => {
-                return Ok(MembershipPage {
-                    items: Vec::new(),
-                    page,
-                    has_more: false,
-                })
-            }
+            Err(_) => return Ok(MembershipPage::empty_last_page(page)),
         };
+
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT stoa, genesis_bytes FROM stoas
+                 ORDER BY stoa ASC
+                 LIMIT ?1 OFFSET ?2",
+            )
+            .map_err(storage)?;
 
         let rows = stmt
             .query_map(rusqlite::params![limit, offset], |row| {
@@ -693,6 +740,26 @@ fn decode_row(stoa: [u8; 32], bytes: &[u8]) -> Result<Membership, MembershipErro
         )));
     }
     Ok(Membership { stoa, genesis })
+}
+
+/// This store's file name inside a host-supplied directory.
+///
+/// A function rather than a literal at the adapter's call site, following
+/// [`crate::keystore::default_path_in`]: **the naming convention belongs with the
+/// thing named**, so a rename is one edit rather than a search. It is in this module
+/// for that reason — it was in `wire.rs`, whose job is the wire contract, and a file
+/// name on disk is not wire contract (`findings/architecture.md` entry 2). `wire`
+/// re-exports it so the adapter still reaches `core::membership_path_in`.
+///
+/// **A file of its own, beside the op log's and never inside it.** `design.md` has
+/// the argument; the load-bearing half is that `SqliteOpLog` refuses any layout
+/// version that is not exactly its own, and its schema is created only for a
+/// never-stamped file — so a membership table added there would reach fresh stores
+/// and never an existing one, and the ways round that are a version bump that
+/// makes an existing store permanently unopenable or a silent repair of a file the
+/// op log's layout check exists to refuse.
+pub fn membership_path_in(dir: &Path) -> PathBuf {
+    dir.join("stoas.sqlite")
 }
 
 /// Every `rusqlite` failure becomes one variant, carrying its own description.
@@ -1039,6 +1106,48 @@ mod tests {
                 "{e:?} rendered as Rust syntax: {rendered}"
             );
         }
+    }
+
+    #[test]
+    fn an_unopenable_store_puts_the_host_path_into_the_error_a_view_renders() {
+        // A CHARACTERISATION TEST, not a passing requirement: it asserts the
+        // CURRENT behaviour, which `findings/security.md` entry 1 reports as a
+        // defect, so that the fix has something to flip and so the leak is not
+        // rediscovered from scratch.
+        //
+        // `storage()` wraps every `rusqlite::Error` as `Storage(e.to_string())`, and
+        // rusqlite's message for a failed open embeds the path it was handed. That
+        // path is the host-stamped `instance_persistence_path`, which carries the
+        // instance id, and `with_membership_store` renders it straight into
+        // `{"error":"..."}` for a view.
+        //
+        // WHY THIS IS NOT FIXED HERE, recorded so the deferral is legible.
+        // `log/sqlite.rs:716` is the byte-identical `OpLogError::Storage(e.to_string())`
+        // and predates this change — this change copied the pattern rather than
+        // introducing it. Fixing only the membership copy leaves the template that
+        // produced it, which is MEMORY's "unfixed test patterns get copied" exactly.
+        // The family fix changes a sibling module's inherited error shape and belongs
+        // in its own change; `design.md` carries it under Risks / Trade-offs.
+        //
+        // `every_error_renders_without_leaking_rust_syntax` cannot see this: its
+        // fixture is the hand-written string "disk on fire", so it would pass any
+        // path whatsoever. The keystore's
+        // `no_error_message_carries_key_material_or_a_passphrase` is the shape this
+        // module lacks.
+        let dir = TempDir::new("path-in-error");
+        let secret = dir.0.join("an-instance-id-nobody-should-see");
+        let unopenable = secret.join("stoas.sqlite"); // the parent does not exist
+        let rendered = MembershipStore::open(&unopenable)
+            .expect_err("a store under a missing directory must not open")
+            .to_string();
+
+        assert!(
+            rendered.contains("an-instance-id-nobody-should-see"),
+            "CHARACTERISATION: this asserts the LEAK, and a fix should invert it to \
+             assert_ne. If this line fails, the leak is closed — replace this test \
+             with the assertion that the path is absent, and see \
+             findings/security.md entry 1. Got: {rendered}"
+        );
     }
 
     // ─── Joining ──────────────────────────────────────────────────────────
@@ -1612,10 +1721,15 @@ mod tests {
             join_matching(&mut store, &g).unwrap();
         }
 
-        // NO SPEC: the spec does not say what a `per_page` of zero lists. The wire
-        // never produces one — `clamp_per_page` turns 0 into the default — so this
-        // is a decision about the crate's own API, and it is the one that cannot
-        // hang a caller: an empty page with nothing after it.
+        // NO SPEC: the spec does not say what a `per_page` of zero lists. This is a
+        // decision about THIS CRATE'S API — `list` is `pub` on a `pub mod` and
+        // answers for every caller, whatever the wire does — and it is the answer
+        // that cannot hang one: an empty page with nothing after it.
+        //
+        // The wire citation that used to be here is dropped for the reason
+        // `findings/architecture.md` entry 6 gives: it made a storage-layer decision
+        // read as contingent on `feed.rs::clamp_per_page`, which this module cannot
+        // see and which a future edit could change without touching this file.
         for page in [0, 1, 5] {
             let p = store.list(page, 0).unwrap();
             assert_eq!(p.items, vec![], "a page of zero holds nothing");

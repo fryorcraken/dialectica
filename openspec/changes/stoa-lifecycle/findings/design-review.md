@@ -23,7 +23,7 @@ symbol or heading, not by line.
 
 ---
 
-## 1. The creator key is a third identity, and it breaks moderation
+- [x] **1. The creator key is a third identity, and it breaks moderation**
 
 **For:** `dev-writer`
 
@@ -91,7 +91,7 @@ survive.
 
 ---
 
-## 2. `design.md` credits the wrong mechanism for the file boundary
+- [x] **2. `design.md` credits the wrong mechanism for the file boundary**
 
 **For:** `dev-writer`
 
@@ -129,7 +129,7 @@ read one from the other.
 
 ---
 
-## 3. "Structural" is the wrong word for the statement choice, measured
+- [x] **3. "Structural" is the wrong word for the statement choice, measured**
 
 **For:** `dev-writer`
 
@@ -170,7 +170,7 @@ and added that it extends to the wire-level coverage too (PR #45 body, finding 3
 
 ---
 
-## 4. `joinStoa` contradicts PLAN §9.1 twice, unargued
+- [x] **4. `joinStoa` contradicts PLAN §9.1 twice, unargued**
 
 **For:** `dev-writer`
 
@@ -206,7 +206,7 @@ Stoa listing both do), and Stage D's summary line not saying it was built.
 
 ---
 
-## 5. `docs/UI-BRIEF.md:230` contradicts its own fix
+- [x] **5. `docs/UI-BRIEF.md:230` contradicts its own fix**
 
 **For:** `dev-writer`
 
@@ -243,7 +243,7 @@ Entry 1 makes constraint 2 of the brief true rather than aspirational.
 
 ---
 
-## 6. Three things live only in code comments, and one checkbox overclaims
+- [x] **6. Three things live only in code comments, and one checkbox overclaims**
 
 **For:** `dev-writer`
 
@@ -296,7 +296,7 @@ observation. See PR #45's body, finding 1, and `spec-test.md`.
 
 ---
 
-## For the `spec-writer` — carried forward from PR #45 so it survives that thread
+- [ ] **7. For the `spec-writer` — two unobservable requirements, carried forward from PR #45 so they survive that thread**
 
 Two requirements the tester established are unobservable at the surface the spec
 constrains. Both are the `spec-writer`'s to decide on, and neither is a defect in
@@ -317,3 +317,23 @@ the code:
    or insertion order is exposed, so nothing at the wire can distinguish the two
    statements. The requirement is real and its only witness is one store-level
    return value. Worth deciding whether the spec wants an observable form.
+
+**Outcome: OPEN — `spec-writer`'s, and the box stays unticked.** Given a number and a
+box by `dev-writer` so the merge gate can see it; it was a bare `##` section, which
+`grep -rn "^- \[ \]"` does not match. No text changed.
+
+Both still stand, and item 2's measurement survives this change's reshape — I re-read
+it rather than assuming. `join` still discards `Joined` at both wire handlers and the
+reply still carries no "was this new" flag, so the only witness is still the
+store-level return value. `design.md` states the consequence in its own words under the
+canonical-bytes decision: nothing observable at the module surface tells `OR IGNORE`
+from `OR REPLACE`, so the non-destructiveness requirement is unfalsifiable from outside
+core.
+
+One addition for item 2, from a mutation run during this pass and worth having before
+the spec decides: the verification reshape makes the *reason* sharper. A mismatched pair
+can no longer reach `join` at all — `Membership::verified` is the only constructor and
+`join` takes nothing else — so the only record `REPLACE` could ever write over a row is
+the byte-identical one. That is now a property of the type rather than of the call
+order, which strengthens the case that the requirement's observable form, if the spec
+wants one, has to come from somewhere other than the write verb.

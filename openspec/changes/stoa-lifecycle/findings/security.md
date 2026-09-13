@@ -19,7 +19,7 @@ identity half of `src/keystore.rs`, `Address`/`PublicKey`/`SecretKey` in
 
 ---
 
-## 1. `MembershipError::Storage` puts the host's absolute filesystem path into the `{"error":...}` wire reply
+- [x] **1. `MembershipError::Storage` puts the host's absolute filesystem path into the `{"error":...}` wire reply**
 
 **For:** `dev-writer`
 
@@ -69,11 +69,40 @@ copy leaves the template in place.
 sandboxed view), medium as a posture inconsistency — the project has an explicit
 rule about this that one module honours and its sibling does not.
 
-**Outcome:**
+**Outcome: DEFERRED, with the leak now proven by a test rather than only reported.**
+
+**Why deferred and not fixed**, which is this entry's own argument turned into a
+decision. The entry says it plainly: *"It is a family, not an instance… Fixing only
+the membership copy leaves the template in place."* `log/sqlite.rs:716` is the
+byte-identical `OpLogError::Storage(e.to_string())`, it predates this change, and
+`list_threads` leaks the op store's path the same way. A fix that closed the
+membership copy and left the op log's would be the exact shape MEMORY's *"unfixed
+test patterns get copied"* note describes — and it would change a sibling module's
+inherited error shape as a side effect of a Stoa-lifecycle change, which is a
+scope this piece should not quietly widen.
+
+**Where it now lives**, because a finding that leaves without landing somewhere
+durable was dropped rather than deferred:
+
+1. **A characterisation test, in the code** —
+   `membership.rs::an_unopenable_store_puts_the_host_path_into_the_error_a_view_renders`.
+   It opens a store under a directory named `an-instance-id-nobody-should-see` and
+   **asserts the path IS in the rendered error**, with a comment saying that a fix
+   should invert it to `assert_ne`. So the leak is reproducible on demand, the next
+   agent does not re-derive it, and a fix has something concrete to flip. Verified
+   passing, which is what makes the defect real rather than argued.
+2. **`design.md`, under Risks / Trade-offs**, as the family: both modules, why one
+   copy cannot be fixed alone, and that the keystore's
+   `no_error_message_carries_key_material_or_a_passphrase` is the shape both lack.
+
+The entry's supporting observation is confirmed and recorded in that test's comment:
+`every_error_renders_without_leaking_rust_syntax` cannot see this, because its
+fixture is the hand-written string `"disk on fire"` — it would pass any path
+whatsoever.
 
 ---
 
-## 2. Nothing caps a request before `hex::decode` allocates from its length — measured at 1.80× the request in `join_stoa`
+- [x] **2. Nothing caps a request before `hex::decode` allocates from its length — measured at 1.80× the request in `join_stoa`**
 
 **For:** `dev-writer`
 
@@ -133,11 +162,33 @@ this one is not.
 attacker needs the IPC socket or the view itself first. Raise it the moment a
 peer-facing decode path reaches `genesis_for`.
 
-**Outcome:**
+**Outcome: DEFERRED to `design.md`, which is what this entry asks for.** The entry is
+explicit that the cap does not belong in the decoder — *"this decoder cannot know
+whether its bytes arrived in one message"* — and that its finding is narrower:
+*"nothing at any layer has it yet, and no document records that as an open gap for
+the stoa surface. The `op.rs` version of the same gap is written down; this one is
+not."*
+
+So the deliverable is the record, and it now exists: `design.md`'s Risks /
+Trade-offs carries the gap with this entry's measurements (1.80× on `join_stoa`,
+2.00× on `create_stoa`, and that the 2.00× is `serde_json`'s parsed `String` plus the
+`s.clone()` at the title read), the conclusion that this is a bounded constant factor
+rather than an amplification, and the negative result that matters most — **no cap
+exists anywhere in the stack**, with the three places checked, and that `PLAN.md`'s
+150 KiB figure is SDS's network message cap and does not govern a local IPC request.
+
+Not implemented here, deliberately. A cap at the decoder would be the wrong layer by
+this entry's own argument; a cap at the transport boundary is a transport change. The
+severity assessment is carried over verbatim, including the trigger for raising it:
+the moment a peer-facing decode path reaches `genesis_for`.
+
+One thing this change did do that touches the entry's follow-up: `parse_stoa` is now
+the single place the `stoa` field is parsed (entry 6), so the length pre-check this
+entry contemplates would be **one** edit rather than the four it would have been.
 
 ---
 
-## 3. The creator/poster key pairing is held by two closures behind `cfg(logos_scaffold)`, which no test and no CI gate can reach
+- [x] **3. The creator/poster key pairing is held by two closures behind `cfg(logos_scaffold)`, which no test and no CI gate can reach**
 
 **For:** `tester`
 
@@ -245,7 +296,7 @@ one derivation"*, including what the gate cannot see.
 
 ---
 
-## 4. `parse_index` narrows a `u64` with `as`, feeding a store that uses `try_from` everywhere else to avoid exactly that
+- [x] **4. `parse_index` narrows a `u64` with `as`, feeding a store that uses `try_from` everywhere else to avoid exactly that**
 
 **For:** `dev-writer`
 
@@ -283,11 +334,29 @@ the measurement this entry lacks.
 it is a one-character divergence from a rule the code states explicitly, in the
 one place a bad number reaches an offset.
 
-**Outcome:**
+**Outcome: FIXED.** `parse_index` now does `usize::try_from(v)` and treats an
+unrepresentable index as the refusal it is, sharing the existing message — *"a page
+number this platform cannot hold is not a page number, exactly as `-1` is not"*.
+
+The entry is right on every point including the one it declines to claim: it is
+latent on the supported target and it **did** measure the 64-bit behaviour rather
+than assume it (`{"page":18446744073709551615,"perPage":1}` answering with that page
+verbatim, and `-1`, `1.5`, `1e308` each refused). I did not add a 32-bit target
+either, so no test distinguishes the two versions on this platform — **stated
+plainly rather than papered over**, because `usize == u64` here means the old `as`
+and the new `try_from` are behaviourally identical and no fixture can tell them
+apart. 550 tests pass before and after, as they must.
+
+What the change buys is therefore not a caught bug but the thing the entry actually
+filed: the one width-changing `as` in the request path is gone, so the code no
+longer contradicts, in the place a bad number reaches an offset, the rule it states
+two files away — *"`try_from` rather than `as` so that a platform where it could fail
+says so instead of wrapping."* The comment records the 32-bit failure scenario the
+entry constructed, so the reasoning survives even though no gate exercises it.
 
 ---
 
-## 5. `Policy::to_byte` replaced by a constant still survives the whole suite, and a code comment says it does not
+- [ ] **5. `Policy::to_byte` replaced by a constant still survives the whole suite, and a code comment says it does not**
 
 **For:** `tester`
 
@@ -337,11 +406,24 @@ since a comment claiming a closed gap is worse than no comment.
 **Severity:** low today, high the day a second `Policy` variant lands. The
 mis-stating comment is the part that costs something now.
 
-**Outcome:**
+**Outcome: OPEN — addressed to `tester`, and deliberately left for it.** Noted here
+by `dev-writer` so the box is not mistaken for an oversight.
+
+Not taken on for two reasons. The fix the entry names is a **test** change — *"assert
+`Policy::Open.to_byte() == 0` against the literal rather than round-tripping"* — and
+the test suite is `tester`'s to own; writing it here would put two agents in the same
+file on one piece. And the second half is a comment at `stoa.rs:124-130` that must
+say the mutant is live, which is only true once the test that makes it dead does not
+exist — so the comment edit and the test belong in one commit, by whoever writes the
+test.
+
+Nothing in this change touches `Policy::to_byte`, `Policy::ALL`, or
+`every_policy_round_trips_through_its_discriminant`, so the entry's measurement still
+stands as written.
 
 ---
 
-## 6. Four spellings of one guard: the `stoa` field is parsed inline three times beside the extractor this change added
+- [x] **6. Four spellings of one guard: the `stoa` field is parsed inline three times beside the extractor this change added**
 
 **For:** `dev-writer`
 
@@ -370,7 +452,19 @@ one.
 reshaping argument; it is here because the duplicated thing is a validation
 guard on attacker-supplied content.
 
-**Outcome:**
+**Outcome: FIXED.** All three inline copies now call `parse_stoa`.
+`grep -c "missing field: stoa" wire.rs` returns **2** — the one inside `parse_stoa`,
+and one inside a doc-comment citing this finding.
+
+The entry's framing is what made this worth doing rather than tidy, and it is quoted
+in the code: *"a future tightening of the address parse — a length pre-check ahead of
+`hex::decode`, per entry 2 — has to be applied four times and will be applied to
+one."* That is now one edit, and the doc says so.
+
+This entry is `findings/readability.md` entry 3 from the security side; one change
+answers both. The entry's careful note that *"the four copies agree today… this is not
+a live divergence"* is confirmed by the result: 550 tests pass unchanged, which is
+what unifying four agreeing copies must produce.
 
 ---
 

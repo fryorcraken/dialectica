@@ -26,7 +26,7 @@ historical and should be located by symbol, not by line.
 
 ---
 
-## 1. `MembershipStore::list` answers "you are in no Stoa" for a valid page 0
+- [x] **1. `MembershipStore::list` answers "you are in no Stoa" for a valid page 0**
 
 **For:** `dev-writer`
 
@@ -65,7 +65,7 @@ Reasoning recorded in `design.md` under the listing decision.
 
 ---
 
-## 2. `per_page == 0` gives a page both empty and not-the-last, so paging never terminates
+- [x] **2. `per_page == 0` gives a page both empty and not-the-last, so paging never terminates**
 
 **For:** `dev-writer`
 
@@ -113,7 +113,7 @@ boundary falls. Carries a `NO SPEC:` marker — the spec does not say what a
 
 ---
 
-## 3. An encode failure is reported as a decode failure
+- [x] **3. An encode failure is reported as a decode failure**
 
 **For:** `dev-writer`
 
@@ -152,7 +152,7 @@ on the variant would have passed the wrong wording.
 
 ---
 
-## 4. `MembershipStore::is_empty` is unprotected
+- [x] **4. `MembershipStore::is_empty` is unprotected**
 
 **For:** `tester`
 
@@ -182,7 +182,7 @@ fewer mutable expressions). The survivor is gone.
 
 ---
 
-## 5. `getCapabilities` reaches the creator identity through a caller-named address
+- [x] **5. `getCapabilities` reaches the creator identity through a caller-named address**
 
 **For:** `dev-writer`
 
@@ -225,6 +225,22 @@ the probe use.
 
 **This is verified independently in `security.md`** rather than resting on the
 fixer's own account of its own fix, which is the right division and was asked for.
+
+**Addendum, from the later review pass** — `security.md` entry 3 and
+`architecture.md` entry 1 both re-derived this and confirmed the property holds, then
+found that *nothing could see it*: the two closures naming the key sat in
+`cfg(logos_scaffold)` code that `cargo test` never compiles, no CI job read, and
+`cargo mutants` reported 6/6 unviable on. Reverting `lib.rs:346` to
+`ks.stoa_address(_stoa)` restored the original bug with every gate green.
+
+So this entry's fix is now held by something rather than only true:
+`core::keystore::creator_and_poster_in` derives both halves in one expression, and
+`wire.rs::the_creator_a_creation_names_is_the_identity_the_probe_reports` drives both
+wire handlers through it — 550 pass, 1 fails under the revert, where before the whole
+suite stayed green. A Lint step covers the part no test can reach.
+
+Recorded here because a reader arriving at this entry should not conclude the matter
+closed at `4313cf6`; it closed the defect, and a later pass closed the gate.
 
 ---
 

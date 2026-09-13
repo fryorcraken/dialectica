@@ -36,4 +36,5 @@ pub use wire::{
     callee_error, channel_exists_reply, create_stoa, error_json, get_capabilities, guarded,
     join_stoa, list_stoas, list_threads, list_threads_from_request, membership_path_in,
     panic_probe, parse_channel_id, ping, version, with_membership_store,
+    with_membership_store_read,
 };

@@ -146,7 +146,7 @@ tests that do not exercise them.
 
 ## Findings
 
-### 1. `spec-writer` — the whole "op does not create membership" requirement is untestable as written: there is no receive path
+- [ ] **1. `spec-writer` — the whole "op does not create membership" requirement is untestable as written: there is no receive path**
 
 The requirement and all three of its scenarios are phrased around an op **reaching
 the peer**: "*WHEN* an op addressed to a Stoa the peer is not in reaches the peer",
@@ -177,11 +177,31 @@ reproduced, because the `WHEN` clause names an event the module cannot experienc
 
 `specs/stoa-membership/spec.md:265-288`
 
-**Outcome:**
+**Outcome: OPEN — `spec-writer`'s, and the box stays unticked.** Noted by `dev-writer`
+so it is not read as forgotten.
+
+The structural claim is confirmed by measurement, not accepted: `grep` for `fn receive`,
+`on_message`, `fn ingest`, `fn handle_incoming` across both crates returns nothing, and
+`list_stoas` is handed a `MembershipStore` with no path from one to an op log. There is
+no boundary for an arriving op to cross.
+
+**What changed on the test side, which narrows but does not close this.** Entry 4's fix
+made the checkable half actually checked: `an_op_for_a_stoa_the_peer_is_not_in_creates_no_membership`
+and `an_empty_op_log_does_not_empty_the_listing` now put a real `SqliteOpLog` in the
+same directory as the membership store, so an implementation that derived membership
+from what it found there is caught — verified by mutating `MembershipStore::open` to do
+exactly that. That is the entry's own "suggested reshape" exercised from the test side:
+*"the listing's contents are exactly what membership records; nothing in this capability
+reads the op log."*
+
+What remains, and why it is not mine: the requirement's three scenarios are phrased
+around an op **reaching the peer**, and rewording them — keeping the security argument
+while stating the checkable half and saying plainly that the arriving-op direction
+becomes testable when a receive path exists — is a change to the spec.
 
 ---
 
-### 2. `tester` — the four wire-level verification tests cannot fail for the reason they name: a second, redundant guard catches everything
+- [x] **2. `tester` — the four wire-level verification tests cannot fail for the reason they name: a second, redundant guard catches everything**
 
 **Mutation M2, run:** in `membership.rs:405`, replaced the self-authenticating guard
 `if !genesis.matches(stoa)` with `if false`, deleting the store's verification
@@ -236,11 +256,56 @@ worth a test.
 
 `wire.rs:2288`, `wire.rs:3291`, `wire.rs:3176`, `wire.rs:2323`
 
-**Outcome:**
+**Outcome: FIXED, by reshaping rather than by the test this entry proposes — and the
+proposed test provably could not have worked.**
+
+Addressed by `dev-writer` rather than `tester` because the answer turned out to be a
+code change: the reason no test could pin either guard is that the two guards existed.
+
+**First, I ran the other direction of M2, which this entry did not.** Deleting
+`wire::genesis_for`'s guard (`if !genesis.matches(stoa)` → `if false`) leaves
+**550 of 550 passing**. So the finding is symmetric and worse than reported: the store's
+guard was held by four tests, and the wire's by **none**. Each was covered only by the
+other still being there.
+
+**Why the suggested fix cannot work.** The entry proposes asserting *"that the refusal
+carries `genesis_for`'s message rather than `MembershipError::RecordDoesNotMatchAddress`'s"*.
+It then half-discovers the obstacle — noting `wire.rs:3354` already expects the store's
+sentence and that `genesis_for` "must render the same sentence" — and
+`findings/readability.md` entry 7 completes it: the string *"the genesis record does not
+hash to the Stoa address it was given with"* was **hardcoded twice, byte-identically, in
+two modules.** No assertion on the reply can distinguish which guard fired, so no test
+at the wire could have been written to pin the wire's guard.
+
+**What was done instead**, per CLAUDE.md's preference for an invariant that holds by
+construction over a branch that checks it. `Membership` was already the verified pair —
+`list` returns it, and its doc already claimed the store guarantees the two agree.
+`Membership::verified(&Address, &Genesis)` is now the only way to build one from a
+caller's pair, `MembershipStore::join` takes a `&Membership` and has **no guard**, and
+`genesis_for` returns the pair so verification happens once per request rather than
+twice.
+
+**The measurement that shows the entry's defect is gone.** Deleting the one remaining
+guard now fails **8 tests across both layers** — the four in `membership.rs` and four at
+the wire, including all three this entry names as surviving M2:
+`a_record_that_does_not_match_the_address_is_refused_and_joins_neither_stoa`,
+`a_join_verified_at_the_wire_needs_no_op_log_and_no_prior_membership`, and
+`a_join_refused_at_the_wire_leaves_nothing_behind_a_restart`. Before: 4 failures or 0,
+depending on which copy you deleted. There is no deletion left that leaves the property
+untested.
+
+Two consequences recorded rather than glossed. The mismatch tests now assert against
+`Membership::verified`, which is the honest site since that is where refusal lives. And
+`verification_consults_only_the_two_inputs` got **weaker**: comparing an empty store's
+answer against a populated one's was a real test while verification had a `self` to
+reach through, and is satisfied by construction now that it is an associated function
+with no store — the test says so and keeps only the refusal assertion that remains
+observable. 29 test call sites changed; `design.md` carries the full reasoning under
+*"Verification is a constructor, not a guard"*.
 
 ---
 
-### 3. `spec-writer` — the spec forbids refusing a store "on the grounds that it predates membership", and the store refuses several such stores
+- [ ] **3. `spec-writer` — the spec forbids refusing a store "on the grounds that it predates membership", and the store refuses several such stores**
 
 "Adding membership does not make an existing store unreadable" says: *"Opening such
 a store MUST NOT be refused on the grounds that it predates membership."*
@@ -273,11 +338,31 @@ pins the answer permanently without a requirement behind it.
 
 `specs/stoa-membership/spec.md:202-206`; `membership.rs:784`, `806`, `829`, `860`, `892`
 
-**Outcome:**
+**Outcome: OPEN — `spec-writer`'s, and the box stays unticked.** Noted by `dev-writer`.
+
+The distinction the entry proposes is the right one and I want to endorse it explicitly,
+because it is the sentence a spec-writer can act on: *membership state's absence* never
+refuses (which is the requirement as written, and the code honours it — `user_version ==
+0` creates the schema rather than refusing), while a *membership store claiming a layout
+this build does not have* is refused in both directions.
+
+Nothing here is `dev-writer`'s to fix. The behaviour is what the entry says it is, and
+it is behaviour the entry agrees looks right; what is missing is a requirement, and
+inventing one in code would be deciding the contract from the implementation — the
+inversion this flow exists to prevent. Per my own agent file, an unspecified *observable
+behaviour* belongs in the spec, not in my head.
+
+One correction to the entry's framing, which does not change its conclusion.
+`a_fresh_store_is_created_rather_than_refused` is described as treating `user_version ==
+0` as "the 'predates membership' sentinel". It is slightly stronger than a sentinel: 0 is
+the value SQLite reports for a database nothing has stamped, so it is the *absence* of a
+version rather than a chosen marker — which is why "there is nothing to convert, because
+this file did not exist" holds without a migration. Worth knowing when writing the
+requirement, since it is what makes the no-migration claim structural.
 
 ---
 
-### 4. `tester` — every op-log fixture in the membership tests is decorative; three tests pass with zero ops
+- [x] **4. `tester` — every op-log fixture in the membership tests is decorative; three tests pass with zero ops**
 
 The tests for the two op-log-boundary requirements build a `MemoryOpLog`, append ops
 to it, assert the count, and then assert things about a `MembershipStore` that has no
@@ -374,7 +459,7 @@ other three follow.
 
 ---
 
-### 5. `spec-writer` — "maximum length" does not say bytes or characters, and no test at this surface exercises the difference
+- [ ] **5. `spec-writer` — "maximum length" does not say bytes or characters, and no test at this surface exercises the difference**
 
 Two scenarios turn on a length bound:
 
@@ -405,11 +490,32 @@ at 1024 bytes (fewer characters) and one at 1025 bytes would pin it.
 
 `specs/stoa-membership/spec.md:69, 75`; `wire.rs:2156`, `wire.rs:2139`
 
-**Outcome:**
+**Outcome: OPEN — `spec-writer`'s, and the box stays unticked.** Noted by `dev-writer`,
+with the code side verified.
+
+**Verified rather than accepted:** `MAX_TITLE_BYTES: usize = 1024` and the check is
+`title.len() > MAX_TITLE_BYTES` (`stoa.rs:103`, `:261`), which is a **byte** length in
+Rust; the error renders "title is {n} bytes". The cap is enforced a second time inside
+`Genesis::decode` at `stoa.rs:296`, on the decoded length, also in bytes. So the entry's
+CJK scenario is right: 400 CJK characters is 1200 bytes and is refused, and a view that
+counted characters against a "1024 maximum" would show a title well inside the limit and
+an error it cannot explain.
+
+`dev-writer` should not resolve this. The entry's point is that the *spec* says "length",
+which a view author reads as characters on a JSON string surface — and which count the
+user is up against is observable behaviour, so it belongs in the spec rather than in my
+head. The entry is also right that the fix may belong in `stoa-genesis`, which owns the
+bound, with `stoa-membership`'s two scenarios saying "in bytes" so the ordering
+requirement they exist for is unambiguous. That is a two-spec decision.
+
+The test the entry asks for — a multi-byte title at 1024 bytes and one at 1025 — is
+`tester`'s once the spec says which count it means. I have not added it, because a test
+written before the contract decides would pin whichever answer the implementation
+happens to give, which is the defect this flow exists to catch.
 
 ---
 
-### 6. `spec-writer` — unmarked spec gaps: behaviour these tests pin that no scenario describes
+- [ ] **6. `spec-writer` — unmarked spec gaps: behaviour these tests pin that no scenario describes**
 
 Six `NO SPEC:` markers sit in the Stoa-membership tests and are correctly placed
 (`wire.rs:557`, `633`, `2500`, `2801`, `2822`; `membership.rs:498`, `1372`, `1530`,
@@ -455,11 +561,42 @@ attention:
 
 `wire.rs:2781`, `2740`; `membership.rs:1406`, `1252`, `1287`
 
-**Outcome:**
+**Outcome: OPEN — `spec-writer`'s, and the box stays unticked.** Noted by `dev-writer`,
+with one item of it fixed because it was a code defect as well as a spec gap.
+
+**What I did act on.** The entry's third bullet in the unmarked list — "the
+layout-version refusals — entry 3 above" — is left to `spec-writer` with entry 3. But the
+two `NO SPEC:` markers about `per_page` of zero (`membership.rs:498`, `:1530`) were doing
+something worse than marking a gap: they justified the guard by citing the wire's
+`clamp_per_page`, inverting the layer dependency. That is
+`findings/architecture.md` entry 6, and both comments now argue from the function being
+`pub` instead. **The marker stays** — the gap is real and still the spec-writer's — only
+the false reasoning beside it is gone.
+
+**Everything else stands as written and is not mine.** Each of the five unmarked items is
+observable behaviour the spec does not describe, which my own agent file routes to the
+spec rather than to me: the `stoas.sqlite` file name, a store-level failure being the
+error shape rather than an empty listing, the total listing order, and a corrupt retained
+row being reported rather than skipped. I did not add `NO SPEC:` markers to those tests,
+and that is deliberate — a marker I add to behaviour I did not choose would claim the
+decision was mine, when four of the five predate or fall outside this change's intent.
+The entry naming them with line numbers is the durable record.
+
+Two notes for whoever writes the requirements, both from this change:
+
+- **The `stoas.sqlite` name now has one home.** `membership_path_in` moved into
+  `membership.rs` (`findings/architecture.md` entry 2), so the name is decided in the
+  module that owns the file rather than in `wire.rs`. The *separateness* argument is
+  already in `design.md`; the *name* is still unspecified, as the entry says.
+- **The store-level failure shape is worth a scenario for the reason the entry gives**,
+  and it is now the only guarded label left on that path: `with_membership_store`'s
+  method parameter is gone (`findings/architecture.md` entry 5), so a panic in `open` is
+  reported under a generic label while the reason a store could not be opened still
+  reaches the view in full. `wire.rs`'s test asserting the reason is unchanged.
 
 ---
 
-### 7. `dev-writer` — the branch is behind `origin/main` and merging it reverts three specs' `## Purpose` sections
+- [x] **7. `dev-writer` — the branch is behind `origin/main` and merging it reverts three specs' `## Purpose` sections**
 
 `git diff origin/main -- openspec/specs` shows four-line deletions from
 `openspec/specs/identity/spec.md`, `module-wire-contract/spec.md` and
@@ -498,22 +635,29 @@ the merge carried main's additions in without a conflict.
 `openspec/specs/identity/spec.md`, `module-wire-contract/spec.md` and
 `stoa-metadata/spec.md`.
 
-One thing worth adding to the entry's stakes, stated as what I measured rather
-than as what I was told. `2b9b7f5`'s own commit message says that before it, these
-three specs had no `## Purpose`, so `openspec list --specs` reported all three as
-holding **zero requirements** and `openspec show --type spec --json` **errored** on
-them — the inventory understated three capabilities to zero, identity among them.
-So a Purpose is not decoration for this toolchain; it is what makes a spec
-enumerable. I did **not** independently verify the stronger claim I was handed,
-that `openspec archive` aborts and writes nothing without one — the archive doc
-that would say so (`docs/OPENSPEC-ARCHIVE.md`) is on an unmerged branch and not in
-this tree, and I did not run a destructive archive to find out. What I did verify:
-`openspec validate --specs --strict` from inside this worktree now reports
-**11 passed, 0 failed**.
+One thing worth adding to the entry's stakes, and it makes this worse than a prose
+regression. `2b9b7f5`'s own commit message records that before it, these three
+specs had no `## Purpose`, so `openspec list --specs` reported all three as holding
+**zero requirements** and `openspec show --type spec --json` **errored** on them —
+the inventory understated three capabilities to zero, identity among them.
+
+And `docs/OPENSPEC-ARCHIVE.md`, which arrived on `main` in `6e31bc0` (#49) and is
+now merged into this branch, states it outright: **`archive` aborts and writes
+nothing when the target spec has no `## Purpose`.** `openspec archive` is the last
+stage row on this piece. So merging as-is would not have quietly lost three
+paragraphs — it would have blocked the archive, at the point where the failure is
+least expected.
+
+Sequence worth recording, because I initially declined to assert that last
+sentence: when I first wrote this outcome the archive doc was on an unmerged branch
+and not in this tree, so the claim was unverifiable here and I said so rather than
+repeating it. It is now verifiable and verified, in the file that asserts it.
+Separately measured: `openspec validate --specs --strict` from inside this worktree
+reports **11 passed, 0 failed**.
 
 ---
 
-### 8. `spec-writer` — `docs/PLAN.md` §4.8 Phase 1 still says an address alone is enough to join, which is the claim this spec exists to correct
+- [ ] **8. `spec-writer` — `docs/PLAN.md` §4.8 Phase 1 still says an address alone is enough to join, which is the claim this spec exists to correct**
 
 Checked against `docs/PLAN.md` on `origin/main` (and the branch's copy, which is
 unchanged in this section).
@@ -550,7 +694,36 @@ Two smaller staleness items in the same family:
 A strikethrough plus "answered: see the `stoa-membership` capability" is the shape
 the flow README asks for, so the question's history stays legible.
 
-**Outcome:**
+**Outcome: OPEN — `spec-writer`'s, and the box stays unticked.** Noted by `dev-writer`
+after re-reading every cited line, because this repo has twice shipped a citation that
+was persuasive and unread.
+
+**All four citations verified present, at the lines given**, in this worktree after
+merging `origin/main` twice:
+
+- `PLAN.md:643-644` — *"A Stoa address is a copyable string. Importing one is how you
+  join a Stoa nobody told the app about"*
+- `PLAN.md:648-649` — *"an address must be **self-authenticating** — pasting it is
+  enough to verify what you joined"*
+- `PLAN.md:3704` — MVP item 7, *"Join a Stoa by address"*
+- `PLAN.md:3733` — *"joining by address, §4.8 Phase 1"*
+
+And the entry's reading of the second one is the subtle part, so it is worth restating
+as confirmation rather than paraphrase: an address is sufficient to **verify** a record
+someone hands over and insufficient to **reconstruct** one, so "pasting it is enough"
+is true of verification and false of joining. That is exactly the distinction the spec's
+"**An address alone is not joinable**" makes.
+
+Not mine to fix: `docs/PLAN.md` is `spec-writer`'s input document, read from
+`origin/main`, and the entry is right that the shedding this change already did (§5.5,
+the Stage D API block, §9.1) is the model — strikethrough plus a pointer at the
+capability, so the question's history stays legible. Editing PLAN.md prose from a code
+fix is how two copies of a rationale come to disagree with nobody able to tell which is
+stale.
+
+The entry's own assessment that the shedding was *"thorough and well done"* matches what
+I found; what survives is in the sections §5.5 **defers to**, which is why a reader
+following the citation chain still lands on the retracted claim.
 
 ---
 

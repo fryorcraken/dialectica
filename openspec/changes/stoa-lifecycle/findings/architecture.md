@@ -16,7 +16,7 @@ split.
 
 ---
 
-## 1. Which key the creator is, is decided in the one file no test can compile — for `dev-writer`
+- [x] **1. Which key the creator is, is decided in the one file no test can compile — for `dev-writer`**
 
 `design.md`'s longest Decision ("Which key the creator is: the root identity, used
 directly") settles a question that had already shipped wrong once: creation named
@@ -103,7 +103,7 @@ one derivation"* — including what the grep cannot see, which is correctness.
 
 ---
 
-## 2. Three storage-path conventions in three different modules — for `dev-writer`
+- [x] **2. Three storage-path conventions in three different modules — for `dev-writer`**
 
 `CLAUDE.md`: *"When you find yourself writing the fourth slightly-different copy of
 a guard, that is the signal to reshape rather than to add a fourth test."* This
@@ -136,11 +136,36 @@ records the wrong one.
 
 `wire.rs:802`, against `keystore.rs:381` and `dialectica/rust-lib/src/lib.rs:362`
 
-**Outcome:**
+**Outcome: FIXED for this change's own copy; the third convention is recorded rather
+than unified.**
+
+`membership_path_in` moved to `membership.rs` — the module that owns the file, and the
+one the analogue it cites would put it in. `wire.rs` re-exports it, so the adapter
+still reaches `core::membership_path_in` and no caller changed. The entry's sharpest
+line is the one that settled it: *"its own docstring says it follows
+`keystore::default_path_in` … and then does not"*, and *"a file name on disk is not
+wire contract"*. Both are right.
+
+Two of three conventions now agree: the store that owns a file names it
+(`keystore::default_path_in` → `identity.key`, `membership::membership_path_in` →
+`stoas.sqlite`).
+
+**The third is left as it is, deliberately.** `dir.join("ops.sqlite")` is inline in
+the adapter and the op log module names no file at all — the entry's grep confirms it
+— so unifying it means adding a function to `log/` and changing a call site in
+`cfg(logos_scaffold)` code, for a module this change otherwise does not touch. That
+is a change to the op log, not to Stoa lifecycle. What this change owes the next
+author is the convention to follow, and it now exists in two places with the rule
+stated: the naming belongs with the thing named. Recorded in `design.md` beside the
+file decision.
+
+So the entry's specific worry — *"adding a fourth store … there is no convention to
+follow, so the author picks a fourth home"* — is answered: there is now a convention,
+followed twice, with the one exception named.
 
 ---
 
-## 3. `list`'s two boundary guards return the same value twice, and the asymmetry the brief asks about is coherent but undocumented at one of the two sites — for `dev-writer`
+- [x] **3. `list`'s two boundary guards return the same value twice, and the asymmetry the brief asks about is coherent but undocumented at one of the two sites — for `dev-writer`**
 
 The brief asks whether the `per_page`-saturates / `page`-refuses split is one
 boundary or two rules. **It is one boundary, and the reasoning is sound** — see
@@ -186,11 +211,41 @@ bullet of `design.md`'s `list` decision claims it already did.
 
 `membership.rs:501-507`, `membership.rs:521`, `membership.rs:549-558`
 
-**Outcome:**
+**Outcome: FIXED, both halves, in the shape the entry names.**
+
+**The duplicated literal.** `MembershipPage::empty_last_page(page)` is the named
+constructor, and both early returns call it. The entry's argument for why this is a
+defect and not tidiness is the one recorded in its doc-comment: this is the function
+whose two live bugs were *exactly* a `page` and a `has_more` computed in two places
+that disagreed, and the two returns left that hazard standing with the compiler
+unable to say so.
+
+**Measured, and the result is better than "still covered".** The entry's own
+verification was that mutating *either* literal fails a different test, so both were
+covered and the defect was independent mutability. Now there is one thing to mutate:
+setting `has_more: true` in `empty_last_page` fails **both**
+`a_per_page_of_zero_terminates_rather_than_paging_forever` and
+`a_page_index_too_large_to_offset_answers_empty_rather_than_the_first_page` — one
+mutation, two failures, which is what "the function means them to be one fact" looks
+like from the test side. The constructor's doc records which half is load-bearing
+(`has_more: false`, or a caller paging to exhaustion never terminates) and why `page`
+is reported verbatim rather than clamped.
+
+**The second, smaller item.** The `usize` `offset` no longer shadows the `i64` one:
+it is `row_offset`, and the `i64::try_from` moved up beside its own computation so
+`row_offset` / `limit` / `offset` are three consecutive lines and the `prepare` call
+no longer sits between the two bindings. That is also
+`findings/readability.md` entry 8, answered by the same edit — and it makes
+`design.md`'s `list` decision true, which the entry correctly noted claimed this had
+already been done.
+
+I did **not** unify the `per_page`-saturates / `page`-refuses split, per the entry's
+own Checked-and-clean #1: it is one boundary with sound reasoning, and the entry
+explicitly says it is not asking for that.
 
 ---
 
-## 4. `with_membership_store` hands `&mut` to a read-only handler, erasing which of the three writes — for `dev-writer`
+- [x] **4. `with_membership_store` hands `&mut` to a read-only handler, erasing which of the three writes — for `dev-writer`**
 
 `list_stoas` takes `&crate::membership::MembershipStore` (`wire.rs:727`) — read-only,
 deliberately and correctly. `with_membership_store`'s handler bound is
@@ -226,11 +281,33 @@ finding, offered as one.
 
 `wire.rs:776-787`, against `wire.rs:727`
 
-**Outcome:**
+**Outcome: FIXED** — two functions, which is the first of the two options the entry
+offers. `with_membership_store` keeps `FnOnce(&mut MembershipStore)` for
+`create_stoa` and `join_stoa`; `with_membership_store_read` takes
+`FnOnce(&MembershipStore)` and is how `list_stoas` reaches its store, in the tests
+and in the adapter.
+
+The entry's framing is what made this worth doing now rather than when it bites, and
+it is quoted in the code: the second caller with different needs **has already
+arrived** — it is `list_stoas` — and the seam absorbed the difference by widening
+rather than expressing it.
+
+The doc states what the split does and does not buy, using the entry's own
+measurement: `rusqlite::Connection` is not `Sync` and both halves still open per call,
+so **no concurrency is gained**. What is gained is that the type stops asserting
+something false, and that the change the entry forecasts — letting readers proceed
+while a writer holds the write lock, once `busy_timeout`/WAL matter because the host
+hands the same path to another instance — becomes a change to one function instead of
+to all three adapter arms plus the opener, in `cfg(logos_scaffold)` code no test
+compiles.
+
+`findings/readability.md` entry 2 is the same defect seen as a false comment; one
+change answers both, and the doc there no longer claims all three handlers take
+`&mut`. 550 tests pass, as they must for a reshape that changes no behaviour.
 
 ---
 
-## 5. `with_membership_store` takes a `method` name that is already inside every handler it can be given — for `dev-writer`
+- [x] **5. `with_membership_store` takes a `method` name that is already inside every handler it can be given — for `dev-writer`**
 
 `with_membership_store(method, path, handler)` calls `guarded(method, …)`
 (`wire.rs:781`). Each of the three handlers it is given *also* calls `guarded` with
@@ -259,11 +336,32 @@ defect.
 
 `wire.rs:776-787`, `wire.rs:611`, `wire.rs:681`, `wire.rs:728`
 
-**Outcome:**
+**Outcome: FIXED**, taking the **second** of the two shapes the entry offers: the
+outer `method` is gone and the inner guards keep the names. Both halves of the
+parameter's defect go with it — there is nothing left for a caller to re-state, so
+nothing left to re-state wrongly, and the five hand-written pairs (two in tests, three
+in the adapter) are five fewer things to keep in step.
+
+**Why not the other option** — dropping the inner guards so the outer one covers the
+body. That would have moved the method name *out* of the report for every panic, not
+just for a panic in `open`: the handlers' own `guarded("create_stoa", …)` is what makes
+`{"error":"panic in create_stoa: …"}` name the method a view called, and
+`guard_names_the_method_that_panicked` pins that. Keeping the inner guards and dropping
+the outer parameter loses nothing a caller can observe.
+
+The outer guard **stays**, with a generic label. The entry's own observation is what
+makes that honest rather than a fudge: the outer frame is reachable *only* by a panic
+in `MembershipStore::open`, because the inner guard catches everything else and returns
+a `String`. So `"opening the Stoa membership store"` is accurate for everything it can
+ever catch, and the doc says exactly that.
+
+I also kept the guard wrapping the open, which the entry notes the docstring already
+argued for and which is not in dispute: a panic while opening a store aborts the module
+process like any other.
 
 ---
 
-## 6. `membership.rs` cites the wire's `clamp_per_page` to justify its own unreachability — for `dev-writer`
+- [x] **6. `membership.rs` cites the wire's `clamp_per_page` to justify its own unreachability — for `dev-writer`**
 
 `membership.rs:498-500`, inside the storage module:
 
@@ -296,11 +394,32 @@ tell which constraint is real. No measurement — a documentation-shape finding.
 
 `membership.rs:498-500`, `membership.rs:1530-1533`, `wire.rs:759`
 
-**Outcome:**
+**Outcome: FIXED**, all three sites, and it was a comment edit rather than a code edit
+exactly as the entry says.
+
+Both `membership.rs` copies now argue from the function being `pub`: *"the guard is
+UNCONDITIONAL because this function is `pub` on a `pub mod`, and that is the whole
+reason."* The wire citation is dropped, and each says why — a storage module whose
+correctness argument rests on a caller one layer up invites someone to delete the guard
+when that caller changes. The specific edit the entry names is spelled out at the first
+site: raising `MAX_PER_PAGE` or letting `clamp_per_page(Some(0))` pass zero through is a
+change in `feed.rs`, and it must not be able to make this function wrong.
+
+The entry is also right that `design.md` already had the honest version, so this was a
+comment contradicting the design document it should have been quoting.
+
+**The `wire.rs:759` half — the "three named permitted callers" docstring — is fixed as
+a side effect and worth noting as such.** That whole paragraph was rewritten for
+`findings/architecture.md` entries 4 and 5 (the seam split and the dropped `method`
+parameter), so the sentence the entry objects to — a `pub` generic function with three
+named permitted callers, where *"a reader cannot tell which constraint is real"* — no
+longer exists. The replacement says which handler reaches which of the two functions
+and why there are two, which is a constraint a reader can check against the
+signatures.
 
 ---
 
-## 7. What the two-file seam forecloses that `design.md` does not record: the two stores can disagree and nothing can detect it — for `spec-writer`
+- [ ] **7. What the two-file seam forecloses that `design.md` does not record: the two stores can disagree and nothing can detect it — for `spec-writer`**
 
 `design.md` records one foreclosure — no transaction spans membership and ops, so a
 future atomic "join and backfill" is unavailable — and argues the recovery asymmetry
@@ -337,7 +456,33 @@ already makes at its own retention requirement (`spec.md:165`).
 `design.md`'s "What two files foreclose" paragraph; `membership.rs:640`;
 `dialectica/rust-lib/src/lib.rs:384-385`
 
-**Outcome:**
+**Outcome: OPEN — this is `spec-writer`'s, and the box stays unticked.** Noted by
+`dev-writer` so it is not read as forgotten, and because the entry's reasoning for the
+routing is right and I am not going to work around it: nothing in the
+`stoa-membership` spec asks for this check, and adding one would widen the surface
+without a requirement.
+
+**I verified the failure scenario rather than taking it on trust, and it holds.**
+`decode_row` checks record-against-address and is unaffected by a changed root
+secret, so `MembershipStore::get` still verifies and `list_stoas` still answers
+truthfully — while `Moderators::of(genesis).contains(identity_public_key())` becomes
+false. Nothing in this capability compares the retained creator against the current
+identity, so there is no call that could report it.
+
+**What I did do, which is short of the contract answer the entry asks for.** The state
+is now recorded in `design.md` under Risks / Trade-offs as a reachable, undetectable
+one, with the scenario and the reason no check exists. That is a note, not a
+requirement — the question *"is a Stoa created under a key the peer no longer holds a
+state the module must be able to report?"* is still unanswered, and answering it is
+the spec's job.
+
+One thing worth adding for whoever picks it up: this is **adjacent to but distinct
+from** `findings/security.md` entry 3 and this file's own entry 1. Those were about two
+derivations of the *current* identity disagreeing with each other, which is now
+impossible by construction (`keystore::creator_and_poster_in`). This one is about the
+current identity disagreeing with a *record written in the past*, which no amount of
+one-derivation-position fixes — the record is immutable and the key can change under
+it. The reshape does not touch this finding, and it should not be assumed to.
 
 ---
 
