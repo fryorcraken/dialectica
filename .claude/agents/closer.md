@@ -288,3 +288,11 @@ the PR number and its merge commit, the run you watched, the archive commit,
 and — where you stopped — the file or the log line that stopped you, by path,
 not paraphrased. A summary of a failure arrives without the evidence that
 backed it, and the runner has to go and read it anyway.
+
+**Then return. Do not wait for what you reported to be fixed.** A red run or an
+unticked box ends your turn: the fix is a dispatch you do not make, and it lands
+on the branch as commits you would have to re-check from Step 1 anyway. A closer
+that reports and then keeps waiting is a stalled agent that looks like a working
+one — it holds a row in `ListAgents`, which is the runner's evidence that the
+piece is being worked, so the piece stops rather than moving on. The runner
+dispatches a fresh `closer` when the fix has landed.
