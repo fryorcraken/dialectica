@@ -84,9 +84,16 @@ ScreenFrame {
     property var recoveryNeedsTheRecord: undefined
 
     // NO SPEC: the spec does not say whether this screen opens its own
-    // who-am-I call. It does not: the launch decision is Main's, taken before
-    // this screen exists, and the opening state's one action that reaches the
-    // module is the slate request. Nothing here runs on completion.
+    // who-am-I call. It does not. Nothing routes to this screen except a user
+    // who has already decided to acquire an identity, so asking who they are
+    // on arrival would answer a question its own presence has settled — the
+    // opening state's one action that reaches the module is the slate request,
+    // and nothing here runs on completion.
+    //
+    // `recoveryNeedsTheRecord` is the one fact this screen shows that only a
+    // who-am-I reply carries, and it is set from outside rather than fetched
+    // here: whoever navigated here owns the module conversation, which is the
+    // same division that makes `identityKept()` carry no identity.
 
     // ---- asking for candidates ------------------------------------------
     //

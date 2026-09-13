@@ -229,9 +229,17 @@ QtObject {
     //
     // A DIFFERENT question from `getCapabilities`, and the two can honestly
     // disagree: a stored identity whose keystore permissions are too open is a
-    // real identity that cannot currently be used. This is the one that decides
-    // whether onboarding is shown, because it is the one that can tell an
-    // absent identity from an unusable one.
+    // real identity that cannot currently be used. This is the one that can
+    // tell an absent identity from an unusable one.
+    //
+    // **It is also the only reply carrying `recoveryNeedsTheRecord`** — the
+    // keep reply does not have the field (see `Whoami::Identity` in
+    // `wire.rs`). That matters because the view may not claim a saved master
+    // key is a complete backup while the record of which candidate was kept
+    // lives only on this machine, and this call is the sole route by which
+    // that fact can reach a screen: the view has no filesystem access, so a
+    // screen that did not ask would be guessing about a secret on the
+    // user's disk.
     function whoAmI(stoa) {
         return root.call("who_am_i", [JSON.stringify({ stoa: stoa })])
     }
