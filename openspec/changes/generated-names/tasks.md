@@ -3,14 +3,18 @@
 ## Stages
 
 - [x] spec — `spec-writer`
-- [ ] design + code — `dev-writer` — **BLOCKED on an owner decision, and the
-      block is the list sizes again.** The derivation, the module wiring and the
-      screen fix are landed and the branch compiles down to four missing
-      wordlists. Removing the single-word screen was right but did not reach
-      1,024: a second census, written with multi-word entries accepted
-      throughout, counts **833 places and 551 nouns**. See "The screen was a
-      defect, and removing it did not reach 1,024" in `design.md` for the method
-      and the re-runnable counts.
+- [ ] design + code — `dev-writer` — **Unblocked on the owner decision; the
+      remaining work is curation.** The sizes are settled at 8,192 / 1,024 /
+      1,024 and are not reopening. What moved is the *source*, not the arithmetic:
+      the noun slot is now any attested ancient Greek noun across four pools —
+      mythological figures and ordinary concrete nouns included — where the census
+      that counted 551 was written against a noun slot read as the vocabulary of
+      Greek thought alone. That census does not measure the current scope and is
+      not evidence about it. Every exclusion is withdrawn, which removes the
+      screening that dominated the estimate. Four wordlists remain unwritten and
+      **must be built from sources rather than recall**: the spec's attestation
+      screen is the one requirement no test can check, so a fabricated entry ships
+      silently.
 - [ ] tests — `tester`
 - [ ] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
@@ -23,23 +27,26 @@
 
 ## Implementation
 
-> **The Greek lists were counted, and both fall short of 1,024.** The screen
-> removal was right — a single-word rule is the third screen the spec forbids,
-> and multi-word entries are accepted now — but it recovers about 5% where 33%
-> and 46% are needed. Counted, deduplicated: **833 places, 551 nouns**. Method
-> and the re-runnable commands are in `design.md`.
+> **The sizes are settled at 8,192 / 1,024 / 1,024 and the options in `design.md`
+> are closed.** The owner has ruled; the powers of two are load-bearing for the
+> modulo argument and are not reopening.
 >
-> **Tasks 2.1, 2.2, 2.3, 3.1 and 4.1 are therefore not startable as written**,
-> and neither is anything downstream of them, because every remaining task needs
-> a list to index into. They stay unticked rather than being satisfied by a
-> padded list: near-duplicate transliterations, Latinised doublets and invented
-> toponyms are each a defect the spec names, and **a fabricated Greek toponym is
-> invisible to a reviewer and uncatchable by any test** — which is why this is
-> reported rather than absorbed.
+> **The earlier censuses do not measure the current scope.** Both were written
+> against a noun slot read as "the vocabulary of Greek thought plus named
+> thinkers", which is a narrow technical vocabulary. The slot is now **any
+> attested ancient Greek noun**, and the two pools that were absent entirely —
+> mythological figures and ordinary concrete nouns — are the larger half. A count
+> taken under the old scope is not evidence about the new one, in either
+> direction. The place census (`tmp/places-census/`, 1,070 deduplicated) is under
+> unchanged scope and does still apply, with the caveat its own author recorded:
+> about 850 entries they stand behind and about 220 they would cut first, so 1,024
+> clears only by keeping soft material.
 >
-> **The adjective list was deliberately not written.** Option 2 in `design.md`
-> would take it from 8,192 to 32,768 to restore 2³³ with the Greek lists at 512;
-> writing 8,192 entries against a size that may quadruple is work done twice.
+> **What every remaining list task must not do is pad.** Near-duplicate
+> transliterations, Latinised doublets and invented toponyms each fail the spec's
+> attestation screen, and **a fabricated Greek word is invisible to a reviewer and
+> uncatchable by any test** — it is the one requirement the suite structurally
+> cannot fail on. Build the lists from sources, not from recall.
 
 ## 1. The derivation
 
@@ -59,8 +66,11 @@
 
 - [ ] 2.1 Add `names/adjectives.rs` — exactly 8,192 entries; verify the length
       assertion and the ASCII/lowercase/well-formed/no-duplicate sweep
-- [ ] 2.2 Add `names/nouns.rs` — exactly 1,024 Greek entries; verify the same sweep
-      plus that no project-vocabulary term and no excluded figure appears
+- [ ] 2.2 Add `names/nouns.rs` — exactly 1,024 entries, any attested ancient Greek
+      noun across the four pools; verify the same sweep plus that no entry contains
+      the connector surrounded by spaces. **No exclusion check**: there is no
+      project-vocabulary list and no excluded figure, so `stoa`, `platon` and
+      `sokrates` are all admissible and a test asserting otherwise is wrong
 - [ ] 2.3 Add `names/places.rs` — exactly 1,024 Greek places; verify the same sweep,
       and that a multi-word entry is accepted rather than rejected
 - [ ] 2.4 Verify every index of each list is reachable and reduction is uniform, by

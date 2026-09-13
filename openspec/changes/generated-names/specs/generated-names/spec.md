@@ -1,6 +1,6 @@
 ## Purpose
 
-Defines how a readable display name is derived from an identity's public key: what the derivation takes and guarantees, what the wordlists must contain and may not, where a name must be returned, what a name may never be used for, and how the name, the mark and the abbreviated address stay independent channels — so that every peer renders one identity identically, and so that a name is never mistaken for the thing that settles who published something.
+Defines how a readable display name is derived from an identity's public key: what the derivation takes and guarantees, which three mechanical screens the wordlists are held to and that nothing else decides what is in them, where a name must be returned, what a name may never be used for, and how the name, the mark and the abbreviated address stay independent channels — so that every peer renders one identity identically, and so that a name is never mistaken for the thing that settles who published something.
 
 ## ADDED Requirements
 
@@ -247,6 +247,7 @@ is droppable precisely because it is the only part that is not derived.
   its input bytes
 - **THEN** every index of the adjective list is produced
 - **AND** every index of the noun list is produced
+- **AND** every index of the place list is produced
 
 #### Scenario: Reduction into a list is uniform
 
@@ -291,13 +292,13 @@ failure paths no test covers.
 - **WHEN** for each slot in turn, the bytes that slot draws from are varied across
   their full range while every other byte is held fixed
 - **THEN** that slot's word takes every value its list holds
-- **AND** the other three slots' words do not change, so no byte feeds two slots
+- **AND** the other two slots' words do not change, so no byte feeds two slots
 
 #### Scenario: Changing a byte one slot reads changes only that slot
 
 - **WHEN** two digests differ only in a byte that one slot reads
 - **THEN** the names derived from them differ in that slot's word
-- **AND** agree in the other three slots
+- **AND** agree in the other two slots
 
 #### Scenario: The derivation reads no byte past its bound
 
@@ -317,46 +318,56 @@ loud failure are unreachable in a test and so are claims nothing can check.
 
 ### Requirement: A refused combination redraws all three slots, deterministically
 
-The scheme SHALL carry a denylist of refused word combinations, and a derivation
+The scheme SHALL carry a denylist of refused noun–place pairs, and a derivation
 landing on one SHALL redraw **all three** slots from the reserved bytes rather
 than redrawing only the offending slot.
 
-Vetting single words is insufficient because the generated *combination* is what
-ships: two individually innocuous words can compose into a slur, an insult aimed
-at a real group, or a claim about the person carrying the name. A pooled noun
-list of thinkers and abstractions is more exposed than a list of one kind,
-because a proper name beside an abstract noun can compose into a reading neither
-word carries alone.
+**The denylist SHALL hold every noun–place pair that spells a real figure's
+canonical name, and nothing else.** The *X of Y* shape can produce exactly how a
+historical figure is conventionally cited — *straton of lampsacus* is how Straton
+of Lampsacus is actually referred to — so a user drawing that pair has every post
+signed with a real person's full canonical identifier.
 
-**The denylist SHALL include every noun–place pair that spells a real figure's
-canonical name**, and this family is mandatory rather than discretionary. The
-*X of Y* shape can produce exactly how a historical figure is conventionally
-cited — *straton of lampsacus* is how Straton of Lampsacus is actually referred
-to — so a user drawing that pair has every post signed with a real person's full
-canonical identifier. This is a structural property of the shape rather than the
-separate exclusion of a handful of figures whose invocation is itself an
-argument.
+**This is not a screen on meaning and it is not an exclusion**, which is the
+distinction the previous requirement turns on. No entry is kept out of any list
+for what it says, what it connotes or whom it names; both halves of a refused pair
+stay in their lists and draw freely elsewhere. What is refused is a *composition*
+that states a falsehood about who is posting — an attribution rather than a tone —
+and it is refused because the pair is enumerable by lookup rather than judged
+word by word. Widening the noun slot to any attested noun enlarges this family
+along with everything else, since every named historical Greek entering the list
+brings its canonical places with it.
 
-The arithmetic is what makes it a requirement. Of the 1,024 nouns roughly 800 are
-named Greeks rather than abstractions, each with about 1.2 canonically associated
-places, giving about 960 forbidden pairs. Against `1024 x 1024` = 1,048,576
-possible noun–place combinations that is about 0.092% of draws, so roughly 4.6
-identities in every 5,000 would otherwise carry a real figure's name. That is a
-handful per Stoa arriving steadily, not a corner case.
+The arithmetic is what makes it a requirement rather than a nicety, and it is
+stated as an order of magnitude because the figure follows from the list contents
+rather than fixing them. Taking a few hundred of the 1,024 nouns to be named
+historical Greeks, each with on the order of one canonically associated place —
+usually a birthplace, sometimes a second where they taught — the family runs to
+hundreds of pairs. Against `1024 x 1024` = 1,048,576 possible noun–place
+combinations that is on the order of a tenth of a percent of draws, so a handful
+of identities in every few thousand would otherwise carry a real figure's name.
+That is a steady arrival rather than a corner case.
+
+**The denylist's size is not a requirement and SHALL NOT be pinned**, because it
+is a consequence of how many named Greeks the noun list happens to hold. What is
+required is that the family be complete for the list as shipped.
 
 **Only the pair is refused, never the words.** The adjective is irrelevant to
 this family, and both halves stay in their lists — so *straton of abdera* and
-*measured aporia of lampsacus* both draw normally. A word-level exclusion would
-cost two entries per figure and buy nothing.
+*measured aporia of lampsacus* both draw normally. Removing either word would
+cost two entries per figure, buy nothing, and be exactly the exclusion the
+previous requirement forbids.
 
 Redrawing the whole name is what keeps termination arithmetic. A refused pair is
 refused for the combination, so changing one half can land on a second refused
 pair and the loop's termination becomes a property of the denylist's shape rather
 than of the byte budget.
 
-One redraw is sufficient rather than merely convenient: a first draw is refused
-about once in 1,090, so a second consecutive refusal — which is what exhausts the
-reserve — arrives about once in 1.2 million identities.
+One redraw is sufficient rather than merely convenient. At a refusal rate on the
+order of a tenth of a percent, a second consecutive refusal — which is what
+exhausts the reserve — is the square of that, arriving about once per million
+identities. The reserve does not need to grow, and this holds across any denylist
+of that order rather than depending on its exact size.
 
 The redraw SHALL be a function of the digest alone, so that every peer skips
 identically. A redraw introducing fresh randomness or a nonce would break the
@@ -459,29 +470,32 @@ path is pinned and not only the common one.
   joining a different number of words, a different order, or a different
   connector fails to match it
 
-### Requirement: Two screens apply to every list, and no others
+### Requirement: Three screens apply to every list, and no others
 
-Every entry of every list SHALL be ASCII and lowercase; and each list SHALL hold
-one entry per word, per person and per place.
+Every entry of every list SHALL be ASCII and lowercase; each list SHALL hold one
+entry per word, per person and per place, with one spelling per entry; and every
+entry SHALL be a real word, person or place rather than an invented one.
+
+Those three — **ASCII-transliterable, deduplicated and attested** — are the only
+screens that apply to a list, and all three are mechanical: **none asks what a
+word means, what register it carries, or what it says about the person carrying
+it.** There SHALL be no pronounceability screen, no length screen, no familiarity
+screen, no register screen, no tone screen, and no list of excluded words of any
+kind. **If a word is being kept out for any reason other than those three, that
+is the mistake rather than the word.** Every successive draft of this contract
+that added a fourth filter was withdrawn on challenge — familiarity, which cut
+the place list by 28%; a rebadged "legibility", which cut it by 88%; a
+single-word rule, which made 1,024 places look unreachable; and a tone-and-
+authority apparatus. The long tail is deliberately in, and the consequence is
+accepted rather than argued away — some names will be legible but hard to tell
+apart.
 
 **An entry MAY contain an internal space**, because a Greek place is often named
-in two words — `alexandria troas`, `heraclea pontica` — and no screen excludes
-them. A single-word rule is exactly the third screen this requirement forbids,
-and it is the costly one: an earlier draft of this spec imposed it, and a census
-written against that draft put the place list's honest yield at 620–780 rather
-than 1,024, because multi-word toponyms and parenthetically disambiguated ones
-were being discarded by a rule the design never stated. The 1,024 is reachable;
-the screen was the defect.
-
-Those two — **ASCII-transliterable and deduplicated** — are the only screens that
-apply to a list. There SHALL be no pronounceability screen, no length screen, no
-familiarity screen and no register screen. **If a word is being excluded for any
-reason other than those two and the exclusions below, that is the mistake rather
-than the word.** Two earlier drafts imposed a third filter and both were
-withdrawn: familiarity, which cut the place list by 28%, and a rebadged
-"legibility", which cut it by 88%. The long tail is deliberately in, and the
-consequence is accepted rather than argued away — some names will be legible but
-hard to tell apart.
+in two words — `alexandria troas`, `heraclea pontica`. A single-word rule is one
+of the screens this requirement forbids, and it is the costly one: an earlier
+draft imposed it, and a census written against that draft put the place list's
+honest yield well below 1,024 because multi-word toponyms were being discarded by
+a rule the design never stated.
 
 ASCII is a bidi decision rather than a typographic preference. These are the one
 piece of rendered text this project fully composes from a fixed list, so keeping
@@ -490,16 +504,38 @@ homoglyph — it removes the attack from this surface rather than mitigating it.
 The obligation to handle bidi in everything a name is rendered *next to* is
 untouched by this and belongs elsewhere.
 
-The sources SHALL be: **any English adjective** for the adjective list; **Greek
-only** for the noun list — the vocabulary of Greek thought plus named thinkers,
-writers, mathematicians, physicians and historians; and **Greek places, real and
-mythological** for the place list. Real and imagined places SHALL NOT be
-distinguished in the list or to a reader; both read as origin, which is the only
-thing the slot does.
+**Attestation carries the whole of the quality bar, and it is the one screen a
+test cannot check.** A fabricated Greek word reads exactly like a real one: no
+reviewer catches it by reading the list, and no assertion over the list's own
+contents can distinguish the two, because the only evidence that would settle it
+is outside the program. The lists SHALL therefore be **built from sources rather
+than from recall**, and that obligation is stated here as a requirement on how
+the lists are produced, checkable by a person against a source and not by a test.
+Stating it without a scenario is deliberate: a scenario here would assert
+something the suite cannot fail on, which is worse than an unchecked requirement
+because it reads as covered.
 
-**The adjective slot does not carry the register and is not screened for it.**
-The register is carried by the *X of Y* shape and the two Greek words in it, so
-`brittle`, `luminous` and `damp` draw alongside `attic` and `measured`.
+The sources SHALL be:
+
+- the **adjective** list: **any English adjective**.
+- the **noun** list: **any attested ancient Greek noun**, drawn from four pools on
+  equal footing — abstractions, named historical Greeks, mythological figures, and
+  ordinary concrete nouns. The last covers objects, animals, plants, materials,
+  crafts, ships, music, measures, body parts, kinship, time and weather.
+- the **place** list: **any ancient Greek or mythological place**.
+
+Real and imagined SHALL NOT be distinguished in either Greek list or to a reader;
+a place reads as an origin and a figure reads as a name, which is all either slot
+does.
+
+**The noun slot is not a technical vocabulary.** Reading it as the vocabulary of
+Greek thought alone is what an earlier draft did, and it is a far narrower pool
+than any attested noun — the mythological and concrete pools were absent from it
+entirely and are the larger half of what the slot now draws on.
+
+**No slot is screened for register**, the adjective slot included. The register is
+carried by the *X of Y* shape and the two Greek words in it, so `brittle`,
+`luminous` and `damp` draw alongside `attic` and `measured`.
 
 #### Scenario: Every entry is ASCII and lowercase
 
@@ -511,7 +547,7 @@ The register is carried by the *X of Y* shape and the two Greek words in it, so
 #### Scenario: A multi-word place entry is accepted
 
 - **WHEN** the place list holds an entry naming a two-word toponym
-- **THEN** it is accepted, because ASCII and deduplication are the only screens
+- **THEN** it is accepted, because no screen excludes an internal space
 - **AND** it draws and renders as one place, the connector `of` still preceding it
 
 #### Scenario: No list holds a duplicate
@@ -519,47 +555,44 @@ The register is carried by the *X of Y* shape and the two Greek words in it, so
 - **WHEN** each list is compared against itself
 - **THEN** no entry appears twice in a list
 
-### Requirement: No entry asserts a verdict, an authority, or an argument
+### Requirement: No noun entry contains the connector
 
-**A name may describe a texture, never a verdict.** No entry SHALL assert a
-quality of the person carrying it, in either direction. Excluded by category:
-words that congratulate their bearer; tyranny and violence; disorder read as an
-accusation; pathology and death; anything mapping onto a real group; and the
-sexual and bodily. The system can be blamed for generating a name even where the
-user cannot be blamed for carrying one, and "the hash chose it" is not a defence.
+No entry of the noun list SHALL contain the connector as a separate word — that
+is, no noun entry SHALL contain the substring formed by a space, the connector,
+and a space.
 
-This is a screen on what a word says about its bearer and **not** on how obscure
-it is. An unrecognisable word describes nothing and therefore passes, which is
-what keeps this distinct from the familiarity screen the previous requirement
-retires.
+An entry may still hold an internal space; this constrains what that space may
+sit beside rather than forbidding one, so `alexandria troas` is unaffected.
 
-No entry SHALL assert authority — no word naming a magistrate, an officer or a
-moderator — because a participant handed such a word has been handed apparent
-standing by the wordlist, and a name is never a credential.
+**The constraint is on the noun list only, and that is the whole of what is
+decided here.** The place slot is the last word of the name, so a place carrying
+the connector produces no second *of Y* after it and no ambiguity about which
+place the slot supplied. Whether a place entry may carry the connector is
+therefore left open rather than ruled on, and a list that happens to contain none
+satisfies this requirement as written.
 
-No entry SHALL be a term this project's own vocabulary depends on, because a
-collision is worst in a feed, where every row attributes a post to one of these
-names. No noun entry SHALL be a figure whose mere invocation is a move in a
-debate, because a user rendered under one is signed by them on every post and
-anyone disagreeing is visually disagreeing with them. That exclusion is
-deliberately a handful of the most invoked figures; everything arguable is kept.
+The reason is the *X of Y* shape rather than anything about the words. A noun
+entry carrying the connector renders as *measured zeno of citium of lampsacus*,
+which reads as two places attached to one name and leaves a reader unable to tell
+which of them the place slot supplied. Widening the noun slot to named historical
+Greeks, mythological figures and concrete nouns is what makes this reachable:
+those are exactly the entries a source is liable to supply already qualified by a
+place. The constraint is on the entry's spelling and is therefore checkable
+against the shipped list, unlike the attestation obligation above.
 
-#### Scenario: No entry is a term of this project's own vocabulary
+This is a rule about one literal substring and **not a reintroduction of a
+semantic screen**: what the noun means is still no part of whether it is in.
 
-- **WHEN** every list is searched for the terms this design names as its own
-- **THEN** none of them appears in any list
+#### Scenario: No noun entry carries the connector as a word
 
-#### Scenario: No noun is an excluded figure
+- **WHEN** every entry of the noun list is examined
+- **THEN** none contains the connector surrounded by spaces
 
-- **WHEN** the noun list is searched for the figures excluded as arguments rather
-  than names
-- **THEN** none of them appears in it
+#### Scenario: The noun a name renders carries no connector
 
-#### Scenario: An obscure word is not excluded for being obscure
-
-- **WHEN** the lists are examined against their sources
-- **THEN** entries are present that a general reader would not recognise, so no
-  familiarity screen has been applied
+- **WHEN** names are derived for many distinct public keys
+- **THEN** no name's second word group contains the connector, so no name reads as
+  carrying two places
 
 ### Requirement: A name is returned wherever core returns an author, beside the address
 
@@ -766,8 +799,8 @@ presented as one attributable to somebody.
 Any change to the scheme SHALL mint a new version rather than edit the current
 one. A change SHALL include: removing a word from any of the three lists, adding
 one, reordering a list, changing a list's size, changing the number of slots,
-changing which bytes a slot reads, changing the connector, and changing either
-denylist family.
+changing which bytes a slot reads, changing the connector, and changing the
+denylist.
 
 **Changing a list's size is a scheme change even when it looks like a
 correction.** The sizes are what make the reduction unbiased, so taking the

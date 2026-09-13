@@ -1,4 +1,4 @@
-# A name for a key: four Greek words, derived, and returned beside the address
+# A name for a key: three drawn words, derived, and returned beside the address
 
 ## Why
 
@@ -41,9 +41,13 @@ from it would pre-answer "does the name change under rotation?" by accident.
 
 - **A true-attribution denylist on noun–place pairs.** The *X of Y* shape can
   spell a real figure's canonical name — *straton of lampsacus* — which would sign
-  a user's every post with a real person's identifier. About 960 forbidden pairs,
-  0.092% of draws, roughly 4.6 identities per 5,000. Only the pair is refused;
-  both words stay in their lists.
+  a user's every post with a real person's identifier. On the order of a tenth of
+  a percent of draws — a handful of identities in every few thousand. **This is
+  not an exclusion and not a screen on meaning**: both words stay in their lists
+  and draw freely elsewhere; what is refused is a composition that states a
+  falsehood about who is posting, and it is enumerable by lookup rather than
+  judged word by word. The denylist's exact size follows from how many named
+  Greeks the noun list holds and is deliberately not pinned.
 
 - **The feed row gains a `displayName` beside its `author`.** This is the crux of
   the change. `list_threads` returns an address; the name comes from a key; so
@@ -56,14 +60,27 @@ from it would pre-answer "does the name change under rotation?" by accident.
 - **The false comment in `feed.rs` is corrected**, because a spec that contradicts
   a doc comment loses to the comment for the next reader of the code.
 
-- **Three curated wordlists** — 8,192 English adjectives, 1,024 Greek nouns,
-  1,024 Greek places real and mythological. **Exactly two screens apply**
-  (ASCII-transliterable, deduplicated) plus the tone and authority exclusions;
-  there is no familiarity, register, length or pronounceability screen, both
-  earlier attempts at a third filter having been withdrawn. The lists and the
-  scheme are versioned together and effectively frozen: removing one word
-  reindexes the list and renames every identity that drew at or after it, on
-  updated peers only.
+- **Three curated wordlists** — 8,192 English adjectives, 1,024 ancient Greek
+  nouns, 1,024 Greek places real and mythological. **Exactly three screens apply,
+  all mechanical**: ASCII-transliterable, deduplicated, and attested. **There are
+  no exclusions.** No familiarity, register, length, pronounceability or tone
+  screen, no authority or project-vocabulary list, and no figure kept out for
+  being an argument — every draft that added a fourth filter was withdrawn on
+  challenge. The lists and the scheme are versioned together and effectively
+  frozen: removing one word reindexes the list and renames every identity that
+  drew at or after it, on updated peers only.
+
+- **The noun slot is any attested ancient Greek noun**, across four pools on equal
+  footing: abstractions, named historical Greeks, mythological figures, and
+  ordinary concrete nouns. An earlier reading of the slot as "the vocabulary of
+  Greek thought" was a narrow technical vocabulary; the last two pools were absent
+  from it and are the larger half.
+
+- **No noun entry may carry the connector as a word**, so that no name renders as
+  *measured zeno of citium of lampsacus*. This is a rule about one literal
+  substring, checkable against the shipped list, and it is what the widened noun
+  slot makes reachable: a source supplying named Greeks is liable to supply them
+  already qualified by a place.
 
 - **The three recognition channels must read disjoint inputs**, and one pair
   currently does not. See below — this is the part with a possible `dialectica-ui`
@@ -99,11 +116,14 @@ change first writes a feed capability inherits it rather than restating it.
   `dialectica/rust-lib/dialectica-core/src/`.
 - `wire.rs`'s feed page serialisation gains one field per row; `feed.rs`'s
   `FeedRow` gains one field and loses a false doc comment.
-- **10,240 curated words plus a ~960-entry denylist are the bulk of the work**,
-  and they are curation rather than design. The sources, the two screens and the
-  exclusion rules are fixed; the words are not written. The true-attribution
-  denylist needs a canonical place for each of ~800 named Greeks, which is a
-  lookup per entry rather than a judgement per entry.
+- **10,240 curated words plus the true-attribution denylist are the bulk of the
+  work**, and they are curation rather than design. The sources and the three
+  screens are fixed; the words are not written. **Withdrawing the exclusions made
+  this job smaller rather than larger** — the screening that dominated the
+  estimate, judging tone and connotation across millions of word junctions, is
+  gone. What is left is looking words up: tedious and checkable rather than a
+  judgement per entry. The denylist needs a canonical place for each named Greek
+  in the noun list, which is the same kind of lookup.
 - `docs/PLAN.md` §5.2.1's derivation, byte budget, arithmetic and list sizes
   become spec prose and are struck through there, pointing here.
 - `docs/UI-BRIEF.md` obligation 6's parenthesis says core "must return" the name.
@@ -143,9 +163,17 @@ of them hold. With `S = 2^33 = 8,589,934,592` and
 `49,995,000 / S = 5.81949 x 10^-3` less `1.693 x 10^-5` giving **0.580%**; at
 k=1,000, **0.0058%**; at k=100, **0.0000576%**. The doubling accounting also
 holds: adjective +5, second-adjective-to-place +2, noun +1 is eight doublings,
-and `2^25 x 2^8 = 2^33`. The denylist figures hold too —
-`960 / 1,048,576 = 9.155 x 10^-4`, so `5,000 x 9.155 x 10^-4 = 4.58` identities
-per 5,000, and a second consecutive refusal at `(9.155 x 10^-4)^2 = 8.4 x 10^-7`.
+and `2^25 x 2^8 = 2^33`. **These are unaffected by the widened noun slot**, which
+changes what the 1,024 nouns are and not how many there are.
+
+**The denylist figures are not re-derived here, because their premise is gone.**
+They rested on "roughly 800 of the 1,024 nouns are named Greeks", which followed
+from a noun slot holding only abstractions and thinkers. With four pools the
+proportion is a consequence of curation rather than an input to it, so the spec
+states the family as an order of magnitude — a tenth of a percent of draws — and
+pins no count. The conclusion the figure was used for survives unchanged either
+way: one redraw is enough, because a second consecutive refusal is the square of
+a rate of that order.
 
 **So three words costs twice the collision rate of four (0.145% against 0.073%)
 and buys a word off every feed row.** That is the trade, stated plainly; it is

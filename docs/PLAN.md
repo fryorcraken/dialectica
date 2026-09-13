@@ -1364,16 +1364,18 @@ it is an attested ancient Greek noun; a place is in if it is an ancient Greek or
 mythological place; an adjective is in if it is an English adjective. Nothing
 else decides.
 
-Three screens and only three, all mechanical:
+~~The three screens, and the rule that nothing else keeps a word out.~~ **Now a
+contract — see the `generated-names` spec**, which carries ASCII-transliterable,
+deduplicated and attested as requirements, together with the rule that a word kept
+out for any other reason is the mistake rather than the word. Kept here as a
+pointer only, because the section above and the denylist section below both lean
+on it.
 
-1. **ASCII-transliterable**, per the convention above — a bidi decision, and the
-   reason a Greek word can be absent from these lists at all.
-2. **Deduplicated** — one entry per word, per person, per place, and one spelling
-   per entry.
-3. **Attested** — the word is real. This is the whole of the quality bar now, and
-   it is the one that needs care: **a fabricated Greek word reads exactly like a
-   real one**, so no reviewer can catch it by reading the list and no test can
-   catch it at all. Source the lists; do not recall them.
+What is worth keeping here, because it is a warning rather than a requirement and
+no test can enforce it: **a fabricated Greek word reads exactly like a real one.**
+No reviewer catches it by reading the list, and the suite structurally cannot fail
+on it. Attestation is therefore the one screen that depends entirely on how the
+lists were produced. Source them; do not recall them.
 
 #### The arithmetic, and why the name is three words
 
@@ -1580,23 +1582,32 @@ permitted precisely because it is the only part that is not derived.
 #### The true-attribution denylist, which the three-word shape makes mandatory
 
 **The *X of Y* shape can produce a real historical figure's canonical name.**
-*straton of lampsacus* is how Straton of Lampsacus is actually cited. This is not
-the exclusion for Plato, Aristotle and Socrates above — that one is about a handful
-of names whose invocation is an argument. This is a structural property of the
-shape: pairing a thinker with the place they are conventionally named after signs a
-user's posts with a real person's full canonical identifier.
+*straton of lampsacus* is how Straton of Lampsacus is actually cited. **This is not
+an exclusion and survives the withdrawal of every exclusion**, which is worth
+saying plainly because the two are easily confused: no word is kept out of any
+list, and both `straton` and `lampsacus` draw freely elsewhere. What is refused is
+a *composition* that states a falsehood about who is posting — pairing a thinker
+with the place they are conventionally named after signs a user's posts with a
+real person's full canonical identifier. It is enumerable by lookup rather than
+judged word by word, which is the whole of why it is tractable where a tone screen
+was not.
 
-**The arithmetic, because it decides whether this needs handling.** Of 1,024 nouns,
-roughly **800** are named Greeks rather than abstractions, and each has on average
-about **1.2** canonically associated places — usually one birthplace, sometimes a
-second where they taught or died. So the number of forbidden noun–place pairs is
-about `800 × 1.2 = 960`.
+**The arithmetic, because it decides whether this needs handling — and it is now
+an order of magnitude rather than a count.** ~~Of 1,024 nouns, roughly **800** are
+named Greeks, each with about **1.2** canonically associated places, giving about
+`800 × 1.2 = 960` forbidden pairs and `960 / 1,048,576` = **0.092% of draws.**~~
+**The premise is withdrawn.** That 800 followed from a noun slot holding only
+abstractions and thinkers; with four pools — mythological figures and ordinary
+concrete nouns included — how many named Greeks the list holds is a consequence of
+curation rather than an input to it.
 
-Against `1,024 × 1,024 = 1,048,576` possible noun–place combinations, that is
-`960 / 1,048,576 = 9.155 × 10⁻⁴` — **0.092% of draws.** Per 5,000 identities:
-`5,000 × 9.155 × 10⁻⁴ = 4.58`, so roughly **4.6 identities in every 5,000 would
-otherwise be signed by a real figure's canonical name.** Not a corner case; a
-handful per Stoa, arriving steadily.
+What survives is the shape of the answer, which is all the decision needed.
+Against `1,024 × 1,024 = 1,048,576` possible noun–place combinations, a family of
+a few hundred pairs is **on the order of a tenth of a percent of draws** — a
+handful of identities in every few thousand would otherwise be signed by a real
+figure's canonical name. Not a corner case; a steady arrival. **The denylist's size
+is deliberately not pinned**, in this document or the spec: what is required is
+that the family be complete for the list as shipped.
 
 **So the denylist is a requirement rather than a nicety**, and it costs nothing:
 
@@ -1606,20 +1617,28 @@ handful per Stoa, arriving steadily.
 - **It folds into the existing denylist mechanism unchanged** — a refused draw
   redraws all three slots from the re-derivation reserve at bytes `6..12`,
   deterministically, so every peer skips identically.
-- **0.092% of draws fits the single-redraw reserve comfortably.** A first draw is
-  refused about once in 1,090; a *second* consecutive refusal — which is what
-  exhausts the reserve and forces the loud failure — has probability about
-  `(9.155 × 10⁻⁴)²` ≈ `8.4 × 10⁻⁷`, once in 1.2 million identities, and that is
-  before the combination denylist's own entries are added. The reserve does not need
-  to grow.
+- **A rate of that order fits the single-redraw reserve comfortably**, and this is
+  why the exact size never mattered. A *second* consecutive refusal — which is what
+  exhausts the reserve and forces the loud failure — is the square of the rate, so
+  a tenth of a percent gives about one identity in a million. The reserve does not
+  need to grow, and would not at several times the family's size.
 - **`straton` and `lampsacus` both stay in their lists.** Only the pair is refused,
-  so *straton of abdera* and *measured aporia of lampsacus* both draw normally. A
-  word-level exclusion would cost two entries per figure and buy nothing.
+  so *straton of abdera* and *measured aporia of lampsacus* both draw normally.
+  Removing either word would cost two entries per figure, buy nothing, and be
+  exactly the kind of exclusion the section above withdraws.
 
 **This list has to be written, and writing it is the real work here.** It needs a
-canonical place for each of ~800 named Greeks, which is a lookup per entry rather
-than a judgement per entry — tedious, checkable, and not something the curation of
-the lists themselves produces as a by-product.
+canonical place for each named Greek in the noun list, which is a lookup per entry
+rather than a judgement per entry — tedious, checkable, and not something the
+curation of the lists themselves produces as a by-product.
+
+**One spelling rule falls out of the widened noun slot, and it is in the spec
+rather than here: no noun entry may carry the connector as a word.** A source
+supplying named Greeks is liable to supply them already qualified — `zeno of
+citium` — and such an entry renders as *measured zeno of citium of lampsacus*,
+which reads as two places and leaves a reader unable to tell which one the place
+slot supplied. It is a constraint on one literal substring and **not a semantic
+screen**: what the noun means is still no part of whether it is in.
 
 **So: collisions are rare rather than expected — and the interface rule does
 not change.** A Stoa of five thousand has about a one-in-690 chance of containing a
@@ -1826,31 +1845,25 @@ touches the control being limited.
 
 #### Word-level failure modes
 
-- **Combinations, not just words.** Two individually innocuous words can compose
-  into a slur or an insult aimed at a real group. Vetting single words is
-  insufficient; the generated *combination* is what ships. **Dropping to three
-  words does not make this easier, and the open adjective slot makes it harder.**
-  The four-word scheme had 256² ordered adjective pairs and 512² noun pairs, both
-  already past hand review; this one has `8,192 × 1,024` ≈ **8.4 million**
-  adjective–noun junctions and `1,024 × 1,024` ≈ **1.05 million** noun–place
-  junctions. Fewer slots, a larger product, because the adjective list grew by five
-  doublings. A noun list pooling thinkers and abstractions is also more exposed
-  than a list of one kind, because a proper name beside an abstract noun can
-  compose into a reading neither word carries alone — and the place slot adds the
-  true-attribution family above, which is the one part of this that has a bounded,
-  enumerable denylist rather than a judgement call per pair. So the practical
-  requirement is a denylist applied at generation — a derived name landing on a
-  refused combination **redraws all three slots** from the next six hash bytes,
+- **The only refused combination is the true-attribution family**, and a derived
+  name landing on one **redraws all three slots** from the next six hash bytes,
   deterministically, so every peer skips identically. The byte budget above bounds
   this at one re-draw and requires a loud failure beyond it.
 
-  **Neither list can be hand-reviewed pairwise at these sizes**, and that is worth
-  saying rather than leaving implied: 8.4 million junctions is not an afternoon.
-  What is tractable is the denylist for the named, bounded families — the
-  true-attribution pairs (about 960, enumerable by lookup) and the tone categories
-  applied at word level — plus whatever a pass over the highest-risk word
-  neighbourhoods turns up. **The residual risk is real and is not closed by this
-  paragraph.**
+  **What is not refused is anything to do with what a combination means.** Earlier
+  drafts argued from here that two innocuous words can compose into a reading
+  neither carries alone, and reached for a pairwise tone review. That is withdrawn
+  with every other exclusion — and the arithmetic is the reason it could never have
+  worked as stated: `8,192 × 1,024` ≈ **8.4 million** adjective–noun junctions and
+  `1,024 × 1,024` ≈ **1.05 million** noun–place junctions are not hand-reviewable,
+  so the apparatus was promising a screen nobody could apply. The true-attribution
+  family is tractable precisely because it is the one that is *enumerable by
+  lookup* rather than judged per pair.
+
+  **The residual risk is real, is accepted, and is not closed by this paragraph.**
+  Some generated combinations will read badly. The owner's position is that a
+  meaning screen costs more than it buys and cannot be applied honestly at these
+  sizes, and that is recorded here rather than re-argued.
 - **The lists are versioned and effectively frozen, and a word removal is a
   scheme version bump.** This is the most operationally important line in the
   section, so it is worth spelling out the mechanism rather than asserting the
