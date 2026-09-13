@@ -26,7 +26,7 @@
 - [x] review: architecture — `code-reviewer`
 - [x] review: spec-test — `spec-test-reviewer`
 - [x] review: design — `design-reviewer`
-- [ ] findings all ticked, `findings/` deleted — `closer`
+- [x] findings all ticked, `findings/` deleted — `closer`
 - [ ] CI green, PR merged — `closer`. **Watch `Build LGX` by name, not "CI
       green".** It is the ONLY gate that compiles `dialectica/rust-lib/src/lib.rs`
       — `cargo test` does not compile `cfg(logos_scaffold)` code at all, so a
@@ -35,7 +35,7 @@
       a typo in the last commit to touch the adapter is a compile error no local
       gate and no other CI job can see. See 8.6 for what stands in Build LGX's
       place for the half it cannot check (order of operations, not compilation).
-- [ ] `openspec validate --strict`, then `archive` — `closer`
+- [x] `openspec validate --strict`, then `archive` — `closer`
 
 ## 1. The refactor, which must be green on its own
 

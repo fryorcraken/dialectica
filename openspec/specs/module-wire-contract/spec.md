@@ -51,6 +51,29 @@ serving" is to reach its panic on whatever it is given. A request the probe cann
 refuse is that requirement's obligation rather than a hole in this one, and any
 other method claiming this exception SHALL be one that reads no field either.
 
+**What "the surface" is SHALL be derivable from one declaration**, so that the
+question "does this rule reach every method?" has an answer something can check
+rather than an answer someone re-establishes by reading. Every method reachable by
+a caller SHALL be one this contract's obligations reach, and no method SHALL be on
+the wire without appearing in the declaration the surface is derived from.
+
+**That derivation rests on an upstream behaviour, which is stated here because it
+is a premise rather than a property of this module.** The declaration a module
+author writes also carries plumbing that is not contract surface, and the
+distinction the generator draws between the two is: a method with a **default
+body** is framework plumbing and is not emitted onto the wire, while a method
+without one is. Verified at the pinned generator revision — `lidl-gen`'s Rust
+frontend skips a trait method whose default body is present, and says so in its
+module doc: *"required methods (no default body) are the module's IPC methods.
+Methods WITH default bodies (e.g. the framework's `on_context_ready`) are not part
+of the contract."* Anything checking this contract's coverage of the surface
+SHALL be able to state that assumption and SHALL fail visibly rather than silently
+if a generator that no longer honours it puts a defaulted method on the wire. The
+assumption is recorded with its citation rather than asserted, because the
+generator is a pinned dependency: a version bump is exactly the event that would
+make it false, and a bare assertion of the behaviour would survive that bump
+unchanged while a citation to a revision does not.
+
 The refusal's message SHALL say that the request is not an object, so that it is
 distinguishable from the two refusals it otherwise resembles: a request that is
 not valid JSON at all, and an object that omits a field the method requires.
@@ -143,6 +166,22 @@ particular view, and it is what keeps dependency churn behind a wall.
   JSON array
 - **THEN** every one of them refuses it with the same message
 - **AND** no method is exempted by which fields it happens to require
+
+#### Scenario: The set of methods checked is derived from the surface declaration
+
+- **WHEN** a method is added to the declaration the module's surface is derived
+  from, and the checks this contract's obligations are applied through are not
+  extended to it
+- **THEN** that omission is reported, naming the method
+- **AND** a declaration written in a shape the derivation does not recognise is
+  reported too, rather than passing as though it carried no method
+
+#### Scenario: A method excluded from the surface is one the generator does not emit
+
+- **WHEN** the declaration carries a method with a default body, which the pinned
+  generator does not put on the wire
+- **THEN** this contract's obligations do not reach it, no caller can reach it,
+  and the exclusion is stated with its citation rather than assumed
 
 #### Scenario: The non-object refusal is not the missing-field refusal
 
@@ -395,3 +434,79 @@ is not misread as a failure.
 - **WHEN** a called module answers a boolean question with either a JSON boolean
   or its string spelling
 - **THEN** both are normalised to the same boolean result
+
+### Requirement: A request is bounded, and the bound is checked before the request is parsed
+
+Every method that reads a field of its request SHALL refuse a request larger than
+a single stated limit, and SHALL refuse it **before** the request is parsed. The
+refusal SHALL be the error shape, and its message SHALL say that the request is
+over that limit — distinguishable from the three refusals it otherwise resembles:
+a request that is not valid JSON, a request that is not an object, and an object
+omitting a required field.
+
+**The ordering is the requirement, not an optimisation of it.** Parsing a request
+allocates on the order of twice its length before any check can run, so a limit
+enforced after the parse bounds nothing: the cost the limit exists to refuse has
+already been paid by the time it is consulted. The observable consequence of
+failing to pay it is not an error reply — it is the module process aborting, the
+caller waiting out its call timeout, and every later call to the module reporting
+it as not loaded. That is why this is stated as a contract obligation rather than
+left to an implementation to size.
+
+**It is one limit for the surface, not a limit per method.** A per-method limit is
+a second thing every new handler must declare, and the shape of that is a guard
+whose presence at each call site has to be re-established. The tighter bounds that
+matter are per *field*, and those belong to the field's own capability rather than
+to the envelope.
+
+**The limit's value is not fixed by this contract**, which would put a number in a
+document no gate reads. What this contract fixes is that a limit exists, that it
+is one number, that it is checked first, and that it is bounded from both sides:
+it SHALL admit the largest request this surface can legitimately carry — a
+composed op with its attachments, whose size `op-format`'s field bounds already
+determine — and SHALL be materially below the size at which a request costs the
+module its process. An implementation SHALL record where its number sits between
+those two bounds, so that raising or lowering it is visibly a change to both.
+
+**The limit is what buys the surface's leniency about unknown fields.** This
+contract accepts a request carrying a field no method reads, which is a
+forward-compatibility choice stated elsewhere in this capability. That leniency is
+also what lets an oversized request be *valid*: every byte of the padding sits in
+a field nothing reads. The two decisions are therefore one, and weakening the
+limit weakens the leniency's price rather than only the limit.
+
+#### Scenario: A request over the limit is refused
+
+- **WHEN** a method that reads a field of its request is called with a request
+  larger than the limit
+- **THEN** the reply carries an error saying the request is over the limit
+- **AND** the reply carries no result field
+
+#### Scenario: Every field-reading method on the surface is bounded
+
+- **WHEN** each method that reads a field of its request is called in turn with a
+  request larger than the limit
+- **THEN** every one of them refuses it for its size
+- **AND** no method is exempted by which fields it happens to require
+
+#### Scenario: The bound is checked before the parse
+
+- **WHEN** a method is called with a request that is both over the limit and not
+  valid JSON
+- **THEN** the reply says the request is over the limit, rather than that it
+  failed to parse
+- **AND** the message is therefore the one refusal that could only have been
+  reached without parsing
+
+#### Scenario: A request within the limit is still served
+
+- **WHEN** a method is called with a well-formed request far below the limit
+- **THEN** the reply carries no error, so the bound refuses an oversized request
+  rather than any request
+
+#### Scenario: The limit admits the largest legitimate request
+
+- **WHEN** the limit is compared against the size of a composed op carrying the
+  largest payload `op-format`'s field bounds permit, encoded as a request
+- **THEN** the limit exceeds it, so no request this surface can legitimately
+  carry is refused for its size
