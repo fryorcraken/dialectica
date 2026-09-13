@@ -30,6 +30,7 @@ pub mod op;
 pub mod revision;
 pub mod sanitise;
 pub mod stoa;
+pub mod thread;
 pub mod wire;
 
 // The wire surface is re-exported at the crate root because it IS the module's
@@ -46,7 +47,8 @@ pub use wire::{
     callee_error, channel_exists_reply, create_stoa, error_json, generate_identity_slate,
     get_capabilities, get_capabilities_from_stores, guarded, join_stoa, keep_identity, list_stoas,
     list_threads, list_threads_from_request, membership_path_in, no_identity, panic_probe,
-    parse_channel_id, ping, posting_identity, publish_post, publish_reply, publish_vote, version,
-    who_am_i, with_membership_store, with_membership_store_read, KeepTargets, OnboardingSession,
-    Request, MAX_REQUEST_BYTES, REQUEST_NOT_AN_OBJECT,
+    parse_channel_id, ping, posting_identity, publish_post, publish_reply, publish_vote,
+    read_thread, read_thread_from_request, version, who_am_i, with_membership_store,
+    with_membership_store_read, KeepTargets, OnboardingSession, Request, MAX_REQUEST_BYTES,
+    REQUEST_NOT_AN_OBJECT,
 };
