@@ -3636,10 +3636,10 @@ stage that proves the projection and both resolvers reach a screen.
 
 **Stage A′ — acquire an identity.** ~~Unplaced: the staging below never said
 where onboarding goes.~~ **Built — see the `view-identity-onboarding` spec**,
-which carries the launch branch, the slate states and what the screen must not
-claim. It sits beside Stage A rather than before it, and the reason is the
-dependency direction: a reader needs no key, so A does not need it, while B
-cannot begin without it.
+which carries the slate states, what the screen must not claim, and that an
+identity gates participation rather than launch or browsing. It sits beside
+Stage A rather than before it, and the reason is the dependency direction: a
+reader needs no key, so A does not need it, while B cannot begin without it.
 
 **Stage B — compose.** A compose affordance gated on `getCapabilities()`, a
 reply affordance in a thread, and an edit affordance on the reader's own posts.

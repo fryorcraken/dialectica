@@ -5,9 +5,9 @@
 A fresh install has no identity, and **nothing in the view can get one**.
 `generate_identity_slate`, `keep_identity` and `who_am_i` are built, merged and
 contracted by the `identity-onboarding` capability — and none of the three is
-reachable from QML: `Core.qml` wraps `list_threads` and `get_capabilities` and
-nothing else, so the three methods exist and no code path calls them.
-`Main.qml` says so in a comment: there is no onboarding.
+reachable from QML: before this change `Core.qml` wrapped every core method the
+view used and none of these three, so all three existed and no code path called
+them.
 
 The consequence is not a missing screen, it is a dead product. With no
 identity the capability probe answers `canPost: false` forever, so the feed
@@ -30,9 +30,12 @@ this proposal records the divergence below rather than specifying it.
   a keep that was refused, and a read that failed. The states are mutually
   exclusive, for the reason `FeedScreen` computes one `readState` from one
   variable rather than holding several booleans.
-- **The app branches on launch** between onboarding and the feed, on the answer
-  to who-am-I rather than on any local flag. A view that remembered "we
-  onboarded" would show a feed to a user whose keystore had gone.
+- **The app does not branch on launch**, and an earlier version of this change
+  that made it do so was withdrawn. An identity is what participation inside a
+  Stoa needs; reaching the Stoa list, pasting an address and reading a Stoa all
+  need none. The screen is therefore a destination rather than a gate, and
+  `composer-view`'s already-specified closed gate is what stands between a
+  keyless peer and posting.
 - **A refused keep is an answer, not a failure.** Core replies
   `{"kept":false,"reason":…}` — a success at the wire level — so a view with
   only the `Core.call` error branch would read a refusal as a success and show
@@ -46,8 +49,9 @@ this proposal records the divergence below rather than specifying it.
 ### New Capabilities
 
 - `view-identity-onboarding`: what the QML view shows while a user acquires an
-  identity, what it must never claim about the identity they chose, and how the
-  app decides on launch whether to show onboarding at all.
+  identity, what it must never claim about the identity they chose, and that an
+  identity is what participating in a Stoa needs rather than what launching or
+  browsing needs.
 
 Checked against `openspec list --specs` before naming it. The near-duplicate to
 avoid is `identity-onboarding`, which is the **core** contract — what a slate
@@ -126,8 +130,14 @@ that is not this change.
   `FlatButton`, `MarginNote`, `Theme`). None is restyled or re-implemented;
   `AddressLabel` in particular owns the abbreviation and has a `full` mode,
   which is the mode this screen uses because the user is choosing a key.
-- `dialectica-ui/src/qml/Main.qml` — the launch branch, and the comment
-  asserting there is no onboarding.
+- `dialectica-ui/src/qml/Main.qml` — **unchanged, and that is the decision.** An
+  earlier version of this change gated the navigator on an identity report. The
+  owner settled the sequencing the other way: identity gates participation
+  inside a Stoa, not launch and not browsing, so the navigator stays as `#63`
+  left it and this change touches the file not at all. What the screen is
+  reached *from* is `composer-view`'s closed-gate affordance, and wiring it is
+  a later change's.
+- `dialectica-ui/src/qml/qmldir` — one entry registering the new screen.
 - `dialectica-ui/tests/` — a new QML test file. The suite runs on every PR.
 - `docs/PLAN.md` §5.2.1 and §9.1 — the view half of onboarding stops reading as
   forthcoming. §9.2's MVP item 1 is not struck: core plus a view is the item,

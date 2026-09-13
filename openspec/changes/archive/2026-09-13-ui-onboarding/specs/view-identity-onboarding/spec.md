@@ -52,56 +52,76 @@ the module to act as somebody it is not.
 - **THEN** no request carries a field naming an address, a public key or a
   derivation path as the identity to act as
 
-### Requirement: The launch branch is the module's answer, never a remembered flag
+### Requirement: An identity is what participation needs, and this screen is where one is made
 
-The view SHALL decide whether to show onboarding or the forum by asking the
-module who the user is, and SHALL make that decision from the reply alone. It
-SHALL NOT decide from any value it stored itself on a previous run.
+An identity SHALL be required before a user posts, replies or votes in a Stoa,
+and SHALL NOT be required to reach the list of Stoas, to look one up by address,
+or to read one. This screen is the view's only route to acquiring one.
 
-A remembered "this user has onboarded" outlives the thing it remembers: a
-keystore that was deleted, moved, or is unreadable leaves the flag set and the
-user looking at a forum they cannot post in, with no path back to the screen
-that would fix it. The module is the only party that can see the store, so it is
-the only party that can answer.
+**Identity gates participation inside a Stoa — not launch, and not browsing.** A
+peer holding no identity reaches their Stoas, pastes an address, and reads what
+is there; what they cannot do is contribute to it. Gating launch instead would
+demand a permanent, unchangeable choice from a user who has not yet seen
+anything to decide it against, and would make a first run impossible to complete
+for a peer whose keystore cannot be read at all.
 
-The reply distinguishes an identity present from an identity absent, and carries
-a reason when absent. **Both absent cases SHALL reach onboarding** — no identity
-stored, and an identity that exists but could not be loaded — because in each
-the user has no usable identity and the screen that offers one is where they
-must arrive. Where the reply is a failure rather than an answer, the view SHALL
-show that failure rather than either branch, because it does not know which
-branch is right.
+**Where that gate is enforced, and the affordance leading out of it, are not
+this capability's.** `composer-view` owns both: it requires the compose, reply
+and vote affordances to be rendered only when the posting probe says posting is
+possible, requires a closed gate to show the probe's reason verbatim, and
+requires an affordance leading to guidance on resolving the blockage. Restating
+any of that here would put two live requirements on one behaviour, which is how
+they come to contradict each other — this capability had a requirement describing
+a launch branch for exactly that reason, and the branch it described was removed
+rather than built.
 
-#### Scenario: An identity reported present shows the forum
+What this capability owns is the screen itself and the one signal by which a
+keep becomes known outside it. When a keep reports that a candidate was kept,
+the screen SHALL announce that fact, and SHALL announce it on no other outcome.
+That signal is the whole of this screen's outward contract: whoever navigated
+here decides what happens next, and the screen SHALL NOT navigate anywhere
+itself. A screen that chose its own successor would have to know which of
+several callers routed to it, which it cannot.
 
-- **WHEN** the identity report says there is an identity
-- **THEN** the view shows the forum rather than onboarding
+**Neither the route into this screen nor the route back out is built, and this
+capability does not yet contract either.** Nothing instantiates the screen today
+— it is a registered type with no caller — so a requirement that it be reachable,
+or that it offer a way out, would describe behaviour no test on this piece could
+discharge. Both belong to whichever change wires the banner's fix affordance to
+this screen, and that change is where **`stoa-navigation-view`'s "Every state a
+user can enter has a specified way out"** applies: arriving somewhere is half a
+transition, and this screen currently has neither half. It is named here rather
+than left silent so the gap reads as scoped rather than as an oversight.
 
-#### Scenario: An identity reported absent shows onboarding
+The screen SHALL take what it reports about stored state from the module's
+replies alone, and SHALL NOT report an identity from any value it stored itself
+on a previous run. A remembered "this user has onboarded" outlives the thing it
+remembers: a keystore that was deleted, moved, or is unreadable leaves the flag
+set while the store it stands for is gone. The module is the only party that can
+see the store, so it is the only party that can answer.
 
-- **WHEN** the identity report says there is none
-- **THEN** the view shows onboarding rather than the forum
+#### Scenario: A kept candidate is announced
 
-#### Scenario: An unloadable identity shows onboarding rather than the forum
+- **WHEN** the keep reply says the candidate was kept
+- **THEN** the screen announces that an identity was kept
 
-- **WHEN** the identity report says there is none, with a reason that names a
-  store it could not read rather than an absent one
-- **THEN** the view shows onboarding
-- **AND** the two absent replies are distinguished by the reason the view holds,
-  so a later screen can tell them apart
+#### Scenario: No other outcome announces one
 
-#### Scenario: A failed report shows the failure rather than guessing a branch
+- **WHEN** a keep is refused, and when the keep call comes back as the failure
+  shape
+- **THEN** neither announces that an identity was kept
 
-- **WHEN** the identity report comes back as the failure shape
-- **THEN** the view shows neither the forum nor a slate
-- **AND** the module's own message is what is shown
+#### Scenario: The screen navigates nowhere of its own accord
 
-#### Scenario: The branch is re-asked rather than remembered
+- **WHEN** a candidate is kept
+- **THEN** the screen remains the screen that is shown
+- **AND** it selects no successor screen itself
 
-- **WHEN** the identity report is asked for, and then asked for again after the
-  stored state has changed from having an identity to having none
-- **THEN** the second answer decides the branch
-- **AND** the first answer does not
+#### Scenario: No stored flag stands in for the module's answer
+
+- **WHEN** the screen reports anything about what is stored
+- **THEN** every such report is taken from a reply received in this run
+- **AND** no value the view persisted across runs decides it
 
 ### Requirement: Onboarding opens with no identity and nothing requested
 
@@ -114,9 +134,11 @@ what is being chosen. The screen's opening job is to say what a key is and that
 it is permanent; the candidates arrive when the user asks for them.
 
 The opening state SHALL offer exactly one action that reaches the module — the
-one that requests a set of candidates. The identity report that decided this
-screen would be shown is not such an action: it precedes the screen and is the
-previous requirement's.
+one that requests a set of candidates — and SHALL make no call of its own on
+arrival. In particular it SHALL NOT ask who the user is when it opens: a user
+reaches this screen because they chose to acquire an identity, so the answer
+would change nothing on screen, and a call whose reply is acted on nowhere is a
+round trip that can fail in a state with no handling for it.
 
 #### Scenario: The opening state has no candidates and made no slate call
 
@@ -495,18 +517,19 @@ generated and nothing kept SHALL leave the view holding no identity.
 
 Generating a set writes nothing, so a set that was abandoned is nothing to
 recover and nothing to clean up. What the view must not do is carry a candidate
-forward as though it were a choice: a candidate that reached the forum screen as
+forward as though it were a choice: a candidate that reached a Stoa's screens as
 "you" would attribute a user's reading, and eventually their posting attempts,
 to a key that exists nowhere.
 
-On returning to a launch decision, the view SHALL ask the module again rather
-than treat a candidate it still holds as an identity.
+Leaving the screen with a candidate still held SHALL announce no identity. The
+signal this screen emits is what a caller would act on, so emitting one for a
+candidate would hand the rest of the view a key the module never stored.
 
 #### Scenario: A generated set is not an identity
 
 - **WHEN** a set of candidates is received and none is kept
 - **THEN** the view holds no identity
-- **AND** the forum is not shown
+- **AND** no identity is announced to anything outside the screen
 
 #### Scenario: A selected candidate is not an identity
 
@@ -515,10 +538,10 @@ than treat a candidate it still holds as an identity.
 
 #### Scenario: Leaving mid-flow leaves nothing behind
 
-- **WHEN** a set is generated, a candidate is selected, and the launch decision
-  is taken again
-- **THEN** the decision is taken from the module's answer
-- **AND** a module reporting no identity shows onboarding rather than the forum
+- **WHEN** a set is generated, a candidate is selected, and the screen is left
+  without a keep
+- **THEN** no identity is announced
+- **AND** the view holds no identity, the selection notwithstanding
 
 ### Requirement: After a keep, the screen reports the protection and the backup gap honestly
 
