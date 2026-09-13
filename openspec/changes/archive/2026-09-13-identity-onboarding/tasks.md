@@ -9,8 +9,8 @@
 - [x] review: architecture — `code-reviewer`
 - [x] review: spec-test — `spec-test-reviewer`
 - [x] review: design — `design-reviewer`
-- [ ] findings all ticked, `findings/` deleted — runner
-- [ ] `openspec validate --strict`, then `archive` — runner
+- [x] findings all ticked, `findings/` deleted — runner
+- [x] `openspec validate --strict`, then `archive` — runner
 
 **Written late, and every row but the runner's was already done when it was
 written** — which is the cost task 7.8 recorded rather than a reason not to write it.
