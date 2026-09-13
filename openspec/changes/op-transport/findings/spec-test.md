@@ -39,7 +39,7 @@ Mutation 4b is the one new measurement that matters, and it is finding 1 below.
 
 ## Findings
 
-- [ ] **`spec-writer`** — the requirement "An oversized payload is refused, and
+- [x] **`spec-writer`** — the requirement "An oversized payload is refused, and
       the limit is the transport's", scenario *"The limit's value is pinned
       against silent drift"* — **untestable as written**, and this is a spec
       defect rather than a coverage gap.
@@ -65,7 +65,39 @@ Mutation 4b is the one new measurement that matters, and it is finding 1 below.
       **Severity: medium** — a green gate asserting an interop property it
       structurally cannot reach.
 
-- [ ] **`spec-writer`** — the requirement "Channel identity is a pure function of
+      **FIXED — `spec-writer`, accepted in full.** The finding is right that a
+      requirement asking for a comparison against a value that does not exist is
+      a spec defect, and the rewrite is the one proposed.
+
+      - The scenario now reads *"the configured maximum is compared against a
+        hardcoded 150 KiB written independently of it / THEN they are equal / AND
+        a local edit to the configured maximum fails this rather than passing
+        quietly"*. That is what the existing test does, so the test now covers a
+        requirement it can fail for the reason the requirement gives.
+      - The requirement carries a new paragraph saying plainly that the pin is
+        what is checkable and agreement with the network is not, and that a
+        scenario claiming the two are compared would be comparing the constant
+        against itself — the finding's own sentence, kept because it is the thing
+        a future reader needs in order not to reinstate the old wording.
+      - A new scope exclusion names the half that is out of reach: *"That the
+        message-size limit contracted below equals what the network validates
+        against"*, with the reason (no transport interface supplies one) and the
+        consequence (a peer over-sending because of a drifted network limit is a
+        failure this capability cannot detect).
+      - **The requirement's title changed** — "and the limit is the transport's"
+        → "against a limit pinned at 150 KiB" — because the old title asserted
+        exactly what the body now denies. This is an `ADDED` delta not yet
+        archived, so the rename costs nothing. **One stale reference remains, and
+        it is not mine to edit:** `design.md:38` still quotes the old title.
+        Left for `dev-writer`.
+
+      What is **not** claimed: that 150 KiB is right. It is the figure the system
+      was designed against, and it stays named in the requirement for the reason
+      the old text gave (a drifted limit still satisfies a scenario probing only
+      absurd sizes). Whether the network still validates at that figure is now an
+      acknowledged gap instead of a false assertion.
+
+- [x] **`spec-writer`** — the requirement "Channel identity is a pure function of
       the Stoa address", scenario *"Identity does not vary with local state"* —
       **not testable as written**, and the requirement's own prose says why while
       the scenario ignores it.
@@ -93,7 +125,56 @@ Mutation 4b is the one new measurement that matters, and it is finding 1 below.
       **Severity: medium** — the requirement whose violation the spec says
       "produces no error" is the one whose named test is weakest.
 
-- [ ] **`spec-writer`** — the requirement "The delivery node is shared and is
+      **FIXED — `spec-writer`, and the mutation is the reason this was taken as a
+      spec defect rather than a coverage gap.** Mutation 4b is the measurement
+      that settles it: a value stable within a peer and different between peers is
+      exactly the silent partition the requirement's justification names, and a
+      single-process test cannot vary it, so a scenario asking a peer to vary "a
+      different peer identity" asks for something no test at this surface can do.
+      Restated as the finding proposes, in three parts:
+
+      - **The scenario is split.** *"Identity does not vary with local state"* is
+        gone. In its place: *"Identity does not vary with the peer's history"* —
+        channels opened and closed, ops stored, time passed between two
+        derivations, which is what the existing test actually witnesses and can
+        fail on; and *"The derivation takes the Stoa address and nothing else"* —
+        the construction half, checked by reading what the derivation accepts.
+      - **The requirement says how it is held**, in a new paragraph that names why
+        the between-peer half is not observable from one peer ("a peer has one of
+        each, and a derivation consulting one would agree with itself every time
+        it was asked") and then discharges it in two stated obligations: by
+        construction (the address is the only input, so there is no parameter such
+        a value could enter through) and by the pinned known answer.
+      - **The pin is named as the guard it turned out to be.** The pinned-answer
+        scenario gains *"AND a derivation that had come to consult a value
+        differing between peers fails it too, since such a value cannot equal the
+        independently derived one"* — which is precisely what mutation 4b
+        demonstrated, now written as a requirement instead of left for a reader to
+        infer from a test failure message that says "the derivation changed".
+
+      Two consistency edits the finding did not ask for but the change forced,
+      because `validate --strict` would not have caught either:
+
+      - The requirement's justification previously ended *"so the property has to
+        hold by construction rather than be checked"*, which contradicted the new
+        paragraph's reliance on a pin that does check it. It now reads *"held
+        before a peer runs rather than reported after — by what the derivation
+        accepts, and by a pin against a value nothing in this implementation
+        produced"*.
+      - The scope exclusion *"That two peers deriving one Stoa's channel identity
+        actually meet"* claimed the pure-function property "is checkable" without
+        qualification. It now says how it is held, and adds that comparing one
+        peer's derivation against another's is itself out of reach — "which is why
+        the requirement below says how it is held instead of asking for a
+        comparison no peer can make".
+
+      **No test change requested here**, and none made:
+      `identity_does_not_vary_with_local_state` already tests the history half
+      honestly, including the comment saying so. What was wrong was the
+      requirement it was answering. Renaming that test to match the new scenario
+      name would be an improvement and is `tester`'s call, not a defect.
+
+- [x] **`spec-writer`** — the requirement "The delivery node is shared and is
       never stopped by this peer" — **three scenarios, no test, and none
       reachable from this capability's surface.**
       `grep -rn "node" transport.rs` returns one comment line.
@@ -113,6 +194,47 @@ Mutation 4b is the one new measurement that matters, and it is finding 1 below.
       reasoning, or state it as an adapter obligation the spec names as untested.
       **Severity: medium** — three scenarios currently read as covered and are
       not.
+
+      **FIXED — `spec-writer`, taking the second of the two options offered.** The
+      finding is right on both halves: the requirement is a real constraint worth
+      stating, and leaving it out of the scope list while the list excludes five
+      other node-dependent properties reads as a claim that it is covered. It is
+      not excluded — it is restated as what it actually is.
+
+      - **Three scenarios became one, and the one names what is read rather than
+        what is run.** *"Shutdown does not stop the node"*, *"Leaving a Stoa does
+        not stop the node"* and *"The node is created once"* are replaced by *"No
+        stop call exists in this application's lifecycle handlers"*: WHEN the
+        handlers run on shutdown and on leaving a Stoa are examined for what they
+        call, THEN neither stops the node, neither creates one, and the shutdown
+        handler closes the channels this peer opened. That is checkable by reading
+        the handlers, which is the only place the call could appear.
+      - **The requirement says why it is stated here and discharged elsewhere**:
+        no part of this capability's surface starts, stops or counts nodes, so the
+        obligation binds the adapter's lifecycle handlers. Stated where the
+        reasoning lives; met where the call would be made.
+      - **It says outright that a peer cannot observe compliance**, and that the
+        obligation is therefore a prohibition on the code rather than on an
+        outcome — including the finding's own scenario as the thing it is
+        admitting: *"A change that adds one satisfies every other requirement in
+        this capability and breaks this one, and nothing in this capability's
+        surface will say so."*
+      - **A scope exclusion was added** — *"Observing that the shared delivery
+        node was left running"* — pointing at the requirement and saying what
+        observing the failure would take (a second module in the same context
+        losing its delivery). That closes the asymmetry the finding identified.
+
+      **Rejected: excluding the requirement outright.** The finding offered that
+      as the first option and it is the wrong one here. A stop call is the kind of
+      thing a later change adds in one line while every gate stays green; removing
+      the requirement removes the only written record that it must not, and the
+      constraint's cost falls on another module's users rather than on ours. A
+      requirement that is checkable by reading is weaker than one checkable by
+      running, and it is not nothing.
+
+      **The finding's scenario stands undefended and is worth repeating**: a
+      `nodeStop()` added to `lib.rs`'s shutdown handler passes all 562 tests. The
+      new scenario is what a reviewer reads the handler against; no test closes it.
 
 - [ ] **`tester`** — the store-failure path is unreached: `Refusal::Storage` and
       `PublishError::NotStored` are each constructed by the implementation
@@ -135,7 +257,7 @@ Mutation 4b is the one new measurement that matters, and it is finding 1 below.
       A `MemoryOpLog` wrapper whose `append` returns
       `Err(OpLogError::Storage(..))` on demand closes both. **Severity: medium.**
 
-- [ ] **`spec-writer`** — one `// NO SPEC:` marker, on
+- [x] **`spec-writer`** — one `// NO SPEC:` marker, on
       `a_send_that_the_transport_accepted_is_not_a_delivery`
       (`transport.rs:2024`): the spec does not say what happens when a published
       op never reaches a peer, and the author chose that `publish` reports the
@@ -161,7 +283,71 @@ Mutation 4b is the one new measurement that matters, and it is finding 1 below.
       **Severity: medium** — an unstated default that the UI can misread as a
       delivery guarantee.
 
-- [ ] **`spec-writer`** — `the_content_topic_keeps_the_prefix_autosharding_reads`
+      **FIXED — `spec-writer`, adopting the finding's proposal exactly, and its
+      diagnosis of the design.md argument is upheld.** A new requirement,
+      **"A successful publish is a statement about the local log and nothing
+      more"**, placed after the publish requirement it qualifies:
+
+      - **The checkable positive.** A successful publish means the op is in the
+        local log and its bytes were handed to the transport, and **no field of
+        what a publish reports may carry, imply or be documented as carrying a
+        delivery outcome**. Two scenarios: *"A send the transport accepted is not
+        a delivery"* (what is reported identifies the op, names the channel,
+        carries the bytes — and no field of it reports whether a peer received it)
+        and *"A publish reports success on the strength of the log alone"*. Both
+        are what `a_send_that_the_transport_accepted_is_not_a_delivery` already
+        asserts, so **the `// NO SPEC:` marker can come down** — that is
+        `dev-writer`'s or `tester`'s line to delete, not mine, and it should go
+        with a pointer to the requirement name.
+      - **The negative the publish path needs**: *"A publish SHALL NOT be reported
+        as having failed on the strength of a delivery outcome."*
+      - **The obligation is named rather than left silent**: an op the transport
+        errored on, or that never propagated within some bound, has to become
+        visible, "or this contract converts a loud failure into a silent one" —
+        stated as an obligation this capability does not discharge, with what
+        meeting it needs (state outliving the call, an association from the send
+        handle to the op, a clock to bound the wait) and why that is a component.
+      - **The scope exclusion was corrected, not removed.** *"That a published op
+        reaches another peer"* now carries: *"Excluding the observation is not
+        excluding the obligation"*, pointing at the new requirement. The finding's
+        distinction — observing delivery is a different question from what a
+        publish call claims — is the one that exclusion was blurring.
+
+      **The false impossibility is upheld as false.** `design.md`'s *"cannot be
+      discharged at this boundary at all"* is a scoping decision in an
+      impossibility's clothes, and the tell is the finding's: the same paragraph
+      specifies the solution. What is true is the narrower claim — a synchronous
+      reply cannot carry an asynchronous outcome — and the new requirement states
+      *that*, as the reason the reply must not be shaped as though it could.
+      **`design.md` is not mine to edit**; its Decisions section should say "not
+      built here, and here is the seam" rather than "cannot be done". Flagged for
+      `dev-writer`.
+
+      **A correction to the brief that dispatched me, and it matters for the
+      pointer.** The brief said `docs/PLAN.md` §9.2's publish-path follow-ups
+      "already record that obligation landing on this capability" and to read them
+      on `origin/main`. **They are not on `origin/main`.** `git show
+      origin/main:docs/PLAN.md` has no `channelMessageError` or `messagePropagated`
+      in §9.2 at all; the follow-ups are on the unmerged local branch
+      `docs/publish-followups` (`962b746`, *"Record two publish-path follow-ups…"*).
+      I read that commit's diff. Its text is the owner's decision and it does say
+      *"The obligation lands on `op-transport`"*, so the two now agree in
+      substance — the spec requirement was written against it deliberately,
+      including its two facts (the outcome arrives asynchronously; a reply could
+      not carry it) and its conclusion (the bound and what a view shows are this
+      capability's to specify).
+
+      **Two consequences the runner should know.** The spec cannot cite a PLAN
+      section number and does not, so nothing here breaks when that branch lands;
+      but until it does, **PLAN.md carries no record of this obligation**, and the
+      one place it is written down other than that unmerged branch is now this
+      spec requirement. And `docs/UI-BRIEF.md` will need the rendering obligation
+      — a successful publish is not "posted" — which `docs/publish-followups`
+      itself anticipates. Not done here: this piece does not touch the brief, and
+      a brief edit against an unmerged PLAN change is the stale-brief failure
+      CLAUDE.md warns about, from the other direction.
+
+- [x] **`spec-writer`** — `the_content_topic_keeps_the_prefix_autosharding_reads`
       pins an interop property **no requirement states**: that both the content
       topic and the channel id begin with the literal `/dialectica/1/`, because
       autosharding hashes only `application` + `version` and that head is what
@@ -178,7 +364,35 @@ Mutation 4b is the one new measurement that matters, and it is finding 1 below.
       network. **Severity: low** — the behaviour is pinned; only the requirement
       is missing.
 
-- [ ] **`spec-writer`** — `docs/PLAN.md` on **`origin/main`** line 343
+      **FIXED — `spec-writer`.** The finding's framing is the one adopted: the test
+      carried the reasoning and the contract should. Added to the requirement "A
+      Stoa's ops travel on one reliable channel per Stoa", beside the
+      no-human-readable-name rule it sits naturally with rather than in the
+      derivation requirement, because it is a property of what the names *are*
+      rather than of what they are derived *from*.
+
+      - The requirement now states that both the content topic and the channel
+        identifier **SHALL each begin with the literal `/dialectica/1/`**, that the
+        network's autosharding hashes only the application and version segments
+        and ignores the rest, and that this prefix is therefore what puts every
+        dialectica Stoa on one shard.
+      - It names the failure mode the finding measured: changing, shortening or
+        version-bumping the prefix moves every adopting Stoa to a different shard
+        from every non-adopting one — **"which is the same silent partition the
+        next requirement exists to prevent, arrived at from the other direction"**
+        — and so **"A change to this prefix is a network migration and SHALL be
+        treated as one"**, which is the sentence aimed at the reader the finding's
+        scenario describes.
+      - Scenario *"Both names keep the prefix autosharding reads"*, including
+        *"AND the check is against that literal rather than against whatever the
+        implementation currently produces"* — the existing test already asserts the
+        literal and says why in its comment, so it now covers a requirement.
+
+      No PLAN section number reaches the spec; the autosharding fact is restated in
+      one clause, which is the substance the §4.2 citation in the test comment was
+      standing in for.
+
+- [x] **`spec-writer`** — `docs/PLAN.md` on **`origin/main`** line 343
       **contradicts** this spec's inbound-validation requirement, and it sits in
       §3.3, the section a reader goes to for the data model.
       Quoted verbatim from `git show origin/main:docs/PLAN.md`, lines 340-343 —
@@ -204,7 +418,32 @@ Mutation 4b is the one new measurement that matters, and it is finding 1 below.
       **Severity: high** — a false statement about built behaviour, in the
       document that governs the next design decision.
 
-- [ ] **`spec-writer`** — `docs/PLAN.md` on `origin/main` §4.1 lines 376-383
+      **FIXED — `spec-writer`, in `docs/PLAN.md` on this branch, and this was the
+      one finding worth taking first.** The contradiction is real: I re-read §3.3
+      in context on `origin/main` and the clause reads as licence exactly as the
+      finding says. The two sentences the finding quotes are now struck through and
+      replaced, in §3.3 (worktree line ~343 after the merge):
+
+      - *"Verification therefore happens on **read** … The store may hold junk;
+        the reader never trusts it"* is struck, and followed by **"Specified, and
+        this is not where verification happens — see the `op-transport` spec"**,
+        naming the requirement ("Every inbound payload is validated before it
+        reaches storage") and stating what it does instead: refuses an unauthentic
+        op at the transport boundary rather than storing it for a reader to filter.
+      - **The half that is still true is kept, because striking it whole would
+        create a second wrong reading.** A reader that does not trust the store
+        remains the right posture and remains why `op-log` verifies nothing on
+        append. What is withdrawn is "the store may hold junk" as a description of
+        ops arriving from a peer, and the replacement says so in those terms:
+        reading it as licence to append unverified ops "is the forgery-storage
+        failure that boundary exists to prevent".
+
+      The two halves the finding identified — PLAN.md carried the `op-log` half and
+      not the transport half — are now both carried, and in the same paragraph, so
+      a reader arriving at §3.3 for the data model cannot pick up one without the
+      other. No section number reaches the spec in either direction.
+
+- [x] **`spec-writer`** — `docs/PLAN.md` on `origin/main` §4.1 lines 376-383
       is now stale in a way that would produce dead code.
       It describes SDS's own `sender_id` semantics accurately, including that
       *"the receive step is a SHOULD to 'ignore the message if it has a
@@ -220,7 +459,36 @@ Mutation 4b is the one new measurement that matters, and it is finding 1 below.
       ships a branch that never executes — and worse, believes their own ops are
       being deduplicated by it rather than by op id. **Severity: medium.**
 
-- [ ] **`spec-writer`** — `docs/PLAN.md` on `origin/main` has **no reference to
+      **FIXED — `spec-writer`, and the finding's diagnosis of *what* is stale is
+      the part worth recording, because it is not the quotes.** Both SDS quotes are
+      accurate descriptions of SDS and are therefore kept verbatim; what was
+      missing was that they describe a layer below the event dialectica receives,
+      so §4.1 pointed a reader at a filter with nothing to filter.
+
+      A new paragraph follows them in §4.1 (worktree line ~402 after the merge),
+      opening **"Do not implement that SHOULD"**:
+
+      - It says why: `channelMessageReceived` does not fire for a participant's own
+        messages, so a self-filter keyed on the sender identifier "is a branch that
+        never executes".
+      - It carries the finding's own second-order consequence, which is the one a
+        dev would not work out unaided — "a dev who writes it will believe their own
+        ops are being deduplicated by it rather than by op id".
+      - It points at the requirement by name ("A peer's own published op is not
+        received back as an arrival") and states what follows from it: storing on
+        publication is the only route by which a peer holds its own op.
+      - It points at §11's trap list for the asymmetry itself **rather than
+        restating it**, which is where the ~3,500-line separation the finding
+        measured is closed. The reciprocal pointer was already added in §11 by the
+        earlier shedding pass on this branch, so the two sections now reference each
+        other instead of neither referencing the other.
+
+      **Not moved into §4.1:** the `messageReceived`-fires-for-own-messages fact
+      itself. It is a delivery-module trap that presents as a storage bug, which is
+      §11's job, and duplicating it into §4.1 would create the two-copies-drift
+      failure the next finding is about.
+
+- [x] **`spec-writer`** — `docs/PLAN.md` on `origin/main` has **no reference to
       `op-transport` at all** (grep returns zero hits), while it names every
       sibling spec — `op-log`, `op-format`, `op-ordering`, `stoa-genesis`,
       `identity` and others. §4.3 is consequently ~60 lines of *built* behaviour
@@ -245,6 +513,89 @@ Mutation 4b is the one new measurement that matters, and it is finding 1 below.
       rule, and four more), so the pattern to follow is in the file.
       **Severity: medium** — no wrong behaviour today, but the shedding step
       this flow requires on landing has not happened for this capability.
+
+      **FIXED IN PART, with two citations corrected and one item deferred with a
+      reason.** The finding's premise held against `origin/main` and no longer
+      does: the branch had **already** shed most of §4.1, §4.3, §4.4, §4.5, §9.2
+      and §11 before this review ran — `git diff origin/main -- docs/PLAN.md` shows
+      the pass, and the spec is now named eleven times. So the finding's line
+      numbers are `origin/main`'s, and several of the copies it lists were struck
+      before it was written. Item by item, against the worktree after the merge:
+
+      **The pure-function rule — three copies, not four.** 478-483 and 601 were
+      already struck and pointed at the spec. Newly struck here:
+
+      - **565-567** (*"Re-creating a channel is allowed … no restriction on
+        reopening"*) → struck, with **"Specified as a requirement rather than a
+        permission"**. This is the finding's separate observation about
+        reopen-being-stated-as-a-permission, and it is the same edit, so it is done
+        here rather than twice.
+      - **573-574** (*"The channel id stays a pure function of the addressed
+        object. No epoch in it"*) → struck, "Specified above", with the reasoning
+        below it kept under an explicit heading: **"Both exclusions' reasoning stays
+        here, because the spec states the rule and not the judgement behind it."**
+        That reasoning is the per-peer partition worked example and the
+        whose-problem-is-this judgement about `logos-delivery` — which a spec cannot
+        hold and which `design.md` for this change did not need, since the spec
+        states the prohibition outright.
+
+      **CORRECTION — 2245-2249 is not a fourth copy.** Worktree ~2286: *"The record
+      carries **no per-peer value** — no epoch, no session counter."* I read the
+      surrounding paragraph. It is about the **Stoa genesis record**, whose hash is
+      the Stoa address — a different object, owned by `stoa-genesis`, applying the
+      same principle and cross-referencing §4.3 for the channel id derived *from*
+      that address. Striking it as an `op-transport` duplicate would delete a
+      `stoa-genesis` requirement's reasoning. **Left as is**, deliberately.
+
+      **The arrival-timestamp finding — one copy struck, two left with reasons.**
+
+      - **4131-4138** (worktree ~4179) → struck. This is the genuine near-verbatim
+        one the finding flagged, including the spec's own *"there is no wire
+        timestamp on this event"*. Replaced with a pointer to both requirements by
+        name. **Kept: the measurement and the pairing** — the value is a
+        `CLOCK_REALTIME` read taken when the callback fires, and exactly one event
+        reads a real wire timestamp, "which is why only that one shows §11's units
+        divergence. The two traps are one divergence seen from both ends." That
+        observation is not in the spec and should not be.
+      - **572-584** (worktree ~608) was already annotated by the earlier pass,
+        pointing at both requirements by name.
+      - **CORRECTION — 2578 is not a restatement.** Worktree ~2623, in §7.2: *"The
+        epoch stored against a decay-free score is therefore the op's Lamport
+        timestamp, never a receive-clock reading."* That is relevance decay
+        reasoning about what a projection may store, reaching a different conclusion
+        from the same fact. Not a copy. **Left as is.**
+
+      **node-shared-never-stopped (501-507 and 3898-3899)** — both already handled
+      by the earlier pass: §4.3's behaviour line is struck and points at the spec
+      while the shared-node argument stays as reasoning, and §11's entry carries
+      "Contracted in the `op-transport` spec; kept here because it presents as a
+      runtime failure in someone else's module." No further edit; re-read both to
+      confirm rather than trusting the diff stat.
+
+      **The sender-id rule (376-383, 569-570, 2338-2339).** 376-383 is closed by the
+      finding above. 569-570 (worktree ~605) is *"No authenticity. `sender_id` is an
+      application-chosen string"* inside §4.4's list of what **SDS** does not
+      promise — a description of the transport, correctly placed, and the premise the
+      spec's requirement is built on rather than a copy of it. **Left as is.** No
+      third instance is present in the worktree; `grep` for the two phrases returns
+      only §3.3's `self-asserted` (closed above) and §4.4's line.
+
+      **DEFERRED — the §13 degraded-order text (4246-4249, worktree ~4310).** Not
+      struck, and the reason is that it is not this capability's to shed: it restates
+      **`op-ordering`'s** requirement, which the `op-transport` spec explicitly
+      declines to restate. Shedding it means pointing at `op-ordering`'s spec — and
+      §13 on this branch already records that `op-ordering`'s leading requirement
+      **contradicts** the withdrawal above it and that *"resolving it needs its own
+      change"*. Pointing a struck-through line at a requirement the same section
+      calls an open contradiction would make PLAN.md worse. **Where it goes:** the
+      change that resolves the `op-ordering` prohibition, which §13 already names as
+      owing this. Flagged for the runner as a cross-piece item rather than left
+      silent.
+
+      **Also left: the `#4116` set-aside (485-491) and the Edge/Core cost analysis.**
+      The finding's own "Areas that are clean" says these are reasoning a spec cannot
+      hold and should stay. Agreed, and recorded here so a later sweep does not read
+      the surrounding strikethroughs as a mandate to continue.
 
 ## Areas that are clean
 

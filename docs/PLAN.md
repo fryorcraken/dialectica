@@ -339,8 +339,18 @@ replies, a Stoa's index — rather than scanning every row.
 
 **Op authenticity is dialectica's job, not the transport's** (§6). A forged op
 cannot be prevented from *arriving*: SDS has no membership and `senderId` is
-self-asserted. Verification therefore happens on **read**, filtering unsigned or
-badly-signed ops out. The store may hold junk; the reader never trusts it.
+self-asserted.
+
+~~Verification therefore happens on **read**, filtering unsigned or
+badly-signed ops out. The store may hold junk; the reader never trusts it.~~
+**Specified, and this is not where verification happens — see the
+`op-transport` spec**, whose requirement "Every inbound payload is validated
+before it reaches storage" refuses an unauthentic op at the transport boundary
+rather than storing it for a reader to filter. A reader that does not trust the
+store is still the right posture, and remains why `op-log` verifies nothing on
+append; but "the store may hold junk" was never the design for ops arriving from
+a peer, and reading it as licence to append unverified ops is the forgery-storage
+failure that boundary exists to prevent.
 
 **A generic op decoder may be wanted eventually, and is not built.** Every op
 decodes attacker-controlled bytes with the same failure modes — truncation,
@@ -389,6 +399,16 @@ is a SHOULD to "ignore the message if it has a `sender_id` matching its own".
 Acknowledgement accounting runs off message ids carried in causal history and
 bloom filters, not off sender ids — so reliability does not depend on a
 `senderId` meaning anything in particular.
+
+**Do not implement that SHOULD.** It describes SDS, one layer below the event
+dialectica receives, and on the reliable-channel path the filter it asks for has
+nothing to filter: `channelMessageReceived` does not fire for a participant's own
+messages, so a self-filter keyed on the sender identifier is a branch that never
+executes — and a dev who writes it will believe their own ops are being
+deduplicated by it rather than by op id. Specified: the `op-transport` spec's "A
+peer's own published op is not received back as an arrival", which is what makes
+storing on publication the only route by which a peer holds its own op. The
+asymmetry itself is in §11's trap list, because it presents as a storage bug.
 
 **The application owns it.** `channelCreate(channelId, contentTopic, senderId)`
 takes it as a parameter, and nothing in the delivery module persists it: the SDS
@@ -542,16 +562,21 @@ only "stops its SDS loops" and does not mention the unsubscribe at all.
 That is why both cases close: leaving a Stoa and shutting down are the same
 situation — a channel that must not outlive the app that opened it.
 
-**Re-creating a channel is allowed.** Close and reopen the same id within one
+~~**Re-creating a channel is allowed.** Close and reopen the same id within one
 node's lifetime — to recover from an error, or because a user left a Stoa and
-rejoined. There is no epoch in the channel id and no restriction on reopening.
+rejoined. There is no epoch in the channel id and no restriction on reopening.~~
+**Specified as a requirement rather than a permission** — the `op-transport`
+spec's channel-lifecycle requirement contracts that a closed channel is
+reopenable under the same identifier and without a restart.
 
 An earlier version of this section forbade all of that to avoid #4116, at the
 cost of one real limitation: **rejoining a Stoa required a restart.** That
 limitation is withdrawn along with the premise.
 
-**The channel id stays a pure function of the addressed object.** No epoch in
-it — not a per-peer one, and not a deterministic one either.
+~~**The channel id stays a pure function of the addressed object.** No epoch in
+it — not a per-peer one, and not a deterministic one either.~~ Specified above.
+**Both exclusions' reasoning stays here, because the spec states the rule and not
+the judgement behind it:**
 
 The per-peer form is ruled out by this section's own rule: peer A reopens at
 `stoa-abc/e8` while peer B is still on `stoa-abc/e7`, and they stop seeing each
@@ -4151,14 +4176,16 @@ thing (§2.3).
   > gap about one field; it should have been read as a signal that nobody had
   > opened the file.
 
-  Two findings worth carrying forward. **The `timestamp` we do receive is
-  unusable for ordering** — it is the receiving peer's own `CLOCK_REALTIME`
-  read taken when its callback fires, so it differs per peer for one message.
-  It is not a preference for a local clock over a wire value: **there is no
-  wire timestamp on this event at all.** Exactly one event
-  (`messageReceived`) reads a real wire timestamp, which is why only that one
-  shows §11's units divergence — the two traps are one divergence seen from
-  both ends.
+  Two findings worth carrying forward. ~~**The `timestamp` we do receive is
+  unusable for ordering.**~~ **Specified — the `op-transport` spec's "The
+  arrival timestamp is a local clock reading and orders nothing" contracts
+  what a receiving peer may do with it, and its companion requirement
+  contracts that this transport supplies no ordering metadata to record.**
+  What stays here is the measurement and the pairing: the value is the
+  receiving peer's own `CLOCK_REALTIME` read taken when its callback fires,
+  and exactly one event (`messageReceived`) reads a real wire timestamp —
+  which is why only that one shows §11's units divergence. The two traps are
+  one divergence seen from both ends.
 
   ~~And **a dialectica-side Lamport clock is the one thing not to build**~~
   — **withdrawn, 2026-09-12.** The argument was that SDS's clock advances on

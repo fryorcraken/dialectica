@@ -14,11 +14,13 @@ The boundary with three neighbouring capabilities is drawn deliberately, and the
 
 **What is outside this capability**, named rather than covered because most of it needs a running delivery node and two live peers to observe, and a requirement nothing can check is worse than an acknowledged gap:
 
-- **That two peers deriving one Stoa's channel identity actually meet.** The derivation being a pure function of the Stoa address is contracted below and is checkable; that two processes on a network consequently exchange ops is a property of the node.
-- **That a published op reaches another peer** — retransmission of an unacknowledged message, recovery of messages missed while offline, and how far back a repairing peer reaches. That is the transport's own reliability, and none of it is observable from this capability's surface.
+- **That two peers deriving one Stoa's channel identity actually meet.** The derivation being a pure function of the Stoa address is contracted below, held by what it accepts and pinned against an independently derived value; that two processes on a network consequently exchange ops is a property of the node. **Comparing one peer's derivation against another peer's** is also outside reach, which is why the requirement below says how it is held instead of asking for a comparison no peer can make.
+- **That a published op reaches another peer** — retransmission of an unacknowledged message, recovery of messages missed while offline, and how far back a repairing peer reaches. That is the transport's own reliability, and none of it is observable from this capability's surface. **Excluding the observation is not excluding the obligation**: the requirement "A successful publish is a statement about the local log and nothing more" contracts what a publish may claim, and names surfacing an op that never propagated as an obligation this capability does not discharge.
 - **That closing a channel released anything on the network.** The release is reference-counted across channels on a content topic and its failures are not surfaced to the caller, so a peer cannot observe the outcome. What is contracted below is that a peer does not claim otherwise.
 - **Whether a hashed content topic buys the anonymity intended.** That a Stoa's title does not appear in a topic is checkable; the size of the set a hashed topic hides a peer within is a property of the deployed network.
+- **That the message-size limit contracted below equals what the network validates against.** The limit arrives from no transport interface — nothing in the delivery contract states one — so a peer has no second value to compare its own against. The requirement below pins the constant so a local edit fails loudly; whether the network has since moved is observable only against a live node, and a peer over-sending or needlessly refusing because of a drifted network limit is a failure this capability cannot detect.
 - **The node's configuration** — which network, which mode, which entry nodes — beyond the lifecycle contracted below.
+- **Observing that the shared delivery node was left running.** The node is never reached from this capability's own surface, so the requirement "The delivery node is shared and is never stopped by this peer" is contracted below as a prohibition on what this application's lifecycle handlers may call, and is discharged by reading them. What it would take to observe the failure is a second module in the same context losing its delivery, which is a property of a deployed context. This is named here rather than left to read as covered.
 - **Attachments and any content addressed outside an op.** A payload here is one op's wire form.
 - **What a channel is opened for.** Which Stoas a peer holds, what joining one means, and where a Stoa's genesis record is stored belong to the Stoa-lifecycle capability. This capability contracts only that an inbound op never causes a peer to hold a Stoa it did not already hold.
 
@@ -33,6 +35,8 @@ The channel SHALL be identified by a channel identifier and a content topic, bot
 A thread identifier, a parent op identifier, an author, or any other property of an individual op SHALL NOT appear in either the channel identifier or the content topic. Every such value is already inside the signed op.
 
 The content topic SHALL NOT contain a Stoa's human-readable title or any other human-readable name. A content topic is disclosed to peers that serve filtering, storage and forwarding, so a readable name in one links a network address to an interest.
+
+**The content topic and the channel identifier SHALL each begin with the literal prefix `/dialectica/1/`, and that prefix SHALL NOT be changed as though it were a naming choice.** The network's autosharding places a topic by hashing only the application and version segments of its name and ignores the rest, so this prefix — and nothing further along the string — is what puts every dialectica Stoa on one shard. Changing it, shortening it, or bumping the version segment moves every Stoa that adopts the change to a different shard from every Stoa that has not, which is the same silent partition the next requirement exists to prevent, arrived at from the other direction. A change to this prefix is a network migration and SHALL be treated as one.
 
 #### Scenario: One Stoa yields one channel identifier and one content topic
 
@@ -56,15 +60,29 @@ The content topic SHALL NOT contain a Stoa's human-readable title or any other h
 - **WHEN** channel identity is derived for one Stoa, and ops of several threads and several authors are published on it
 - **THEN** the channel identifier and content topic are the same for every one of them
 
+#### Scenario: Both names keep the prefix autosharding reads
+
+- **WHEN** channel identity is derived for any Stoa
+- **THEN** the content topic begins with the literal `/dialectica/1/`
+- **AND** the channel identifier begins with the same literal
+- **AND** the check is against that literal rather than against whatever the implementation currently produces
+
 ### Requirement: Channel identity is a pure function of the Stoa address
 
 The channel identifier and the content topic SHALL each be a pure function of the Stoa's address. Nothing else SHALL participate: not a session counter, not an epoch, not a local sequence number, not a device identifier, not a wall-clock reading, not the number of times this peer has opened the channel, and not the peer's own identity.
 
-**This requirement exists because its violation produces no error.** Two peers computing different channel identifiers for one Stoa do not fail, do not warn and do not retry: each opens a channel nobody else is in, and the two never see one another's ops. The partition is silent and permanent, and no participant can observe it from inside. Every other refusal in this capability reports itself; this one cannot, so the property has to hold by construction rather than be checked.
+**This requirement exists because its violation produces no error.** Two peers computing different channel identifiers for one Stoa do not fail, do not warn and do not retry: each opens a channel nobody else is in, and the two never see one another's ops. The partition is silent and permanent, and no participant can observe it from inside. Every other refusal in this capability reports itself; this one cannot, so it is held before a peer runs rather than reported after — by what the derivation accepts, and by a pin against a value nothing in this implementation produced. Both are stated below.
 
 A deterministic epoch SHALL NOT be introduced as a variant of this. An epoch that every peer must recompute identically is a rendezvous problem at every boundary where it changes, and it reintroduces the same silent partition at each one.
 
 Re-deriving channel identity for a Stoa already joined SHALL yield the same values it yielded before.
+
+**How this requirement is held, since the peer-to-peer half of it is not observable from one peer.** The values that differ *between* peers — a peer's own identity, a device identifier, a process or installation identifier — cannot be varied by a peer inspecting its own derivation: a peer has one of each, and a derivation consulting one would agree with itself every time it was asked. The requirement is therefore discharged in two parts, and both are obligations:
+
+- **By construction.** The derivation SHALL take the Stoa's address as its only input, so that there is no parameter through which a per-peer or per-session value could enter. A derivation reaching for such a value outside its inputs violates this requirement whether or not any peer can observe the result.
+- **By a pinned known answer.** The derivation's output for a fixed Stoa address SHALL equal a value derived independently of this implementation, so that any change to what participates — including one adding a per-peer input — fails loudly at the pin rather than passing every self-comparing check. That pin is the scenario "The derivation is pinned against silent change" below, and it is what makes a construction change visible.
+
+The part a peer *can* vary, and SHALL find makes no difference, is its own history: how many times it has opened or closed the channel, how many ops it holds, and how much time has passed between two derivations.
 
 #### Scenario: Deriving twice yields the same identity
 
@@ -72,10 +90,16 @@ Re-deriving channel identity for a Stoa already joined SHALL yield the same valu
 - **THEN** both derivations yield the same channel identifier
 - **AND** both yield the same content topic
 
-#### Scenario: Identity does not vary with local state
+#### Scenario: Identity does not vary with the peer's history
 
-- **WHEN** channel identity is derived for one Stoa address under differing local state — a different peer identity, a different count of prior opens, a different clock reading
-- **THEN** every derivation yields the same channel identifier and content topic
+- **WHEN** channel identity is derived for one Stoa address, then derived again after that peer's history has changed around it — channels opened and closed, ops stored, and time passed between the two derivations
+- **THEN** both derivations yield the same channel identifier and content topic
+
+#### Scenario: The derivation takes the Stoa address and nothing else
+
+- **WHEN** the derivation is examined for what it accepts
+- **THEN** the Stoa's address is its only input
+- **AND** there is no parameter through which a peer identity, a device or process identifier, a session value or a clock reading could reach it
 
 #### Scenario: Reopening a channel does not change its identity
 
@@ -88,6 +112,7 @@ Re-deriving channel identity for a Stoa already joined SHALL yield the same valu
 - **WHEN** channel identity is derived from a fixed Stoa address
 - **THEN** the channel identifier and content topic equal values derived independently of this implementation
 - **AND** a change to the derivation fails this rather than passing quietly
+- **AND** a derivation that had come to consult a value differing between peers fails it too, since such a value cannot equal the independently derived one
 
 ### Requirement: The transport's sender identifier is never an identity
 
@@ -212,6 +237,28 @@ Publishing on a Stoa whose channel this peer has no open channel for SHALL be re
 - **AND** no channel is opened
 - **AND** the op is in the local log
 
+### Requirement: A successful publish is a statement about the local log and nothing more
+
+A publish reported as successful SHALL mean that the op is in the local op log and that its bytes were handed to the transport. **It SHALL NOT be read as a statement that any peer received the op**, and no field of what a publish reports SHALL carry, imply or be documented as carrying a delivery outcome.
+
+Publishing and delivering are two events at two times. The transport's own outcomes — that it accepted a message, that a message propagated, that sending it errored — arrive after the call has returned and are keyed by a handle the send produced, so a publish's reply is not merely silent about delivery; it is structurally incapable of carrying it. A reply shaped as though it could would be a worse signal than no signal, because "the transport accepted this" reads as "this arrived" while meaning only the former.
+
+**A publish SHALL NOT be reported as having failed on the strength of a delivery outcome.** An op in the log is published; whether it reached the network is the separate fact above, and reporting a failure for it would tell a caller to retry or discard something that already exists. This is not in tension with the failure the previous requirement contracts: **a transport that refuses the handoff is a failure of the publish call itself**, known before it returns and reportable as such, where a delivery outcome arrives after the call is over and describes what the network did with bytes the transport already took. The first may be reported; the second may not, because by then there is no call left to report it to.
+
+**The delivery outcome is an obligation, not an absence.** An op the transport reported an error for, or that never propagated within some bound, has to become visible to the user, or this contract converts a loud failure into a silent one. **That obligation is not discharged by this capability, and nothing below satisfies it.** Meeting it needs state that outlives a publish call — an association from the transport's send handle to the op it sent — and a clock to bound the wait, which is a component rather than a branch on this path. It is named here so that whoever owns it inherits a stated obligation rather than discovering a silence, and so that the reply this capability produces is not mistaken for having met it. A view rendering a successful publish as delivered is relying on a guarantee no requirement here provides.
+
+#### Scenario: A send the transport accepted is not a delivery
+
+- **WHEN** an op is published on an open channel and the handoff to the transport succeeds
+- **THEN** what is reported identifies the op, names the channel it belongs on, and carries the bytes to send
+- **AND** no field of it reports whether a peer received the op
+
+#### Scenario: A publish reports success on the strength of the log alone
+
+- **WHEN** an op is published and no delivery outcome for it ever arrives
+- **THEN** the publish is reported as successful
+- **AND** the op is readable from the local op log
+
 ### Requirement: What the channel carries is an op's wire form and nothing else
 
 The payload published on a channel SHALL be exactly one signed op's wire form. No envelope, header, framing or metadata of this capability's own SHALL be wrapped around it.
@@ -312,11 +359,13 @@ An op's Stoa is inside its signature, so an op cannot be *rewritten* to name ano
 - **THEN** its signature verifies under its author
 - **AND** the refusal is the Stoa comparison rather than a failure of authenticity
 
-### Requirement: An oversized payload is refused, and the limit is the transport's
+### Requirement: An oversized payload is refused, against a limit pinned at 150 KiB
 
 A payload larger than the maximum a single message may carry SHALL be refused, and the refusal SHALL be reported distinguishably from a decode failure so that "no peer could legitimately have sent this" is tellable from "this op is corrupt".
 
-That maximum SHALL be **150 KiB**, the network-wide validation limit applied to one message, which cannot be raised unilaterally. The value is named here because the requirement's justification depends on it: a limit that had silently drifted upward would still refuse an absurd payload and still satisfy a scenario probing only absurd sizes.
+That maximum SHALL be **150 KiB**. The value is named here because the requirement's justification depends on it: a limit that had silently drifted upward would still refuse an absurd payload and still satisfy a scenario probing only absurd sizes. 150 KiB is the figure this system was designed against as a network-wide validation limit applied to one message, which cannot be raised unilaterally.
+
+**What is checkable here is the pin, and not agreement with the network.** No limit reaches this capability from the transport — the delivery contract states none — so the value is a constant this system chose, and the only property a peer can establish locally is that the constant is still the one that was chosen. That a raised or lowered network limit would make this constant wrong is real and is out of scope below; a scenario claiming the two are compared would be comparing the constant against itself.
 
 The check SHALL apply to the payload as received, before it is decoded. `op-format`'s cap bounds one field of an op and explicitly declines to bound a decoded op's total size, on the grounds that a decoder handed a byte slice cannot see the frame the bytes arrived in. **This capability is that frame**, and this requirement is the total-size bound `op-format` named as belonging here.
 
@@ -333,9 +382,9 @@ The check SHALL apply to the payload as received, before it is decoded. `op-form
 
 #### Scenario: The limit's value is pinned against silent drift
 
-- **WHEN** the configured maximum is compared against the transport's stated message limit
+- **WHEN** the configured maximum is compared against a hardcoded 150 KiB written independently of it
 - **THEN** they are equal
-- **AND** a change to either fails this rather than passing quietly
+- **AND** a local edit to the configured maximum fails this rather than passing quietly
 
 ### Requirement: Receiving a payload never aborts the process
 
@@ -366,21 +415,16 @@ The node is a separate, shared process serving every module in one context. Stop
 
 Consequently, releasing what a Stoa's channel holds SHALL be done by closing the channel rather than by stopping the node.
 
-#### Scenario: Shutdown does not stop the node
+**This requirement is a prohibition on a call, and it binds the code that can make that call — which is not the code the requirements above contract.** No part of this capability's own surface starts, stops or counts nodes: the node is reached only from the adapter that carries this application's lifecycle handlers. So the obligation is stated here, where the reasoning for it lives, and discharged there.
 
-- **WHEN** the application shuts down
-- **THEN** the node is not stopped
-- **AND** the channels this peer opened are closed
+**A peer cannot observe compliance, and no scenario below claims it can.** What it would take is a second module in the same context noticing its delivery had gone, which is a property of a deployed context rather than of this capability. The obligation is consequently that a stop call **SHALL NOT appear** in this application at all: a prohibition on the code rather than on an outcome, checkable by reading the lifecycle handlers and not by exercising them. A change that adds one satisfies every other requirement in this capability and breaks this one, and nothing in this capability's surface will say so.
 
-#### Scenario: Leaving a Stoa does not stop the node
+#### Scenario: No stop call exists in this application's lifecycle handlers
 
-- **WHEN** a user leaves a Stoa
-- **THEN** the node is not stopped
-
-#### Scenario: The node is created once
-
-- **WHEN** several Stoas' channels are opened
-- **THEN** no additional node is created for any of them
+- **WHEN** the handlers this application runs on shutdown, and on a user leaving a Stoa, are examined for what they call
+- **THEN** neither stops the delivery node
+- **AND** neither creates a node of its own
+- **AND** the shutdown handler closes the channels this peer opened
 
 ### Requirement: A channel is closed when a user leaves a Stoa and on shutdown
 
