@@ -932,10 +932,13 @@ ionic thales* — not `user_8f3a` and not a handle someone registered. The shape
 is settled below and is **four words**, for reasons that are arithmetic rather
 than aesthetic.
 
-**But a user is not handed one.** At onboarding they are shown a slate of five
+**But a user is not handed one.** ~~At onboarding they are shown a slate of five
 generated identities and pick one, and they may refresh the slate as many times
-as they like. So a name is *chosen* in the ordinary sense — it carries intent,
-and a user who refreshed forty times meant the one they kept.
+as they like.~~ **Built — see the `identity-onboarding` spec**, which carries both
+the fixed count reported with the set and the unlimited regeneration as
+requirements. What matters here and is not a requirement anywhere: a name is
+*chosen* in the ordinary sense — it carries intent, and a user who refreshed forty
+times meant the one they kept.
 
 **What is being chosen is the key, and the name is the key's shadow.** This
 distinction is not pedantry and it is the single most important sentence in this
@@ -1415,30 +1418,40 @@ number them oppositely and each would be sure the other was the impostor.
 **A second collision question the slate introduces: two identical names in one
 picker.** Five draws from 2³⁴ collide with probability about `5·4/2S` = `10/S` —
 roughly one slate in 1.7 billion, against one in 1.7 million at 2²⁴. A user will
-never see it, and at this size arguably no deployment ever will. **The picker
-still discards and redraws a duplicate**, because the handling is three lines
-and the alternative is a display that reads as broken in the one case it
-appears.
+never see it, and at this size arguably no deployment ever will.
 
-This one *is* worth handling, and it is cheap precisely because it is local:
-the slate is generated on one peer, at one moment, with nothing published. So
-**the picker discards and redraws a duplicate before displaying**, which is a
-presentation rule with no protocol consequence whatsoever — unlike the
-cross-identity collision above, where discarding is impossible because both
-identities already exist and neither peer may decide which one is real. The two
-cases look alike and are not: one is a choice about what to draw, the other is a
-fact about what exists.
+~~**The picker still discards and redraws a duplicate**, because the handling is
+three lines and the alternative is a display that reads as broken in the one case
+it appears. This one *is* worth handling, and it is cheap precisely because it is
+local: the slate is generated on one peer, at one moment, with nothing published.
+So **the picker discards and redraws a duplicate before displaying**, which is a
+presentation rule with no protocol consequence whatsoever.~~
 
-**Regeneration discards keys, and the user cannot see it.** Each refresh mints
+**Built, and not by the picker** — see the `identity-onboarding` spec. Duplicate
+handling is in **core**, and it is an index walk rather than a redraw: the
+derivation walks forward until it has five distinct paths. A redraw would need a
+fresh nonce, which would destroy the reproducibility everything else rests on; the
+archived `design.md` carries that argument. The distinction this section draws
+against the cross-identity case still holds and is why it is kept: one is a choice
+about what to draw, the other a fact about what exists.
+
+~~**Regeneration discards keys, and the user cannot see it.** Each refresh mints
 five keypairs and keeps at most one; the rest are gone, unrecoverable, and were
-never anywhere. This sounds alarming and is not: a discarded key was never an
-identity — it signed nothing, appeared in no op, and no peer ever heard of it.
-There is nothing to lose. **The only case that would matter is if a refresh
-could discard a key the user had already used**, which is why selection and use
-must be one step: an identity becomes real when it signs, and nothing signs
-during onboarding. Whether the keystore writes on every refresh or only on
+never anywhere.~~ ~~Whether the keystore writes on every refresh or only on
 selection is an implementation question with no user-visible consequence, and is
-deliberately not decided here.
+deliberately not decided here.~~
+
+**Both halves are superseded.** A refresh mints **no keypairs**: the five
+candidates are derivation paths over **one** master key, differing by path alone —
+so there are no discarded keys to be invisible about, and a backup is one secret
+rather than five. And the write question **was decided**: nothing writes on
+refresh, structurally, because the slate handler has no store parameter to write
+to. See the `identity-onboarding` spec for both, and its archived `design.md` for
+why five independent roots was rejected.
+
+What survives from this paragraph, because it is the reason the shape is safe:
+**an identity becomes real when it signs, and nothing signs during onboarding.**
+That is now spec prose rather than a plan note.
 
 #### Grinding — and the slate makes this the central finding
 
@@ -3730,6 +3743,88 @@ method sets the precedent for every later one, so its spec is the one that
 should pin the envelope — `items`, `page`, `hasMore` — rather than each
 subsequent spec restating it and slowly disagreeing.
 
+##### The feed read is built and still has no contract — a named debt, not an oversight
+
+**This is the one place the "specs come per stage" rule has already been
+overtaken by the code.** `feed::list_threads` and
+`wire::list_threads_from_request` are on `main` and are the largest behaviour
+block the integration suite pins, and `openspec/specs/` carries **no feed
+requirement at all** — `grep -rli "feed\|list_threads"` over that directory
+returns nothing. The read shipped in the feed-screen change, which merged before
+this repo adopted OpenSpec, so no delta was skipped; there was no flow to skip
+one in.
+
+What is consequently unspecified is not a detail. None of these is a promoted
+requirement, and each is behaviour a reader can rely on today:
+
+- a feed lists thread heads and never replies as their own rows
+- pages tile with no gap and no repeat, and a page past the end is empty rather
+  than a panic or an error
+- a thread whose root post is hidden is omitted by default and is included,
+  flagged, under the explicit parameter — the distinction this section's
+  "Hidden threads are omitted by default" paragraph draws between a hidden root
+  and a hidden reply
+- a post whose signature does not verify is refused by the reader rather than
+  rendered
+- a body and its attachment CIDs are sanitised on the way out (`feed.rs:254-255`).
+  The nearest promoted text points the other way: `stoa-metadata`'s "Display text
+  is preserved rather than sanitised in the data layer" governs what is *stored*,
+  and says nothing about what a read returns
+- the JSON envelope reports the page that was asked for and whether more follows
+
+**Why this was not closed by the change that found it.** It surfaced in a
+spec-test review of the `core-e2e` integration target — a piece declaring
+`skip_specs: true` that adds no behaviour and only tests. Writing the feed
+contract there would have put a behaviour contract for code that merged in other
+pieces into a change whose reviewers never read those pieces, and promoted it
+past the review each of those pieces actually had. The contract is owed by
+whoever next touches the feed read, which is also the only agent positioned to
+write it against the projection that exists rather than against the tests that
+happen to pin it.
+
+**The cost of leaving it, stated so it is not rediscovered.** Until this lands,
+an integration test in `dialectica-core/tests/end_to_end.rs` is the only written
+statement of what the feed does — so a change that makes the feed list replies as
+rows contradicts no requirement, passes `openspec validate --strict`, and is
+objected to only by a test whose own header says it is organised by boundary
+rather than by capability. A reviewer then has no contract to weigh the change
+against, which is the failure a spec exists to prevent.
+
+**Store lifecycle is the same shape and is already in hand.** `op-log` as
+promoted specifies nothing file-backed, so the suite also pins store creation,
+layout versioning, mislabelling and restart with no promoted requirement behind
+them. Unlike the feed, that gap has an owner in flight: the `sqlite-projection`
+change's `op-log` delta adds "A persistent log survives the process that wrote
+it", "A persistent log declares the layout it was written with" and "A persistent
+log verifies the layout its declared version promises", and extends the
+every-read requirement to separate a storage failure from emptiness. Read that
+delta before writing anything here. **One piece of it is genuinely absent even
+there**: that opening a path holding no store *creates* it rather than refusing
+it — the suite's `a_missing_store_file_is_created_rather_than_refused` — which no
+requirement in that delta states. It belongs to `sqlite-projection`, not to a
+later change.
+
+**A third, much smaller debt of the same class**, found while answering whether
+an integration test may construct a hostile keystore. `posting-capability`'s
+requirement "The reason names the fix" enumerates six reasons the probe must
+distinguish, and carries a scenario for five of them. **"The keystore's directory
+is writable by others" has no scenario** — the phrase appears only in the
+requirement text. The *behaviour* is contracted: `keystore`'s "A keystore in a
+directory others can write to is refused" specifies the refusal and its
+distinguishability, with both a refusing and an accepting scenario. What is
+unpinned is that the **probe** surfaces that state as its own reason, which is
+`posting-capability`'s claim rather than `keystore`'s. One scenario on an existing
+promoted requirement closes it, and it belongs to whoever next touches the probe.
+
+On the question that surfaced it: all three of the enumeration's file-level
+states — permissions too open, a directory writable by others, an unreadable or
+malformed keystore — are legitimately constructible by a test, because `keystore`
+specifies each as a scenario whose WHEN clause *is* that construction. A
+requirement that specifies refusing a hostile file cannot also forbid making one
+to check the refusal; that scenario would be untestable, which is the defect
+`.claude/agents/README.md` names as this repo's most common — "Never write a
+scenario that cannot be tested".
+
 ### 9.2 The MVP, as scoped by the owner
 
 **The owner has directed a rush to a working MVP.** This section exists so the
@@ -3854,7 +3949,8 @@ built** — meeting it needs state outliving the publish call and a clock, which
 a component rather than a branch.
 
 **`docs/UI-BRIEF.md` carries the half of the rendering obligation that is true
-today**, as its obligation 7: a successful publish means "saved here" and must not
+today**, as the obligation titled *"A successful publish means 'saved here', not
+'posted'"*: a successful publish must not
 be rendered as sent, delivered or seen, and no in-flight state is to be designed
 because no call produces the signal one would wait on. What the brief still needs
 when the three are answered is the *positive* half — what a view shows for an op
@@ -3980,9 +4076,10 @@ That principle earned its place immediately, and against the template itself:
   correct build. Check by shape, and re-derive every inherited assertion
   against what this repo actually produces.
 - **Assert against a derived number, never a literal.** The test-count check
-  compares cargo's result against the count of `#[test]` attributes in `src/`,
-  so it cannot rot. A hardcoded floor that nothing keeps in sync is itself a
-  false green.
+  compares cargo's result against a count of `#[test]` attributes derived from
+  the Rust tree, so it cannot rot. A hardcoded floor that nothing keeps in sync
+  is itself a false green. Read the workflow for which paths it walks — naming
+  them here would be a second copy that drifts.
 
 **Deliberately not built, each with its re-entry condition** (recorded at the
 foot of the workflow too):
@@ -4137,7 +4234,11 @@ thing (§2.3).
   unanswered, for the owner's own review** of identity and derivation: *"I would
   expect us to have all root identities using derivation."* Today §5.1's root
   secret is generated (`SecretKey::generate`) and only the per-Stoa key is derived
-  from it (§5.2, `derive_stoa_key`) — and §9.2's MVP does not call even that. The
+  from it — under **two** schemes now, not one: `derive_stoa_key` takes the root and
+  the Stoa, and `derive_stoa_key_at_path` takes a chosen derivation path as a third
+  input, under a bumped salt so the two cannot silently reproduce each other. The
+  path-taking one is what a kept identity uses (see the `identity-onboarding`
+  spec); the pathless one has no production caller left. The
   question is whether a root should itself be a derived child of something
   higher, and what that something is. **Do not answer it here**; it touches §5.1,
   §5.6's keystore and the LEZ key-tree path in the next entry, and the owner has

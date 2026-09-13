@@ -246,8 +246,12 @@ Recorded because a passing suite here proves less than it appears to.
       then described how it is met.
 - [x] `design.md:38`'s quotation of a renamed requirement title corrected to
       "An oversized payload is refused, against a limit pinned at 150 KiB".
-- [x] `docs/UI-BRIEF.md` gained the rendering obligation as its **obligation 7**:
-      a successful publish means "saved here", not "posted". Written as the half
+- [x] `docs/UI-BRIEF.md` gained the rendering obligation, titled **"A successful
+      publish means 'saved here', not 'posted'"**. Cited by title rather than by
+      number because merging `origin/main` at `b85111d` added two identity
+      obligations that took numbers 7 and 8, moving this one to 9 — a number in a
+      cross-file citation is a claim that goes stale on somebody else's merge.
+      Written as the half
       that is true today — the prohibition, plus *do not design an in-flight state*
       since no call produces the signal one would wait on — with the positive half
       left for whoever answers the three owed things. PLAN §9.2's pointer updated

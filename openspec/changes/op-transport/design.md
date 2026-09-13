@@ -299,7 +299,9 @@ worth checking before building it: the tracker is the first thing here that need
 one, and where that clock lives is its decision to record, not this one's.
 
 **The rendering obligation went to `docs/UI-BRIEF.md` now rather than waiting**,
-as its obligation 7: a successful publish means "saved here", not "posted". PLAN
+as the obligation titled *"A successful publish means 'saved here', not
+'posted'"* — cited by title, because its number moved when `origin/main`'s
+identity obligations landed beside it. PLAN
 §9.2 had said the brief would need this once the three owed things were answered,
 and that deferral was the wrong half to act on. The brief is designed against by
 someone who cannot read the code, so a brief silent on the point leaves a designer
