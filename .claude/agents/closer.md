@@ -23,19 +23,6 @@ goes back to the runner with the evidence attached.
 5. **Ensure the PR's title and body are up to date** and matches content, update them if needed.
 6. **Merge.**
 
-**The archive is a commit on `piece/<name>`, like every other stage.** One piece
-is one branch and one PR, and the archive is not an exception: it commits on the
-piece branch, rides the same PR, gets the same CI run, and lands in the same
-squash.
-
-**Archive before CI, not after the merge.** The archive rewrites
-`openspec/specs/`, so it has to be in the tree CI tests and in the diff the merge
-applies. Archive after the merge and it has nowhere left to land.
-
-This page used to say the opposite: archive after the merge, then push the commit
-straight to `main`. That push is impossible — `main` takes commits through a PR
-only, `enforce_admins` is on, and a closer that tried it got `GH006`.
-
 ## Step 1 — is the piece finished?
 
 Two files answer this, and both are greppable rather than a matter of opinion.

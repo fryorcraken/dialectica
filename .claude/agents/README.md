@@ -156,21 +156,12 @@ rather than merged shows here even though its content is in, so read the commits
 rather than the count. Say in the closing comment where the work went, and keep
 the branch.
 
-**The runner pushes `piece/<name>`, except for the push that opens the PR.** With
-one pusher there is no race to lose, no rebase to retry, and no force-push to be
-tempted by.
+**Each agent pushes its own commits, once its work is done** — `dev-writer` and
+`tester` after theirs. The `dev-writer` pushes at the end of its first pass and
+opens the PR there; see [`dev-writer.md`](dev-writer.md).
 
-The `dev-writer` makes that one exception: it pushes at the end of its first pass
-and opens the PR there, because reviewers and CI both need one to exist and it is
-the agent that knows what the change does. It is not a second pusher — it pushes
-once, at a moment when it is the only agent holding the piece, and the runner
-pushes everything after. See [`dev-writer.md`](dev-writer.md).
-
-The `closer` is the other exception: it commits the **archive** to the piece
-branch and pushes that, before CI and the merge. By then every writer and
-reviewer is done, so it holds the branch alone. Two agents pushing one branch at
-once is the race this rule prevents; a branch handed from one agent to the next
-is not.
+The `closer` also pushes, after committing the **archive** to the piece branch,
+before the CI check and the merge.
 
 **Nobody pushes `main`.** It takes commits through a PR only — `enforce_admins`
 is on, and a direct push is rejected with `GH006`. This page and `closer.md` both
@@ -331,10 +322,11 @@ approach impossible has produced a result worth as much as the review, and
 unwritten the next agent spends the same afternoon. It goes in `design.md`, beside
 the decision it rules out.
 
-**The runner owns dispatching and pushing; the `dev-writer` opens the PR; the
-`closer` owns the last three stage rows.** `tasks.md`'s stage block is the list —
-read it to see what is left, because an unticked row with no agent running is a
-stage nobody is doing.
+**The runner owns dispatching, and should set a 5–10 minute reminder to ensure at
+least one agent is working; the `dev-writer` opens the PR; the `closer` owns the
+last three stage rows.** `tasks.md`'s stage block is the list — read it to see
+what is left, because an unticked row with no agent running is a stage nobody is
+doing.
 Dispatch by naming the findings files rather than carrying their content, and
 re-run only the reviewers whose findings led to changes.
 

@@ -125,9 +125,9 @@ its commit yours.
 **Push `piece/<name>` and open its PR as your last act on the first pass**, before
 the runner dispatches reviewers.
 
-This is the only push you make. On the findings pass the PR is already open and
-the runner pushes as usual — commit and hand back. One piece is one PR, so
-`gh pr list --head piece/<name>` before you create, and never open a second.
+On the findings pass the PR is already open: commit, push to it, and never open a
+second. One piece is one PR, so `gh pr list --head piece/<name>` before you
+create.
 
 **Check `git branch -vv` first** and push by name, `git push origin piece/<name>`.
 A worktree inherits its parent branch's upstream, and a bare `git push` has landed
