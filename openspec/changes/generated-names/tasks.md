@@ -24,7 +24,17 @@
 - [ ] review: readability — `code-reviewer`
 - [ ] review: architecture — `code-reviewer`
 - [ ] review: spec-test — `spec-test-reviewer`
-- [ ] review: design — `design-reviewer`
+- [x] review: design — `design-reviewer` — 14 findings. D3/D4/D6–D10/D13 verified
+      against the code and the exclusion withdrawal is clean. **One behavioural
+      finding**: `feed.rs:293` silently drops a post whose author's name cannot be
+      derived — unrecorded, unpinned, and content censorship by a name failure.
+      The denylist is **199** pairs, so D5's "~1,000" and the 0.092% / 1-in-1,090
+      / 1-in-1.2-million figures in `names.rs` and `feed.rs` are wrong by factors
+      of 5 to 23 — they import the premise PLAN.md withdrew. D2's recorded
+      `NAME_PREFIX` has seven NULs where the code has six, and the
+      `identity.rs` assertion it cites as its justification does not exist.
+      D1's provenance chain is under gitignored `tmp/` and does not survive merge.
+      PLAN.md still says the mark reads `12..19` in four places.
 - [ ] findings all ticked, `findings/` deleted — runner
 - [ ] `openspec validate --strict`, then `archive` — runner
 
