@@ -3276,9 +3276,13 @@ ceiling does not support — the ops are in every peer's log regardless.
 **Stage D — reach another Stoa.** §4.8 Phase 1's address, which verifies the
 genesis record it is offered with, and in-post addresses rendered as an
 affordance rather than acted on. **The joining half is built** — see below and
-the `stoa-membership` capability; the in-post affordance is a UI obligation and
-is not. §4.8 Phase 1 records why "pasting an address is enough to join" was
-wrong: a join takes the address **and** the record.
+the `stoa-membership` capability. ~~The in-post affordance is a UI obligation and
+is not.~~ **The view half is now contracted too** — the Stoa list, the join
+preview, creation and sharing are the `stoa-navigation-view` capability, which
+carries what the screens must render and must refuse to claim. §4.8 Phase 1
+records why "pasting an address is enough to join" was wrong: a join takes the
+address **and** the record, and that is why what a user *shares* has to carry
+both halves as well.
 
 The ordering is not arbitrary and the dependencies run one way only. B needs A
 because a compose box needs somewhere to put the result; C needs A and B because
@@ -3829,15 +3833,20 @@ the costs below were named and accepted.
 **In the MVP:**
 
 1. Create an identity
-2. Create a Stoa
+2. Create a Stoa. **Built**, core and view both — the core half is the
+   `stoa-membership` capability, the screen is `stoa-navigation-view`
 3. Post
 4. Reply to a post
 5. Upvote / downvote
-6. Share a Stoa — copy its address. **Built** (the address is what creation
-   returns); sharing it *from the UI* is not
+6. ~~Share a Stoa — copy its address~~ **Share a Stoa — what is shared carries
+   its address *and* its genesis record**, for the same reason item 7 does: an
+   address is a one-way hash, so it verifies a record and cannot reconstruct
+   one. The address alone would produce something its recipient cannot act on.
+   **Built** — `stoa-navigation-view` carries what a share must contain
 7. ~~Join a Stoa by address~~ **Join a Stoa, given its address and its genesis
-   record. Built** — see the `stoa-membership` capability. An address alone is
-   not joinable; §4.8 Phase 1 records why the original wording was wrong
+   record. Built** — the core half is the `stoa-membership` capability, the
+   preview screen `stoa-navigation-view`. An address alone is not joinable;
+   §4.8 Phase 1 records why the original wording was wrong
 8. **Receive ops from other peers**, over delivery's reliable channel
 9. **View a feed; view a thread**
 10. **Persistence on disk** of Stoas, identities and messages

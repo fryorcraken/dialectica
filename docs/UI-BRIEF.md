@@ -264,6 +264,16 @@ Two things follow for this screen:
   and split one Stoa into two. Rendering it safely is this screen's job; see the
   Unicode obligation below.
 
+**A per-row count of posts held is not available, and a row must be designed
+without one.** A listed Stoa carries its address and its founding title, and
+nothing else: no call answers how many posts this peer holds for a given Stoa,
+and the thread listing is paginated — it reports whether a further page exists,
+never a total. So a row has no honest number to put in its margin, and "nothing
+received yet" is equally unavailable, being itself a claim about a count. Note
+this is *not* the global-count rule: a count of what this machine holds would be
+perfectly legitimate to show, and this one is simply not computed. Design the row
+so such a number could appear later without the layout changing.
+
 ### Joining a Stoa — a security surface, not a form
 
 An address is a copyable string that is **self-authenticating**: pasting it is
@@ -282,6 +292,19 @@ single pasteable field cannot work.
 - An address appearing inside a post is attacker-supplied. Render it as an
   affordance the reader chooses to act on. **Never auto-join.**
 - Two Stoas may present the same name. Show something that distinguishes them.
+- **What a person shares and what the join field accepts are one decision, and
+  both halves have to carry the record.** A share producing a bare address
+  produces something its recipient cannot act on; a paste field accepting a bare
+  address accepts input that can never succeed. Whatever shape is chosen, the
+  address inside it is carried **in full** — the 8-8-6 abbreviation is a
+  recognition aid for a reader looking at a screen, and is lossy for anything
+  meant to be pasted.
+- **The join confirmation cannot show a current title yet, and must not caption
+  the founding one as though it were.** Nothing resolves the moderator-signed
+  metadata op, so the founding title is the only title there is. A panel
+  captioned "current title" filled with the founding value asserts that nobody
+  has renamed the Stoa — which is exactly the thing no peer on this build has
+  checked. Reserve the position; do not fill it.
 - **Joining a Stoa the user is already in is not an error.** The core reports the
   same success either way, deliberately: a pasted address is exactly the input
   someone supplies twice, and it changes nothing about what is already held. Do
