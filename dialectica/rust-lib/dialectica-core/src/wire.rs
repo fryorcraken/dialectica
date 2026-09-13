@@ -5886,6 +5886,165 @@ mod tests {
         assert_eq!(v["items"][1]["parent"], a_thread_root().op.id().to_hex());
     }
 
+    /// Every top-level key of a thread reply, and every key of each item, as
+    /// sorted lists — so an assertion can be about the WHOLE key set rather than
+    /// about names somebody thought to look for.
+    fn thread_reply_key_sets(out: &str) -> (Vec<String>, Vec<Vec<String>>) {
+        let v: serde_json::Value = serde_json::from_str(out).unwrap();
+        let mut top: Vec<String> = v
+            .as_object()
+            .expect("a thread reply is a JSON object")
+            .keys()
+            .cloned()
+            .collect();
+        top.sort();
+        let items = v["items"]
+            .as_array()
+            .expect("a served reply carries items")
+            .iter()
+            .map(|item| {
+                let mut keys: Vec<String> = item
+                    .as_object()
+                    .expect("an item is a JSON object")
+                    .keys()
+                    .cloned()
+                    .collect();
+                keys.sort();
+                keys
+            })
+            .collect();
+        (top, items)
+    }
+
+    #[test]
+    fn a_thread_reply_carries_exactly_its_contracted_keys_and_no_others() {
+        // Two spec scenarios are phrased as ENUMERATIONS and neither can be
+        // discharged by a denylist: "No total is reported" and "no item carries a
+        // derived display name", the latter saying in as many words that "every
+        // field of an item is enumerated".
+        //
+        // A denylist fails on the names somebody thought of and passes on the one
+        // they did not — this repo's hand-maintained-sweep-list defect, in the one
+        // place where the stronger form is actually available. So this asserts the
+        // WHOLE key set, at both levels, and a field added to either object fails
+        // here whatever it is called.
+        //
+        // Three item fields are conditional by contract, so a single fixture
+        // cannot pin them: `parent` is absent on the root, `body` and
+        // `attachments` are absent only on a WITHHELD hidden root, and
+        // `moderation.decidedBy` is absent only when nothing decided. Each case
+        // is built below and its exact key set asserted, rather than allowing a
+        // permissive superset that would let a stray field hide in the slack.
+        let root = a_thread_root();
+        let reply = a_thread_post(3, Some(root.op.id()), Some(root.op.id()), "a reply");
+        let moderator = feed_key(1);
+        let hide_the_root = Op {
+            stoa: feed_genesis().address().unwrap(),
+            author: moderator.public_key(),
+            kind: OpKind::Moderate {
+                target: root.op.id(),
+                action: crate::op::ModerationAction::Hide,
+            },
+        }
+        .sign(&moderator);
+
+        // Case 1: an ordinary served thread — an unmoderated root with no parent,
+        // and an unmoderated reply with one.
+        let plain = read_thread(&thread_request(""), &a_thread_log(), &feed_genesis());
+        let (top, items) = thread_reply_key_sets(&plain);
+        assert_eq!(
+            top,
+            vec!["hasMore", "items", "page"],
+            "the reply carries the pagination shape and NOTHING else — a count of \
+             what this peer holds is not a count of what exists, and the two are \
+             indistinguishable once rendered: {plain}"
+        );
+        assert_eq!(items.len(), 2, "got {plain}");
+        assert_eq!(
+            items[0],
+            vec![
+                "attachments",
+                "author",
+                "authorKey",
+                "body",
+                "currentVersion",
+                "id",
+                "isRevised",
+                "moderation",
+                "thread",
+            ],
+            "the root's complete key set — no parent, and nothing derived from \
+             `authorKey` by any further transformation: {plain}"
+        );
+        assert_eq!(
+            items[1],
+            vec![
+                "attachments",
+                "author",
+                "authorKey",
+                "body",
+                "currentVersion",
+                "id",
+                "isRevised",
+                "moderation",
+                "parent",
+                "thread",
+            ],
+            "a reply's complete key set is the root's plus `parent`: {plain}"
+        );
+
+        // Case 2: a hidden root read WITHOUT hidden content — `body` and
+        // `attachments` withheld, so the key set is two shorter and no longer.
+        let mut hidden_log = MemoryOpLog::new();
+        for op in [root.clone(), reply.clone(), hide_the_root.clone()] {
+            hidden_log.append(op, Arrival::unordered()).unwrap();
+        }
+        let withheld = read_thread(&thread_request(""), &hidden_log, &feed_genesis());
+        let (_, withheld_items) = thread_reply_key_sets(&withheld);
+        assert_eq!(
+            withheld_items[0],
+            vec![
+                "author",
+                "authorKey",
+                "currentVersion",
+                "id",
+                "isRevised",
+                "moderation",
+                "thread",
+            ],
+            "a withheld hidden root omits `body` and `attachments` and gains \
+             nothing in their place: {withheld}"
+        );
+
+        // Case 3: the moderation object itself, both ways round. `decidedBy` is
+        // the one conditional key inside it, and the nested object is enumerated
+        // for the same reason the outer ones are.
+        let hidden_v: serde_json::Value = serde_json::from_str(&withheld).unwrap();
+        let mut decided: Vec<&String> = hidden_v["items"][0]["moderation"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect();
+        decided.sort();
+        assert_eq!(
+            decided,
+            vec!["decidedBy", "state"],
+            "a decided item names the op and carries no third field: {withheld}"
+        );
+        let mut undecided: Vec<&String> = hidden_v["items"][1]["moderation"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect();
+        undecided.sort();
+        assert_eq!(
+            undecided,
+            vec!["state"],
+            "an unmoderated item carries `state` alone — `decidedBy` omitted, not \
+             nulled: {withheld}"
+        );
+    }
+
     #[test]
     fn the_wire_reports_the_author_as_an_address_and_a_key_and_no_name() {
         // Two independent digests: the generated name comes from the KEY, the
@@ -6290,6 +6449,84 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(asked["items"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_genesis_for_another_stoa_is_refused_rather_than_applied_to_this_one() {
+        // Found by security review, which measured that `if false &&
+        // genesis_address != stoa` left the whole suite green. The check is the
+        // one that stops a caller pairing one Stoa's moderator set with another
+        // Stoa's posts, and `read_thread(request, log, genesis)` — public and
+        // re-exported at the crate root — relies on this line alone.
+        //
+        // **Why the consequence is worse than a wrong answer:** `Moderators::
+        // authorises` leads with `entry.op.op.stoa == self.stoa`, so a set built
+        // for Stoa B binds NOTHING in Stoa A. Every moderation silently stops
+        // applying — a hidden reply reappears and a hidden root renders the body
+        // that was withheld. So this asserts the moderation actually still binds
+        // in the correct pairing, not merely that the mismatch is refused;
+        // without that half, an implementation that refused everything would pass.
+        let root = a_thread_root();
+        let reply = a_thread_post(3, Some(root.op.id()), Some(root.op.id()), "a reply");
+        let moderator = feed_key(1);
+        let hide = Op {
+            stoa: feed_genesis().address().unwrap(),
+            author: moderator.public_key(),
+            kind: OpKind::Moderate {
+                target: reply.op.id(),
+                action: crate::op::ModerationAction::Hide,
+            },
+        }
+        .sign(&moderator);
+        let mut log = MemoryOpLog::new();
+        for op in [root.clone(), reply.clone(), hide.clone()] {
+            log.append(op, Arrival::unordered()).unwrap();
+        }
+
+        // A well-formed genesis record for a DIFFERENT Stoa. Well-formed is the
+        // point: it decodes, it hashes, `Moderators::of` would happily build a
+        // set from it — only the pairing with the requested Stoa is wrong.
+        let elsewhere = Genesis {
+            creator: feed_key(1).public_key(),
+            policy: Policy::Open,
+            title: "Somewhere else".to_string(),
+        };
+        assert_ne!(
+            elsewhere.address().unwrap(),
+            feed_genesis().address().unwrap(),
+            "the fixture must name a genuinely different Stoa"
+        );
+
+        let out = read_thread(&thread_request(""), &log, &elsewhere);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(
+            v.get("error").is_some(),
+            "a genesis record for another Stoa must be REFUSED, not used to build \
+             a moderator set that binds nothing here: {out}"
+        );
+        assert!(
+            v.get("items").is_none(),
+            "a refusal carries no items: {out}"
+        );
+
+        // The other half: with the right pairing the same read succeeds AND the
+        // moderation binds — so the refusal above is the check doing its job
+        // rather than the read being broken for every genesis record.
+        let correct = read_thread(&thread_request(""), &log, &feed_genesis());
+        let cv: serde_json::Value = serde_json::from_str(&correct).unwrap();
+        assert!(cv.get("error").is_none(), "got {correct}");
+        let ids: Vec<&str> = cv["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            ids,
+            vec![root.op.id().to_hex().as_str()],
+            "the hidden reply must be omitted — which is what stops working when \
+             the moderator set governs the wrong Stoa: {correct}"
+        );
     }
 
     #[test]

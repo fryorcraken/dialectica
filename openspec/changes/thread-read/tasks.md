@@ -151,10 +151,46 @@
       and the test now asserts the arrangement rather than reporting it. Proved
       by turning `items.insert(0, item)` into `items.push(item)`.
 
-## 5. Documents
+## 5. Review findings acted on by the tester
 
-- [x] 4.1 Write `design.md` alongside the code, recording the chain-walk decision
+Each is proved by re-running the reviewer's own mutation, which survived before
+and fails now. The tree was restored after every one.
+
+- [x] 5.1 Enumerate the thread reply's key set rather than denylisting names.
+      `wire::a_thread_reply_carries_exactly_its_contracted_keys_and_no_others`
+      asserts the exact sorted key set at three levels — the reply, each item,
+      and the nested `moderation` object — across the cases that make a field
+      conditional. Closes two spec-test boxes: `"total": 42` and an
+      `authorLabel` derived from `authorKey` each survived the whole suite
+      before and each fails this now.
+- [x] 5.2 Pin that a reported parent need not be on the page.
+      `thread::an_item_still_names_a_parent_that_fell_on_an_earlier_page`, with
+      the page boundary found from the order rather than assumed. Proved by
+      giving `read_thread` page-awareness it does not have.
+- [x] 5.3 Make the overflow fixture able to see the defect it names.
+      `an_enormous_page_index_does_not_overflow` is a table including
+      `(1 << 63, 2)`, where wrapping and saturating disagree. `wrapping_mul`
+      now fails it in debug **and** release; the original single case did not.
+- [x] 5.4 Pin the forged root's disclosure clause as a relation, not a literal.
+      The first version of this test could not fail — the ordering let a
+      leaking implementation disclose in both messages being compared. Fixed by
+      taking the baseline before any forged read; see `correctness.md` for the
+      near-miss, which is this repo's own defect family reproduced while fixing
+      it.
+- [x] 5.5 Cover the genesis/Stoa pairing check, which nothing saw.
+      `wire::a_genesis_for_another_stoa_is_refused_rather_than_applied_to_this
+      _one`, asserting both that the mismatch is refused and that the correct
+      pairing still binds moderation — without the second half an
+      over-refusing implementation would pass.
+- [x] 5.6 Drive `read_thread` against a real `SqliteOpLog`. Two integration
+      tests in `end_to_end.rs`: a two-link chain walked across a file, and a
+      hidden reply that stays hidden across a restart. This is the seam that
+      file's own header records as invisible one layer down.
+
+## 6. Documents
+
+- [x] 6.1 Write `design.md` alongside the code, recording the chain-walk decision
       and what was rejected.
-- [x] 4.2 Correct `docs/UI-BRIEF.md`'s vote-count passage, which said "there is
+- [x] 6.2 Correct `docs/UI-BRIEF.md`'s vote-count passage, which said "there is
       no thread read at all". Its conclusion — that no call returns a vote count
       — is untouched and still correct.

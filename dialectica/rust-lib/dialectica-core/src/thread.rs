@@ -1447,6 +1447,25 @@ mod tests {
     fn a_forged_root_is_not_readable_as_a_thread() {
         let forged = a_forged_post(&a_key(2).public_key(), &a_key(9), None, None, "not mine");
         let log = a_log(vec![forged.clone()]);
+        let never_arrived = a_root(5, "never received").op.id();
+
+        let blanked = |id: OpId| {
+            read_thread(&log, &moderators(), &a_stoa(), &id, 0, MAX_PER_PAGE, false)
+                .unwrap()
+                .expect_err("both must be refused")
+                .to_string()
+                .replace(&id.to_hex(), "<id>")
+        };
+
+        // **Captured BEFORE any forged read happens in this test**, which is
+        // load-bearing and was got wrong once: a disclosure need not be a
+        // constant, and an implementation reaching for ambient state — a flag set
+        // when verification fails, a cache, a counter — leaks on the forged read
+        // and then goes on leaking. Taking this baseline after the variant
+        // assertion below would compare two equally-disclosing messages and call
+        // them identical.
+        let clean_before_any_forged_read = blanked(never_arrived);
+
         assert_eq!(
             read_thread(
                 &log,
@@ -1460,6 +1479,43 @@ mod tests {
             .unwrap(),
             Err(NotAThread::NotHeld(forged.op.id())),
             "an op that does not verify is not a thread this peer holds"
+        );
+
+        // And the MESSAGE discloses nothing about the bytes the store is holding.
+        // The variant assertion above cannot see this: the message comes from
+        // `NotAThread::Display`, a different function, so a reword there adding
+        // "(bytes present but unverifiable)" would satisfy everything above while
+        // telling a caller that SOMETHING arrived under an id this read cannot
+        // say anything about — a fact with no remedy attached to it.
+        //
+        // Asserted as a RELATION rather than as a pinned literal, for the reason
+        // this repo keeps relearning: a pinned literal fails on a reword and
+        // passes on misinformation, which is the wrong way round. With each
+        // message's own op id blanked, the refusal for an op whose bytes the store
+        // HOLDS must be byte-identical to the refusal for one that never arrived.
+        // Any disclosure makes them differ; rewording both together does not.
+        assert!(log.get(&never_arrived).unwrap().is_none());
+        assert!(
+            log.get(&forged.op.id()).unwrap().is_some(),
+            "the store must HOLD the forged bytes, or the two messages are alike \
+             because both ops are genuinely absent"
+        );
+
+        let forged_message = blanked(forged.op.id());
+        assert_eq!(
+            forged_message, clean_before_any_forged_read,
+            "the refusal for an op whose bytes the store holds must not differ \
+             from the refusal for one that never arrived"
+        );
+        // And reading the absent one AGAIN, now that a forged read has happened,
+        // still gives the same message — so a refusal cannot disclose by
+        // remembering what a previous call saw.
+        assert_eq!(
+            blanked(never_arrived),
+            clean_before_any_forged_read,
+            "the refusal for an absent op must not change once a forged op has \
+             been read — a refusal that depends on what a previous call saw is \
+             disclosing through the back door"
         );
     }
 
@@ -2720,6 +2776,83 @@ mod tests {
     }
 
     #[test]
+    fn an_item_still_names_a_parent_that_fell_on_an_earlier_page() {
+        // "A reported parent is an op id and not a promise that the parent is
+        // among the items." Every other test of `parent` reads the thread whole,
+        // where the parent is always present — so none of them can tell "reports
+        // the parent always" from "reports the parent when it is on the page".
+        //
+        // The page boundary is CHOSEN from the order rather than assumed: the
+        // convergent order is ascending op id and carries no temporal meaning, so
+        // which reply lands where is not something to guess. This finds an item
+        // whose parent precedes it in the whole-thread sequence and then cuts the
+        // page between the two, which is the only arrangement that exercises the
+        // claim.
+        let root = a_root(2, "root");
+        let one = a_reply(3, &root, "one");
+        let two = a_reply(4, &one, "two");
+        let three = a_reply(5, &two, "three");
+        let log = a_log(vec![root.clone(), one.clone(), two.clone(), three.clone()]);
+
+        let whole = read(&log, &root, false);
+        assert_eq!(whole.items.len(), 4, "the fixture must place all four");
+        let order = ids_of(&whole);
+
+        // Any item whose parent sits earlier in the sequence will do; a chain of
+        // three guarantees at least one exists whatever the hashes did, because
+        // the root leads and `one`'s parent IS the root.
+        let (at, parent_hex) = whole
+            .items
+            .iter()
+            .enumerate()
+            .skip(1)
+            .find_map(|(i, item)| {
+                let parent = item.parent.clone()?;
+                let parent_at = order.iter().position(|id| *id == parent)?;
+                (parent_at < i).then_some((i, parent))
+            })
+            .expect("a chain of three must put some item after its parent");
+
+        // Cut so the parent is on an earlier page than the item naming it. A page
+        // size of `at` puts the item first on page 1 and its parent on page 0.
+        let per_page = at;
+        let later = read_thread(
+            &log,
+            &moderators(),
+            &a_stoa(),
+            &root.op.id(),
+            1,
+            per_page,
+            false,
+        )
+        .unwrap()
+        .expect("a later page of a held thread is served");
+
+        let item = later
+            .items
+            .first()
+            .expect("the cut must put an item on page 1");
+        assert_eq!(
+            item.id, order[at],
+            "the arithmetic must have put the intended item first on page 1"
+        );
+        assert_eq!(
+            item.parent.as_deref(),
+            Some(parent_hex.as_str()),
+            "an item must report its parent's op id even when the parent fell on \
+             an earlier page"
+        );
+        // And the parent really is absent from THIS page, or the assertion above
+        // is about a page that happens to carry it after all.
+        assert!(
+            !ids_of(&later).contains(&parent_hex),
+            "the fixture must have cut the parent onto an earlier page"
+        );
+        // The read is not refused for the parent being off the page.
+        assert!(!later.items.is_empty());
+    }
+
+    #[test]
     fn a_page_past_the_end_is_empty_rather_than_an_error() {
         let root = a_root(2, "root");
         let log = a_log(vec![root.clone()]);
@@ -2737,23 +2870,52 @@ mod tests {
         // that overflows. In release builds it wraps silently, which would serve
         // a page from the middle of the thread to a caller who asked for one past
         // the end.
+        //
+        // **A table, because one input cannot see the defect.** Correctness
+        // review measured that `usize::MAX, 20` — the case originally written
+        // here — passes with `saturating_mul` replaced by `wrapping_mul`:
+        // `usize::MAX.wrapping_mul(20)` is `2^64 - 20`, which `.min(items.len())`
+        // clamps to an empty page, the same answer saturating gives. The fixture
+        // agreed with the mutation rather than exercising it.
+        //
+        // `1 << 63, 2` is the discriminating case and the reason this is a table:
+        // `(2^63).wrapping_mul(2) == 0`, so the mutation serves page ZERO — every
+        // item, while reporting a page index in the billions — which is exactly
+        // the "page from the middle of the thread" this comment claims to forbid.
+        // The other rows are kept because a case that agrees with the mutation
+        // still pins the saturating behaviour against a different edit.
         let root = a_root(2, "root");
         let reply = a_reply(3, &root, "reply");
         let log = a_log(vec![root.clone(), reply]);
-        let p = read_thread(
-            &log,
-            &moderators(),
-            &a_stoa(),
-            &root.op.id(),
-            usize::MAX,
-            20,
-            false,
-        )
-        .unwrap()
-        .unwrap();
-        assert!(p.items.is_empty());
-        assert!(!p.has_more);
-        assert_eq!(p.page, usize::MAX);
+
+        for (page, per_page) in [
+            (usize::MAX, 20),
+            // The one where wrapping and saturating DISAGREE.
+            (1usize << 63, 2),
+            // A third multiplier, so a fix special-casing one power of two shows.
+            (1usize << 62, 4),
+            (usize::MAX, 1),
+        ] {
+            let p = read_thread(
+                &log,
+                &moderators(),
+                &a_stoa(),
+                &root.op.id(),
+                page,
+                per_page,
+                false,
+            )
+            .unwrap()
+            .unwrap();
+            assert!(
+                p.items.is_empty(),
+                "page {page} at size {per_page} is past the end and must be \
+                 EMPTY, not a page from the middle of the thread: got {:?}",
+                ids_of(&p)
+            );
+            assert!(!p.has_more, "page {page} at size {per_page}");
+            assert_eq!(p.page, page, "the index asked for is reported back");
+        }
     }
 
     #[test]

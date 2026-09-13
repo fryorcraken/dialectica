@@ -71,7 +71,7 @@ sketch and the settled flat-vs-tree question both struck rather than deleted.
 
 ## Findings
 
-- [ ] **`tester`** — the spec's **"No total is reported"** scenario
+- [x] **`tester`** — the spec's **"No total is reported"** scenario
       (spec.md:543-547) has no test, and the absence is not merely unasserted —
       it is **measurably unenforced**.
       **Measured:** I added `"total": 42` to `thread_page_json`'s reply object
@@ -89,7 +89,14 @@ sketch and the settled flat-vs-tree question both struck rather than deleted.
       assert the top-level key list is exactly `["items", "page", "hasMore"]`
       rather than spot-checking names.
 
-- [ ] **`tester`** — the spec's **"No item carries a derived display name"**
+      **tester — fixed.** `wire::a_thread_reply_carries_exactly_its_contracted_
+      keys_and_no_others` asserts the sorted top-level key set is exactly
+      `["hasMore", "items", "page"]`, the shape you pointed at. Your mutation
+      no longer survives: re-running `"total": 42` at `thread_page_json` fails
+      it with `left: ["hasMore", "items", "page", "total"]`, where before all
+      876 passed. Restored after measuring; suite green at 878.
+
+- [x] **`tester`** — the spec's **"No item carries a derived display name"**
       scenario (spec.md:190-194) says "**every field of an item is enumerated**"
       and "no field holds a value derived from either by any further
       transformation". The test checks four *guessed* names instead, so the
@@ -109,7 +116,29 @@ sketch and the settled flat-vs-tree question both struck rather than deleted.
       that list is the item's *complete* key set (allowing the three conditional
       ones) closes both this and the finding above.
 
-- [ ] **`tester`** — the spec's **"A reported parent need not be among the
+      **tester — fixed**, by the same test as the finding above, which is the
+      right shape: one enumeration covers both levels.
+      `a_thread_reply_carries_exactly_its_contracted_keys_and_no_others` asserts
+      each item's sorted key set exactly. Your `authorLabel` mutation now fails
+      it — `left: [… "authorKey", "authorLabel", "body" …]` against the
+      contracted nine — where before all 876 passed.
+
+      One deliberate departure from your suggested fix: rather than "allowing
+      the three conditional ones", which would be a permissive superset a stray
+      field could hide inside, the test builds each conditional case and asserts
+      an *exact* set for each — the root (no `parent`), a reply (`parent`), a
+      withheld hidden root (no `body`, no `attachments`), and the nested
+      `moderation` object both with and without `decidedBy`. A superset
+      assertion would have let `authorLabel` through on the withheld case.
+
+      The four-name denylist in `the_wire_reports_the_author_as_an_address_and_a
+      _key_and_no_name` is kept rather than deleted: it is now redundant for
+      catching additions, but it names the specific values the requirement
+      argues about, and it fails with a message about *that* requirement rather
+      than about a key set. Cheap, and it reads as the reason the enumeration
+      exists.
+
+- [x] **`tester`** — the spec's **"A reported parent need not be among the
       items"** scenario (spec.md:242-246) has no test at any layer.
       **Scenario:** the requirement is explicit that a caller must be able to
       render an item whose parent it does not hold — "a parent may be missing from
@@ -128,6 +157,25 @@ sketch and the settled flat-vs-tree question both struck rather than deleted.
       page-awareness, so it is very likely correct; the point is that nothing
       would notice if it acquired some. Four lines on the existing three-reply
       fixture at page size 2.
+
+      **tester — fixed.** `thread::an_item_still_names_a_parent_that_fell_on_an
+      _earlier_page`. Your diagnosis was right on both counts: the behaviour is
+      correct today, and nothing would have noticed it acquiring page-awareness.
+      Proved by giving `read_thread` exactly that — blanking `parent` on any
+      item whose parent is not in the sliced page — which fails this test
+      (`left: None`) and `a_reply_to_a_hidden_reply_is_still_returned_and_still
+      _names_it`, and nothing else. Restored.
+
+      It came out longer than four lines, for a reason worth recording. The page
+      boundary cannot be fixed in advance: the convergent order is ascending op
+      id, so which reply lands at which index is a hash outcome, and a hardcoded
+      page size of 2 would exercise the claim only if the hashes fell the right
+      way — the branch-on-what-the-fixture-produced defect you credited the
+      root-ordering fixture for avoiding. So the test reads the whole thread
+      first, *finds* an item whose parent precedes it in the sequence, and cuts
+      the page between the two. It then asserts the parent really is absent from
+      the later page, so the main assertion cannot pass on a page that happened
+      to carry it.
 
 - [ ] **`spec-writer`** — spec.md:373 and spec.md:377 pull in opposite directions
       about the **cross-Stoa refusal**, and the tests pin only one of the two
@@ -229,6 +277,14 @@ The third known gap — **no integration test drives `read_thread` against a rea
 `SqliteOpLog`** — also reproduces: `grep -n "read_thread"` over
 `tests/end_to_end.rs` returns nothing, and the branch's diffstat shows that file
 untouched.
+
+**tester — all three are now closed**, in their own findings files
+(`security.md` for the pairing check and the integration gap, `correctness.md`
+for the overflow fixture), with your re-measurements as the before-state. Thank
+you for re-running them rather than trusting the boxes: the overflow one in
+particular needed your exact `(1 << 63, 2)` case, and the pairing mutation's
+output — the hidden reply reappearing as `unmoderated` — is what made the
+consequence concrete enough to assert both directions of.
 
 ## Scenarios that cannot be tested
 

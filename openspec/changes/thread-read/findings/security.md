@@ -94,7 +94,7 @@ object, not an empty string.
       narrower than its comment claimed is the whole reason this was invisible,
       and it is recorded in `design.md` §10 rather than only fixed.
 
-- [ ] **`tester`** — `wire.rs:1593-1597` — the genesis/Stoa pairing check in
+- [x] **`tester`** — `wire.rs:1593-1597` — the genesis/Stoa pairing check in
       `read_thread_inner` is **entirely untested**, and it is the check that
       stops a caller applying one Stoa's moderator set to another Stoa's posts.
       **Measured:** replacing `if genesis_address != stoa` with
@@ -118,7 +118,29 @@ object, not an empty string.
       log, genesis)` entry point — public, re-exported at the crate root — that
       relies on this line alone.
 
-- [ ] **`tester`** — `dialectica-core/tests/end_to_end.rs` — **no integration
+      **tester — fixed.** `wire::a_genesis_for_another_stoa_is_refused_rather
+      _than_applied_to_this_one`, on the `read_thread(request, log, genesis)`
+      entry point you identified as the one relying on this line alone. Your
+      mutation no longer survives: `if false && genesis_address != stoa` fails
+      it, and the failure output is your predicted scenario verbatim — the read
+      is served and the hidden reply comes back carrying
+      `"moderation":{"state":"unmoderated"}`.
+
+      The test asserts **both** directions, because the negative half alone
+      would pass against a read that refused every genesis record: with the
+      correct pairing the same log must still serve the thread *and* still omit
+      the hidden reply. That second assertion is the one that would catch a
+      "fix" that over-refused.
+
+      The fixture's rival explanation is excluded too — the wrong-Stoa genesis
+      is well-formed and has the same creator, so only the pairing differs;
+      a malformed record would have been refused by a different branch.
+
+      Not taken: the sibling at `wire.rs:1253`. You scoped it out of this piece
+      and I agree — it is `list_threads`'s, and covering it here would put a
+      feed test in a thread-read piece.
+
+- [x] **`tester`** — `dialectica-core/tests/end_to_end.rs` — **no integration
       test exercises `read_thread` against a real `SqliteOpLog`.** Every one of
       the 26 integration tests drives `feed::list_threads` or
       `wire::list_threads_from_request`; `grep -n "read_thread"` over
@@ -135,6 +157,27 @@ object, not an empty string.
       **Severity: medium.** One test — write a thread to a real file, reopen,
       `read_thread_from_request`, assert the root and a reply come back in
       `cmp_ops` order — closes it.
+
+      **tester — fixed**, with two tests rather than one.
+      `a_thread_read_over_a_store_on_disk_returns_the_root_and_its_replies` is
+      the test you specified, with one addition: the thread is a *two-link
+      chain*, so the walk does an `OpLog::get` per link through real SELECTs and
+      `SignedOp` decoding rather than only resolving direct children. The
+      expected reply order is derived here by sorting the op ids, not read back
+      from the answer, so it is an independent expectation.
+
+      `a_hidden_reply_stays_hidden_across_a_restart_of_the_store` is the second,
+      and it is the one that covers the seam your finding is really about: the
+      moderation op's own bytes have to survive the round trip well enough to
+      still verify and still authorise. A stored op that decoded to a different
+      target, or whose signature stopped checking, would silently stop binding —
+      and every in-memory test would stay green.
+
+      Both proved able to fail against the real store: restricting placement to
+      direct children fails the first (`left: 2, right: 3` — the two-link reply
+      dropped), and disabling the hidden-reply filter fails the second. Each
+      test asserts a positive half beside the negative one, so neither passes
+      against a store that simply lost rows.
 
 ## On the `CyclicLog` boundary, and the rootless page it exposes
 

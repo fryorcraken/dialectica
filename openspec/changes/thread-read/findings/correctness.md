@@ -39,7 +39,7 @@ literals.
 
 ## Findings
 
-- [ ] **`tester`** — `thread.rs:2427 an_enormous_page_index_does_not_overflow`
+- [x] **`tester`** — `thread.rs:2427 an_enormous_page_index_does_not_overflow`
       — the test cannot observe the failure its own comment describes, because
       its fixture is one where wrapping and saturating agree.
       **Measured:** replacing `page.saturating_mul(per_page)` (`thread.rs:455`)
@@ -61,6 +61,23 @@ literals.
       notice if it stopped being. Note `per_page = 2` is reachable from the
       wire, so a regression here would be peer-triggerable. Adding this second
       case beside the existing one costs four lines.
+
+      **tester — fixed.** `an_enormous_page_index_does_not_overflow` is now a
+      table, with your `(1 << 63, 2)` as the discriminating row. Your mutation
+      no longer survives: `wrapping_mul` fails it with *"page
+      9223372036854775808 at size 2 is past the end and must be EMPTY, not a
+      page from the middle of the thread: got [<root>, <reply>]"* — both items,
+      exactly the outcome you predicted from the arithmetic. **Confirmed in
+      release as well as debug**, since you flagged that the original fixture
+      agreed with the mutation in both.
+
+      Two rows beyond the one you named, on the principle that a case which
+      agrees with one mutation can still discriminate against another:
+      `(1 << 62, 4)` so a fix special-casing a single power of two shows, and
+      `(usize::MAX, 1)`. The original `(usize::MAX, 20)` is kept rather than
+      replaced — it pins the saturating answer even though it cannot see this
+      particular substitution, and dropping it would trade one blind spot for
+      another.
 
 - [x] **`dev-writer`** — `thread.rs:455-457` — `read_thread` called with
       `per_page == 0` reports `has_more: true` on every page forever, so a
@@ -102,7 +119,7 @@ literals.
       is not this piece's. `design.md` §12 names the third paginated read as the
       moment to introduce it rather than write a third clamp.
 
-- [ ] **`tester`** — `thread.rs:1239 a_forged_root_is_not_readable_as_a_thread`
+- [x] **`tester`** — `thread.rs:1239 a_forged_root_is_not_readable_as_a_thread`
       — the test asserts the refusal *variant* but not the spec's disclosure
       clause, so the one sentence the requirement singles out is unpinned.
       **What the spec requires:** "the message does not reveal that the store
@@ -119,6 +136,29 @@ literals.
       the relation (the forged-root message is byte-identical to the
       never-arrived message, with only the id differing), rather than pinning
       the literal, so a reword fails on misinformation rather than on wording.
+
+      **tester — fixed**, with the relation you specified: each message's own op
+      id is blanked to `<id>` and the two must then be equal. Verified it fails
+      on misinformation and not on wording — rewording *both* messages
+      ("holds no **verifiable** op … or what did arrive did not verify") leaves
+      the suite green, which is correct, because that reword discloses nothing.
+
+      **Your finding was righter than the fix I first wrote for it, and the
+      first version could not fail.** I proved the disclosure case by making
+      `Display` leak conditionally (a thread-local set on the verification
+      branch — the honest shape, since `Display` has no store access), and my
+      test passed. The reason: the pre-existing variant assertion performs the
+      forged read *first*, so by the time I captured the never-arrived message
+      the leak was already on and both messages disclosed equally. A comparison
+      of two equally-wrong strings.
+
+      Fixed by capturing the absent-op message **before any forged read happens
+      in the test**, and asserting a third time afterwards that it has not
+      changed — so a refusal cannot disclose by remembering what a previous call
+      saw. With that ordering the leak fails it: *left: "… may not have arrived
+      yet (bytes present but unverifiable)", right: "… may not have arrived
+      yet"*. Recording the near-miss because it is this file's own defect family
+      reproduced by the person fixing it.
 
 ## Not defects
 
