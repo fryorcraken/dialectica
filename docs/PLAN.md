@@ -640,17 +640,32 @@ each phase is independently useful and none depends on a later one landing.
 No discovery mechanism at all, and none needed to prove the rest of the system
 works.
 
-**Phase 1 — addresses as links.** A Stoa address is a copyable string. Importing
-one is how you join a Stoa nobody told the app about; a Stoa address appearing
-in a post renders as a link that enters that Stoa on click. This is the whole
-mechanism, and it is enough for a network that grows by word of mouth.
+**Phase 1 — addresses as links.** A Stoa address is a copyable string, and a
+Stoa address appearing in a post renders as a link that offers to enter that
+Stoa. This is the whole mechanism, and it is enough for a network that grows by
+word of mouth.
 
-Two things to get right, both security-relevant: an address must be
-**self-authenticating** — pasting it is enough to verify what you joined,
-because the address is a hash of the genesis record (§5.1), so a wrong or
-tampered record fails to match. And in-post addresses are **attacker-supplied
-content**: render them as an explicit affordance the reader chooses to act on,
-never auto-join, and show what is being joined before joining it.
+~~Importing an address is how you join a Stoa nobody told the app about.~~
+~~An address must be **self-authenticating** — pasting it is enough to verify
+what you joined.~~ **Retracted; the joining half is built.** Creating, joining
+and listing Stoas are contracted by the `stoa-membership` capability, which
+states that **an address alone is not joinable**: the address is a one-way hash
+of the genesis record, so it is sufficient to *verify* a record somebody hands
+over and insufficient to *reconstruct* one. A join therefore takes the address
+**and** the record it names. This is the same error §5.5 records having made
+twice in its own signature; the sentence above stated the false half more
+confidently than the retraction, which is why it is struck here rather than
+merely cross-referenced.
+
+What survives of the self-authentication property, and it is the load-bearing
+half: the address is a hash of the genesis record (§5.1), so a wrong or tampered
+record **fails to match the address it is offered with**. Verification needs
+nothing but those two inputs — no registry, no peer, no network call.
+
+Still to get right, and still not built: in-post addresses are
+**attacker-supplied content**. Render them as an explicit affordance the reader
+chooses to act on, never auto-join, and show what is being joined before joining
+it. That is a UI obligation — see §5.5, which holds it.
 
 **Phase 2 — opt-in broadcast.** A dedicated content topic, **outside SDS**,
 carries Stoa announcements. A creator decides at creation whether their Stoa is
@@ -3240,9 +3255,12 @@ projection already applies, and it needs no key and no authority. Putting it in
 Stage C would make "see what was moderated" a moderator privilege, which §6.1's
 ceiling does not support — the ops are in every peer's log regardless.
 
-**Stage D — reach another Stoa.** §4.8 Phase 1's self-authenticating address, and
-in-post addresses rendered as an affordance rather than acted on. **Built** — see
-below.
+**Stage D — reach another Stoa.** §4.8 Phase 1's address, which verifies the
+genesis record it is offered with, and in-post addresses rendered as an
+affordance rather than acted on. **The joining half is built** — see below and
+the `stoa-membership` capability; the in-post affordance is a UI obligation and
+is not. §4.8 Phase 1 records why "pasting an address is enough to join" was
+wrong: a join takes the address **and** the record.
 
 The ordering is not arbitrary and the dependencies run one way only. B needs A
 because a compose box needs somewhere to put the result; C needs A and B because
@@ -3700,8 +3718,11 @@ the costs below were named and accepted.
 3. Post
 4. Reply to a post
 5. Upvote / downvote
-6. Share a Stoa — copy its address
-7. Join a Stoa by address
+6. Share a Stoa — copy its address. **Built** (the address is what creation
+   returns); sharing it *from the UI* is not
+7. ~~Join a Stoa by address~~ **Join a Stoa, given its address and its genesis
+   record. Built** — see the `stoa-membership` capability. An address alone is
+   not joinable; §4.8 Phase 1 records why the original wording was wrong
 8. **Receive ops from other peers**, over delivery's reliable channel
 9. **View a feed; view a thread**
 10. **Persistence on disk** of Stoas, identities and messages
@@ -3729,8 +3750,10 @@ only:
   needs a later one.
 - **Stage C (moderate) is out**, which is the §6 exclusion seen from the staging
   side.
-- **Stage D (reach another Stoa)** is **in**, via items 6 and 7 — sharing and
-  joining by address, §4.8 Phase 1. This is the one place the MVP scope departs
+- **Stage D (reach another Stoa)** is **in**, via items 6 and 7 — sharing an
+  address, and joining with an address **and** the genesis record it names (§4.8
+  Phase 1; "joining by address" was the wrong shape). This is the one place the
+  MVP scope departs
   from §9.1's ordering, and it is a deliberate reordering rather than an
   oversight: D before C. §9.1 permits it, since D depends on A and on nothing
   later.

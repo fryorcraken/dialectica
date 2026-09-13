@@ -419,7 +419,7 @@ signatures.
 
 ---
 
-- [ ] **7. What the two-file seam forecloses that `design.md` does not record: the two stores can disagree and nothing can detect it — for `spec-writer`**
+- [x] **7. What the two-file seam forecloses that `design.md` does not record: the two stores can disagree and nothing can detect it — for `spec-writer`**
 
 `design.md` records one foreclosure — no transaction spans membership and ops, so a
 future atomic "join and backfill" is unavailable — and argues the recovery asymmetry
@@ -483,6 +483,53 @@ impossible by construction (`keystore::creator_and_poster_in`). This one is abou
 current identity disagreeing with a *record written in the past*, which no amount of
 one-derivation-position fixes — the record is immutable and the key can change under
 it. The reshape does not touch this finding, and it should not be assumed to.
+
+**Outcome: FIXED — the contract question is answered, and the answer is "out of scope
+here, deliberately", stated in the spec so the silence stops being one.**
+
+The entry asks for one of two answers and says either is fine. **I took the second**: a
+Stoa created under a key the peer no longer holds is **not** a state this capability must
+report. Three reasons, in the order they decided it:
+
+1. **Nothing in this capability can discharge it.** Reporting the divergence needs a call
+   that compares a retained creator key against the peer's current signing key, and no
+   call here does or should — `list_stoas` answers what the user chose. Specifying it here
+   would produce a requirement no test in this capability could cover, which is the
+   failure mode my own agent file names first.
+2. **The vocabulary belongs elsewhere.** "You cannot moderate this" is about the moderator
+   set, which is `moderation-resolution`'s requirement *"A Stoa's moderator set is derived
+   from its genesis record"*. That capability already owns the derivation; the comparison
+   against a current key is the same subject.
+3. **Every answer this capability gives stays truthful in the divergent state**, which is
+   what makes declining safe rather than evasive. I verified this rather than asserting it:
+   `decode_row` checks record-against-address (`membership.rs:731`, reached from `get` at
+   `:530` and `list` at `:666`), so a changed root secret does not disturb it. A listed
+   Stoa means the user chose it, not that the user governs it.
+
+**What the spec now says**, under *"Creating a Stoa produces a genesis record the creator
+can moderate"* — the requirement whose own title is the one a reader could mis-read as
+promising the check:
+
+- The creator key recorded in a genesis record is fixed at creation and is **never
+  re-checked** against the peer's current signing key, and this capability **MUST NOT
+  claim, in any reply, that the peer can moderate a Stoa it lists.** That is the
+  requirement the finding actually needs — it forecloses a future reply field that would
+  assert the unchecked thing.
+- The divergence is named with its cause (the record is immutable, the signing key is not)
+  and its trigger (a key restored from a different backup, or re-created).
+- Reportability is **out of scope, stated as a decision rather than an omission**, with
+  reasons 1 and 2 above.
+- **A warning to the capability that picks it up:** it MUST NOT assume this one detected
+  the divergence, because nothing here does, and the state is reachable, silent, and
+  indistinguishable from the ordinary case in every answer above.
+
+That last clause is the part worth having. The entry's real risk is not the silence — it
+is a later change reading `list_stoas` returning a Stoa as evidence the peer can moderate
+it. The spec now forbids that reading explicitly.
+
+**The `design.md` note `dev-writer` added under Risks / Trade-offs should stay.** It
+carries the failure scenario and the measurement; this entry adds the contract position,
+and the two are the *why* and the *what* respectively. Neither replaces the other.
 
 ---
 

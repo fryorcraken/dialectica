@@ -146,7 +146,7 @@ tests that do not exercise them.
 
 ## Findings
 
-- [ ] **1. `spec-writer` — the whole "op does not create membership" requirement is untestable as written: there is no receive path**
+- [x] **1. `spec-writer` — the whole "op does not create membership" requirement is untestable as written: there is no receive path**
 
 The requirement and all three of its scenarios are phrased around an op **reaching
 the peer**: "*WHEN* an op addressed to a Stoa the peer is not in reaches the peer",
@@ -198,6 +198,50 @@ What remains, and why it is not mine: the requirement's three scenarios are phra
 around an op **reaching the peer**, and rewording them — keeping the security argument
 while stating the checkable half and saying plainly that the arriving-op direction
 becomes testable when a receive path exists — is a change to the spec.
+
+**Outcome: FIXED — the requirement is rewritten over the material the answer is
+computed from, and the arrival framing is gone.**
+
+**The structural claim was re-verified rather than inherited**, in this worktree after
+merging `origin/main`: `grep` for `fn receive`, `on_message`, `fn ingest`,
+`fn handle_incoming` across `dialectica/rust-lib/src/lib.rs` and
+`dialectica/rust-lib/dialectica-core/src/` returns nothing. One correction to the
+entry's own citation, which does not affect its conclusion: the core crate is at
+`dialectica/rust-lib/dialectica-core/src/`, not `dialectica-core/src/` as the entry
+writes it, so anyone re-running the grep at the literal path gets "No such file or
+directory" rather than an empty result. I also checked `arrival.rs`, whose name is the
+one thing that could have falsified the entry — it is op *ordering* (`Arrival`,
+`cmp_ops`, a Lamport/message-id pair), with no inbound path, so the finding holds.
+
+**What the requirement says now.** Renamed to *"Membership is what the user chose,
+never what the ops say"*, and restated over the material rather than the event:
+membership MUST be reported from the record of what the user chose and MUST NOT be
+derived, in whole or in part, from the ops the peer holds. The security argument is kept
+verbatim — it is the good half of the old requirement and the reason any of this is
+specified. Added below it, in the requirement's own words, is why the shape changed:
+arrival is not an event this capability can be shown to experience, so a scenario
+beginning "when an op reaches the peer" names something no test can stage, and **the
+arriving-op direction is explicitly named as the receive path's change to specify, not
+this one's.** That is the entry's "suggested reshape" taken as written.
+
+**The three scenarios are replaced by two that a test can stage**, both phrased around
+ops being *present where an implementation would look for them* rather than arriving:
+ops for a Stoa the peer never joined change neither the listing nor the membership
+answer, and an op store's contents disturb no retained record. This is the shape
+`dev-writer` already built the tests to under entry 4 — a real `SqliteOpLog` in the
+membership store's own directory — so the scenarios now describe what those tests do.
+
+**One consequence worth flagging for `tester`.** "Many ops for an unjoined Stoa still
+enrol nobody" is **gone as a scenario**, deliberately. Its only content beyond the
+single-op case was the count, and a count of ops in a store nothing reads is the
+decorative fixture entry 4 removed — five ops and one op exercise the same path. The
+single scenario that remains covers what is checkable.
+
+Also folded in: the sibling requirement *"Membership is not lost because a Stoa has no
+ops"* now says "an op store that exists and holds nothing MUST NOT empty the listing",
+and its scenario says the store "exists, opens, and holds no ops", so the fixture the
+scenario describes is the real on-disk one rather than a `MemoryOpLog` that could not
+have been consulted.
 
 ---
 
@@ -305,7 +349,7 @@ observable. 29 test call sites changed; `design.md` carries the full reasoning u
 
 ---
 
-- [ ] **3. `spec-writer` — the spec forbids refusing a store "on the grounds that it predates membership", and the store refuses several such stores**
+- [x] **3. `spec-writer` — the spec forbids refusing a store "on the grounds that it predates membership", and the store refuses several such stores**
 
 "Adding membership does not make an existing store unreadable" says: *"Opening such
 a store MUST NOT be refused on the grounds that it predates membership."*
@@ -345,6 +389,48 @@ because it is the sentence a spec-writer can act on: *membership state's absence
 refuses (which is the requirement as written, and the code honours it — `user_version ==
 0` creates the schema rather than refusing), while a *membership store claiming a layout
 this build does not have* is refused in both directions.
+
+**Outcome: FIXED — the entry's distinction is adopted as written, and it is now the
+stated content of the requirement rather than a silence around one sentence.**
+
+**Read from the code before writing it**, since the entry's framing is what the
+requirement had to encode. `from_connection` (`membership.rs:353-381`) takes three
+branches: `found == 0` creates the schema, `found != MEMBERSHIP_LAYOUT_VERSION` returns
+`UnknownLayoutVersion { found, expected }`, and an equal version runs `check_layout`,
+which names the **columns** (`SELECT stoa, genesis_bytes FROM stoas LIMIT 0`) and not
+merely the table. So there are three distinct cases, not two, and the third — a version
+that matches while the layout does not — had no requirement either.
+
+**The offending sentence is gone.** *"Opening such a store MUST NOT be refused on the
+grounds that it predates membership"* is replaced by **"The absence of membership state
+MUST NOT be a reason to refuse"**, which says the thing that is true (and which the code
+honours) without reading as a prohibition on the version refusals. The requirement is
+renamed to carry both halves: *"Adding membership does not make an existing store
+unreadable, and a layout this build cannot read is refused rather than guessed at"*.
+
+**Three refusals now have requirements**, and the entry's list of eleven tests maps onto
+them: an unknown (higher) version, an older (lower) version, and a version whose claimed
+layout is absent or altered. Each is stated as MUST-refuse, and the refusal MUST name
+both the version found and the version expected — which is the assertion
+`a_store_from_an_unknown_layout_version_is_refused_and_names_both_numbers` already
+makes. Refusing *downwards* is called out as deliberate, with the reason: an older layout
+is not a subset of a newer one, so accepting it means guessing at a conversion no
+requirement defines.
+
+**A paragraph says the two rules do not conflict**, because that is the contradiction a
+reader would otherwise reconstruct — and per the brief, `validate --strict` would not
+catch it. Never having recorded membership is the *absence* of a version; claiming a
+version this build cannot read is an *assertion* it cannot honour.
+
+**The entry's correction to its own framing is taken and used.** I adopted the point that
+`user_version == 0` is the absence of a version rather than a chosen sentinel — it is
+what SQLite reports for a database nothing has stamped — and that is exactly why the
+no-migration claim is structural. The requirement's prose says it in those terms.
+
+**The store-level failure shape came with it**, since it is the same requirement's
+surface: a refusal to open MUST be the error shape carrying the reason, and an empty
+listing MUST NOT be reported in its place. That closes the second unmarked bullet of
+entry 6 as well, and it is noted there.
 
 Nothing here is `dev-writer`'s to fix. The behaviour is what the entry says it is, and
 it is behaviour the entry agrees looks right; what is missing is a requirement, and
@@ -459,7 +545,7 @@ other three follow.
 
 ---
 
-- [ ] **5. `spec-writer` — "maximum length" does not say bytes or characters, and no test at this surface exercises the difference**
+- [x] **5. `spec-writer` — "maximum length" does not say bytes or characters, and no test at this surface exercises the difference**
 
 Two scenarios turn on a length bound:
 
@@ -513,9 +599,51 @@ The test the entry asks for — a multi-byte title at 1024 bytes and one at 1025
 written before the contract decides would pin whichever answer the implementation
 happens to give, which is the defect this flow exists to catch.
 
+**Outcome: FIXED — the spec now says bytes, and a scenario exercises the difference.
+The contract is decided, so the test `tester` was waiting on is now writable.**
+
+**Re-derived rather than inherited**, because `dev-writer`'s note is itself a citation:
+`MAX_TITLE_BYTES: usize = 1024` (`stoa.rs:103`), checked as `title.len() > MAX_TITLE_BYTES`
+(`stoa.rs:261`), and `String::len` in Rust is a byte count. The second enforcement inside
+`Genesis::decode` (`stoa.rs:296`) compares the decoded `len` the same way. The error
+renders "title is {n} bytes, the maximum is {MAX_TITLE_BYTES}" (`stoa.rs:217`). So the
+bound is bytes at every site, and the CJK arithmetic holds: a CJK codepoint in the BMP is
+3 bytes in UTF-8, so 400 of them is 1200 bytes, which exceeds 1024 and is refused.
+
+**The decision, stated so it is not re-litigated: the bound is bytes, and this surface
+says so.** A requirement paragraph now states the unit, names the 400-CJK-characters /
+1200-bytes case as a refusal, and gives the reason the unit belongs in *this* capability's
+spec rather than only in `stoa-genesis`'s — a caller of this call needs it to predict
+which titles the call refuses, and "length" on a JSON string surface reads as characters.
+
+**Both boundary scenarios now name the unit** ("whose UTF-8 encoding is longer in bytes",
+"exactly the maximum number of bytes"), and a **third scenario exists for the
+distinction itself**: a title whose *character* count is well inside the bound but whose
+UTF-8 encoding exceeds it in bytes is refused, and a multi-byte title encoding to exactly
+the bound — therefore fewer characters than the bound — succeeds. That second half is the
+one that catches an implementation counting characters, because a character-counting
+build would accept the first and also accept a longer one.
+
+**Where I declined the entry's suggestion, and why.** The entry offers that the fix "may
+belong in `stoa-genesis`, which owns the bound". I left `stoa-genesis` alone. Two reasons,
+and the first is decisive: `stoa-genesis` is a **live** spec in `openspec/specs/`, so
+changing it means a `MODIFIED` delta in this change, and this change's `proposal.md`
+declares `stoa-genesis` explicitly **unmodified** with the reasoning for the decline. Doing
+it here would contradict the proposal and take on the archive trap the brief warns about —
+a `MODIFIED` block replaces the whole requirement including its scenarios. Second, what
+this change needs is what *this* call reports, which is what I stated.
+
+**Flagged rather than fixed, for whoever next has cause to modify `stoa-genesis`:** that
+spec has the same ambiguity in its own words — `spec.md:35` "a record whose title exceeds
+the maximum", `:57` "a title longer than the maximum", and the scenario at `:103-107` "A
+title longer than the maximum is refused on both sides", none of which names a unit. It is
+the capability that owns the bound, so that is where the unit ideally lives too. It is not
+wrong today, only unit-silent, and `stoa-membership` now removes the ambiguity at the
+surface a caller actually calls.
+
 ---
 
-- [ ] **6. `spec-writer` — unmarked spec gaps: behaviour these tests pin that no scenario describes**
+- [x] **6. `spec-writer` — unmarked spec gaps: behaviour these tests pin that no scenario describes**
 
 Six `NO SPEC:` markers sit in the Stoa-membership tests and are correctly placed
 (`wire.rs:557`, `633`, `2500`, `2801`, `2822`; `membership.rs:498`, `1372`, `1530`,
@@ -594,6 +722,84 @@ Two notes for whoever writes the requirements, both from this change:
   reported under a generic label while the reason a store could not be opened still
   reaches the view in full. `wire.rs`'s test asserting the reason is unchanged.
 
+**Outcome: FIXED — all ten items now have a requirement or a stated scope decision. Taken
+one at a time, because the entry's two lists are ten separate decisions and a blanket
+"added" would hide which way each went.**
+
+The five **marked** `NO SPEC:` items:
+
+1. **The policy's wire spelling.** Specified, under the retention requirement: the policy
+   is reported as a string under the field `policy`, and the name for the policy a created
+   Stoa declares is `"open"`. Verified against the code rather than the entry —
+   `FOUNDING_TITLE = "foundingTitle"` (`wire.rs:542`), `policy_name` maps
+   `Policy::Open => "open"` (`wire.rs:569-575`), and the tests assert `reply["policy"] ==
+   "open"` (`wire.rs:2957`). The entry is right that a view branches on the string, so it
+   is a lasting surface decision and belonged in the contract.
+2. **Which policy a creation declares.** Specified: creation takes no policy parameter and
+   every Stoa created through this surface declares `open`, with widening named as a later
+   change's to make.
+   **A gap the entry did not name, found while writing this.** "A policy this build has no
+   name for is a failure, not `\"open\"`" is the security-relevant half — and stating it
+   beside "creation always declares `open`" would have been a requirement no test could
+   reach, since creation cannot produce one. So the spec says where it *is* reachable:
+   **joining**, where the record is supplied by whoever hands it over. That keeps the
+   requirement testable, which is the rule that would otherwise have been broken by
+   writing the obvious version.
+3. **`hasMore` on an empty listing.** Specified: an empty listing MUST report that there
+   are no further pages, and the empty-listing scenario now asserts it.
+4. **An unrecognised request field is ignored.** Specified under the failure-shape
+   requirement, with a scenario. Scoped deliberately: it applies only to fields the call
+   does not read, so a field it *does* read carrying the wrong type stays a failure by the
+   existing rule — without that clause the new sentence would have contradicted the
+   requirement it sits inside. Checked `module-wire-contract` first: its tolerance
+   requirements are about *replies* (`spec.md:148`, `:159`), so this is the request-side
+   counterpart and not a duplicate.
+5. **`per_page` of zero.** Specified, and deliberately **not** as "zero returns an empty
+   page" — that spells the implementation. The requirement is *paging MUST terminate*: a
+   caller paging until the envelope reports no more pages must reach that answer in
+   finitely many calls for every page size the call accepts, zero included. The failure it
+   names is the real one `membership.rs:569-599` documents — an empty page that claims a
+   page after it, which never terminates. **The `NO SPEC:` marker at `membership.rs:585`
+   can now come down; leaving it is `dev-writer`'s or `tester`'s call, and it is no longer
+   a gap.**
+
+The five **unmarked** items:
+
+6. **`stoas.sqlite` as the file name.** **Deliberately not specified, and the spec says
+   so.** Pinning a filename in a behaviour contract would make a rename a spec change
+   while making no observable difference to a caller — and the entry's own stake is not the
+   name, it is that *changing* it orphans memberships. So the requirement states the
+   durable property: membership state is reached the same way on every run, the name is
+   unspecified, a caller MUST NOT depend on it, and changing where a build looks without a
+   conversion orphans every membership a user holds — which is indistinguishable to the
+   user from having been removed from all their Stoas. The *separateness* from the op log
+   is now also a requirement rather than only an implication, with the recovery-asymmetry
+   reason. This is a **partial decline** of the entry, and the argument is above.
+7. **A store that cannot be opened is the error shape, not an empty listing.** Specified,
+   with a scenario, and with the entry's reasoning as the requirement's own: the two are
+   indistinguishable to a view, and a peer told it belongs to nothing invites the user to
+   re-join Stoas they are already in. Folded into the layout requirement (see entry 3).
+8. **The layout-version refusals.** Entry 3, now fixed there.
+9. **A total listing order independent of join sequence.** Specified. The entry's
+   cross-peer argument is the requirement's stated reason — two peers in the same Stoas
+   paging with the same arguments must see the same page boundaries, which an order derived
+   from local join sequence cannot give. Also carried over from the code's own reasoning
+   (`membership.rs:566`): the order is over 32 bytes of hash and **means nothing**, so the
+   spec says it MUST NOT be presented as a ranking, a recency, or a join order. Verified
+   the implementation actually orders totally: `ORDER BY stoa ASC` (`membership.rs:646`).
+10. **A corrupt or misfiled retained row is reported, never skipped.** Specified, under the
+    retention requirement, which previously said the retained record must verify and said
+    nothing about the case where it does not. The entry is right that this is the shape
+    that becomes permanent by accident. The reason is stated: a listing that dropped the
+    Stoa would be indistinguishable from one of a peer that never joined it. Verified the
+    code reports rather than skips — `decode_row` propagates with `?` from both `get`
+    (`membership.rs:530`) and `list` (`:666`).
+
+**One entry-framing note.** The entry lists nine marker sites for five subjects, which
+reads as nine gaps; they are five, with several sites each. Counting subjects is what makes
+the list actionable, and the entry does group them correctly — flagged only so the count
+is not read as a number of open decisions.
+
 ---
 
 - [x] **7. `dev-writer` — the branch is behind `origin/main` and merging it reverts three specs' `## Purpose` sections**
@@ -657,7 +863,7 @@ reports **11 passed, 0 failed**.
 
 ---
 
-- [ ] **8. `spec-writer` — `docs/PLAN.md` §4.8 Phase 1 still says an address alone is enough to join, which is the claim this spec exists to correct**
+- [x] **8. `spec-writer` — `docs/PLAN.md` §4.8 Phase 1 still says an address alone is enough to join, which is the claim this spec exists to correct**
 
 Checked against `docs/PLAN.md` on `origin/main` (and the branch's copy, which is
 unchanged in this section).
@@ -724,6 +930,55 @@ stale.
 The entry's own assessment that the shedding was *"thorough and well done"* matches what
 I found; what survives is in the sections §5.5 **defers to**, which is why a reader
 following the citation chain still lands on the retracted claim.
+
+**Outcome: FIXED in `docs/PLAN.md`, four sections, and one more the entry did not name.**
+
+**Read from `origin/main` and merged before editing**, per my own agent file. `origin/main`
+was two commits ahead of this branch (`46da605` #42, `b6a8cef` #52, neither touching
+PLAN.md); merged clean, so the PLAN.md edited here is current with main plus this change's
+own shedding.
+
+**One correction to the entry's citations, which does not touch its conclusion.** The line
+numbers have drifted — the Phase 1 prose is at `PLAN.md:643-653` rather than `643-649`, and
+the "self-authenticating" sentence at `:648-649`. Every quoted *string* was found verbatim,
+which is the part that matters; I located them by content (`grep -n "Importing one is how
+you join"`) rather than by line, which is the habit this repo's fabricated-citation history
+argues for.
+
+What changed:
+
+- **§4.8 Phase 1** — the two claims are **struck through** and marked retracted, pointing
+  at the `stoa-membership` capability, with the reason stated in the capability's own terms:
+  an address is a one-way hash, sufficient to *verify* a record somebody hands over and
+  insufficient to *reconstruct* one, so a join takes the address **and** the record. It says
+  outright that this is the same error §5.5 records making twice, and why it is struck here
+  rather than only cross-referenced — the entry's point that the false half was stated more
+  confidently than its retraction.
+- **The surviving half is kept and named**, which is the part a blanket strikethrough would
+  have lost: the address *is* a hash of the genesis record, so a wrong or tampered record
+  fails to match the address it is offered with, and verification consults nothing but those
+  two inputs. That property is load-bearing and true; only "pasting it is enough to join"
+  was false.
+- **The in-post-address obligation is kept as not built**, and re-pointed at §5.5 which
+  holds it. It was in the same paragraph as the retracted sentence and is a live UI
+  obligation, so folding it into the strikethrough would have quietly dropped a security
+  requirement — the failure mode this kind of edit invites.
+- **MVP item 7** — struck and restated: joining takes an address *and* the genesis record,
+  **Built**, pointing at the capability. Item 6 is marked Built for the core half with
+  "sharing it *from the UI* is not", since the entry is right that 2 and 7 were built and
+  unmarked while §5.5 and §9.1 marked theirs.
+- **The §9.1 cross-reference** ("sharing and joining by address, §4.8 Phase 1") now says
+  joining takes the address and the record, and flags "joining by address" as the wrong
+  shape.
+
+**The fifth site, which the entry did not list and which its fix made necessary.**
+`PLAN.md:3258` — §9.1's own **Stage D** block — reads *"§4.8 Phase 1's self-authenticating
+address … **Built** — see below"*. That sentence pointed at the claim being struck, so
+correcting §4.8 without it would have left a "Built" marker citing a retraction. It now
+names the surviving property (the address verifies the record it is offered with), says the
+joining half is built and the in-post affordance is not, and repeats that a join takes
+both inputs. Found by grepping for every `§4.8 Phase 1` reference rather than trusting the
+entry's list to be exhaustive — worth doing, since it was not.
 
 ---
 

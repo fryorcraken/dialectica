@@ -1,3 +1,29 @@
+## Stages
+
+Added late, by the `spec-writer` pass that closed the review findings: this change
+started before the stage block was a convention (it arrived on `main` in #49), so the
+block was never opened. Each row below is ticked against evidence in the tree rather
+than from memory — the six `findings/` files for the reviews, the implementation
+checklist below for the code, and this spec pass for its own row. **A row is not
+ticked because the stage seems to have happened; it is ticked because a file in this
+directory shows it did.**
+
+- [x] spec — `spec-writer`
+- [x] design + code — `dev-writer`
+- [x] tests — `tester`
+- [x] review: correctness — `code-reviewer` (`findings/correctness.md`)
+- [x] review: security — `code-reviewer` (`findings/security.md`)
+- [x] review: readability — `code-reviewer` (`findings/readability.md`)
+- [x] review: architecture — `code-reviewer` (`findings/architecture.md`)
+- [x] review: spec-test — `spec-test-reviewer` (`findings/spec-test.md`)
+- [x] review: design — `design-reviewer` (`findings/design-review.md`)
+- [ ] findings all ticked, `findings/` deleted — runner
+- [ ] `openspec validate --strict`, then `archive` — runner
+
+**One finding is still open and it is not mine:** `findings/security.md` entry 5
+(`Policy::to_byte` replaced by a constant survives the suite) is `tester`'s. The
+runner's first row above cannot be ticked until it is.
+
 ## 1. The membership store
 
 - [x] 1.1 Add `dialectica-core/src/membership.rs` with `MembershipError`,

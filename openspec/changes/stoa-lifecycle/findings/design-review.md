@@ -296,7 +296,7 @@ observation. See PR #45's body, finding 1, and `spec-test.md`.
 
 ---
 
-- [ ] **7. For the `spec-writer` — two unobservable requirements, carried forward from PR #45 so they survive that thread**
+- [x] **7. For the `spec-writer` — two unobservable requirements, carried forward from PR #45 so they survive that thread**
 
 Two requirements the tester established are unobservable at the surface the spec
 constrains. Both are the `spec-writer`'s to decide on, and neither is a defect in
@@ -337,3 +337,54 @@ can no longer reach `join` at all — `Membership::verified` is the only constru
 the byte-identical one. That is now a property of the type rather than of the call
 order, which strengthens the case that the requirement's observable form, if the spec
 wants one, has to come from somewhere other than the write verb.
+
+**Outcome: FIXED — both decided, and the two went opposite ways. Neither is deleted, and
+neither keeps an unobservable scenario.**
+
+**Item 1, "no key was created as a side effect" — the clause is removed from the
+scenario, and the prohibition is kept in the requirement's prose.** The entry offers
+"scope it to the adapter or drop it"; this is a third answer and I think the right one,
+so here is the argument. *Dropping* it loses a real constraint — "creation must not mint
+a key for the occasion" is the whole point of the requirement, and the reason is already
+stated and good (a Stoa created under a key the user does not hold cannot be moderated
+and cannot be un-minted). *Scoping it to the adapter* moves a requirement into a layer
+this change's spec does not contract. So: the **MUST NOT** stays as a prohibition on
+this call, and the **scenario clause goes**, because a scenario is the part that claims
+a test can check it.
+
+The requirement now says why in its own text: creation is handed the means of obtaining
+a key rather than reaching for a keystore, so no caller of this capability can observe
+whether one was minted, and a scenario asserting none was would assert something
+indistinguishable from the call simply succeeding. It points at `keystore` as the
+capability that can answer whether a key exists. The scenario keeps what is checkable —
+failure, the reason, and no Stoa — and I **added** an assertion while I was there: the
+failure carries the reason the key is unusable, which the tests already check against
+the keystore's own message and which no scenario had stated.
+
+**Item 2, "MUST NOT disturb what was already retained" — kept, and given an observable
+form, which is what the entry asks whether the spec wants.** It does. The requirement
+now says explicitly that "not disturbed" is specified as *what a later read answers*:
+the founding values, the retained record's verification, and the count of Stoas for that
+address MUST all be what they were before the repeated join. It states that it
+deliberately does **not** constrain how the write is performed, and that a scenario
+asserting no write occurred would assert something this surface cannot distinguish.
+
+**The entry's own measurement is what makes that safe, and I used it rather than
+re-deriving it.** A mismatched pair cannot reach `join` at all now — `Membership::verified`
+is the only constructor — so the only record a repeated join could write over a retained
+one is byte-for-byte identical to it. The spec says this, because it is the reason
+constraining the answers rather than the verb loses nothing: there is no observable
+difference for the write verb to make. That is the entry's addition promoted from a note
+to the requirement's stated reasoning.
+
+The idempotence scenario gains one assertion to match: the retained record still verifies
+against the address it is retained under, after the repeated join.
+
+**One thing I added that the entry did not raise, from the same reasoning.** The
+requirement now states that the reply **MUST NOT** be required to say whether the join
+was new. The entry notes `join_stoa` discards `Joined` and the reply carries no
+"was this new" flag *by design* — but that was a design fact with no contract behind it,
+so the next person to want an observable form of item 2 would reach for exactly that flag.
+It is the wrong fix: it would invite a view to treat a second join as a failure, which is
+the behaviour this requirement exists to prevent. Better to forbid it in the contract than
+to leave it as the obvious available move.
