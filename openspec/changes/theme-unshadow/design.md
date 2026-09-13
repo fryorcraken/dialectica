@@ -120,6 +120,119 @@ the `qmldir` line plus the same 116. An earlier draft of this document said
 "80-odd", which no reading of the command produces; the correctness review
 measured 113 for the `src/qml/` scope and that half is confirmed here exactly.
 
+### The gate outran CI's Qt, so CI's Qt is pinned
+
+The gate above is right and CI could not run it. `qmllint --missing-property`
+is a **command-line flag that Qt 6.4.2 does not have**, and `ubuntu-latest`
+means Ubuntu 24.04, whose `qt6-declarative-dev-tools` is exactly 6.4.2. So the
+`qml` job's fifth step died on its own preflight probe — the one
+`check_qml_members.sh` performs precisely so that a linter which does not
+understand the flags cannot be mistaken for one reporting a clean tree.
+
+**The probe did its job; the failure is the honest kind.** Worth stating,
+because the tempting reading is that the preflight was overzealous. It was not:
+without it, a qmllint that ignored an unknown flag would have reported green
+over an unchecked tree, which is the false green this whole piece is written
+against. Every local proof of the gate was sound — they ran against 6.10.3.
+
+**What made it expensive is what the failure took with it.** The five steps
+after it were *skipped*, not passed: `qmllint` proper, the binding check, the
+component suite and the spec-count assertion were all unverified while the job
+reported a single red. A gate failing early hides the state of everything
+downstream of it.
+
+**Rejected: `runs-on: ubuntu-26.04`.** Ubuntu 26.04 ships Qt 6.10.2 and would
+be green today, one word changed. It is the same defect with a later fuse: the
+Qt version would again be a property of a runner image nobody in this repo
+chose, so the day that image moves the gate breaks again for a reason unrelated
+to any change in the diff. That is how this arrived in the first place.
+
+**Rejected: an apt pin or a PPA.** Noble has no newer Qt to pin *to* — there is
+no `noble-updates` or `noble-backports` entry for the package — so the only apt
+route is a third-party archive that replaces the whole `qt6-base` stack
+underneath the image. That is a large, fragile dependency swap to obtain one
+command-line flag.
+
+**Taken: `jurplel/install-qt-action`, SHA-pinned, at an explicit Qt version.**
+It makes the Qt version a decision this repo records rather than one it
+inherits, which is the property the two rejected options both lack. The action
+is SHA-pinned like every other third-party action here, and for the usual
+reason plus a specific one: `v4` in that repo is a **branch**, not a tag, so
+`@v4` is mutable.
+
+**Why 6.8.3 and not the newest.** The requirement is the flag, and its presence
+at this exact version is confirmed in Qt's own source rather than interpolated:
+at tag `v6.8.3`, `src/qmlcompiler/qqmljslogger.cpp` declares
+`qmlMissingProperty{ "missing-property" }` and registers it in
+`defaultCategories()`, which `tools/qmllint/main.cpp` turns into a command-line
+option taking a level. It is also measured directly at 6.10.3 (`qmllint --help`
+lists both flags) and absent at 6.4.2. 6.8.3 is the newest 6.8 LTS patch.
+Pinning the newest available instead would track Qt's release cadence for no
+gain: nothing in this view needs anything after 6.8.
+
+**A correction worth carrying, because the error message invites the wrong
+conclusion.** The probe passes `--unqualified` and `--missing-property` in one
+invocation, so its failure message names both — but only `--missing-property`
+is actually absent at 6.4.2. `--unqualified` is there, and per-category
+`--<name> <level>` options as a *mechanism* are there too; 6.4's category is
+simply named `--property`. The category was renamed and the set expanded in
+**6.5**, which is the real floor. Read carelessly, the message suggests 6.4
+lacks category options altogether, which is false and would send someone
+looking for a much bigger change than the one that happened.
+
+The number is self-invalidating in the way `CLAUDE.md` asks for. The comment at
+the pin says *which flag* forces the floor and *which two versions were
+measured*, so a reader who lowers it knows what to re-run —
+`tst_check_qml_members.sh`, whose preflight is the failing assertion — rather
+than finding a bare version number with no attached reason.
+
+**The SHA pin does not reach the code that downloads Qt, and saying otherwise
+would be the more comfortable lie.** `install-qt-action` at that commit is a
+*composite* action whose real step is `uses: jurplel/install-qt-action/action@v4`
+— a floating branch ref in the nested action. Pinning the wrapper pins input
+forwarding and the `aqtinstall` version default; the fetcher and the apt
+dependency list still resolve `@v4` at run time, and GitHub gives a caller no
+way to pin a nested `uses:`.
+
+It is accepted here on the same reasoning this file already applies to
+`install-nix-action`, run in the other direction. That pin is load-bearing
+because `build` produces the `.lgx` a user installs, so a patched fetcher
+reaches users. The `qml` job produces no artefact — `build` and `release`
+install no Qt at all — so the exposure is a wrong or malicious Qt making *this
+job lie about the view*, not a compromised module. Real, bounded, and not the
+supply-chain path the other pins defend. Recorded because a reader who sees a
+40-character SHA will otherwise assume a guarantee that is not there; the fix,
+if the trade ever stops being acceptable, is vendoring the nested action or
+installing Qt from a checksummed archive, since **re-pinning this line cannot
+fix it**.
+
+**Dropping `libgl1-mesa-dev` was checked, not assumed.** The apt line carried
+it explicitly and the replacement does not. `install-deps` defaults to true and
+its list installs that exact package plus the full `libxcb-*` set,
+`libxkbcommon-x11-0`, and — for Qt >= 6.5 — `libxcb-cursor0`, a requirement Qt
+introduced at 6.5 that a hand-written apt line in this repo would not have
+known to add. Verified in the action's source at the pinned commit rather than
+inferred from the README. Keeping `install-deps` at its default is what leaves
+that list maintained upstream instead of rotting here, which is the
+`hand-maintained sweep lists go stale silently` trap in a different costume.
+
+**One consequence to state rather than bury: this changes the Qt the component
+suite runs against, not only the linter's.** `run-qml-tests.sh` and
+`qmlformat` resolve through the same `PATH`, so `qmltestrunner` and QtTest now
+come from the pinned 6.8.3 upstream build instead of noble's 6.4.2. That is a
+real change in what the specs execute on and it is the right direction — the
+suite was previously two years older in CI than on any developer's machine —
+but it is a change, and a spec that starts behaving differently should be read
+with this pin in mind.
+
+**A new step asserts the discovery actually landed there.** The tool-discovery
+lists in these scripts name absolute apt paths before the bare name; those
+paths no longer exist, so discovery falls through to `PATH`. `the Qt on PATH is
+the pinned one` prints each tool's resolved path and version and re-runs the
+flag probe, so a bare `qmllint` silently resolving to some *other* Qt fails
+immediately and by name, instead of surfacing six steps later as a confusing
+diagnostic.
+
 ### What the gate checks, and why it stopped enumerating
 
 The first version banned a **list** of five names basecamp was known to occupy.

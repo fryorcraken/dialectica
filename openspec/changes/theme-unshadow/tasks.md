@@ -417,3 +417,86 @@ still looks correct. Each fix below is proven with a mutation that reaches it.
       and findings only; nothing under `dialectica-ui/src/`. Every mutation
       above was made to a gate or to `Main.qml` and restored, with the suite
       re-run green afterwards.
+
+## 8. Pinning CI's Qt, after the gate outran it
+
+The gate 7.4 added is newer than the Qt `ubuntu-latest` supplies, so the `qml`
+job failed on `check_qml_members.sh`'s preflight probe and **skipped the five
+steps after it**. Diagnosis and the rejected alternatives are in `design.md`,
+"The gate outran CI's Qt, so CI's Qt is pinned".
+
+- [x] 8.1 **Replace the apt Qt with a pinned upstream one.** The `Install Qt`
+      apt step becomes `jurplel/install-qt-action` at `version: "6.8.3"`,
+      SHA-pinned to `48d3ad6db93f3627c8ee7a0454bc6f3744f7e730` (v4.3.1) —
+      matching this workflow's existing convention for third-party actions, and
+      necessary here because `v4` in that repo is a **branch**, not a tag. The
+      tag SHA was read from `gh api repos/jurplel/install-qt-action/git/ref/tags/v4.3.1`
+      rather than copied from prose, and `releases/latest` confirms v4.3.1 is
+      current.
+- [x] 8.2 **The comment says which flag forces the floor and how that was
+      established**, not a bare number. `--missing-property` is confirmed at the
+      pinned version in Qt's own source — tag `v6.8.3`,
+      `src/qmlcompiler/qqmljslogger.cpp` declares
+      `qmlMissingProperty{ "missing-property" }` and registers it in
+      `defaultCategories()` — read via `gh api` at the exact tag, not the `6.8`
+      branch. Also measured at 6.10.3 (`qmllint --help`) and absent at v6.4.2.
+      The comment names what to re-run if the pin is ever lowered:
+      `tst_check_qml_members.sh`, whose preflight is the failing assertion.
+- [x] 8.2a **A wrong claim of mine, corrected in all three places it reached.**
+      I first wrote that 6.4.2 accepts neither flag. It accepts `--unqualified`;
+      only `--missing-property` is absent, the 6.4 category being named
+      `--property`, and per-category `--<name> <level>` options exist as a
+      mechanism in 6.4 already. Verified myself at tag `v6.4.2` rather than
+      relayed. Fixed in the `ci.yml` comment, the gate's error message and
+      `design.md`, each of which now says the floor is **6.5** and why the
+      message names two flags while one is at fault.
+- [x] 8.3 **`archives:` deliberately unset**, so the default desktop package
+      supplies `qmllint`, `qmlformat`, `qmltestrunner` and the `QtTest` QML
+      module from one qtdeclarative build. Slimming to `qtbase qtdeclarative`
+      would drop qtsvg/qtwayland and risk the headless run.
+- [x] 8.3a **The SHA pin's limit is recorded rather than implied away.** The
+      pinned commit is a *composite* action delegating to
+      `jurplel/install-qt-action/action@v4` — a floating branch ref — so the
+      pin covers input forwarding but not the fetcher or the apt list, and a
+      caller cannot pin a nested `uses:`. Read at the pinned SHA myself.
+      Accepted because this job ships no artefact (`build`/`release` install no
+      Qt), so the exposure is this job lying about the view rather than a
+      backdoored `.lgx` — the case the `install-nix-action` pins defend. Noted
+      in `ci.yml` and `design.md` that re-pinning this line cannot fix it.
+- [x] 8.3b **Dropping `libgl1-mesa-dev` verified, not assumed.** `install-deps`
+      defaults to true and installs that exact package plus the `libxcb-*` set,
+      `libxkbcommon-x11-0` and, for Qt >= 6.5, `libxcb-cursor0` — a requirement
+      Qt added at 6.5 that a hand-written apt line here would have missed.
+      Checked in the action's source at the pinned commit. `run-qml-tests.sh`
+      already exports `QT_QPA_PLATFORM=offscreen`, which is still needed; if
+      the runner ever fails on GL context creation rather than the platform
+      plugin, `QT_QUICK_BACKEND=software` is the first thing to try, recorded
+      in the `ci.yml` comment.
+- [x] 8.4 **A step asserts the discovery actually landed on the pinned Qt.**
+      The scripts' candidate lists name absolute apt paths first; those no
+      longer exist, so discovery falls through to `PATH`. `the Qt on PATH is
+      the pinned one` prints each tool's resolved path and `--version` and
+      re-runs the flag probe, so a bare `qmllint` resolving to some other Qt
+      fails by name rather than as a confusing diagnostic six steps later.
+- [x] 8.5 **The gate's error message names the real requirement.** It said "a
+      Qt5 qmllint?"; the case that actually fired was Qt **6.4.2**, which is
+      Qt6 — so a reader checking "is this Qt6?" got `yes` and was no further
+      forward. It now names the flag, states that being Qt6 is not sufficient,
+      cites 6.4.2 against 6.8.3/6.10.3, and gives the two commands to check.
+- [x] 8.6 **Proven to fire, not just edited.** The rejection branch was driven
+      by running a scratch copy of the gate with its candidate list forced to
+      `/usr/bin/qmllint` (Qt5, `qmllint 1.0`), which exits 1 with
+      `Unknown options: unqualified, missing-property` — the new message
+      printed in full. Scratch copy deleted; `git status` clean but for the two
+      intended files.
+- [x] 8.7 **Local gates re-run after the message change** —
+      `tst_check_qml_members.sh` all four cases pass, `run-qml-tests.sh` 4 spec
+      files / 41 passed / 0 failed, both on Qt 6.10.3. The workflow parses as
+      YAML and the `qml` job still lists all six original steps.
+- [ ] 8.8 **Only CI can confirm the pin in action.** The flag's presence at
+      6.8.3 is settled by Qt's source, but nothing local exercises
+      `install-qt-action` itself: that it installs on the runner, puts the
+      tools on `PATH`, and supplies the GL/xcb libraries `qmltestrunner` needs
+      headless are all unproven here. The five previously-skipped steps remain
+      unverified until a run goes green. Step 8.4 exists so a wrong pin or a
+      wrong `PATH` fails loudly in the second step rather than silently.

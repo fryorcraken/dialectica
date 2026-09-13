@@ -69,10 +69,31 @@ done
 # A linter that exits non-zero on its own options would otherwise be
 # indistinguishable from one reporting a real defect — and, worse, a linter that
 # ignored an unknown flag would report a green that measured nothing.
+#
+# NAME THE REAL REQUIREMENT, not the first guess. This message used to say "a
+# Qt5 qmllint?", and that sent a reader after the wrong thing: the case that
+# actually fired was Qt **6.4.2**, the qmllint Ubuntu 24.04 ships, which is Qt6
+# and still has no `--missing-property` command-line flag. Someone checking "is
+# this Qt6?" gets `yes` and is no further forward. The requirement is a VERSION
+# carrying that flag, so say which, and say how to check.
+#
+# Both flags go in one invocation, so a failure cannot say which was rejected —
+# and the two are not equally likely. `--unqualified` has existed since well
+# before 6.4; `--missing-property` arrived in **6.5** (checked in qtdeclarative:
+# absent from the category list at tag v6.4.2, where the near-equivalent is
+# named `--property`; present at v6.5.0 and at v6.8.3). So on a too-old Qt it is
+# effectively always `--missing-property` that is missing, and the message says
+# that rather than implying both are suspect.
 if ! "$linter" --unqualified disable --missing-property error --help \
         >/dev/null 2>&1; then
     echo "::error::$linter does not accept --unqualified/--missing-property" >&2
-    echo "         (a Qt5 qmllint? this gate needs the Qt6 one)" >&2
+    echo "         Almost certainly --missing-property: it arrived in Qt 6.5." >&2
+    echo "         Being Qt6 is NOT enough. Qt 6.4.2 (Ubuntu 24.04's" >&2
+    echo "         qt6-declarative-dev-tools) is Qt6 and still too old; it" >&2
+    echo "         calls the near-equivalent category --property instead." >&2
+    echo "         CI pins 6.8.3; this gate is also proven at 6.10.3." >&2
+    echo "         Check with: $linter --version" >&2
+    echo "         and:        $linter --help   (look for --missing-property)" >&2
     exit 1
 fi
 
