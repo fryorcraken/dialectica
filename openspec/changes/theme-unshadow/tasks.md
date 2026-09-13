@@ -7,7 +7,7 @@
       because "does not apply" and "nobody did this" are different states and the
       block exists to tell them apart.
 - [x] design + code — `dev-writer`
-- [ ] tests — `tester`
+- [x] tests — `tester`
 - [x] review: correctness — `code-reviewer`
 - [x] review: security — `code-reviewer`
 - [ ] review: readability — `code-reviewer`
@@ -214,3 +214,78 @@ so neither is re-done from scratch:**
       Verified by `git grep -n "Theme"` over the whole tracked tree, which now
       returns only `DTheme` references plus the comment lines in `ci.yml` and
       `DTheme.qml` that discuss the old name on purpose.
+
+## 6. Tests — the `tester` stage
+
+Both boxes in `findings/correctness.md` addressed to `tester`. Implementation
+code was mutated to prove each check can fail and restored after each; the tree
+was confirmed byte-clean with `git status --porcelain` and
+`git diff -- dialectica-ui/src .github docs dialectica openspec CLAUDE.md`
+before committing, which lists nothing.
+
+- [x] 6.1 **Confirm 4.4's anchored regex independently**, rather than inherit
+      `dev-writer`'s measurement — the reason that box stayed open. Both of the
+      review's mutations re-applied to `MarginNote.qml` and the gate run against
+      each: `font:` / newline / `Theme.note` at column 0 → **exit 1** at
+      `line=40`; `color: Theme` / newline / `.inkSoft` → **exit 1** at `line=40`.
+      Unmutated tree → **exit 0**, `ok: 17 QML file(s) checked`. The exit-0 run
+      is the half that carries the weight: the tree is full of legitimate
+      `DTheme.` references, so a pattern firing on everything would have "caught"
+      both mutations too. Each mutation was confirmed present with `git diff
+      --stat` before the gate ran, since a mutation that fails to apply looks
+      exactly like a gate that fails to catch it.
+- [x] 6.2 **Make the suite fail on a binding that evaluates to `undefined`** —
+      `check_bindings` in `run-qml-tests.sh`. The runner previously reported a
+      QML runtime error inside an instantiated component as a QWARN and exited
+      0; reproduced first, 35 `ReferenceError: Theme is not defined` lines with
+      `12 passed, 0 failed`. The fix belongs in the runner rather than in the
+      specs because the defect is in components no spec asserts against, so
+      per-component assertions would be a sweep list going stale on the next
+      component added. Not `QT_FATAL_WARNINGS`: it aborts on the first warning
+      of any kind, so the run crashes instead of diagnosing and the remaining
+      specs never execute. `qmltestrunner -help` lists no flag that escalates a
+      warning to a failure.
+- [x] 6.3 **Two patterns, because one is provably insufficient.** A check keyed
+      only on `ReferenceError` — what the finding asked for — still passes a
+      broken binding: `DTheme.noSuchToken` raises **no `ReferenceError` at all**
+      and reports `Unable to assign [undefined] to QColor`, with the suite at 12
+      passed, 0 failed. Measured across three mutations, with the static gate's
+      verdict beside the runner's:
+      | mutation | ci.yml gate | `ReferenceError`s | runner |
+      |---|---|---|---|
+      | `Theme.note` at column 0 | exit 1 | 36 | exit 1 |
+      | `DThemeTypo.note` | **exit 0** | 36 | exit 1 |
+      | `DTheme.noSuchToken` | **exit 0** | **0** | exit 1 |
+      | unmutated | exit 0 | 0 | exit 0 |
+      Rows 2 and 3 are the independence evidence `design.md` previously claimed
+      without: the static gate passes both, so the runner check covers strictly
+      more than the gate rather than duplicating it.
+- [x] 6.4 **Test the check itself**, in `dialectica-ui/tests/tst_check_bindings.sh`
+      with its own CI step ahead of the suite. A helper is part of the
+      measurement: narrowed to nothing it passes as quietly as a correct one.
+      Six cases, both directions — three verbatim `qmltestrunner` outputs it
+      must reject, three it must accept (a real clean run, an unrelated Qt
+      "undefined behaviour" warning, and test names containing the word
+      `undefined`, of which this suite already has two). Fixtures are copied
+      output rather than paraphrase, so the test measures what Qt prints rather
+      than what the regex expects.
+      Proved by mutating the check: dropping the `Unable to assign` pattern
+      fails case 3 alone; widening to the bare word `undefined` fails **four**
+      cases where I predicted two. The prediction was wrong in an informative
+      way — `ReferenceError` text reads "is not **defined**", so a
+      bare-`undefined` pattern misses that family entirely. The two families
+      share no common substring, which is the concrete reason two precise
+      patterns cannot collapse into one loose one; recorded in the runner's
+      comment so it is not re-derived.
+      The extraction guard was itself proved to fire: renaming `check_bindings`
+      makes the test exit 1 with its named "could not extract" diagnostic rather
+      than a confusing shell error.
+- [x] 6.5 **What these gates still cannot see**, written down rather than left
+      to be rediscovered. A binding resolving to a *wrong but defined* value
+      (`DTheme.paper` where `DTheme.ink` was meant) emits no diagnostic and is
+      invisible to every gate here. And the host collision itself remains
+      unreproducible under `qmltestrunner`, where basecamp is absent — 6.2
+      closes the **runtime** half of the blind spot, not the host-precedence
+      half, which stays a static check plus a real basecamp launch. The suite is
+      now a genuine second direction for stale and undefined references, which
+      is what `design.md`'s corrected prose claims, and nothing more.

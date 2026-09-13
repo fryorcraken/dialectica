@@ -323,11 +323,30 @@ These are structural and bite at build time, not review time.
   the static `no QML type name collides with the host` step in `ci.yml`, proven
   to fail on a tree carrying the old name.
 
-  **Nor is the QML suite a backstop**, which is worth knowing before reading a
-  green run as coverage: `qmltestrunner` reports a `ReferenceError` inside an
-  instantiated component as a **QWARN, not a failure**. A stale singleton
+  **`qmltestrunner` does not fail on a broken binding, and `run-qml-tests.sh`
+  has to make it.** Out of the box the runner reports a `ReferenceError` inside
+  an instantiated component as a **QWARN, not a failure**: a stale singleton
   reference in a component no spec asserts against prints the error dozens of
-  times and still exits 0. Only a reference inside a `compare()` fails a spec.
+  times and still exits 0, and only a reference inside a `compare()` fails a
+  spec. `check_bindings` in the runner closes that — it greps each spec's output
+  and fails the run on a binding that evaluated to `undefined`.
+
+  Two things about it that are easy to get wrong, both measured:
+
+  - **`ReferenceError` alone is not enough.** A missing token on a
+    correctly-named singleton (`DTheme.noSuchToken`) raises none — Qt says
+    `Unable to assign [undefined] to <T>` instead. The two messages share no
+    common substring, so this is two patterns and cannot be collapsed into one
+    grep for `undefined` (which also hits Qt's "undefined behaviour" warnings
+    and this suite's own test names).
+  - **Do not reach for `QT_FATAL_WARNINGS`.** It aborts on the first warning of
+    any kind, so the run crashes instead of diagnosing and the remaining specs
+    never execute. `qmltestrunner` has no flag that escalates a warning to a
+    failure.
+
+  The check is itself tested in `tst_check_bindings.sh`, pinning both what it
+  must catch and what it must not — a check narrowed to nothing passes as
+  quietly as a correct one.
 
   **The gate enforces the `D` prefix rather than a list of host names.** An
   earlier version banned five names basecamp was known to occupy, which is the

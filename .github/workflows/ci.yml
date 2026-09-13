@@ -600,15 +600,26 @@ jobs:
       # component layer is structurally blind here, and a static check is the
       # honest gate rather than a second-best one.
       #
-      # AND THE SUITE IS NOT A SECOND LINE OF DEFENCE, which review established
-      # and is worth knowing before trusting a green run. `qmltestrunner`
-      # reports a `ReferenceError` raised inside an instantiated component as a
-      # QWARN, not a failure: a stale `Theme` reference in `MarginNote.qml`
-      # printed `ReferenceError: Theme is not defined` dozens of times across
-      # the `FeedStates` spec and the runner still reported 0 failed, exit 0.
-      # The suite only catches a stale reference that sits inside a `compare()`.
-      # So this step and the suite share a blind spot rather than covering each
-      # other, and this step is the one that has to be right.
+      # THE SUITE IS NOW A SECOND LINE OF DEFENCE, BUT IT WAS NOT BY DEFAULT,
+      # and the difference is worth knowing before trusting a green run.
+      # `qmltestrunner` reports a `ReferenceError` raised inside an instantiated
+      # component as a QWARN, not a failure: a stale `Theme` reference in
+      # `MarginNote.qml` printed `ReferenceError: Theme is not defined` dozens
+      # of times across the `FeedStates` spec and the runner still reported 0
+      # failed, exit 0. Out of the box the suite only catches a stale reference
+      # sitting inside a `compare()`, so this step and the suite shared a blind
+      # spot rather than covering each other.
+      #
+      # `check_bindings` in run-qml-tests.sh closes that half: the runner now
+      # fails on any binding that evaluated to `undefined` at runtime. The two
+      # checks are genuinely independent, which is measurable rather than
+      # asserted — a D-prefixed typo (`DThemeTypo.note`) and a missing token
+      # (`DTheme.noSuchToken`) both contain no bare `Theme`, so THIS STEP EXITS
+      # 0 on both while the runner exits 1. Conversely this step reads source,
+      # so it catches the old name in files no spec instantiates.
+      #
+      # Neither sees the collision itself — under qmltestrunner the host is
+      # absent — so that remains this step plus a real basecamp launch.
       #
       # WHAT A STATIC CHECK CAN SEE, and the shape it took after review.
       #
@@ -744,6 +755,22 @@ jobs:
                     "every singleton D-prefixed, no bare Theme reference")
           sys.exit(status)
           PY
+
+      # The runner's own undefined-binding check, tested before the suite that
+      # relies on it. `check_bindings` is what turns a QML binding evaluating to
+      # `undefined` from a QWARN the runner ignores into a failed run — see the
+      # long comment on it in run-qml-tests.sh for why that gap exists.
+      #
+      # It is gated separately because a helper is part of the measurement: a
+      # check narrowed until it matches nothing passes every run exactly as
+      # quietly as a correct one, and the suite it guards would go on reporting
+      # green. This step pins both directions — what it must catch and what it
+      # must not — so a later edit that guts it fails HERE, loudly, rather than
+      # silently widening the blind spot the suite already had.
+      #
+      # Needs no Qt: it runs check_bindings over recorded runner output.
+      - name: the runner's undefined-binding check
+        run: dialectica-ui/tests/tst_check_bindings.sh
 
       # The component tests. `REQUIRE_QML_TESTS=1` so a missing or
       # wrong-major-version runner FAILS rather than skipping: a job that

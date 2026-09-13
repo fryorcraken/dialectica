@@ -124,23 +124,39 @@ column-0 mutation in `MarginNote.qml` printed `ReferenceError: Theme is not
 defined` dozens of times across the `FeedStates` spec, and the runner still
 reported `12 passed, 0 failed`, whole suite exit 0.
 
-So the two do not cover each other; they shared a blind spot. The suite catches
-a stale reference **only** when it sits inside a `compare()` — as
-`tst_identicon.qml`'s palette assertions do, which is why that one spec does
-fail on a stale reference while the rest stay green.
+So the two did not cover each other; they shared a blind spot. Before the fix
+below, the suite caught a stale reference **only** when it sat inside a
+`compare()` — as `tst_identicon.qml`'s palette assertions do, which is why that
+one spec failed on a stale reference while the rest stayed green.
 
-That leaves the honest division:
+**That blind spot is now closed at the runner**, in `check_bindings` in
+`run-qml-tests.sh` (`tasks.md` §6). The runner captures each spec's output and
+fails the run when it carries a diagnostic meaning "a binding evaluated to
+`undefined`", whatever the spec reported. Failing on *any* QWARN was rejected as
+too blunt — an unrelated Qt warning would fail the suite for a reason unrelated
+to the code — so two specific families are matched, and the second is not
+optional: a missing token on a correctly-named singleton (`DTheme.noSuchToken`)
+raises **no `ReferenceError` at all**, reporting `Unable to assign [undefined]`
+instead, so a `ReferenceError`-only check would have passed it.
 
-- **The CI gate** is what checks the rename's completeness, across all 17 QML
-  files in the module. It is the only check that sees a stale reference in a
-  component no spec asserts against.
-- **The suite** pins that the identicon's ink indexing still lands on the same
-  seven constants, and would fail on a stale reference inside its own
-  assertions.
-- **Neither can see the collision itself**, for the reason measured above.
+That leaves the honest division, which is now genuinely two directions rather
+than one:
 
-Making the runner fail on a `ReferenceError` in its output would close this
-properly and is `tester`'s box in `findings/correctness.md`, not this one's.
+- **The CI gate** checks the rename's completeness statically, across all 17 QML
+  files in the module. It reads source, so it catches the old name wherever it
+  appears, including in files no spec touches.
+- **The suite** now fails on any binding that evaluates to `undefined` at
+  runtime, in any component it instantiates — including defects the gate cannot
+  see, since a D-prefixed typo (`DThemeTypo`) and a missing token both contain
+  no bare `Theme`. Measured: the gate exits 0 on both, the runner exits 1.
+  It also still pins that the identicon's ink indexing lands on the same seven
+  constants.
+- **Neither can see the collision itself**, for the reason measured above: under
+  `qmltestrunner` the host is absent. The runner check closes the runtime half
+  of the blind spot, not the host-precedence half, which remains a static check
+  plus a real basecamp launch.
+- **Neither can see a wrong-but-defined value** — `DTheme.paper` where
+  `DTheme.ink` was meant produces no diagnostic anywhere.
 
 ## Dead ends, recorded so they are not re-walked
 
