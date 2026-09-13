@@ -411,8 +411,39 @@ Its honest limit, stated in the test: it emulates the documented newline rule,
 it does not observe a rendered annotation panel. A live Actions run is still the
 only way to see the real thing.
 
+### 13. Check the base you commit against is the base you computed against
+
+Not a decision about this gate — a working practice the gate cannot enforce,
+recorded here because the incident that produced it is the same family as the
+one this piece exists for, and because it generalises past the case that found
+it.
+
+A staged resolution holds an index computed against a particular base. A merge,
+a rebase's `--continue`, a cherry-pick — each is a window in which another agent
+can move HEAD underneath the resolution. Commit anyway and the recorded tree
+predates its own first parent, silently reverting whatever landed in between.
+Measured: 254 lines, caught only by re-running `rev-parse HEAD MERGE_HEAD`
+before committing and noticing the mismatch.
+
+**Why it belongs in the same family as the stale branch this gate catches**: the
+result *looks intentional*. A tree predating the new HEAD is byte-for-byte
+indistinguishable from a tree that deliberately removed those lines, exactly as
+a branch that predates a change is indistinguishable from one that deleted it.
+Both are a diff that reads as a decision nobody made.
+
+**Why no guard is added.** Detecting "this merge reverted work" needs a model of
+what the merge *should* have contained, which is a substantially harder problem
+than comparing a path list against a PR body. Conflating the two would cost this
+piece the property that makes it reviewable — that it does one checkable thing
+and says plainly what it does not do. The practice is the mitigation; the gate
+stays narrow. `proposal.md`'s scope section records the blind spot itself.
+
 ## Risks / Trade-offs
 
+- **[The gate catches a file vanishing, not work vanishing]** → Both known blind
+  spots are this: an addition from a textual merge, and a reversion from a stale
+  index, neither of which deletes a path. Stated in `proposal.md` and
+  deliberately not guarded against — see §13.
 - **[A `Deletes:` line is an assertion, not a review]** → Intended, and stated in
   `proposal.md`. The gate converts a silent deletion into a stated one. The
   failure message says which paths need claiming, not that claiming them is

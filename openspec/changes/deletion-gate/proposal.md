@@ -113,6 +113,10 @@ that this check ran at all.
 
 ## What it does not catch, stated plainly
 
+**The gate catches a file vanishing, not work vanishing.** That one sentence
+covers both known blind spots, and stating it once is more use than listing
+cases, because the next case will be a third shape of the same thing.
+
 **Seven of the eight firings, not eight.** The exception is the duplicate
 `storage_dir` on `piece/ui-stoa-list`: a textual merge that kept *both* copies of
 a refactor that landed at two offsets. That is an addition, not a deletion, and a
@@ -120,9 +124,37 @@ deletion gate is blind to it. Only Build LGX caught it — both copies are
 `cfg(logos_scaffold)`, so `cargo test`, clippy and `cargo fmt` compile neither,
 and three of four jobs went green over a tree that could not build.
 
+**A merge that silently reverts content deletes no files.** Found after this
+proposal was first written, and measured rather than reasoned. While a merge of
+`origin/main` into `piece/ui-stoa-list` was staged, another agent committed that
+worktree's in-progress work, moving HEAD; the resolver's index had been computed
+against the *old* base. Committing it would have recorded the new commit as first
+parent while carrying a tree that predated it, silently reverting **254 lines**.
+The resolver caught it by re-checking `rev-parse HEAD MERGE_HEAD` before
+committing, aborted, and redid the merge from the correct base — the work
+survived, and `git merge-base --is-ancestor 3fa58c3
+origin/piece/ui-stoa-list` exits 0 today.
+
+**This gate would have passed it, and that was confirmed on a reconstruction
+rather than assumed.** No file disappears: the loss is lines inside files that
+still exist, so `--diff-filter=D` returns nothing and the gate reports
+`ok: 0 deleted path(s)` and exits 0. The reconstruction also shows why it is so
+hard to see — `git merge-base --is-ancestor` on the reverted commit still exits
+0, because the *commit* remains reachable while its *content* is gone.
+
+The two cases differ in direction and share a shape: `storage_dir` was an
+**addition** from a textual merge, this is a **reversion** from a staged index.
+Neither is the deletion of a path.
+
 Naming this is the point rather than an apology for it. A gate whose limits are
 unwritten gets trusted past them, which is how "exit 0 on a gate that measured
-nothing" happens in the first place.
+nothing" happens in the first place. **No guard is added for either**: detecting
+"this merge reverted work" is a substantially harder problem than the one this
+change solves, and folding it in would cost the piece the clarity that makes it
+reviewable. The generalisation the second case does yield — check the base you
+are committing against is still the base you computed against — is in
+`design.md`, because it is a working practice rather than a property of this
+gate.
 
 **It also does not replace the closer's hand-run diff.** This gate proves a
 branch deletes nothing unclaimed; it does not prove the branch's diff is the

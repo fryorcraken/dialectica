@@ -40,9 +40,22 @@
 #     assertion by whoever wrote the body. This converts a silent deletion into
 #     a stated one, never into a reviewed one — closer.md step 2 is still the
 #     reader.
-#   * It does not notice anything a branch ADDS, which is the other half of the
-#     stale-branch failure. A textual merge that kept two copies of one refactor
-#     is invisible here.
+#   * IT CATCHES A FILE VANISHING, NOT WORK VANISHING. That one line covers both
+#     known blind spots, and it is the more useful form because the next case
+#     will be a third shape of the same thing:
+#       - anything a branch ADDS. A textual merge that kept two copies of one
+#         refactor is invisible here.
+#       - a merge that silently REVERTS content. A staged resolution whose index
+#         was computed against a base that has since moved records a tree
+#         predating its own first parent; measured at 254 lines. No file
+#         disappears, so `--diff-filter=D` returns nothing and this gate reports
+#         `ok: 0 deleted path(s)`. Confirmed on a reconstruction, not assumed.
+#         Nastier still, `merge-base --is-ancestor` on the reverted commit exits
+#         0 — the commit stays reachable while its content is gone.
+#     No guard is added for either: detecting "this merge reverted work" needs a
+#     model of what the merge should have contained, which is a much harder
+#     problem than this one. design.md §13 carries the working practice that
+#     does catch it.
 #   * It runs on pull requests only. There is no PR body on a push to main or a
 #     tag, so a green run on main is not evidence that this ran.
 set -u

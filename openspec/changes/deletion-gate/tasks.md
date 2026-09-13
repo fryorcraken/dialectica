@@ -114,6 +114,23 @@
 - [x] 4b.8 Replace proposal.md's pruned-branch verification command with a loop
       over whatever `origin/piece/*` exists. Verified by running it.
 
+## 4c. The second blind spot
+
+- [x] 4c.1 Record that a merge silently reverting content is invisible to this
+      gate, beside the `storage_dir` case. Reconstructed the shape rather than
+      taking it on report: 254 lines reverted, file still present,
+      `--diff-filter=D` empty, gate reports `ok: 0 deleted path(s)` and exits 0.
+      Also confirmed `merge-base --is-ancestor` exits 0 on the reverted commit,
+      so reachability is no evidence the content survived.
+- [x] 4c.2 Restate the scope as one property — *the gate catches a file
+      vanishing, not work vanishing* — since both known blind spots are that,
+      and the next will be a third shape of it. In `proposal.md` and repeated in
+      the script header, which already carried the limits.
+- [x] 4c.3 Record the generalisation in design.md §13: check the base you commit
+      against is still the base you computed against, which covers a rebase
+      `--continue` and a cherry-pick as well as a merge. **No guard added** —
+      deliberately, with the argument for why in the same section.
+
 ## 5. The documentation edits
 
 - [x] 4.1 Add the closer-authoring rule to `closer.md`'s "What you never do",
