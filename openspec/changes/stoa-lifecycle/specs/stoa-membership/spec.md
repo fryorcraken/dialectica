@@ -13,7 +13,9 @@ Two further boundaries, named so that no requirement here duplicates one:
 
 ### Requirement: Creating a Stoa produces a genesis record the creator can moderate
 
-The module MUST offer a call that takes a human-readable title and creates a Stoa: it MUST construct a genesis record whose creator key is the caller's own signing key, MUST compute that record's address, MUST record the Stoa as one this peer is in, and MUST return the address to the caller.
+The module MUST offer a call that takes a human-readable title and creates a Stoa: it MUST construct a genesis record whose creator key is a key this peer holds the secret half of, MUST compute that record's address, MUST record the Stoa as one this peer is in, and MUST return the address to the caller.
+
+**The creator key MUST NOT be derived from the Stoa's own address, and this is forced rather than chosen.** A Stoa's address is a hash of its genesis record, and the creator key is one of the fields inside that record, so the address does not exist until the creator key is fixed. A creation-time key is therefore the one key in this system that cannot be per-Stoa, whatever scheme governs keys used *inside* an existing Stoa. A capability specifying which key signs an op inside a Stoa MUST NOT be read as constraining this one.
 
 The creator key MUST NOT be a parameter. A call that accepted one would be a call that can be asked to create a Stoa moderated by somebody else, which is a Stoa the caller cannot moderate and did not mean to make.
 
@@ -34,8 +36,13 @@ Whether that divergence is reportable is deliberately **out of scope here, and t
 #### Scenario: The creator is the caller's own key
 
 - **WHEN** a Stoa is created
-- **THEN** the genesis record's creator key is the key the caller would sign an op with
+- **THEN** the genesis record's creator key is a key this peer holds the secret half of
 - **AND** no creator key was accepted from the request
+
+#### Scenario: The creator key is one the peer can sign with
+
+- **WHEN** a Stoa is created and the retained creator key is read back from membership
+- **THEN** a signature this peer produces as the Stoa's creator verifies under that key
 
 #### Scenario: The created Stoa is listed immediately
 

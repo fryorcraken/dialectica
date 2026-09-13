@@ -92,8 +92,64 @@ None, and each near-miss is a deliberate decline rather than an omission:
   affordance that publishes. Creating a Stoa needs a key, which makes it the
   same question; this capability says creation fails without a usable key and
   leaves the probe's shape and its reason vocabulary where they are.
+- **`content-authoring`** owns which key signs a post, a reply or a vote. Its
+  requirement "The author is derived from the Stoa, never supplied" and its
+  scenario "The signing identity is the one the probe reports" are **not
+  satisfied by the wired code today**, and that is a defect in a merged
+  capability rather than anything this change introduces. It is not amended here;
+  see **Two things this change does not settle**, below.
 - **`stoa-metadata`** owns current-versus-founding metadata and its resolution
   rule. See above.
+
+## Two things this change does not settle
+
+Merging `main` made visible that one user has three signing identities, each
+correct against its own change's contract. This change settles the half that is a
+defect and declines the half that is an owner's decision. Both halves are stated
+here because a deferral with no durable home is a drop.
+
+**What is settled, and it is here because it is this delta's own claim.** A
+creation-time key **cannot** be derived from the Stoa's address: the creator key is
+a field inside the genesis record, and the address is that record's hash, so the
+address does not exist until the creator key is fixed. This is a property of
+`stoa-genesis`, not an MVP shortcut, and it does not go away when per-Stoa identity
+is switched on. The requirement above now states it, and this delta's own scenario
+no longer claims the creator key is "the key the caller would sign an op with" — a
+claim `identity-onboarding` made false, in a delta this change owns.
+
+**What is a defect and belongs to `content-authoring`.** The publish path signs
+with the *pathless* per-Stoa derivation while the probe reports the *path-derived*
+one. `identity`'s scenario "The path-taking scheme does not collide with the scheme
+without one" guarantees those two keys differ, so `content-authoring`'s "The
+signing identity is the one the probe reports" is violated by the wired code. No
+spec chose the pathless scheme for publishing; it is the residue of a change
+written before the path existed. **Fixing it needs no new decision** — it is a
+one-call change in the adapter plus the test that pairs the probe against a
+published op's author — but it amends a merged capability's implementation, so it
+belongs to a change owning `content-authoring`, not to this one. Until then the CI
+gate's named exemption stays.
+
+**What needs an owner decision, sharpened rather than answered.** Given the
+creation-time key cannot be per-Stoa, a Stoa's creator has two keys inside their
+own Stoa: the root key the genesis record names, and a per-Stoa key the probe
+reports. `moderation-resolution` requires a moderation op's signer to be in the
+moderator set, and that set "SHALL be derived from its genesis record" with "the
+record's creator SHALL be the sole moderator" — so **a creator's moderation op must
+be signed by the root key while their posts are signed by a per-Stoa key.** No spec
+states which key signs a moderation op, and nothing tests it.
+
+The cost is specific and is the one `identity`'s "Identities are unlinkable across
+Stoas" exists to prevent: a creator who both moderates and posts publishes two keys
+in one Stoa, and anyone can see the root key that also creates their other Stoas.
+For a Stoa's creator, cross-Stoa unlinkability is lost — not suspended for the MVP,
+but lost by construction under per-Stoa identity.
+
+The owner's question is therefore **not** "which of three schemes wins". It is:
+**should a Stoa's creator moderate under the root key that the genesis record
+already publishes, accepting that a creator is linkable across the Stoas they
+create — or should the moderator set be something other than the genesis creator
+key, which is a change to `stoa-genesis` and `moderation-resolution` rather than to
+any key derivation?** Nothing in this change depends on the answer.
 
 ## Impact
 
