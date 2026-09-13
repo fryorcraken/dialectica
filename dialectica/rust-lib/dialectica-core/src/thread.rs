@@ -313,6 +313,24 @@ pub fn thread_of<L: OpLog>(log: &L, id: &OpId) -> Result<Option<OpId>, OpLogErro
             return Ok(None);
         };
 
+        // The row must BE the op this link named. `Entry::id()` recomputes the id
+        // from the op's own bytes, so this compares what the store was keyed on
+        // against what it returned.
+        //
+        // Without it, the bytes of one op decide where a different op's id leads:
+        // a row filed under X holding an op whose real id is Y hands this walk
+        // Y's `parent`, and a post is placed by a link the store cannot vouch
+        // for — including "reaches a root" naming an id under which no root
+        // exists. That is the mid-chain form of the rootless page `read_thread`
+        // refuses at the root, and the guard is the same comparison.
+        //
+        // Unreachable through `MemoryOpLog`, which keys on `op.id()`; reachable
+        // through a corrupted or hand-edited `SqliteOpLog` file, whose `get`
+        // selects `WHERE op_id = ?1` and re-derives nothing.
+        if entry.id() != current {
+            return Ok(None);
+        }
+
         // BEFORE any field of the op is read. Every field is a claim until the
         // signature is checked, and `parent` is the field this walk is about to
         // believe.
@@ -372,6 +390,28 @@ pub fn thread_of<L: OpLog>(log: &L, id: &OpId) -> Result<Option<OpId>, OpLogErro
 /// into an empty page, for §11.1 obligation 5's reason: an empty listing is
 /// indistinguishable from a subject nobody posted in, so swallowing this would
 /// render a peer whose store is broken as a thread that is merely quiet.
+///
+/// # `per_page` is clamped HERE, not only at the wire
+///
+/// Found by correctness review. This function is `pub` and re-exported at the
+/// crate root, and [`clamp_per_page`] is a separate function a caller has to
+/// remember — so a `per_page` of zero reached the arithmetic below and made
+/// `has_more` **true on every page forever**: `start` and `end` are both zero, so
+/// `0 < items.len()` holds for every index, and every readable thread has at
+/// least a root. A caller paging on `has_more` never terminated, and every page
+/// was empty. It is the same defect `MembershipStore::list` had.
+///
+/// The wire path clamped already, so this was unreachable from a peer — and that
+/// is exactly CLAUDE.md's point about a guard being a job: "is it called
+/// everywhere?" had the answer "at one of two entry points". Clamping inside
+/// makes the question answerable by reading this function alone, and the next
+/// caller inherits it without knowing the rule exists.
+///
+/// The alternative — a page-size type that cannot be zero — is the better shape
+/// by "put the complexity in the data structure", and was not taken here because
+/// it changes [`crate::feed::list_threads`]'s signature too, and `feed.rs` is not
+/// this change's to touch. Recorded in `design.md` as the shape to reach for if a
+/// third read is added.
 pub fn read_thread<L: OpLog>(
     log: &L,
     moderators: &Moderators,
@@ -381,9 +421,41 @@ pub fn read_thread<L: OpLog>(
     per_page: usize,
     include_hidden: bool,
 ) -> Result<Result<ThreadPage, NotAThread>, OpLogError> {
+    // The guard runs HERE rather than only at the wire, so it cannot be skipped
+    // by reaching this function directly — see this function's documentation for
+    // what a zero did before. Idempotent, so the wire path clamping first costs
+    // nothing and changes no answer.
+    let per_page = clamp_per_page(Some(per_page));
+
     let Some(root_entry) = log.get(root)? else {
         return Ok(Err(NotAThread::NotHeld(*root)));
     };
+
+    // The row the store handed back must actually BE the op that was asked for.
+    //
+    // `Entry::id()` recomputes the id from the op's own bytes, so this compares
+    // what the store was keyed on against what it returned. A store that answers
+    // `get(X)` with bytes whose id is `Y` is not a store this read can serve
+    // from: every later step keys on `entry.id()`, so the root would be placed
+    // under `Y`, `thread_of` would find nothing under `Y`, and the read would
+    // return a SUCCESSFUL page with no root in it — an empty page, which is the
+    // one answer indistinguishable from a thread this peer never received. That
+    // is precisely the confusion the not-held refusal exists to prevent, reached
+    // by the back door.
+    //
+    // `NotHeld` rather than a fourth variant: the peer holds no op *under this
+    // id*, which is exactly what the caller needs to know and exactly what the
+    // message says. A row whose bytes are some other op is not evidence that the
+    // named thread ever arrived.
+    //
+    // Unreachable through `MemoryOpLog`, which keys on `op.id()`, and through
+    // `SqliteOpLog` writing its own rows — but `SqliteOpLog::get` selects
+    // `WHERE op_id = ?1` and re-derives nothing, so a corrupted or hand-edited
+    // file produces it. Everything this module reads arrived from somewhere it
+    // does not control.
+    if root_entry.id() != *root {
+        return Ok(Err(NotAThread::NotHeld(*root)));
+    }
 
     // Authenticity before the op's fields decide anything. A forged post is not
     // a thread this peer holds — the spec puts the refusal for one at the
@@ -452,6 +524,9 @@ pub fn read_thread<L: OpLog>(
     // the end an empty page rather than a panic on the slice, and
     // `saturating_mul` is what makes a caller-supplied `page` of `usize::MAX` an
     // empty page rather than a wrapped offset into the middle of the thread.
+    //
+    // `per_page` is the CLAMPED value, not the argument. See this function's
+    // documentation: a zero here makes `has_more` true on every page forever.
     let start = page.saturating_mul(per_page).min(items.len());
     let end = start.saturating_add(per_page).min(items.len());
     let has_more = end < items.len();
@@ -1076,6 +1151,123 @@ mod tests {
     }
 
     #[test]
+    fn a_store_row_filed_under_the_wrong_id_is_refused_rather_than_served_rootless() {
+        // Found by security review, which observed that `CyclicLog` had only ever
+        // been driven through `thread_of` and never through `read_thread`.
+        //
+        // The state: a row filed under id X holding a genuinely signed,
+        // parentless, in-Stoa post whose real id is Y. Before the fix, the root
+        // passed all four checks — `get(X)` yields it, it verifies, its Stoa
+        // matches, it is a `Post { parent: None }` — and then the iteration
+        // handed the same entry over under `entry.id() == Y`, `thread_of(log, &Y)`
+        // called `get(Y)`, found nothing, and skipped it.
+        //
+        // The result was `Ok(Ok(ThreadPage { items: [], page: 0, has_more:
+        // false }))` — a SUCCESSFUL page with no root and no items. That is the
+        // one reply this capability's own argument forbids: an empty page is
+        // indistinguishable from a subject nobody has posted in, which is why an
+        // unheld thread is a refusal rather than an empty page. Serving it here
+        // reintroduced by the back door exactly the confusion the refusal exists
+        // to prevent, and `read_thread`'s doc promises the root item first
+        // unconditionally.
+        //
+        // Not remotely triggerable: it needs a store whose key disagrees with its
+        // bytes, which is the corrupted or hand-edited file `CyclicLog`'s own doc
+        // comment invokes. The guard is one line on a value the walk already
+        // computes.
+        let filed_under = an_id(0x55);
+        let log = CyclicLog {
+            entries: vec![CyclicLog::entry_at(filed_under, None, 7)],
+        };
+
+        // The fixture must genuinely disagree with itself, or this test passes
+        // for absence rather than for the mismatch.
+        let stored = log
+            .get(&filed_under)
+            .unwrap()
+            .expect("the row must be there under the wrong key");
+        assert_ne!(
+            stored.id(),
+            filed_under,
+            "the row's real id must differ from the key it is filed under"
+        );
+        assert!(stored.op.verify(), "and the op itself must be authentic");
+        assert!(
+            matches!(stored.op.op.kind, OpKind::Post { parent: None, .. }),
+            "and it must look exactly like a root, or an earlier check refuses \
+             it and the guard under test is never reached"
+        );
+
+        let answer = read_thread(
+            &log,
+            &moderators(),
+            &a_stoa(),
+            &filed_under,
+            0,
+            MAX_PER_PAGE,
+            false,
+        )
+        .expect("the store answered, so this is not an Err");
+
+        match answer {
+            Err(NotAThread::NotHeld(id)) => assert_eq!(id, filed_under),
+            Err(other) => panic!(
+                "refused, but as {other:?} — a row whose bytes are not the op \
+                 the caller named is not held UNDER THAT ID, which is the \
+                 refusal that tells a caller to wait rather than to correct a \
+                 category error"
+            ),
+            Ok(page) => panic!(
+                "served a page with {} items rather than refusing; a rootless \
+                 page is the one reply this capability must never give",
+                page.items.len()
+            ),
+        }
+    }
+
+    #[test]
+    fn a_store_row_filed_under_the_wrong_id_places_nothing_mid_chain_either() {
+        // The same disagreement one link further along, which the root guard does
+        // not cover: the post being PLACED is filed correctly and its parent is
+        // the row whose key lies.
+        //
+        // Without the guard in `thread_of`, the walk reads that row's `parent`
+        // and follows it — so the bytes of one op decide where a different op's
+        // id leads, and a post is placed by a link the store cannot vouch for.
+        // Here the lying row is parentless, so the walk would answer "this chain
+        // reaches a root" and name an id under which no such root exists.
+        let lying_key = an_id(0x66);
+        let entrant = a_post_in(a_stoa(), 5, None, Some(lying_key), "reply to a lie");
+        let log = CyclicLog {
+            entries: vec![
+                CyclicLog::entry_at(lying_key, None, 7),
+                (entrant.op.id(), {
+                    Entry {
+                        op: entrant.clone(),
+                        arrival: Arrival::unordered(),
+                    }
+                }),
+            ],
+        };
+
+        // The entrant itself is filed HONESTLY, so any refusal is about the link
+        // rather than about the post being placed.
+        assert_eq!(
+            log.get(&entrant.op.id()).unwrap().unwrap().id(),
+            entrant.op.id()
+        );
+        // And the parent row genuinely disagrees with its key.
+        assert_ne!(log.get(&lying_key).unwrap().unwrap().id(), lying_key);
+
+        assert_eq!(
+            thread_of(&log, &entrant.op.id()).unwrap(),
+            None,
+            "a chain must not be completed through a row whose bytes are not \
+             the op its key names"
+        );
+    }
+
+    #[test]
     fn a_post_naming_itself_as_its_parent_terminates_and_places_nothing() {
         // The one-op cycle, over a store whose key disagrees with its contents —
         // see `CyclicLog` for why that is the only way to build one and why a
@@ -1468,6 +1660,113 @@ mod tests {
             "a cleared body is present and empty, never absent"
         );
         assert!(item.is_revised);
+    }
+
+    /// The Stoa the cross-Stoa revision fixtures stamp their op with.
+    ///
+    /// A real, well-formed Stoa that this thread is not in — not a junk address
+    /// — so the op is refused for the Stoa it names rather than for being
+    /// undecodable.
+    fn another_stoa() -> Address {
+        Genesis {
+            creator: a_key(1).public_key(),
+            policy: Policy::Open,
+            title: "Elsewhere".to_string(),
+        }
+        .address()
+        .unwrap()
+    }
+
+    #[test]
+    fn a_revision_stamped_with_another_stoa_does_not_rewrite_a_post() {
+        // Found by security review, and it is the finding that matters most in
+        // this piece: the spec says "It SHALL return only ops belonging to the
+        // Stoa named in the request", and a revision naming another Stoa was
+        // rewriting a thread item's body.
+        //
+        // THE FIXTURE IS A FRESH SIGNATURE, NOT A REPLAY, and that distinction is
+        // the whole finding. `revision.rs`'s
+        // `a_revision_lifted_into_another_stoa_is_dropped` copies a signature
+        // onto a rewritten op, so `verify()` fails and the Stoa is never
+        // consulted — its comment then generalises to "relies entirely on
+        // `verify()`", which execution disproves. Here key 3 signs the op it
+        // actually publishes, so it VERIFIES, it is BY THE POST'S OWN AUTHOR, and
+        // only the Stoa comparison can refuse it.
+        //
+        // The moderation resolver has always made this check —
+        // `Moderators::authorises` leads with `entry.op.op.stoa == self.stoa` —
+        // so before the fix the two resolvers disagreed about whether a Stoa is
+        // part of an op's standing.
+        let root = a_root(2, "root");
+        let reply = a_reply(3, &root, "what the author actually wrote");
+        let author = a_key(3);
+        let elsewhere = Op {
+            stoa: another_stoa(),
+            author: author.public_key(),
+            kind: OpKind::Revise {
+                target: reply.op.id(),
+                body: "REWRITTEN FROM ANOTHER STOA".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&author);
+
+        // Every property that is NOT the Stoa holds, asserted so a future reader
+        // can see that this test can only pass for the reason it names.
+        assert!(
+            elsewhere.verify(),
+            "the fixture must be AUTHENTIC — a replay would fail verify() and \
+             this test would pass without the Stoa check existing"
+        );
+        assert_eq!(
+            elsewhere.op.author, reply.op.author,
+            "the fixture must be by the post's OWN author, or the authorship \
+             rule refuses it and the Stoa check is again untested"
+        );
+        assert_ne!(another_stoa(), a_stoa());
+
+        let log = a_log(vec![root.clone(), reply.clone(), elsewhere.clone()]);
+        // And it really is in the log, so this passes because the read refused it
+        // rather than because nothing was stored.
+        assert!(log.get(&elsewhere.op.id()).unwrap().is_some());
+
+        let item = read(&log, &root, false)
+            .items
+            .into_iter()
+            .find(|i| i.id == reply.op.id().to_hex())
+            .expect("the reply must still be returned");
+        assert_eq!(
+            item.body.as_ref().unwrap().text,
+            "what the author actually wrote",
+            "a revision naming another Stoa rewrote this thread's content"
+        );
+        assert!(
+            !item.is_revised,
+            "an op that does not belong to this Stoa must not make a post read \
+             as revised"
+        );
+        assert_eq!(item.current_version, reply.op.id().to_hex());
+    }
+
+    #[test]
+    fn a_revision_in_this_stoa_still_rewrites_the_post() {
+        // The positive half. Without it, a fix that refused EVERY revision would
+        // pass the test above — and the suite would be pinning a read that can
+        // never show an edit.
+        let root = a_root(2, "root");
+        let reply = a_reply(3, &root, "v1");
+        let here = a_revision(&a_key(3), reply.op.id(), "v2");
+        assert_eq!(here.op.stoa, a_stoa(), "this one IS in the thread's Stoa");
+        let log = a_log(vec![root.clone(), reply.clone(), here.clone()]);
+
+        let item = read(&log, &root, false)
+            .items
+            .into_iter()
+            .find(|i| i.id == reply.op.id().to_hex())
+            .unwrap();
+        assert_eq!(item.body.unwrap().text, "v2");
+        assert!(item.is_revised);
+        assert_eq!(item.current_version, here.op.id().to_hex());
     }
 
     #[test]
@@ -2447,6 +2746,61 @@ mod tests {
         assert!(p.items.is_empty());
         assert!(!p.has_more);
         assert_eq!(p.page, usize::MAX);
+    }
+
+    #[test]
+    fn a_per_page_of_zero_terminates_rather_than_paging_forever() {
+        // Found by correctness review. `read_thread` is `pub` and re-exported at
+        // the crate root, and `clamp_per_page` is a SEPARATE function a caller
+        // must remember — so "is the guard called everywhere?" had the answer "at
+        // one of two entry points".
+        //
+        // Before the fix: `start = page * 0 = 0`, `end = 0 + 0 = 0`, and
+        // `has_more = 0 < items.len()` is `true` for EVERY index, because every
+        // readable thread has at least a root so `items` is never empty. A caller
+        // paging on `has_more` never terminates, and each page is empty. This is
+        // the same shape as `MembershipStore::list`'s `per_page == 0`.
+        //
+        // Asserted over several indices rather than one, because the defect is
+        // that the answer never changes — a single-index test would pass against
+        // an implementation that got page 0 right by accident.
+        let root = a_root(2, "root");
+        let reply = a_reply(3, &root, "reply");
+        let log = a_log(vec![root.clone(), reply]);
+
+        for page in [0usize, 1, 2, 99] {
+            let p = read_thread(
+                &log,
+                &moderators(),
+                &a_stoa(),
+                &root.op.id(),
+                page,
+                0,
+                false,
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(p.page, page, "the index served must be the one asked for");
+            if page == 0 {
+                // Zero clamps UP to the default, so the first page carries the
+                // thread rather than nothing — the same answer the wire path has
+                // always given through `clamp_per_page`.
+                assert_eq!(
+                    p.items.len(),
+                    2,
+                    "a page size of zero is served at the DEFAULT, never as an \
+                     empty page"
+                );
+                assert!(!p.has_more);
+            } else {
+                assert!(p.items.is_empty());
+                assert!(
+                    !p.has_more,
+                    "page {page} claims another follows, so a caller paging on \
+                     has_more never terminates"
+                );
+            }
+        }
     }
 
     #[test]

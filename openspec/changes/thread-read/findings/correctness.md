@@ -62,7 +62,7 @@ literals.
       wire, so a regression here would be peer-triggerable. Adding this second
       case beside the existing one costs four lines.
 
-- [ ] **`dev-writer`** — `thread.rs:455-457` — `read_thread` called with
+- [x] **`dev-writer`** — `thread.rs:455-457` — `read_thread` called with
       `per_page == 0` reports `has_more: true` on every page forever, so a
       caller paging on `has_more` never terminates.
       **Scenario:** any readable thread (every one has at least the root, so
@@ -82,6 +82,25 @@ literals.
       `read_thread` inherits it. Either clamp inside `read_thread` or make the
       parameter a type that cannot be zero; a test then pins whichever is
       chosen.
+
+      **Fixed** — `read_thread` now calls `clamp_per_page(Some(per_page))` as its
+      first statement, so the guard runs at the function rather than only at the
+      wire, and the wire's own clamp stays harmless because clamping is
+      idempotent. `design.md` §12 records it.
+
+      The test is `a_per_page_of_zero_terminates_rather_than_paging_forever`,
+      which asserts over indices 0, 1, 2 and 99 rather than one — the defect is
+      that the answer never changes, so a single-index test could pass against an
+      implementation that got page 0 right by accident. **Measured failing before
+      the fix** (`left: 0, right: 2` — the first page came back empty) and
+      **measured failing again with the clamp reverted to `let per_page =
+      per_page`**: 813 passed, 1 failed.
+
+      **The type was considered and not taken, deliberately.** A page size that
+      cannot be zero is the better shape by "put the complexity in the data
+      structure", and it changes `feed::list_threads`'s signature too — `feed.rs`
+      is not this piece's. `design.md` §12 names the third paginated read as the
+      moment to introduce it rather than write a third clamp.
 
 - [ ] **`tester`** — `thread.rs:1239 a_forged_root_is_not_readable_as_a_thread`
       — the test asserts the refusal *variant* but not the spec's disclosure

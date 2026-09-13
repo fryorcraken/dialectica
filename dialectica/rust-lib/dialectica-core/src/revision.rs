@@ -286,14 +286,45 @@ pub fn current_version<L: OpLog>(
 /// it is what makes the three conditions enumerable at one glance rather than
 /// buried in a fold.
 ///
-/// All three must hold, and the last two are in this order for the reason this
+/// All **four** must hold, and the last two are in this order for the reason this
 /// module's documentation gives: an unverified `author` field is a claim, and
 /// comparing a claim against a fact passes for whoever wrote the claim.
+///
+/// # The Stoa check is the fourth, and it was missing
+///
+/// Found by security review of the `thread-read` change. A revision is valid only
+/// in the Stoa its target is in, and this function used to decide standing from
+/// kind, authenticity and authorship alone — so an author could sign a `Revise`
+/// naming their own post while stamping it with **another Stoa's address**, and
+/// every reader rendered the rewritten body.
+///
+/// **The signed preimage does not close this, and that is the part worth being
+/// precise about.** `op.rs` puts the Stoa inside the bytes, so an op *lifted*
+/// from one Stoa's channel onto another's fails [`SignedOp::verify`] — which
+/// stops an attacker **rewriting** the field. It does not stop the author
+/// **choosing** it. A fresh signature over a freshly chosen Stoa verifies
+/// perfectly, and only this comparison refuses it.
+///
+/// That is verbatim the reasoning [`crate::moderation`] gives for its own check
+/// 3, which has always been made: `Moderators::authorises` leads with
+/// `entry.op.op.stoa == self.stoa`. Until this line, the two resolvers disagreed
+/// about whether a Stoa is part of an op's standing — one op kind's cross-Stoa
+/// claim bound nothing, and another's rewrote content.
+///
+/// Compared against the **target's** Stoa rather than against a Stoa passed in,
+/// because that is the one this function can establish without a second argument
+/// every call site would have to get right: a post is in exactly one Stoa, and a
+/// version of that post belongs where the post does.
 fn is_valid_revision(candidate: &Entry, original: &Entry) -> bool {
     // It must be a revision. `iter_target` returns every kind naming this post —
     // a moderation, a vote — because "what acts on this subject?" is one
     // question; narrowing it is the reader's job.
     matches!(candidate.op.op.kind, OpKind::Revise { .. })
+        // It must be in the same Stoa as the post it supersedes. Cheapest of the
+        // four and the one most likely to exclude, but ordering is a performance
+        // matter only: all four must pass, so no ordering of them changes the
+        // answer.
+        && candidate.op.op.stoa == original.op.op.stoa
         // It must be authentic. §3.3: the store holds junk and the reader never
         // trusts it, so this is not redundant with anything the log did — the
         // log deliberately verifies nothing on append.
@@ -673,10 +704,22 @@ mod tests {
 
     #[test]
     fn a_revision_lifted_into_another_stoa_is_dropped() {
-        // The Stoa is inside the signed bytes, so a revision replayed from
-        // another Stoa's channel fails verification. Pinned here because the
-        // resolver never looks at the Stoa itself — it relies entirely on
-        // `verify()` to catch this, and that reliance should be tested.
+        // The Stoa is inside the signed bytes, so a revision REPLAYED from
+        // another Stoa's channel fails verification.
+        //
+        // **This test's comment used to generalise and the generalisation was
+        // false.** It said the resolver "relies entirely on `verify()` to catch
+        // this" — and security review of `thread-read` disproved that by
+        // execution: `verify()` catches a replay, and catches nothing at all when
+        // the author signs the rewritten Stoa afresh. The test passed for a
+        // reason narrower than it claimed, which is this repo's named defect
+        // family — a fixture where two explanations give the same answer.
+        //
+        // What it covers is still worth keeping and is now stated at its true
+        // width: a replay is refused, and the signature is what refuses it. The
+        // case the old comment wrongly implied was covered is
+        // `a_revision_freshly_signed_for_another_stoa_is_dropped` below, and that
+        // one fails without the Stoa comparison in `is_valid_revision`.
         let post = a_post("mine");
         let id = post.op.id();
         let genuine = a_revision(id, "v2");
@@ -698,6 +741,81 @@ mod tests {
             current_version(&log, &id).unwrap().unwrap().body(),
             "mine"
         );
+    }
+
+    #[test]
+    fn a_revision_freshly_signed_for_another_stoa_is_dropped() {
+        // THE case the replay test above does not reach, found by security review
+        // of `thread-read` and fixed by the fourth condition in
+        // `is_valid_revision`.
+        //
+        // The author signs the op they actually publish, so the Stoa inside the
+        // signed bytes is one they CHOSE rather than one an attacker rewrote.
+        // Every other condition holds: it is a `Revise`, it names this post, it
+        // verifies, and it is by the post's own author. Only the Stoa comparison
+        // can refuse it — which is what makes this test able to fail for the
+        // reason it names, and what makes the replay test unable to.
+        //
+        // Without the fix this returns "REWRITTEN FROM ANOTHER STOA".
+        let post = a_post("mine");
+        let id = post.op.id();
+        let elsewhere = Op {
+            stoa: crate::identity::stoa_address(b"a different stoa"),
+            author: author().public_key(),
+            kind: OpKind::Revise {
+                target: id,
+                body: "REWRITTEN FROM ANOTHER STOA".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&author());
+
+        assert!(
+            elsewhere.verify(),
+            "the fixture must VERIFY — a replay would not, and would then be \
+             refused by the signature rather than by the Stoa"
+        );
+        assert_eq!(
+            elsewhere.op.author, post.op.author,
+            "and it must be by the post's own author, or authorship refuses it"
+        );
+        assert_ne!(elsewhere.op.stoa, post.op.stoa);
+
+        let mut log = MemoryOpLog::new();
+        log.append(post, Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
+        log.append(elsewhere.clone(), Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
+        // It really is stored and really does name the post, so the Stoa check is
+        // what drops it rather than an empty `iter_target`.
+        assert_eq!(log.iter_target(&id).unwrap().len(), 1);
+
+        let resolved = current_version(&log, &id).unwrap().unwrap();
+        assert_eq!(resolved.body(), "mine");
+        assert!(!resolved.is_revised());
+        assert_eq!(resolved.current.id(), id);
+    }
+
+    #[test]
+    fn a_revision_in_the_posts_own_stoa_is_still_accepted() {
+        // The positive half of the Stoa check. Without it, a comparison written
+        // the wrong way round — or one that refused every revision — would pass
+        // both cross-Stoa tests above while making every edit invisible.
+        let post = a_post("v1");
+        let id = post.op.id();
+        let here = a_revision(id, "v2");
+        assert_eq!(here.op.stoa, post.op.stoa);
+
+        let mut log = MemoryOpLog::new();
+        log.append(post, Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
+        log.append(here.clone(), Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
+
+        let resolved = current_version(&log, &id).unwrap().unwrap();
+        assert_eq!(resolved.body(), "v2");
+        assert!(resolved.is_revised());
+        assert_eq!(resolved.current.id(), here.op.id());
     }
 
     // ─── Lamport order decides currency ───────────────────────────────────

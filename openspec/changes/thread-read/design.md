@@ -161,6 +161,91 @@ The cost is that the *chain walk* must not reorder either — so placement is
 computed per entry as `iter_stoa` hands it over, and the entry's position is
 never moved.
 
+### 10. An op's Stoa is part of its standing, and `revision.rs` did not think so
+
+Found by security review. `is_valid_revision` decided a revision's standing from
+kind, authenticity and authorship — and never the Stoa — while
+`Moderators::authorises` has always led with `entry.op.op.stoa == self.stoa`. So
+the two resolvers disagreed about whether a Stoa is part of an op's standing, and
+an author could sign a `Revise` naming their own post while stamping it with
+**another Stoa's address**. Every reader rendered the rewritten body.
+
+**Fixed in `revision.rs` rather than worked around here**, even though the root
+cause predates this piece and `feed.rs` shares it. Three reasons, and the first
+decides it:
+
+- **This is the piece whose spec claims "It SHALL return only ops belonging to
+  the Stoa named in the request."** Leaving the defect and narrowing the spec
+  would mean writing down that a thread read may render content from another
+  Stoa, which is not a contract worth having. Discharging the claim is cheaper
+  than retracting it.
+- A filter in `thread.rs` would be the **fourth slightly-different guard** —
+  CLAUDE.md's named signal to reshape rather than add one. `moderation.rs` makes
+  the check, `authoring.rs` makes it on the publish path, and `thread.rs` would
+  make a third copy while `feed.rs` still did not.
+- The comparison is against the **target's** Stoa, which `is_valid_revision`
+  already holds. No call site gains an argument, so no call site can get it
+  wrong.
+
+The fix is two lines and it repairs `feed.rs` for free.
+
+**What made this invisible is worth recording.** `revision.rs`'s existing
+`a_revision_lifted_into_another_stoa_is_dropped` builds a **replayed** op — the
+signature is copied, so `verify()` fails — and its comment then generalised to
+"relies entirely on `verify()`". Execution disproves that: `verify()` catches a
+rewritten field and catches nothing when the author signs the new Stoa afresh.
+The test passed for a reason narrower than it claimed, which is this repo's named
+defect family. The comment is corrected at its true width and
+`a_revision_freshly_signed_for_another_stoa_is_dropped` covers the case it
+wrongly implied.
+
+### 11. A store row must be the op its key names
+
+Found by security review, driving the tester's `CyclicLog` through `read_thread`
+rather than only through `thread_of`.
+
+`OpLog::get(X)` is trusted to return the op whose id is `X`. `MemoryOpLog` keys on
+`op.id()` so it cannot do otherwise, and `SqliteOpLog` writes its own rows — but
+`SqliteOpLog::get` selects `WHERE op_id = ?1` and re-derives nothing, so a
+corrupted or hand-edited file returns a row whose bytes are some other op. Two
+consequences, both fixed by the same comparison in two places:
+
+- **At the root**, the read passed all four checks and then skipped the entry
+  during iteration (it is keyed on `entry.id()`, which is the *other* id), giving
+  `Ok(Ok(ThreadPage { items: [], .. }))` — a **successful page with no root**.
+  That is precisely the empty page the held/not-held distinction exists to
+  prevent, reached by the back door.
+- **Mid-chain**, the walk read the lying row's `parent` and followed it, so one
+  op's bytes decided where a different op's id leads — including answering
+  "reaches a root" with an id under which no root exists.
+
+Both refuse as **not held**, which is literally true: the peer holds no op *under
+that id*. A fourth `NotAThread` variant was considered and rejected — a caller
+can do nothing different with "your store is corrupt" than with "wait for it to
+arrive", and the spec fixes three refusals.
+
+`sqlite-projection` still owns proving a real file produces such a row end to
+end; this change owns not serving a rootless page when one does.
+
+### 12. `per_page` is clamped inside `read_thread`, not only at the wire
+
+Found by correctness review. A `per_page` of zero made `has_more` **true on every
+page forever** — `start` and `end` are both zero and every readable thread has at
+least a root — so a caller paging on `has_more` never terminated. Unreachable
+from a peer, because the wire clamps; reachable from any other caller of a `pub`
+function re-exported at the crate root.
+
+That gap is exactly CLAUDE.md's "a guard is a job, so *is it called everywhere?*
+stays a question with an answer" — and the answer was "at one of two entry
+points". Clamping inside makes the question answerable by reading one function.
+
+**The better shape was not taken, and the reason is scope.** A page-size type
+that cannot be zero would make the invariant hold by construction rather than by
+a call — "put the complexity in the data structure". It changes
+`feed::list_threads`'s signature too, and `feed.rs` is not this change's to
+touch. **If a third paginated read is added, that is the moment to introduce the
+type** rather than write a third clamp.
+
 ## Risks / Trade-offs
 
 - **Quadratic-ish cost.** Placing N posts walks up to N chains of up to N
@@ -226,3 +311,16 @@ deeper reply instead. Nothing in the spec picks between them, so
   all"**, which this change makes false. The conclusion it supports — that no
   call returns a vote count — is untouched and still correct, so the clause is
   corrected in place rather than the paragraph rewritten.
+- **The cross-Stoa revision defect DID reach `feed.rs`, and is fixed there too**
+  — not by touching the file, but because the repair is in `revision.rs`, which
+  the feed calls. That is the argument for fixing a root cause rather than
+  filtering at one call site, and it is the one place this piece deliberately
+  changed a file outside its own surface. `feed.rs`'s own suite has no test for
+  it; `revision.rs`'s new
+  `a_revision_freshly_signed_for_another_stoa_is_dropped` covers the resolver
+  both reads share, which is where the behaviour actually lives.
+- **`wire.rs:1253`, the feed's genesis/Stoa pairing check, is untested in the
+  same way `read_thread`'s was.** Security review noted it while measuring the
+  thread read's. Not this piece's: the feed read has no spec, and a test written
+  here would promote a requirement for code that merged in another piece past
+  the review that piece had. Reported so it is not lost.

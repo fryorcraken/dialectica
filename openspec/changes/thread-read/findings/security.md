@@ -31,7 +31,7 @@ object, not an empty string.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `thread.rs:520-521` via `revision.rs:292` —
+- [x] **`dev-writer`** — `thread.rs:520-521` via `revision.rs:292` —
       a revision stamped with **another Stoa's address** rewrites a thread
       item's body, so a thread read renders content from an op that does not
       belong to the Stoa it was asked for.
@@ -58,6 +58,41 @@ object, not an empty string.
       is the piece whose spec makes the claim, so the fix or the explicit
       deferral belongs here. If deferred, say so in `design.md`'s "found and did
       not fix" section beside the `feed.rs` author-key gap.
+
+      **Fixed at the root, in `revision.rs`, rather than deferred or filtered
+      here.** `is_valid_revision` gains a fourth condition —
+      `candidate.op.op.stoa == original.op.op.stoa` — compared against the
+      **target's** Stoa, which the function already holds, so no call site gains
+      an argument it could get wrong. `design.md` §10 carries the argument; the
+      short form is that a filter in `thread.rs` would be the fourth
+      slightly-different copy of a guard `moderation.rs` and `authoring.rs`
+      already make, and narrowing the spec instead would mean writing down that a
+      thread read may render another Stoa's content.
+
+      **It repairs `feed.rs` for free**, since the feed calls the same resolver —
+      which is the argument for fixing the root cause rather than the call site,
+      and is recorded in `design.md`'s "found and did not fix".
+
+      Two tests, and each fails without the line. `revision.rs`'s
+      `a_revision_freshly_signed_for_another_stoa_is_dropped` is the resolver-level
+      one: it asserts the fixture **verifies** and is **by the post's own author**
+      before asserting the outcome, so it can only pass for the reason it names —
+      which is exactly what the replay fixture could not do. `thread.rs`'s
+      `a_revision_stamped_with_another_stoa_does_not_rewrite_a_post` is your
+      scenario as written, and **measured failing first**: `left: "REWRITTEN FROM
+      ANOTHER STOA", right: "what the author actually wrote"`. Reverting the
+      condition fails both: 812 passed, 2 failed.
+      `a_revision_in_this_stoa_still_rewrites_the_post` and
+      `a_revision_in_the_posts_own_stoa_is_still_accepted` are the positive halves,
+      without which a fix refusing every revision would pass both.
+
+      **The misleading comment is corrected too.**
+      `a_revision_lifted_into_another_stoa_is_dropped` no longer claims the
+      resolver "relies entirely on `verify()`"; it now states what it actually
+      covers — a replay, refused by the signature — and points at the new test for
+      the case it wrongly implied. Your observation that it passed for a reason
+      narrower than its comment claimed is the whole reason this was invisible,
+      and it is recorded in `design.md` §10 rather than only fixed.
 
 - [ ] **`tester`** — `wire.rs:1593-1597` — the genesis/Stoa pairing check in
       `read_thread_inner` is **entirely untested**, and it is the check that
@@ -115,7 +150,7 @@ is also correctly drawn: `SqliteOpLog::get` selects `WHERE op_id = ?1` and
 But the fake was only ever driven through `thread_of`, never through
 `read_thread`, and that leaves a reachable state nobody looked at:
 
-- [ ] **`dev-writer`** — `thread.rs:384-463` — a store row whose key disagrees
+- [x] **`dev-writer`** — `thread.rs:384-463` — a store row whose key disagrees
       with its bytes produces a **successful page with no root and no items** —
       the one reply the spec says must never be served.
       **Scenario:** a row filed under id `X` holding a genuinely signed,
@@ -139,3 +174,29 @@ But the fake was only ever driven through `thread_of`, never through
       value the walk already computes; the broader one belongs to
       `sqlite-projection`. Either way the piece should not be able to serve a
       rootless page, and today it can.
+
+      **Fixed — and the same disagreement one link further along was reachable
+      too, which your finding led straight to.** The guard you named is in
+      `read_thread` (`root_entry.id() != *root` → `NotHeld`), and reproducing it
+      showed the walk had the same trust: `thread_of` took whatever `get` returned
+      and read **its** `parent`, so a lying row mid-chain let one op's bytes decide
+      where a different op's id leads. Measured before the second guard:
+      `thread_of` answered `Some(6666…66)` — "this chain reaches a root" naming an
+      id under which no root exists. So `thread_of` carries the same comparison
+      (`entry.id() != current` → `Ok(None)`).
+
+      Two tests, each failing without its own guard —
+      `a_store_row_filed_under_the_wrong_id_is_refused_rather_than_served_rootless`
+      (measured first as "served a page with 0 items rather than refusing") and
+      `a_store_row_filed_under_the_wrong_id_places_nothing_mid_chain_either`. Both
+      assert the fixture genuinely disagrees with itself and that the op is
+      otherwise a perfectly good root, so neither can pass for absence. Stubbing
+      both guards out fails exactly those two: 812 passed, 2 failed.
+
+      **`NotHeld` rather than a fourth variant**, because it is literally true —
+      the peer holds no op *under that id* — and because a caller can do nothing
+      different with "your store is corrupt" than with "wait for it to arrive".
+      The spec fixes three refusals and this adds none. `design.md` §11 records
+      it, including that `sqlite-projection` still owns proving a real file
+      produces such a row end to end; this piece owns not serving a rootless page
+      when one does.
