@@ -1,6 +1,31 @@
 pragma Singleton
 import QtQuick
 
+// `DTheme`, not `Theme`, and the D is the whole point.
+//
+// Basecamp registers its own `Theme`, and a host registration OUTRANKS a plugin
+// directory's `qmldir` entry. While this file was called `Theme.qml`, every
+// `Theme.x` in every view resolved to basecamp's object instead of to this one,
+// every token came back `undefined`, and QML fell back to its defaults: white
+// ground, black system text, no spacing, no borders. One name collision took
+// the entire visual system out at once, and the reported symptom was 89 errors
+// on a screen that could not render.
+//
+// `Core` resolved correctly in the same files with the same imports, purely
+// because basecamp has no `Core` — so "our other singleton works" is never
+// evidence that a name is safe.
+//
+// A prefix rather than a module URI: a name nothing in the host can claim
+// cannot be shadowed by anything basecamp registers later.
+//
+// WHAT NO COMPONENT TEST CAN SEE, which is the part worth keeping. Under
+// `qmltestrunner` there is no competing singleton, so `verify(DTheme.paper !==
+// undefined)` passes whatever this file is called — a check that cannot fail.
+// Measured, not assumed: a competing `Theme` staged on the runner's `-import`
+// path does not shadow this directory's own `qmldir` entry, because the
+// collision lives in the host's C++ type registration and a file-based import
+// path cannot reach it. The gate is therefore the static `no QML type name
+// collides with the host` step in `.github/workflows/ci.yml`.
 QtObject {
     // ---- surfaces -------------------------------------------------------
     readonly property color desk:      "#d9d2c2"   // behind the cards

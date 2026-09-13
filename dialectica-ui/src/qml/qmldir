@@ -1,4 +1,4 @@
-singleton Theme 1.0 Theme.qml
+singleton DTheme 1.0 DTheme.qml
 singleton Core 1.0 Core.qml
 Identicon 1.0 Identicon.qml
 AddressLabel 1.0 AddressLabel.qml

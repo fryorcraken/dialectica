@@ -70,10 +70,10 @@ Canvas {
     // rotation applied consistently across all three selectors is otherwise
     // invisible to a distinctness test.
     //
-    // The values are frozen constants in Theme, not tunable tokens.
+    // The values are frozen constants in DTheme, not tunable tokens.
     readonly property var inks: [
-        Theme.markInk, Theme.markIndigo, Theme.markRust, Theme.markGreen,
-        Theme.markSteel, Theme.markLavender, Theme.markSage
+        DTheme.markInk, DTheme.markIndigo, DTheme.markRust, DTheme.markGreen,
+        DTheme.markSteel, DTheme.markLavender, DTheme.markSage
     ]
 
     // ---- address bytes --------------------------------------------------
@@ -317,7 +317,7 @@ Canvas {
     onPaint: {
         var ctx = getContext("2d");
         ctx.reset();
-        if (size < Theme.markMinDraw)
+        if (size < DTheme.markMinDraw)
             return;   // the caller prints the address instead
 
         // The outline is always drawn, so a mark never bleeds into the row
@@ -334,7 +334,7 @@ Canvas {
         ctx.fillStyle = _inkA();
         ctx.fillRect(0, 0, size, size);
 
-        if (size >= Theme.markMinWeave)   // below this the weave turns to mud
+        if (size >= DTheme.markMinWeave)   // below this the weave turns to mud
             _paintWeave(ctx);
 
         ctx.restore();
