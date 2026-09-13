@@ -350,9 +350,20 @@ jobs:
           # `keystore.stoa_key(&stoa)` on a line in this file, which is how it
           # came to disagree with the probe unnoticed. Losing this call from the
           # adapter is the adapter taking the choice back.
+          # AND `core::stoa_of` IS REQUIRED FOR AN ORDERING REASON, not a
+          # derivation one. The adapter must read `stoa` before it can derive a
+          # per-Stoa key, and it was doing that with its own bare
+          # `serde_json::from_str` plus a four-arm ladder -- which shadowed the
+          # whole request envelope on the shipped path: an array was answered
+          # "missing field: stoa" here, and an N-byte request was fully parsed
+          # at ~2N heap before MAX_REQUEST_BYTES was ever evaluated. Going
+          # through `core::stoa_of` crosses the envelope once. Review caught
+          # that; no gate did, because Build LGX proves this file COMPILES and
+          # asserts nothing about the order of operations inside it.
           for want in ("core::keystore::creator_key_in",
                        "core::wire::get_capabilities_from_stores",
-                       "core::wire::publishing_key"):
+                       "core::wire::publishing_key",
+                       "core::stoa_of"):
               if want not in src:
                   print(f"::error file={path}::{want} is gone from the adapter — "
                         "which key the creator is, and which the poster is, are "
@@ -408,8 +419,37 @@ jobs:
                     "and read by no other gate. Call core::keystore::creator_key_in "
                     "or core::wire::get_capabilities_from_stores instead.")
               sys.exit(1)
-          print("ok: the adapter routes both halves through core::keystore, "
-                "and names no Keystore accessor itself")
+
+          # AND THE ADAPTER MUST NOT PARSE A REQUEST ITSELF.
+          #
+          # This is a separate ban from the accessors above because it is a
+          # separate failure: not "which key signs" but "was the request ever
+          # bounded". A `serde_json::from_str` here is an unguarded parse of an
+          # attacker-controlled body -- no size cap, no non-object refusal --
+          # and it runs BEFORE the bytes reach `core`, so every envelope
+          # obligation is shadowed however correct `dialectica-core` is. That
+          # shipped once, in the very change that added the envelope to the
+          # publish path, and no gate saw it: `cargo test` does not compile this
+          # file, and Build LGX proves it compiles rather than what order it
+          # runs in.
+          #
+          # Every request this file reads must go through a `core` entry point
+          # built on `Request::parse` -- `core::stoa_of`, `core::parse_channel_id`
+          # or a handler. If a new one is genuinely needed, add it to `core`
+          # where `cargo test` can reach it, rather than relaxing this.
+          parses = re.findall(r"serde_json\s*::\s*from_str", code)
+          if parses:
+              print(f"::error file={path}::the adapter parses a request itself "
+                    f"({len(parses)} call(s) to serde_json::from_str) — which "
+                    "bypasses the request envelope: no size cap, and a non-object "
+                    "answered as a missing field. This file is compiled by no test, "
+                    "so nothing else would catch it. Read the request through a "
+                    "core entry point built on Request::parse (core::stoa_of, "
+                    "core::parse_channel_id, or a handler).")
+              sys.exit(1)
+
+          print("ok: the adapter routes every derivation through core, names no "
+                "Keystore accessor itself, and parses no request")
           PY
 
   # ─── qml ─────────────────────────────────────────────────────────────────

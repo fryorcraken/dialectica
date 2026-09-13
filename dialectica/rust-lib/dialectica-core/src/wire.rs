@@ -2014,6 +2014,49 @@ impl PublishRequest {
     }
 }
 
+/// The Stoa a publish request names, for a caller that must know it **before**
+/// the handler runs — which is the adapter, and only the adapter.
+///
+/// # Why this exists, and why it is not a convenience
+///
+/// The per-Stoa signing key cannot be derived without the Stoa, and only the
+/// adapter can open a keystore ([`crate::keystore`] needs a host-supplied path
+/// this crate cannot know). So the adapter genuinely has to read one field
+/// before it can supply the `key` argument the handlers take.
+///
+/// It was reading it with its own bare `serde_json::from_str` and its own
+/// four-arm `stoa` ladder, and **that shadowed every envelope fix in this
+/// change on the shipped module**: an array was answered `missing field: stoa`
+/// by the adapter at a line no `cargo test` compiles, and an N-byte request was
+/// fully parsed at ~2N transient heap before [`MAX_REQUEST_BYTES`] was ever
+/// evaluated — so the cap bounded only a *second* parse of bytes already paid
+/// for, and the PHASE0-FINDINGS §3 abort it exists to prevent was untouched.
+/// `dialectica-core` was correct in isolation and the module was not.
+///
+/// This is the same envelope, reached through the same [`Request::parse`], so
+/// the adapter's early read and the handler's later one **cannot disagree**:
+/// the size cap is evaluated on the adapter's call because it is the first
+/// thing `Request::parse` does, and a non-object earns [`REQUEST_NOT_AN_OBJECT`]
+/// here exactly as it does inside a handler.
+///
+/// # It reads the Stoa and nothing else, deliberately
+///
+/// It does **not** run the forbidden-field guard or any required-field read.
+/// Those stay the handler's, so there is exactly one place that decides what a
+/// publish request must contain — an adapter that validated a second time is
+/// the two-readers-of-one-field shape that produced this defect. What the
+/// adapter gets is the one value it structurally cannot proceed without.
+///
+/// **The request is parsed twice and that is accepted rather than hidden.**
+/// Both parses are now bounded by the cap, so the cost is CPU on a request
+/// already proved small, not unbounded allocation. Removing the second would
+/// mean the handlers taking a key *supplier* rather than a key — a reshape
+/// `design.md` defers with its argument.
+pub fn stoa_of(request: &str) -> Result<crate::identity::Address, String> {
+    let parsed = Request::parse(request)?;
+    parse_stoa(&parsed)
+}
+
 /// The shape all three publish handlers have: guard, prologue, the operation's
 /// own fields, then the tail.
 ///
@@ -7406,6 +7449,91 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_adapters_early_stoa_read_crosses_the_same_envelope_the_handler_does() {
+        // THE REGRESSION TEST FOR THE DEFECT THAT MADE THIS PIECE'S HEADLINE
+        // CLAIM TRUE OF THE CRATE AND FALSE OF THE MODULE.
+        //
+        // `Dialectica::publishing` must read `stoa` before it can derive a
+        // per-Stoa signing key, and only the adapter can open a keystore — so
+        // that early read is structural, not incidental. It was doing it with
+        // its own bare `serde_json::from_str` and its own four-arm ladder, at a
+        // line `cargo test` does not compile. The effect was that every
+        // envelope fix in this change was shadowed on the shipped path:
+        //
+        //   - `[]` was answered `{"error":"missing field: stoa"}` by the
+        //     adapter, never reaching REQUEST_NOT_AN_OBJECT;
+        //   - an N-byte request was fully parsed at ~2N transient heap BEFORE
+        //     MAX_REQUEST_BYTES was evaluated, so the cap bounded only a second
+        //     parse of bytes already paid for — and per PHASE0-FINDINGS §3 an
+        //     allocation failure there aborts the module process.
+        //
+        // This is the same kind of test as
+        // `the_three_handlers_share_one_signature_the_adapter_can_dispatch_over`
+        // directly above, and for the same reason: the adapter is behind
+        // `cfg(logos_scaffold)`, so the only way to pin a property of it from a
+        // gate that runs is to pin the `core` function it is obliged to use.
+        // Build LGX proves the adapter compiles; it asserts nothing about the
+        // order of operations inside it. CI's adapter-derivation gate is what
+        // holds the adapter to CALLING this — the two halves together are the
+        // claim.
+        let stoa = publish_stoa();
+
+        // 1. A non-object earns the ENVELOPE's refusal, not a missing-field
+        //    one. This is the assertion that fails against a bare `from_str`,
+        //    and it is on the message rather than on `is_err` because an array
+        //    is an error either way — the two-explanations-one-answer shape.
+        for not_an_object in ["[]", "7", r#""s""#, "true", "null"] {
+            let refused = stoa_of(not_an_object)
+                .expect_err("the adapter's Stoa read must refuse a non-object");
+            assert_eq!(
+                refused,
+                error_json(REQUEST_NOT_AN_OBJECT),
+                "the adapter's early read must refuse {not_an_object} for its \
+                 SHAPE. A bare `serde_json::from_str` answers \
+                 `missing field: stoa` here, which is the defect."
+            );
+        }
+
+        // 2. The size cap is evaluated BEFORE the parse, which is the whole
+        //    point of a cap that exists to bound allocation. Asserted the only
+        //    way it is observable from a return value — the same way
+        //    `an_oversized_request_is_refused_before_it_is_parsed` does it
+        //    inside `Request::parse`: feed in something both oversized AND
+        //    unparseable, and check which refusal comes back. Only an
+        //    implementation that measures length before calling `from_str` can
+        //    answer with the size refusal.
+        let oversized_and_unparseable = "{".repeat(MAX_REQUEST_BYTES + 1);
+        let refused =
+            stoa_of(&oversized_and_unparseable).expect_err("an oversized request must be refused");
+        assert!(
+            refused.contains("over the") && refused.contains("byte limit"),
+            "the adapter's early read must refuse an oversized request for its \
+             SIZE, got {refused}"
+        );
+        assert!(
+            !refused.contains("invalid JSON"),
+            "the size check must run BEFORE the parse on the adapter's path \
+             too, or the allocation the cap exists to prevent has already \
+             happened, got {refused}"
+        );
+
+        // 3. And it still answers the question the adapter actually asked, so
+        //    none of the above is satisfied by a function that refuses
+        //    everything.
+        let served = stoa_of(&publish_request(r#""body":"anything""#))
+            .expect("a well-formed publish request must yield its Stoa");
+        assert_eq!(served, stoa, "the Stoa read must be the Stoa named");
+
+        // 4. It reads the Stoa and NOTHING else. A forbidden field and a
+        //    missing `body` are the handler's to refuse, and an adapter that
+        //    refused them too would be a second reader of what a publish must
+        //    contain — the shape that produced this defect in the first place.
+        let with_forbidden = stoa_of(&publish_request(r#""author":"someone else""#))
+            .expect("the adapter's read must not run the handler's guards");
+        assert_eq!(with_forbidden, stoa);
+    }
+
     // ─── The request envelope ─────────────────────────────────────────────
     //
     // WHY THESE TESTS LOOK OVERBUILT. Every hostile-input fixture already in
@@ -7744,6 +7872,45 @@ mod tests {
     /// about *compiling* the trait. Reading its declaration as text needs
     /// neither — which is what makes this reachable from here, and is the part
     /// that document did not consider rather than a part it got wrong.
+    ///
+    /// # It CLASSIFIES every method rather than filtering for one shape
+    ///
+    /// This is the correction for a defect review measured rather than
+    /// imagined. The first version matched
+    /// `"&mut self, request: String) -> String;"` against a single trimmed
+    /// line, and a reviewer defeated it **two ways, both silent**, by adding
+    /// `publish_moderation` to the trait and watching this gate stay green:
+    ///
+    /// - a signature long enough that rustfmt wraps it across four lines, so no
+    ///   single line carried the pattern; and
+    /// - a parameter named `req` rather than `request`, which is a
+    ///   byte-for-byte identical dispatch surface because a parameter name has
+    ///   no compiler or codegen consequence.
+    ///
+    /// A filter cannot catch either, because **a filter's failure mode is
+    /// silence**: an unrecognised method is simply absent from the result, and
+    /// the `!found.is_empty()` backstop never fires while the other fourteen
+    /// still parse. That backstop only ever caught a *total* change of shape,
+    /// never the partial one that actually happens — one method written
+    /// differently from the rest.
+    ///
+    /// So this enumerates **every** `fn` in the trait and puts each into
+    /// exactly one bucket: takes a request, takes none, or takes something
+    /// else. A method matching no bucket is a **loud panic naming it**, not an
+    /// omission. That is what turns the parser's own blind spot from a silent
+    /// pass into a failure, and it is why the two evasions above are now both
+    /// caught by one mechanism rather than by two patches.
+    ///
+    /// # Its preconditions, stated because a guard with undocumented limits is
+    /// worse than one known to be partial
+    ///
+    /// It assumes the trait declaration is Rust that rustfmt produced, that
+    /// each method declaration ends in `;`, and that a request parameter is
+    /// typed `String` by value. A method taking `&str`, or `impl Into<String>`,
+    /// or two parameters, lands in the "something else" bucket and **fails
+    /// loudly** rather than passing — which is the correct direction for a
+    /// shape nobody has considered, and is the property the first version
+    /// lacked.
     fn the_dispatch_traits_request_taking_methods() -> Vec<String> {
         // The trait DECLARATION, not the impl — the impl repeats every
         // signature, and counting both would double every name. The declaration
@@ -7756,18 +7923,99 @@ mod tests {
             .split_once("\n}\n")
             .expect("the trait declaration must be closed by a `}` at column 0");
 
-        let mut found: Vec<String> = body
+        // Strip doc comments and line comments BEFORE anything else: a `fn` or
+        // a `;` inside prose would otherwise be read as code. Then collapse all
+        // whitespace, so a signature rustfmt wrapped across four lines and one
+        // it left on a single line are the same string by the time it is
+        // matched. This is what closes the wrapped-signature evasion, and it
+        // closes it for every future method rather than for the one that was
+        // probed.
+        let code: String = body
             .lines()
-            .filter_map(|line| {
-                let rest = line.trim().strip_prefix("fn ")?;
-                let (name, signature) = rest.split_once('(')?;
-                // Only a DECLARATION, which ends in `;`. A defaulted method's
-                // body ends in `{`, so this keeps one out without naming it.
-                signature
-                    .starts_with("&mut self, request: String) -> String;")
-                    .then(|| name.to_string())
-            })
-            .collect();
+            .map(|l| l.trim())
+            .filter(|l| !l.starts_with("//"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let normalised = code.split_whitespace().collect::<Vec<_>>().join(" ");
+
+        let mut found = Vec::new();
+        let mut unclassified = Vec::new();
+
+        // Split on `fn ` rather than on lines, so wrapping is irrelevant.
+        for piece in normalised.split("fn ").skip(1) {
+            let Some((name, rest)) = piece.split_once('(') else {
+                continue;
+            };
+            let name = name.trim();
+
+            // A defaulted method carries a body, so its declaration does not
+            // end at a `;`. `on_context_ready` is the only one today, and this
+            // keeps it out without naming it.
+            let Some((params_and_ret, _)) = rest.split_once(';') else {
+                continue;
+            };
+            // Everything between the parens, whitespace already normalised.
+            let Some((params, ret)) = params_and_ret.split_once(')') else {
+                continue;
+            };
+            if ret.trim() != "-> String" {
+                unclassified.push(format!("{name} (returns `{}`)", ret.trim()));
+                continue;
+            }
+
+            // Drop the receiver; what is left is the parameter list.
+            //
+            // The TRAILING COMMA is stripped because rustfmt emits one on every
+            // wrapped signature — `fn f(\n &mut self,\n request: String,\n)` —
+            // and it is the same declaration as the unwrapped form. Not
+            // stripping it was not merely cosmetic: it put a perfectly ordinary
+            // wrapped method into the unclassified bucket, so the gate failed
+            // for the wrong reason and an author would have "fixed" it by
+            // teaching the parser a shape it already understood.
+            let params = params.trim().trim_end_matches(',').trim();
+            let rest_of_params = match params.strip_prefix("&mut self") {
+                Some(r) => r.trim_start().trim_start_matches(',').trim(),
+                None => {
+                    unclassified.push(format!("{name} (receiver `{params}`)"));
+                    continue;
+                }
+            };
+
+            if rest_of_params.is_empty() {
+                // Takes no request — the envelope rule's second case. Outside
+                // the rule with nothing to check, and `version` is the one.
+                continue;
+            }
+
+            // MATCHED ON THE TYPE, NOT THE NAME. `request: String` and
+            // `req: String` are the same dispatch surface, so keying on the
+            // name is what let a one-word rename evade this. The name is
+            // ignored entirely; only `: String` decides.
+            match rest_of_params.split_once(':') {
+                Some((_param_name, ty)) if ty.trim() == "String" => {
+                    found.push(name.to_string());
+                }
+                _ => unclassified.push(format!("{name} (parameters `{rest_of_params}`)")),
+            }
+        }
+
+        // THE LOUD FAILURE THAT REPLACES A SILENT OMISSION. A method whose
+        // shape this parser does not recognise is the exact case that made the
+        // first version evadable, so it panics NAMING the method rather than
+        // leaving it out of the result. Erring toward a red test on an
+        // unfamiliar shape is the correct direction: the cost is an author
+        // teaching this function one new shape, and the alternative is a
+        // dispatch method reaching the wire unswept.
+        assert!(
+            unclassified.is_empty(),
+            "the dispatch trait declares method(s) whose shape this parser does \
+             not recognise: {unclassified:?}\n\nIt cannot tell whether they read \
+             a request, so it will not silently assume they do not. Teach \
+             `the_dispatch_traits_request_taking_methods` the new shape, and add \
+             the method to `every_request_taking_method` if it reads a field of \
+             its request."
+        );
+
         found.sort();
         assert!(
             !found.is_empty(),

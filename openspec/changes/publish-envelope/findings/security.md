@@ -5,7 +5,7 @@ Reviewed at `35fc859`, in a worktree of my own. Dimension: **security**
 both, and each box is written for the dimension it is filed under). Suite green
 at 736 + 26 before any mutation. Worktree deleted on completion.
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/src/lib.rs:511` — the request size
+- [x] **`dev-writer`** — `dialectica/rust-lib/src/lib.rs:511` — the request size
       cap does not bound any allocation on the shipped path
       **Scenario:** the whole security value of routing publishes through
       `Request::parse` is that `request.len() > MAX_REQUEST_BYTES` is checked
@@ -27,7 +27,36 @@ at 736 + 26 before any mutation. Worktree deleted on completion.
       it survives the piece. The fix is the same one correctness finding 1 asks
       for: delete the adapter's pre-parse so the envelope is crossed once.
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/src/lib.rs:536` — an unauthenticated
+      **FIXED.** The adapter's pre-parse is deleted; it now reads its Stoa
+      through `core::stoa_of`, which is `Request::parse` then `parse_stoa`. The
+      length check is therefore the first thing that happens to the bytes on the
+      shipped path, so a 400 MiB `publishPost` body is refused **before** any
+      allocation rather than after one — which is the distinction your finding
+      turns on, and the reason "the refusal is reported" was not enough.
+
+      **The test that fails without it**, and it asserts the ordering rather
+      than the refusal, because "refused: yes" is true either way. In
+      `the_adapters_early_stoa_read_crosses_the_same_envelope_the_handler_does`
+      I feed `stoa_of` a request that is both oversized **and** unparseable and
+      assert the refusal says `over the … byte limit` and does **not** say
+      `invalid JSON`. Only an implementation that measures length before calling
+      `from_str` can answer that way — the same technique
+      `an_oversized_request_is_refused_before_it_is_parsed` uses one level down,
+      which you correctly noted could not see the adapter.
+
+      **Plus a CI ban, because a test in `core` cannot hold a file `core` does
+      not contain.** The adapter-derivation gate now fails on any
+      `serde_json::from_str` in `rust-lib/src/lib.rs` — the shape, not the
+      instance — so a future unguarded parse fails CI rather than shipping.
+      Verified against `35fc859`, this piece's own previous commit: it fires.
+
+      Two parses remain on the path (the adapter's, then the handler's), and
+      `design.md` decision 7 says so rather than leaving it implied. Both are
+      now behind the cap, so the residual is CPU on a request already proved
+      small, not unbounded allocation. Removing the second is decision 8's
+      deferred supplier-closure reshape.
+
+- [x] **`dev-writer`** — `dialectica/rust-lib/src/lib.rs:536` — an unauthenticated
       malformed request buys a 64 MiB Argon2id derivation
       **Scenario:** `core::keystore::open_from_env` runs at line 536, before the
       handler validates anything but `stoa`. So `{"stoa":"<any valid 32-byte
@@ -46,6 +75,34 @@ at 736 + 26 before any mutation. Worktree deleted on completion.
       key — so the fix is to split the handler's validation from its signing, or
       at minimum to run the forbidden-field guard and the required-field reads
       in the adapter's `core` call before the unlock.
+
+      **DEFERRED**, to its own piece, with `design.md` decision 8 carrying the
+      argument and `docs/PLAN.md` §9.2 updated so it outlives this findings file.
+      Your sharpest sentence — *"the security property is claimed and absent"* —
+      is the part I fixed immediately: `design.md` §1 now states the ordering is
+      **unchanged on every path** and names both your findings, rather than
+      leaving the claim standing.
+
+      **On your "at minimum" option, which I considered and did not take.**
+      Running the forbidden-field guard and the required-field reads in the
+      adapter before the unlock would work, and it is cheaper — but it puts a
+      second reader of what a publish request must contain into the one file no
+      test compiles. That is the same shape as the defect in your first finding
+      (an adapter validating what the handler also validates, drifting apart
+      unobserved), and it is what `design.md` decision 3 deleted `required_stoa`
+      to avoid. Buying a DoS mitigation with a second validation path in an
+      untested file trades a bounded cost for an unbounded one.
+
+      So the fix is the one you named first — split validation from signing —
+      which means the handlers taking a **fallible key supplier** rather than a
+      key, moving their three signatures, the `Handler` type test, and every
+      sweep fixture. PLAN.md §9.2 already flags that trade independently
+      (`authoring` currently *cannot* create key material; a closure makes it
+      "does not, and here is a test"), so it wants judging on its own merits
+      rather than being smuggled in as a DoS fix.
+
+      Not a defect this change introduced — one it claimed to fix. The claim was
+      the error, and the claim is gone.
 
 - [ ] **`tester`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:7541` — the
       envelope sweep can be evaded, so a future method can reach the wire

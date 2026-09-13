@@ -81,19 +81,60 @@
       the list and watching it report exactly
       `["publish_vote"]`, then restore.
 
-## 6. The gates, and what each cannot see
+## 6. Acting on review: the fix did not reach the wire
 
-- [x] 6.1 `cargo test -p dialectica -p dialectica-core`: 736 + 26, green.
-- [x] 6.2 `cargo clippy -p dialectica-core --all-targets -- -D warnings`: clean.
-- [x] 6.3 `cargo fmt --check`: `wire.rs` clean. The ten other files it reports
+Five `dev-writer` boxes across `findings/correctness.md` and
+`findings/security.md`. The headline one is that everything in sections 2-5 was
+true of `dialectica-core` and **false of the shipped module**, because the
+adapter pre-parsed the same bytes before handing them on.
+
+- [x] 6.1 Add `core::stoa_of` — `Request::parse` then `parse_stoa` — and delete
+      the adapter's bare `serde_json::from_str` and its four-arm `stoa` ladder,
+      so the envelope is crossed **once**. It reads the Stoa and nothing else;
+      the forbidden-field guard and every required-field read stay the
+      handler's, because an adapter validating twice is the shape that produced
+      this.
+- [x] 6.2 Write
+      `the_adapters_early_stoa_read_crosses_the_same_envelope_the_handler_does`
+      and **watch it fail** against the adapter's old shape:
+      `left: "{\"error\":\"missing field: stoa\"}"` against
+      `right: "{\"error\":\"the request must be a JSON object\"}"`. It also pins
+      the size ordering by feeding in a request that is oversized *and*
+      unparseable and asserting which refusal comes back.
+- [x] 6.3 Make the CI adapter gate hold the file to it, since one test in `core`
+      cannot: **require** `core::stoa_of`, and **ban `serde_json::from_str` in
+      the adapter outright** — the shape, not the instance. Verified against
+      `35fc859`, this piece's own previous commit: the gate fails on both.
+- [x] 6.4 Reproduce both sweep-parser evasions before fixing — a wrapped
+      signature and a renamed parameter each left the gate **green** with
+      `publish_moderation` on the dispatch surface and unswept.
+- [x] 6.5 Replace the filter with a **classifier**: enumerate every `fn` in the
+      trait into one of three buckets, and panic naming any method whose shape
+      is unrecognised. Normalising whitespace closes the wrap; matching the
+      parameter's **type** rather than its name closes the rename. Both
+      evasions now fail, naming `publish_moderation`.
+- [x] 6.6 Probe a third shape neither reviewer tried — `request: &str` — and
+      confirm it lands in the unclassified bucket and fails loudly. State the
+      parser's preconditions in its doc and in `design.md` §6, per the brief's
+      instruction not to overclaim a second time.
+- [x] 6.7 **Defer "validate, then unlock"** with the argument, and correct
+      `design.md` §1 so it no longer claims the reordering happened. Record it
+      in `docs/PLAN.md` §9.2 too, since a findings file is deleted at merge.
+
+## 7. The gates, and what each cannot see
+
+- [x] 7.1 `cargo test -p dialectica -p dialectica-core`: 737 + 26, green.
+- [x] 7.2 `cargo clippy -p dialectica-core --all-targets -- -D warnings`: clean.
+- [x] 7.3 `cargo fmt --check`: `wire.rs` clean. The ten other files it reports
       in this crate are the pre-existing set CI cannot reach at all — the gate
       does not follow path dependencies — and are not this change's to fix.
-- [x] 6.4 Run the adapter-derivation gate's own Python locally, since CI is the
-      only thing that checks the adapter: it passes without the exemption.
-- [x] 6.5 Run the test-count gate's logic locally: 762 declared, 762 ran.
-- [ ] 6.6 **Build LGX is the only gate that compiles the adapter.** This change
-      edits `cfg(logos_scaffold)` code, so nothing run locally checks it —
-      `cargo test`, clippy and fmt all stop at `core.rs`. A duplicate method in
-      two `cfg(logos_scaffold)` blocks passed all three on this repo and was
-      caught only by Build LGX, seven minutes in. Unticked deliberately: it is
-      the `closer`'s CI row to observe, not something this agent can claim.
+- [x] 7.4 Run the adapter gate's own Python locally, since CI is the only thing
+      that checks the adapter: passes, and fails on `35fc859`.
+- [x] 7.5 Run the test-count gate's logic locally: 763 declared, 763 ran.
+- [ ] 7.6 **Build LGX is the only gate that compiles the adapter, and it proves
+      the file COMPILES rather than what order it runs in.** That distinction is
+      not academic: both adapter findings passed every green gate on this PR,
+      including Build LGX, and were caught by a reviewer reading the call order.
+      What now stands in its place is the CI gate at 6.3 plus the `core` test at
+      6.2 — neither of which executes the adapter either, which is why it took
+      both. Unticked deliberately: it is the `closer`'s CI row to observe.

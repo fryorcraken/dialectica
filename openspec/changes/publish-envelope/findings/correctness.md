@@ -5,7 +5,7 @@ Reviewed at `35fc859`, in a worktree of my own. Dimension: **correctness**
 mutation; every mutation below was confirmed to land before its result was
 believed, and the tree was mutated only in my own worktree, which is deleted.
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/src/lib.rs:511` — the adapter's
+- [x] **`dev-writer`** — `dialectica/rust-lib/src/lib.rs:511` — the adapter's
       own pre-parse shadows all three envelope fixes, so none of them reaches
       the shipped module
       **Scenario:** `publishing()` still opens with a bare
@@ -33,7 +33,32 @@ believed, and the tree was mutated only in my own worktree, which is deleted.
       returning `Result<Address, String>` built on `Request::parse`), so the
       envelope is crossed once.
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/src/lib.rs:536` — "validate, then
+      **FIXED**, exactly as suggested. `core::stoa_of` (`wire.rs`) is
+      `Request::parse` then `parse_stoa`, and the adapter's lines 510-522 are
+      gone — it now calls `core::stoa_of(request)` and returns its `Err` arm
+      unchanged. It reads the Stoa and nothing else: the forbidden-field guard
+      and every required-field read stay the handler's, because an adapter
+      validating twice is the two-readers-of-one-field shape that produced this.
+
+      **The test that fails without it:**
+      `the_adapters_early_stoa_read_crosses_the_same_envelope_the_handler_does`.
+      Reverting `stoa_of` to the adapter's old bare-parse shape turns it red
+      with your exact defect:
+      `left: "{\"error\":\"missing field: stoa\"}"` against
+      `right: "{\"error\":\"the request must be a JSON object\"}"`. It also pins
+      the size ordering the way `an_oversized_request_is_refused_before_it_is_
+      parsed` does — an oversized *and* unparseable request must come back with
+      the size refusal, which only a length check before `from_str` can answer.
+
+      **And two CI changes, because one test cannot hold a file no test
+      compiles.** The adapter-derivation gate now *requires* `core::stoa_of`,
+      and — a new ban, for the shape rather than the instance — **fails on any
+      `serde_json::from_str` in the adapter at all**. Run against `35fc859`,
+      this piece's own previous commit, the gate fails on both counts. Your
+      point that Build LGX proves the file compiles rather than what order it
+      runs in is exactly why the gate had to grow rather than the test alone.
+
+- [x] **`dev-writer`** — `dialectica/rust-lib/src/lib.rs:536` — "validate, then
       unlock" is stated as the reshape's purpose and does not hold on any path
       **Scenario:** `design.md` §1 and the refactor commit message both say the
       64 MiB Argon2id unlock running before validation is the defect the
@@ -51,6 +76,34 @@ believed, and the tree was mutated only in my own worktree, which is deleted.
       per malformed request). Note this is *not* a defect the change introduced;
       it is one the change says it fixes and does not. If it is deferred, say so
       in `design.md` rather than leaving §1 claiming otherwise.
+
+      **DEFERRED**, to its own piece, and §1 is corrected rather than narrowed —
+      which is the option you named and the right one.
+
+      The argument is the shape of the fix, not its size. `handler` takes
+      `&SecretKey`, so the key must exist before the handler runs and the
+      handler is what validates. Reordering therefore means the three handlers
+      taking a **fallible key supplier** instead of a key, which moves their
+      signatures, the `Handler` type in
+      `the_three_handlers_share_one_signature_the_adapter_can_dispatch_over`,
+      every sweep fixture passing `&publish_key()`, and the adapter. That is a
+      second reshape of the same three functions — and PLAN.md §9.2 already
+      flags the supplier-closure trade-off as one to *"be judged on its own
+      merits rather than as the price of testability"*, because `authoring`
+      currently **cannot** create key material and a closure replaces "cannot"
+      with "does not, and here is a test".
+
+      **§1 no longer claims it.** It now says the ordering is unchanged on every
+      path, names your two findings as having caught it, and points at
+      `design.md` decision 8, which carries the deferral with its argument and
+      says where it goes. `docs/PLAN.md` §9.2 is updated too — the reshape half
+      is struck through as done, the unlock half is written out as outstanding
+      with your `{"stoa":"…","author":"x"}` case — because a findings file is
+      deleted at merge and this must outlive it.
+
+      Your last sentence is the one I acted on most directly: the defect is not
+      one this change introduced, it is one the change claimed to fix. The claim
+      was the error.
 
 - [ ] **`tester`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:7541` —
       the sweep parser is evaded by a wrapped signature, silently
@@ -93,7 +146,7 @@ believed, and the tree was mutated only in my own worktree, which is deleted.
       **Severity: medium** — less likely than a rustfmt wrap, but it is the
       cheaper of the two to fix and the same class.
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:7541` —
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:7541` —
       the parser's own failure mode is undetectable from its assertion text
       **Scenario:** the three evasions above all leave `found` non-empty, so the
       `!found.is_empty()` guard — whose message says "the signature shape this
@@ -105,6 +158,41 @@ believed, and the tree was mutated only in my own worktree, which is deleted.
       **Severity: low** as a defect, but it is the reason the two above are
       silent rather than loud, so it wants a comment correction at minimum: the
       guard does not protect against what its message claims.
+
+      **FIXED, and this is the box I acted on hardest**, because your diagnosis
+      is the general one and the other two are its symptoms. *"It only catches a
+      total change of shape, not a partial one"* is exactly right, and it made a
+      comment correction the wrong fix: the defect is that **a filter's failure
+      mode is silence**, so any patch that kept filtering would have left the
+      next unanticipated shape just as quiet.
+
+      So it no longer filters. `the_dispatch_traits_request_taking_methods` now
+      **classifies every `fn` in the trait** into exactly one of three buckets —
+      takes a request, takes none, takes something else — and the third bucket
+      is a **panic naming the method and its parameters**. Both your evasions
+      fall out of that one change rather than needing two patches: whitespace is
+      normalised across the whole trait body before matching (the wrap), and the
+      match is on the parameter's **type** rather than its name (the rename).
+
+      **Measured on a shape neither of us had tried.** I ran a third probe,
+      `fn publish_moderation(&mut self, request: &str) -> String;`, and it lands
+      in the unclassified bucket and fails loudly:
+      `["publish_moderation (parameters \`request: &str\`)"]`. That is the
+      property the first version could not have: erring toward red on an
+      unfamiliar shape, where the cost is teaching the parser one shape and the
+      alternative is a dispatch method reaching the wire unswept.
+
+      One thing your finding surfaced that I would have missed: the first cut of
+      the classifier failed on the *wrapped* probe for the wrong reason —
+      rustfmt's trailing comma put an ordinary method in the unclassified
+      bucket. Fixed and commented, because a gate failing for the wrong reason
+      is one an author "fixes" by teaching it a shape it already knew.
+
+      **Preconditions now stated**, per the brief's instruction not to overclaim
+      a second time: rustfmt-shaped Rust, a declaration ending in `;`, and a
+      request parameter typed `String` by value. Anything else fails loudly
+      rather than passing. That is in the function's doc comment and in
+      `design.md` decision 6.
 
 ## What I verified and found clean
 

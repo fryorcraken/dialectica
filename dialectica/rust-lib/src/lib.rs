@@ -505,19 +505,35 @@ impl Dialectica {
         let dir = std::path::PathBuf::from(dir);
 
         core::guarded(method, || {
-            // The Stoa, read only far enough to derive a key. The handler owns
-            // the real parse and reports every other malformation by name.
-            let parsed: serde_json::Value = match serde_json::from_str(request) {
-                Ok(v) => v,
-                Err(e) => return core::error_json(&format!("invalid JSON: {e}")),
-            };
-            let stoa = match parsed.get("stoa") {
-                Some(serde_json::Value::String(s)) => match core::identity::Address::from_hex(s) {
-                    Ok(a) => a,
-                    Err(e) => return core::error_json(&format!("stoa: {e}")),
-                },
-                Some(_) => return core::error_json("stoa must be a string"),
-                None => return core::error_json("missing field: stoa"),
+            // The Stoa, read only far enough to derive a key — THROUGH `core`,
+            // which is the whole of the correction here.
+            //
+            // This was a bare `serde_json::from_str` and a four-arm `stoa`
+            // ladder written out on these lines, and it SHADOWED every envelope
+            // fix in this change on the shipped module. An array was answered
+            // `missing field: stoa` here and never reached
+            // `REQUEST_NOT_AN_OBJECT`; and an N-byte request was fully parsed at
+            // ~2N transient heap before `MAX_REQUEST_BYTES` was ever evaluated,
+            // so the cap bounded only a SECOND parse of bytes already paid for
+            // and the PHASE0-FINDINGS §3 abort it exists to prevent was
+            // untouched. `dialectica-core` was correct in isolation and the
+            // module was not — the exact failure mode this file's own header
+            // warns about, since nothing here is compiled by `cargo test`,
+            // clippy, fmt or `cargo mutants`.
+            //
+            // `core::stoa_of` goes through `Request::parse`, so the adapter's
+            // early read and the handler's later one cannot disagree, and the
+            // size cap is evaluated first on both. It reads the Stoa and
+            // nothing else: the forbidden-field guard and every required-field
+            // read stay the handler's, because an adapter validating a second
+            // time is the two-readers-of-one-field shape that produced this.
+            //
+            // `the_adapters_early_stoa_read_crosses_the_same_envelope_the_
+            // handler_does` is what pins it from a gate that runs; CI's
+            // adapter-derivation gate is what holds this file to calling it.
+            let stoa = match core::stoa_of(request) {
+                Ok(a) => a,
+                Err(e) => return e,
             };
 
             // A publish requires a usable identity and NEVER creates one. This

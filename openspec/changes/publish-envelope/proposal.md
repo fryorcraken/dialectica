@@ -51,6 +51,13 @@ probe reported."*
   own commit, changing no behaviour, with the envelope fix on top.
 - **`Request::parse` on the publish path**, which is the whole of the first two
   envelope fixes and is one line because of that reshape.
+- **`core::stoa_of`, and the adapter's own pre-parse deleted.** The adapter must
+  read `stoa` before it can derive a per-Stoa key, and it was doing so with its
+  own bare `serde_json::from_str` — which **shadowed every envelope fix above on
+  the shipped module**, however correct `dialectica-core` was in isolation.
+  Review caught this; no gate did. It now reads through `core`, so the envelope
+  is crossed once, and CI both requires that call and bans `serde_json::from_str`
+  in the adapter outright.
 - **`publishing_key` in `core`**, the probe's own derivation, replacing the
   adapter's pathless call. A Stoa with no recorded choice is refused with the
   same constant `getCapabilities` and `whoAmI` give, rather than signed under
@@ -61,6 +68,10 @@ probe reported."*
   `the_sweep_covers_every_request_taking_method_the_dispatch_trait_declares`
   reads the dispatch trait's declaration out of the adapter with `include_str!`
   and fails, naming the method, when one is on the surface and not in the sweep.
+  It **classifies** every method rather than filtering for one shape, so a
+  declaration written unusually is a loud failure naming it rather than a silent
+  omission — the correction for two evasions review measured against the first
+  version. Its preconditions are stated in `design.md` §6 rather than implied.
 
 ## No spec delta, and the reasoning rather than the conclusion
 
@@ -94,8 +105,25 @@ contracts were already right.
 ## Impact
 
 - `dialectica-core`: `wire.rs` — the three handlers, the prologue type,
-  `publishing_key`, and the sweep.
-- `dialectica`: `rust-lib/src/lib.rs` — the adapter's publish assembly.
-- `.github/workflows/ci.yml` — the exemption removed, the required call added.
+  `stoa_of`, `publishing_key`, and the sweep.
+- `dialectica`: `rust-lib/src/lib.rs` — the adapter's publish assembly, which
+  now parses nothing itself.
+- `.github/workflows/ci.yml` — the exemption removed, two calls required, and a
+  ban on the adapter parsing a request at all.
+- `docs/PLAN.md` §9.2 — the prologue reshape struck through as done, the unlock
+  ordering written out as what remains.
 - No change to any wire reply a correct caller receives. What changes is which
   requests are refused, what those refusals say, and which key signs.
+
+## What this change deliberately does not fix
+
+**The adapter still unlocks before it validates.** `open_from_env` runs a 64 MiB
+Argon2id derivation before the forbidden-field guard and every required-field
+read, so a malformed request buys a full memory-hard KDF and is then refused.
+
+That is a real DoS amplifier, it predates this change, and the change's original
+error was *claiming* to have fixed it rather than leaving it. The fix means the
+three handlers taking a fallible key supplier instead of a key — a second
+reshape of the same three signatures, which PLAN.md §9.2 already flags as one to
+judge on its own merits. `design.md` decision 8 carries the argument and says
+where it goes; PLAN.md §9.2 records it so it outlives this change folder.

@@ -19,10 +19,16 @@ here:
   written against three copies of a guard is one where a missed copy is an
   *authorisation* defect, not a wrong reply.
 - **The adapter unlocks before it validates.** `open_from_env` runs a 64 MiB
-  Argon2id derivation, and it runs before any field but `stoa` has been looked
-  at, so a request destined for refusal pays for a full unlock first. One
-  constructor holding the whole prologue makes "validate, then unlock" a change
-  to one function rather than to three.
+  Argon2id derivation before any field but `stoa` has been looked at, so a
+  request destined for refusal pays for a full unlock first.
+
+**On that second bullet, be exact about what this change does and does not do,
+because an earlier version of this section was not.** It said the reshape "makes
+'validate, then unlock' a change to one function rather than to three", which is
+true and reads as though the reordering happened. **It did not, and the ordering
+is unchanged on every path** — correctness finding 2 and security finding 2 both
+named that, correctly. What the reshape buys is that the reordering is now a
+change to one function; making it is deferred, with the argument in decision 8.
 
 **The split into two commits is what makes either reviewable.** The refactor
 commit is green at 733 + 26 with **no test changed** — that is its proof, and it
@@ -150,6 +156,99 @@ mismatch.
 **Proved by failing.** Removing `publish_vote` from the list makes it report
 `["publish_vote"]` and nothing else. It is the test that would have caught this
 change's own defect.
+
+**The first version of the parser was evadable two ways, and the fix is to
+classify rather than to filter.** Review measured both, by adding
+`publish_moderation` to the trait and watching this gate stay **green**: a
+signature rustfmt wraps past 100 columns carried the pattern on no single line,
+and a parameter named `req` rather than `request` is a byte-for-byte identical
+dispatch surface that the literal match missed. Both were silent, because **a
+filter's failure mode is silence** — an unrecognised method is simply absent
+from the result, and the `!found.is_empty()` backstop never fires while the
+other fourteen still parse.
+
+So it no longer filters for one shape. It enumerates **every** `fn` in the trait
+and puts each in exactly one bucket — takes a request, takes none, or takes
+something else — and a method in the third bucket is a **panic naming it**.
+Whitespace is normalised across the whole body first (closing the wrap), and the
+match is on the parameter's **type** rather than its name (closing the rename).
+A third shape neither reviewer tried, `request: &str`, was checked and lands in
+the unclassified bucket, failing loudly.
+
+**Its preconditions, stated rather than left implicit**, because the brief is
+right that a guard with undocumented limits is worse than one known to be
+partial: it assumes rustfmt-shaped Rust, a declaration ending in `;`, and a
+request parameter typed `String` by value. Anything else fails loudly instead of
+passing, which is the correct direction for a shape nobody has considered — and
+is precisely the property the first version lacked.
+
+### 7. The adapter reads its Stoa through `core`, so the envelope is crossed once
+
+**This is the correction for the defect that made this piece's headline claim
+true of the crate and false of the module.** `Dialectica::publishing` must read
+`stoa` before it can derive a per-Stoa key — only the adapter can open a
+keystore — and it was doing that with its own bare `serde_json::from_str` and
+its own four-arm ladder. That **shadowed every envelope fix in this change on
+the shipped path**: an array was answered `missing field: stoa` at a line no
+`cargo test` compiles, and an N-byte request was fully parsed at ~2N transient
+heap before `MAX_REQUEST_BYTES` was evaluated, so the cap bounded only a second
+parse of bytes already paid for and the PHASE0-FINDINGS §3 abort it exists to
+prevent was untouched.
+
+`core::stoa_of` goes through `Request::parse`, so both reads cross one envelope
+and cannot disagree. It reads the Stoa and **nothing else**: the forbidden-field
+guard and every required-field read stay the handler's, because an adapter
+validating a second time is the two-readers-of-one-field shape that produced
+this defect and that decision 3 deleted `required_stoa` to avoid.
+
+**The request is parsed twice, and that is accepted rather than hidden.** Both
+parses are now bounded by the cap, so the residual cost is CPU on a request
+already proved small — not unbounded allocation. Removing the second parse means
+the handlers taking a key *supplier* rather than a key, which is decision 8.
+
+**Three things hold it in place**, because one would not:
+`the_adapters_early_stoa_read_crosses_the_same_envelope_the_handler_does` pins
+the behaviour from a gate that runs; CI's adapter-derivation gate now *requires*
+`core::stoa_of` in the adapter; and that gate now also **bans
+`serde_json::from_str` in the adapter outright**, which is the shape rather than
+the instance. Run against `35fc859` — this piece's own previous commit — the
+gate fails on both the missing call and the banned parse.
+
+### 8. "Validate, then unlock" is DEFERRED, and §1 is corrected rather than narrowed
+
+The ordering defect is real and unchanged: `open_from_env` runs a 64 MiB Argon2id
+derivation before the forbidden-field guard and every required-field read, so
+`{"stoa":"<valid hex>","author":"x"}` and `{"stoa":"<valid hex>"}` with no `body`
+each buy a full memory-hard KDF and are then refused. An attacker needs only a
+well-formed hex Stoa; membership is not checked and the Stoa need not exist.
+
+**It is deferred rather than fixed here, and the argument is the shape of the
+fix rather than its size.** `handler` takes `&SecretKey`, so the key must exist
+before the handler runs, and the handler is what validates. Reordering therefore
+means the three handlers taking a **fallible key supplier** instead of a key —
+which changes `publish_post`, `publish_reply` and `publish_vote`'s signatures,
+the `Handler` type in
+`the_three_handlers_share_one_signature_the_adapter_can_dispatch_over`, every
+sweep fixture that passes `&publish_key()`, and the adapter. That is a second
+reshape of the same three functions, and PLAN.md §9.2 already flags the
+supplier-closure trade-off as one to *"be judged on its own merits rather than
+as the price of testability"*: `authoring` currently **cannot** create key
+material because it never holds anything that could, and a closure replaces
+"cannot" with "does not, and here is a test".
+
+Deferring it is the same judgement that split this change into two commits: a
+diff that reshapes three signatures and fixes an envelope cannot be reviewed for
+either. What must not happen — and what review correctly caught — is the claim
+outliving the omission, so §1's bullet now says the ordering is **unchanged**
+and names this decision.
+
+**Where it goes:** its own piece, against the adapter's `publishing`. The
+envelope fix in decision 7 reduces its cost, since the adapter no longer parses
+and the supplier would be the only remaining reason it touches the request at
+all.
+
+**What it is not:** a defect this change introduced. It predates the piece; the
+piece's error was claiming to have fixed it.
 
 ## Rejected alternatives
 
