@@ -4189,7 +4189,10 @@ at build or run time, not review time.
 - **`lgs basecamp setup`, `modules` *and* `install` each strip every comment
   from `scaffold.toml`** — not `setup` alone. Rediscovered the expensive way:
   the comments were restored, then vanished again on the next unrelated verb.
-  Run `git diff scaffold.toml` after **any** `lgs basecamp` verb.
+  Restoring them is not the fix, and was abandoned after failing repeatedly —
+  the reasoning now lives in [`SCAFFOLD.md`](SCAFFOLD.md) and the file carries
+  bare values. Still run `git diff scaffold.toml` after **any** `lgs basecamp`
+  verb, because a verb can rewrite a value as well as drop a comment.
 - **`lgs basecamp install` does not install a module's declared
   `dependencies`.** It builds the `[modules.*]` project sources and never reads
   the `dependencies` array in `metadata.json`. `lgs basecamp modules` is the

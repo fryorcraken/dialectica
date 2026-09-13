@@ -1,33 +1,9 @@
+# Why each entry is what it is: docs/SCAFFOLD.md — not here, because every
+# `lgs basecamp` verb rewrites this file and deletes every comment in it.
+
 [scaffold]
 version = "0.2.0"
 
-# ─────────────────────────────────────────────────────────────────────────
-# WARNING: `lgs basecamp setup`, `modules` AND `install` each destroy every
-# comment in this file — not just `setup`, as PLAN.md §11 says. Rediscovered
-# the hard way: the comments were restored, then vanished again on the next
-# unrelated verb. Run `git diff scaffold.toml` after ANY `lgs basecamp` verb
-# and restore what it took, in one pass at the end rather than after each
-# command. These comments are the record of bugs that each cost a debugging
-# session, and they are not recoverable from the values alone.
-# ─────────────────────────────────────────────────────────────────────────
-
-# ─── The [repos.*] tables are a schema requirement, not a dependency ──────
-#
-# `lgs` refuses a scaffold.toml without `[repos.lez]` — "invalid scaffold.toml:
-# missing [repos.lez]" — even for a project that is only ever going to run
-# `basecamp build`. The validator is shared with the LEZ zkVM project shape and
-# does not know that a module-only project has no zone to talk to.
-#
-# So `lez` and `spel` are here to satisfy the schema and are never fetched by
-# any verb this project uses. Do NOT read them as dialectica depending on the
-# execution zone — it does not (PLAN.md §7.1 keeps LEZ firmly in "later").
-# Pinned anyway, because an unpinned entry that nothing fetches is still an
-# entry that would fetch something unexpected the day a verb does reach it.
-#
-# The same applies to [wallet], [framework], [localnet] and [circuits] further
-# down: schema furniture written by the tooling, not choices this project made.
-#
-# `basecamp` and `lgpm` are the real ones: `install` and `launch` build them.
 [repos.lez]
 source = "https://github.com/logos-blockchain/logos-execution-zone.git"
 pin = "35d8df0d031315219f94d1546ceb862b0e5b208f"
@@ -36,62 +12,22 @@ pin = "35d8df0d031315219f94d1546ceb862b0e5b208f"
 source = "https://github.com/logos-co/spel.git"
 pin = "1db7c5f8af3165318f9046c13ab185e24773fd59"
 
-# `app` is the plain DEV stack, and it must stay paired with a dev `[repos.lgpm]`
-# attr below. `bin-bundle-dir-inspector` is a PORTABLE stack, and the two halves
-# disagree about which package variant to load: a dev basecamp wants
-# `<host>-dev` variants, a portable one wants bare `<host>`. Mixing them
-# deadlocks `install` — the module builder emits `linux-amd64-dev`, and a
-# portable lgpm rejects it with "Package does not contain variant for platform:
-# linux-x86_64 (package provides: linux-amd64-dev)". Verified: `launch` now
-# prints "all linux-amd64-dev variants present ✓".
 [repos.basecamp]
 source = "https://github.com/logos-co/logos-basecamp.git"
 pin = "aa237766baf61404e12da86b7303cb41065464c9"
 build = "nix-flake"
 attr = "app"
 
-# Pinned PAST the newest lgpm tag, deliberately. v0.2.1 — which is what `lgs`
-# defaults to — rejects a ui_qml package with:
-#
-#   Error: Package validation failed: Forbidden root entry: assets
-#
-# The builder emits manifest 0.6.0, which relocates a ui_qml module's icon to
-# a top-level `assets/` entry, and 0.2.1 predates `assets` in
-# logos-package's ALLOWED_ROOT_ENTRIES. Move this back to a tag once one
-# ships that includes it.
-#
-# `attr` is `cli`, NOT `cli-portable`: it must match the dev stack that
-# `[repos.basecamp].attr = "app"` selects, or install deadlocks on the variant
-# mismatch described above. Both attrs build the same version — the dev/portable
-# split is in the build, not the version string, so `nix flake show` cannot tell
-# them apart and only `install` reveals the mismatch.
 [repos.lgpm]
 source = "github:logos-co/logos-package-manager"
 pin = "d3af2972f51d9c542537d80d60ad8d20282ddcd1"
 build = "nix-flake"
 attr = "cli"
 
-# Written by `lgs basecamp modules`, not by hand: it reads `dependencies` out
-# of dialectica/metadata.json and captures the module that satisfies it.
-#
-# `role = "dependency"` is what gets it INSTALLED rather than merely built.
-# `lgs basecamp install` on its own builds the `role = "project"` entries and
-# never consults a metadata `dependencies` array — so without a prior
-# `lgs basecamp modules`, delivery_module is absent at runtime and the core
-# fails to load with "Cannot resolve dependencies for: dialectica", which
-# presents as a launcher tile that does nothing when clicked.
 [modules.delivery_module]
 flake = "github:logos-co/logos-delivery-module/b8b9ac2f4667bc63644b2116f64a07aa30cfd3ef#lgx"
 role = "dependency"
 
-# Both project modules are adopted by hand rather than generated: `lgs new`
-# cannot scaffold a module project (its templates are LEZ zkVM projects), so
-# these tables are the whole adoption. A hand-authored table builds in a fresh
-# checkout with no `.scaffold/` at all — only `install` and `launch` need a
-# prior `lgs basecamp setup`.
-#
-# The flake ref is `path:./<dir>#lgx`, and the key must match each module's
-# `name` in its own metadata.json.
 [modules.dialectica]
 flake = "path:./dialectica#lgx"
 role = "project"
@@ -119,30 +55,9 @@ risc0_dev_mode = true
 version = "0.4.1"
 
 [basecamp.env]
-# Qt's own logging otherwise vanishes into the platform log sink, so neither
-# `lgs basecamp launch` nor the profile log captures it.
 QT_FORCE_STDERR_LOGGING = "1"
-# Surface QML import errors. Basecamp does not log them itself, so a ui_qml
-# plugin that fails to load looks EXACTLY like one that was never clicked —
-# which is also how a missing or wrongly-sized icon presents (PLAN.md §8.1),
-# and how a missing core dependency presents. Read the profile log at
-# .scaffold/basecamp/profiles/<n>/basecamp.log before guessing which.
 QT_LOGGING_RULES = "qt.qml.import.debug=true"
 
-# QtRO module sockets live under XDG_RUNTIME_DIR. A unix socket path is capped
-# at 108 bytes (`sun_path`), and scaffold's default in-profile `xdg-tmp` path
-# overflows it — every module then segfaults at "Failed to register module for
-# remote access", basecamp's own bundled ones included. macOS gets a short
-# /tmp/lgs-<profile> by default; Linux keeps the long in-profile path, so each
-# profile below sets `runtime_dir` explicitly.
-#
-# It must be the session's REAL runtime dir, not merely a short one: Qt finds
-# the Wayland compositor socket (wayland-0) through XDG_RUNTIME_DIR, so a
-# private directory like /tmp/lgs-alice starts basecamp with no display and it
-# exits immediately.
-#
-# `/run/user/1000` is this machine's; check yours with `echo $XDG_RUNTIME_DIR`
-# or `id -u`.
 [basecamp.profiles.alice]
 runtime_dir = "/run/user/1000"
 
