@@ -112,8 +112,12 @@ open on — and **tick the tests row** in `tasks.md`'s stage block in the same c
 Same when you come back to act on a finding: you are the only agent writing tests
 on the piece either time, so no side branch and no cherry-pick are needed.
 
-**Do not push and do not open a PR** — the runner pushes. Never `git add -A`; a
-worktree collects build output and a gitignored SDK symlink.
+**Push `piece/<name>` once you are done**, and do not open a PR — the
+`dev-writer` opened it before you ran. Push by name, `git push origin
+piece/<name>`, after checking `git branch -vv`; a worktree inherits its parent
+branch's upstream, and a bare `git push` has landed commits on `main` here more
+than once. Never `git add -A`; a worktree collects build output and a gitignored
+SDK symlink.
 
 Report what you kept, adapted and removed, and why. Report the
 predicted-versus-observed failure for each test you proved can fail — if they

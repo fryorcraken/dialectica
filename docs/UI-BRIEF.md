@@ -20,13 +20,14 @@ argument between positions.
 > reconciled against **PLAN.md §7.2-§7.3** (votes and vouching), **§9.1**
 > (the Phase 3 API) and **§5.2.1** (what an identity is called).
 >
-> **The generated name's vocabulary is settled as of §5.2.1**: four words — two
-> adjectives and two nouns — drawn from Greek philosophy and letters, derived
-> from the key and never typed. An earlier version of this block called the
-> wordlist provisional and the shape "adjectives plus a noun"; both are
-> superseded. The *word counts* remain curation work, but the shape, the sizes
-> and the source are decided. `git log docs/PLAN.md` answers what has landed;
-> this block does not try to.
+> **The generated name's shape is settled as of §5.2.1**: three words —
+> **adjective + Greek noun + "of" + Greek place**, as in *measured aporia of
+> lampsacus* — derived from the key and never typed. Earlier versions of this
+> block said "adjectives plus a noun" and then "four words — two adjectives and
+> two nouns"; both are superseded, and the four-word version was the one this
+> brief was designed against for a while. The *word lists* remain curation work,
+> but the shape, the sizes and the sources are decided. `git log docs/PLAN.md`
+> answers what has landed; this block does not try to.
 >
 > Also reconciled against **§9.2** (the first release's scope), which suspends
 > one property this brief previously stated as fact — see the box below.
@@ -125,28 +126,36 @@ switched on, and switching it on later is not a redesign.
   will need reopening.
 
 **Identities have generated names, and this is new.** An identity renders as
-**two adjectives and two nouns drawn from Greek philosophy and letters** —
-something like *measured attic thales praxis* or *sober ionic stoic kairos* —
+**an adjective, a Greek noun, the word "of", and a Greek place** — something like
+*measured aporia of lampsacus*, *brittle kairos of abdera* or *luminous stasis of
+delos* —
 computed from the key itself. Nobody types a name; there is no registry to hold
 one, and a typed name carried between Stoas would undo the unlinkability above
 with a text field — which is a reason that outlives the first release's
 suspension of it, since a name field would make the property unrestorable rather
 than merely switched off.
 
-**The register is deliberate and it is the point: sober, plain, adult.** The
-adjectives are geographic and temperamental (`attic`, `ionic`, `doric`,
-`measured`, `sober`, `patient`, `laconic`); the nouns pool the vocabulary of
-Greek thought (`logos`, `praxis`, `techne`, `aporia`, `kairos`) with thinkers
-and writers (`thales`, `hypatia`, `solon`, `sappho`). **If a name reads like a
-fantasy handle, something has gone wrong** — an earlier draft drew on science
-fiction and produced *vermilion patient sandworm*, which is why this note
-exists.
+**The register is deliberate and it is the point: sober, plain, adult — but only
+two of the three words carry it.** The **noun** pools the vocabulary of Greek
+thought (`logos`, `praxis`, `techne`, `aporia`, `kairos`) with thinkers and
+writers (`thales`, `hypatia`, `solon`, `sappho`), and the **place** is a Greek
+place, real or mythological (`lampsacus`, `abdera`, `delos`, `elea`). The
+**adjective is any English adjective** and is not screened for register at all, so
+`brittle`, `luminous` and `damp` draw alongside `measured` and `attic`. What
+carries the classical register is the *X of Y* shape and the two Greek words in
+it. **If a name reads like a fantasy handle, something has gone wrong** — an
+earlier draft drew on science fiction and produced *vermilion patient sandworm*,
+which is why this note exists.
 
-**It is four words, and they all matter.** This is longer than a typical
-username and the length is not decorative: it is what makes accidental
-collisions rare (see below). **Do not truncate or elide it** — dropping the tail
-removes one of the two nouns, which is most of what distinguishes one name from
-another.
+**Three content words, and they all matter — but the `of` is free.** The
+adjective, the noun and the place are each an independent draw and each is part of
+what makes accidental collisions rare (see below), so **do not truncate or elide
+any of them, and never cut one mid-word**: dropping the tail removes the place,
+which is a third of what distinguishes one name from another and is often the only
+part that differs between two similar names. **The one thing a cramped row may
+drop is the connector** — *measured aporia lampsacus* loses nothing, because "of"
+is fixed literal text and carries no information. If a row cannot hold three
+words, the row is wrong.
 
 **An identicon is intended alongside the name, and designing it is part of your
 work.** A small visual glyph derived from the same key, giving recognition a
@@ -180,18 +189,70 @@ the person will ever have** — so a backup flow is one secret, not one per Stoa
 Two consequences for you:
 
 - **An onboarding screen exists that did not before**: five identities, pick
-  one, refresh for more. It is the first thing a new user sees in a Stoa.
+  one, refresh for more. **It is not a gate and not the first thing a new user
+  sees** — identity is required to *participate in a Stoa*, not to launch the
+  app or to browse. The owner's flow, and the shape to design against:
+
+  1. The homepage is **the Stoas you hold** — empty at first, with no identity
+     check of any kind.
+  2. **Paste an address** to look at a Stoa. Still no identity check.
+  3. **Inside a Stoa**, a banner saying an identity is needed *to participate*.
+     The Stoa is readable without one.
+  4. **The identity screen**, reached from that banner.
+  5. **Back in the Stoa**, now able to post, comment and upvote.
+
+  So a user with no identity — or whose identity question cannot be answered at
+  all — still reaches their Stoas, still imports one, still reads one. What they
+  cannot do is post, reply or vote, and the place that says so is the Stoa they
+  are standing in.
   **Core now serves this** — a slate call returns five candidates with an address
   and a public key each, a keep call stores the one chosen, and a "who am I" call
   answers afterwards. Refreshing is unlimited and is never refused for having
   been pressed too often.
+
+  **But core serves no name**, and the built screen therefore shows none. Which
+  words a key produces is a separate contract that is not yet built, and the
+  view cannot compute the name itself — it derives from the public key under a
+  scheme that does not exist. So a candidate row today is **the mark and the
+  full address, with nothing in the name's position**: not the derivation path,
+  not an index, not a shortened address. Each of those would be read as the
+  thing the user is choosing, and none of them is.
+
+  Design the row so a name can **arrive above the address** without the layout
+  moving. That is the one thing to get right here, because the name is coming
+  and the row is the only place it goes.
+
+  **Do not size that space from a word count — not the one stated elsewhere in
+  this file, and not the one in PLAN.md §5.2.1 either.** The count has moved
+  three times (`git log docs/PLAN.md` is the record), most recently back to
+  three (#22 made it four, #64 moved it back), and each move carries the
+  collision figures with it, since those are arithmetic over vocabulary sizes
+  rather than prose. This file and PLAN.md
+  agree today, so there is no disagreement to resolve — but agreeing is not the
+  same as being settled, and a layout sized to the current count is a layout
+  that gets redrawn on the next move.
+
+  The screen asserts no number for exactly this reason, and the row should be
+  built the same way: **size the space from the longest name the row can show
+  without the address moving, and let the count be whatever it turns out to
+  be.** That constraint does not change when the count does, which is the only
+  reason it is safe to design against today.
 - **A name is not unique and not an identifier** — see obligation 6 below.
-  Accidental collisions are now rare: in a Stoa of a thousand the chance two
-  people share a name is **about 0.003%**, and at five thousand **about 0.07%**.
-  (The superseded science-fiction scheme — three words, 2²⁴ — gave 3% at a
-  thousand and better than even at five thousand. The fourth word is what bought
-  the change.) **Rare is not never**, and none of it touches deliberate
-  impersonation — which is the whole of obligation 6.
+  Accidental collisions are rare: in a Stoa of a thousand the chance two people
+  share a name is **about 0.006%**, and at five thousand **about 0.15%**. (The
+  superseded science-fiction scheme — three words over much smaller lists — gave
+  3% at a thousand and better than even at five thousand. Far larger word lists
+  are what bought the change, not more words.) **Rare is not never**, and none of
+  it touches deliberate impersonation — which is the whole of obligation 6.
+
+  Two caveats worth having, because they both bear on what a row must show.
+  **These figures are a floor, not a prediction**: users refresh until they like a
+  name, so the names actually kept cluster, and PLAN.md's plausible worst case is
+  roughly **0.29%** at five thousand. And **an exact collision is not the only way
+  two names get confused** — the place list deliberately keeps entries most
+  readers cannot pronounce or tell apart, so two names differing only in the place
+  can read as one. Neither is fixed by anything you can do to the name; both are
+  fixed by the address being on screen.
 
 ### 3. Posts are never edited in place
 
@@ -270,6 +331,35 @@ Two things follow for this screen:
   and split one Stoa into two. Rendering it safely is this screen's job; see the
   Unicode obligation below.
 
+**A per-row count of posts held is not available, and a row must be designed
+without one.** A listed Stoa carries its address and its founding title, and
+nothing else: no call answers how many posts this peer holds for a given Stoa,
+and the thread listing is paginated — it reports whether a further page exists,
+never a total. So a row has no honest number to put in its margin, and "nothing
+received yet" is equally unavailable, being itself a claim about a count. Note
+this is *not* the global-count rule: a count of what this machine holds would be
+perfectly legitimate to show, and this one is simply not computed. Design the row
+so such a number could appear later without the layout changing.
+
+**A row can be shared from only when this copy holds the Stoa's genesis record,
+and today that means only Stoas JOINED in the current session.** The core retains
+every joined Stoa's record, but the membership listing hands back the address and
+the founding title and not the record — so after a restart the view holds no
+record for any row.
+
+**Creation is worse, and not symmetric with joining.** `create_stoa` returns the
+address, the founding title and the policy, and **no genesis record** — so a Stoa
+the user just created cannot be shared *at all*, from the moment it exists,
+without waiting for a restart. That is the opposite of what a designer would
+assume: the Stoa the user has the strongest reason to hand to someone is the one
+the interface can least help them hand over.
+
+Since a shareable thing has to carry both halves (see *Joining a Stoa*), **the
+share affordance is absent on most rows, and its absence is the correct rendering
+rather than an error**. Do not design a disabled or explanatory share control in
+that position; design a row where the control is simply not there, and expect it
+to become universal when the listing starts returning the retained record.
+
 ### Joining a Stoa — a security surface, not a form
 
 An address is a copyable string that is **self-authenticating**: pasting it is
@@ -283,11 +373,78 @@ as well as the address — which means whatever a user shares, and whatever an
 in-post affordance carries, has to carry both. A screen designed around a
 single pasteable field cannot work.
 
+**The shape chosen is a one-line JSON object**, `{"stoa":"…","genesis":"…"}`,
+bare hex in both fields and the address unabbreviated. It is what the copy
+affordance produces and what the paste field accepts — one decision seen from
+each end, so the two cannot drift. Two consequences for a designer: the pasted
+string is long and opaque and should be given a field that wraps rather than one
+sized for a short token, and the field's label must not say "address", which asks
+for input whose successful-looking form can never join anything. The `stoa:`
+display prefix stays a *reading* aid; it is stripped from anything sent onward
+and never added to anything produced.
+
+**What the address proves must be stated exactly.** The bundle's join note says
+pasting the address "is itself the verification", and that overreaches. The check
+is a hash comparison between the two inputs the *user* supplied and consults no
+registry, peer, or network — so it proves the record shown is the one that
+address names, and nothing about whether that address is the one the user was
+meant to receive. A reader who pasted a hostile address and saw a verified record
+has verified the attacker's record against the attacker's address, successfully.
+Copy on this screen must say what remains unverified, not only what was checked.
+
 **Requirements:**
 - Show what is being joined **before** joining it.
 - An address appearing inside a post is attacker-supplied. Render it as an
   affordance the reader chooses to act on. **Never auto-join.**
 - Two Stoas may present the same name. Show something that distinguishes them.
+- **What a person shares and what the join field accepts are one decision, and
+  both halves have to carry the record.** A share producing a bare address
+  produces something its recipient cannot act on; a paste field accepting a bare
+  address accepts input that can never succeed. Whatever shape is chosen, the
+  address inside it is carried **in full** — the 8-8-6 abbreviation is a
+  recognition aid for a reader looking at a screen, and is lossy for anything
+  meant to be pasted.
+- **The join confirmation shows NO title at all before a join, and this is the
+  single most surprising thing on the screen — design for it.** Both title
+  positions are empty on a preview, for two different reasons, and a designer who
+  assumes one filled panel and one reserved will design a screen that never
+  renders.
+
+  *No current title*: nothing resolves the moderator-signed metadata op, so no
+  peer on this build knows what a Stoa is called now. A panel captioned "current
+  title" filled with the founding value would assert that nobody has renamed the
+  Stoa — exactly the thing nothing has checked. Reserve the position; do not fill
+  it.
+
+  *No founding title either*: the only call that reports a founding title is the
+  one that joins. The title is inside the founding record the reader was handed,
+  and the interface cannot read it — decoding that record is the core's job and
+  the view has no access to it. So on a preview there is nothing to put in the
+  founding panel, and a caption reading "founding title" over blank space tells
+  the reader this Stoa's title **is** blank. That is a legal value (a Stoa can be
+  created with an empty title, and the list renders such a row), so the reader
+  cannot tell "empty" from "unknown" — and on the screen where they decide whether
+  to trust an address, those mean opposite things.
+
+  **What the preview must do instead**: show the address, and say in words that
+  it cannot tell the reader what this Stoa is called or whether they already hold
+  one presenting the same title, and that joining is what answers both. The
+  absence needs a voice, not a blank panel. After a join succeeds the founding
+  title arrives and can be labelled as founding.
+
+  This is a constraint of the current API, not a permanent property — see
+  PLAN.md's `getStoa`. When a call can describe a reference without joining it,
+  the founding panel fills at preview time and this paragraph shrinks to the
+  current-title half.
+
+- **The same-title warning arrives after the join on this build, not before it.**
+  The requirement below — two Stoas may present the same name, show something that
+  distinguishes them — is implemented, and it compares titles, so it cannot run
+  while there is no title. A reader previewing an impersonating Stoa therefore
+  sees no warning *at the moment they decide*. Do not design the preview so that
+  an absent warning reads as a clean result: a reader who infers "checked, nothing
+  found" has been misled by a check that never ran, which is the impersonation
+  arriving through the defence rather than around it.
 - **Joining a Stoa the user is already in is not an error.** The core reports the
   same success either way, deliberately: a pasted address is exactly the input
   someone supplies twice, and it changes nothing about what is already held. Do
@@ -299,14 +456,27 @@ A title, and nothing else. The creator's key comes from the user's own keystore
 and **cannot be supplied** — a Stoa created under someone else's key is one the
 creator cannot moderate, and its address cannot be un-minted.
 
-**The key recorded as creator is the same key the user posts under**, which is
-the one identity constraint 2 describes. It matters here because a Stoa's creator
-is its sole moderator: a creator key the user does not sign with would be a Stoa
-nobody can moderate, permanently, since the creator is fixed inside the address.
-Nothing on this screen shows any of that today — moderation is out of the first
-release — but a later "you moderate this Stoa" badge will be answering the same
-question, so do not design as though the creator and the poster could be
-different people.
+**One person, one identity — but today, more than one key.** Constraint 2's "one
+identity per person" still holds: there is one root secret and one human behind
+everything a peer publishes. What does *not* hold is that the creator and the
+poster are the same **key**. The record names one derivation and the publish path
+signs with another, so a Stoa's creator is not the key its own user posts under.
+
+**The consequence is that moderation does not bind today.** A Stoa's creator is
+its sole moderator and is fixed inside the address forever, so a hide published
+through the module against a Stoa this peer created is **refused** — the signing
+key is not the creator the record names. This is a known gap under review, not a
+design intention: `ci.yml` carries a named exemption calling it *"three
+derivations for one user"*, and `openspec/changes/seed-store/design.md` records it
+with the measurement. Which key a publish signs with is an open spec question.
+
+**What that means for you.** Still do not design as though the creator and the
+poster could be different **people** — that remains the intent and the thing a
+later "you moderate this Stoa" badge will answer. But do not build a screen that
+*asserts* the user moderates what they created, because right now they do not, and
+copy claiming a capability the user does not have is the failure this brief treats
+as the serious one. Nothing on this screen shows any of it today — moderation is
+out of the first release — which is why the gap costs nothing yet.
 
 **Requirements:**
 - **Show the new Stoa's address after creating it.** It is the only way to share
@@ -402,6 +572,55 @@ A reply is just a post that names a parent, so threads nest naturally.
 Each post shows: author identity, body, attachments, whether it was edited, the
 up/down control, and a report action.
 
+**What core hands you is a flat list, and nesting is yours to compute** (the
+`thread-read` spec). Each item names its parent; nothing reports a depth or an
+indent level. That is deliberate and it costs you nothing: depth is a count of
+parents, and you hold the parents. Two consequences worth designing for.
+
+- **An item's parent may not be on screen.** It can fall on an earlier page, or
+  be hidden while the reader has not asked to see hidden posts. So a reply can
+  arrive with nothing to attach it to. Do not drop it, and do not render it as a
+  root — it is a reply to something not shown, and saying so is honest.
+- **Hiding a post does not hide the replies under it.** One hide binds one post.
+  A subtree that vanished because its top was hidden would apply a moderation to
+  ops no moderator acted on.
+
+**The root is always the first item of the first page and never repeats.** Later
+pages are replies only.
+
+**A hidden root behaves unlike a hidden reply, and the asymmetry is deliberate.**
+A hidden *reply* is simply absent from the default view. A hidden *root* is still
+returned, marked hidden, with its body withheld — because a thread read that
+dropped its own subject would be indistinguishable from a thread this machine
+has never received, and those mean opposite things. So a thread screen must have
+a state for "this thread's opening post was hidden", and it must not look like
+the not-found state or the empty state.
+
+**The thread screen is told more about moderation than the feed screen is, and
+today you have to handle both.** A feed row says only *hidden or not*. A thread
+item says one of **three** things — nothing binding was found, a moderator hid
+it, or a moderator deliberately **restored** it — and names the decision when
+there was one.
+
+That third state is the one worth designing for, because a boolean cannot carry
+it: a post nobody ever moderated and a post a moderator looked at and put back
+read identically under "not hidden", and they mean different things to a reader
+deciding whether to trust what they are seeing. You are not obliged to render the
+restored state differently — but if you do, the thread screen is the only place
+the information exists.
+
+**This asymmetry is a known gap in the core, not a design intent.** Both screens
+are computing from the same underlying answer and the feed flattens it; the
+thread's richer shape is the correct one. Expect the feed to catch up, and do not
+build a layout that depends on the two staying different.
+
+**A post whose thread this machine cannot place does not appear.** A reply
+whose parent has not arrived yet cannot be positioned, so it is not shown
+anywhere rather than being shown at the root. It appears when the parent does.
+Nothing is lost and nothing is wrong; it is the ordinary condition of a
+peer-to-peer forum, and it is the same fact the reply composer already has to
+explain.
+
 **Attachments are not in the first release** — posts are text (PLAN.md §9.2
 excludes Logos Storage, which is where attachment bytes live). Design the post so
 an attachment area can appear later without the layout changing; do not design a
@@ -420,6 +639,30 @@ to owner-only and replace the key".
 **Never gate on a build flag, and never show a compose box that cannot be
 submitted** — it loses whatever the user typed. Surface the reason instead.
 
+**What the composer does with the author's own text, which is the opposite of
+what obligation 1 below asks for peer text.** It publishes it **exactly as
+typed** — an op is signed over its bytes, so a composer that stripped a
+zero-width space would publish, under the author's signature, something they did
+not write. What it does instead is *warn*: a draft containing characters the
+sanitiser would remove gets a count before submission, because the author is the
+only person who can still change the text, and the warning does not block
+sending.
+
+**That warning covers removals only, and the shortfall is deliberate.** The
+sanitiser's other half — marking letters from a minority script mixed into
+another, the Cyrillic-"а"-in-a-Latin-word case — is a judgement over the whole
+string, and no core method sanitises draft text, so the interface would have to
+reimplement that judgement and would silently disagree with the core about real
+drafts. **So a draft mixing confusable scripts is not warned about.** A reader
+seeing that post later still gets the marked chips, because display-side
+sanitising is unaffected; it is only the author who is not told in advance.
+
+**Also cleared up: what happens to the draft after sending.** It is cleared only
+when something new was actually stored. On a refusal, and on a repeat publish
+that stored nothing new, the box keeps what was typed — in the first case it is
+the only copy, and in the second the author most likely meant to write something
+different and needs the text to edit.
+
 **What a successful submit does and does not establish: see rendering obligation
 7.** It means the post is in this device's log, and nothing more — not that it
 was sent, and not that anyone else can see it. That governs the wording on the
@@ -428,6 +671,26 @@ before designing the submit flow rather than after.
 
 **Two obligations the core creates and cannot meet itself.** Both come from the
 publish contract (`content-authoring`), and neither is visible from a screenshot.
+**Both are now contracted on the interface side by the `composer-view` spec**,
+along with a third the section below did not name: a successful publish says the
+content was saved on this machine and must never say it was sent, delivered or
+seen by anyone. Publishing and delivering are two events at two times, and
+delivery is not wired at all yet — so "sent" is a claim nothing checks.
+
+**And that third one is not satisfied by saying nothing — the interface must say
+the opposite, in so many words.** Alongside a successful publish it has to state
+that whether any other peer received the content is not something it can report.
+Declining to mention delivery is not enough: someone watching a forum post submit
+successfully assumes it went somewhere, so silence leaves the wrong belief in
+place while breaking no rule.
+
+Why this one is worth a positive obligation when the others are prohibitions: the
+author genuinely cannot find out. Delivery is not wired, the publish reply says
+nothing about it by design, and a long-but-legal post is stored locally and then
+silently refused by every peer that receives it — so **a censored post and a
+delivered one look identical from the author's side.** The interface is the only
+place that can be admitted, and an obligation phrased only as "do not claim
+delivery" is discharged by a screen that says nothing at all.
 
 **1. Posting the same thing twice posts once, and the interface has to handle
 it.** A post is named by a hash of its own content, and nothing in that content
@@ -440,9 +703,18 @@ someone deliberately writing "agreed" twice in one thread, which is ordinary
 forum behaviour. The core reports which of the two happened; **the interface
 decides what the person sees**, and the failing design is the one that reports
 success and shows nothing new, because the person concludes their post vanished.
-Reasonable answers: say so plainly ("you already posted this"), or scroll to and
-highlight the existing post. **Do not** show a spinner that resolves to nothing,
-and do not show a generic error — nothing failed.
+**Do not** show a spinner that resolves to nothing, and do not show a generic
+error — nothing failed.
+
+**What `composer-view` settled, and why the other option was dropped.** This
+section used to offer two reasonable answers: say so plainly, or scroll to and
+highlight the existing post. Only the first ships. The second is a behaviour the
+view can perform for a post and **not** for a reply — the feed lists thread
+heads, so a deduplicated reply has no row to scroll to — and requiring a
+behaviour half the surface cannot meet is how a spec acquires a requirement no
+test can satisfy honestly. So the spec requires a third message, distinguishable
+from both the fresh-success and the refusal messages, saying the content was
+already published.
 
 This is a known gap with a known fix (a timestamp or nonce inside the post), and
 it is deliberately not fixed yet. Design for the behaviour that exists.
@@ -454,10 +726,20 @@ forum where two people legitimately hold different sets of posts — the reply i
 **refused**.
 
 So a reply control can fail for a reason that is nobody's fault and is temporary.
-The message must say that: the post being replied to has not arrived here yet, try
-again shortly. It must not read as an error the person caused, and **the draft must
-survive** — this is the one refusal that is expected to succeed on a retry, so
-discarding what they typed is the worst possible response to it.
+It must not read as an error the person caused, and **the draft must survive** —
+this is the one refusal that is expected to succeed on a retry, so discarding what
+they typed is the worst possible response to it.
+
+**A correction to what this section used to ask for.** It previously said the
+message must name this specific cause. The interface cannot: the core does
+distinguish "parent not held" from "target is not a post", but only as different
+prose inside one error shape that carries no machine-readable discriminant, and a
+caller must not branch on message wording. So the `composer-view` spec requires
+the reading that is safe either way — **every** reply refusal shows the core's
+message, keeps the draft, and keeps a retry available. Offering a retry that
+cannot succeed costs one press; withholding one from the common, temporary case
+would be much worse. Naming the cause needs a discriminant on the wire, which is a
+core change nobody has made.
 
 ### Moderation
 
@@ -602,19 +884,47 @@ Removal is moderation, which is a different and binding thing.
 A storage failure must never render as an empty feed. An empty feed and "we
 could not read the store" look identical and mean opposite things.
 
+**5b. One broken row breaks one row — it neither disappears nor takes the feed
+with it.**
+Posts arrive from peers, so a row can be missing a field the interface wanted.
+**Show the row and switch off just the control that cannot work** — a vote
+control with nothing to vote on goes dead rather than clickable-but-inert.
+
+The two tempting alternatives are both worse, and for reasons specific to this
+project rather than general tidiness. **Hiding the row** silently removes
+somebody's post, which is the exact outcome a censorship-resistant forum exists
+to prevent — and the reader cannot tell a hidden row from a row nobody wrote.
+**Failing the whole read** hands every peer a free way to blank your feed by
+sending one malformed row, and lands you back in obligation 5, showing "could not
+read the store" when the store read fine.
+
+So design rows to tolerate a missing piece: a control that can be present but
+dead, and a row that still reads properly without it. This is not hypothetical —
+two rows missing their identifier were found sharing a single vote slot, so a
+vote on one marked the other.
+
 **6. A generated name is never unique and never an identifier — the address is.**
 This is obligation 2b again, now applying to the thing **every post is
 attributed to**, which is a far larger surface than Stoa titles: a feed renders
 an attribution on every row.
 
-*(One thing to know about where the name comes from, and an earlier version of
-this paragraph had it wrong. The core returns the author as an **address**, not
-a name — PLAN §9.1 lists the feed's author field as "the author, as the per-Stoa
-address (§5.2) — never a name, because there are no names". But the name is
-**not** derived from that address: §5.2.1 derives it from the **public key**, on
-purpose, so that a name tracks the key that signs. So a view holding only an
-address **cannot** compute the name itself, and core must return the rendered
-name alongside the address. Treat both as things you are given.)*
+*(One thing to know about where the name comes from, and this paragraph has been
+wrong twice. The name is **not** derived from the address: it is derived from the
+**public key**, on purpose, so that a name tracks the key that signs — while the
+**mark** is derived from the address. Two independent digests, two different
+inputs. So a view holding only an address **cannot** compute the name.*
+
+*The correction to the previous version: core does **not** hand you a rendered
+name, and should not — a name is a pure function of the key, so sending both
+would put a derived value on the wire beside the material it comes from, where
+the two could disagree. **Core gives you the address and the public key**, and
+deriving the name from the key is the interface's job, as deriving the mark from
+the address already is.*
+
+*The thread read does this (the `thread-read` spec). **The feed read does not
+yet** — it returns an address per row and drops the key, which is why the feed
+screen renders an empty name today. That is a known gap with an owner, not a
+design decision to build around.)*
 
 **Uniqueness is not merely unbuilt — it is unavailable.** A uniqueness check
 needs agreement about who holds which name, and there is no authority to hold
@@ -628,7 +938,8 @@ never cross Stoas, so the privacy property in constraint 2 is not what rules
 this out — do not reach for it here.)*
 
 And a bigger name space is not the lever it appears to be: **the space was
-enlarged roughly a thousandfold and this paragraph did not change.** It lengthens
+enlarged about five-hundredfold against the earliest scheme, then halved again in
+a later revision, and this paragraph did not change either time.** It lengthens
 the odds of an *accidental* collision, which is worth doing and is all it does;
 it costs a deliberate impersonator only a constant factor, because refresh is
 unlimited. Treat "two identities can present the same name" as permanent.
@@ -661,7 +972,9 @@ the numbers. Does nothing else, and nothing at all about impersonation.
 **2. The identicon** — intended, and yours to design. A glyph derived from the
 same key, shown with the name. It earns its place on *accidental* collisions:
 two people who happen to share a name still look different at a glance, because
-name and glyph come from separate parts of the hash and vary independently.
+name and glyph come from **two separate hashes** of the same key and so vary
+independently — not from separate parts of one hash, which an earlier version of
+this line said and which is a different and weaker claim.
 **It is nonetheless forgeable in exactly the way the name is.** An attacker
 grinds for a key whose name *and* glyph both read close — a two-channel search
 instead of a one-channel search, which raises their cost by a factor and changes
@@ -835,17 +1148,31 @@ it.** The design is:
 > - **Safe:** showing the reader their own vote back, as state on the button. That
 >   is real, immediate and true — they voted, and the interface remembers.
 > - **Not available yet, though it would be safe:** a plain count of votes on a
->   post. No call returns one — there is no thread read at all, and the publish
->   reply carries only an op id — so a count cannot be rendered today. Design for
->   its absence. If a later change exposes one, it is safe only presented as a
->   count, never as a position, a rank, or a reason this post appears where it
->   does.
+>   post. No call returns one — the thread read carries no score or tally, and the
+>   publish reply carries only an op id — so a count cannot be rendered today.
+>   Design for its absence. If a later change exposes one, it is safe only
+>   presented as a count, never as a position, a rank, or a reason this post
+>   appears where it does.
+>
+>   **The absence is now contracted, in the `composer-view` spec**: the control
+>   displays no score at all, and specifically not a zero. A zero is a number, so
+>   it reads as a tally — the claim that this post is known to have received no
+>   votes, which is false as soon as any peer has voted. Note this cuts against
+>   the reference mockup, which shows a score of 12 beside every post; that part
+>   of the mockup is not implementable and is not a target.
+>
+>   The same spec limits the "safe" half above: the viewer's own vote is shown
+>   back **only for votes this view published while it is open**, because no call
+>   returns earlier ones. A control that appeared to remember across a reload
+>   would be the interface inventing state.
 > - **Not safe:** anything suggesting the vote moved the post, changed what anyone
 >   else sees, or fed an ordering. It did not. No "trending", no arrow, no implied
 >   effect on the feed.
 >
-> **Do not let this leak into the ordering controls either.** The feed offers two
-> orderings and neither is vote-based; a "top" or "best" option must not appear.
+> **Do not let this leak into the ordering controls either.** No ordering the
+> feed offers is vote-based; a "top" or "best" option must not appear. (The core
+> computes exactly one ordering today, so the feed shows one — built from a model
+> so that a second can arrive without the layout changing.)
 
 **One axis — up and down, as on Reddit — plus two things that are not votes.**
 

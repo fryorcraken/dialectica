@@ -13,10 +13,10 @@ Rectangle {
 
     default property alias content: body.data
 
-    implicitWidth: Theme.cardWidth
-    color: Theme.paper
-    border.width: Theme.hairline
-    border.color: Theme.ink
+    implicitWidth: DTheme.cardWidth
+    color: DTheme.paper
+    border.width: DTheme.hairline
+    border.color: DTheme.ink
 
     // The card is as tall as its content plus the padding above and below it.
     // `Main.qml` reads this to size the Flickable's contentHeight, so a card
@@ -25,7 +25,7 @@ Rectangle {
     // This reads `body.implicitHeight` (what the children need) and never
     // `body.height` (what the frame grants), so it cannot form a loop with the
     // height binding below.
-    implicitHeight: body.implicitHeight + 2 * Theme.cardPaddingY
+    implicitHeight: body.implicitHeight + 2 * DTheme.cardPaddingY
 
     // `body.height` is BOUND rather than left to the column, and that line is
     // load-bearing for a reason not visible from this file.
@@ -67,7 +67,7 @@ Rectangle {
     // absorb the slack. Do **not** reach for a trailing
     // `Item { Layout.fillHeight: true }`: it fixes the scatter equally, but its
     // `spacing` gap enters `body.implicitHeight` and inflates the card by
-    // `Theme.blockGap`, so the Flickable scrolls past the end of the content —
+    // `DTheme.blockGap`, so the Flickable scrolls past the end of the content —
     // re-breaking what `implicitHeight` above exists to fix. Measured, same two
     // 40px rows: both forms give y=0 and y=60, but `implicitHeight` is 156 with
     // a real child claiming the slack and 176 with a trailing spacer.
@@ -76,15 +76,15 @@ Rectangle {
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.topMargin: Theme.cardPaddingY
-        anchors.leftMargin: Theme.cardPaddingX
-        anchors.rightMargin: Theme.cardPaddingX
-        spacing: Theme.blockGap
+        anchors.topMargin: DTheme.cardPaddingY
+        anchors.leftMargin: DTheme.cardPaddingX
+        anchors.rightMargin: DTheme.cardPaddingX
+        spacing: DTheme.blockGap
 
         // Reads `root.height`, never `root.implicitHeight`, and `implicitHeight`
         // above reads `body.implicitHeight`, never `body.height` — the two
         // bindings touch disjoint properties, so they cannot form a loop. Qt
         // reports none.
-        height: Math.max(implicitHeight, root.height - 2 * Theme.cardPaddingY)
+        height: Math.max(implicitHeight, root.height - 2 * DTheme.cardPaddingY)
     }
 }

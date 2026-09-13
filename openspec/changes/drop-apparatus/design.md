@@ -422,61 +422,58 @@ usage rather than a designed set.
 
 - **No spec delta.** `.openspec.yaml` sets `skip_specs: true` with the
   measurement. See §7 for the one spec that *does* name an apparatus string.
-- **No test assertion is changed or removed.** No test on `main` asserts
-  apparatus content — measured by grep over `dialectica-ui/tests/`, which returns
-  one line, in `tst_identicon.qml`, and it is the word "mark" inside an unrelated
-  comment. **That is itself a finding**: the column shipped, and no gate could see
-  it. Two test-directory changes are nonetheless in the diff and are listed in
-  `proposal.md`'s Impact: `tst_feed_extent_claim.qml` is added, and
-  `run-qml-tests.sh` gains a single-spec mode with the reasoning recorded there.
+- **No test assertion about the *feed's* apparatus is changed or removed.** When
+  this change was written, no test on `main` asserted apparatus content —
+  measured by grep over `dialectica-ui/tests/`, which returned one line, in
+  `tst_identicon.qml`, and it was the word "mark" inside an unrelated comment.
+  **That was itself a finding**: the column shipped, and no gate could see it.
+
+  **That claim no longer covers the whole tree, and §9 records what changed.**
+  #60 and #63 landed three more screens with eleven margin notes between them,
+  and the tests written alongside them *do* reach into `ScreenFrame.apparatus`.
+  Merging `main` therefore made three test edits unavoidable; each is named and
+  argued in §9 rather than folded in silently.
 - **No core change.** View-only.
 - **No unrelated staleness fixed.** Several things in `UI-BRIEF.md` invite
   editing; all are left alone. Three branches are editing this file concurrently
   and one rewrites it wholesale, so a sweep here would be a sweep nobody can
   review.
 
-## 7. A spec on an unmerged branch requires an apparatus string — reported, not decided
+## 7. The `compose.apparatus` question, raised here and since settled upstream
 
-`piece/ui-composer` (PR #62) carries a spec delta requiring an apparatus string:
+**This section is kept because its conclusion was reached independently and then
+confirmed, which is worth more than either half alone.**
 
-> `openspec/changes/ui-composer/specs/composer-view/spec.md:79`
->
-> "The view SHALL state that no compose box is shown and why, using the bundle's
-> `compose.apparatus` string, so the absence reads as a decision rather than as a
-> missing feature."
+When this change was written, `piece/ui-composer` (PR #62) carried an unmerged
+delta requiring the closed gate to state why no compose box is shown *"using the
+bundle's `compose.apparatus` string"*. The worry was obvious: a requirement
+naming an apparatus string, in a change deleting the apparatus column.
 
-**Read in full, this requirement does not need the column.** It sits inside the
-requirement *"A closed gate shows the reason verbatim and offers a fix"*, and
-what it requires is that **the closed gate** state why no compose box is shown.
-It names `compose.apparatus` only as the source of the wording. A sentence in the
-closed gate's own body discharges it exactly — which is the same move §3 makes
-for the ordering note, and it is the better answer on its own merits: a statement
-about why *this gate* is closed belongs in the gate, not in a margin.
+The reading taken here was that **the requirement never needed the column**. What
+it requires is that *the closed gate* state why no box is shown; it names
+`compose.apparatus` only as the source of the wording, and a sentence in the
+gate's own body discharges it exactly — the same move §3 makes for the ordering
+note, and better on its own merits, since a statement about why *this* gate is
+closed belongs in the gate rather than in a margin. Changing the contract was
+nonetheless left alone as a `spec-writer`'s job with the owner's call.
 
-**But the wording "the bundle's `compose.apparatus` string" is contract text, and
-changing a contract is a `spec-writer`'s job with the owner's call.** So this is
-reported and not touched. Nothing in this change edits `openspec/specs/` or any
-other change's delta.
+**#62 has since merged, and the merged spec settles it the same way and more
+strongly.** `openspec/specs/composer-view/spec.md` now reads:
 
-Three facts bound the risk, all measured:
+> The view SHALL state, **in the closed gate's own body**, that no compose box is
+> shown and why … The requirement is on the **statement being present where the
+> gate is rendered**, not on it occupying any particular region of the screen.
 
-- **Nothing is merged.** `composer-view` does not exist in `openspec/specs/`,
-  which holds sixteen capabilities and not that one. The requirement is in an
-  in-flight delta.
-- **The string has no implementation anywhere.** `git grep "compose.apparatus"`
-  over `piece/ui-composer`'s pushed tip finds it in the spec and the proposal, and
-  in **no QML file**. There is no `copy.json` in the tree at all, on any branch.
-  So no code is being broken; a requirement is awaiting an implementation that has
-  not been written.
-- **The test said to block this is not on any branch.** The dispatch named
-  `tst_vote_and_gate.qml::test_the_apparatus_string_is_the_bundles_and_is_verbatim`.
-  `piece/ui-composer`'s pushed tip carries four test files and none is that one;
-  `git grep "apparatus"` over its `dialectica-ui/tests/` returns nothing. It
-  exists in a tester's working tree that has not been pushed.
+and adds that the requirements are *"on what the interface says, not on which
+stored string it says it with"*, because the bundle is not in this repository and
+a verbatim-string requirement would be one no gate can enforce.
 
-So this change cannot fail that test and cannot edit that spec. **It is the
-composer piece's decision** whether the requirement keeps naming a bundle string
-whose column no longer exists. This design note is the hand-off.
+So there is no conflict to resolve: the contract requires a statement in the
+gate's body, which is where `FeedScreen` puts it, and
+`test_the_missing_box_statement_is_in_the_gates_own_body` pins it. The residual
+risk this section once listed — an unpushed test demanding the bundle string
+verbatim — did not materialise, and the merged spec explains why such a test
+would have been the wrong instrument.
 
 ## 8. The delivery disclaimer, and why it is not this change's to preserve
 
@@ -484,23 +481,137 @@ The dispatch asked that the `ON PUBLISHING` note's obligation — that the
 interface positively denies knowing anything about delivery — be preserved in the
 screen's own body rather than in the brief alone.
 
-**That note does not exist on this branch.** `git grep "ON PUBLISHING"` over both
-`origin/main` and `piece/ui-composer`'s pushed tip returns nothing; it is in the
-same unpushed working tree as the test above. On `main` there is no publish path,
-no compose box and no submit control at all — `FeedScreen` only reads.
+**When this change was written that note did not exist on any pushed branch**, and
+`main` had no publish path, no compose box and no submit control at all —
+`FeedScreen` only read. So there was nothing to preserve it into, and writing a
+delivery denial would have meant text about a button that was not on the screen.
 
-So there is nothing here to preserve it into, and adding a delivery disclaimer
-would mean writing a denial about an affordance this branch does not have. That
-is not honesty; it is text about a button that is not on the screen.
+**#62 has since merged and answered this better than a preservation would have.**
+Re-measured rather than left as written: `grep -rn "ON PUBLISHING"` over
+`dialectica-ui/` now returns three hits, all in `tst_composer_claims.qml`, all
+comments — and what they record is that the composer piece **deleted its own
+`ON PUBLISHING` note** and discharged the denial in `DPublishOutcome`, beside the
+success it qualifies, where it is pinned character-for-character. The test file
+also deleted the sweep exclusion that had accommodated the note, so the denial is
+now covered by the same sweep as everything else rather than exempted from it.
 
-**The obligation is real and is already contracted**, twice over, so it is not
-resting on a note:
+That is the same move §3 makes for the ordering note, arrived at independently by
+another author: the obligation goes where the reader meets the claim, not into a
+margin. This change therefore inherits nothing to do here.
+
+**The obligation is contracted twice over**, so it never rested on a note:
 
 - `docs/UI-BRIEF.md` obligation 9 — "A successful publish means 'saved here', not
-  'posted'" — which is unchanged by this change.
+  'posted'" — unchanged by this change.
 - `composer-view`'s requirement *"A successful publish claims local storage and
-  never delivery"*, with three scenarios, on the branch where publishing lands.
+  never delivery"*, with three scenarios, now merged into `openspec/specs/`.
 
-The right place for the interface text is the composer screen, which is where the
-success message that must not claim delivery will be written. Recorded here so
-the composer piece inherits it rather than discovering it.
+## 9. The eleven notes on the three screens `main` gained, and the decision to delete them
+
+While this piece was in review, #60 and #63 merged three screens that each build
+on `ScreenFrame` and each fill its `apparatus` property. Deleting the component
+breaks them, so the question was put to the owner: migrate these notes into the
+screens' bodies, or leave the screens to do it themselves later?
+
+**The owner's answer was neither — the notes go.** Verbatim: *"marginnote.qml is
+the apparatus right? it can be deleted; I dont want the notes on the screen at
+all."* So the eleven instantiations are removed along with the component, with no
+migration and no rewriting of any note as body copy.
+
+**This section exists so nothing has to be reconstructed from git history.** Six
+of these notes were the only rendered copy of what they said. If an obligation
+below is later wanted in some other form, this is the record of what it said and
+where it was; it is not a task list, and nothing here is deferred work.
+
+### `DOnboardingScreen.qml` — three notes, none of them a sole carrier
+
+| Note | Survives as |
+|---|---|
+| `ON PERMANENCE` | **Body copy, identical string**, at `DOnboardingScreen.qml:511`. Measured, not assumed: the two strings were compared and match character for character. |
+| `ON UNIQUENESS` | **Body copy, identical string**, at `:541`. The screen's own comment recorded why it was duplicated there — a spec'd obligation must not rest on annotation — which is exactly what made this deletion free. |
+| `ON THE MARK` | Nothing rendered. It described how the identicon's three inks are derived and what a curved versus angular contour means. |
+
+The first two are why this screen cost nothing: an earlier author had already
+moved both obligations into the body *because* the apparatus was known to be
+annotation. That foresight is what this change collects on.
+
+### `DJoinScreen.qml` — four notes, all rendered nowhere else
+
+| Note | What it said |
+|---|---|
+| `ON WHAT THE ADDRESS PROVES` | That verification compares two things the user supplied and consults nothing else — not a registry, not a peer, not the network — and does **not** establish that this is the address they were meant to receive. |
+| `ON THE TITLE` | The title is decoration: freely chosen, not unique, matched against nothing, and pickable to resemble another Stoa's. |
+| `ON WHERE THIS CAME FROM` | The screen was opened from a reference somebody handed the user, and nothing was joined by opening it. |
+| `ON WHAT JOINING DOES` | That joining starts collecting the Stoa's records locally — *"There is no membership list, nobody is notified, and **no peer can be stopped from publishing here**."* |
+
+The last clause is the one to notice: **"no peer can be stopped from publishing
+here"** appeared nowhere else in the tree. It states the permissionless half of
+the Stoa design directly to a user at the moment they join.
+
+This note also carried a deliberate correction that dies with it: the bundle's
+wording ended *"and generates you an identity for it alone"*, and the author
+dropped that clause because per-Stoa identity is built but **not switched on** —
+one key signs in every Stoa in this release. The screen's remaining copy is
+pinned by `tst_stoa_screens.qml::test_nothing_on_the_preview_promises_a_per_stoa_identity`,
+so the false claim cannot return through the body; what is gone is only the note
+that positively denied it.
+
+### `DStoaListScreen.qml` — four notes, all rendered nowhere else
+
+| Note | What it said |
+|---|---|
+| `ON TITLES` | *"**A moderator may rename a Stoa to anything, including someone else's name.** Two rows can carry the same title and be entirely different Stoas. The contour and the address differ; the title does not."* |
+| `ON COUNTS` | No row says how many posts are held for a Stoa; such a number would be honest, but nothing computes it — so there is none to show rather than one being withheld. |
+| `ON SHARING` | A shareable reference carries the address and the founding record together, because an address is a hash of the record and cannot rebuild it; a row with no record offers no share, and that is absence rather than breakage. |
+| `ON WHAT THIS LIST IS` | Stoas the user chose, recorded locally — nobody was notified, no peer can see the list, and being in a Stoa does not mean moderating it. |
+
+**`ON TITLES` is the other sentence that existed only here.** The impersonation
+risk it names is real and follows directly from permissionless creation plus
+in-Stoa moderation, which is the pair the whole design turns on.
+
+Four of these obligations do survive as `//` comments in the screen's source —
+which a user never sees. That is recorded as a fact about where the reasoning
+went, not as a claim that the obligation is discharged.
+
+### What this leaves true, stated plainly
+
+Two sentences that stated real properties of the system to a user are no longer
+stated to a user anywhere: **that no peer can be stopped from publishing in a
+Stoa**, and **that a moderator may rename a Stoa to any name at all, including
+one already in use**. Both remain true of the system; neither is now said on
+screen. The owner has decided that is the right trade, and this section is the
+durable record of what the trade was.
+
+### Three test edits the merge forced
+
+`main`'s tests reach into `ScreenFrame.apparatus`, so removing the property
+broke them. Each was fixed on its own argument rather than by whatever turned
+the suite green:
+
+- **`tst_vote_and_gate.qml`** — `test_the_apparatus_walker_actually_excludes_the_column`
+  is **deleted**, along with `renderedTextOutsideApparatus` and
+  `isApparatusColumn`. It was a guard on a guard: it proved the walker actually
+  excluded a subtree, so that the placement assertion was not secretly a
+  presence assertion. With one region left on the screen, the walker is the
+  identity function and the distinction it enforced does not exist. Keeping it
+  would have meant keeping an identity function that reads like coverage. The
+  placement test remains and now pins the gate's own heading and core's reason
+  alongside the required sentence.
+- **`tst_onboarding_states.qml`** — `test_an_omitted_encryption_field_shows_no_claim_on_screen`
+  floored its corpus at `shown.length > 5`; removing three notes took it to 4.
+  The floor was never the property being protected — the named-sentence check on
+  the next line is — so it is replaced by `> 0` with the reasoning written down.
+  A count-pin fails on any re-layout and passes on a corpus collecting the wrong
+  text, which is the trap this repo has already paid for.
+- **`tst_onboarding_states.qml`** — `test_the_uniqueness_obligation_survives_without_the_apparatus_column`
+  threw on `screen.apparatus.length` once the alias was gone. The property is
+  now read defensively; `inApparatus` becomes 0 and the assertion reduces to
+  "the body copy carries the obligation", which is exactly what the test's own
+  comments say must survive. **Proved live by mutation**: replacing the body
+  sentence made it fail with *"Found 0 carrier(s), 0 of them in apparatus"*,
+  and the mutation was reverted.
+
+That last test deserves a note of credit: its author anticipated this change by
+name, rejected an exact-count assertion precisely because it would have made the
+margin copy undroppable, and left the reasoning in the file. Every assertion in
+it survived the column's removal untouched. Only the dereference needed a guard.

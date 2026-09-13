@@ -141,11 +141,16 @@ You are given a worktree of your own under `.claude/worktrees/` and a branch nam
 `review/<name>/<dimension>`. **Mutate it freely** — breaking the code to see
 whether a test notices is the job, and `cargo mutants` will break dozens of lines.
 
-**When you are done, remove the worktree rather than restoring it**:
+**When you are done, step out of it and remove it rather than restoring it**:
 
 ```
+ExitWorktree(action: "keep")
 git worktree remove <absolute-path> --force
 ```
+
+`ExitWorktree` first, because `git worktree remove` cannot remove the directory
+you are standing in — and `keep` rather than `remove`, because the tool only
+deletes worktrees it created itself and the runner made this one.
 
 Do not try to undo your mutations one by one. That depends on your having tracked
 every edit you made, and a single missed restore ships a deliberately broken line

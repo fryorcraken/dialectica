@@ -120,6 +120,35 @@ pub trait DialecticaModule: Send + 'static {
     /// ever collapsed.
     fn list_threads(&mut self, request: String) -> String;
 
+    /// One page of a thread: its root post and the replies beneath it.
+    ///
+    /// Takes
+    /// `{"stoa":"<hex>","genesis":"<hex>","thread":"<hex>","page":N,"perPage":N,"includeHidden":bool}`
+    /// and returns the same pagination shape `listThreads` does. `thread` is the
+    /// **root post's** op id, which never moves when the post is edited.
+    ///
+    /// **Which posts are in the thread is computed from the parent chain, never
+    /// from the `thread` field an op carries.** That field is its author's claim:
+    /// a peer can authentically sign a post naming any thread it likes, and a
+    /// reader placing posts by the claim would render it inside a conversation it
+    /// was never part of. A post whose parent chain this peer cannot complete is
+    /// returned under no thread rather than placed by its claim.
+    ///
+    /// **The items are flat and each names its parent.** Nesting is the view's to
+    /// compute — depth is a count of parents, and the view holds the parents. No
+    /// item reports a depth or an indentation level.
+    ///
+    /// **A hidden root is returned, marked, with its body withheld; a hidden
+    /// reply is omitted.** The asymmetry is deliberate: a thread read that
+    /// dropped its own subject would be indistinguishable from a thread this peer
+    /// never received, and those mean opposite things.
+    ///
+    /// A thread this peer holds no root for is an error and never an empty page,
+    /// for the same reason — and the three ways a root can be unreadable (not
+    /// held, not a post, a reply rather than a root) are three different
+    /// messages, because they call for three different responses.
+    fn read_thread(&mut self, request: String) -> String;
+
     /// Create a Stoa this peer is in, and return its address.
     ///
     /// Takes `{"title":"…"}` and returns
@@ -470,10 +499,41 @@ impl Dialectica {
     /// The signing key is per-Stoa (PLAN.md §5.2), so the Stoa has to be known
     /// before the key can be derived — and the handler parses the request
     /// properly, refusing forbidden fields and naming its own failures. So this
-    /// reads the Stoa cheaply to derive a key, and the handler re-reads it as
-    /// part of the parse it owns. The alternative, threading a parsed Stoa in
-    /// from here, would put half the request's validation in the one file no
-    /// test can reach.
+    /// reads the Stoa through [`core::stoa_of`], and the handler re-reads it as
+    /// part of the parse it owns. Both go through `Request::parse` and the
+    /// single `parse_stoa`, so the two reads cannot disagree and both are
+    /// bounded by the request cap; the cost is CPU on a request already proved
+    /// small. Threading a parsed request in from here instead is the reshape
+    /// `design.md` decision 8 defers, and it moves the handlers' signatures.
+    ///
+    /// # There is no `method` parameter, and that is the fix for a parameter
+    /// nobody could keep right
+    ///
+    /// This took the method name and passed it to [`core::guarded`], while
+    /// `core::wire::publishing` *also* calls `guarded` with its own hardcoded
+    /// name — so the guard was nested and the outer name was a second,
+    /// caller-supplied copy of something the inner one already knew. It could
+    /// disagree and nothing would notice:
+    /// `self.publishing(&request, "publish_vote", core::publish_post)` compiles,
+    /// runs, publishes a post, and reports a panic in the keystore open as
+    /// `panic in publish_vote`. No gate can see it — `cargo test` does not
+    /// compile this file, the CI text gates check only which `core::` names
+    /// appear, and Build LGX proves it compiles.
+    ///
+    /// **This exact defect was already found and fixed once in this repo**, in
+    /// `core::wire::with_membership_store`, whose doc records it: five
+    /// hand-written pairs that had to be kept in step for no gain, and a panic
+    /// in `open` reported as `panic in list_stoas`. The fix proven there
+    /// transfers exactly, and `publish_moderation` would have made it four pairs
+    /// here — which is the count this change's own thesis calls the signal to
+    /// reshape.
+    ///
+    /// The outer guard stays and owns a **generic label**. The only panics it
+    /// can catch that the inner one cannot are in `core::stoa_of`,
+    /// `open_from_env`, `Self::paths` and `SqliteOpLog::open` — everything after
+    /// that is inside `core::wire::publishing`, where the handler's own guard
+    /// names the method — so the label is accurate for everything it can ever
+    /// report.
     ///
     /// # Delivery's outcome is discarded, deliberately
     ///
@@ -487,7 +547,7 @@ impl Dialectica {
     /// sink is a no-op that logs. A no-op is honest; inventing a channel-naming
     /// scheme here would be two peers computing different values and opening
     /// channels nobody else is in — silently, and permanently.
-    fn publishing<F>(&mut self, request: &str, method: &str, handler: F) -> String
+    fn publishing<F>(&mut self, request: &str, handler: F) -> String
     where
         F: FnOnce(
             &str,
@@ -504,20 +564,26 @@ impl Dialectica {
         };
         let dir = std::path::PathBuf::from(dir);
 
-        core::guarded(method, || {
-            // The Stoa, read only far enough to derive a key. The handler owns
-            // the real parse and reports every other malformation by name.
-            let parsed: serde_json::Value = match serde_json::from_str(request) {
-                Ok(v) => v,
-                Err(e) => return core::error_json(&format!("invalid JSON: {e}")),
-            };
-            let stoa = match parsed.get("stoa") {
-                Some(serde_json::Value::String(s)) => match core::identity::Address::from_hex(s) {
-                    Ok(a) => a,
-                    Err(e) => return core::error_json(&format!("stoa: {e}")),
-                },
-                Some(_) => return core::error_json("stoa must be a string"),
-                None => return core::error_json("missing field: stoa"),
+        core::guarded("opening the publish path's stores", || {
+            // The Stoa, read only far enough to derive a key — THROUGH `core`,
+            // so this is the adapter's first and only touch of the bytes and it
+            // crosses the request envelope.
+            //
+            // It reads the Stoa and NOTHING else: the forbidden-field guard and
+            // every required-field read stay the handler's, because an adapter
+            // validating a second time is the two-readers-of-one-field shape
+            // that put this path outside the envelope to begin with.
+            //
+            // What holds it: `the_adapters_early_stoa_read_crosses_the_same_
+            // envelope_the_handler_does` pins the behaviour from a gate that
+            // runs, and CI's adapter-derivation gate both requires this call
+            // and bans `serde_json::from_str` in this file. Why it is shaped
+            // this way, and what the bare parse it replaced cost, is
+            // `design.md` decision 7 — not repeated here, where the question a
+            // reader has is what this line does rather than what a commit did.
+            let stoa = match core::stoa_of(request) {
+                Ok(a) => a,
+                Err(e) => return e,
             };
 
             // A publish requires a usable identity and NEVER creates one. This
@@ -536,7 +602,33 @@ impl Dialectica {
                 Ok(k) => k,
                 Err(e) => return core::no_identity(&e.to_string()),
             };
-            let key = keystore.stoa_key(&stoa);
+
+            // WHICH KEY SIGNS IS `core`'s DECISION, not this file's, and that is
+            // the same correction `get_capabilities` above already carries.
+            //
+            // This was `keystore.stoa_key(&stoa)` — the PATHLESS per-Stoa scheme
+            // — while the probe reports `stoa_address_at_path`. The two schemes
+            // are asserted to DISAGREE in `identity.rs`, so every published op
+            // was authored by an identity neither `getCapabilities` nor `whoAmI`
+            // would name. `core::wire::publishing_key` is the same derivation
+            // the probe reports, and
+            // `the_key_a_publish_signs_with_is_the_identity_the_probe_reports`
+            // is the test that the choice living in `core` makes possible — it
+            // could not be written while the choice was on this line.
+            let paths = match Self::paths(&dir) {
+                Ok(p) => p,
+                Err(e) => return core::no_identity(&e.to_string()),
+            };
+            let key = match core::wire::publishing_key(&stoa, &keystore, &paths) {
+                Ok(k) => k,
+                // A Stoa with no chosen identity is the state the probe reports
+                // as `canPost:false`. Refusing here is what keeps the two
+                // methods agreeing: a publish that succeeded under some other
+                // key while the probe said the user cannot post would be a
+                // worse disagreement than the one this fixes, because nothing
+                // on the publishing side would say so.
+                Err(why) => return core::no_identity(&why),
+            };
 
             let mut log = match core::log::SqliteOpLog::open(&dir.join("ops.sqlite")) {
                 Ok(l) => l,
@@ -667,6 +759,20 @@ impl DialecticaModule for Dialectica {
         })
     }
 
+    fn read_thread(&mut self, request: String) -> String {
+        let dir = match self.storage_dir() {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
+        // The same store opener and the same per-call reasoning as
+        // `list_threads` above: opening is cheap, and a handle held across calls
+        // would have to answer what happens when the host hands the same path to
+        // another instance.
+        core::read_thread_from_request(&request, || {
+            core::log::SqliteOpLog::open(&dir.join("ops.sqlite"))
+        })
+    }
+
     fn create_stoa(&mut self, request: String) -> String {
         let dir = match self.storage_dir() {
             Ok(d) => d,
@@ -760,15 +866,15 @@ impl DialecticaModule for Dialectica {
     }
 
     fn publish_post(&mut self, request: String) -> String {
-        self.publishing(&request, "publish_post", core::publish_post)
+        self.publishing(&request, core::publish_post)
     }
 
     fn publish_reply(&mut self, request: String) -> String {
-        self.publishing(&request, "publish_reply", core::publish_reply)
+        self.publishing(&request, core::publish_reply)
     }
 
     fn publish_vote(&mut self, request: String) -> String {
-        self.publishing(&request, "publish_vote", core::publish_vote)
+        self.publishing(&request, core::publish_vote)
     }
 
     fn on_context_ready(&mut self, ctx: &RustModuleContext) {

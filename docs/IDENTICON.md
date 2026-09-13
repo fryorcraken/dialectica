@@ -31,7 +31,13 @@ These get conflated, so they are separated here deliberately.
 |---|---|---|
 | **bytes consumed** | 6 (bytes 0..5) | 8 (bytes 12..19) |
 | **perceptually distinct marks** | ~1,700 | ~12,400 |
-| **combined with the generated name** | ~2^36 | ~2^38.6 |
+| **combined with the generated name** | mark x name | mark x name |
+
+**The combined row deliberately names no figure.** Earlier revisions pinned
+~2^36 and ~2^38.6 here; both were the mark multiplied by a name space this note
+does not own, and both went stale when PLAN.md changed — see the note below and
+the worked example further down. **Multiply ~12,400 (2^13.6) by the name space in
+PLAN.md §5.2.1**, which is the only place that figure is current.
 
 > **Several figures in earlier revisions of this note were wrong, and the
 > corrections are recorded in place rather than quietly replaced.** Two rounds of
@@ -81,7 +87,7 @@ necessary and not sufficient; the dimension work is what moved the number.
 The original mark read six bytes (2^48 states) and rendered them through these
 dimensions. The count is *perceptual*: where two parameter values produce marks
 a person cannot separate at the rendered size, they are counted once. The
-governing size is `Theme.markInFeed` = **19px**, because that is where
+governing size is `DTheme.markInFeed` = **19px**, because that is where
 recognition actually happens; `markInList` = 40px is the generous case.
 
 **Contour.** Byte 0 drove three things at once — `_sides()` (period 6),
@@ -330,7 +336,7 @@ reproduce a known value is not trusted to produce unknown ones.
 **That assertion was itself a false green for one revision**, which is worth
 recording because it is the same shape as everything else in this section: the
 check concatenated the measured value into a printed report and asserted *nothing*,
-so a mismatch would have been exactly as silent as a match — while `Theme.qml`
+so a mismatch would have been exactly as silent as a match — while `DTheme.qml`
 claimed it "self-tests before reporting". A guard that cannot fail is not a guard,
 and this one was holding up the credibility of every number here. It is now a real
 `fuzzyCompare` that fails the run.
@@ -606,13 +612,19 @@ was the *superseded three-word* scheme, and the figure was already stale when
 it merged. A number owned by another document does not belong pinned in this
 one; **read the current space from PLAN.md §5.2.1 and multiply by 2^13.6.**
 
-Worked for the four-word scheme at the time of writing (2^34), so the method is
+Worked for the three-word scheme at the time of writing (2^33), so the method is
 checkable rather than merely asserted:
 
-    2^34 x 12,400 ≈ 2.13 x 10^14 ≈ 2^47.6
+    2^33 x 12,400 ≈ 1.07 x 10^14 ≈ 2^46.6
 
-    k = 1,000:  499,500 / 2.13e14    = 2.3e-9   → P ~ 1 in 430 million
-    k = 5,000:  12,497,500 / 2.13e14 = 5.9e-8   → P ~ 1 in 17 million
+    k = 1,000:  499,500 / 1.07e14    = 4.7e-9   → P ~ 1 in 213 million
+    k = 5,000:  12,497,500 / 1.07e14 = 1.2e-7   → P ~ 1 in 8.5 million
+
+**This example has now been restated twice** — first against 2^25, then 2^34, now
+2^33 — which is the strongest available argument for stating the method rather
+than pinning the value. Note that the word count has returned to **three** without
+the space returning to 2^25: the two are eight doublings apart, so a matching word
+count is not a check that the number is current.
 
 **If those figures disagree with PLAN.md, PLAN.md is right and this worked
 example is stale** — which is the point of stating the method rather than only
@@ -687,8 +699,11 @@ abbreviation shows the *same byte positions for every address*, so an attacker
 grinding for a lookalike grinds only those fixed positions and gets the hidden
 ones free.
 
-**2^38.6 is grindable** with unlimited address regeneration. This defeats casual
-impersonation, not a motivated attacker. The address remains the identity.
+**The bundle is grindable at any of the sizes this note has quoted** — 2^38.6
+when that figure was pinned here, 2^46.6 at the name space PLAN.md §5.2.1 now
+carries — with unlimited address regeneration. The conclusion has survived every
+restatement of the number, which is the point: this defeats casual impersonation,
+not a motivated attacker, and the address remains the identity.
 
 ## Which dimensions resist grinding
 
@@ -801,21 +816,21 @@ only one honestly available.
 
 ## Where the palette lives
 
-The seven inks are named roles in `Theme.qml`, in their own block separate from the
+The seven inks are named roles in `DTheme.qml`, in their own block separate from the
 three interface inks. They carry the `mark` prefix rather than extending the
 `accent` series because the mark's palette has a different job, and a change to
 `accent2` must not silently change what every identity looks like.
 
 **They are frozen wire-visible constants, not theme tokens**, and this is the one
 thing about them most likely to be got wrong later. The mark binds to
-`Theme.mark*`, so editing a value there changes every identity's appearance — and
+`DTheme.mark*`, so editing a value there changes every identity's appearance — and
 two peers on different app versions would then render *different marks for the
 same address*, which is precisely the failure the determinism contract exists to
 prevent. That is far more likely in practice than any renderer difference. An
 earlier revision of this note presented the theme binding as a benefit ("the look
 can be iterated without touching this component"), which is true of interface
 colours and false of these. **Add an ink if the mark needs one; do not retune an
-existing one.** The obligation is recorded beside the values in `Theme.qml`.
+existing one.** The obligation is recorded beside the values in `DTheme.qml`.
 
 ### Removing isPerson touched two call sites
 

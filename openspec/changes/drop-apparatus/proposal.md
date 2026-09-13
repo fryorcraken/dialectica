@@ -118,14 +118,25 @@ None.
 
 None. `.openspec.yaml` sets `skip_specs: true` with the measurement behind it.
 
-**No merged spec requires apparatus text.** The single `apparatus` hit across
-`openspec/specs/` is `module-wire-contract/spec.md:302`, using the word in its
-Phase 0 sense ("the probe is apparatus rather than forum surface"). The two specs
-named as risks in the dispatch — `composer-view` and `stoa-navigation-view` — **do
-not exist**; run `openspec list --specs` for the inventory, and neither is among
-it. There is no `copy.json` anywhere in the tree, so no `*.apparatus` key
-is required verbatim by anything. If either spec lands later requiring apparatus
-text, that is a `spec-writer`'s question and an owner's call, not this piece's.
+**No merged spec requires apparatus text.** Re-measured after merging `main`,
+because the two specs this paragraph once reported as non-existent —
+`composer-view` and `stoa-navigation-view` — **have since merged**, and a stale
+"it does not exist" is exactly the claim that decays into a wrong one. Run
+`openspec list --specs` for the current inventory.
+
+Two `apparatus` hits across `openspec/specs/` today, neither requiring apparatus
+text:
+
+- `module-wire-contract/spec.md` uses the word in its Phase 0 sense — "the probe
+  is apparatus rather than forum surface".
+- `composer-view/spec.md` names `compose.apparatus` as a **bundle wording
+  source**, while requiring the statement itself *"in the closed gate's own
+  body"* and stating explicitly that the requirement is not on occupying any
+  region of the screen. `design.md` §7 quotes it in full.
+
+There is still no `copy.json` anywhere in the tree, so no `*.apparatus` key is
+required verbatim by anything — and `composer-view` now says in the spec why such
+a requirement would be unenforceable.
 
 **Rendering obligation 10 goes in `docs/UI-BRIEF.md`, not into a capability, and
 that placement is a decision rather than a default.** Every capability
@@ -144,33 +155,46 @@ the first place.
   `dialectica-ui/src/qml/MarginNote.qml`.
 - **Modified:** `dialectica-ui/src/qml/ScreenFrame.qml`,
   `dialectica-ui/src/qml/FeedScreen.qml`, `dialectica-ui/src/qml/qmldir`,
-  `dialectica-ui/src/qml/Theme.qml`, `docs/UI-BRIEF.md`, `CLAUDE.md` (the
+  `dialectica-ui/src/qml/DTheme.qml`, `docs/UI-BRIEF.md`, and `CLAUDE.md` (the
   *Where to look for what* row now sends a screen author to the brief **before
-  writing a screen**, argued in `design.md` §4), and
-  `dialectica-ui/tests/run-qml-tests.sh` — see the next two entries.
+  writing a screen**, argued in `design.md` §4).
+- **Modified by the merge with `main`, and argued in `design.md` §9:**
+  `dialectica-ui/src/qml/DJoinScreen.qml`,
+  `dialectica-ui/src/qml/DStoaListScreen.qml` and
+  `dialectica-ui/src/qml/DOnboardingScreen.qml` lose their `apparatus` blocks —
+  eleven margin notes in total, deleted on the owner's decision rather than
+  migrated. `dialectica-ui/tests/tst_vote_and_gate.qml` and
+  `dialectica-ui/tests/tst_onboarding_states.qml` lose the assertions that
+  reached into `ScreenFrame.apparatus`.
 - **Added:** `dialectica-ui/tests/tst_feed_extent_claim.qml`, pinning obligation
   10's discharge.
-- **The test runner gained a single-spec mode**, which is a change to test
-  machinery rather than to any assertion. `run-qml-tests.sh <file.qml>` now runs
-  one spec. **Why it exists rather than leaving callers to reach past the
-  script:** invoking `qmltestrunner` directly means hand-writing
-  `QT_QPA_PLATFORM=offscreen`, and an environment-variable prefix is a shape the
-  permission checker cannot analyse, so every such call costs the user an approval
-  click; it also loses the script's runner discovery, which is the difference
-  between a real failure and a Qt5 binary exiting 1 with no output. **What it
-  costs:** the script now has two modes, and the glob branch and the argument
-  branch can drift — accepted because both delegate to the same discovered runner
-  with the same import path, so a drift would have to be written deliberately.
-- **No test *assertion* was changed or removed**, which is the claim this list
-  used to overstate as "no test changes". `grep -rniI "MarginNote\|apparatus\|ON
-  THIS ORDERING\|ON WHAT YOU HOLD\|ON THE MARK"` over `dialectica-ui/tests/`
-  returns one line, in `tst_identicon.qml`, and it is the word "mark" inside an
-  unrelated comment. **No test asserted apparatus content**, which is itself worth
-  recording: the column shipped and no gate could see it — and **no gate can see
-  it come back**, either. Restoring both components and their two `qmldir` lines
-  would pass every gate in the repo. That is accepted rather than overlooked: a
-  test asserting the absence of a deleted component is usually the wrong
-  instrument, and the obligations the notes carried are pinned instead.
+- **The test runner's single-spec mode is no longer this change's to add.**
+  This piece added one; `main` independently grew the same feature and did it
+  better, adding `check_bindings` (which fails a spec whose bindings evaluate to
+  `undefined` — a QWARN `qmltestrunner` otherwise reports while exiting 0) and an
+  `--import` option. Merging took `main`'s file **wholesale**, verified
+  byte-identical to `origin/main`'s blob by `git hash-object`, so
+  `dialectica-ui/tests/run-qml-tests.sh` is untouched by this change.
+
+  Nothing was lost in doing so: `main`'s version keeps the same
+  `run-qml-tests.sh <file.qml>` interface and the same reasoning for it — that
+  invoking `qmltestrunner` directly means hand-writing `QT_QPA_PLATFORM=offscreen`,
+  a shape the permission checker cannot analyse, costing an approval click per
+  call, and losing the runner discovery that distinguishes a real failure from a
+  Qt5 binary exiting 1 with no output.
+- **No test asserted the *feed's* apparatus content**, which is worth recording:
+  that column shipped and no gate could see it — and **no gate can see it come
+  back**, either. Restoring both components and their two `qmldir` lines would
+  pass every gate in the repo. That is accepted rather than overlooked: a test
+  asserting the absence of a deleted component is usually the wrong instrument,
+  and the obligations the notes carried are pinned instead.
+
+  **Three assertions elsewhere did have to change**, and this list no longer
+  claims otherwise. The screens `main` added were tested, and two of those tests
+  read `ScreenFrame.apparatus` directly. Each edit is argued in `design.md` §9 —
+  one obsolete guard deleted, one count-pin replaced by the property it stood
+  in for, one dereference guarded and then **proved still able to fail** by
+  mutation.
 - **No core change.** This is view-only.
 - **`docs/UI-BRIEF.md` needed less correcting than expected on the apparatus
   itself**, and the reason is recorded in `design.md` §1: the brief never

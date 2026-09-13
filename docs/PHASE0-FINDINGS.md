@@ -395,11 +395,13 @@ In PLAN.md §11's style — structural, and each one cost a debugging cycle here
   view works".
 
 - **`lgs basecamp setup`, `modules` and `install` each strip every comment from
-  `scaffold.toml`.** PLAN.md §11 names only `setup`, which is why this was
+  `scaffold.toml`.** PLAN.md §11 named only `setup`, which is why this was
   rediscovered: the comments came back after a restore and vanished again on
-  the next unrelated verb. Treat *any* `lgs basecamp` verb as comment-
-  destroying, run `git diff scaffold.toml` after each, and restore in one pass
-  at the end rather than after every command.
+  the next unrelated verb. Restoring them was abandoned after failing
+  repeatedly — the reasoning now lives in [`SCAFFOLD.md`](SCAFFOLD.md), which
+  no verb can reach, and the file carries bare values. Still treat *any*
+  `lgs basecamp` verb as file-rewriting and run `git diff scaffold.toml` after
+  each, because a verb can also change a *value*.
 
 - **The newest builder *tag* cannot build a Rust module on a cold cache.**
   `importCargoLock` fetches crates through a nixpkgs `fetchurl` that sends no
@@ -504,7 +506,16 @@ person clicking the buttons. Where something is inference it says so.
 
 Reproduce with `lgs basecamp modules`, `lgs basecamp install`,
 `lgs basecamp launch alice`, then click the four buttons in the Dialectica
-plugin. The evidence is in `.scaffold/basecamp/profiles/alice/basecamp.log`.
+plugin.
+
+**The evidence is in
+`.scaffold/basecamp/profiles/alice/xdg-data/Logos/LogosBasecampDev/logs/basecamp_<timestamp>.log`**
+— a timestamped file several directories deeper than the
+`.scaffold/basecamp/profiles/alice/basecamp.log` this line used to give. The
+wrong path was not harmless: it is part of why nobody read a launch log while
+diagnosing the `Theme` shadowing, and that log turned out to hold the whole
+answer in two `grep -c` runs (209 resolutions into the host's `Theme`, zero into
+the plugin's own). A log is only evidence if the path to it is right.
 
 ### Both modules load, and the view renders
 

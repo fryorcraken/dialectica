@@ -1,0 +1,28 @@
+# `schema` is REQUIRED for this file to be valid change metadata, and without it
+# `skip_specs` is silently NOT HONOURED — `openspec validate --strict` reports
+# the marker as ignored and then fails for having no deltas, which reads as two
+# problems rather than one. It must name a known schema; this project's is the
+# built-in `spec-driven`, set in `openspec/config.yaml`.
+schema: spec-driven
+
+# This change carried `skip_specs: true` until spec-test review, and the marker's
+# reasoning was right about two of the three envelope obligations and wrong about
+# the third. Kept here rather than deleted, because the two it was right about are
+# still the reason no requirement names the publish handlers:
+#
+#   `module-wire-contract` scopes the request-envelope rule to "every method that
+#   reads a field of its request" and names the panic probe as the surface's ONLY
+#   exception. The three publish handlers read `stoa`, `body`, `parent`, `target`
+#   and `direction`, so they were already inside the rule and already violating
+#   it. `content-authoring` likewise already decides which key signs. Adding a
+#   requirement naming these handlers would make the contract WEAKER, and the
+#   requirement says so itself: "This SHALL hold for every such method, whatever
+#   fields that method requires ... The rule is therefore stated once, for the
+#   envelope, rather than left to each method's fields to imply."
+#
+# What the marker missed is that the THIRD obligation — the request size cap —
+# was in no merged spec at all. It was a `dev-writer` default carrying a
+# `NO SPEC:` marker, and this change pinned it across the whole surface, which is
+# the moment an absent decision becomes expensive to revisit. So there is now one
+# MODIFIED delta against `module-wire-contract`, and it specifies the envelope's
+# bound rather than the publish handlers.

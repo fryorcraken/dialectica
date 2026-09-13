@@ -116,9 +116,29 @@ point, so a side branch and a cherry-pick buy nothing and add a step to get wron
 Let the commit message say what the commit is; the branch name is not the place
 for it.
 
-**Do not push and do not open a PR** — the runner pushes. Never `git add -A`;
-commit named paths, because a worktree collects build output and a gitignored SDK
-symlink, and sweeping up a reviewer's findings file makes its commit yours.
+Never `git add -A`; commit named paths, because a worktree collects build output
+and a gitignored SDK symlink, and sweeping up a reviewer's findings file makes
+its commit yours.
+
+## Open the PR before you hand back
+
+**Push `piece/<name>` and open its PR as your last act on the first pass**, before
+the runner dispatches reviewers.
+
+On the findings pass the PR is already open: commit, push to it, and never open a
+second. One piece is one PR, so `gh pr list --head piece/<name>` before you
+create.
+
+**Check `git branch -vv` first** and push by name, `git push origin piece/<name>`.
+A worktree inherits its parent branch's upstream, and a bare `git push` has landed
+commits on `main` here more than once.
+
+The title says what the change does, not which stage produced it; the body says
+why it exists and names every `NO SPEC:` you left. Do not narrate your commits —
+the squash discards them. The `closer` updates both before merging, against the
+diff findings have changed by then; write them so that is an edit, not a rewrite.
+
+**You still do not merge**, and `piece/<name>` is the only branch you push.
 
 ## When you are acting on review findings
 

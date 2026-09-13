@@ -13,8 +13,10 @@ from a table here, so that this file stays the thing worth reading in full:
 |---|---|
 | [`docs/PLAN.md`](docs/PLAN.md) | **Before any design decision.** It carries the architecture, what was rejected and why, and the traps found before a line was written. |
 | [`docs/UI-BRIEF.md`](docs/UI-BRIEF.md) | Before any change that alters what the UI must show, hide or refuse to claim — **and before writing a QML screen**, which is the reading this table used to miss: the brief is the contract a screen must meet, and *What `ScreenFrame` gives you* is addressed to the implementer. It is a **live document derived from PLAN.md**, written so an external designer who cannot read the code can act on it — so it states rendering obligations the core deliberately does not meet. **If a change makes it wrong, fix it in the same change**; a stale brief is worse than none, because it is designed against. PLAN.md wins any disagreement. |
+| [`.claude/agents/RUNNER.md`](.claude/agents/RUNNER.md) | **Before dispatching your first agent.** Written for the session that orchestrates rather than for the agents it launches: how to tell whether an agent is still running, how many to launch at once, and why one piece is one PR. Read it whenever you are about to spawn an agent — the mistakes it prevents all came from its rules living in files the runner never opened. |
 | [`.claude/agents/README.md`](.claude/agents/README.md) | **Before starting a change.** The spec-driven flow: which document answers which question, and the role agents. Also the test defects that have shipped here and what prevents them. |
 | [`docs/OPENSPEC-ARCHIVE.md`](docs/OPENSPEC-ARCHIVE.md) | **Before archiving a change**, which is the last step in closing it and runs after its PR merges — not before starting one. The traps that lose a requirement silently, and why `validate --strict` passes a spec that contradicts itself. |
+| [`docs/SCAFFOLD.md`](docs/SCAFFOLD.md) | **Before changing a value in `scaffold.toml`**, or when a build, `install` or `launch` misbehaves. Every entry whose purpose is not visible from its value — why two `[repos.*]` tables exist for a zone we do not use, which pairs of `attr` values deadlock `install`, and what the settings under `[basecamp.env]` and `[basecamp.profiles.*]` are each preventing. It lives here because `lgs` deletes every comment in that file. |
 
 ### Keeping this file true
 
@@ -78,6 +80,14 @@ project a stalled session.
   This applies to every tool that takes a path, and to subagent prompts: when
   you spawn an agent, tell it this rule explicitly, or it will inherit the
   habit and stall on its first sweep.
+
+  **The exception is `EnterWorktree`, which moves the session rather than
+  prefixing a command.** An agent working in a worktree enters it once with
+  `EnterWorktree(path: <absolute path>)` and then uses ordinary relative paths:
+  there is no `cd` for the checker to defeat it, and no `git -C <dir>` on every
+  call. That is the shape to put in an agent's brief — see
+  [`.claude/agents/README.md`](.claude/agents/README.md). Absolute paths remain
+  the rule for anything reaching *outside* the tree you are in.
 
   **Before sending an agent somewhere, check the directory is in scope.**
   Absolute paths fix the *analysability* problem; they do nothing for a
@@ -269,11 +279,18 @@ These are structural and bite at build time, not review time.
 - **On Linux, set `runtime_dir` to the session's real one** (e.g.
   `/run/user/1000`) in `[basecamp.profiles.<n>]`. The in-profile `xdg-tmp`
   default overflows the 108-byte `sun_path` cap and **every module segfaults**
-  at "Failed to register module for remote access".
+  at "Failed to register module for remote access". Short is not enough — it
+  must be the real one, or basecamp starts with no display; `docs/SCAFFOLD.md`
+  says why.
 - **`lgs basecamp` rewrites `scaffold.toml` and strips every comment — and
   not only on `setup`.** A plain `lgs basecamp modules`, which reads like a
   query, deleted 77 lines of comments. Assume **any** `lgs basecamp` verb
-  rewrites the file, and run `git diff scaffold.toml` after every one.
+  rewrites the file, and run `git diff scaffold.toml` after every one — a verb
+  can change a value too, not just drop a comment.
+
+  **Do not answer this by re-adding comments.** That was the workaround, it
+  failed repeatedly, and it cost a permission click per verb to maintain.
+  The reasoning lives in `docs/SCAFFOLD.md`, where nothing strips it.
 
 - **`lgs` builds whichever checkout it is run from, worktrees included.**
   `[modules.*]` uses **relative** flake refs (`path:./dialectica#lgx`),
@@ -292,6 +309,159 @@ These are structural and bite at build time, not review time.
 - **The UI's icon must be a 256×256 PNG**, and the UI module must declare core
   in `dependencies` with **matching versions**.
 
+- **Never name a QML type something basecamp also registers.** Our theme
+  singleton was `Theme`; basecamp registers a type of that name, and basecamp's
+  won — every `Theme.x` in the view resolved to basecamp's object, every token
+  read `undefined`, and QML fell back to its defaults: white ground, black
+  system text, no spacing, no borders. One name collision took the entire visual
+  system out at once. It is `DTheme` now.
+
+  **The collision lives in the host's C++ type registration**, and that fact is
+  what makes the rest of this entry follow.
+
+  *A premise withdrawn, recorded because it is the intuitive wrong answer and
+  will otherwise be re-derived:* that a host registration **outranks** a plugin
+  directory's `qmldir` entry — that the two compete and the host wins on
+  precedence. Measured on Qt 6.10.3 and **false**. Staging a competing `Theme`
+  singleton in a second directory and handing it to `qmltestrunner` via
+  `-import` does not shadow the plugin directory's own `qmldir` entry, and
+  neither does making that directory a named module on the import path. A
+  file-based competitor is not in a contest it can win, so "stage a competitor
+  and watch it win" is not a reproduction — it is two green runs and no finding.
+
+  The tell in a launch log is a resolution line pointing at `qrc:/qt/qml/Logos/`
+  for a name you own. `Core` resolved correctly in the same files with the same
+  imports, purely because basecamp has no `Core` — so **"our other singleton
+  works" is not evidence that a name is safe.**
+
+  **Read the launch log; it answers this in two commands.** It is at
+  `.scaffold/basecamp/profiles/<profile>/xdg-data/Logos/LogosBasecampDev/logs/basecamp_<timestamp>.log`
+  — a timestamped file, **not** `basecamp.log`, and several directories deeper
+  than you would guess. The wrong path was in `docs/PHASE0-FINDINGS.md` for
+  months and is part of why nobody read one while diagnosing this defect.
+
+  `grep -c "qrc:/qt/qml/Logos/Theme/Theme.qml"` against
+  `grep -c "dialectica_ui/qml/<Name>.qml"` is the whole diagnosis: on the broken
+  branch, 209 and **0**. And `grep -oh "qrc:/qt/qml/Logos/[A-Za-z0-9_/]*\.qml"
+  <log> | sort -u` enumerates what the host actually registers — 29 types, all
+  `Logos`-prefixed except five under `Theme/`, reproducible across launches.
+  That measurement is what makes the `D` prefix a reasoned defence rather than a
+  hopeful one: it does not collide with the host's own naming convention.
+
+  Two things that log also settles, recorded so they are not re-argued.
+  **`Core` does not collide** — 27 resolutions into the plugin's own `Core.qml`,
+  zero into the host namespace. And **`qmllint --missing-property error` cannot
+  see this defect**: CI passes `-I dialectica-ui/src/qml`, which puts our own
+  `Theme.qml` on the import path, so qmllint resolves to the correct singleton
+  where every member exists. It checks a different resolution than the app
+  performs, and a green from it says nothing about the collision.
+
+  **It does catch every undefined MEMBER, which is a different and real class**
+  — and stating only the sentence above is precisely what left that unexamined.
+  `DTheme.noSuchDesk` in `Main.qml` passed the QML suite (no spec instantiates
+  `Main.qml`, so the runner's check never sees it), passed the name gate (a
+  D-prefixed typo contains no bare `Theme`), and passed qmllint, which printed
+  it as a **warning** into a green log. The escalation is now its own gate,
+  `dialectica-ui/tests/check_qml_members.sh`, with `tst_check_qml_members.sh`
+  beside it pinning both directions. Keep the two claims apart: it covers
+  members, never the collision.
+
+  **A component test cannot catch this**, and that is the durable part. Under
+  `qmltestrunner` the host is simply absent, so `verify(DTheme.x !== undefined)`
+  cannot fail *on the collision* — there is no competitor for it to lose to.
+
+  Say it that precisely: the broader "passes no matter what" is **false**,
+  measured with a probe spec. That assertion does fail if the singleton is
+  renamed, if its `qmldir` entry is dropped, or if its file goes missing; an
+  undeclared name throws rather than resolving. It is blind to the collision and
+  to nothing else — and the overbroad version of the sentence is what left
+  qmllint's `--missing-property error` unexamined, so the imprecision cost
+  coverage rather than being pedantic.
+
+  The gate is therefore the static `no QML type name collides with the host`
+  step, proven to fail on a tree carrying the old name.
+
+  **`qmltestrunner` does not fail on a broken binding, and `run-qml-tests.sh`
+  has to make it.** Out of the box the runner reports a `ReferenceError` inside
+  an instantiated component as a **QWARN, not a failure**: a stale singleton
+  reference in a component no spec asserts against prints the error dozens of
+  times and still exits 0, and only a reference inside a `compare()` fails a
+  spec. `check_bindings` in the runner closes that — it greps each spec's output
+  and fails the run on a binding that evaluated to `undefined`.
+
+  Two things about it that are easy to get wrong, both measured:
+
+  - **`ReferenceError` alone is not enough.** A missing token on a
+    correctly-named singleton (`DTheme.noSuchToken`) raises none — Qt says
+    `Unable to assign [undefined] to <T>` instead. The two messages share no
+    common substring, so this is two patterns and cannot be collapsed into one
+    grep for `undefined` (which also hits Qt's "undefined behaviour" warnings
+    and this suite's own test names).
+  - **Do not reach for `QT_FATAL_WARNINGS`.** It aborts on the first warning of
+    any kind, so the run crashes instead of diagnosing and the remaining specs
+    never execute. `qmltestrunner` has no flag that escalates a warning to a
+    failure.
+
+  The check is itself tested in `tst_check_bindings.sh`, pinning both what it
+  must catch and what it must not — a check narrowed to nothing passes as
+  quietly as a correct one.
+
+  **The gate enforces the `D` prefix rather than a list of host names.** An
+  earlier version banned five names basecamp was known to occupy, which is the
+  `hand-maintained sweep lists go stale silently` trap: correct only until the
+  host registers a sixth, with nothing able to notice. A prefix rule is total
+  over registrations that have not happened yet.
+
+  **The rule covers every `qmldir` entry, not only the singletons** — a
+  component name registers in the same directory namespace and is shadowable
+  the same way. The host's own launch log registers `LogosButton.qml`, which is
+  a component. A version of this gate that read only `singleton` lines passed
+  green over a `qmldir` declaring `Theme 1.0 Identicon.qml`, measured.
+
+  **`internal` entries are covered too, but not for the reason you would
+  guess** — measured on Qt 6.10.3, because the guess was written down first and
+  was wrong. `internal Foo Foo.qml` does **not** export `Foo`: a consumer doing
+  `import <Module>` gets `Foo is not a type`. What makes it worth gating is that
+  the name is live *inside* the directory — a sibling `.qml` instantiates it and
+  loads — and that resolution is **by filename**, independent of the qmldir line
+  entirely. Deleting the `internal` entry left the sibling resolving exactly as
+  before. Since the directory is where basecamp loads the plugin, an
+  `internal Theme Theme.qml` line is a reliable witness that a `Theme.qml` sits
+  there.
+
+  The trap worth carrying: a probe written against the *export* claim passes
+  with the `internal` line deleted, because it is measuring same-directory
+  filename resolution and nothing else. Import by module name is the only form
+  that distinguishes them.
+
+  `Core` and the eleven component names predating the convention are
+  grandfathered, each listed in the gate with its reason. **If you add a type,
+  add the `D`; do not add an exemption** — the list is the enumeration of what
+  is unprotected, not a place to put the twelfth.
+
+  **The grandfathered names are not yet `D`-prefixed, and that is deferred work
+  rather than a settled end state.** `DCore` and `DIdenticon`, `DFlatButton` and
+  the rest are the intended names; they were left alone deliberately, because
+  renaming eleven components across every view file is a piece of its own and
+  bundling it would have made the shadowing fix unreviewable. Recorded here
+  because the change that deferred it is archived, and after that the only trace
+  is the exemption set itself — which says what is unprotected but not that
+  anyone meant it. The line is self-invalidating: the moment a name is prefixed,
+  the gate's `GRANDFATHERED` set is visibly shorter than this sentence claims.
+
+  What makes the deferral safe rather than hopeful is that `Core`'s exemption is
+  measured — 27 resolutions into the plugin's own `Core.qml`, zero into the host
+  namespace, and `Core` absent from the host's 29 registered types. That is
+  evidence it does not collide **today**; "basecamp has no `Core`" carries no
+  expiry date, which is the shape the prefix rule exists to stop depending on.
+
+  The gate is `dialectica-ui/tests/check_qml_names.py`, run from the `lint` job
+  (it needs no Qt), with `tst_check_qml_names.py` beside it pinning both
+  directions — including that breaking its corpus-builder makes it fail rather
+  than report clean. It was a heredoc in `ci.yml`, and both defects above
+  shipped through review because a heredoc cannot be run without pushing a
+  branch.
+
 ## Scaffold: what `lgs` does and does not do
 
 `lgs new` **cannot generate a module project** — its templates are LEZ zkVM
@@ -306,6 +476,13 @@ module's flake ref, orders builds by dependency, and derives the sibling
 `lgs basecamp build` does **not** need `lgs basecamp setup` — a hand-authored
 `[modules.*]` table builds in a fresh checkout with no `.scaffold/` at all.
 Only `install` and `launch` need `setup`.
+
+**`install` is also where a wrong pairing first shows.** `[repos.basecamp].attr`
+and `[repos.lgpm].attr` select a dev or a portable stack, and the two halves
+must match; `nix flake show` cannot tell them apart, because both attrs build
+the same version and the split is in the build rather than the version string.
+`docs/SCAFFOLD.md` carries the pairing and the error it fails with — along with
+the rest of the reasoning `lgs` strips out of `scaffold.toml`.
 
 ## How to shape a change
 

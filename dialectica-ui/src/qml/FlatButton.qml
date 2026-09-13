@@ -11,11 +11,11 @@ Rectangle {
 
     readonly property bool filled: kind !== "secondary"
 
-    color: kind === "primary" ? Theme.ink
-         : kind === "destructive" ? Theme.accent
+    color: kind === "primary" ? DTheme.ink
+         : kind === "destructive" ? DTheme.accent
          : "transparent"
-    border.width: filled ? 0 : Theme.hairline
-    border.color: Theme.ink
+    border.width: filled ? 0 : DTheme.hairline
+    border.color: DTheme.ink
     implicitWidth: label.implicitWidth + (filled ? 36 : 32)
     implicitHeight: label.implicitHeight + (filled ? 16 : 14)
 
@@ -23,8 +23,8 @@ Rectangle {
         id: label
         anchors.centerIn: parent
         text: root.text
-        font: Theme.body
-        color: root.filled ? Theme.paper : Theme.ink
+        font: DTheme.body
+        color: root.filled ? DTheme.paper : DTheme.ink
         textFormat: Text.PlainText
     }
 

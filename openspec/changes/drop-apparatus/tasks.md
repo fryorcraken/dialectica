@@ -341,3 +341,79 @@ done. Two of the seven describe a tree that had already moved — the review rea
       cost it accepts (two modes that can drift) stated. `design.md` §6 carried
       the same false sentence and is corrected to match.
 - [x] 10.8 Gates after all of the above — see §11.
+
+## 11. Merging `main`, and the eleven notes the owner decided to delete
+
+`main` moved a long way while this piece was in review: #67 renamed the theme
+singleton, #77/#79 rewrote the QML runner, and #60/#63 added three screens.
+Six files conflicted. Each resolution below was verified rather than assumed.
+
+- [x] 11.1 **Establish which merge-tree stage is which**, because the number
+      depends on merge direction and a previous brief assumed it wrongly.
+      `git merge-tree --write-tree origin/main HEAD` puts `origin/main` at
+      **stage 2** and the piece at **stage 3** — proved by resolving
+      `origin/main:<path>` and `HEAD:<path>` with `git rev-parse` and matching
+      all eight blob hashes, not by reading the documentation.
+- [x] 11.2 **`ApparatusColumn.qml` and `MarginNote.qml` — modify/delete, both
+      deleted.** `main`'s only change to either is #67's `Theme.` → `DTheme.`
+      rename, measured by diffing the base blob against `main`'s. A rename
+      applied to a file that is going away is not a reason to keep the file.
+- [x] 11.3 **`run-qml-tests.sh` — took `main`'s wholesale.** `main` grew this
+      branch's single-spec mode independently and added `check_bindings` and
+      `--import` on top. Proved byte-identical to `origin/main`'s blob with
+      `git hash-object` (`8802141`) after `checkout --theirs`. `proposal.md`'s
+      Impact entry claiming this change adds the mode is corrected rather than
+      left moot.
+- [x] 11.4 **`CLAUDE.md`, `FeedScreen.qml`, `ScreenFrame.qml` — genuine
+      three-way merges**, each keeping this piece's work and `main`'s. `CLAUDE.md`
+      keeps the piece's *UI-BRIEF* row **and** `main`'s new `RUNNER.md` row;
+      `ScreenFrame` keeps the one-column reshape and drops the `apparatus` alias
+      `main` documented; `FeedScreen` keeps the empty tail where the three notes
+      were.
+- [x] 11.5 **Delete the eleven `MarginNote` instantiations `main` added**, on the
+      owner's explicit decision — no migration, no rewriting as body copy.
+      `DJoinScreen` (4), `DStoaListScreen` (4), `DOnboardingScreen` (3). Every
+      note is recorded verbatim in `design.md` §9, including the two sentences
+      that existed nowhere else, so nothing needs reconstructing from git history.
+- [x] 11.6 **Rewrite `DOnboardingScreen`'s body-copy comment**, which argued from
+      "the margin note stays" and pointed at "the apparatus note below" — both
+      false once the notes went. The reasoning that survives (why the obligation
+      is in the body, why no word count) is kept; the orphaned premises are gone.
+- [x] 11.7 **Sweep the whole `dialectica-ui/` tree for stale bare `Theme.`**, not
+      only the files touched. The merge left five live reads in this branch's own
+      new code — `FeedScreen.qml:413,414,674,698,699` — plus five in
+      `ScreenFrame.qml`, all written correctly for a pre-#67 world and stale
+      after it. A stale `Theme.` resolves into basecamp's host namespace, reads
+      `undefined`, and renders as an unstyled default without failing any build.
+      `check_qml_names.py` now reports **ok across 29 QML files and 17 qmldir
+      entries**.
+- [x] 11.8 **Three test edits the merge forced**, each argued in `design.md` §9
+      rather than fixed to whatever turned the suite green: one obsolete
+      guard-on-a-guard deleted, one count-pin (`shown.length > 5`, broken by a
+      legitimate change) replaced by the named-sentence check it stood in for,
+      one `screen.apparatus.length` dereference guarded. The last was **proved
+      still able to fail** by mutating the body sentence — it reported *"Found 0
+      carrier(s), 0 of them in apparatus"* — and the mutation reverted.
+- [x] 11.9 **Drop `MarginNote` and `ApparatusColumn` from `check_qml_names.py`'s
+      `GRANDFATHERED` set**, since their components no longer exist. An exemption
+      for a deleted file exempts nothing and grows a list the gate's own comments
+      ask a reader to shrink — the "hand-maintained sweep lists go stale
+      silently" trap. The comment above the set described it as "eleven", a count
+      this change would have falsified; it now describes the set instead of
+      counting it. `tst_check_qml_names.py` builds its fixtures from `Core` and
+      `Identicon`, so neither name was pinned and all 17 cases still pass.
+- [x] 11.10 **Correct four claims in `proposal.md` and `design.md` that the merge
+      falsified**, rather than leaving them to read as current: `composer-view`
+      and `stoa-navigation-view` are no longer unmerged; `compose.apparatus` is
+      now settled by the merged spec, which requires the statement *"in the
+      closed gate's own body"* and explicitly not in any region; and the
+      `ON PUBLISHING` note is gone because #62 deleted it and discharged the
+      denial in `DPublishOutcome`. Each re-measured against the merged tree.
+- [x] 11.11 **Gates and suite.** `check_qml_names.py`, `tst_check_qml_names.py`,
+      `check_qml_members.sh`, `tst_check_qml_members.sh` all green;
+      `run-qml-tests.sh` exits **0** across 11 spec files with 0 failed.
+      `qmllint` exits 0 on every changed file — its remaining "Unqualified
+      access" warnings are pre-existing `Repeater`-delegate noise, confirmed by
+      running the same lint against a pristine `origin/main` checkout.
+      `qmlformat -n` parses every edited file, and no edited file contains the
+      multi-declarator `for` init that Qt 6.8.3 miscompiles.

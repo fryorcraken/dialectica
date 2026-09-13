@@ -1,6 +1,50 @@
 pragma Singleton
 import QtQuick
 
+// `DTheme`, not `Theme`, and the D is the whole point.
+//
+// Basecamp registers a QML type called `Theme`, in its own C++ type
+// registration. While this file was called `Theme.qml`, basecamp's won: every
+// `Theme.x` in every view resolved to basecamp's object instead of to this one,
+// every token came back `undefined`, and QML fell back to its defaults: white
+// ground, black system text, no spacing, no borders. One name collision took
+// the entire visual system out at once, and the reported symptom was 89 errors
+// on a screen that could not render.
+//
+// THE COLLISION LIVES IN THE HOST'S C++ REGISTRATION. That is the load-bearing
+// fact, and everything below follows from it.
+//
+// A premise this project held and withdrew, named because it is the intuitive
+// wrong answer: that a host registration "outranks a plugin directory's
+// `qmldir` entry" — that the two compete on precedence and the host wins.
+// Measured on Qt 6.10.3 and FALSE. Staging a competing `Theme` singleton in a
+// second directory and handing it to `qmltestrunner` via `-import` does not
+// shadow this directory's `qmldir` entry, and neither does making that
+// directory a named module on the import path. A file-based competitor is not
+// in a contest it can win.
+//
+// `Core` resolved correctly in the same files with the same imports, purely
+// because basecamp has no `Core` — so "our other singleton works" is never
+// evidence that a name is safe.
+//
+// A prefix rather than a module URI: a name nothing in the host can claim
+// cannot be shadowed by anything basecamp registers later.
+//
+// WHAT NO COMPONENT TEST CAN SEE follows from where the collision lives. Under
+// `qmltestrunner` the host is simply absent, so `verify(DTheme.paper !==
+// undefined)` cannot fail ON THE COLLISION — there is no competitor present for
+// it to lose to.
+//
+// Be precise about that, because the broader claim is false and was measured:
+// the assertion is NOT a check that cannot fail. It fails if this singleton is
+// renamed, if its `qmldir` entry is dropped, or if this file goes missing — a
+// probe spec confirms `DTheme.paper` resolves while an undeclared `Theme.paper`
+// throws. It is blind to the host collision specifically, and to nothing else.
+// The overbroad version of this sentence is what stopped anyone examining
+// qmllint's `missing-property`, so it cost something.
+//
+// The gate is therefore the static `no QML type name collides with the host`
+// step, which runs `dialectica-ui/tests/check_qml_names.py`.
 QtObject {
     // ---- surfaces -------------------------------------------------------
     readonly property color desk:      "#d9d2c2"   // behind the cards
