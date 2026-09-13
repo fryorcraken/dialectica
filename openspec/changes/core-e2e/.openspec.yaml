@@ -1,0 +1,16 @@
+# `schema` is REQUIRED for this file to be valid change metadata, and without it
+# `skip_specs` is silently NOT HONOURED — `openspec validate --strict` reports
+# the marker as ignored and then fails for having no deltas, which reads as two
+# problems rather than one. It must name a known schema; this project's is the
+# built-in `spec-driven`, set in `openspec/config.yaml`.
+schema: spec-driven
+
+# No spec delta: this change adds a test target, not a requirement.
+#
+# `openspec validate` rejects a zero-delta change without this marker, and the
+# marker is the honest answer rather than a workaround: every behaviour the new
+# target asserts is already contracted by `op-log`, `module-wire-contract`,
+# `moderation-resolution` and `stoa-genesis`. Adding a requirement so that
+# validation passes would put a clause in the contract that describes a test
+# rather than the system.
+skip_specs: true

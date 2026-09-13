@@ -11,7 +11,7 @@ committed.
 
 ## Defects
 
-- [ ] **`dev-writer`** — `.github/workflows/ci.yml:694-697` — the `examples/`
+- [x] **`dev-writer`** — `.github/workflows/ci.yml:694-697` — the `examples/`
       paragraph argues the opposite of what the gate does
       The comment states: *"If an example ever grows a `#[test]`, this gate fails
       — correctly, because that test would never be run."* It does not fail. The
@@ -38,7 +38,27 @@ committed.
       **Severity: medium** (a false claim about what a green gate proves, which
       `.claude/agents/README.md` names as the worst kind).
 
-- [ ] **`tester`** — `end_to_end.rs:1417-1420` — the vote test's comment claims a
+      **Fixed** in `5a1719b`, taking the second of your two options — `examples/`
+      is now in scope, so the claim is true rather than deleted. The three-root
+      list became one `rglob` over `dialectica/rust-lib` with
+      `if "target" in p.parts: continue`; this is also the architecture entry on
+      the same lines, and one change answers both.
+
+      **Reproduced your measurement first, then re-ran it against the fix.** With
+      your `examples/probe.rs` restored on the merged tree: the old three-root
+      shape counts 530 and cargo runs 530 — green, exactly as you measured. The
+      new rglob counts **531** while cargo still runs 530 and reports
+      `a_test_inside_an_example` in no `Running` line, so `ran != declared` fires.
+      (530 rather than your 495 because `origin/main` was merged in between; #54
+      landed 31 tests. Your arithmetic was right for the tree you measured.)
+
+      Your two rebuttals to the comment's objections were the deciding argument
+      and both check out: `target/` is a one-line exclusion, and there is exactly
+      one `target/` in the tree. The comment now quotes **no number at all**,
+      because both move with every test added — the self-invalidating form
+      CLAUDE.md asks for.
+
+- [x] **`tester`** — `end_to_end.rs:1417-1420` — the vote test's comment claims a
       shape-pinning assertion the test does not make
       *"Pinned by the row's own shape: if a score is ever added, this comparison
       against a fully-specified row fails and someone has to decide what the view
@@ -57,7 +77,26 @@ committed.
       sentence. **Severity: medium** — this comment is the file's stated
       justification for the test existing at all.
 
-- [ ] **`dev-writer`** — `end_to_end.rs:1216-1218` — a fabricated ordinal
+      **Fixed** in `1342aa9` — wrote the destructure you suggested, rather than
+      deleting the sentence, because the claim is worth having true.
+
+      **Your mutation re-run against it:** `pub score: i64` on `feed::FeedRow` set
+      to `7` at the construction site now fails with
+      `error[E0027]: pattern does not mention field 'score'`. That is better than
+      the failing assertion the comment promised — it fails to **compile**, so it
+      cannot be skipped, filtered out, or left to a `--no-fail-fast` run nobody
+      reads. The comment now says that is what it does, and credits the
+      measurement that showed the previous form passing.
+
+      Two things came out of writing it. The outer `author` key had to be renamed
+      `poster`, because the destructured `FeedRow.author` field shadowed it — and
+      the attribution assertion is precisely that the two differ, so a shadow
+      there would have been the test agreeing with itself. And the row's `author`
+      is now asserted equal to the poster's derived address **and** `assert_ne!`
+      against the voter's, which is the attribution a vote-rendering bug would
+      actually produce.
+
+- [x] **`dev-writer`** — `end_to_end.rs:1216-1218` — a fabricated ordinal
       citation of the project's defect list
       *"A test using only `u32::MAX` would pass under that tightening — which is
       the second entry on this project's list of tests that could not fail for
@@ -75,7 +114,19 @@ committed.
       `op.rs:1632-1640` — or drop the ordinal. **Severity: medium**; this is the
       persuasive-fabricated-citation family the project has been bitten by twice.
 
-- [ ] **`dev-writer`** — `end_to_end.rs:12-17` — the header's argument for
+      **Fixed** in `1342aa9`, taking your first option: the ordinal is gone and
+      the comment now cites `op.rs`'s own argument, restating its substance (an
+      absurd value is ~28,000x the cap, so it proves *a* cap exists and nothing
+      about *where*) rather than pointing at a line number.
+
+      **Confirmed your reading of the list**, and it is worse than a wrong
+      ordinal — the cap case is not on the list at all. One point in your favour
+      that strengthens the finding: the list has moved to `README.md:308` on the
+      merged tree, so even a *correct* line-number citation would now be wrong.
+      That is why the replacement cites by symbol name and quotes the argument
+      instead.
+
+- [x] **`dev-writer`** — `end_to_end.rs:12-17` — the header's argument for
       hardcoding `FIELD_CAP` rests on a premise `op.rs` disproves
       *"a crate whose public surface was missing a method entirely would pass
       every one of them"* is fine; the next claim is not: *"a cap that silently
@@ -93,7 +144,24 @@ committed.
       cannot see a private const), so say *that* rather than a claim about the
       unit suite's coverage. **Severity: low** — wrong premise, right conclusion.
 
-- [ ] **`dev-writer`** — `end_to_end.rs:448` — the section header says "three
+      **Fixed** in `1342aa9`. The header now gives reach as the whole reason — an
+      integration test cannot see a private `const` — and then says explicitly
+      that this is *not* because nothing else pins the caps, naming both
+      `op.rs::the_field_cap_is_pinned_to_a_known_answer` and `stoa.rs`'s
+      equivalent, so a reader learns a drifted cap has two other tests to argue
+      with before it reaches this one.
+
+      Your "wrong premise, right conclusion" framing is exactly the distinction,
+      and it is recorded in `design.md` as its own decision — the answer to
+      "should a test import a constant?" is about **reach**, not strength, and the
+      next person to ask deserves the right reason rather than the right verdict.
+
+      Cited by symbol rather than line: your own two references to this test
+      (`op.rs:1631` in the prose, `op.rs:1650` in the measurement) point at the
+      test and its assertion respectively — both correct, and between them a good
+      argument for keeping line numbers out of comments.
+
+- [x] **`dev-writer`** — `end_to_end.rs:448` — the section header says "three
       boundaries" over a section holding four, and the fourth test says so
       `// ─── Empty versus unreadable, at three boundaries ───` is followed by
       four `#[test]`s (empty store, foreign layout version, mislabelled layout,
@@ -108,7 +176,16 @@ committed.
       and cannot go stale. **Severity: low** (stylistic in effect, but it is the
       same failure shape as the numeric claims above).
 
-- [ ] **`dev-writer`** — `end_to_end.rs:25-29` — "The three bugs that reached
+      **Fixed** in `1342aa9`, taking your suggested wording verbatim — the heading
+      is now "Empty versus unreadable, at each boundary a read can fail at".
+
+      Generalised rather than fixed in one place, because you are right that it is
+      the same failure shape: the header now carries a sectioning rule whose third
+      clause is that **a heading states the boundary and never a count**, so the
+      next section added cannot reintroduce this. That rule also answers the
+      architecture entry about sections having no home for the pieces in flight.
+
+- [x] **`dev-writer`** — `end_to_end.rs:25-29` — "The three bugs that reached
       this session's review" is an uncited count
       *"The three bugs that reached this session's review were each
       **cross-layer**: encode versus decode, wire versus store, memory versus
@@ -125,7 +202,19 @@ committed.
       between encode and decode…"). **Severity: low**, but it is precisely the
       shape `.claude/agents/README.md:294-300` was written about.
 
-- [ ] **`tester`** — `end_to_end.rs:456` and `end_to_end.rs:1148` — two test
+      **Fixed** in `1342aa9`, taking your second option — the count is gone and the
+      sentence now argues from the shape of the defect, which is what it needed to
+      do all along. Your first option was not available: I re-ran your grep and got
+      the same nothing, so there is no archive path to name. Rather than leave that
+      implicit, the paragraph now **says** no count is given and why, and names the
+      over-cap asymmetry as the one worked example the file can actually point to —
+      which it documents itself.
+
+      A count removed quietly would have read as a stylistic edit; saying "no count,
+      because none is recorded anywhere countable" is the thing that stops someone
+      re-adding one.
+
+- [x] **`tester`** — `end_to_end.rs:456` and `end_to_end.rs:1148` — two test
       names state two claims joined by `and`, so neither can fail on its own
       name
       `an_empty_store_answers_every_read_and_a_missing_file_is_a_created_one`
@@ -143,7 +232,37 @@ committed.
       **Severity: low / stylistic** — but it is the precedent question, and the
       matching unit tests are already split.
 
-- [ ] **`dev-writer`** — `end_to_end.rs:47-96` — the eleven-row mutation table
+      **Fixed** in `1342aa9`, both split, following `feed.rs`'s precedent as you
+      argued. The suite is 24 tests rather than 20 as a result.
+
+      **This was not stylistic, and your own reasoning is why.** You wrote that a
+      failure names a test whose other half is still true — and splitting the
+      paging pair produced exactly that case, in the opposite direction. Under this
+      file's `:memory:` mutation the new
+      `a_page_past_the_end_is_an_empty_page_rather_than_a_panic_or_a_wrapped_first_page`
+      **survived**: "page 99 is empty" is also what a store holding nothing
+      answers, so the test was passing on a fixture that had persisted no rows.
+      That defect was invisible while the claim was bundled with the tiling claim
+      that did fail — the bundle was hiding it, not merely obscuring which half
+      went.
+
+      A fixture guard asserting page 0 holds three rows fixes it, and the mutation
+      now kills **21 of 24** rather than 20. Measured both ways.
+
+      The empty-store split earns its keep more modestly: under the mutation making
+      `open` refuse a missing path, the creation half dies at its own assertion
+      (`a missing store is created, not refused`) while the other 17 deaths are at
+      the `dir.store()` fixture helper. Which is the "failure names the right
+      claim" property you were asking for.
+
+      Recorded in `design.md`, including the case that correctly survives —
+      `an_empty_store_answers_every_read…` is unaffected by the `:memory:`
+      mutation because an in-memory store genuinely answers every read empty, and a
+      test that survives a mutation which does not change what it claims is passing
+      rather than weak. Telling those two apart is the reason to run the mutation
+      instead of counting survivors.
+
+- [x] **`dev-writer`** — `end_to_end.rs:47-96` — the eleven-row mutation table
       has nothing that can keep it true
       The table's content is accurate today — I re-ran the load-bearing row and
       it reproduces exactly (see below) — and that is what makes it dangerous: it
@@ -164,6 +283,31 @@ committed.
       'measured once, at commit <sha>' list". As it stands the honest reading is
       "measured at 9bb2bc1", and nothing in the file says so. **Severity: low**
       — a documentation-durability defect, not a wrong claim.
+
+      **Fixed** in `1342aa9`, taking your second option. `9bb2bc1` is confirmed as
+      the commit — `git log --oneline -- <the test file>` returns it and nothing
+      else — and the table is now grouped by when each group was measured, with a
+      second group of seven rows for the mutations run while addressing these
+      findings.
+
+      **Rejected the half of your suggestion that says re-run before adding a
+      test**, and the argument is in the file: a later author owes this table
+      **almost nothing**. Re-running eleven mutations to add one test is a tax
+      nobody would pay, so a file demanding it would get a stale table *and* a
+      resented one. What the file asks instead is the same discipline for the new
+      test — mutate, predict, watch, add a row — plus one hard obligation: if you
+      rename or move something the table names, fix the row in that commit or
+      delete it. A row pointing at a symbol that no longer exists is worse than no
+      row, because it reads as though somebody checked.
+
+      Your "measured once" framing is what the file now says in as many words, and
+      the six symbol names you listed as rename-fragile are quoted in the warning.
+
+      **Your note-3 re-measurement was load-bearing beyond this box.** Re-running
+      that mutation at 24 tests turned up a test passing for the wrong reason —
+      see the split-names entry above. A table that nothing keeps true is still
+      the most useful thing in the file, which is an argument for dating it rather
+      than deleting it.
 
 ## Clean
 
