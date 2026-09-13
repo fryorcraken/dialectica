@@ -10,7 +10,7 @@ Baseline confirmed: **626 tests passing**.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `design.md:230` — **a third phantom name in this file's
+- [x] **`dev-writer`** — `design.md:230` — **a third phantom name in this file's
       `design.md`, and it is the one the brief asked for a sweep for.** The sentence
       reads "the test `the_timestamp_reaches_nothing_that_is_recorded` is what holds
       that." No such test exists.
@@ -31,7 +31,31 @@ Baseline confirmed: **626 tests passing**.
       citations now carry less weight than they earn, and two of the three previous
       ones were found by a reviewer rather than by the author.
 
-- [ ] **`dev-writer`** — `tasks.md:186` — **`tasks.md` contradicts itself about the
+      **Fixed**: the phantom name is gone. Both replacements were opened and read
+      before being cited, not grepped — `the_arrival_timestamp_is_not_recorded_as_ordering_metadata`
+      at `transport.rs:1110` and `the_timestamp_handed_in_does_not_change_what_is_recorded`
+      at `:1138`, exactly the lines you gave, and the second does iterate `i64::MIN`
+      and `i64::MAX` as I now claim it does (`:1148-1149`).
+
+      The sentence also stopped resting on test names at all, which is the actual
+      repair. The property holds **by construction**, and I checked that rather than
+      asserting it: `grep -n "timestamp" transport.rs` returns 25 hits, of which
+      exactly one outside module docs, comments and `mod tests` (which begins at
+      `:605`) is the struct field declaration at `:294`. There is no read on any
+      branch, so there is no path that could reach the field. The two tests are now
+      cited as witnesses of a property the type already guarantees, which is a claim
+      that cannot go phantom the way a bare name can.
+
+      On the pattern rather than the instance, since you are right that three makes
+      it one: the fix applied across this pass is to stop citing by *identifier*
+      where a property or a title will do. The same move was needed twice more
+      independently — `tasks.md` and `design.md` cited `docs/UI-BRIEF.md`'s
+      "obligation 7" by number, and merging `origin/main` at `b85111d` renumbered it
+      to 9, so the citation you verified as **true** became false through no edit of
+      ours. Both now cite the obligation by title. A name or number in a cross-file
+      citation is a claim that rots on someone else's commit; a property is not.
+
+- [x] **`dev-writer`** — `tasks.md:186` — **`tasks.md` contradicts itself about the
       `// NO SPEC:` marker within 47 lines.** §6 line 139 states: "**No `// NO SPEC:`
       marker remains in this change.**" §7 line 186 then says: "It is not, by anyone,
       and no test claims otherwise. **See the `// NO SPEC:` marker** and `design.md`."
@@ -48,6 +72,32 @@ Baseline confirmed: **626 tests passing**.
       **Severity: medium** — the brief lists this exact hazard ("check any count,
       duration or magnitude against a command"), and §7 is the one section whose
       whole job is to say honestly what the gate cannot see.
+
+      **Fixed.** §6 was right, as you say, so §7's bullet is the one that changed: it
+      now names the requirement "A successful publish is a statement about the local
+      log and nothing more" plus the `design.md` section, and states outright that it
+      *used* to point at a `// NO SPEC:` marker, that the marker went when the
+      `spec-writer` adopted the behaviour as that requirement, and that §6 is the
+      current claim. Written that way rather than silently swapped, because a reader
+      who remembers the old pointer needs to know which of the two ticked claims
+      survived and why — which was your stated cost.
+
+      **A second wrong claim in the same bullet list, which your box led me to and
+      did not name.** The bullet immediately below said the constant is pinned "and
+      the spec requires it equal the transport's stated limit". The spec requires the
+      opposite: it was rewritten in `b1af4e3` to say agreement with the network's
+      limit is **not** checkable here, because no limit reaches this capability from
+      the transport, and that a scenario claiming the two are compared "would be
+      comparing the constant against itself". So §7 — the honesty section — contained
+      a claim the spec had explicitly withdrawn. Corrected, with the withdrawal
+      named, since the previous wording is the more intuitive one and would otherwise
+      come back.
+
+      §7 also gained a third bullet, for the gap
+      `findings/correctness.md` entry 1 and `findings/security.md` entry 1 are about:
+      the suite now measures that a publishable op can be unreceivable, and nothing
+      refuses it at publish. A green gate that could not see that is exactly what §7
+      is for.
 
 - [ ] **`tester`** — `transport.rs:819` — **the test name
       `identity_does_not_vary_with_local_state` states a falsifiable claim the test
@@ -73,7 +123,7 @@ Baseline confirmed: **626 tests passing**.
       witness, and the file's other names are honest about their mechanism, which
       makes this one read as stronger than its neighbours rather than weaker.
 
-- [ ] **`dev-writer`** — `transport.rs:841` — **a dead binding standing in for an
+- [x] **`dev-writer`** — `transport.rs:841` — **a dead binding standing in for an
       assertion.** `let _another_peers_key = a_key(200).public_key();` with the
       comment "Another peer's identity in the same process, which is as close as a
       unit test gets to 'a different peer identity'."
@@ -90,7 +140,24 @@ Baseline confirmed: **626 tests passing**.
       **Severity: low** — cosmetic, but it is the one line in a 59-test file that a
       reader can mistake for a check.
 
-- [ ] **`dev-writer`** — `transport.rs:1911` — **`surrogputesque` is not a word**,
+      **Fixed**: the binding is deleted. Took the first of your two options — the
+      comment stays at the site and says the thing plainly — because the sentence is
+      about *this test's* scope, and moving it to the module doc would separate it
+      from the assertion a reader is calibrating.
+
+      What replaces it states what the line was and was not, rather than quietly
+      vanishing: that a binding constructing "another peer's key" used to sit here
+      and was never read, that it reached nothing because `of` takes no key, and that
+      the property is held by `of`'s signature and its private fields. So a reader
+      who wonders whether a peer identity is varied here gets the answer and the
+      reason, which is what the dead `let` was gesturing at without delivering.
+
+      No test changed behaviour, so nothing could fail: the binding participated in
+      no property, which was your finding. Verified by the suite staying at 742 and
+      clippy staying clean — a still-referenced binding would have failed to compile,
+      and an unused one would have tripped `-D warnings`.
+
+- [x] **`dev-writer`** — `transport.rs:1911` — **`surrogputesque` is not a word**,
       in the comment for `a_hostile_channel_or_sender_identifier_does_not_panic`:
       "control bytes, lone surrogputesque sequences expressed as valid UTF-8".
       The sentence it sits in is doing real work — it is the honest scope statement
@@ -103,6 +170,22 @@ Baseline confirmed: **626 tests passing**.
       `:1919-1929` is claimed to include them (it does not — `\u{FFFD}` is the
       replacement character, not a surrogate).
       **Severity: low** — stylistic, listed separately from the defects above.
+
+      **Fixed**, and not as a spelling correction, because your parenthesis is the
+      real finding: `\u{FFFD}` is the replacement character, so "surrogate" would
+      have been a **false** claim about the fixture list and "surrogate-esque" a
+      vague one. Neither is what the comment should say.
+
+      It now names what the fixtures actually are — NUL and other control bytes, the
+      replacement character, multi-byte characters at a boundary — and then states the
+      two exclusions separately and by reason: a `String` of raw invalid UTF-8 is
+      unrepresentable in Rust, and **so is a lone surrogate**, with `\u{FFFD}` called
+      out as what a decoder *substitutes* for one rather than as one itself. That
+      answers the exact question you said a reader could not resolve, in the clause
+      where they would ask it.
+
+      Nothing testable changed — it is a comment — so there is no failing test to
+      show, and I am not claiming one.
 
 ## Areas that are clean
 

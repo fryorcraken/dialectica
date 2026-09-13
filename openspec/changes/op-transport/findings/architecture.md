@@ -16,7 +16,7 @@ Worktree used for the mutation run and removed afterwards.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `transport.rs:573` and `authoring.rs:187` — **two
+- [x] **`dev-writer`** — `transport.rs:573` and `authoring.rs:187` — **two
       functions named `publish` in one crate, and the one a caller actually reaches
       never touches this capability.** `authoring::publish` signs and appends with
       `Arrival::unordered()` and then returns; `transport::publish` appends with
@@ -44,7 +44,29 @@ Worktree used for the mutation run and removed afterwards.
       not available, because the seam was placed beside an existing path rather than
       under it.
 
-- [ ] **`dev-writer`** — `transport.rs:312` and `authoring.rs:84` — **two public
+      **Deferred**, to `design.md` § "`transport::publish` is correct and unreached,
+      and wiring it is its own change". Every measurement here reproduces, and one
+      is stronger than reported: `grep -rn "transport::"` over both
+      `dialectica-core/src/` and `rust-lib/src/` returns **zero** hits, not merely
+      zero non-test ones — the module is reached from nowhere, including its own
+      siblings. `authoring.rs`'s four `use` lines confirmed, none `crate::transport`.
+
+      The runner ruled on this explicitly and the reasoning matches yours: wiring
+      means removing one of two `Arrival::unordered()` appends across two files,
+      each with a suite pinning the same ordering from the opposite side, and that
+      is a behaviour change to the **merged** `content-authoring` capability. It
+      needs its own change and its own reviewers, not a late edit inside this one.
+
+      Two things the deferral does **not** do, because both would misrepresent it.
+      It does not treat `transport.rs` as dead code — the `design.md` entry records
+      it as *correct and unreached*, and says explicitly that no finding was
+      downgraded for unreachability, since a finding parked as unreachable is one
+      nobody revisits. And it does not pretend the architectural cost is nil: the
+      entry states plainly that the make-it-easy move was available when the seam
+      was designed, was not taken, and is now paid by whoever wires it. That is your
+      finding's substance, recorded where it survives `findings/` being deleted.
+
+- [x] **`dev-writer`** — `transport.rs:312` and `authoring.rs:84` — **two public
       `Refusal` enums in one crate**, `dialectica_core::transport::Refusal` and
       `dialectica_core::authoring::Refusal`, with disjoint variant sets and no
       relation between them.
@@ -62,7 +84,33 @@ Worktree used for the mutation run and removed afterwards.
       is arguably `InboundRefusal`, since every variant is about a payload that
       arrived.)*
 
-- [ ] **`dev-writer`** — `transport.rs:171` — `ChannelIdentity::content_topic()`
+      **Fixed**: `transport::Refusal` → `transport::InboundRefusal`, taking your
+      suggested name and your reason for it — every variant here is about a payload
+      that **arrived**, so the qualifier is the type's subject rather than a
+      disambiguating suffix. `authoring::Refusal` is left alone: it is the merged
+      capability, and renaming the unmerged side is the contained half.
+
+      Contained is measured, not assumed: nothing outside `transport.rs` names the
+      type, so the diff is 56 occurrences in one file plus the enum declaration,
+      `impl Display`, `receive`'s return type and one test helper's signature.
+      `grep -rn "Refusal" dialectica-core/src/lib.rs` returns nothing, so there is
+      no re-export to update.
+
+      **Why now rather than when someone needs both** — which is your severity
+      argument, and it decided this: the rename is free *only* while nothing
+      consumes the type. It stops being free the moment the wiring lands, which is
+      the same change finding 1 defers. Doing it now is the one ordering where the
+      naming fix does not become part of a behaviour change to a merged capability.
+      The enum's doc comment records that reasoning at the type.
+
+      No test asserts a type *name*, so nothing failed and nothing needed to: this
+      is a rename the compiler verifies exhaustively. Proven green by `cargo clippy
+      --all-targets -- -D warnings` (clean for both our crates) and 742 tests
+      passing, and the non-exhaustive `match` in `every_refusal_variant` — which
+      exists to fail compilation when a variant is added — still compiles, so the
+      rename did not silently drop a variant.
+
+- [x] **`dev-writer`** — `transport.rs:171` — `ChannelIdentity::content_topic()`
       **has no caller outside this file's own tests**, and neither does the adapter
       that would need it. `grep -rn "content_topic()" dialectica/rust-lib/` returns
       8 hits, **all of them in `transport.rs`'s `mod tests`**, and
@@ -80,7 +128,28 @@ Worktree used for the mutation run and removed afterwards.
       box so it is a tracked consequence of splitting at `cfg(logos_scaffold)` rather
       than something a later reader discovers while wiring the send.
 
-- [ ] **`dev-writer`** — `transport.rs:521-542` — **`Publishable` makes forgetting
+      **Deferred**, to `design.md` § "What is left in the adapter, and why it is
+      three lines", which now carries a named list of the two consequences of that
+      split rather than only the honest "nothing here is compiled by `cargo test`".
+      Both your measurements reproduce: `grep -rn "content_topic"` over
+      `rust-lib/src/` returns nothing, and `grep -rn
+      "channelCreate\|channel_create"` there returns nothing either — the adapter
+      `design.md` describes as three lines is not written.
+
+      Accepted as stated rather than argued with, including the part that makes it
+      *not* dead code: deleting `content_topic()` would split `ChannelIdentity` back
+      into the two functions the type exists to prevent, so the value staying
+      unconsumed is the correct state and the test is what is owed. The `design.md`
+      entry names the specific cost you identified — the first consumer arrives with
+      nothing catching a topic/channel-id mix-up at the one call site where the two
+      are adjacent and look interchangeable — so whoever writes `channelCreate` reads
+      it as an obligation rather than rediscovering it.
+
+      No test added, deliberately: a test for this would have to reach the adapter,
+      which `cargo test` does not compile. Covering it with one that does not reach
+      it is the defect `tasks.md` §7 exists to avoid.
+
+- [x] **`dev-writer`** — `transport.rs:521-542` — **`Publishable` makes forgetting
       the send silent, and the seam is where the three owed things must attach.**
       The brief asks whether that is acceptable; measured, it is not yet, for a
       reason narrower than "a caller might forget". `Publishable` derives
@@ -100,6 +169,30 @@ Worktree used for the mutation run and removed afterwards.
       operation — which is the argument for `#[must_use]` plus an explicit
       `let _ = ` at that one site, not against it.
       **Severity: medium.**
+
+      **Fixed**: `#[must_use]` on `Publishable`, with your tracker argument recorded
+      at the type — that the attribute is the only compiler-visible signal separating
+      "dropped without sending" from "sent and never propagated", which is one of the
+      three things this change records as owed, so it is not a lint preference.
+      Confirmed as the crate's first: `grep -rn "must_use" dialectica-core/src/`
+      returned zero before this.
+
+      **It bit immediately, and not where either of us expected.** The attribute
+      turned up **two** silent discards that were not the deliberate one you named —
+      `a_published_op_does_not_depend_on_being_received_back:2317` and
+      `an_op_the_peer_already_holds_arriving_again_is_one_op:2331`, both
+      `publish(...).unwrap();` as a bare statement. `cargo clippy --all-targets -- -D
+      warnings` failed on both with `unused transport::Publishable that must be
+      used`. That *is* the can-it-fail proof, and it is stronger than a constructed
+      one: the lint found real sites rather than a fixture built to be found.
+
+      Both are legitimate discards — each test is about the log, and one builds its
+      echo from `op` rather than from the returned payload — so each got an explicit
+      `let _ =` with the reason written beside it, per your prescription. Your named
+      site, `a_send_failure_does_not_lose_the_op:2261`, already binds and then
+      `drop`s, which satisfies the attribute unchanged; it needed nothing.
+
+      Green after: clippy clean for both crates, 742 tests passing.
 
 ## Areas that are clean
 

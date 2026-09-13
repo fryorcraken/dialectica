@@ -173,6 +173,95 @@ cap "does NOT bound the total size of a decoded op, and must not be read as doin
 so". Aliasing them would make a later change to either silently change the other,
 and the spec pins this one's value against drift on its own terms.
 
+### The publish cap and the message limit leave a band of unreceivable ops, and closing it is a spec decision this change cannot take
+
+**Measured, in `a_body_at_the_authoring_cap_encodes_past_the_message_limit`:** a
+post whose body is exactly `authoring::MAX_BODY_LEN` encodes to **153,740 bytes**
+against a **153,600** limit — over by **140**, which is a minimal `Post`'s fixed
+wire overhead (version, kind, two 32-byte keys, two presence tags, two length
+prefixes, a 64-byte signature). `receive` refuses it as
+`TooLong { bytes: 153740, limit: 153600 }`. So the live `authoring::post` path
+signs, stores and reports success for an op **no conforming peer can receive**,
+with no error on either side: the author sees their post and nobody else ever
+will. Raised by review as `findings/correctness.md` entry 1 and
+`findings/security.md` entry 1 — the same defect under two dimensions, because the
+correctness consequence (a success that is not one) and the security consequence (a
+silent, content-length-controlled delivery failure on a censorship-resistant
+system) call for different judgements about the fix.
+
+**Every bound involved is individually correct**, which is why this is a gap rather
+than a bug in either:
+
+- `op::MAX_FIELD_LEN` caps **one variable-length field**, and its own docs say it
+  "does NOT bound the total size of a decoded op" — several capped fields sum well
+  past 150 KiB.
+- `authoring::MAX_BODY_LEN` **is** that field cap, deliberately one value and not
+  two, so the publish path cannot sign a body its own decoder refuses.
+- `MAX_MESSAGE_BYTES` bounds **a whole message**, against a network-wide gossipsub
+  validation limit this system cannot raise unilaterally.
+
+Nothing anywhere bounds **body + overhead** against the message limit. `op.rs`
+names the transport boundary as the home for a total bound, and that bound exists
+here — it is simply not consulted by the path that *creates* ops.
+
+**Why the obvious fix does not land in this change.** The reviewer's proposal — a
+publish-side guard on the encoded op against `MAX_MESSAGE_BYTES` — contradicts a
+**merged** requirement. `openspec/specs/content-authoring/spec.md` carries the
+scenario *"A body at the cap is published"*: a body of exactly `op-format`'s field
+cap SHALL publish successfully, and *"The publish cap and the format's field cap
+are one value"*. A total-size guard refuses that body, so it fails a scenario in a
+capability that is already in `openspec/specs/`, pinned by
+`a_maximal_body_publishes_rather_than_panicking`.
+
+That makes the choice a **contract decision across two capabilities**, not an
+implementation one, and there are at least three defensible answers with different
+blast radii:
+
+1. **Lower `MAX_BODY_LEN`** to `MAX_MESSAGE_BYTES` minus the worst-case overhead.
+   Cheapest to implement; breaks `content-authoring`'s "one value" scenario
+   outright, and the worst-case overhead is a number that has to be derived and
+   then defended against every future op field.
+2. **Guard the encoded total at publish**, adding a refusal variant. Keeps both
+   caps; still fails "A body at the cap is published", and moves the refusal from a
+   field the user typed to a total they cannot see, so the message has to explain
+   a budget rather than a limit.
+3. **Accept the band and report it** — publish succeeds, and the peer records that
+   this op is over the message limit and will not propagate. This is the only one
+   that does not contradict a merged scenario, and it is unbuildable here: it is a
+   *delivery outcome*, which is precisely the thing this change records as owed and
+   unbuilt (see the section above, and the three owed things).
+
+Option 3 being the consistent one is not a coincidence. The band is the same
+underlying gap as the delivery-outcome obligation, seen from the publish side: in
+both cases a peer reports success for an op whose propagation it has established
+nothing about. **A change that closes the band without answering the delivery
+outcome would have to pick 1 or 2, contradict a merged spec, and do it without the
+reviewers of `content-authoring` in the room.**
+
+**What this change does instead**: pins the measurement in the suite, so the band
+is a checked number rather than a claim, and fails loudly if either cap moves in a
+way that changes the arithmetic. The test asserts `payload.len() == MAX_BODY_LEN +
+overhead` from measured values rather than against a literal `153_740`, because a
+literal would sit off the boundary after a drifted cap and pass while testing
+nothing — the same defect `the_publish_body_cap_is_the_format_field_cap` exists to
+prevent in `authoring.rs`.
+
+**This is live now and does not wait on the `transport` wiring.** The creating half
+(`authoring::post`) is reached from `wire.rs::publish_post`; the refusing half is
+`receive`, which is what every *other* peer's build runs. Two peers is all it takes.
+
+**A fourth option ruled out by measurement, recorded so it is not re-proposed:**
+raise `MAX_MESSAGE_BYTES` to make room for the overhead. Setting it to
+`150 * 1024 + 1024` to prove the new test can fail broke a third test nobody
+expected — `an_op_at_the_limit_is_admitted` failed with
+`Undecodable(FieldTooLong(154484))`. That fixture builds a payload sitting exactly
+on the message limit by padding a body, so raising the limit demands a body **above
+`MAX_FIELD_LEN`**, which the decoder then refuses. The two caps are coupled tightly
+enough that the fixture for one becomes unbuildable when the other moves. Raising
+the message limit is also not ours to do — it is a network-wide gossipsub
+validation limit, not unilaterally raisable — but this is the local reason it would
+not even be self-consistent.
+
 ### Publish stores first, then hands the bytes out — and the store failure is the only one this function can have
 
 The spec's ordering requirement, implemented as: append to the log; if that fails,
@@ -226,8 +315,15 @@ absorbed." This change is the boundary that comment was written for.
 
 The `timestamp` parameter is accepted and dropped. It is in the signature because
 the event carries it and a boundary that did not take it would be hiding the
-field rather than refusing it; it reaches nothing, and the test
-`the_timestamp_reaches_nothing_that_is_recorded` is what holds that.
+field rather than refusing it; it reaches nothing. Two tests hold that, from the
+two sides it can fail on:
+`the_arrival_timestamp_is_not_recorded_as_ordering_metadata` (nothing recorded
+carries it) and `the_timestamp_handed_in_does_not_change_what_is_recorded`
+(varying it, including `i64::MIN` and `i64::MAX`, changes nothing stored).
+Stronger than either, and the reason this property is not merely tested: outside
+`#[cfg(test)]` and the doc comments, `timestamp` appears only as a struct field
+declaration — there is no read on any branch, so there is no path that could
+reach it.
 
 **Not `from_parts(None, None)`.** Reaching the same value the general way would
 make the absence look like a recording of what arrived, where `unordered()` is a
@@ -329,6 +425,59 @@ envelope, which was observed live and is not in the contract's type.
 **Nothing in the adapter is compiled by `cargo test`**, so any property that
 holds only there is untested by definition. Said plainly rather than covered by a
 test that does not reach it.
+
+**Two consequences of that split are worth naming as owed, not as clean.** Raised
+by review (`findings/architecture.md` entry 3):
+
+- **`ChannelIdentity::content_topic()` has no consumer.** Its only callers are this
+  file's own tests, and the adapter that would call it — the `channelCreate`
+  handler — is not written; `grep -rn "channelCreate\|channel_create"` over
+  `dialectica/rust-lib/src/` returns nothing. The topic is nonetheless half of what
+  makes `ChannelIdentity` one type rather than two functions a caller could invoke
+  with two different addresses, and that argument holds whether or not anything
+  reads the value yet. What the gap costs is specific: the **first** real consumer
+  arrives with no test showing the topic reaching `channelCreate`, and nothing to
+  catch a topic/channel-id mix-up at the one call site where the two are adjacent
+  and interchangeable-looking. This is not dead code to delete — deleting it would
+  split the type — it is a test the adapter owes on the day it exists.
+- **`transport::publish` has no production caller.** See the next section.
+
+### `transport::publish` is correct and unreached, and wiring it is its own change
+
+`grep -rn "transport::"` over `dialectica/rust-lib/` finds **zero non-test call
+sites**. `authoring.rs` carries its own private `publish` that signs, appends with
+`Arrival::unordered()` and returns, and does not import `crate::transport` at all;
+the live path (`authoring::post`/`reply`/`vote`, reached from `wire.rs`) goes
+through that one. Raised by review as `findings/architecture.md` entry 1, severity
+high, on the ground that the seam was placed *beside* an existing path rather than
+under it.
+
+**Recorded as unreached, not as dead.** The distinction matters for how the other
+findings read: a security property here is not downgraded for being unreachable,
+because it becomes live the moment the wiring lands, and a finding parked as
+unreachable is one nobody revisits.
+
+**Why the wiring is not this change's work.** `content-authoring` is merged, and
+its spec requires each publish operation to sign, append **and hand it to
+delivery**. Satisfying that means `authoring::post` reaching `transport::publish`
+— at which point the op is appended **twice** unless one of the two appends is
+removed, and both choices are behaviour changes to a merged capability:
+
+- Removing `authoring`'s append moves a requirement `authoring`'s own suite pins.
+- Removing `transport`'s makes `transport::publish` a pure derivation, which no
+  longer earns the store-first ordering argument its doc comment is built on — and
+  that ordering is the thing preventing an op reaching the network while its author
+  does not hold it.
+
+So the reshape lands in two files with two suites asserting the same ordering from
+opposite sides, and it needs its own change and its own reviewers rather than a
+late edit inside this one. The runner ruled on this explicitly: it does not block
+this piece.
+
+**What is genuinely lost by deferring**, stated so the next change does not have to
+rediscover it: the "make the change easy, then make the easy change" move was
+available at the point the seam was designed and was not taken. The easy change is
+not available now — that is the cost, and it is paid by whoever wires it.
 
 ## Risks / Trade-offs
 

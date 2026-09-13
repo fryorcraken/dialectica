@@ -296,6 +296,21 @@ pub struct InboundMessage<'a> {
 
 /// Why an inbound payload was refused.
 ///
+/// # Named `InboundRefusal` and not `Refusal`, because the crate already has one
+///
+/// `authoring::Refusal` exists, with a disjoint variant set and no relation to
+/// this. Two public `Refusal`s in one crate is a collision that gets resolved by
+/// whoever needs both first, under time pressure, at the call site rather than in
+/// the types — and the call site that needs both is the one this change's seam is
+/// for: a handler reporting a publish that then hands off to delivery. `stoa.rs`
+/// and `op.rs` each name their error for what it is (`GenesisError`, `OpError`);
+/// this follows them. Every variant here is about a payload that **arrived**, so
+/// the qualifier is the type's actual subject rather than a disambiguating suffix.
+///
+/// Renamed on review (`findings/architecture.md` entry 2) while it was still free
+/// to do: nothing outside this module names the type yet, so the diff is contained
+/// to one file. It stops being free the moment the wiring lands.
+///
 /// # Each variant is a different cause with a different response
 ///
 /// The spec requires the five refusals be "reported distinguishably from the
@@ -304,12 +319,12 @@ pub struct InboundMessage<'a> {
 /// sending more than the network permits are five problems, and a boundary that
 /// said only "invalid" would send someone looking in the wrong place.
 ///
-/// [`Refusal::Undecodable`] **carries** the decoder's own error rather than
+/// [`InboundRefusal::Undecodable`] **carries** the decoder's own error rather than
 /// flattening it to a string: `op-format` already distinguishes eleven ways a byte
 /// string is not an op, and discarding that one layer after the code that produced
 /// it is the same mistake at a smaller scale.
 #[derive(Debug, PartialEq, Eq)]
-pub enum Refusal {
+pub enum InboundRefusal {
     /// A payload on a channel identifier this peer has no open channel for.
     ///
     /// Not an error about the op: this peer was not listening, so nothing about
@@ -347,22 +362,22 @@ pub enum Refusal {
     Storage(OpLogError),
 }
 
-impl std::fmt::Display for Refusal {
+impl std::fmt::Display for InboundRefusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Refusal::UnknownChannel => {
+            InboundRefusal::UnknownChannel => {
                 write!(f, "no channel is open under that channel identifier")
             }
-            Refusal::TooLong { bytes, limit } => write!(
+            InboundRefusal::TooLong { bytes, limit } => write!(
                 f,
                 "the payload is {bytes} bytes, over the {limit} a single message may carry"
             ),
-            Refusal::Undecodable(e) => write!(f, "the payload is not an op: {e}"),
-            Refusal::FailsVerification => write!(
+            InboundRefusal::Undecodable(e) => write!(f, "the payload is not an op: {e}"),
+            InboundRefusal::FailsVerification => write!(
                 f,
                 "the op's signature does not verify under the author it claims"
             ),
-            Refusal::StoaMismatch {
+            InboundRefusal::StoaMismatch {
                 named,
                 channel_is_for,
             } => write!(
@@ -371,7 +386,7 @@ impl std::fmt::Display for Refusal {
                 named.to_hex(),
                 channel_is_for.to_hex()
             ),
-            Refusal::Storage(e) => write!(f, "the op could not be stored: {e}"),
+            InboundRefusal::Storage(e) => write!(f, "the op could not be stored: {e}"),
         }
     }
 }
@@ -440,15 +455,15 @@ pub fn receive<L: OpLog>(
     message: InboundMessage<'_>,
     channels: &OpenChannels,
     log: &mut L,
-) -> Result<Admitted, Refusal> {
+) -> Result<Admitted, InboundRefusal> {
     let channel_stoa = *channels
         .stoa_of(message.channel_id)
-        .ok_or(Refusal::UnknownChannel)?;
+        .ok_or(InboundRefusal::UnknownChannel)?;
 
     // BEFORE the decode. The spec requires it, and the reason is that this is the
     // one bound whose input size an attacker chooses freely.
     if message.payload.len() > MAX_MESSAGE_BYTES {
-        return Err(Refusal::TooLong {
+        return Err(InboundRefusal::TooLong {
             bytes: message.payload.len(),
             limit: MAX_MESSAGE_BYTES,
         });
@@ -456,17 +471,17 @@ pub fn receive<L: OpLog>(
 
     // The WHOLE payload, so no prefix is decoded in isolation. `Op::decode`'s
     // trailing-bytes check is what makes that true of a valid op followed by junk.
-    let signed = SignedOp::from_bytes(message.payload).map_err(Refusal::Undecodable)?;
+    let signed = SignedOp::from_bytes(message.payload).map_err(InboundRefusal::Undecodable)?;
 
     if !signed.verify() {
-        return Err(Refusal::FailsVerification);
+        return Err(InboundRefusal::FailsVerification);
     }
 
     // The comparison that refuses an authentic op copied onto another Stoa's
     // channel. Whole-address equality, never a prefix: `Address` is `PartialEq`
     // over `[u8; 32]`, so there is no shorter comparison available to write.
     if signed.op.stoa != channel_stoa {
-        return Err(Refusal::StoaMismatch {
+        return Err(InboundRefusal::StoaMismatch {
             named: signed.op.stoa,
             channel_is_for: channel_stoa,
         });
@@ -479,7 +494,7 @@ pub fn receive<L: OpLog>(
     // and `message.sender_id` reach nothing here, by design.
     let appended = log
         .append(signed, Arrival::unordered())
-        .map_err(Refusal::Storage)?;
+        .map_err(InboundRefusal::Storage)?;
     Ok(Admitted { id, appended })
 }
 
@@ -534,7 +549,24 @@ impl std::fmt::Display for PublishError {
 /// preimage is something any relay may rewrite. Everything a receiving peer needs
 /// — the Stoa, the author key, the kind, the target — is already inside the signed
 /// bytes.
+///
+/// # `#[must_use]`, because dropping one is indistinguishable from sending one
+///
+/// The tracker this seam is for keys a delivery outcome back to an op by this
+/// struct's `id` and `channel_id`, which means it must observe **every**
+/// `Publishable` that was sent. A `Publishable` dropped on a path that forgot to
+/// send is, to that tracker, identical to one sent and never propagated — and
+/// telling those two apart is precisely one of the three things this change
+/// records as owed. So the attribute is not a lint preference: it is the only
+/// compiler-visible signal separating the two states.
+///
+/// Dropping one is still a legitimate operation — `a_send_failure_does_not_lose_the_op`
+/// drops one deliberately, to witness that the log survives — so the attribute is
+/// paired with an explicit `let _ =` at that one site rather than omitted. An
+/// explicit discard states the intent; a silent one cannot be told from a mistake.
+/// This is the first `#[must_use]` in the crate.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[must_use]
 pub struct Publishable {
     pub id: OpId,
     pub channel_id: String,
@@ -652,7 +684,7 @@ mod tests {
 
     /// A [`MemoryOpLog`] whose `append` refuses.
     ///
-    /// **The only route by which a test reaches [`Refusal::Storage`] and
+    /// **The only route by which a test reaches [`InboundRefusal::Storage`] and
     /// [`PublishError::NotStored`].** Both variants are constructed by the
     /// implementation and neither was reachable from a test before this existed,
     /// because `MemoryOpLog::append` cannot fail — so the assertions naming them
@@ -836,9 +868,11 @@ mod tests {
             let _ = publish(op, &channels, &mut log);
             channels.close(&ChannelIdentity::of(&stoa));
         }
-        // Another peer's identity in the same process, which is as close as a
-        // unit test gets to "a different peer identity".
-        let _another_peers_key = a_key(200).public_key();
+        // A binding constructing "another peer's key" used to sit here, never
+        // read. It reached nothing — `of` takes no key — so it was a line a
+        // reader could mistake for a check. That a caller cannot supply a
+        // per-peer value is held by `of`'s signature and its private fields,
+        // which is where the argument belongs rather than in a dead `let`.
 
         assert_eq!(
             ChannelIdentity::of(&stoa),
@@ -1031,7 +1065,7 @@ mod tests {
         )
         .unwrap_err();
 
-        assert_eq!(refusal, Refusal::FailsVerification);
+        assert_eq!(refusal, InboundRefusal::FailsVerification);
         assert_eq!(log.len().unwrap(), 0, "a forgery was stored");
     }
 
@@ -1289,7 +1323,7 @@ mod tests {
             &mut log,
         )
         .unwrap_err();
-        assert_eq!(refusal, Refusal::UnknownChannel);
+        assert_eq!(refusal, InboundRefusal::UnknownChannel);
         assert_eq!(log.len().unwrap(), 0, "something was stored");
     }
 
@@ -1304,11 +1338,11 @@ mod tests {
         let refusal =
             receive(inbound(identity.channel_id(), b"junk"), &channels, &mut log).unwrap_err();
         assert!(
-            matches!(refusal, Refusal::Undecodable(_)),
+            matches!(refusal, InboundRefusal::Undecodable(_)),
             "got {refusal:?}"
         );
-        assert_ne!(refusal, Refusal::UnknownChannel);
-        assert_ne!(refusal, Refusal::FailsVerification);
+        assert_ne!(refusal, InboundRefusal::UnknownChannel);
+        assert_ne!(refusal, InboundRefusal::FailsVerification);
         assert_eq!(log.len().unwrap(), 0, "a partial op was stored");
     }
 
@@ -1337,8 +1371,8 @@ mod tests {
             &mut log,
         )
         .unwrap_err();
-        assert_eq!(refusal, Refusal::FailsVerification);
-        assert!(!matches!(refusal, Refusal::Undecodable(_)));
+        assert_eq!(refusal, InboundRefusal::FailsVerification);
+        assert!(!matches!(refusal, InboundRefusal::Undecodable(_)));
         assert_eq!(log.len().unwrap(), 0);
     }
 
@@ -1373,8 +1407,8 @@ mod tests {
             &mut log,
         )
         .unwrap_err();
-        assert_eq!(refusal, Refusal::FailsVerification);
-        assert!(!matches!(refusal, Refusal::Undecodable(_)));
+        assert_eq!(refusal, InboundRefusal::FailsVerification);
+        assert!(!matches!(refusal, InboundRefusal::Undecodable(_)));
         assert_eq!(log.len().unwrap(), 0);
     }
 
@@ -1400,7 +1434,7 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            matches!(refusal, Refusal::Undecodable(_)),
+            matches!(refusal, InboundRefusal::Undecodable(_)),
             "got {refusal:?}"
         );
         assert_eq!(
@@ -1502,40 +1536,40 @@ mod tests {
         }
     }
 
-    /// Every `Refusal` variant, with a non-exhaustive match that fails to compile
+    /// Every `InboundRefusal` variant, with a non-exhaustive match that fails to compile
     /// when one is added.
     ///
     /// The `match` is the reason this list cannot silently fall behind the enum.
     /// A bare array would compile forever while covering fewer and fewer
     /// variants — `stoa.rs` records that exact drift happening when
     /// `TitleTooLong` was added.
-    fn every_refusal_variant() -> Vec<Refusal> {
+    fn every_refusal_variant() -> Vec<InboundRefusal> {
         let all = vec![
-            Refusal::UnknownChannel,
-            Refusal::TooLong {
+            InboundRefusal::UnknownChannel,
+            InboundRefusal::TooLong {
                 bytes: MAX_MESSAGE_BYTES + 1,
                 limit: MAX_MESSAGE_BYTES,
             },
-            Refusal::Undecodable(OpError::Truncated),
+            InboundRefusal::Undecodable(OpError::Truncated),
             // A second decoder error, so the wrapped Display is exercised on
             // more than one path.
-            Refusal::Undecodable(OpError::TrailingBytes),
-            Refusal::FailsVerification,
-            Refusal::StoaMismatch {
+            InboundRefusal::Undecodable(OpError::TrailingBytes),
+            InboundRefusal::FailsVerification,
+            InboundRefusal::StoaMismatch {
                 named: a_stoa("Agora"),
                 channel_is_for: a_stoa("Lyceum"),
             },
-            Refusal::Storage(OpLogError::Storage("disk on fire".to_string())),
+            InboundRefusal::Storage(OpLogError::Storage("disk on fire".to_string())),
         ];
         if let Some(r) = all.first() {
             // Never executed; it exists only to make the compiler check the list.
             match r {
-                Refusal::UnknownChannel
-                | Refusal::TooLong { .. }
-                | Refusal::Undecodable(_)
-                | Refusal::FailsVerification
-                | Refusal::StoaMismatch { .. }
-                | Refusal::Storage(_) => {}
+                InboundRefusal::UnknownChannel
+                | InboundRefusal::TooLong { .. }
+                | InboundRefusal::Undecodable(_)
+                | InboundRefusal::FailsVerification
+                | InboundRefusal::StoaMismatch { .. }
+                | InboundRefusal::Storage(_) => {}
             }
         }
         all
@@ -1548,7 +1582,7 @@ mod tests {
         // disk error reported as `FailsVerification` tells the reader a peer
         // forged an op, which sends them looking at the network for a fault on
         // their own disk — and `every_refusal_variant()` cannot catch it,
-        // because it constructs `Refusal::Storage` by hand and so proves only
+        // because it constructs `InboundRefusal::Storage` by hand and so proves only
         // that the variant renders distinctly, never that `receive` returns it.
         //
         // The payload here is a VALID, verifying op naming the right Stoa, so
@@ -1568,7 +1602,7 @@ mod tests {
             receive(inbound(identity.channel_id(), &bytes), &channels, &mut log).unwrap_err();
 
         assert!(
-            matches!(refusal, Refusal::Storage(OpLogError::Storage(_))),
+            matches!(refusal, InboundRefusal::Storage(OpLogError::Storage(_))),
             "a store failure was reported as {refusal:?}, which sends the reader \
              looking in the wrong place"
         );
@@ -1607,14 +1641,14 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             refusal,
-            Refusal::StoaMismatch {
+            InboundRefusal::StoaMismatch {
                 named: there,
                 channel_is_for: here,
             }
         );
         // Distinguishable from a decode failure AND from a signature failure.
-        assert!(!matches!(refusal, Refusal::Undecodable(_)));
-        assert_ne!(refusal, Refusal::FailsVerification);
+        assert!(!matches!(refusal, InboundRefusal::Undecodable(_)));
+        assert_ne!(refusal, InboundRefusal::FailsVerification);
         assert_eq!(log.len().unwrap(), 0);
     }
 
@@ -1656,7 +1690,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             refusal,
-            Refusal::StoaMismatch {
+            InboundRefusal::StoaMismatch {
                 named: there,
                 channel_is_for: here,
             },
@@ -1693,7 +1727,7 @@ mod tests {
         for wrong in [longer.as_str(), shorter] {
             assert_eq!(
                 receive(inbound(wrong, &payload), &channels, &mut log).unwrap_err(),
-                Refusal::UnknownChannel,
+                InboundRefusal::UnknownChannel,
                 "a prefix match admitted a payload on {wrong}"
             );
         }
@@ -1746,7 +1780,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             refusal,
-            Refusal::TooLong {
+            InboundRefusal::TooLong {
                 bytes: MAX_MESSAGE_BYTES + 1,
                 limit: MAX_MESSAGE_BYTES,
             }
@@ -1755,7 +1789,7 @@ mod tests {
         // peer could legitimately have sent this" is a different fact from "this
         // op is corrupt", and the payload above is also undecodable — so a
         // boundary checking size AFTER the decode would report the wrong one.
-        assert!(!matches!(refusal, Refusal::Undecodable(_)));
+        assert!(!matches!(refusal, InboundRefusal::Undecodable(_)));
         assert_eq!(log.len().unwrap(), 0);
     }
 
@@ -1786,7 +1820,7 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            matches!(refusal, Refusal::TooLong { .. }),
+            matches!(refusal, InboundRefusal::TooLong { .. }),
             "the decode ran before the size check: got {refusal:?}"
         );
     }
@@ -1812,11 +1846,11 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            !matches!(refusal, Refusal::TooLong { .. }),
+            !matches!(refusal, InboundRefusal::TooLong { .. }),
             "a payload of exactly the limit was refused for its size"
         );
         assert!(
-            matches!(refusal, Refusal::Undecodable(_)),
+            matches!(refusal, InboundRefusal::Undecodable(_)),
             "got {refusal:?}"
         );
     }
@@ -1853,6 +1887,62 @@ mod tests {
         .unwrap();
         assert_eq!(admitted.id, op.op.id());
         assert_eq!(log.len().unwrap(), 1);
+    }
+
+    #[test]
+    fn a_body_at_the_authoring_cap_encodes_past_the_message_limit() {
+        // The gap between two caps that are each correct on their own, measured
+        // rather than argued. Found by review (findings/correctness.md entry 1,
+        // findings/security.md entry 1), which reported 153,740 bytes and a
+        // 140-byte overshoot; this reproduces the measurement in the suite so it
+        // cannot drift out of the record.
+        //
+        // `authoring::MAX_BODY_LEN` is `op::MAX_FIELD_LEN`, which equals
+        // `MAX_MESSAGE_BYTES` today. A body AT the authoring cap therefore encodes
+        // to the limit PLUS the fixed wire overhead of a post, and `receive`
+        // refuses it. The merged `content-authoring` spec requires that body to
+        // publish ("A body at the cap is published"), so the two contracts
+        // disagree and neither is wrong on its own — see design.md, "The publish
+        // cap and the message limit leave a band of unreceivable ops".
+        //
+        // Asserted as arithmetic on measured values, not against a hardcoded
+        // 153,740: a literal would pass a drifted cap by sitting off the boundary,
+        // which is the defect `the_publish_body_cap_is_the_format_field_cap`
+        // exists to prevent in `authoring.rs`.
+        let stoa = a_stoa("Agora");
+        let (channels, mut log, identity) = peer_in(stoa);
+
+        let overhead = signed_post_in(stoa, "").to_bytes().len();
+        let at_cap = signed_post_in(stoa, &"x".repeat(crate::authoring::MAX_BODY_LEN));
+        let payload = at_cap.to_bytes();
+
+        assert_eq!(
+            payload.len(),
+            crate::authoring::MAX_BODY_LEN + overhead,
+            "a post's wire form is its body plus a fixed overhead"
+        );
+        assert!(
+            payload.len() > MAX_MESSAGE_BYTES,
+            "the fixture must exceed the message limit, or it tests nothing: \
+             {} bytes against a {MAX_MESSAGE_BYTES} limit",
+            payload.len()
+        );
+
+        let refusal = receive(
+            inbound(identity.channel_id(), &payload),
+            &channels,
+            &mut log,
+        )
+        .unwrap_err();
+        assert_eq!(
+            refusal,
+            InboundRefusal::TooLong {
+                bytes: payload.len(),
+                limit: MAX_MESSAGE_BYTES,
+            },
+            "an op the live publish path signs must be refused by every peer"
+        );
+        assert_eq!(log.len().unwrap(), 0, "a refused payload appends nothing");
     }
 
     // ─── No panic is reachable ────────────────────────────────────────────
@@ -1908,10 +1998,16 @@ mod tests {
     #[test]
     fn a_hostile_channel_or_sender_identifier_does_not_panic() {
         // Empty, maximal and non-textual. `&str` is UTF-8 by construction, so
-        // "non-textual" here means control bytes, lone surrogputesque sequences
-        // expressed as valid UTF-8, and multi-byte characters at a boundary — the
-        // shapes a slicing bug would hit. A `String` built from raw invalid bytes
-        // is unrepresentable in Rust and so is not a reachable input.
+        // "non-textual" here means NUL and other control bytes, the replacement
+        // character, and multi-byte characters at a boundary — the shapes a
+        // slicing bug would hit.
+        //
+        // Two things this deliberately does NOT cover, because neither is a
+        // reachable input: a `String` of raw invalid UTF-8 is unrepresentable in
+        // Rust, and so is a lone surrogate — `\u{FFFD}` below is the replacement
+        // character, which is what a decoder *substitutes* for one, not a
+        // surrogate itself. Said plainly because the scope of this fixture list
+        // is the clause a reader has to parse to know what is untested.
         let stoa = a_stoa("Agora");
         let (channels, mut log, identity) = peer_in(stoa);
         let payload = signed_post_in(stoa, "valid").to_bytes();
@@ -2233,7 +2329,10 @@ mod tests {
         let op = signed_post_in(stoa, "never comes back");
         let id = op.op.id();
 
-        publish(op, &channels, &mut log).unwrap();
+        // Discarded on purpose: this test is about the log, and never sending is
+        // the scenario. `Publishable` is `#[must_use]`, so the discard is written
+        // out rather than implied.
+        let _ = publish(op, &channels, &mut log).unwrap();
         assert!(log.get(&id).unwrap().is_some());
         assert_eq!(log.len().unwrap(), 1);
     }
@@ -2247,7 +2346,9 @@ mod tests {
         let op = signed_post_in(stoa, "mine, echoed");
         let id = op.op.id();
 
-        publish(op.clone(), &channels, &mut log).unwrap();
+        // Discarded on purpose: the echo below is built from `op`, not from the
+        // payload this returns. Written out because `Publishable` is `#[must_use]`.
+        let _ = publish(op.clone(), &channels, &mut log).unwrap();
         let first_arrival = log.get(&id).unwrap().unwrap().arrival;
 
         let payload = op.to_bytes();
@@ -2349,7 +2450,7 @@ mod tests {
                 &mut log
             )
             .unwrap_err(),
-            Refusal::FailsVerification
+            InboundRefusal::FailsVerification
         );
         assert_eq!(
             log.len().unwrap(),

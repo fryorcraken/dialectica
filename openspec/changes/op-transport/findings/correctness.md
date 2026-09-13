@@ -16,7 +16,7 @@ means nothing.
 
 ---
 
-- [ ] **`dev-writer`** — `authoring.rs:206` / `transport.rs:95` — a body at the
+- [x] **`dev-writer`** — `authoring.rs:206` / `transport.rs:95` — a body at the
       accepted publish cap produces an op **no conforming peer can receive**
       **Scenario:** `authoring::MAX_BODY_LEN == op::MAX_FIELD_LEN == 150 KiB ==
       transport::MAX_MESSAGE_BYTES`. `authoring::post` accepts a body of exactly
@@ -47,6 +47,59 @@ means nothing.
       and is reached from `wire.rs`'s `publish_post`; the refusing half is
       `receive`, which is what every *other* peer's build runs. The defect is live
       the moment two peers exist.
+
+      **Deferred** — the defect is confirmed and recorded, but the fix you name
+      cannot land here. Home: `design.md` § "The publish cap and the message limit
+      leave a band of unreceivable ops, and closing it is a spec decision this
+      change cannot take".
+
+      **Your measurement reproduces exactly**, and I did not take it on trust. A new
+      test, `a_body_at_the_authoring_cap_encodes_past_the_message_limit`
+      (`transport.rs`), publishes a `MAX_BODY_LEN` body and hands the wire form to
+      `receive`: **153,740 bytes, overhead 140, over the limit by 140**, refused as
+      `TooLong { bytes: 153740, limit: 153600 }`. Every figure in your entry,
+      including the 140-byte `Post` overhead, confirmed to the byte.
+
+      **Why not the fix you prescribe.** "A publish-side guard against
+      `MAX_MESSAGE_BYTES` on the encoded op" contradicts a **merged** requirement.
+      `openspec/specs/content-authoring/spec.md:184-189` carries the scenario *"A
+      body at the cap is published"* — a body of exactly `op-format`'s field cap
+      SHALL publish — and `:205-209` requires the publish cap and the field cap be
+      *one value*. A total-size guard refuses that body, failing a scenario already
+      in `openspec/specs/` and pinned by
+      `authoring.rs::a_maximal_body_publishes_rather_than_panicking`. So this is a
+      contract decision across two capabilities, not an implementation one, and
+      `dev-writer`'s contract says a decision about observable behaviour belongs in
+      the spec rather than in my head.
+
+      `design.md` lays out the three candidate answers (lower `MAX_BODY_LEN`; guard
+      the encoded total; accept the band and report it) with what each costs, and
+      notes that only the third contradicts no merged scenario — and that it is
+      unbuildable here, because "this op will not propagate" **is** a delivery
+      outcome, the thing this change already records as owed and unbuilt. That
+      alignment is the substantive finding: your defect and the delivery-outcome gap
+      are one gap seen from two sides.
+
+      **A fourth option ruled out by measurement, which I had not predicted.**
+      Raising `MAX_MESSAGE_BYTES` to `150 * 1024 + 1024` — done to prove the new test
+      can fail — broke a third test: `an_op_at_the_limit_is_admitted` failed with
+      `Undecodable(FieldTooLong(154484))`. That fixture reaches the message limit by
+      padding a body, so a raised limit demands a body above `MAX_FIELD_LEN`, which
+      the decoder then refuses. The two caps are coupled tightly enough that one's
+      boundary fixture becomes unbuildable when the other moves. Recorded in
+      `design.md`.
+
+      **Can-it-fail, predicted versus observed.** Predicted: the new test fails at its
+      `payload.len() > MAX_MESSAGE_BYTES` guard, and
+      `the_message_limit_is_pinned_to_the_transports_stated_value` fails on the
+      hardcoded 153,600. Both observed, with the expected message ("153740 bytes
+      against a 154624 limit"). The third failure above was **not** predicted and is
+      the more informative result. Limit restored; 742 tests pass.
+
+      The test asserts `payload.len() == MAX_BODY_LEN + overhead` from measured values
+      rather than against a literal `153_740`, so a drifted cap moves the assertion
+      with it instead of leaving it passing off the boundary — the defect family
+      `the_publish_body_cap_is_the_format_field_cap` exists to prevent.
 
 - [ ] **`tester`** — `transport.rs:266` — `OpenChannels::is_empty` can be
       replaced by `true` and the whole suite still passes

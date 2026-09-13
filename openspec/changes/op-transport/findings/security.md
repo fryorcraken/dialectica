@@ -19,7 +19,7 @@ on reachability I say so in the entry.
 
 ---
 
-- [ ] **`dev-writer`** — `authoring.rs:206` / `transport.rs:95` — the publish
+- [x] **`dev-writer`** — `authoring.rs:206` / `transport.rs:95` — the publish
       cap and the message cap are both 150 KiB, so a maximal legitimate post is
       **unreceivable** and the gap is silent in both directions
       **Scenario:** the same defect as `correctness.md`'s first entry, and I open a
@@ -43,6 +43,53 @@ on reachability I say so in the entry.
       from `wire.rs::publish_post`. The refusing half is `receive`, which is what a
       *peer's* build runs. So this is live as soon as there are two peers, and does
       not wait on the `transport` wiring.
+
+      **Deferred.** Home: `design.md` § "The publish cap and the message limit leave
+      a band of unreceivable ops, and closing it is a spec decision this change
+      cannot take". Kept as its own box rather than closed with a pointer to
+      `correctness.md` entry 1, because you opened it deliberately for a different
+      fix consideration and that consideration turns out to be the one that decides
+      the answer.
+
+      Measurement reproduced to the byte — 153,740, over by 140 — by a new test,
+      `a_body_at_the_authoring_cap_encodes_past_the_message_limit`. Detail of the
+      reproduction and the can-it-fail run is on the correctness box; not repeated
+      here.
+
+      **Your framing is accepted in full, and it is why the deferral is shaped the
+      way it is.** The security consequence is not "a large post fails" — it is that
+      **the author cannot tell a censored post from a delivered one**, on a system
+      whose claim is censorship resistance, with the discriminator being content
+      length and the failure silent on both sides. An attacker needs no capability at
+      all: persuade someone to write a long post.
+
+      That rules out the cheap fixes on *security* grounds specifically, not only on
+      the merged-spec grounds the correctness box argues. Both of the publish-side
+      guards (lower `MAX_BODY_LEN`; refuse the encoded total) convert a silent
+      delivery failure into a **loud publish refusal**, which is better — but they
+      close it by making some legitimate posts unpublishable, and neither tells the
+      author anything about the far larger class of posts that are publishable and
+      still may not propagate. The honest fix is the one that makes the *state*
+      visible rather than narrowing the input: publish succeeds, and the peer records
+      and reports that this op exceeds the message limit and will not propagate.
+
+      That is a delivery outcome, and it is precisely the thing this capability's spec
+      already names as owed and unbuilt — the bound, what a peer records for an op in
+      flight, and what it records for one that never propagated. **This band is a
+      fourth instance of the same gap, and it is the instance where the peer knows the
+      answer locally and with certainty**, before anything is sent: `to_bytes().len()
+      > MAX_MESSAGE_BYTES` is decidable at publish time, where "did it propagate?" is
+      not. Recorded in `design.md` so whoever builds the tracker inherits it as the
+      cheapest case to get right rather than rediscovering it.
+
+      Two things **not** claimed, since the standing rule is to say what a green gate
+      cannot see. Nothing now refuses the op at publish, so the defect is live on
+      `main`'s behaviour after this piece merges as much as before it. And
+      `docs/UI-BRIEF.md`'s publish obligation — which forbids rendering a successful
+      publish as *sent* or *delivered* — mitigates the *user-facing* half by refusing
+      to claim delivery, but it is a designer-facing prohibition, not a mechanism, and
+      it cannot distinguish this op from any other saved-but-unpropagated one. The
+      distinction is exactly what is owed.
 
 - [ ] **`spec-writer`** — `specs/op-transport/spec.md` (requirement "The delivery
       node is shared and is never stopped by this peer") — the scenario is

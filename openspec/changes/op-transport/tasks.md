@@ -183,11 +183,27 @@ Recorded because a passing suite here proves less than it appears to.
       by definition. This is why those three lines carry no logic: everything that
       could be wrong was moved to where a test can reach it.
 - [x] **That a failed delivery is surfaced.** It is not, by anyone, and no test
-      claims otherwise. See the `// NO SPEC:` marker and `design.md`.
+      claims otherwise. The record is the requirement "A successful publish is a
+      statement about the local log and nothing more", which names the three owed
+      things, plus `design.md`'s section on the seam they attach to. This bullet
+      used to point at a `// NO SPEC:` marker, contradicting §6 above within the
+      same file: the marker was removed when the `spec-writer` adopted the
+      behaviour as that requirement, and §6 is the current claim.
 - [x] **That the size bound matches what the network actually validates.** The
-      constant is pinned to 150 KiB and the spec requires it equal the transport's
-      stated limit — but nothing here reads that limit from the transport, so the
-      test pins our value rather than their agreement.
+      constant is pinned to 150 KiB, and the spec is explicit that agreement with
+      the network's limit is **not** checkable here — no limit reaches this
+      capability from the transport, so there is no second value to compare
+      against. The test pins our value against local drift and nothing more. (This
+      bullet previously said the spec "requires it equal the transport's stated
+      limit"; the spec was rewritten in `b1af4e3` precisely because a scenario
+      claiming the two are compared would be comparing the constant against
+      itself.)
+- [x] **That a publishable op is receivable.** The suite now measures the gap
+      rather than leaving it unseen — `a_body_at_the_authoring_cap_encodes_past_the_message_limit`
+      shows a body at `authoring::MAX_BODY_LEN` encoding to 153,740 bytes and being
+      refused by `receive` — but **nothing refuses it at publish**, and closing that
+      contradicts a merged `content-authoring` scenario. See `design.md`, "The
+      publish cap and the message limit leave a band of unreceivable ops".
 
 ## 8. Not done, and deliberately
 
