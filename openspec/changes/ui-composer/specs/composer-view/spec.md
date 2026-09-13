@@ -84,9 +84,21 @@ The view SHALL also present an affordance leading to guidance on resolving the
 blockage, labelled with the bundle's `compose.fix` string, so that the reader is
 shown the reason and a route to acting on it rather than the reason alone.
 
-The view SHALL state that no compose box is shown and why, using the bundle's
-`compose.apparatus` string, so the absence reads as a decision rather than as a
-missing feature.
+The view SHALL state, **in the closed gate's own body**, that no compose box is
+shown and why — that a box the reader could type into and not submit would lose
+what they wrote — so the absence reads as a decision rather than as a missing
+feature. The bundle's `compose.apparatus` string says exactly this and SHALL be
+used, but the requirement is on the **statement being present where the gate is
+rendered**, not on it occupying any particular region of the screen.
+
+That distinction is the requirement rather than a note about it. An earlier
+version of this capability tied the sentence to a marginal annotation column;
+that column is annotation explaining the design to a reader of the design, it
+reached the shipped interface by mistake, and it is being removed. An obligation
+expressed as "this text appears in that column" disappears with the column,
+silently and while still being required. So the obligation is stated as text the
+reader facing the gate can see, and SHALL NOT be discharged by placing it
+anywhere a reader of the gate would not encounter it.
 
 **The heading for a closed gate SHALL name the affordance actually withheld and
 SHALL NOT promise that submitting will send anything.** Where the gate withholds
@@ -129,6 +141,18 @@ forbidden before one.
 - **WHEN** the probe reports posting is not possible
 - **THEN** the view displays the reason
 - **AND** displays an affordance leading to guidance on resolving it
+
+#### Scenario: The closed gate says why there is no box
+
+- **WHEN** the probe reports posting is not possible
+- **THEN** the view states that no compose box is shown because one the reader
+  could type into and not submit would lose what they wrote
+
+#### Scenario: That statement survives without the annotation column
+
+- **WHEN** the gate is closed and every region of the screen given over to
+  annotating the design is disregarded
+- **THEN** the statement explaining the missing box is still displayed
 
 ### Requirement: The composer never alters the text the user typed
 
@@ -252,6 +276,45 @@ checked.
 
 The view SHALL NOT display a count of peers reached, a delivery state, or a
 progress indicator that resolves into a delivery claim.
+
+**Saying nothing about delivery is not sufficient, and the view SHALL positively
+deny delivery knowledge.** Where a publish has succeeded, the view SHALL state,
+in the screen's own body, that whether any other peer has received the content is
+not something this software can report. That statement SHALL accompany the
+success itself rather than being available only elsewhere in the interface.
+
+Every other delivery rule in this capability is a prohibition, and a prohibition
+is discharged by silence. Silence is the wrong answer here, because the reader's
+default assumption on seeing a forum post submit successfully is that it went
+somewhere — so an interface that merely declines to mention delivery lets that
+assumption stand unchallenged while being fully compliant.
+
+**The stakes are specific to this system rather than general good manners.** A
+publish reply carries no delivery outcome by design; delivery is not wired at
+all; and a post whose body is legal but near the cap encodes to more than the
+transport will carry, so it is accepted locally and silently refused by every
+receiving peer. An author therefore cannot distinguish a post nobody has received
+from one everybody has, and the interface is the only place that fact can be
+told to them.
+
+A prohibition-only contract also cannot be tested for. A test can sweep for a
+forbidden claim and pass when the honest sentence is deleted, which is how such a
+statement is lost: not by someone deciding to remove it, but by it leaving
+attached to something else.
+
+#### Scenario: A success denies delivery knowledge rather than omitting it
+
+- **WHEN** a publish succeeds
+- **THEN** the view states that whether any other peer has received the content
+  is not something it can report
+- **AND** that statement is displayed with the success rather than only in
+  another part of the interface
+
+#### Scenario: The denial survives without the annotation column
+
+- **WHEN** a publish succeeds and every region of the screen given over to
+  annotating the design is disregarded
+- **THEN** the denial is still displayed
 
 #### Scenario: A success names local storage
 
@@ -477,6 +540,14 @@ as soon as any peer has voted.
 
 The absence SHALL be a rendered decision rather than a value that happens to be
 empty, so that a later change exposing a count has to decide to display it.
+
+**That is a requirement on how the control is built, not on the interface
+explaining itself.** It is discharged by the number being suppressed by default,
+so that displaying one is something a future change must opt into; it does not
+oblige the view to carry prose about why no number is there. Unlike the delivery
+denial above, a missing number invites no false inference a reader would
+otherwise draw — nothing appears, so nothing is claimed — whereas a successful
+submission does invite one.
 
 The view SHALL NOT present a vote as having moved a post, changed an ordering,
 changed what anyone else sees, or fed into any ranking. No ordering offered by

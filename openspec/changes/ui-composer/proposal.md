@@ -257,6 +257,61 @@ The cost is named: a near-identical follow-up must be retyped. That is a
 convenience, weighed against an interface offering a control that produces a
 confusing no-op.
 
+### The apparatus column goes, and two obligations attached to it must not
+
+The owner has confirmed the right-hand `APPARATUS` column is annotation from the
+design bundle explaining the design to a reader of the design, and that it
+reached the shipped interface by mistake. A separate piece removes it. This
+spec's job is to make sure nothing real leaves with it.
+
+**Two obligations were expressed in terms of that column, and they have different
+fates.**
+
+**The missing-box statement moves into the gate's body.** `compose.apparatus` —
+"There is no disabled composer here. A box you could type into and not send would
+lose what you wrote." — is guidance to the person facing a closed gate, and the
+closed gate is where the box is missing from. The requirement now says the
+statement must appear **where the gate is rendered**, and explicitly not merely
+somewhere a reader of the gate would not encounter it. The bundle's string still
+supplies the wording; what changed is that the obligation is on the statement
+being present, not on which region of the screen holds it.
+
+That reframing is the actual lesson. An obligation phrased as "this text appears
+in that column" disappears when the column does — silently, and while still being
+required. The spec now states the obligation in terms a reader can check without
+reference to a layout decision.
+
+**The delivery denial is promoted from a prohibition to a requirement.** This is
+the substantive change and the reason this was not cosmetic.
+
+Every delivery rule in this capability was a **prohibition** — do not claim sent,
+delivered, propagated. A prohibition is discharged by silence, and silence is the
+wrong answer here: a reader watching a forum post submit successfully assumes it
+went somewhere, so an interface that merely declines to mention delivery leaves
+that assumption standing while being fully compliant. The positive denial lived
+only in the `ON PUBLISHING` note, so it would have left with the column and
+**nothing would have failed** — the surviving tests are absence sweeps, which
+catch a false claim and cannot notice an honest disclaimer being deleted.
+
+The stakes are specific rather than general: the publish reply carries no
+delivery outcome by design, delivery is not wired, and a legal body near the cap
+encodes past what the transport carries, so it is stored locally and silently
+refused by every receiving peer. An author cannot tell a post nobody received
+from one everybody did, and the interface is the only place that can be said.
+
+So the spec now **requires** the denial, in the screen's own body, accompanying
+the success — with a scenario that disregards any annotation region, so the
+requirement is checkable against the interface after the column is gone.
+
+**The vote control's missing number is deliberately not given the same
+treatment.** "The absence SHALL be a rendered decision" is a requirement on how
+the control is built — the number suppressed by default, so displaying one must
+be opted into — and is discharged by `showScore` defaulting false, independent of
+any column. It does not oblige explanatory prose, and the spec now says so, because
+"rendered decision" could otherwise be read as requiring the `ON THE ARROWS` note.
+The asymmetry has a reason: a missing number invites no false inference, since
+nothing appears and nothing is claimed, whereas a successful submission does.
+
 ### The reply composer is contracted but not yet reachable, and the spec says so
 
 `Composer` supports both modes and tests exercise both; only the post mode is

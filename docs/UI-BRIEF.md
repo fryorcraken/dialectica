@@ -431,6 +431,21 @@ content was saved on this machine and must never say it was sent, delivered or
 seen by anyone. Publishing and delivering are two events at two times, and
 delivery is not wired at all yet — so "sent" is a claim nothing checks.
 
+**And that third one is not satisfied by saying nothing — the interface must say
+the opposite, in so many words.** Alongside a successful publish it has to state
+that whether any other peer received the content is not something it can report.
+Declining to mention delivery is not enough: someone watching a forum post submit
+successfully assumes it went somewhere, so silence leaves the wrong belief in
+place while breaking no rule.
+
+Why this one is worth a positive obligation when the others are prohibitions: the
+author genuinely cannot find out. Delivery is not wired, the publish reply says
+nothing about it by design, and a long-but-legal post is stored locally and then
+silently refused by every peer that receives it — so **a censored post and a
+delivered one look identical from the author's side.** The interface is the only
+place that can be admitted, and an obligation phrased only as "do not claim
+delivery" is discharged by a screen that says nothing at all.
+
 **1. Posting the same thing twice posts once, and the interface has to handle
 it.** A post is named by a hash of its own content, and nothing in that content
 varies between two submissions — so one person posting the same body into the same
