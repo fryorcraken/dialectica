@@ -482,6 +482,22 @@ would report the protection of whatever is at the path *now*, which on a
 directory an attacker can write to is not necessarily the file just written. The
 value that is true is the one this code used.
 
+**The test re-reads the file, and that is deliberate rather than a contradiction.**
+`the_keep_reply_reports_whether_the_master_key_was_encrypted` checks the reply
+against `Keystore::is_encrypted` on the written file — the very operation this
+decision declines. Design review flagged that the entry and the test look like they
+disagree, and the distinction is worth stating: the decision is about what the
+**reply** derives from, where the value this code used is the authority; the test's
+independent re-read is what keeps that derived value *honest*, because asserting the
+reply against the same `Unlock` it was computed from would be the reply agreeing with
+itself. A decision to prefer one source does not make the other source useless for
+checking it.
+
+**Where a re-read is now the right source**, and this is new: a keep whose keystore
+already exists writes nothing, so there is no "value this code used" to prefer. That
+branch reads the file. See the second-keep decision above — the two situations are
+different, which is why they take different sources rather than one rule being bent.
+
 **The passphrase itself is not decided here**, and this change adds no source
 constant for one. The keep takes the unlock the caller's environment supplies, by
 the same `unlock_from_env` route `open_from_env` already uses for reads: a
@@ -502,6 +518,21 @@ implements backup flips a value rather than changing a shape.
 This is reported as a field on `whoAmI` rather than as its own method. A separate
 method would be one more thing a view must remember to call, and the fact is
 about the identity being reported, so it belongs beside it.
+
+**What it costs, which this entry did not say and design review was right to ask
+for.** The field is hardcoded `true`, so there is no reachable state in which it is
+`false` — and therefore **no test can distinguish "correctly true" from "stuck
+true"**. When backup lands and someone forgets to flip it, nothing fails. A value
+that cannot detect its own staleness is exactly what CLAUDE.md's
+"self-invalidating" rule is about, and this one is not self-invalidating; it is
+carried by `docs/UI-BRIEF.md` obligation 7 saying so in prose to a designer, which
+is a person rather than a gate.
+
+Accepted, because the alternatives are worse: a field that is sometimes absent
+makes every view branch, and inferring it from whether an export exists means
+inventing an export API before there is one. Recorded so the change that
+implements backup knows this field is waiting for it and that nothing will remind
+it.
 
 ### Disk content is refused, never coerced — one principle, three applications
 

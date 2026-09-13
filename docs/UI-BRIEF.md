@@ -538,6 +538,13 @@ Two things follow, and the second is the one that is easy to get wrong:
 Whether a passphrase gets asked for at all is undecided upstream, so this
 obligation is about reporting the state honestly rather than about a flow.
 
+One detail that matters if you show this per Stoa: **the flag describes the master
+key, which is one file for the whole install, not one per Stoa.** The first keep
+creates that file and reports the protection it wrote; a keep in a second Stoa writes
+no key and reports the protection the existing file *has*. Both answers are true about
+the same single secret, so do not render them as two independent facts — "this
+identity is encrypted, that one is not" is not a state that can occur.
+
 ---
 
 ## The vote control — settled, and smaller than it was

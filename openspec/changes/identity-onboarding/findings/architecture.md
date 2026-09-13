@@ -18,7 +18,7 @@ is part of the finding in A1, not a reassurance.
 
 ---
 
-## A1 — `getCapabilities` and `whoAmI` report two different author addresses for the same user in the same Stoa
+- [x] **A1 — `getCapabilities` and `whoAmI` report two different author addresses for the same user in the same Stoa**
 
 **For: `dev-writer`** (and `spec-writer` for the `posting-capability` consequence)
 **Severity: high — genuine defect, the most serious in the change**
@@ -100,9 +100,43 @@ taking on purpose), or the pathless trio is retired from the live path and kept
 only as the primitive the non-collision test needs. What cannot stand is two
 public trios each claiming to be "the" per-Stoa identity.
 
+**Fixed** in `63133c9` — the **first** of the two shapes offered, and the finding's
+framing of it as "a real API decision worth taking on purpose" is why it is recorded
+in `design.md` rather than just done.
+
+`core::wire::posting_identity(stoa, keystore, paths)` consults the record and derives
+at the recorded path; `get_capabilities_from_stores` is what the adapter forwards to.
+So `getCapabilities` does now depend on `IdentityStore`, deliberately.
+
+**Why not the second shape.** Retiring the pathless trio from the live path does not
+answer the question, because the probe would then have no identity to report at all —
+the question is not which of two derivations to use, it is whether the probe may
+answer without consulting the record. It may not: a master key with no recorded choice
+for this Stoa cannot post as anyone, and that is now `canPost: false` with a reason
+naming the missing choice, reported through the same constant `whoAmI` uses so the two
+cannot describe one state in two vocabularies. It previously answered `canPost: true`
+there.
+
+**The sentence the finding says is now false has been corrected**, and it was the
+useful pointer: `Keystore::stoa_address`'s doc comment claimed to be "what the probe
+reports". As a side effect the whole pathless trio now has **no production caller** —
+recorded in `design.md`'s Risks rather than deleted, because removing three public
+methods from the secret-holding type belongs in a change whose proposal does not
+declare `keystore` untouched.
+
+Measured: returning the pathless address fails
+`the_probe_and_whoami_report_the_same_identity_for_one_user_and_stoa` and **nothing
+else in 563**, confirming this finding's "zero tests fail" measurement.
+
+**For `spec-writer`, and not closed:** `proposal.md` still declares
+`posting-capability` unchanged with its derivation untouched. The finding is precise
+about why that matters — *"the shape is untouched and the contract is broken, which is
+the distinction the proposal's own 'Not modified, deliberately' section exists to make
+and got backwards."* That correction is `spec-writer`'s to make.
+
 ---
 
-## A2 — `master_key()` mints a throwaway root, so on a fresh install the kept identity is **not** any candidate the user was shown; the logic sits where no gate can reach it
+- [x] **A2 — `master_key()` mints a throwaway root, so on a fresh install the kept identity is **not** any candidate the user was shown; the logic sits where no gate can reach it**
 
 **For: `dev-writer`**
 **Severity: high — genuine defect**
@@ -186,9 +220,46 @@ keystore is the same span), or write the minted keystore at slate time and make
 `keepIdentity` open rather than mint. Either is a `core` decision with a test. Note
 that fixing it in the adapter would leave it equally unreachable.
 
+**Fixed** in `63133c9`, and this entry's last sentence is the one that shaped the fix
+more than anything else in the six files: *"fixing it in the adapter would leave it
+equally unreachable."* The temptation was a two-line change to `master_key` caching its
+result. That would have worked and stayed invisible to every gate, which is the defect
+this finding is actually about.
+
+So the decision moved. `core::wire::OnboardingSession::keystore_for` holds the
+mint-or-open choice, and the session holds `(keystore, live_slate)` as one value —
+which is the **first** of the two shapes offered here, chosen because the finding's own
+observation that *"the module already holds 32 bytes across calls; holding the
+un-written keystore is the same span"* is exactly right.
+
+**Why not the second shape** (write the keystore at slate time): the spec requires
+"Generating a slate SHALL NOT write to storage", and `generate_identity_slate` having
+no store parameter is what makes that structural rather than a line somebody has to not
+add — which this same review calls the best decision in the change. Trading that away
+to fix this would have broken a requirement to repair a defect.
+
+**On the measurement.** The finding identifies `from_root_for_test([7u8; 32])` at 24
+call sites as what makes this invisible, and it is right — so the regression test
+supplies **no** key at all. Its opener returns `NotFound`, minting actually happens, and
+the assertion is a relationship between two replies rather than a comparison against a
+constant. That is the only fixture shape that can distinguish "the slate and the keep
+agree" from "the harness gave them the same one".
+
+Restoring the per-call mint fails it plus two others and nothing else in 563.
+
+**What is left in the adapter** is what the finding says cannot move: the host's
+directory and the environment the protection is read from. `Dialectica`'s second field
+is a `Default`-constructible `core` type, so `interface: "universal"`'s parameterless-
+constructor requirement still holds.
+
+**Still unreachable by `cargo test`, and that has not changed:** the adapter is
+`#[cfg(logos_scaffold)]`. What changed is that there is no longer a *decision* in there
+to be unreachable. The CI test-count gate is still blind to a whole `impl` being cfg'd
+out, as this finding notes; nothing here fixes that.
+
 ---
 
-## A3 — `parse_stoa` was extracted for the three new handlers and three pre-existing copies were left behind; the fourth-copy signal was answered halfway
+- [x] **A3 — `parse_stoa` was extracted for the three new handlers and three pre-existing copies were left behind; the fourth-copy signal was answered halfway**
 
 **For: `dev-writer`**
 **Severity: medium — genuine defect of shape, no behavioural divergence today**
@@ -228,9 +299,29 @@ no-behaviour-change refactor that leaves every gate green on its own, and it is 
 commit that should have preceded the feature. Done first, the feature diff adds
 three handlers that each use an existing helper and introduces no new parse at all.
 
+**Fixed** in `d8f9816`: all three pre-existing copies converted, so the tree holds one
+`parse_stoa` and six call sites.
+
+The finding's diagnosis of why this is worth doing despite nothing being broken is the
+whole of it: *"they are behaviourally identical **today**, which is precisely why this
+is a shape finding rather than a correctness one. The cost arrives on the next change
+that tightens the parse … it lands in one place and three handlers keep the old
+behaviour, with no test failing, because each copy has its own passing tests."* A
+finding whose evidence is that nothing fails is the kind that gets waved through.
+
+`parse_stoa`'s doc comment now says "every handler that takes a Stoa" rather than
+naming a count — the old text said "three handlers below", which was a number that
+went stale the moment a fourth arrived, and is the same class as R7's test count.
+
+**The ordering criticism is accepted and not remediable now.** The conversion should
+have been its own commit before the feature, and landing it in a fix-pass commit that
+also touches five comments is not that. What I did do was apply the same principle
+where it still had force: `wire.rs`'s formatting went in its own commit ahead of the
+behaviour changes (see R8), for exactly the reason this entry gives.
+
 ---
 
-## A4 — `storage_dir()` has the same half-done extraction, in the adapter
+- [x] **A4 — `storage_dir()` has the same half-done extraction, in the adapter**
 
 **For: `dev-writer`**
 **Severity: low — genuine defect of shape**
@@ -251,9 +342,25 @@ Lower severity than A3 only because the string is a constant and a divergence wo
 be cosmetic rather than semantic — but it is also the same file A2 shows no test can
 reach, so a divergence here is a divergence nothing would catch.
 
+**Fixed** in `63133c9`: `get_capabilities` and `list_threads` both use
+`storage_dir()`, so the string exists once. `grep` for it in `src/lib.rs` returns a
+single hit.
+
+Two more extractions went in alongside, for the same reason and found while doing
+this: `Self::paths(&dir)` and `Self::open_keystore(&dir)`, each of which was about to
+be its third and fourth copy across the five handlers. The A2 fix removed the
+`master_key` helper this entry sits beside, so the adapter's private helpers are now
+`storage_dir`, `paths` and `open_keystore` — all three "where is the file" questions
+that genuinely cannot move to `core`.
+
+**The last sentence is the one worth keeping on the record**, because it is the
+argument for fixing a cosmetic duplication at all: this is the file no test reaches,
+so a divergence here is a divergence nothing would catch. That is why "the string is a
+constant and a divergence would be cosmetic" is not a reason to leave it.
+
 ---
 
-## A5 — `identity_store.rs` is a second copy of `log/sqlite.rs`'s store machinery, and `design.md` claims it is not
+- [ ] **A5 — `identity_store.rs` is a second copy of `log/sqlite.rs`'s store machinery, and `design.md` claims it is not**
 
 **For: `dev-writer`**, with a note for **`spec-writer`** on the design record
 **Severity: medium — genuine defect of shape**
@@ -311,9 +418,41 @@ shape as `keystore.rs`'s and `log/sqlite.rs`'s"*, i.e. it identifies itself as t
 copy CLAUDE.md names and proceeds anyway. Four copies of a `Drop`-guard temp
 directory is the textbook instance of the rule.
 
+**PARTIALLY fixed; box left OPEN.** Two of the three claims here need different
+answers, so splitting them:
+
+**The `design.md` misstatement is fixed** (`d8f9816`). The risk entry said
+`identity.sqlite` has *no* `check_layout` equivalent, describing a tree that does not
+exist — readability's R1 found the same thing. It now states what `check_layout` does
+prove and what it does not, which turned out to matter: security's S4 measured that
+`LIMIT 0` proves column names and nothing about constraints, so the entry's residual
+risk is real rather than rhetorical.
+
+**The `versioned_sqlite` reshape is NOT done, and that is why this box is empty.** The
+finding is right that two stores sharing this machinery is the reshape point, and right
+that it should have *preceded* this change. Both of those make it a poor thing to do
+now:
+
+- It is a refactor of `log/sqlite.rs`, a file this change does not otherwise touch, in
+  a fix pass already carrying four high-severity defect fixes. The commit that reshapes
+  the op log's open-and-triage path needs to be reviewable as that and nothing else.
+- The finding's own ordering argument says so: done first, `identity_store.rs` would
+  have been written as "a schema string, two statements and a decode guard". Done last,
+  it is a rewrite of a file whose tests are the only thing standing between the op log
+  and a silently unopenable store.
+
+**The `TempDir` fourth copy is recorded rather than unified**, per R6: the comment now
+names all four copies and says whoever needs a fifth should decide deliberately. The
+`wire.rs` comment that *"identifies itself as the copy CLAUDE.md names and proceeds
+anyway"* — a fair hit — now at least identifies the right precedent, which it did not.
+
+Left open because a reviewer reading a ticked box here would reasonably conclude the
+duplication was addressed. One table in it was corrected; the eight rows of duplicated
+machinery are all still there.
+
 ---
 
-## A6 — Three public API surfaces added with no production caller
+- [ ] **A6 — Three public API surfaces added with no production caller**
 
 **For: `dev-writer`**
 **Severity: low — genuine defect of shape (speculative widening)**
@@ -346,9 +485,36 @@ unchanged, which is what that paragraph argues about; the **type's API** is not,
 the proposal does not say so. A reader taking "keystore — unchanged" at face value
 will not expect six new public items.
 
+**OPEN, and the A1 fix made this worse in an instructive way.** Nothing is deleted and
+the box stays empty.
+
+`stoa_address_at_path` — one of the two the finding calls "the trio-for-symmetry
+pattern" — **now has a production caller**: `posting_identity` uses it, because the A1
+fix needed exactly that method. So one of the two flagged additions was not speculative
+after all; it was needed by a defect nobody had found yet.
+
+`stoa_key_at_path` still has none. And the A1 fix retired the *pathless* trio from the
+live path, so `Keystore::stoa_key`, `stoa_public_key` and `stoa_address` now have no
+production caller either — three more than this finding counted, and pre-existing rather
+than added. Deleting them is a real question and it is not this change's: removing three
+public methods from the secret-holding type, in a change whose proposal declares
+`keystore` untouched, is precisely the kind of silent widening-in-reverse the finding
+objects to. Recorded in `design.md`'s Risks.
+
+`all_paths` the finding itself calls defensible, and I agree: the spec requires the
+record be readable in full.
+
+**The proposal correction is `spec-writer`'s**, and it is the substantive half. The
+finding's distinction — *"The file format is indeed unchanged, which is what that
+paragraph argues about; the **type's API** is not"* — is exactly the distinction A1's
+"derivation untouched" claim got wrong too. Same paragraph, same failure mode, twice.
+
+Left open because the API surface question is unresolved either way: one item gained a
+caller, three lost theirs, and the proposal still says none of it happened.
+
 ---
 
-## A7 — `keystore` now depends on `onboarding`, which is the right call, recorded for the record
+- [x] **A7 — `keystore` now depends on `onboarding`, which is the right call, recorded for the record**
 
 **For: `dev-writer`**
 **Severity: informational — not a defect**
@@ -369,9 +535,23 @@ signature, and a free function in `onboarding.rs` taking `&Keystore` plus a
 module boundary for a crate-internal secret accessor, and the current shape is the
 better of the two. No action needed.
 
+**No action taken, as the finding says is right.** Ticked because "no action needed" is
+the outcome and the entry's purpose — stopping a later reader from "fixing" the
+direction — is served by it being on the record.
+
+Worth confirming it survived the fix pass unchanged, since the session work moved
+several things across this boundary: `slate_for` and `slate_from_nonce` still return
+`crate::onboarding::Slate`, `onboarding.rs:214` still takes `&[u8; 32]` rather than a
+`Keystore`, and no root accessor was added. `OnboardingSession` holds a whole
+`Keystore` rather than a root, which keeps the same rule — the operation is passed in,
+the secret does not come out.
+
+The reasoning here also answered a question the A2 fix raised: `keystore_for` returns
+`&Keystore` rather than the root for the same reason `slate_for` exists at all.
+
 ---
 
-## A8 — `UI-BRIEF.md` now describes a flow the code does not implement
+- [x] **A8 — `UI-BRIEF.md` now describes a flow the code does not implement**
 
 **For: `dev-writer`**
 **Severity: low — genuine defect, follows from A2**
@@ -393,9 +573,30 @@ cannot read the code, so it is currently promising a flow that does not exist.
 Fixing A2 makes this paragraph true; nothing needs changing here **if** A2 is
 fixed, and this must not be resolved by weakening the brief instead.
 
+**Fixed by fixing A2, which is what this entry prescribes** — and the prescription
+mattered, because weakening the brief was the cheaper option and would have been the
+wrong one. The paragraph is now true: a keep stores the candidate the slate showed
+(`on_a_fresh_install_the_identity_kept_is_the_candidate_the_slate_showed`), and
+refreshing offers more candidates of one identity's key
+(`refreshing_a_slate_offers_candidates_of_one_master_key`). Both are named tests
+because "the brief is now accurate" should rest on something a gate can check.
+
+That second test exists **because of this entry**. The A2 fix would have been complete
+without it — the kept-identity property is what the defect was about — but "refresh for
+more" is a separate claim the brief makes to a designer, and it deserved its own
+assertion rather than being inherited.
+
+The brief's paragraph is unchanged, deliberately. I did add one thing the fixes make
+newly relevant, to obligation 8: `encrypted` describes the master key, which is **one
+file per install**, so the first keep reports the protection it wrote and a second
+Stoa's keep reports the protection the existing file has. A designer showing that flag
+per Stoa could otherwise render "this identity is encrypted, that one is not", which is
+not a state that can occur. That is a consequence of the A5/design-review-1 fix
+(a second Stoa being keepable at all), so it could not have been written before.
+
 ---
 
-## A9 — `design.md`'s derivation-chain citations point at pre-change line numbers
+- [x] **A9 — `design.md`'s derivation-chain citations point at pre-change line numbers**
 
 **For: `spec-writer`** (and flagged for the design reviewer, whose dimension this
 mostly is)
@@ -418,9 +619,30 @@ the wrong lesson from a correct claim. Prefer citing the symbol chain
 (`stoa_address` → `stoa_public_key` → `stoa_key` → `derive_stoa_key`), which does
 not rot.
 
+**Fixed** in `63133c9`, by the symbol-chain form this entry recommends. `design.md`'s
+Context paragraph now walks `stoa_address` → `stoa_public_key` → `stoa_key` →
+`identity::derive_stoa_key` with no line numbers, and records *why* the change was
+made — because "line numbers in a `design.md` rot inside the same change" is a
+generalisation worth leaving behind, and three reviewers spent effort rediscovering it
+independently.
+
+The reasoning in this entry is the part I kept verbatim in the document: a reader who
+checks a stale citation, finds unrelated prose, and concludes the claim was fabricated
+draws the wrong lesson from a correct claim. That is a more specific hazard than
+"citations should be accurate", and it is the one this repo has actually hit.
+
+One thing added beyond the fix: the paragraph now notes that `getCapabilities` **no
+longer uses that chain** at all, after A1. The chain claim was true when written and
+the change it describes has moved past it, so leaving it uncorrected would have made an
+accurate citation point at an abandoned design — the same failure one level up.
+
+Addressed to `spec-writer` in the original. I fixed `design.md` because it is
+`dev-writer`'s file; **`proposal.md:217-220` repeats the same stale numbers and I have
+not touched it**, since the proposal is `spec-writer`'s.
+
 ---
 
-## Noted for the tester, outside my dimension
+- [ ] **Noted for the tester, outside my dimension**
 
 Recorded only because I tripped over them while reading for shape; not my findings
 to make and not counted above.
@@ -429,6 +651,23 @@ to make and not counted above.
   is the "the property holds for EVERY method" gate and was **not** extended with
   `generate_identity_slate`, `keep_identity` or `who_am_i`. The gate's own comment
   says *"The wire contract is only useful if it holds for EVERY method"*.
+
+**Open — `tester`'s**, and I am leaving it rather than taking the first item myself.
+
+I verified the first observation: that gate still does not include the three onboarding
+methods, and its comment still claims the property holds for every one. It is a genuine
+hole and it is a *test* hole — the gate is a test asserting a property across the wire
+surface, and `tester` owns the suite. Extending it also means deciding what the three
+handlers' "exactly one top-level shape" is, which is a reading of the contract rather
+than a mechanical addition.
+
+The other two observations need no action: `from_root_for_test`'s 24 fixed-root call
+sites are what made A2 invisible, and the A2 fix answered that by adding a test that
+supplies **no** key rather than by changing those sites. `cargo mutants` is correctly
+identified as the tester's instrument.
+
+Unticked because the gate's comment is currently false about three methods, which is
+exactly the "a claim nothing checks" shape this project keeps finding.
 - `Keystore::from_root_for_test` (`keystore.rs:689`) supplies the same fixed root
   `[7u8; 32]` to 24 call sites, which is what makes A2 invisible; and
   `onboarding.rs` uses `[7u8; 32]` for both the master key and the nonce in most

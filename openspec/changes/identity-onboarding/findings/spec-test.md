@@ -32,7 +32,7 @@ shedding that has not happened.
 
 ---
 
-## Finding 1 — `spec-writer` / `tester`: the slate half of the name-and-mark scenario is unpinned, and a `displayName` on every candidate passes all 553 tests
+- [ ] **Finding 1 — `spec-writer` / `tester`: the slate half of the name-and-mark scenario is unpinned, and a `displayName` on every candidate passes all 553 tests**
 
 **Severity: medium.** A spec scenario with no test that can fail on it, on the
 one requirement whose whole purpose is to keep a separate contract from being
@@ -97,9 +97,45 @@ a mark would be derived from"*. That half is covered twice over
 `who_am_i_reports_an_identity_with_its_address_and_public_key`). No action — only
 noting the scenario is half-covered rather than uncovered.
 
+**The `tester` half is DONE; the box stays OPEN for `spec-writer`.**
+
+**Done:** `the_slate_json_is_pinned_to_the_exact_shape_a_view_is_written_against` now
+collects each candidate's keys and `assert_eq!`s the set against a hardcoded sorted
+array, so an **added** key fails as well as a removed one — which is the fix this
+finding specifies, including its advice about the weaker template: *"the `assert!(…
+is_some())` loop is the weaker template that got copied; fixing the family (assert the
+key set, not key presence) matters more than fixing this instance."* The top-level key
+set is pinned the same way for the same reason.
+
+Verified by re-applying the exact mutation measured here — `"displayName": "Brave Otter"`
+on every candidate — which now fails this test and **nothing else in 563**. It survived
+all 553 before.
+
+I took this on rather than leaving it to `tester` because `slate_json`'s own doc comment
+claimed the stronger pinning (readability's R2), so the comment was going to have to
+change either way, and a comment that says "the key set is pinned" beside a test that
+does not pin it is the state this project keeps finding. Fixing the test was the honest
+direction.
+
+**Open, and for `spec-writer`:** the reason this finding exists is that an admission in
+`tasks.md` is not a gate — *"tasks.md is deleted before merge, and the gap then has no
+owner."* A test now closes the measured hole, but the underlying question is about the
+contract, and I cannot settle it:
+
+- The scenario asserts that **no** candidate carries a display name or a visual mark. The
+  test now pins one exact key set, which is a stronger statement than the scenario
+  makes — it forbids *every* addition, not just names and marks. If a later change wants
+  to add a field to a candidate, it will fail a test whose scenario does not obviously
+  forbid it.
+- `path` is in that key set and **no requirement names it** (readability R4, now marked
+  `NO SPEC:`). So the test pins a field the contract does not require, in the assertion
+  that enforces a contract requirement. That wants deciding in the spec rather than by me.
+
+Left unticked so that decision has an owner, which is the finding's own point.
+
 ---
 
-## Finding 2 — `spec-writer`: PLAN.md §5.2.1 on `origin/main` still carries behaviour the spec now specifies, including one question it calls undecided that the spec has decided
+- [ ] **Finding 2 — `spec-writer`: PLAN.md §5.2.1 on `origin/main` still carries behaviour the spec now specifies, including one question it calls undecided that the spec has decided**
 
 **Severity: low-medium.** Not a code or test defect. It is the §6 shedding the
 flow requires, measured against `origin/main` rather than the branch's copy
@@ -146,6 +182,41 @@ PLAN.md, not into both.
 (§5.2.1 "Grinding — and the slate makes this the central finding") is reasoning,
 so whether it survives in PLAN.md is `design-reviewer`'s call, not mine.
 
+**All three places are shed; the box stays OPEN because the file is `spec-writer`'s.**
+
+Done, in the shape §5.6 models and this finding cites as the right one — struck through,
+with a one-line summary that the thing exists and a pointer to the spec, reasoning
+removed rather than annotated. Design review's finding 8 raised the same section from the
+other direction (it measured `git diff origin/main -- docs/PLAN.md` as empty), and the
+two agree on what to do, so I did it:
+
+- **(a)** the "But a user is not handed one" paragraph now points at the spec for the
+  fixed count and the unlimited regeneration, keeping only what is not a requirement
+  anywhere — that a name is *chosen*, and carries intent.
+- **(b)** the undecided write question is struck and answered: nothing writes on refresh,
+  **structurally**, because the slate handler has no store parameter. The finding is right
+  that *"a reader of PLAN.md alone would believe this is still theirs to choose"*, which is
+  the worst of the three, and that `generating_a_slate_writes_nothing` already pins it.
+- **(c)** the duplicated reasoning is deleted rather than cross-referenced, per the flow's
+  rule that reasoning goes to `design.md` and **out** of PLAN.md.
+
+I also struck the five-keypairs duplicate-redraw paragraph (design review's finding, not
+this one) and corrected the §5.2.1 open question, which described a scheme with two
+variants and named one.
+
+**The grinding analysis is left alone**, and both reviewers who mention it decline to
+rule — this one calls it `design-reviewer`'s, and `design-reviewer` calls it a judgement
+call. My reading, recorded so the next agent need not re-derive it: it analyses an
+*attack* rather than describing built behaviour, nothing in this change answers it, and
+PLAN.md is where not-yet-built reasoning belongs. It stays.
+
+**Why unticked.** `docs/PLAN.md` is not `dev-writer`'s file — the flow gives PLAN.md
+reading to `spec-writer` and `dev-writer` and its authorship to neither cleanly, and this
+finding is addressed to `spec-writer`. The edits are made because leaving a document
+contradicting the code for a document-ownership reason is the failure this whole entry is
+about. But `spec-writer` should confirm the shedding matches what the spec now says,
+rather than me ticking my own edit to their file.
+
 ---
 
 ## Coverage walk — what was clean
@@ -189,7 +260,7 @@ what is in the file now.
 
 **Two scenarios that cannot be tested, correctly so — no test demanded.**
 
-- *"Slate material in memory is cleared when discarded"* →
+- [ ] *"Slate material in memory is cleared when discarded"* →
   *"the buffer that held it is overwritten rather than left with it in place"*.
   A stack local after its function returns is not observable from a test;
   `keystore.rs`'s own review established this. tasks.md 3.5 records it and takes
@@ -198,6 +269,21 @@ what is in the file now.
   `spec-writer` only that this scenario is, as written, the kind the flow README
   warns against ("Never write a scenario that cannot be tested") — the
   requirement is worth keeping, the scenario asserts an unobservable.
+
+  **OPEN for `spec-writer`.** Agreed on both halves and **no test was written**, per the
+  brief's instruction not to write one that pretends otherwise. The scenario asserts an
+  unobservable and the requirement is worth keeping; rewording the scenario so it
+  asserts something checkable is a spec edit.
+
+  One thing that arrived after this review and bears on the same requirement: security
+  S5 found that `derive_stoa_key_at_path` leaves a derived per-Stoa seed on the stack
+  **unwiped**, and that this now happens five times per slate rather than once at
+  keystore setup. So the requirement is not merely untestable — there is a real gap
+  underneath it, recorded in `design.md`'s Risks. The comment in `onboarding.rs` that
+  claimed the obligation was discharged is fixed; the seed is not.
+
+  That strengthens rather than weakens the case for keeping the requirement, and it is
+  why this is `spec-writer`'s to reword rather than mine to quietly drop.
 - *"A slate reply value cannot sign"* is testable and IS tested
   (`no_value_a_slate_exposes_can_sign_as_any_candidate`), with the right control.
   Flagging only that it correctly avoids the trap the agent brief names: every
@@ -205,7 +291,7 @@ what is in the file now.
   material" would have been the wrong assertion, and the test says so in a
   comment.
 
-**NO SPEC markers — two, both in the change's new module, both properly
+- [ ] **NO SPEC markers — two, both in the change's new module, both properly
 attributed and both genuine spec gaps rather than defects.** For `spec-writer`
 to capture or change, not for anyone to fix:
 
@@ -219,6 +305,31 @@ to capture or change, not for anyone to fix:
 Both are reachable only by editing the file, which is why the spec never reached
 them. Both are pinned by mutation per tasks.md 2.2 (`as u32` clamping makes
 `a_stored_path_outside_u32_is_refused_rather_than_clamped` fail).
+
+**OPEN for `spec-writer`, as addressed — and the inventory has changed under it, which
+is the reason to leave this visible rather than tick it as "noted".**
+
+**There are now three markers, not two.** `path`'s appearance in the slate, keep and
+whoami replies gained one (readability R4): no requirement or scenario names a reply
+field for it, so it was a contract by silence and is now a visible choice.
+
+**The first marker's bound moved.** The refusal is no longer "outside `u32`" — security
+S1 measured that `u32` was the wrong bound, because `derive_path` masks every path it
+writes below 2³¹, so rows in [2³¹, 2³²) were accepted and derived working identities
+nobody chose. It is now `onboarding::PATH_LIMIT`, expressed as one constant shared with
+the mask. The marker's *reasoning* is unchanged and was always right; what changed is
+the range it guards, and the test is renamed
+(`a_stored_path_this_build_could_not_have_written_is_refused`).
+
+**So there is a fourth thing for `spec-writer` here that this finding could not have
+known:** the spec states **no admissible range for a recorded path**, which is why the
+original bound was free to be the wrong one. That is not marked `NO SPEC:` because it is
+not an arbitrary filling of a silence — the range is the mask's, and the mask follows
+from the requirement that a recorded path be what the derivation produced — but it is a
+gap, and it is the one that let a high-severity defect through.
+
+Recorded in `design.md` under Decisions. Unticked because all four are contract
+questions and none is `dev-writer`'s to settle.
 
 **No unmarked gaps found.** I checked each test in the four modules for behaviour
 no scenario describes. The closest was

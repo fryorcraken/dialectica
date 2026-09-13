@@ -24,7 +24,7 @@ Ordered by severity.
 
 ---
 
-## 1. `keepIdentity` can never record a second Stoa, which makes a recorded decision false
+- [x] **1. `keepIdentity` can never record a second Stoa, which makes a recorded decision false**
 
 **For: `dev-writer`** (and `spec-writer` for the scenario, see below)
 
@@ -95,9 +95,49 @@ recognition that `create`-refuses-first cannot be both the second-keep guard and
 the per-Stoa gate. Right now `design.md` claims the schema discharges a scenario
 the code cannot reach, which is the more misleading of the two states.
 
+**Fixed** in `63133c9` — the **second** of the two options, and not the first.
+
+The entry offers them even-handedly, but they are not equal: documenting the limit
+would have left a user who joins a second Stoa at a permanent dead end, with a reason
+string naming a keystore they did not know they had, for the sake of an accurate
+`design.md`. The sentence that settles it is this entry's own: *"Those are two
+different refusals sharing one mechanism, which is exactly the collapse
+`KeystoreError`'s distinguishability doctrine exists to prevent."* Once the collapse is
+named, separating them is the fix and documenting it is not.
+
+So the keystore is created only where no file exists, and the per-Stoa refusal comes
+from `chosen_paths`' primary key — which makes the recorded decision true rather than
+retracting it. `design.md` carries the whole story: the mechanism, why it read as
+elegant, the install-scope-versus-Stoa-scope mismatch, and the two costs.
+
+Two costs this uncovered, neither of which the finding could have predicted and both
+now paid explicitly:
+
+- **`encrypted` needed a second source.** Where the keystore already exists the keep
+  writes nothing, so "the `Unlock` this keep used" is not the truth about the file. That
+  branch reads it. An unreadable existing keystore refuses the keep rather than
+  guessing.
+- **The refusal needed its own error arm.** The primary key surfaces as SQLite's
+  `UNIQUE constraint failed`, which `IdentityStoreError::Storage` renders as *"check the
+  path and its containing directory"* — the wrong fix for the commonest refusal the
+  store has. `ChoiceAlreadyRecorded` names the existing choice, matched on SQLite's
+  error **code** rather than its message text. `each_keep_refusal_reason_is_pinned_to_its_own_situation`
+  failed on exactly this when the refusal moved, which is what that test was for.
+
+Tests: `keeping_an_identity_in_a_second_stoa_succeeds_and_reuses_the_master_key` goes
+through the handler twice — the finding's key observation is that *"every multi-Stoa
+test writes the second row with `store.record_path(...)` directly, bypassing
+`keep_identity`"*, so a handler-level test was the missing thing. It also asserts the
+written keystore re-derives **both** Stoas' addresses, because the old guard was
+accidentally preventing a second keep from writing a new master key over the first.
+`a_second_keep_for_one_stoa_is_still_refused_after_the_second_stoa_fix` sits beside it
+so the fix cannot have traded a reachable second Stoa for a replaceable identity.
+
+Measured: always calling `create` fails the first of those and nothing else in 563.
+
 ---
 
-## 2. The "one partial state" is unrecoverable through the API, and `whoAmI`'s reason tells the user to do the thing that cannot work
+- [x] **2. The "one partial state" is unrecoverable through the API, and `whoAmI`'s reason tells the user to do the thing that cannot work**
 
 **For: `dev-writer`**
 
@@ -155,9 +195,42 @@ is that `design.md`'s atomicity argument names the right mechanism (write order,
 `create`'s refusal, `write_atomically`'s staging — all verified, see §6 below) and
 then draws a conclusion about recoverability the mechanism does not support.
 
+**Fixed** in `63133c9`, and by **none** of the three options this entry offers — which
+is worth explaining, because the entry explicitly leaves the choice to `dev-writer`.
+
+Not a repair path (it would mean choosing a path on the user's behalf, which the spec
+forbids). Not a different reason string (the string names the right fix; what was wrong
+was that the fix did not work). Not moving `create` after `record_path` (that produces
+the state the write-order argument exists to prevent — a recorded path naming a master
+key that does not exist).
+
+**Fixing finding 1 closes this one.** A keep whose keystore already exists now reuses it
+and proceeds to `record_path`, so the next choice does land. The state is recoverable in
+the way the document claimed all along, and `whoAmI`'s reason is now a fix that works.
+
+That the two findings share a mechanism is this entry's own discovery — *"By finding 1's
+mechanism, the next `keepIdentity` hits `create` → `AlreadyExists` and returns before
+`record_path` is ever called"* — and it is why the steps-3-to-5 loop was the more
+convincing half of the evidence. A reader of finding 1 alone might have accepted a
+documented one-Stoa-per-install limit; nobody would accept a documented permanent loop.
+
+`design.md`'s entry now records the **correction rather than the conclusion**: that it
+said "recoverable", that the choice could never be made, and that the mechanism it
+named was right while the inference from it was not. The alternative was to quietly
+rewrite the sentence into something true, which would have removed the one piece of
+evidence that a careful-looking concession can be wrong.
+
+**Not pinned by a test, and saying so.** Steps 3-5 of the loop are now
+survivable, but no test walks the whole cycle — `a_keep_whose_path_record_fails_reports_failure_and_names_no_identity`
+still stops at step 2, as this entry notes. What *is* pinned is the mechanism that
+closes it: `keeping_an_identity_in_a_second_stoa_succeeds_and_reuses_the_master_key`
+proves a keep proceeds past an existing keystore. A test for the full recovery loop
+would need a `record_path` that fails once and then succeeds, which no fixture here can
+express. Flagged for `tester` rather than claimed.
+
 ---
 
-## 3. The master key a slate is derived from is minted fresh on every call, and `design.md` never mentions it
+- [x] **3. The master key a slate is derived from is minted fresh on every call, and `design.md` never mentions it**
 
 **For: `dev-writer`**
 
@@ -218,9 +291,39 @@ addresses a keep will produce. If the answer is "hold the minted key beside the
 nonce", note that the module already holds `live_slate` as a second field
 (`tasks.md` 5.1), so the shape exists.
 
+**Fixed** in `63133c9`, and the decision is now recorded — but recording it was never
+going to be enough, which is the one place I part company with this entry's framing.
+
+It is filed as "a decision not recorded", and the remedy it specifies is a Decisions
+entry naming the cost. But the cost, as the entry itself states it, is that *"the user
+is shown five identities and keeps a sixth"* — and that is not a cost a design document
+can make acceptable by naming it. It is the defect. Correctness and security review
+filed the same mechanism as a high-severity bug; the honest reading is that this entry
+found the bug and, by looking at it through the "was it recorded?" lens, filed it as a
+documentation gap.
+
+So both were done. The behaviour is fixed — `OnboardingSession` holds
+`(keystore, live_slate)` in `core` and mints at most once — and `design.md` carries the
+entry this asks for, including the alternatives and what ruled each out.
+
+**Of the three alternatives listed, the first was taken**, for the reason this entry
+supplies: *"the module already holds `live_slate` as a second field, so the shape
+exists."* That is exactly right and it is why the fix is small. The other two were
+rejected in `design.md`: deriving the key from the nonce would make the nonce key
+material, when the type and its comments rest on it being public randomness; writing at
+slate time breaks "Generating a slate SHALL NOT write to storage", which this same
+review calls the best decision in the change.
+
+**The fixture observation is the most valuable thing here** and shaped the test
+directly: *"Its comment says 'The two replies come from two calls, so agreeing is a
+property of the code rather than of one value being copied', which is true of `core` and
+false of the adapter, and the adapter is where the minting happens."* A comment that is
+true of the layer it is written in and false of the layer that matters. The regression
+test supplies **no** key at all so that the property cannot be inherited from a fixture.
+
 ---
 
-## 4. `getCapabilities` still reports the pathless identity, so two wire methods name two different addresses for one user and Stoa
+- [x] **4. `getCapabilities` still reports the pathless identity, so two wire methods name two different addresses for one user and Stoa**
 
 **For: `dev-writer`**
 
@@ -264,9 +367,37 @@ new scheme's doc comment at `keystore.rs:718-727` says the path-taking trio is
 "the same three hops as `Keystore::stoa_key` and its two callers" — which invites
 the reader to assume the callers moved over. They did not.
 
+**Fixed** in `63133c9`, by the alternative rather than by recording the gap — and here
+the entry's own "defensible reading" is the thing I want to argue with, because it is
+the reading that would have kept the defect.
+
+The reading is that `getCapabilities` belongs to `posting-capability`, so widening it is
+a separate change. That is true about *ownership* and wrong about *consequence*: the
+merged `posting-capability` requirement says the reported identity SHALL be the one an op
+published now would be attributed to, and after the salt bump it was not. Deferring
+would not have been "two methods disagree until then" — it would have been shipping a
+merged requirement violated, with the violation recorded as a deliberate cost. A spec
+this change does not own is a stronger reason to fix it than a weaker one.
+
+So `posting_identity` in `core` consults the record and derives at the recorded path,
+and `design.md` carries the decision including the two consequences taken on purpose
+(`getCapabilities` now depends on `IdentityStore`; the lookup's error type widened).
+
+**The doc-comment observation was the sharpest pointer in this entry** and is fixed:
+*"the path-taking trio is 'the same three hops as `Keystore::stoa_key` and its two
+callers' — which invites the reader to assume the callers moved over. They did not."*
+They have now. As a side effect the pathless trio has no production caller at all, which
+is recorded in `design.md`'s Risks rather than resolved by deletion.
+
+Tests: `the_probe_and_whoami_report_the_same_identity_for_one_user_and_stoa` and
+`the_probe_and_whoami_give_one_reason_when_no_choice_is_recorded_for_this_stoa`. The
+second covers the state this entry does not mention and which the old code got worst:
+`canPost: true` for an address with no recorded path, asserting posting ability for an
+identity nothing would ever sign with.
+
 ---
 
-## 5. `design.md` says "nothing was written anywhere. Clean." — an empty `identity.sqlite` is written first
+- [x] **5. `design.md` says "nothing was written anywhere. Clean." — an empty `identity.sqlite` is written first**
 
 **For: `dev-writer`** (small, but it is the document describing the wrong thing)
 
@@ -288,9 +419,29 @@ was created carries no row") is both true and just as strong. A concession that
 overstates its own cleanliness is the shape that got caught on another piece this
 week.
 
+**Fixed** in `63133c9`, using the replacement wording this entry proposes almost
+verbatim, because it is right that the precise claim is *"both true and just as
+strong"*. `design.md` now says no path was recorded anywhere and the file the adapter
+opened on the way in carries no row, and names what is actually left behind: a zero-row
+`identity.sqlite` with `user_version = 1`.
+
+The finding is explicitly the smallest in the file and I want to record why it was worth
+acting on rather than noting. Its last sentence is the reason: *"A concession that
+overstates its own cleanliness is the shape that got caught on another piece this
+week."* A concession is the part of a document a reader trusts most, because it is where
+the author is arguing against themselves — so an overstatement there is worth more than
+an overstatement in a claim. Two of the four things this reviewer found wrong in
+`design.md` were inside concessions (this one and finding 2's "recoverable"), which is
+not a coincidence.
+
+The entry's own caveat — harmless, and
+`a_keep_whose_keystore_write_fails_records_no_path` asserts the right thing — is
+confirmed, so **no test changed** and none needed to. This is a documentation fix and is
+ticked as one.
+
 ---
 
-## 6. Verified as recorded — the three claims I was asked to check, and one line-number nit
+- [x] **6. Verified as recorded — the three claims I was asked to check, and one line-number nit**
 
 **For: nobody. Recorded so the next reviewer does not redo it.**
 
@@ -336,9 +487,33 @@ week.
   (`identity_store.rs:700`, `:746`). The third marker my brief expected is at
   `wire.rs:1348` and is about `Fn` vs `FnOnce`, unrelated. See finding 7.
 
+**Actioned — the line-number nit is fixed; the verifications needed nothing.** Ticked
+because the one item addressed to anyone has been dealt with, and recorded here because
+this entry saved real time.
+
+The nit: `design.md`'s `keystore.rs:651/:645/:640/:641` and `lib.rs:251` are replaced by
+the symbol chain, which is what this entry recommends (*"line numbers in a `design.md`
+rot within the same change"*). Architecture's A9 found the same thing independently; the
+`proposal.md:217-220` copy is untouched because the proposal is `spec-writer`'s.
+
+The four verified claims I did **not** re-derive, on the strength of this entry saying
+they were walked rather than inferred — the `log/sqlite.rs` no-migration argument, the
+three pinned constants with their `openssl` provenance including the validate-against-v1
+step, the absent passphrase constant, and the slate-as-nonce implementation. The
+spec-test reviewer independently reproduced the pinned constant with `openssl kdf`, which
+is two agents agreeing from different directions, so I spent my time on the four defects
+instead. Recording that as a deliberate choice rather than an omission.
+
+One item here **became false during the fix pass** and is worth flagging rather than
+leaving for someone to trip over: the marker count is now **three**, not two. `path`'s
+appearance in three replies gained a `NO SPEC:` marker on
+`the_slate_json_is_pinned_to_the_exact_shape_a_view_is_written_against`, per readability's
+R4. So a later reader grepping `NO SPEC` and comparing against this entry will find a
+discrepancy that is a fix rather than a drift.
+
 ---
 
-## 7. The `NO SPEC:` refusals are durable reasoning living only in test comments
+- [x] **7. The `NO SPEC:` refusals are durable reasoning living only in test comments**
 
 **For: `dev-writer`**
 
@@ -364,9 +539,36 @@ stating it twice in doc comments, because a later reader reaching for
 docs. `tasks.md` 2.2 records that both refusals were mutation-verified, so the
 evidence exists; it just does not live where the flow says it should.
 
+**Fixed** in `d8f9816`: `design.md` has a Decisions entry, "Disk content is refused,
+never coerced — one principle, three applications", stating the principle once with a
+table of where it applies.
+
+**Three, not two, and that is the fix improving on the finding rather than just
+following it.** The entry's own argument is that *"Both refusals turn on the same
+principle … and stating it once in Decisions is stronger than stating it twice in doc
+comments."* Acting on that surfaced a third application arriving in the same fix pass:
+`ChoiceAlreadyRecorded` (from finding 1) is the same principle — a replaced choice
+strands every op the previous identity signed — and it would otherwise have been a
+fourth doc comment restating it. Which is exactly what the finding predicts happens.
+
+The table is the useful form: a stored path outside the writable range, a stored Stoa key
+that is not 32 bytes, and a second choice for a Stoa that has one. Each hands the user
+something that *works* and is not theirs, with no error anywhere.
+
+**The `NO SPEC:` markers stay in the tests**, deliberately, and this is where I read the
+finding slightly differently from how it is written. It treats the markers and the
+reasoning as the same thing moving to one place. They are two claims addressed to two
+readers: the marker says *the spec is silent here*, which is `spec-writer`'s to act on
+and is what a reviewer greps for; the Decisions entry says *and this is why we chose
+refusal*, which is the archive's. Moving the reasoning does not make the silence go
+away. Both now exist.
+
+This is fairly called the mildest finding in the file, and the entry says so. It was
+worth acting on because the prediction embedded in it came true inside the same pass.
+
 ---
 
-## 8. PLAN.md §5.2.1 was not shed, and it now contradicts the code in two places
+- [x] **8. PLAN.md §5.2.1 was not shed, and it now contradicts the code in two places**
 
 **For: `dev-writer`**
 
@@ -416,9 +618,41 @@ Also worth checking while in there: `docs/PLAN.md:3954-3962`'s open question
 from it (§5.2, `derive_stoa_key`)". Still true of the root, but the sentence now
 describes a scheme with two variants and names only one.
 
+**Fixed.** All three places, in the prescribed shape: struck through, with a one-line
+summary that the thing exists and a pointer to the spec, and the reasoning removed
+rather than duplicated.
+
+- **The regeneration paragraph.** Both halves were false and both are struck. A refresh
+  mints no keypairs — the five candidates are paths over one master key — and the write
+  question was decided, structurally, by the slate handler having no store parameter.
+  One sentence is kept because it is the reason the shape is safe rather than a
+  description of it: *an identity becomes real when it signs, and nothing signs during
+  onboarding.*
+- **The duplicate-redraw paragraph.** Struck, with the correction that duplicate
+  handling is in **core** and is an index walk rather than a redraw, because a fresh
+  nonce would destroy reproducibility. The distinction this section draws against the
+  cross-identity collision is kept — it is still true and is the reason the two cases
+  must not be conflated.
+- **The `#### Grinding` analysis is left alone**, per this entry's own note that whether
+  reasoning survives in PLAN.md is a judgement call. It analyses an attack rather than
+  describing built behaviour, and nothing in this change answers it.
+- **The open question** now says two schemes exist, names both, and says which one a
+  kept identity uses. It also lost a clause that had become false — "§9.2's MVP does not
+  call even that" — which I would not have looked at if this entry had not sent me
+  there.
+
+**The observation that made this worth doing properly** is the one about duplication
+rather than staleness: *"some of §5.2.1's reasoning has already been duplicated rather
+than moved: `design.md`/`onboarding.rs` now argue the one-master-key model at length
+while PLAN.md still argues the five-keypairs model. That is the two-copies-drift failure
+the rule exists to prevent, and here the wrong copy is the one a reader reaches first."*
+Two copies is worse than one stale copy, because a reader who finds the plan first has no
+signal that a better one exists. That is why the reasoning is deleted rather than
+annotated.
+
 ---
 
-## 9. `tasks.md` claims the code disproves
+- [x] **9. `tasks.md` claims the code disproves**
 
 **For: `dev-writer`**
 
@@ -444,9 +678,37 @@ right thing, and 2.2's two mutation results are consistent with
 `record_path`'s `INSERT`-without-`OR REPLACE` (`identity_store.rs:314-332`) and
 `path_from_row`'s refusal.
 
+**Fixed** — 6.1 no longer carries a count. Readability's R7 filed the same thing from the
+rule's side; this entry supplied the measurement (553 against the recorded 546), and the
+two together are what made the answer obvious.
+
+Replaced rather than corrected, which is the point. Updating 546 to 563 would have been
+wrong within the hour: this fix pass changed the number three times. 6.1 now names the
+command and says the tests this change adds are the ones listed against the tasks above
+— tied to a diff someone can check rather than to a total nobody can. This entry's
+framing is exact: *"Two commits landed after the tick, which is the honest explanation —
+but a hardcoded count in a tracker is exactly what CLAUDE.md's 'do not write down
+anything a command can answer' forbids."*
+
+6.2's `cargo fmt --check` tick was the same class of problem one step further on — true,
+and measuring nothing, because that gate cannot reach `dialectica-core`. It now says so
+and records the per-file `rustfmt --check` that was run instead.
+
+Two items here needed **no** action and the entry is right that they do not:
+
+- **3.1's mask verification** holds. Both pinned digests have the top bit set, so a no-op
+  mask cannot hide, which this entry independently confirmed.
+- **3.5 is correctly recorded as deliberately untested.** A stack local after its
+  function returns is unobservable from a test. Flagged here *"only so the next reviewer
+  does not re-raise it"*, and it worked — I did not re-raise it, and S5's
+  residual-`seed` finding one layer down is a different claim which is recorded in
+  `design.md` rather than tested.
+
+The verification of 4.3 and 2.2 saved re-deriving both; noted as time this entry bought.
+
 ---
 
-## 10. Two thin entries (suggestions only)
+- [x] **10. Two thin entries (suggestions only)**
 
 **For: `dev-writer`**
 
@@ -467,6 +729,33 @@ right thing, and 2.2's two mutation results are consistent with
   entry should say so: the decision is about what the *reply* is derived from, and
   the test's independent re-read is what keeps the derived value honest. As
   written, entry and test look like they disagree.
+
+**Fixed**, both, and the second turned out to be load-bearing rather than a polish
+suggestion.
+
+**The recovery-needs-the-record entry** now states the cost in the terms this finding
+supplies, which are sharper than anything I would have written: the field is hardcoded
+`true`, *"no test can distinguish 'correctly true' from 'stuck true', because there is no
+reachable state where it is false"*, so it **forecloses detecting its own staleness**.
+That is a specific failure mode rather than a general caveat — the change that implements
+backup will not be reminded by anything — and the entry now says what carries it instead
+(UI-BRIEF obligation 7, which is a person, not a gate).
+
+**The protection-report entry** now draws the distinction this finding asks for: the
+decision is about what the *reply* derives from, and the test's independent re-read is
+what keeps that derived value honest, because asserting the reply against the same
+`Unlock` it was computed from would be the reply agreeing with itself.
+
+Writing that paragraph is what made the second-keep fix's `encrypted` problem visible.
+Having just articulated *why* "the value this code used" is the authority, I noticed that
+a keep whose keystore already exists **uses no value** — it writes nothing — so that
+justification does not reach it, and reporting the `Unlock` there would have been a
+straightforward lie in a field a view renders as a padlock. That branch now reads the
+file. The entry records both sources and why they differ.
+
+So a finding filed as "suggestions only" prevented a defect in a different fix. Worth
+recording, because the temptation with a thin-entry finding is to reword the document and
+move on.
 
 ---
 
@@ -492,3 +781,38 @@ structural observation worth carrying out of this review: `design.md` documents
 `dialectica-core` thoroughly and `dialectica/rust-lib/src/lib.rs` not at all, and
 the untested half is exactly the half where an undocumented choice cannot be
 caught by anything else.
+
+---
+
+### Outcomes — `dev-writer`
+
+All ten actioned; each entry above carries its own detail. **Every one is ticked**, so
+this file blocks nothing.
+
+| # | Outcome |
+|---|---|
+| 1 | **Fixed** `63133c9` — refusal moved to the primary key; a second Stoa is keepable and two tests constrain each other |
+| 2 | **Fixed** `63133c9` — closed by fixing 1; the state is now recoverable as the document always claimed |
+| 3 | **Fixed** `63133c9` — behaviour *and* the Decisions entry; filed as a documentation gap, but the cost it names is the defect |
+| 4 | **Fixed** `63133c9` — `posting_identity` in `core`; the "defensible reading" that would have deferred it is argued against in the entry |
+| 5 | **Fixed** `63133c9` — the wording this entry proposes, near-verbatim |
+| 6 | **Actioned** — line numbers replaced by symbol chains; four verified claims not re-derived, deliberately |
+| 7 | **Fixed** `d8f9816` — one Decisions entry, and acting on it surfaced a **third** application of the principle |
+| 8 | **Fixed** — all three places shed in §5.6's shape; the grinding analysis deliberately kept |
+| 9 | **Fixed** — 6.1 names the command; 6.2 now says what `cargo fmt --check` cannot see |
+| 10 | **Fixed** — and the protection-report half prevented a defect in the finding-1 fix |
+
+**The closing paragraph was the most useful thing in this review**, and it is worth
+saying why rather than just agreeing. Its claim is structural: the four serious findings
+are on the adapter path *because* that is the path no test reaches, so an undocumented
+choice there cannot be caught by anything else. That predicts where to look, and it was
+right — correctness, security and architecture each found the same defect from their own
+direction, all four in `lib.rs`.
+
+The fix follows the prediction rather than the individual findings: every decision named
+in 1-4 **moved into `core`**, which is why they are fixed rather than documented.
+`design.md` still documents `dialectica-core` more thoroughly than the adapter, and that
+is now much less dangerous, because the adapter holds three "where is the file" helpers
+and no decisions. What remains structurally true and unfixed: the adapter is still
+`#[cfg(logos_scaffold)]`, and CI's test-count gate is still blind to a whole `impl` being
+compiled out (architecture A2 notes this). Nothing here changes that.

@@ -145,12 +145,37 @@ that never made the claim.
 
 ## 6. Gates
 
-- [x] 6.1 Full suite: **546 passed, 0 failed** (475 before this change), with no
-  warnings from either of this repo's crates. The warnings in the output are the
-  SDK's own and predate this change.
-- [x] 6.2 `cargo fmt --check` exits 0 and `cargo clippy -p dialectica-core
-  --all-targets -- -D warnings` exits 0. Clippy caught three lints in the new
-  tests (`bool_assert_comparison` twice, `unnecessary_to_owned` once), now fixed.
+- [x] 6.1 The full suite passes, with no warnings from either of this repo's crates
+  — the warnings in the output are the SDK's own and predate this change. Run
+  `cargo test --manifest-path dialectica/rust-lib/Cargo.toml -p dialectica
+  -p dialectica-core`; the tests this change adds are the ones listed against the
+  tasks above.
+
+  **This box used to record "546 passed, 0 failed (475 before this change)", and
+  the count was wrong by the time anyone read it** — two commits landed after the
+  tick, and review measured 553. CLAUDE.md names "how many tests pass" as the
+  canonical thing not to write down, and the reason is exactly this: a total
+  cannot fail loudly, it just goes quietly stale, and a reader cannot tell whether
+  it was true when written. The self-invalidating form ties the claim to a diff
+  someone can check instead of to a number nobody can.
+- [x] 6.2 `cargo clippy -p dialectica -p dialectica-core --all-targets -- -D
+  warnings` exits 0. Clippy caught three lints in the new tests
+  (`bool_assert_comparison` twice, `unnecessary_to_owned` once), now fixed.
+
+  **`cargo fmt --check` exits 0 and that measures nothing here.** It does not
+  follow path dependencies, so it never reaches `dialectica-core` — where every
+  file this change adds lives. Reporting it as a passed gate is the "exit 0 on a
+  gate that measured nothing" that `.claude/agents/README.md` says is worse than
+  no gate.
+
+  Checked per file instead, with `rustfmt --check --edition 2021 --config
+  skip_children=true`. Readability review found the new files carrying 20 hunks;
+  they are now clean. `wire.rs` was formatted in its own commit ahead of the
+  behaviour changes, because 8 of its hunks reproduce against `origin/main`'s copy
+  and so are not this change's — mixing those into a behaviour diff makes it
+  reviewable for neither. `keystore.rs`'s pre-existing hunks are deliberately
+  untouched for the same reason. `identity.rs` picked up about five, because they
+  sit inside test bodies this change edits.
 - [x] 6.3 `openspec validate identity-onboarding --strict` — **passes**, after two
   defects the implementation pass found were fixed in the delta by `spec-writer`.
   Recorded rather than ticked silently, because the failures were real and the
@@ -171,32 +196,45 @@ that never made the claim.
      field, while both still carry the public key and the address such values
      would be derived from.
 
-     **Coverage of the new scenario is partial, and saying so is the point.**
+     **Coverage of the new scenario was partial and is now complete.**
      `the_whoami_json_is_pinned_to_the_exact_shape_a_view_is_written_against`
      asserts the whole serialised string, so a name field added to the whoami
      reply fails it. `the_slate_json_is_pinned_to_the_exact_shape_a_view_is_written_against`
-     checks each expected key is *present*, not that the key set is exactly
-     those — so a `name` field added to a slate candidate would leave it green.
-     The slate half of the scenario is therefore unpinned; a test asserting the
-     candidate's key set exactly is `tester`'s to add.
+     checked each expected key was *present*, not that the key set was exactly
+     those — so a `name` field added to a slate candidate left it green. That was
+     recorded here as `tester`'s to add, and the spec-test reviewer measured it:
+     `"displayName"` on every candidate, 553 passed, 0 failed.
+
+     It is closed. That test now collects each candidate's keys and asserts the
+     set exactly, so an **added** key fails as well as a removed one; re-applying
+     the reviewer's mutation fails it and nothing else.
+
+     Recorded rather than quietly corrected, because the review's point about this
+     entry is the durable one: the honest account lived in `tasks.md`, which is
+     deleted before merge, while the overstated claim lived in `slate_json`'s doc
+     comment, which survives. An admission in a tracker is not a gate.
 
   Both behaviours were already covered in code —
   `a_derived_stoa_key_is_deterministic` and `a_path_derived_key_is_deterministic`
   both exist and pass — so nothing was untested; what was at risk was the
   contract losing a requirement on archive.
 
-  **A third thing blocks the archive, and it is not in this change.**
-  `openspec archive identity-onboarding` aborts with *"Validation errors in
-  rebuilt spec for identity … Spec must have a Purpose section"* and writes
-  nothing — so this change cannot be archived at all until the live
-  `openspec/specs/identity/spec.md` gains a `## Purpose`. That file has none, an
-  artifact of the specs being hand-merged before the CLI was installed.
+  **A third thing blocked the archive and no longer does.**
+  `openspec archive identity-onboarding` aborted with *"Validation errors in
+  rebuilt spec for identity … Spec must have a Purpose section"* and wrote
+  nothing, because the live `openspec/specs/identity/spec.md` had no `## Purpose`
+  — an artifact of the specs being hand-merged before the CLI was installed.
 
-  **The fix already exists on the `docs/flow-tooling` branch**, which gives a
-  Purpose to `identity`, `module-wire-contract` and `stoa-metadata` and corrects
-  the flow README's claim that openspec is not installed. It is not on `main`
-  yet. **`docs/flow-tooling` must land before this change is archived**; nothing
-  is duplicated here, because two Purposes for one spec is two answers.
+  The fix was on `docs/flow-tooling` and **has since landed on `main`** (it came in
+  with the commit that gave three specs a Purpose). This branch was rebased onto
+  `origin/main` during the review-fix pass, so it now carries that Purpose and the
+  abort is gone. Nothing is duplicated here, because two Purposes for one spec is
+  two answers.
+
+  Kept rather than deleted because the trap is live for any change branched before
+  that landed, and because the failure mode is the dangerous kind: `archive`
+  aborts and **writes nothing**, so it looks like a no-op rather than an error
+  someone must fix.
 
   With that Purpose temporarily in place, the archive applies cleanly and the
   rebuilt `identity` requirement carries **both** determinism scenarios, all
@@ -205,3 +243,92 @@ that never made the claim.
   everything the archive wrote.
 - [x] 6.4 The `logos-rust-sdk-src` symlink is removed and absent from the commit
   — confirmed by `git status`.
+
+## 7. Acting on the review findings
+
+Six reviewers wrote `findings/`; this section records what the fix pass did to the
+code. Each entry's evidence lives in the findings file it answers, and every finding
+carries its own outcome there — **that** is the gate, not this list.
+
+- [x] 7.1 **The identity kept is the one the slate showed.** Three reviewers found
+  independently that `master_key` minted a fresh key per call, so on a fresh install
+  the slate showed candidates of key A and the keep wrote key B. `OnboardingSession`
+  in `core` now holds `(keystore, live_slate)` together and mints at most once —
+  verified by `on_a_fresh_install_the_identity_kept_is_the_candidate_the_slate_showed`,
+  measured failing first, and by restoring the per-call mint and watching it plus two
+  others fail and nothing else.
+- [x] 7.2 **A second Stoa can be kept.** `Keystore::create`'s `AlreadyExists` was
+  serving as both the second-keep guard and the per-Stoa gate, and the keystore is one
+  file per install — so `chosen_paths` could never hold a second row through any wire
+  call, making a spec scenario unreachable through the API. The refusal moved to the
+  primary key — verified by
+  `keeping_an_identity_in_a_second_stoa_succeeds_and_reuses_the_master_key` and, in
+  the other direction, by
+  `a_second_keep_for_one_stoa_is_still_refused_after_the_second_stoa_fix`, which is
+  there so the fix cannot have bought a reachable second Stoa at the price of a
+  replaceable identity.
+- [x] 7.3 **The probe and `whoAmI` report one identity.** The salt bump left
+  `getCapabilities` on the pathless derivation. `posting_identity` in `core` now
+  consults the record — verified by
+  `the_probe_and_whoami_report_the_same_identity_for_one_user_and_stoa`, whose
+  strongest assertion is that an op signed at the recorded path verifies against the
+  address the probe reported, and by
+  `the_probe_and_whoami_give_one_reason_when_no_choice_is_recorded_for_this_stoa`.
+- [x] 7.4 **The path mask and the path guard are one constant.** `path_from_row`
+  bounded the whole of `u32` while `derive_path` masks below 2³¹, so a hand-edited row
+  in between derived a working identity nobody chose. `onboarding::PATH_LIMIT` is now
+  the single bound, applied on read **and** on write — three tests, each watched
+  failing first, one of which pins the two rules to each other rather than each to a
+  literal.
+- [x] 7.5 **Minting a key cannot panic.** `SecretKey::generate`'s `expect` had become
+  reachable from a dispatch handler while its comment said otherwise. Both halves
+  fixed: the mint moved inside `guarded`, and the signature is fallible.
+  **Deliberately not proven by a test that forces the failure** — `getrandom` cannot be
+  made to fail without a seccomp policy, and a test installing one would be testing
+  the sandbox. `minting_a_key_is_fallible_rather_than_a_panic` pins the shape instead
+  and says so.
+- [x] 7.6 **Documents corrected against the code.** `design.md`'s atomicity concession
+  claimed a partial state was repairable by the user's next choice, which 7.2 shows
+  could never be made; its "nothing was written anywhere" ignored the
+  `identity.sqlite` created first; its `check_layout` risk entry described a guard the
+  code has. Line-number citations replaced with symbol chains, because the ones it
+  carried were pre-change and three reviewers found them stale independently.
+- [x] 7.7 **Six comments and one helper that had outlived the code**, each named in
+  `findings/readability.md`: `parse_stoa`'s three unconverted copies, `parse_index`'s
+  caller count and its `as usize`, the slate reply's presence-only pin, the zeroize
+  comment's false claim, `OnboardingDir`'s wrong precedent, `who_am_i`'s off-by-one.
+- [ ] 7.8 **`tasks.md` has no stage block, and I have not added one.**
+  `.claude/agents/README.md` specifies one at the top of this file, one row per agent
+  instance, each agent ticking only its own row — and it is the mechanism by which "an
+  unticked row with no agent running is a stage nobody is doing" is checkable. This
+  file starts at section 1.
+
+  Left for `spec-writer`, which owns that block, rather than written by me: my own
+  agent file says to tick exactly one row and **never add a row**, because concurrent
+  agents' cherry-picks must not touch the same lines. Authoring the whole block would
+  be the same hazard at larger scale, and I would also be guessing at how many
+  reviewer rows to create for reviewers who have already run.
+
+  Unticked because it is a real gap in this change's tracking, not a note.
+
+## What is NOT in this change, and where it went
+
+- **`check_layout` does not prove the `PRIMARY KEY`** (`findings/security.md` S4),
+  so a replaced `identity.sqlite` with a constraint-less table opens and
+  `path_for` returns whichever row SQLite hands back first. A schema-verification
+  design rather than a guard, and it should decide about `all_paths` returning two
+  rows for one Stoa at the same time. Recorded in `design.md`'s Risks; that
+  finding's box is left **open**.
+- **`derive_stoa_key_at_path` leaves a derived seed on the stack unwiped**
+  (`findings/security.md` S5's substantive half). Fixing it means giving
+  `identity.rs` a memory-lifetime obligation it currently defers to `keystore`,
+  which is a change to that module's contract. Recorded in `design.md`'s Risks;
+  the comment that falsely claimed the obligation was discharged **is** fixed.
+- **The pathless `Keystore` trio now has no production caller.** Retiring it would
+  delete three public methods from the secret-holding type, in a change whose
+  proposal declares `keystore` untouched. Recorded in `design.md`'s Risks.
+- **The spec gaps** the findings route to `spec-writer`: no scenario requires that
+  the kept identity be the candidate the slate *displayed* across two calls; no
+  requirement states the recorded path's admissible range; no requirement names
+  `path` as a reply field; and `proposal.md` still says `posting-capability`'s
+  derivation is untouched, which 7.3 makes false.

@@ -22,7 +22,7 @@ apart from this file.
 
 ## Genuine defects
 
-### R1. `design.md` says `identity.sqlite` has no `check_layout` equivalent. It has one.
+- [x] **R1. `design.md` says `identity.sqlite` has no `check_layout` equivalent. It has one.**
 
 **For:** `dev-writer`
 
@@ -61,7 +61,29 @@ from the code it explains. The Risk entry should either be deleted or rewritten
 to record that the guard **was** copied and why the 40-lines objection was
 dropped.
 
-### R2. `slate_json`'s doc comment claims a pinning its test does not perform
+**Fixed** in `d8f9816`, rewritten rather than deleted — and the rewrite is worth more
+than either option the finding offers, because the residual risk turned out to be
+real.
+
+The entry now states what `check_layout` **does** prove (two column names, via
+`LIMIT 0`) and what it does not (anything about keys or constraints), which is the
+genuinely asymmetric part. Security review's S4 measured the consequence: a replaced
+file whose `chosen_paths` lacks the `PRIMARY KEY` opens `Ok`, and `path_for` then
+returns whichever of two rows SQLite hands back first — an identity chosen by
+physical row order. So deleting the entry would have removed a true warning along
+with a false one.
+
+The observation this finding makes that I want to keep on the record, because it
+generalises: *"This is the 'comment claiming more than the code does' family
+inverted: the document claims **less**, which is just as misleading and harder to
+catch, because nothing fails."* That is the reason a stale `design.md` is worth a
+reviewer's time at all.
+
+S4 itself is **left open** — see `findings/security.md`. The constraint check is a
+schema-verification design rather than a guard, and it does not belong bolted onto
+this change.
+
+- [x] **R2. `slate_json`'s doc comment claims a pinning its test does not perform**
 
 **For:** `dev-writer` (comment), `tester` (the test, if the claim is kept)
 
@@ -104,7 +126,35 @@ name drop the "exact shape" claim, or the test asserts the key set exactly.
 **Measurement.** `slate_json` has one fewer guarantee than the three sibling
 reply shapes, and the difference is invisible from the comment.
 
-### R3. `parse_index`'s doc comment names two callers; it has three, and the third is the one where its inline reasoning is wrong
+**Fixed** in `d8f9816` by taking the **second** of the two options offered — the test
+now asserts the key set exactly — rather than the first, which was to weaken the
+comment and the test name.
+
+The finding is scrupulously even-handed between them, and the spec is what breaks the
+tie. The scenario "A generated name and a mark are not settled by this capability"
+requires that no candidate carry a display name or a visual mark; a presence-only
+check cannot fail on that scenario at all. Dropping the "exact shape" claim would
+have made the comment honest and left the contract unpinned, which is the worse of
+the two honest states.
+
+`the_slate_json_is_pinned_to_the_exact_shape_a_view_is_written_against` now collects
+each candidate's keys and `assert_eq!`s against a hardcoded sorted array, so an
+**added** key fails as well as a removed one. Verified by re-applying the spec-test
+reviewer's mutation — `"displayName": "Brave Otter"` on every candidate, which had
+survived all 553 tests — and watching this test fail and nothing else.
+
+The top-level key set is pinned the same way, which the finding did not ask for and
+which costs nothing now that the shape of the assertion exists.
+
+This also closes the half of `spec-test.md`'s finding 1 that was `tester`'s. **The
+half that is `spec-writer`'s is not closed** — see that file.
+
+**The generalisable point, which is the most valuable thing in this entry:** *"the
+honest account lives in `tasks.md`, which is deleted before merge, while the
+overstated one lives in the code, which survives."* That is the asymmetry that makes
+an admission in a tracker worth less than a weaker test with an accurate comment.
+
+- [x] **R3. `parse_index`'s doc comment names two callers; it has three, and the third is the one where its inline reasoning is wrong**
 
 **For:** `dev-writer`
 
@@ -148,7 +198,33 @@ also the name of a field it parses meaning something entirely different — a
 slate position rather than a pagination offset. One concept, two names, and one
 name, two concepts, in the same four lines.
 
-### R4. A field the spec never mentions is exposed in three replies with no `NO SPEC:` marker
+**Fixed** in `d8f9816`. The doc comment names all three callers and the inline comment
+now argues from the **severe** one, with the mild one kept beside it: a page of -1 is
+not a page, and a defaulted index keeps the first candidate, which is storing an
+identity nobody chose.
+
+The finding's diagnosis of *why* this happened is the part I want recorded, because it
+is CLAUDE.md's rule arriving from an angle the rule does not state: the shared helper
+*"gives the mild reason for the mild caller and silently withholds the severe one"*.
+The function was correct throughout — it always refused — so nothing failed; what was
+wrong was that a reader could not learn from it which consequence the refusal is
+protecting against. That is a comment defect with no code defect behind it, and those
+are the ones that survive review.
+
+While there I also fixed S6, which is about the same lines: `as usize` became
+`usize::try_from`.
+
+**The naming half is NOT fixed, and I am ticking this box anyway** — flagging that
+rather than burying it. Renaming `parse_index` touches three handlers for no
+behaviour change, and doing it inside a commit that also reshapes the session and
+moves two derivations is the mixing CLAUDE.md forbids. A note now sits in the doc
+comment saying the name came from pagination, that `index` means a slate position to
+its newest caller, and that renaming is left to whoever next has a reason to touch
+those handlers. If a reviewer thinks a tick requires the rename too, reopen it — the
+box is ticked for the reasoning fix, which is what the finding's title and body are
+about.
+
+- [x] **R4. A field the spec never mentions is exposed in three replies with no `NO SPEC:` marker**
 
 **For:** `dev-writer`
 
@@ -183,7 +259,31 @@ needing one more field."
 for this change (`identity_store.rs:700`, `:746`). Both of those are good — see
 Clean, below. This is the third unspecified choice and it has none.
 
-### R5. `who_am_i` says "three ways that can fail" and then names a fourth
+**Fixed** in `d8f9816`: a `NO SPEC:` marker on
+`the_slate_json_is_pinned_to_the_exact_shape_a_view_is_written_against`, which is the
+test that now pins the key set `path` appears in. It names what was chosen, why (not
+secret, and a view that can show the path can render the recovery warning
+truthfully), that no requirement or scenario asks for it, and that it appears in the
+keep and whoami replies too.
+
+The finding is right that the *reasoning* was already recorded on `slate_json` and
+that what was missing was the marker, and right about why that matters: *"a later
+reviewer grepping `NO SPEC` to enumerate this change's unspecified choices gets two
+hits, both in `identity_store.rs`, and concludes the wire replies carry nothing
+unspecified."* A marker is addressed to a different reader than a doc comment — the
+one enumerating rather than the one reading in place — and good prose in the wrong
+place does not reach them.
+
+Placed on the test rather than beside `slate_json`, per the convention in
+`.claude/agents/README.md` ("the test carries `// NO SPEC:`"), and it lands on the one
+test a change to the reply's shape has to pass.
+
+**For `spec-writer`:** this is now a visible unspecified choice rather than a hidden
+one, and it is a *widening of the core API* — which CLAUDE.md says should be
+deliberate rather than a side effect. The contract should either require `path` in
+these replies or say it is not part of them. Not something `dev-writer` can settle.
+
+- [x] **R5. `who_am_i` says "three ways that can fail" and then names a fourth**
 
 **For:** `dev-writer`
 
@@ -207,7 +307,21 @@ plus one: `master()` returning `Err`, `paths()` returning `Err`,
 code comment should either say four, or say "three keystore states and a fourth
 the split creates" — whichever it means.
 
-### R6. `OnboardingDir` credits a shape it did not copy
+**Fixed** in `63133c9`: it says **four**, and enumerates them, because the finding's
+count is the right one. Reading `whoami_for`'s arms confirms it — `master()` errors,
+`paths()` errors, `path_for` returns `Ok(None)`, `path_for` errors — four failure
+routes, not three plus a special case.
+
+The alternative wording the finding offers ("three keystore states and a fourth the
+split creates") would have been defensible and is worse, because two of the four are
+*record* failures rather than keystore ones, so "three keystore states" is not true
+either. Enumerating removes the question instead of rephrasing it.
+
+The comment also now says the no-choice reason is the same string `getCapabilities`
+gives, which is true as of the S2 fix (`NO_CHOICE_FOR_THIS_STOA`) and was not true
+before it.
+
+- [x] **R6. `OnboardingDir` credits a shape it did not copy**
 
 **For:** `dev-writer`
 
@@ -245,7 +359,25 @@ copy is the point at which "a fourth slightly-different guard" starts to apply,
 and whoever touches this next should decide deliberately rather than adding a
 fifth.
 
-### R7. `tasks.md` records a test count, which CLAUDE.md names as the canonical thing not to write down
+**Fixed** in `d8f9816`, and the correction is more specific than "name one file"
+because the finding's evidence is specific: the comment now says it copies
+`log/sqlite.rs`'s shape, and explains that the two strategies differ —
+`std::process::id()` in the name needs the pre-emptive `remove_dir_all` because a name
+is reused within one run, while `keystore.rs`'s 8 random bytes from `getrandom` does
+not. So a reader asked to change one is told which precedent actually applies and
+why they are not interchangeable.
+
+The detail worth keeping: *"The accurate comment and the inaccurate one are in the same
+change"* — `identity_store.rs`'s equivalent credits only `log/sqlite.rs` and is
+correct. One author, one sitting, two comments, one wrong.
+
+**The fourth-copy observation is recorded in the comment, not acted on**, which is
+what the finding asks for. It now states that this is the fourth near-copy, names all
+four, and says whoever needs a fifth should decide deliberately instead of adding it.
+Unifying four test fixtures is a refactor with no change in front of it, which is the
+speculative half CLAUDE.md warns against — and the finding says so itself.
+
+- [x] **R7. `tasks.md` records a test count, which CLAUDE.md names as the canonical thing not to write down**
 
 **For:** `dev-writer`
 
@@ -273,7 +405,23 @@ This is true and measures nothing, which the project already knows — see R8 an
 should say what the gate could not see, per that document's own instruction:
 *"Say what a gate cannot see rather than reporting it as passed."*
 
-### R8. The new files are not rustfmt-clean, and the gate that would have said so cannot see them
+**Fixed**, both halves, in the same commit as R8.
+
+6.1 now names the command instead of a total, and says the tests this change adds are
+the ones listed against the tasks above — the self-invalidating form the finding
+prescribes, tied to a diff someone can check. It also records *why* the number was
+replaced rather than merely corrected: design review measured 553 against the recorded
+546, and the honest explanation is that two commits landed after the tick. A count
+cannot fail loudly; that is the whole objection, and correcting 546 to 563 would have
+reproduced it within the hour, since this fix pass changed the number again.
+
+6.2 now says what `cargo fmt --check` **cannot see** — it does not follow path
+dependencies, so it never reaches `dialectica-core`, where every file this change adds
+lives — and records the per-file `rustfmt --check` that was run instead, with which
+files' hunks are this change's and which are pre-existing. The clippy half of that box
+was always real and is unchanged.
+
+- [x] **R8. The new files are not rustfmt-clean, and the gate that would have said so cannot see them**
 
 **For:** `dev-writer`
 
@@ -313,11 +461,47 @@ diff touching three files in ways unrelated to whatever they were doing, and
 the real change hides inside it. That is the same objection CLAUDE.md makes to
 mixing a refactor with a behaviour change, arriving by a different route.
 
+**Fixed**, and the finding's closing argument is what determined *how*, so it is worth
+saying rather than just reporting clean.
+
+`onboarding.rs` and `identity_store.rs` are **new files in this change** — neither
+exists on `origin/main`, which I checked rather than assumed — so every hunk in them is
+this change's and they were simply formatted, in the commits that own them.
+
+`wire.rs` is not new, and this is where the finding's argument bites. Eight of its
+hunks reproduce against `origin/main`'s copy of the file, so they are not this
+change's. Formatting the whole file inside a behaviour commit would have swept them in
+and produced exactly the unreviewable diff this entry describes; leaving my own hunks
+unformatted would have repeated the defect. So the file was formatted in **its own
+commit, ahead of the behaviour changes** (`90f698c`), with the suite re-run at the
+unchanged count to show it changes nothing. That is CLAUDE.md's "make the change easy,
+then make the easy change", with the counter-pressure respected: the file the change in
+front of me touches, not a sweep of the crate.
+
+**Two disclosures, because a clean `rustfmt --check` would otherwise overstate this.**
+
+- `keystore.rs` has many pre-existing hunks. I formatted it, saw that it had swept
+  them all in, and **reverted** — reapplying my four content edits by hand. Its
+  pre-existing hunks are untouched and it is *not* format-clean.
+- `identity.rs` picked up about five pre-existing hunks, because they sit inside test
+  bodies this change edits (the `SecretKey::generate` call sites). Separating them
+  would have meant reverting and reapplying those edits for five whitespace hunks. I
+  judged that not worth a second stash cycle and am flagging it rather than letting it
+  pass as clean work.
+
+**A correction to the brief I was given, for the record:** it told me 20 hunks across
+the three touched files were pre-existing and to reformat none of them. That is wrong
+in the direction that matters — two of the three files do not exist on `main`, so
+their hunks are all this change's, which is what R8 says. The only genuinely
+pre-existing hunks in the touched set are `wire.rs`'s eight, plus `keystore.rs`'s and
+`identity.rs`'s (which the brief did not mention). Trusting the brief over the measurement
+would have left both new files unformatted.
+
 ---
 
 ## Stylistic preferences — not defects
 
-### S1. `Slate::from_nonce`'s loop keeps a `paths` vector that tracks `candidates` exactly
+- [x] **S1. `Slate::from_nonce`'s loop keeps a `paths` vector that tracks `candidates` exactly**
 
 `onboarding.rs:248-285`. `paths` and `candidates` are pushed in lockstep —
 every `paths.push` at line 259 is followed by a `candidates.push` at 279 unless
@@ -331,7 +515,18 @@ lines 237-242 argues specifically that "Distinctness of *paths* is what is
 checked". Keeping the checked thing in its own variable supports that reading.
 Recorded so nobody 'simplifies' it without noticing it was deliberate.
 
-### S2. `whoami_for` / `who_am_i` / `Whoami` — three spellings of one concept
+**No change, ticked as actioned rather than fixed.** The reviewer states this is a
+preference and not a defect, argues *against* making the change, and says the entry
+exists so nobody simplifies it without noticing. Agreed on all three, and the code is
+untouched.
+
+Ticked rather than left open because there is nothing here that blocks a merge: an
+empty box would tell the runner a decision is outstanding when the reviewer and I
+agree the current shape is right. The entry has done its job by existing — the next
+reader who reaches for `candidates.iter().any(...)` will find the argument for not
+doing it.
+
+- [x] **S2. `whoami_for` / `who_am_i` / `Whoami` — three spellings of one concept**
 
 `wire.rs:563` (`Whoami`), `:623` (`who_am_i`), `:651` (`whoami_for`), and the
 wire method is `whoAmI`. Each spelling is idiomatic for its own position (Rust
@@ -339,6 +534,16 @@ type, Rust fn, JSON camelCase) and the `Capability` / `capability_for` /
 `get_capabilities` trio beside it has the same structure, so this is
 consistent with the file it lives in. Noted only because the brief asks about
 one-concept-one-name; I do not think it should change.
+
+**No change, ticked as actioned.** The reviewer's own conclusion is that it should not
+change, and the reason given is the right one: the three spellings are one per
+position, and the `Capability` trio beside it establishes the pattern — so renaming
+any of them would make this handler the inconsistent one.
+
+Ticked for the reason S1 is: an empty box would signal an outstanding decision where
+there is none. Worth noting that the S2 fix in `findings/security.md` added a fourth
+member to the same family (`posting_identity`, which answers the probe's half of the
+question), and it follows the same convention.
 
 ---
 
