@@ -1877,15 +1877,116 @@ fn required_direction(parsed: &serde_json::Value) -> Result<crate::op::VoteDirec
     }
 }
 
-/// Parse the whole request first, then act. The ordering is the requirement.
+/// A publish request that has been through the parse, the forbidden-field guard
+/// and the `stoa` read — because it cannot be built without them.
+///
+/// # Why the prologue is a type and not three copies of four statements
+///
+/// `publish_post`, `publish_reply` and `publish_vote` each carried the same
+/// opening — parse, reject forbidden fields, read `stoa` — and CLAUDE.md names
+/// exactly this: *"when you find yourself writing the fourth slightly-different
+/// copy of a guard, that is the signal to reshape rather than to add a fourth
+/// test"*. `publish_moderation` is the fourth, and there a missed guard is an
+/// **authorisation** defect rather than a wrong reply, which is why PLAN.md §9.2
+/// calls this reshape its precondition.
+///
+/// So the guards are not called by each handler; they are what constructing the
+/// value *is*. A handler holding a `PublishRequest` provably went through all
+/// three, and a fourth publish operation inherits them without its author
+/// knowing this decision happened.
+///
+/// # What this does NOT fix, and where that fix goes
+///
+/// [`PublishRequest::parse`] still parses with a bare `serde_json::from_str`,
+/// exactly as the three handlers did — this commit moves the shape and changes
+/// no behaviour, so the diff can be reviewed as a refactor. The envelope defect
+/// it makes fixable *in one line* is real and separate:
+/// `serde_json::Value::get` answers `None` for an array exactly as it does for
+/// an object with no `stoa`, so a request that is an array is reported as
+/// "missing field: stoa"; and nothing on this path bounds the request's size.
+///
+/// # Parse the whole request first, then act. The ordering is the requirement.
 ///
 /// Each handler reads every field it needs before [`crate::authoring`] is
 /// reached, so "a refused publish appends nothing and delivery was not invoked"
 /// is structural: there is nothing to append until the last field has parsed.
 /// Under validate-as-you-go that property would be an artefact of the order the
-/// statements happen to be in.
-fn parsed_object(request: &str) -> Result<serde_json::Value, String> {
-    serde_json::from_str(request).map_err(|e| error_json(&format!("invalid JSON: {e}")))
+/// statements happen to be in. This type preserves that: it hands back the
+/// request for the operation's own fields, and the handler reads all of them
+/// before publishing.
+struct PublishRequest {
+    /// The Stoa every publish names, parsed once.
+    stoa: crate::identity::Address,
+    /// The request itself, for the fields this operation adds.
+    fields: serde_json::Value,
+}
+
+impl PublishRequest {
+    /// Run the parse, the forbidden-field guard and the `stoa` read, in that
+    /// order.
+    ///
+    /// **The order is not arbitrary.** The forbidden-field guard precedes the
+    /// `stoa` read because a caller who supplied `author` has a wrong model of
+    /// the API that a message about a malformed Stoa would not correct.
+    fn parse(request: &str) -> Result<Self, String> {
+        let fields: serde_json::Value =
+            serde_json::from_str(request).map_err(|e| error_json(&format!("invalid JSON: {e}")))?;
+        reject_forbidden_fields(&fields)?;
+        let stoa = required_stoa(&fields)?;
+        Ok(PublishRequest { stoa, fields })
+    }
+}
+
+/// The shape all three publish handlers have: guard, prologue, the operation's
+/// own fields, then the tail.
+///
+/// # What the caller is left with, and why that is the whole of it
+///
+/// `run` receives a [`PublishRequest`] — already parsed, guarded and with its
+/// Stoa read — and returns the [`crate::authoring::Published`]. Everything
+/// either side of that is here: the panic guard, the three prologue steps, and
+/// the delivery handoff with its own `catch_unwind`.
+///
+/// So a fourth publish operation is a closure reading its own fields. It cannot
+/// forget a guard, because it never runs one.
+///
+/// # The error arm is the wire reply already, not a type to convert
+///
+/// Both things a `run` closure can fail on already produce one: a field reader
+/// (`required_string` and friends) returns the error shape, and a
+/// [`crate::authoring::Refusal`] is turned into one by [`refused`]. Following
+/// [`Request::parse`]'s own convention here — *"the `Err` arm is already the
+/// wire reply, so a caller cannot invent a second error shape while converting
+/// one"* — means the two arrive by the same route and no closure has to decide
+/// which wrapper to use.
+fn publishing(
+    method: &'static str,
+    request: &str,
+    deliver: &mut dyn FnMut(&crate::op::OpId),
+    run: impl FnOnce(&PublishRequest) -> Result<crate::authoring::Published, String>,
+) -> String {
+    guarded(method, || {
+        let parsed = match PublishRequest::parse(request) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+        match run(&parsed) {
+            Ok(published) => delivered_and_published(&published, deliver),
+            Err(already_the_wire_reply) => already_the_wire_reply,
+        }
+    })
+}
+
+/// An authoring refusal, as the wire reply.
+///
+/// One function rather than `.map_err(|r| error_json(&r.to_string()))` at three
+/// call sites: the wording of a refusal is the `Refusal` type's own job (see
+/// [`no_identity`] for why that matters — the adapter is compiled by no test, so
+/// a message written outside `Refusal`'s `Display` is a message no gate sees),
+/// and three copies of the conversion is three places for one of them to start
+/// wording it differently.
+fn refused(refusal: crate::authoring::Refusal) -> String {
+    error_json(&refusal.to_string())
 }
 
 /// `{"stoa":"…","body":"…"}` -> `{"opId":"…","wasNew":bool}`.
@@ -1941,27 +2042,9 @@ pub fn publish_post<L: crate::log::OpLog>(
     key: &crate::identity::SecretKey,
     deliver: &mut dyn FnMut(&crate::op::OpId),
 ) -> String {
-    guarded("publish_post", || {
-        let parsed = match parsed_object(request) {
-            Ok(v) => v,
-            Err(e) => return e,
-        };
-        if let Err(e) = reject_forbidden_fields(&parsed) {
-            return e;
-        }
-        let stoa = match required_stoa(&parsed) {
-            Ok(v) => v,
-            Err(e) => return e,
-        };
-        let body = match required_string(&parsed, "body") {
-            Ok(v) => v.to_string(),
-            Err(e) => return e,
-        };
-
-        match crate::authoring::post(log, key, stoa, body) {
-            Ok(published) => delivered_and_published(&published, deliver),
-            Err(refusal) => error_json(&refusal.to_string()),
-        }
+    publishing("publish_post", request, deliver, |parsed| {
+        let body = required_string(&parsed.fields, "body")?.to_string();
+        crate::authoring::post(log, key, parsed.stoa, body).map_err(refused)
     })
 }
 
@@ -2189,31 +2272,10 @@ pub fn publish_reply<L: crate::log::OpLog>(
     key: &crate::identity::SecretKey,
     deliver: &mut dyn FnMut(&crate::op::OpId),
 ) -> String {
-    guarded("publish_reply", || {
-        let parsed = match parsed_object(request) {
-            Ok(v) => v,
-            Err(e) => return e,
-        };
-        if let Err(e) = reject_forbidden_fields(&parsed) {
-            return e;
-        }
-        let stoa = match required_stoa(&parsed) {
-            Ok(v) => v,
-            Err(e) => return e,
-        };
-        let parent = match required_op_id(&parsed, "parent") {
-            Ok(v) => v,
-            Err(e) => return e,
-        };
-        let body = match required_string(&parsed, "body") {
-            Ok(v) => v.to_string(),
-            Err(e) => return e,
-        };
-
-        match crate::authoring::reply(log, key, stoa, parent, body) {
-            Ok(published) => delivered_and_published(&published, deliver),
-            Err(refusal) => error_json(&refusal.to_string()),
-        }
+    publishing("publish_reply", request, deliver, |parsed| {
+        let parent = required_op_id(&parsed.fields, "parent")?;
+        let body = required_string(&parsed.fields, "body")?.to_string();
+        crate::authoring::reply(log, key, parsed.stoa, parent, body).map_err(refused)
     })
 }
 
@@ -2229,31 +2291,10 @@ pub fn publish_vote<L: crate::log::OpLog>(
     key: &crate::identity::SecretKey,
     deliver: &mut dyn FnMut(&crate::op::OpId),
 ) -> String {
-    guarded("publish_vote", || {
-        let parsed = match parsed_object(request) {
-            Ok(v) => v,
-            Err(e) => return e,
-        };
-        if let Err(e) = reject_forbidden_fields(&parsed) {
-            return e;
-        }
-        let stoa = match required_stoa(&parsed) {
-            Ok(v) => v,
-            Err(e) => return e,
-        };
-        let target = match required_op_id(&parsed, "target") {
-            Ok(v) => v,
-            Err(e) => return e,
-        };
-        let direction = match required_direction(&parsed) {
-            Ok(v) => v,
-            Err(e) => return e,
-        };
-
-        match crate::authoring::vote(log, key, stoa, target, direction) {
-            Ok(published) => delivered_and_published(&published, deliver),
-            Err(refusal) => error_json(&refusal.to_string()),
-        }
+    publishing("publish_vote", request, deliver, |parsed| {
+        let target = required_op_id(&parsed.fields, "target")?;
+        let direction = required_direction(&parsed.fields)?;
+        crate::authoring::vote(log, key, parsed.stoa, target, direction).map_err(refused)
     })
 }
 
