@@ -4265,21 +4265,30 @@ change that found it.
 Both came out of review and are recorded here rather than in a findings file,
 which is deleted at merge.
 
-**The publish prologue/tail wants reshaping into one place.** `publish_post`,
-`publish_reply` and `publish_vote` each carry the same prologue — parse, validate,
-open the keystore, open the store — and the same tail. Three copies of one guard
-is the point at which a guard should become a data structure, and two things make
-it more than tidiness:
+~~**The publish prologue/tail wants reshaping into one place.**~~ **Done** — the
+prologue is `wire::PublishRequest`, whose construction *is* the envelope, the
+forbidden-field guard and the `stoa` read, so a fourth publish operation inherits
+all three. It remains the **precondition of `publish_moderation`** it was named
+as.
 
-- It is a **precondition of `publish_moderation`**, where a missed guard is an
-  authorisation defect rather than a wrong reply.
-- The adapter runs a **64 MiB Argon2id unlock before any validation**, so a
-  request that will be refused for a malformed Stoa pays for a full key
-  derivation first. Validate, then unlock — one reshape fixes both.
+**What that reshape was also meant to buy is NOT done: the adapter still
+unlocks before it validates.** `open_from_env` runs a **64 MiB Argon2id**
+derivation before the forbidden-field guard and every required-field read, so
+`{"stoa":"<valid hex>","author":"x"}` — refused unconditionally — or a request
+with no `body` each pay a full memory-hard KDF and are then refused. The Stoa
+need not exist and the caller need not be a member; only hex well-formedness is
+checked first, which makes it a cheap-request memory-and-CPU amplifier.
 
-Deliberately **not** done inside the change that revealed it: make the change
-easy, then make the easy change. A diff that reshapes three handlers and adds a
-publish path cannot be reviewed for either.
+The reshape makes the fix a change to **one** function instead of three, and
+that is all it did. The remaining cost is a signature change: `handler` takes
+`&SecretKey`, so the key must exist before the handler runs and the handler is
+what validates — reordering means the three handlers taking a **fallible key
+supplier** instead, which also moves the `Handler` type test and every sweep
+fixture. Judge that on the merits recorded above under "Taking a fallible
+key-supplier in core", not as the price of this reordering.
+
+Found by review on `piece/publish-envelope`, whose `design.md` decision 8 carries
+the full argument; recorded here because a findings file is deleted at merge.
 
 **A panicking delivery sink must not report a published op as failed.** `deliver`
 runs inside `guarded`, so a sink that panics yields `{"error":…}` with no `opId`

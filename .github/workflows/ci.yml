@@ -343,14 +343,66 @@ jobs:
           # `the_probe_and_whoami_report_the_same_identity_for_one_user_and_stoa`
           # asserts on it. What the gate still checks is that the adapter did not take
           # the choice back.
-          for want in ("core::keystore::creator_key_in",
-                       "core::wire::get_capabilities_from_stores"):
+          #
+          # THE PUBLISH PATH'S HALF IS NOW HERE TOO, and for the same reason the
+          # probe's is: `core::wire::publishing_key` is where "which key signs a
+          # publish" is decided, inside the crate `cargo test` compiles. It was
+          # `keystore.stoa_key(&stoa)` on a line in this file, which is how it
+          # came to disagree with the probe unnoticed. Losing this call from the
+          # adapter is the adapter taking the choice back.
+          # AND `core::stoa_of` IS REQUIRED FOR AN ORDERING REASON, not a
+          # derivation one. The adapter must read `stoa` before it can derive a
+          # per-Stoa key, and it was doing that with its own bare
+          # `serde_json::from_str` plus a four-arm ladder -- which shadowed the
+          # whole request envelope on the shipped path: an array was answered
+          # "missing field: stoa" here, and an N-byte request was fully parsed
+          # at ~2N heap before MAX_REQUEST_BYTES was ever evaluated. Going
+          # through `core::stoa_of` crosses the envelope once. Review caught
+          # that; no gate did, because Build LGX proves this file COMPILES and
+          # asserts nothing about the order of operations inside it.
+          #
+          # EACH `want` CARRIES ITS OWN REASON, and that is a fix rather than
+          # tidying. The message used to be one shared string about which key
+          # the creator is, citing 4313cf6 -- so a red on `core::stoa_of`, which
+          # derives no key at all, printed a paragraph about key derivation and
+          # a commit about creator/poster agreement. An author following that
+          # citation read a fix unrelated to the property the call actually
+          # holds. The reasoning above reaches whoever opens this YAML and never
+          # reached the CI log; these strings are what reaches the log.
+          WANTED = {
+              "core::keystore::creator_key_in":
+                  "which key a Stoa's CREATOR is derived from is a decision, and "
+                  "it must live in core where a test can reach it. Deriving it "
+                  "here restores the bug 4313cf6 fixed -- a Stoa's creator named "
+                  "under a key it would never sign with -- with every other gate "
+                  "green.",
+              "core::wire::get_capabilities_from_stores":
+                  "which identity the posting PROBE reports is a decision, and it "
+                  "must live in core where a test can reach it. It was chosen in "
+                  "this file once, under the pathless per-Stoa scheme, while "
+                  "whoAmI used the path-taking one -- so two shipped methods "
+                  "reported two different addresses for one user in one Stoa.",
+              "core::wire::publishing_key":
+                  "which key a PUBLISH signs with is a decision, and it must live "
+                  "in core where a test can reach it. It was `keystore.stoa_key"
+                  "(&stoa)` on a line in this file -- the pathless scheme -- while "
+                  "the probe reported the path-derived one, so every published op "
+                  "was authored by an identity no method on the surface would "
+                  "name. See the_key_a_publish_signs_with_is_the_identity_the_"
+                  "probe_reports.",
+              "core::stoa_of":
+                  "this is an ORDERING requirement, not a derivation one: it is "
+                  "how the adapter's first touch of the request bytes goes through "
+                  "Request::parse. Reading `stoa` any other way here re-opens the "
+                  "envelope bypass -- a non-object answered as a missing field, "
+                  "and an N-byte request fully parsed at ~2N heap BEFORE "
+                  "MAX_REQUEST_BYTES is evaluated, which per PHASE0-FINDINGS 3 "
+                  "aborts the module process rather than returning an error.",
+          }
+          for want, why in WANTED.items():
               if want not in src:
                   print(f"::error file={path}::{want} is gone from the adapter — "
-                        "which key the creator is, and which the poster is, are "
-                        "decisions that must live in core where a test can reach "
-                        "them. Deriving either here restores the bug 4313cf6 fixed, "
-                        "with every other gate green.")
+                        f"{why}")
                   sys.exit(1)
 
           # And it must NOT reach a per-Stoa accessor, which is what the bug did.
@@ -364,17 +416,29 @@ jobs:
           # weakens rather than obeys.
           code = re.sub(r"^\s*//.*$", "", src, flags=re.M)
 
-          # ONE EXEMPTION, NAMED, AND IT IS A KNOWN GAP RATHER THAN AN ALLOWANCE.
-          # `with_publish_identity` calls `keystore.stoa_key(&stoa)` — the PATHLESS
-          # per-Stoa scheme — while `getCapabilities` reports
-          # `stoa_address_at_path` and `createStoa` names `identity_public_key`.
-          # That is three derivations for one user, and `stoa-lifecycle`'s merge of
-          # `main` is what made all three visible at once; see its design.md,
-          # "Three derivations after the merge". It is exempted rather than fixed
-          # because WHICH key a publish signs with is a spec question this gate
-          # cannot answer, and failing CI on it would block a merge on a question
-          # nobody has decided. Delete this exemption when the spec decides.
-          code = code.replace("keystore.stoa_key(&stoa)", "<exempt: publish path>")
+          # THE EXEMPTION IS GONE, BECAUSE THE SPEC DECIDED.
+          #
+          # It read: `with_publish_identity` calls `keystore.stoa_key(&stoa)` --
+          # the PATHLESS per-Stoa scheme -- while `getCapabilities` reports
+          # `stoa_address_at_path`, and "WHICH key a publish signs with is a spec
+          # question this gate cannot answer ... Delete this exemption when the
+          # spec decides."
+          #
+          # `content-authoring` decides it: "WHEN the posting-capability probe
+          # reports an identity for a Stoa and a post is then published into that
+          # Stoa, THEN the published op's author is the identity the probe
+          # reported." So the publish path now calls
+          # `core::wire::publishing_key`, which is the probe's own derivation,
+          # and the exempted call no longer exists to exempt. The ban below is
+          # what keeps it from coming back.
+          #
+          # WHAT MADE THE FIX POSSIBLE is the same move this gate already
+          # records for the probe's half: the choice went into `core`, where
+          # `cargo test` compiles it and
+          # `the_key_a_publish_signs_with_is_the_identity_the_probe_reports`
+          # asserts an op's author against the probe's reply. While it lived on
+          # this file's line, no test could see it -- which is the whole reason
+          # this gate exists.
 
           banned = re.findall(
               r"\.\s*(stoa_key|stoa_public_key|stoa_address|identity_key|"
@@ -388,8 +452,37 @@ jobs:
                     "and read by no other gate. Call core::keystore::creator_key_in "
                     "or core::wire::get_capabilities_from_stores instead.")
               sys.exit(1)
-          print("ok: the adapter routes both halves through core::keystore, "
-                "and names no Keystore accessor itself")
+
+          # AND THE ADAPTER MUST NOT PARSE A REQUEST ITSELF.
+          #
+          # This is a separate ban from the accessors above because it is a
+          # separate failure: not "which key signs" but "was the request ever
+          # bounded". A `serde_json::from_str` here is an unguarded parse of an
+          # attacker-controlled body -- no size cap, no non-object refusal --
+          # and it runs BEFORE the bytes reach `core`, so every envelope
+          # obligation is shadowed however correct `dialectica-core` is. That
+          # shipped once, in the very change that added the envelope to the
+          # publish path, and no gate saw it: `cargo test` does not compile this
+          # file, and Build LGX proves it compiles rather than what order it
+          # runs in.
+          #
+          # Every request this file reads must go through a `core` entry point
+          # built on `Request::parse` -- `core::stoa_of`, `core::parse_channel_id`
+          # or a handler. If a new one is genuinely needed, add it to `core`
+          # where `cargo test` can reach it, rather than relaxing this.
+          parses = re.findall(r"serde_json\s*::\s*from_str", code)
+          if parses:
+              print(f"::error file={path}::the adapter parses a request itself "
+                    f"({len(parses)} call(s) to serde_json::from_str) — which "
+                    "bypasses the request envelope: no size cap, and a non-object "
+                    "answered as a missing field. This file is compiled by no test, "
+                    "so nothing else would catch it. Read the request through a "
+                    "core entry point built on Request::parse (core::stoa_of, "
+                    "core::parse_channel_id, or a handler).")
+              sys.exit(1)
+
+          print("ok: the adapter routes every derivation through core, names no "
+                "Keystore accessor itself, and parses no request")
           PY
 
   # ─── qml ─────────────────────────────────────────────────────────────────
