@@ -470,7 +470,59 @@ The name derivation and the "recovery needs the record" export path are both
 owned elsewhere and both have a place to land in this screen without it changing
 shape.
 
-### BLOCKING, found merging #60 into main after #63/#62 landed: where the launch gate sits
+### SETTLED by the owner while merging #60: identity gates PARTICIPATION, not launch
+
+**The decision, recorded not argued.** The owner's flow:
+
+1. Homepage is **the Stoas you hold**, empty at first. No identity check.
+2. **Paste an address** to look at one. No identity check.
+3. **Inside a Stoa**, a banner: an identity is needed *to participate*. The Stoa
+   is readable without one.
+4. **The identity screen**, reached from that banner.
+5. **Back in the Stoa**, now able to post, comment, upvote.
+
+**This dissolved the contradiction below rather than choosing a side of it, and
+both specs turned out to be partly right.** `stoa-navigation-view` is correct
+that a keyless peer reaches the Stoa list and can create; `view-identity-
+onboarding` is correct that an identity is required before participating. What
+was wrong was **where** that requirement is enforced — at launch, above
+everything, instead of at the point of participation.
+
+**What this piece therefore does to `Main.qml`: nothing.** It is `main`'s
+three-screen navigator, byte-identical, ungated. The measurement below shows
+that is the shape under which `tst_stoa_screens.qml` passes 67/67.
+
+**Step 3 is NOT in this piece**, and that is the reportable boundary rather than
+an omission. The banner belongs in `FeedScreen.qml`'s posting gate, which
+already implements everything around it: the Stoa renders without an identity,
+`getCapabilities(stoa)` is probed on every render, post/comment/upvote are each
+bound to `capability.canPost === true`, and a closed gate renders core's own
+reason. That file is owned by #62 and #63; this branch has never touched it
+(`git diff --stat origin/main...` over `dialectica-ui/src/qml/` names
+`Core.qml`, `DOnboardingScreen.qml`, `Main.qml`, `ScreenFrame.qml`, `qmldir`
+and nothing else).
+
+What the closed gate lacks is only a **route** to the identity screen, and it
+says so itself: its `FlatButton` comment reads "it reveals guidance rather than
+navigating: there is nowhere to navigate to". This piece is what makes somewhere
+exist. The wiring is small and in-pattern — a second signal beside `closed()`,
+routed by `Main.qml` the way `onClosed` already is, since `FeedScreen` states it
+"does not know what is" outside itself — but it is a navigation decision (does
+the identity screen replace the feed, and how does the user get back?) in a file
+this piece does not own, so it is left for whoever owns that step.
+
+**`tst_launch_branch.qml` was deleted rather than rewritten.** Its subject was
+which screen `Main.qml` selects from the identity answer, and `Main.qml` now
+selects none — there is no launch branch to pin. Everything it protected that
+still exists is covered where it belongs: `tst_onboarding_states.qml`'s 50 tests
+drive the screen itself, including that `identityKept` fires only on a reply
+that kept something, that a candidate is never an identity, and that the two
+absent reasons stay distinguishable. Rewriting it against the banner would have
+meant asserting a contract in a file this piece does not implement.
+
+Everything below is the working that led here, kept because the two rejected
+shapes are each the intuitive answer from one side and will otherwise be
+re-derived.
 
 This change was written when `Main.qml` was a single feed over one
 developer-supplied Stoa, so "branch on launch between onboarding and the feed"
@@ -478,10 +530,11 @@ had exactly one reading. `main` has since made `Main.qml` a **three-screen
 navigator** (list / join / feed, `piece/ui-stoa-list`) that deliberately holds
 no Stoa address of its own, choosing one at runtime from the membership listing.
 
-The merge resolution taken here gates the whole navigator: `screenShown` tests
-the identity answer first, so `onboarding` and `identityFailed` outrank the three
-navigator screens, and the app opens on the Stoa **list** once an identity is
-reported. All 13 `tst_launch_branch.qml` specs pass against it, and it satisfies
+The first merge resolution attempted gated the whole navigator: `screenShown`
+tested the identity answer first, so `onboarding` and `identityFailed` outranked
+the three navigator screens, and the app opened on the Stoa **list** once an
+identity was reported. All 13 `tst_launch_branch.qml` specs passed against it,
+and it satisfied
 every scenario in this change's spec — none of which names the list, the feed or
 their order; they say onboarding versus "the forum".
 
@@ -561,15 +614,32 @@ refusal. So a keyless peer must be able to reach the Stoa list: any gate that
 hides the list until an identity exists contradicts that requirement too. Option
 2 satisfies it; option 1 cannot without that requirement changing.
 
-The resolution left in the tree is option 1, so the branch's own contract
-arrives intact and reviewable rather than silently dropped. It is **not
-shippable as it stands** — the cold-start dead end above is real, and whichever
-option is chosen, `identityStoa` needs either a supplier or removal.
+**Why participation is the right place, in terms the two rejected options make
+concrete.** A gate has no safe default when it cannot ask its question: showing
+the forum claims an identity nobody reported, showing onboarding offers to
+replace one that may exist. That is why the gated build rendered "Whether you
+have an identity here could not be determined" as the entire application. At the
+point of participation the question is always answerable, because a Stoa is in
+hand — `getCapabilities(stoa)` has an argument, and its answer is about the
+thing the user is trying to do.
 
-**`identityStoa` is the seam either way.** Core's `who_am_i`,
+**The trap that cost two attempts, recorded because it passes every gate.** Both
+gated builds bound their guard to a Stoa address property with an empty default
+— `stoaAddress`, then `identityStoa`. Nothing in the running application ever
+set either one, so the guard fired on every launch and rendered a dead end,
+**with the whole suite green**: a guard that always fails is still valid QML, no
+spec instantiates `Main.qml` (a recorded blind spot), and the one spec that did
+supplied the property itself. The rule that falls out is narrow and worth
+keeping: **bind an identity check to whether an identity exists, never to an
+address a caller is trusted to have filled in.** Core's `who_am_i`,
 `generate_identity_slate` and `keep_identity` each take a Stoa and refuse a
-request without one (`wire.rs`'s `parse_stoa`), so onboarding cannot ask anything
-without an address — even though §5.2's MVP waypoint makes the answer the same
-for every Stoa. That is why the property survives `piece/ui-stoa-list`'s removal
-of `stoaAddress`: it is a different question from "whose feed is up", renders
-nothing, and is commented as such at its declaration.
+request without one (`wire.rs`'s `parse_stoa`), so the address must come from
+somewhere the application genuinely has it — inside a Stoa, that is the Stoa
+being read.
+
+**When §5.2's destination arrives, the participation seam is already right.**
+Identity becomes genuinely per-Stoa, and a check performed inside a Stoa is
+asking about exactly the Stoa whose answer matters — no change of shape. Core
+already anticipates it: `whoami_for` answers `NO_CHOICE_FOR_THIS_STOA` for a
+peer holding a master key with no choice recorded for the Stoa asked about, a
+state a single app-level question could not have expressed.

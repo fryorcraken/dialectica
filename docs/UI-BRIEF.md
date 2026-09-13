@@ -183,7 +183,22 @@ the person will ever have** — so a backup flow is one secret, not one per Stoa
 Two consequences for you:
 
 - **An onboarding screen exists that did not before**: five identities, pick
-  one, refresh for more. It is the first thing a new user sees in a Stoa.
+  one, refresh for more. **It is not a gate and not the first thing a new user
+  sees** — identity is required to *participate in a Stoa*, not to launch the
+  app or to browse. The owner's flow, and the shape to design against:
+
+  1. The homepage is **the Stoas you hold** — empty at first, with no identity
+     check of any kind.
+  2. **Paste an address** to look at a Stoa. Still no identity check.
+  3. **Inside a Stoa**, a banner saying an identity is needed *to participate*.
+     The Stoa is readable without one.
+  4. **The identity screen**, reached from that banner.
+  5. **Back in the Stoa**, now able to post, comment and upvote.
+
+  So a user with no identity — or whose identity question cannot be answered at
+  all — still reaches their Stoas, still imports one, still reads one. What they
+  cannot do is post, reply or vote, and the place that says so is the Stoa they
+  are standing in.
   **Core now serves this** — a slate call returns five candidates with an address
   and a public key each, a keep call stores the one chosen, and a "who am I" call
   answers afterwards. Refreshing is unlimited and is never refused for having
