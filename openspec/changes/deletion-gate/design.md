@@ -3,6 +3,51 @@
 See `proposal.md` — Why, for the eight firings and the 7,101-vs-37 measurement
 that motivates the three-dot range.
 
+### The near miss that happened after this design was written
+
+`proposal.md`'s argument for the three-dot range rests on a single historical
+false alarm. There is now a second instance, and it is the stronger one because
+it is a *population* rather than an anecdote.
+
+When `468e716` (op-transport, #55) landed on `main`, **every one of the ten open
+piece branches would have reported deletions under the two-dot form, and all ten
+were clean.** Re-measurable as long as those branches exist, with
+`git diff --diff-filter=D --name-only origin/main <branch>` against the same
+range with `...`:
+
+| branch | files "deleted" two-dot | three-dot |
+|---|---|---|
+| `piece/authoring` | 26 | 0 |
+| `piece/generated-names` | 13 | 0 |
+| the other eight, each | 6 | 0 |
+
+#68 (`piece/publish-envelope`) is the sharpest: 5,067 lines deleted two-dot
+against 130 three-dot — a 4,937-line phantom. The six files it "deleted" are
+`dialectica-core/src/transport.rs`, the four `op-transport` change documents and
+`openspec/specs/op-transport/spec.md`: entirely content the branch predates. A
+two-dot gate would have demanded that author claim deletion of a live spec they
+never touched.
+
+**Ten red pull requests at once, none defective, is how a gate gets disabled in
+its first week.** That is a sharper risk to this piece than any deletion it
+might miss, and it is why the range is load-bearing rather than fastidious.
+
+### The false alarm and the real defect are indistinguishable by inspection
+
+This answers the obvious objection to automating any of this — *why not just run
+a diff and look?*
+
+"5,034 deletions" reads exactly the same whether the branch rotted or `main`
+grew. A human eyeballing either number reaches the same alarm and **cannot tell
+from the output which they are looking at**; the two cases differ only in which
+range produced them. So a reviewer running the wrong range does not get a
+confused answer, they get a confident wrong one — and `mergeStateStatus` reported
+`UNKNOWN` for all three of the original PRs, so there was no second signal to
+catch it.
+
+The three-dot range is the only thing that separates the two, which is why this
+is a gate rather than a note in a checklist.
+
 The design-level constraints, which the proposal states but does not resolve:
 
 - The check must run somewhere it is already enforced. `Lint` is a required
@@ -194,6 +239,34 @@ while every test was written with symbolic refs — a different path through
 the form that actually runs in CI. Reading the base from the event rather than
 hardcoding `origin/main` also means a PR targeting a non-`main` base is measured
 against its own base.
+
+### 8b. Strip the quoting construct once, up front — not per-arm
+
+The fence-stripping in §Decisions above follows a shape this repo already has,
+and it is worth naming as the pattern rather than leaving each author to
+rediscover it. A text gate that bans some string must first remove the places
+where that string can legitimately appear *as prose* — comments in source, code
+fences in Markdown — and there are two ways to do it:
+
+- **Once, up front, producing a clean buffer every subsequent search runs
+  against.** `ci.yml`'s adapter check does this (`re.sub(r"^\s*//.*$", ...)`
+  before any ban is applied, with a comment explaining that the gate was firing
+  on its own explanatory paragraph). This piece's `awk` fence filter is the same
+  shape: one pass, then every claim lookup sees only real content.
+- **Per-arm, with an exclusion bolted onto each individual search.** The closer
+  reports that #67's `no QML type name collides with the host` gate took this
+  route and carries documented false positives for block comments and trailing
+  comments, because its exclusion only catches a *leading* `//`.
+
+I have verified the first shape in this file and in my own script; **#67 is on a
+branch not merged here, so that half is the closer's measurement and not mine.**
+The structural argument stands on its own either way: an up-front strip is one
+place to be right, and a new ban inherits it for free, where a per-arm exclusion
+must be repeated correctly at every site and silently is not. It is the same
+"complexity in the data structure, not the logic" rule CLAUDE.md states, applied
+to text.
+
+If a third such gate is written, this is the shape to copy.
 
 ### 9. Two git settings are pinned, because each changes the verdict
 
