@@ -282,6 +282,35 @@ Two things follow for this screen:
   and split one Stoa into two. Rendering it safely is this screen's job; see the
   Unicode obligation below.
 
+**A per-row count of posts held is not available, and a row must be designed
+without one.** A listed Stoa carries its address and its founding title, and
+nothing else: no call answers how many posts this peer holds for a given Stoa,
+and the thread listing is paginated — it reports whether a further page exists,
+never a total. So a row has no honest number to put in its margin, and "nothing
+received yet" is equally unavailable, being itself a claim about a count. Note
+this is *not* the global-count rule: a count of what this machine holds would be
+perfectly legitimate to show, and this one is simply not computed. Design the row
+so such a number could appear later without the layout changing.
+
+**A row can be shared from only when this copy holds the Stoa's genesis record,
+and today that means only Stoas JOINED in the current session.** The core retains
+every joined Stoa's record, but the membership listing hands back the address and
+the founding title and not the record — so after a restart the view holds no
+record for any row.
+
+**Creation is worse, and not symmetric with joining.** `create_stoa` returns the
+address, the founding title and the policy, and **no genesis record** — so a Stoa
+the user just created cannot be shared *at all*, from the moment it exists,
+without waiting for a restart. That is the opposite of what a designer would
+assume: the Stoa the user has the strongest reason to hand to someone is the one
+the interface can least help them hand over.
+
+Since a shareable thing has to carry both halves (see *Joining a Stoa*), **the
+share affordance is absent on most rows, and its absence is the correct rendering
+rather than an error**. Do not design a disabled or explanatory share control in
+that position; design a row where the control is simply not there, and expect it
+to become universal when the listing starts returning the retained record.
+
 ### Joining a Stoa — a security surface, not a form
 
 An address is a copyable string that is **self-authenticating**: pasting it is
@@ -295,11 +324,78 @@ as well as the address — which means whatever a user shares, and whatever an
 in-post affordance carries, has to carry both. A screen designed around a
 single pasteable field cannot work.
 
+**The shape chosen is a one-line JSON object**, `{"stoa":"…","genesis":"…"}`,
+bare hex in both fields and the address unabbreviated. It is what the copy
+affordance produces and what the paste field accepts — one decision seen from
+each end, so the two cannot drift. Two consequences for a designer: the pasted
+string is long and opaque and should be given a field that wraps rather than one
+sized for a short token, and the field's label must not say "address", which asks
+for input whose successful-looking form can never join anything. The `stoa:`
+display prefix stays a *reading* aid; it is stripped from anything sent onward
+and never added to anything produced.
+
+**What the address proves must be stated exactly.** The bundle's join note says
+pasting the address "is itself the verification", and that overreaches. The check
+is a hash comparison between the two inputs the *user* supplied and consults no
+registry, peer, or network — so it proves the record shown is the one that
+address names, and nothing about whether that address is the one the user was
+meant to receive. A reader who pasted a hostile address and saw a verified record
+has verified the attacker's record against the attacker's address, successfully.
+Copy on this screen must say what remains unverified, not only what was checked.
+
 **Requirements:**
 - Show what is being joined **before** joining it.
 - An address appearing inside a post is attacker-supplied. Render it as an
   affordance the reader chooses to act on. **Never auto-join.**
 - Two Stoas may present the same name. Show something that distinguishes them.
+- **What a person shares and what the join field accepts are one decision, and
+  both halves have to carry the record.** A share producing a bare address
+  produces something its recipient cannot act on; a paste field accepting a bare
+  address accepts input that can never succeed. Whatever shape is chosen, the
+  address inside it is carried **in full** — the 8-8-6 abbreviation is a
+  recognition aid for a reader looking at a screen, and is lossy for anything
+  meant to be pasted.
+- **The join confirmation shows NO title at all before a join, and this is the
+  single most surprising thing on the screen — design for it.** Both title
+  positions are empty on a preview, for two different reasons, and a designer who
+  assumes one filled panel and one reserved will design a screen that never
+  renders.
+
+  *No current title*: nothing resolves the moderator-signed metadata op, so no
+  peer on this build knows what a Stoa is called now. A panel captioned "current
+  title" filled with the founding value would assert that nobody has renamed the
+  Stoa — exactly the thing nothing has checked. Reserve the position; do not fill
+  it.
+
+  *No founding title either*: the only call that reports a founding title is the
+  one that joins. The title is inside the founding record the reader was handed,
+  and the interface cannot read it — decoding that record is the core's job and
+  the view has no access to it. So on a preview there is nothing to put in the
+  founding panel, and a caption reading "founding title" over blank space tells
+  the reader this Stoa's title **is** blank. That is a legal value (a Stoa can be
+  created with an empty title, and the list renders such a row), so the reader
+  cannot tell "empty" from "unknown" — and on the screen where they decide whether
+  to trust an address, those mean opposite things.
+
+  **What the preview must do instead**: show the address, and say in words that
+  it cannot tell the reader what this Stoa is called or whether they already hold
+  one presenting the same title, and that joining is what answers both. The
+  absence needs a voice, not a blank panel. After a join succeeds the founding
+  title arrives and can be labelled as founding.
+
+  This is a constraint of the current API, not a permanent property — see
+  PLAN.md's `getStoa`. When a call can describe a reference without joining it,
+  the founding panel fills at preview time and this paragraph shrinks to the
+  current-title half.
+
+- **The same-title warning arrives after the join on this build, not before it.**
+  The requirement below — two Stoas may present the same name, show something that
+  distinguishes them — is implemented, and it compares titles, so it cannot run
+  while there is no title. A reader previewing an impersonating Stoa therefore
+  sees no warning *at the moment they decide*. Do not design the preview so that
+  an absent warning reads as a clean result: a reader who infers "checked, nothing
+  found" has been misled by a check that never ran, which is the impersonation
+  arriving through the defence rather than around it.
 - **Joining a Stoa the user is already in is not an error.** The core reports the
   same success either way, deliberately: a pasted address is exactly the input
   someone supplies twice, and it changes nothing about what is already held. Do
