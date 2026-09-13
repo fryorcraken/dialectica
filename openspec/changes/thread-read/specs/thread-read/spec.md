@@ -43,7 +43,8 @@ Stability is what makes the identifier usable at all: it is the value a reply na
 
 - **WHEN** a thread read names the op id of a revision of a root post rather than the root post's own
 - **THEN** the reply does not return that thread
-- **AND** the refusal is the one for a thread this peer does not hold
+- **AND** the refusal is the one for an op the peer holds that is not a post, a revision being exactly that
+- **AND** it is not the refusal for an op the peer does not hold, which would be false about an op it has
 
 ### Requirement: Membership is derived from the parent chain, and a post's own thread field is never trusted
 
@@ -133,7 +134,9 @@ Verification SHALL run before an op's parent is followed, so that a forged op ca
 #### Scenario: A forged root is not readable as a thread
 
 - **WHEN** a thread read names the op id of a post whose signature does not verify
-- **THEN** the reply is the refusal for a thread this peer does not hold
+- **THEN** the reply is the refusal for a thread this peer does not hold, an unverified op being no usable post
+- **AND** it is not the not-a-post refusal, which would tell the caller its identifier named the wrong kind of thing when the kind was never established
+- **AND** the message does not reveal that the store holds bytes under that id
 
 #### Scenario: A forgery in the log does not displace genuine posts
 
@@ -150,6 +153,7 @@ Verification SHALL run before an op's parent is followed, so that a forged op ca
 
 - **WHEN** a thread read names a Stoa and a root op id belonging to a different Stoa
 - **THEN** the reply is the refusal for a thread this peer does not hold in that Stoa
+- **AND** it is not the not-a-post refusal, the op being a perfectly good post of another Stoa
 - **AND** no post of either Stoa is returned
 
 ### Requirement: An author is reported as both an address and a public key, and never as a name
@@ -366,11 +370,27 @@ A hidden reply is omitted rather than replaced with a placeholder, because moder
 
 A thread read SHALL be refused when the peer holds no post under the op id named, when the op it holds under that id is not a post, and when the post it holds under that id is a reply rather than a root. The refusal SHALL be the wire contract's error shape.
 
+**"Holds" here means holds a usable post in the named Stoa**, and the scoping is stated because two cases would otherwise look like exceptions. An op whose signature does not verify, and an op belonging to a different Stoa, are each present in the store as bytes and are each unusable to this read: the first is not established to be anyone's post, and the second is not this Stoa's. Both SHALL therefore take the not-held refusal rather than the not-a-post one, since neither is a post this read may use and the caller's remedy is the same as for an op that never arrived. **This SHALL NOT be read as licence to report a genuine, in-Stoa op as not held** — a revision, a vote, a moderation op or a metadata op in the named Stoa is a usable op of the wrong kind, which is precisely the not-a-post case.
+
+A refusal SHALL NOT disclose whether the store holds bytes that failed verification under an op id it refuses as not held. An unverified op establishes nothing about anybody, so reporting its presence would let a caller learn that *something* arrived under an id while this read is unable to say what — a fact with no remedy attached to it.
+
+**The cross-Stoa refusal is the exception, and it is deliberate**: it MAY name the Stoa the op actually belongs to, which is what lets a view offer to read the thread where it really lives rather than merely reporting a dead end. This is the same disclosure the publish path makes on a cross-Stoa parent and is licensed on the same terms — the caller contracted here is the local view, which can read that fact from the store directly, so the refusal reveals nothing it could not already obtain. Should this read become reachable by a caller that cannot read the store, the Stoa holding the op SHALL NOT be named, and the refusal SHALL remain distinguishable from the other refusals.
+
 A thread whose root the peer holds and for which it holds no replies SHALL be served: a page carrying the root and nothing else, reporting no further page.
 
 **These two states SHALL NOT be reported alike**, and the reason is the failure this repository has already met: an empty listing is indistinguishable from a subject nobody has posted in, so a read that answered an unknown thread with an empty page would render a peer that has never received a thread exactly as it renders a thread whose author wrote one post. A reader shown the second when the first is true concludes a post vanished.
 
-The refusal for a root that is not held SHALL be distinguishable from the refusal for an op held that is not a post, and from the refusal for a post held that is a reply. Three different mistakes call for three different responses: wait for the op to propagate, correct a category error, or read the thread this reply actually belongs to.
+The refusal for a root that is not held SHALL be distinguishable from the refusal for an op held that is not a post, and from the refusal for a post held that is a reply.
+
+**The three refusals are distinguishable because a caller acts differently on each**, and that — rather than tidiness — is why they are three:
+
+- **Not held.** The op may still arrive. A view retries later, and says so: the post has not reached this peer yet. This is the only one of the three that a caller should wait on, which is why it must never be reported for an op the peer has.
+- **Held, not a post.** The caller named the wrong kind of thing, and waiting will never fix it. A view treats this as a defect in whatever produced the identifier — a stale link, a mis-parsed address — rather than as a propagation gap.
+- **Held, a post, but a reply.** The caller is one level too deep, and there is a right answer nearby: the thread that reply belongs to. This is the only one of the three a view can act on **by making another call**.
+
+A refusal that merged the first with either of the others would be the expensive mistake, because it is the one that sends a reader waiting for something that has already arrived or that can never arrive.
+
+**Every op kind that is not a post takes the not-a-post refusal**, and the rule is stated over kinds rather than enumerated. A vote, a moderation op, a Stoa metadata op and a revision are each an op the peer holds that is not a post, so each is refused that way; a kind added later is refused that way too, without this requirement being revisited. **A revision is named explicitly because it is the one that invites the other answer**: revisions are bound up with posts, and "this is a version of a post, not a post" is a distinction a reader can talk themselves out of. It is still an op the peer holds, so reporting it as not held would be false.
 
 A refusal SHALL NOT be produced on the grounds that other ops may exist elsewhere. A peer routinely holds an incomplete set, and a thread read answers over what it has.
 
@@ -398,6 +418,19 @@ A refusal SHALL NOT be produced on the grounds that other ops may exist elsewher
 - **WHEN** a thread read names a vote's op id
 - **THEN** the reply carries an error saying the op named is not a post
 - **AND** that message differs from the one for an op id the log does not hold
+
+#### Scenario: Every non-post kind takes the same refusal
+
+- **WHEN** a thread read names in turn the op id of a vote, a moderation op, a Stoa metadata op and a revision of a post, each held by the peer
+- **THEN** each reply carries the not-a-post error
+- **AND** none of them carries the error for an op the peer does not hold
+- **AND** the outcome does not vary by kind, so a kind this scenario does not name is not left with an answer of its own
+
+#### Scenario: A held revision is not reported as unheld
+
+- **WHEN** a thread read names a revision's op id, and the same read is compared against one naming an op id the log holds nothing for
+- **THEN** the two messages differ
+- **AND** the revision's message does not state that the op is not held, which the log disproves
 
 #### Scenario: A reply's op id is refused distinguishably
 

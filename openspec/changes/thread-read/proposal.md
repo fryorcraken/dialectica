@@ -95,6 +95,24 @@ check.
   does not hold is a refusal; a root it holds with no replies is a served page
   carrying the root and nothing else.
 
+- **Three refusals, distinguished by what the caller should do next** — wait,
+  stop, or make a different call. The first draft of this spec contradicted
+  itself here, saying in one place that a revision's op id gets the not-held
+  refusal and in another that any held non-post gets a not-a-post refusal. The
+  dev-writer found it while implementing and resolved it toward the second;
+  that resolution is now the contract, on its own argument rather than on
+  precedent: telling a caller "no op under that id" about an op the peer
+  demonstrably holds is false, and it sends a view waiting for propagation of
+  something that has already arrived. The rule is now stated over kinds — every
+  held, in-Stoa op that is not a post takes the not-a-post refusal — so a kind
+  added later does not need this decided again.
+
+  Two cases that look like exceptions and are not, now stated rather than left
+  to be inferred: an op that fails verification and an op belonging to another
+  Stoa each take the **not-held** refusal, because neither is a usable post of
+  the named Stoa and the caller's remedy is the same as for one that never
+  arrived.
+
 - **No ordering parameter**, matching the feed. The order is the one core can
   honestly compute, and it is convergent rather than chronological.
 
