@@ -500,3 +500,46 @@ steps after it**. Diagnosis and the rejected alternatives are in `design.md`,
       headless are all unproven here. The five previously-skipped steps remain
       unverified until a run goes green. Step 8.4 exists so a wrong pin or a
       wrong `PATH` fails loudly in the second step rather than silently.
+
+## 9. Bringing the branch current with `main`
+
+`main` gained #63 (the three-screen navigator and the Stoa screens) and then
+#62 (the composer) while this branch was open. Both were written against the
+old `Theme` name and before this gate existed, so merging produced work the
+rows above do not describe. **Sections 1–8 are left as they were written:** a
+ticked row that silently changes its meaning is worse than one that is visibly
+about an earlier tree, which is the convention 2.1 already set here.
+
+- [x] 9.1 **Section 1.3's "eleven component files" is now the count for the
+      pre-merge tree, not the merged one.** The merge added five more files
+      reading the singleton — `StoaListScreen`, `JoinScreen`, `Composer`,
+      `PublishOutcome` and a rewritten `FeedScreen` — for 196 `Theme` →
+      `DTheme` substitutions in this merge on top of what 1.3 recorded. Proven
+      by a word-level diff against `origin/main` carrying 196 `-Theme` and 196
+      `+DTheme` words and, once the twelve file headers are subtracted, no
+      other changed word in any of the six files.
+- [x] 9.2 **The two conflicted files take `main`'s version wholesale**, so that
+      no screen #63 or #62 added is dropped by a partial merge resolution.
+      Verified by `git hash-object` against the merge's stage 3 before any
+      rename: `Main.qml` = `ff76b06`, `FeedScreen.qml` = `dc055de`, each
+      identical to `origin/main`'s blob. The renames were applied only after
+      that check passed.
+- [x] 9.3 **Six new types got the `D` rather than an exemption**, per the
+      owner's decision and `check_qml_names.py`'s own instruction that a new
+      type takes the prefix. `StoaReference`, `ClipboardSink`, `StoaListScreen`
+      and `JoinScreen` arrived with #63; `PublishOutcome` and `Composer`
+      arrived with #62 after this branch's brief was written. `GRANDFATHERED`
+      is untouched and still lists exactly the eleven pre-convention names.
+- [x] 9.4 **Six `git mv` renames**, so history follows each file:
+      `StoaReference`, `StoaListScreen`, `JoinScreen`, `ClipboardSink`,
+      `Composer` and `PublishOutcome` each gain the `D`. Fifty-nine call sites
+      updated across nine source and four test files, including the comments
+      naming the old filenames — a comment citing a file that no longer exists
+      is the stale citation this repo has paid for before.
+- [x] 9.5 **Re-run of every gate on the merged tree**, which is the first time
+      any of them has seen #62's or #63's files: `check_qml_names.py` ok at 28
+      QML files and 18 qmldir entries, `tst_check_qml_names.py` all seventeen
+      cases, `check_qml_members.sh` ok at 19 files, `tst_check_qml_members.sh`
+      all four, `tst_check_bindings.sh` all eight, and `run-qml-tests.sh` at 9
+      spec files / 204 passed / 0 failed on Qt 6.10.3. Section 4.1's "41
+      passed" was the pre-merge corpus.

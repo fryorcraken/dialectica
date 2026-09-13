@@ -1,5 +1,6 @@
 singleton DTheme 1.0 DTheme.qml
 singleton Core 1.0 Core.qml
+singleton DStoaReference 1.0 DStoaReference.qml
 Identicon 1.0 Identicon.qml
 AddressLabel 1.0 AddressLabel.qml
 VoteControl 1.0 VoteControl.qml
@@ -9,4 +10,9 @@ ApparatusColumn 1.0 ApparatusColumn.qml
 FlatButton 1.0 FlatButton.qml
 ScreenFrame 1.0 ScreenFrame.qml
 SanitisedText 1.0 SanitisedText.qml
+DPublishOutcome 1.0 DPublishOutcome.qml
+DComposer 1.0 DComposer.qml
 FeedScreen 1.0 FeedScreen.qml
+DClipboardSink 1.0 DClipboardSink.qml
+DStoaListScreen 1.0 DStoaListScreen.qml
+DJoinScreen 1.0 DJoinScreen.qml
