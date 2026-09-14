@@ -104,9 +104,13 @@ method that reaches it" would split one contract across two files.
   **widening of the core API**, which `CLAUDE.md` asks be done on purpose: the
   deliverable is the wire contract, and one more method on it is a decision rather
   than a side effect.
-- **Three hand-maintained lists in `wire.rs`' tests** must gain the new method —
-  `every_request_taking_method()`, `every_method_with_a_required_field()`, and the
-  `a_served_request()` fixture. This is the "sweep lists go stale silently" trap,
+- **Four hand-maintained lists in `wire.rs`' tests** must account for the new
+  method — `every_request_taking_method()`, `a_served_request()`,
+  `one_field_has_one_null_reading()`'s `cases` vec, and
+  `every_method_with_a_required_field()`, which needs **no edit** because it
+  filters the first list rather than being a second hand-written one. So three
+  gain an entry and the fourth inherits; `tasks.md` records which is which.
+  This is the "sweep lists go stale silently" trap,
   and the repo has two trip-wires for it:
   `the_sweep_covers_every_request_taking_method_the_dispatch_trait_declares` fails
   naming a method on the trait but missing from the list, and `a_served_request()`'s
@@ -115,20 +119,25 @@ method that reaches it" would split one contract across two files.
   size cap, the null readings, the panic guard. **Neither trip-wire is a reason to
   skip the entries** — they turn an omission into a red test rather than into
   coverage nobody notices missing.
+
+  **`one_field_has_one_null_reading()` has no trip-wire at all**, which is why it
+  is the one this change first missed: it enumerates *fields*, and nothing in the
+  source enumerates those, so an omission is silent and every gate stays green.
+  `design.md` §8 records why deriving it would be worse than maintaining it.
 - **`docs/PLAN.md`** §9's method sketch gains nothing to strike through — it never
   sketched a name method, and §5.2.1 is already pruned to "Built — see the
   `generated-names` spec". The reachability gap it records is closed by this change
   rather than restated.
-- **`docs/UI-BRIEF.md` Obligation 6 becomes wrong when this lands, and the
-  `dev-writer` MUST fix it in this change.** Around line 957 it tells a designer:
-  *"**Core has no call that turns a key into a name yet** (issue #81) — the
-  derivation exists in core but nothing reaches it"*, and names that as one of two
-  gaps leaving the feed screen rendering an empty name. The first gap closes here;
-  **the second does not** — the feed read still returns an address per row and
-  drops the key, so a feed row's name stays unrenderable and the brief must still
-  say so, now for one reason rather than two. CLAUDE.md makes this same-change
-  work: the brief is designed against by someone who cannot read the code, so a
-  stale one costs work that gets thrown away.
+- **One of the two gaps that leave a feed row's name unrenderable closes here;
+  the other does not.** This change makes the derivation reachable by a caller
+  holding a key. It does **not** put a key in a feed row: the feed read still
+  reports an address per row and drops the key, and
+  `openspec/specs/generated-names/spec.md:39-45` is explicit that a caller
+  holding only an address cannot arrive at the right name — the name derived
+  from address bytes differs from the name for that key. So a feed row's name
+  stays underivable after this change, for one reason rather than two. That
+  second gap is `content-authoring`'s reply shape and its own piece;
+  `design.md`'s "What this change does not do" records it as staying open.
 - **No QML changes.** Rendering a name is the view pieces' work. This change makes
   the call available.
 

@@ -27,11 +27,14 @@ trait declaration is what the trip-wire reads.
 - [x] `display_name` in `dialectica-core/src/wire.rs`: read `publicKey`, bound
       the hex string before decoding, decode, hand the bytes to
       `names::display_name_from_bytes`, render.
-- [x] Four distinguishable refusals — missing field, wrong type, bad hex, and
-      the identity layer's own words for key material it refuses (design §4).
-      The last defers to `NameError`'s `Display` rather than restating it, so
-      the low-order refusal and the not-a-key refusal read differently without
-      this file enumerating either.
+- [x] Five distinguishable refusals — missing field, wrong type, over the
+      allocation bound, bad hex, and the identity layer's own words for key
+      material it refuses (design §4). The last defers to `NameError`'s
+      `Display` rather than restating it, so the low-order refusal and the
+      not-a-key refusal read differently without this file enumerating either.
+      (This said "four" and design §4's heading said "three" over a list of
+      four; the size refusal is one a caller receives and appeared in neither
+      count.)
 - [x] Reply carries `name` and `words` (design §5). No gloss field.
 
 ### The dispatch surface
@@ -40,11 +43,16 @@ trait declaration is what the trip-wire reads.
 - [x] Forwarded from the `#[cfg(logos_scaffold)]` impl — a one-line body, since
       the handler needs no state.
 
-### The three hand-maintained sweep lists
+### The four hand-maintained sweep lists
 
 Each is an obligation rather than a courtesy; two have trip-wires that fail
 naming the method, and meeting them deliberately rather than being told is the
 point.
+
+This said "three" and worked through three. There is a **fourth**, and it is the
+one with no trip-wire, so its omission was silent and the suite stayed green —
+the repo's own "hand-maintained sweep lists go stale silently" trap, met at
+three sites and missed at the fourth.
 
 - [x] `every_request_taking_method()` — gains `("display_name", display_name_m)`.
       Without it `the_sweep_covers_every_request_taking_method_the_dispatch_trait_declares`
@@ -55,6 +63,11 @@ point.
       than forgotten.
 - [x] `a_served_request()` — gains a `display_name` arm supplying a valid key,
       or its catch-all panics naming the method.
+- [x] `one_field_has_one_null_reading()` — gains a `publicKey` case. **The list
+      with no trip-wire**, and the one this change first missed. Nothing relates
+      its `cases` vec to the fields the surface reads, so `{"publicKey":null}`
+      was unswept while every gate stayed green. Why it has no trip-wire, and
+      why that is a decision rather than an oversight, is design §8.
 
 ### Tests
 

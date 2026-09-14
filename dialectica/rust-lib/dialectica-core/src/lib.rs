@@ -51,11 +51,19 @@ pub mod wire;
 // import depth from this root, and the two are easy to confuse and different in
 // kind: the `names` one takes a `&PublicKey` and returns a `DisplayName`, the
 // `wire` one takes and returns wire JSON and is the boundary that refuses
-// malformed key material. The adapter reaches the handler as
-// `core::wire::display_name`, which is the form it already uses for
-// `get_capabilities_from_stores` and `publishing_key`. Adding it to this list
-// would put two functions of one name a single word apart, which is the kind of
-// ambiguity a longer path is worth avoiding.
+// malformed key material. Adding it to this list would put two functions of one
+// name a single word apart, which is the kind of ambiguity a longer path is
+// worth avoiding.
+//
+// The adapter reaches the handler as `core::wire::display_name`, a form it
+// already uses for `get_capabilities_from_stores` and `publishing_key`. Note
+// what that precedent does and does not show: `publishing_key` is genuinely
+// absent from the list below, but `get_capabilities_from_stores` is IN it (two
+// lines down) and the adapter spells it the long way anyway. So the long path
+// is independent of list membership, and it is NOT evidence that omission is
+// required — the omission stands on the ambiguity argument above and on
+// nothing else. An earlier wording called this "the established form for
+// handlers outside the list", which named a handler inside it.
 pub use wire::{
     callee_error, channel_exists_reply, create_stoa, error_json, generate_identity_slate,
     get_capabilities, get_capabilities_from_stores, guarded, join_stoa, keep_identity, list_stoas,

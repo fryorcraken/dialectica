@@ -92,6 +92,18 @@ key material**, and the two SHALL be distinguishable by their messages. Both are
 refusals and neither is a name; a caller that cannot tell them apart cannot tell a
 request it malformed from a key it should stop trusting.
 
+**A request whose key material cannot be read at all is refused before the
+identity layer is reached**, and this is a third class rather than a variety of
+either above. Key material of a type that is not a string, key material that is
+not valid hex, and key material longer than a public key's encoding admits are
+each refused by the entry point itself — the identity layer is given nothing to
+judge, so it renders no verdict and "exactly what the identity layer refuses"
+does not reach them. Each SHALL be distinguishable from *absent* key material,
+for the same reason absent and bad must be told apart: a caller that reads
+"nothing supplied" when it supplied something malformed looks for the wrong bug.
+The entry point MAY refuse over-long material without examining it, which is what
+lets the length be bounded before anything is allocated from it.
+
 **Key material that parses is the whole of what can fail.** The derivation is
 total over well-formed keys, so once key material is accepted as a public key
 there is nothing left that can fail. The entry point SHALL therefore report no
@@ -127,10 +139,20 @@ rather than a robustness nicety.
 
 #### Scenario: The entry point admits exactly what the identity layer admits
 
-- **WHEN** key material is supplied to the entry point, and the same material is
-  offered to the identity layer's public key parse
+- **WHEN** key material that reaches the identity layer is supplied to the entry
+  point, and the same material is offered to the identity layer's public key
+  parse
 - **THEN** the entry point returns a name in exactly the cases the identity layer
   accepts the material, and refuses in exactly the cases it refuses
+
+#### Scenario: A request the entry point cannot read as key material is refused before the identity layer is reached
+
+- **WHEN** a caller supplies no key material, key material of a type that is not
+  a string, key material that is not valid hex, or key material longer than a
+  public key's encoding admits
+- **THEN** the call is refused and no name is returned
+- **AND** the refusal is the entry point's own, since the identity layer is given
+  no material to render a verdict on
 
 #### Scenario: Absent key material is refused distinguishably from bad key material
 
