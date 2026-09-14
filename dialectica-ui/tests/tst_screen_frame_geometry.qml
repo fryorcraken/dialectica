@@ -183,9 +183,10 @@ TestCase {
         compare(filler.height, 0,
                 "a card sized from its own content has no spare height to "
                 + "distribute, so a fillHeight child measures 0 even with the "
-                + "body.height binding. docs/UI-BRIEF.md's first draft promised "
-                + "the opposite; a screen needing a full-height region cannot "
-                + "get one from this shell as it stands.")
+                + "body.height binding. An earlier write-up of the ScreenFrame "
+                + "contract promised the opposite; a screen needing a "
+                + "full-height region cannot get one from this shell as it "
+                + "stands. See the contract at the top of ScreenFrame.qml.")
 
         // And the card is exactly its content plus the padding — 2 * 28 with a
         // zero-height child. The pair is what distinguishes "no slack" from

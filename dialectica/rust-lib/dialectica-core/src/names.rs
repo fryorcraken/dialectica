@@ -49,7 +49,8 @@
 //! filed as its own piece — `key-identity-sweep` — and until it lands the feed
 //! path cannot render a name. What forbids the wrong remedy in the meantime is
 //! the `generated-names` spec's own requirement that **no reply carries a
-//! display name**, which is the authority here.
+//! display name**, which is the authority here. When the feed path can render a
+//! name, *What a name is NOT* below governs what may be claimed of it.
 //!
 //! # Determinism is the whole contract
 //!
@@ -1845,26 +1846,14 @@ mod tests {
 
     #[test]
     fn the_lists_carry_no_exclusion_of_any_kind() {
-        // **The screens are three and they are all mechanical: ASCII,
-        // deduplicated, attested.** Every successive draft that added a fourth
-        // was withdrawn on challenge — familiarity, which cut the place list by
-        // 28%; a rebadged "legibility", which cut it by 88%; a single-word rule,
-        // which made 1,024 places look unreachable; and a tone-and-authority
-        // apparatus.
-        //
-        // This test is the inverse of the three it replaced. Those asserted
-        // that `stoa`, `platon`, `sokrates`, `archon` and `strategos` were
-        // ABSENT. The contract now says no word is kept out for what it says,
-        // what it connotes or whom it names, so their absence would be the
-        // defect and their presence is the requirement.
+        // **No word is kept out for what it says, what it connotes or whom it
+        // names.** The screens on the lists are mechanical — ASCII,
+        // deduplicated, attested — and the only other rule is the compound-noun
+        // check above, which is one literal substring and no part of this.
         //
         // Pinned as PRESENT rather than merely "not asserted absent", because a
-        // curation pass that quietly dropped them would otherwise reintroduce
-        // the withdrawn screen with every test still green.
-        // `strategos` is in this loop because the comment above names it as one
-        // of the five the deleted tests asserted absent, and it was pinned by
-        // nothing — the exact gap this test says it closes, left open for the
-        // one term the prose singled out.
+        // curation pass that quietly dropped these would otherwise install a
+        // semantic screen with every test still green.
         for term in [
             "stoa",
             "agora",

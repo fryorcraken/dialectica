@@ -4,10 +4,28 @@ import QtQuick.Layouts
 // The card: content on paper. Every screen uses it, so padding, width and the
 // hairline border are decided once.
 //
-// What this gives a screen, and what it asks of one, is stated for the person
-// writing a screen in `docs/UI-BRIEF.md` under *What `ScreenFrame` gives you*.
-// Keep the two in step. `git log` and `design.md` §4 carry how this shape was
-// arrived at.
+// THE CONTRACT, for whoever writes a screen. It is short, and the failure mode
+// of getting it wrong is silent, so it is stated here — in the file you already
+// have open — rather than in a document a screen author has no reason to find.
+//
+//   - The card REPORTS ITS OWN HEIGHT from its content. `Main.qml` reads that to
+//     size the scroll area, so this is what makes a long feed scroll at all.
+//   - DO NOT GIVE A `ScreenFrame` AN EXPLICIT `height`. Let it size from its
+//     content: `Main.qml` gives the card a width and an alignment and no height.
+//   - So a card is exactly as tall as its content, and THERE IS NO SLACK TO
+//     FILL. A child declaring `Layout.fillHeight: true` in a content-sized card
+//     measures ZERO — not because the shell withholds the space, but because a
+//     card sized from its content has none to give.
+//   - DESIGN SCREENS THAT GROW DOWNWARD, not screens that fill a viewport. If a
+//     region should look like it occupies the rest of the page, give it a height
+//     you choose — a minimum, a ratio, a fixed block — rather than asking it to
+//     fill. `Layout.fillWidth` behaves as you expect; its vertical twin does
+//     not, and nothing warns you: no error, no binding loop, every gate green,
+//     and a blank region on the screen.
+//
+// `git log` carries how this shape was arrived at; the numbers behind each
+// clause are in the comments below, and `tst_screen_frame_geometry.qml` pins
+// them.
 Rectangle {
     id: root
 
@@ -44,9 +62,9 @@ Rectangle {
     // width and alignment only. In a content-sized card there is no slack to
     // distribute, so a `fillHeight` child measures 0 even with this binding.
     // What the binding buys is that a card WITH a height behaves, not that a
-    // body can fill a card sized from its own content. `docs/UI-BRIEF.md` under
-    // *What `ScreenFrame` gives you* states this for screen authors; the first
-    // draft of that section promised the opposite and was corrected here.
+    // body can fill a card sized from its own content. The contract at the top
+    // of this file states it for screen authors in those terms, and states it
+    // that carefully because an earlier write-up of it promised the opposite.
     //
     // That matters because a screen wanting a body that fills the card is the
     // ordinary case, and the text such a screen owes its reader — a seed-phrase

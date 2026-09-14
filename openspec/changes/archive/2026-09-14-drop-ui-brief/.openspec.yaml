@@ -1,0 +1,22 @@
+# `schema` is REQUIRED for this file to be valid change metadata, and without it
+# `skip_specs` is silently NOT HONOURED — `openspec validate --strict` reports
+# the marker as ignored and then fails for having no deltas, which reads as two
+# problems rather than one. It must name a known schema; this project's is the
+# built-in `spec-driven`, set in `openspec/config.yaml`.
+schema: spec-driven
+
+# No spec delta: this change deletes a document and repairs the prose that cited
+# it. It alters no behaviour and no requirement.
+#
+# Measured rather than assumed. `grep -rn "UI-BRIEF\|UI brief"` over
+# `openspec/specs/` returns **nothing** — no live requirement cites the brief,
+# quotes it, or delegates to it. So there is no requirement to modify and none
+# to delete.
+#
+# That measurement is also the argument against the tempting alternative of
+# promoting the brief's obligations into a spec as part of this change. The
+# obligations a requirement depends on are already IN requirements; what the
+# brief held that no spec holds is designer-facing framing, and the owner's
+# decision is that it goes with the brief rather than being relocated. Adding
+# requirements here would be writing new contract under cover of a deletion.
+skip_specs: true

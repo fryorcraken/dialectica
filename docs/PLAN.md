@@ -1528,12 +1528,12 @@ weight anyone**, and the answer needs no new mechanism:
   `dialectica-nft-eth`" is a recommendation rendered to a human, never an
   instruction a client follows. A module name arriving over the network is
   attacker-influenced content in the same class as a Stoa address embedded in a
-  post — and `docs/UI-BRIEF.md` already settles that class: "render it as an
-  affordance the reader chooses to act on. **Never auto-join.**" Same rule, new
-  surface.
+  post, and that class is already contracted by `stoa-navigation-view`'s
+  "Joining shows what is being joined, and joins nothing until the user acts".
+  Same rule, new surface.
 
-**Two interface notes**, recorded here because no surface exists yet and
-`docs/UI-BRIEF.md` describes only what does:
+**Two interface notes**, recorded here because no surface exists yet for them to
+be contracted against:
 
 1. A Stoa recommending a module must not present its absence as **brokenness**. A
    reader without it sees a *correct* view of the Stoa, not a partial one. There is
@@ -1565,8 +1565,10 @@ side-channel state a re-implementer would have to reverse-engineer.
 **The honest counterweight**: a substrate and an application pull in opposite
 directions, and this project has consistently chosen the application. The
 moderation resolver's `Hide`-preferring tie-break is a policy decision baked into
-a resolver; §7.2's weights are policy; the rendering obligations in
-`docs/UI-BRIEF.md` are policy. None of that is wrong — an application that refuses
+a resolver; §7.2's weights are policy; and so are the rendering obligations the
+view capabilities carry — what a publish may claim, that a storage failure never
+renders as an empty result, that an address accompanies every generated name.
+None of that is wrong — an application that refuses
 to conclude anything is not a forum — but a future split would have to separate
 "what the ops say" from "what dialectica concludes from them", and **that boundary
 does not currently exist as a boundary.** It runs through the resolvers rather
@@ -2871,8 +2873,7 @@ Both are built from the same resolver, so a view must currently branch on which
 call produced an item — which §2.5's "JSON shapes are source-independent"
 forbids. The thread read's shape is the correct one; the feed's is the older.
 Until the feed is brought to it, `restored` is a state the feed cannot express
-at all. Recorded in `docs/UI-BRIEF.md` too, since a designer meets it on their
-second screen.
+at all.
 
 **And one obligation the core does not meet**: a view must not render a hidden
 post indistinguishably from a visible one in the show-hidden view. A reader who
@@ -3499,16 +3500,17 @@ an op in flight, and what it records for one that never propagated. **Still not
 built** — meeting it needs state outliving the publish call and a clock, which is
 a component rather than a branch.
 
-**`docs/UI-BRIEF.md` carries the half of the rendering obligation that is true
-today**, as the obligation titled *"A successful publish means 'saved here', not
-'posted'"*: a successful publish must not
-be rendered as sent, delivered or seen, and no in-flight state is to be designed
-because no call produces the signal one would wait on. What the brief still needs
-when the three are answered is the *positive* half — what a view shows for an op
-in flight versus one that never propagated — which is additive to the prohibition
-rather than a replacement for it. The prohibition did not wait on the three,
-because a brief silent about it is one designed against by someone free to render
-success as "posted".
+**The view half is contracted by the `composer-view` spec**, as the requirement
+*"A successful publish claims local storage and never delivery"* — which goes
+further than a prohibition and requires the view to positively deny delivery
+knowledge in the screen's own body.
+
+What belongs here is the *ordering*, which is a decision rather than a
+requirement: the view half did not wait on the three owed things above. It could
+have, since the positive half (what a view shows for an op in flight versus one
+that never propagated) is genuinely blocked on them — but a contract silent about
+delivery is one designed against by someone free to render success as "posted",
+and the positive half is additive to that rather than a replacement for it.
 
 Moving `deliver` outside `guarded` was rejected — PHASE0-FINDINGS §3 measured what
 an unguarded panic costs (the module aborts, the caller waits out a 20-second
