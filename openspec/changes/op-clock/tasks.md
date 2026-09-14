@@ -20,7 +20,26 @@
       the six decisions and the constants' reasoning; the **NO SPEC** markers
       and one unimplementable-as-written finding are in the report.
 - [ ] tests — `tester`
-- [ ] review: correctness — `code-reviewer`
+- [x] review: correctness — `code-reviewer` — four findings, all for `tester`.
+      The implementation is sound: the wall clock reaches no comparison (traced
+      every sort and resolver; `OpEntry` cannot name an `Arrival` or an
+      `asserted_ms`, and the instant leaves core only as text), the advance bound
+      is folded over sorted held counters so it is a function of the op set and
+      not of arrival order, and the downgrade attack is closed by the version
+      byte living in the preimage. Both self-reported defects re-measured: the
+      `check_layout` column list now matches `CREATE TABLE` and re-introducing
+      the stale names fails 8 of 63 sqlite tests, and the calendar agrees with an
+      independent walk over 800,000 consecutive days with zero disagreements.
+      What is wrong is all in the tests. Two `moderation.rs` ordering tests are
+      fully vacuous — `the_order_is_by_lamport_and_not_by_op_id` passes with its
+      arrival values inverted AND with every arrival deleted, satisfied by the
+      Hide bias rather than by any order; `a_later_hide_reverses_an_earlier_unhide`
+      is the same shape, and is the direction the author's own re-aiming of its
+      sibling missed. A `contract.rs` assertion claims Lamport order while resting
+      on op-id hash luck. One `revision.rs` fixture lacks the disagreement guard
+      its neighbours all carry — measured sound today, latent tomorrow.
+      `cargo mutants` attempted and abandoned: the unmutated baseline alone is
+      49s, so 120 mutants timed out at the cap.
 - [ ] review: security — `code-reviewer`
 - [x] review: readability — `code-reviewer` — twelve findings, seven for
       `dev-writer` and five for `tester`. The central distinction is stated at the
