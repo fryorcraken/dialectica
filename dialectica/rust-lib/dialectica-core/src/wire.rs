@@ -12738,9 +12738,16 @@ mod tests {
     ///
     /// Produced by `examples/pin_name.rs`, which reads the wordlists from the
     /// text files in `wordlists/` and does the index arithmetic itself — it does
-    /// not link the derivation at all. The digest it was given,
-    /// `3892664a…247f73`, is that key's `name_digest`, and the generator reported
-    /// indices (6290, 586, 81).
+    /// not link the derivation at all. It is given the KEY, not a digest: the
+    /// name reads key bytes `18..23` directly, and the generator reported
+    /// indices (3458, 131, 886).
+    ///
+    /// **This value changed with the derivation, and that is the one legitimate
+    /// reason to rewrite a pin.** The previous `riskful megaron of anemourion`
+    /// was computed under `H(NAME_PREFIX || key)`, a scheme `key-identity`
+    /// deletes; a pin whose derivation no longer exists is not evidence about
+    /// anything. It was re-produced through the same independent generator
+    /// rather than read back from the code it checks.
     ///
     /// **This is the only test in this section that can see a silent consensus
     /// change.** Every other assertion here is self-consistent: it compares the
@@ -12750,7 +12757,7 @@ mod tests {
     ///
     /// If it fails, do **not** update it to match. Work out what changed in the
     /// derivation or the wordlists and whether the network can survive it.
-    const PINNED_NAME_ON_THE_WIRE: &str = "riskful megaron of anemourion";
+    const PINNED_NAME_ON_THE_WIRE: &str = "immensurable astraios of smyrna";
 
     #[test]
     fn a_name_is_obtainable_for_a_supplied_public_key() {
@@ -12786,7 +12793,7 @@ mod tests {
         // before it rather than a claim about the `words` field.
         assert_eq!(
             v["words"],
-            serde_json::json!(["riskful", "megaron", "anemourion"]),
+            serde_json::json!(["immensurable", "astraios", "smyrna"]),
             "the three drawn words must come back without the connector, got {v}"
         );
 
@@ -12803,12 +12810,20 @@ mod tests {
         // two-word entries in 1,024 and NO fixture in this file drew one. Two
         // explanations gave the same answer everywhere it was checked.
         //
-        // Seed 166 is the fixture that tells them apart: its place is
-        // `thermai himeraiai`, so the rendered name is FOUR space-separated
+        // Seed 60 is the fixture that tells them apart: its place is
+        // `rhode iberias`, so the rendered name is FOUR space-separated
         // tokens while `words` is three elements, the last containing a space.
         // A split-based implementation returns four elements here and truncates
-        // the place to `thermai`.
-        let key = feed_key(166).public_key();
+        // the place to `rhode`.
+        //
+        // **The seed changed with the derivation.** Seed 166 drew
+        // `thermai himeraiai` under `H(NAME_PREFIX || key)`; reading key bytes
+        // directly it draws the one-word `elateia`, which would leave this test
+        // unable to fail for the reason it names. Seed 60 was found by sweeping
+        // all 256 `feed_key` seeds for a place containing a space, and its name
+        // was confirmed through `examples/pin_name.rs`, which reads the text
+        // files and does not link the derivation.
+        let key = feed_key(60).public_key();
         let v = name_request(&key.to_hex());
 
         let words = v["words"].as_array().expect("words must be an array");
@@ -12819,7 +12834,7 @@ mod tests {
         );
         assert_eq!(
             words[2].as_str(),
-            Some("thermai himeraiai"),
+            Some("rhode iberias"),
             "the place must arrive whole rather than truncated at its space, got {v}"
         );
 
@@ -12832,9 +12847,9 @@ mod tests {
         // rather than by pinning the whole rendered name. An earlier version
         // pinned `intaxable eidos of thermai himeraiai` here, which did hold the
         // fixture to its two-word case but made this a SECOND full pin on the
-        // derivation beside `PINNED_NAME_ON_THE_WIRE`: a change to seed 166's
-        // adjective or noun — neither of which this test is about — would fail
-        // it, and the failure would read as a `words` defect.
+        // derivation beside `PINNED_NAME_ON_THE_WIRE`: a change to the fixture
+        // seed's adjective or noun — neither of which this test is about —
+        // would fail it, and the failure would read as a `words` defect.
         //
         // The two-word property survives the removal because it is pinned
         // directly: `words[2]` above is asserted to be the two-word literal, so
@@ -12920,11 +12935,11 @@ mod tests {
 
         // And the sweep must actually reach the internal-space case, or the
         // membership assertions above cannot tell a TRUNCATING split from the
-        // drawn words: a space split truncates seed 166's place to `thermai`,
+        // drawn words: a space split truncates seed 60's place to `rhode`,
         // which is not a PLACES entry and so fails membership. Without a
         // two-word fixture in the sweep, every single-word name survives a
         // space split with all three elements still list members.
-        let v = name_request(&feed_key(166).public_key().to_hex());
+        let v = name_request(&feed_key(60).public_key().to_hex());
         let place = v["words"][2].as_str().expect("a string");
         assert!(
             place.contains(' '),
@@ -12933,7 +12948,7 @@ mod tests {
         );
         assert!(
             crate::names::PLACES.contains(&place),
-            "seed 166: `{place}` is not a place list entry, got {v}"
+            "seed 60: `{place}` is not a place list entry, got {v}"
         );
     }
 
