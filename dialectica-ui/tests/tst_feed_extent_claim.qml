@@ -2,7 +2,7 @@ import QtQuick
 import QtTest
 import "../src/qml"
 
-// UI-BRIEF rendering obligation 10, second half: **where the interface asserts
+// The rendering rule this file exists for: **where the interface asserts
 // extent, that assertion must be readable as local.**
 //
 // The feed's extent claim is the pagination control. `hasMore` is computed by
@@ -10,9 +10,9 @@ import "../src/qml"
 // holds another page* — while a reader meeting a full page and a "Next" button
 // reads it as *this Stoa has more*, which is the claim no peer can make.
 //
-// Obligation 10 also states the explicit NON-obligation: a screen asserting no
-// extent owes nothing, because a locality line printed once per screen is a
-// disclaimer at the reader rather than a discharged obligation.
+// There is an explicit NON-obligation beside it: a screen asserting no extent
+// owes nothing, because a locality line printed once per screen is a disclaimer
+// at the reader rather than a discharged obligation.
 //
 // **Why these tests assert a shared PARENT rather than `visible`.** A QML item's
 // `visible` reports EFFECTIVE visibility, and a `TestCase` is itself invisible

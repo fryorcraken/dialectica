@@ -1785,9 +1785,9 @@ fn an_over_cap_genesis_title_is_refused_before_it_can_name_a_stoa() {
 
 #[test]
 fn a_vote_is_stored_and_is_rendered_by_nothing() {
-    // What a vote currently does, pinned so that the UI brief's claim — votes are
-    // stored and read by nothing, so there is no score to render — is checkable
-    // rather than asserted in prose.
+    // What a vote currently does, pinned so that the claim — votes are stored
+    // and read by nothing, so there is no score to render — is checkable rather
+    // than asserted in prose.
     //
     // The rival explanation excluded: that the vote is absent from the feed
     // because it was not stored. `iter_target` is asserted to return it, so it IS
@@ -2344,23 +2344,19 @@ fn a_store_on_disk_that_is_not_a_database_reaches_the_view_as_the_error_shape() 
     // can only half-prove. `a_store_that_is_not_a_database_is_a_storage_failure…`
     // above shows the read returns `Err`; it cannot show what a view receives,
     // because `Err` is not a JSON reply. The obligation is about what the READER
-    // sees — `docs/UI-BRIEF.md`'s "Distinguish an empty result from a failed one",
-    // which says in terms that a storage failure must never render as an empty
-    // feed — so it is only discharged at the layer that produces what the reader
-    // is shown.
-    //
-    // **Cited by its heading and NOT by its number**, deliberately. An earlier
-    // version of this comment cited "§11.1 obligation 5"; `docs/PLAN.md` says at
-    // §11's head that §11.1 arrives with the `vouching-state` change and is
-    // absent until then, so the section was a phantom. The number 5 was real —
-    // but it is UI-BRIEF's, and UI-BRIEF restarts its numbering per section and
-    // contains a `2b`, so a bare ordinal does not locate anything there either.
-    // The quoted heading is unique; grep for it.
+    // sees — **an empty result and a failed one must be distinguishable, because
+    // a storage failure rendered as an empty feed says the opposite of what
+    // happened** — so it is only discharged at the layer that produces what the
+    // reader is shown.
     //
     // The promoted half of the same rule is `module-wire-contract`'s "Failure is
     // always the error shape, and never a partial success", which is what the
-    // assertions below actually check; UI-BRIEF says why a view cannot recover
-    // from getting it wrong.
+    // assertions below actually check. That requirement is the citable one;
+    // **cite a requirement by its heading and never by an ordinal**, which is
+    // the lesson an earlier version of this comment cost: it cited "§11.1
+    // obligation 5", and `docs/PLAN.md` says at §11's head that §11.1 arrives
+    // with the `vouching-state` change and is absent until then — so the
+    // section was a phantom and the number located nothing.
     //
     // Same fixture as that test deliberately: identical bytes on disk, one layer
     // further out, so the pair shows the failure surviving the JSON crossing

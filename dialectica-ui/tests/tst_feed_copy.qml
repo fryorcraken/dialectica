@@ -9,9 +9,9 @@ import "../src/qml"
 // That gap is what this file closes, and it is not hypothetical. Review replaced
 // the empty state's locality sentence with the literal string **"This Stoa is
 // empty."** and every test in the suite passed. That is not a missing
-// disclaimer: it is the interface making the global claim `docs/UI-BRIEF.md`
-// constraint 1 forbids outright, in the one state where the brief's own prose
-// says the obligation is currently met. No peer can know a Stoa is empty; it can
+// disclaimer: it is the interface making a claim about the whole Stoa, which is
+// the one thing no screen may do — and it slipped into the very state where the
+// obligation was believed to be met. No peer can know a Stoa is empty; it can
 // only know what it holds.
 //
 // **Prefix, then relation — never a pinned sentence.** A test pinning the copy
@@ -282,7 +282,7 @@ TestCase {
 
     // ---- the failed state: not an empty one -------------------------------
 
-    // UI-BRIEF obligation 5 in the copy rather than in the state machine. The
+    // Empty-versus-failed in the COPY rather than in the state machine. The
     // state half is covered; that a reader can TELL is not, and the two are
     // different properties — two states can be correctly distinct in `readState`
     // and indistinguishable on screen.

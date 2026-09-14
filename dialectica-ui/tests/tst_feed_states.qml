@@ -5,10 +5,11 @@ import "../src/qml"
 // The three states of a feed read, and the one distinction the screen exists
 // to make: **an empty store and an unreadable store must never look alike.**
 //
-// UI-BRIEF obligation 5 states it, core keeps the two reply shapes disjoint
-// (with a wire test pinning that), and `reload()` has a guard so the screen does
-// not depend on a promise made one module away. Nothing on the QML side checked
-// any of it until this file.
+// They mean opposite things, so confusing them tells the reader the reverse of
+// what happened. Core keeps the two reply shapes disjoint (with a wire test
+// pinning that), and `reload()` has a guard so the screen does not depend on a
+// promise made one module away. Nothing on the QML side checked any of it until
+// this file.
 //
 // These tests drive the real FeedScreen through a fake bridge, so what is under
 // test is the screen's own state machine rather than a re-implementation of it.
