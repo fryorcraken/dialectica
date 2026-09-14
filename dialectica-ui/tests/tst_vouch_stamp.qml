@@ -139,15 +139,36 @@ TestCase {
     // `tst_identity_chip.qml` in this same piece, and on `ui-stoa-list` before
     // it. The stamp's own label is a constant, but the assertion is here anyway
     // because the next version of this component will bind something.
+    //
+    // IT DESCENDS `data`, NOT ONLY `children`. A `ToolTip` is a `Popup`, not an
+    // `Item`, so it never appears in `children` and the first version of this
+    // walker could not see the stamp's tooltip at all — it reported the stamp
+    // clean without ever looking, which is this suite's recorded defect family.
     function nonPlainTextElements(item) {
         var out = [];
+        var visited = [];
+
+        function seen(node) {
+            for (var k = 0; k < visited.length; k++)
+                if (visited[k] === node)
+                    return true;
+            visited.push(node);
+            return false;
+        }
+
         function walk(node) {
-            if (!node)
+            if (!node || seen(node))
                 return;
             if (typeof node.text === "string" && node.textFormat !== undefined
                 && node.textFormat !== 0)
                 out.push(JSON.stringify(node.text) + " has textFormat "
                          + node.textFormat);
+            if (node.contentItem !== undefined && node.contentItem !== null)
+                walk(node.contentItem);
+            var d = node.data;
+            if (d !== undefined)
+                for (var j = 0; j < d.length; j++)
+                    walk(d[j]);
             var kids = node.children;
             if (kids !== undefined)
                 for (var i = 0; i < kids.length; i++)
@@ -161,6 +182,58 @@ TestCase {
         var s = stamp({ vouched: true, revealed: true });
         var bad = nonPlainTextElements(s);
         compare(bad.length, 0, "a non-plain Text in the stamp: " + bad.join(" | "));
+        s.destroy();
+    }
+
+    // The stamp's tooltip, reached and asserted separately from the walk above.
+    // Both its strings are hardcoded literals today, so this pins a component
+    // that renders no markup rather than repairing one that does — the point is
+    // that the NEXT edit to bind a name or a reason here inherits the format
+    // instead of re-deriving it. The count is asserted first for the same reason
+    // as in `tst_status_bar.qml`: a walker that reaches no tooltip and a stamp
+    // with a clean tooltip are otherwise the same green.
+    function tooltipFormats(item) {
+        var out = [];
+        var visited = [];
+
+        function seen(node) {
+            for (var k = 0; k < visited.length; k++)
+                if (visited[k] === node)
+                    return true;
+            visited.push(node);
+            return false;
+        }
+
+        function walk(node) {
+            if (!node || seen(node))
+                return;
+            if (node.contentItem !== undefined && node.contentItem !== null
+                && typeof node.text === "string" && node.children === undefined)
+                out.push(node.contentItem.textFormat);
+            var d = node.data;
+            if (d !== undefined)
+                for (var j = 0; j < d.length; j++)
+                    walk(d[j]);
+            var kids = node.children;
+            if (kids !== undefined)
+                for (var i = 0; i < kids.length; i++)
+                    walk(kids[i]);
+        }
+        walk(item);
+        return out;
+    }
+
+    function test_the_stamps_tooltip_is_plain_text() {
+        var s = stamp({ vouched: true, revealed: true });
+        var formats = tooltipFormats(s);
+        compare(formats.length, 1,
+                "expected exactly one tooltip on the stamp, found "
+                + formats.length + " — if this is 0 the walker no longer reaches "
+                + "a popup and the plain-text test above is vacuous");
+        compare(formats[0], 0,
+                "the stamp's tooltip renders as markup (textFormat "
+                + formats[0] + ") — a ToolTip's default content item is "
+                + "StyledText, so `ToolTip.text:` is a markup sink");
         s.destroy();
     }
 

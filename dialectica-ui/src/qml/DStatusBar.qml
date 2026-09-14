@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
 
 // Three lamps, always the same three and always in this order:
@@ -11,9 +10,15 @@ import QtQuick.Layouts
 // have to know, where a lamp asserts one of three states and puts the sentence
 // in a tooltip where it is read on demand.
 //
-// The lamp colours are the ONLY green and orange in the design — see DTheme.
-// Spending them anywhere else spends the signal reserved for "is this machine
-// working" on something that is not that.
+// The lamp colours are the only green and orange THE INTERFACE uses — see
+// DTheme. Spending them anywhere else spends the signal reserved for "is this
+// machine working" on something that is not that.
+//
+// The qualifier is load-bearing rather than pedantic: `DTheme`'s mark palette
+// carries `markGreen` and `markSage`, and a reader who checks an unqualified
+// claim finds it contradicted in the file cited to support it. The marks are
+// not the interface palette (DTheme says so where they are declared) — an
+// identicon ink is picked by an address, never to signal a state.
 RowLayout {
     id: root
 
@@ -114,10 +119,18 @@ RowLayout {
         }
 
         MouseArea {
+            id: lampHover
             anchors.fill: parent
             hoverEnabled: true
-            ToolTip.visible: containsMouse && lamp.explanation !== ""
-            ToolTip.text: lamp.explanation
+
+            // `DTip`, not an attached tooltip binding — the attached form's
+            // content item is a `Text` at `textFormat: StyledText`, and
+            // `explanation` is the one free string this component takes. See
+            // DTip.qml for the measurement.
+            DTip {
+                text: lamp.explanation
+                visible: lampHover.containsMouse && lamp.explanation !== ""
+            }
         }
     }
 

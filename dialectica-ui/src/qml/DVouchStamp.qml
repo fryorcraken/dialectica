@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls
 
 // The vouch stamp. Two states and no third:
 //   not vouched — outline stamp, revealed only while the pointer is over the
@@ -68,6 +67,7 @@ Rectangle {
     }
 
     MouseArea {
+        id: stampHover
         anchors.fill: parent
 
         // A stamp at zero opacity is invisible, and an invisible control that
@@ -79,9 +79,18 @@ Rectangle {
         hoverEnabled: true
         onClicked: root.toggled()
 
-        // copy.json `common.vouchTooltip` / `common.vouchedTooltip`, verbatim.
-        ToolTip.visible: containsMouse
-        ToolTip.text: root.vouched ? "You vouched for this author — click to undo"
-                                   : "Vouch for this author"
+        // `DTip` rather than an attached tooltip binding. Both strings here are
+        // hardcoded literals, so this site renders no markup TODAY — which is
+        // exactly why it is converted rather than excused. A tooltip binding a
+        // literal is one edit from binding a name or a reason, and that edit
+        // has no reason to think it touched rendering. The rule is "no attached
+        // tooltip binding in this tree", and a rule with a case-by-case
+        // exemption is a rule a gate cannot state.
+        DTip {
+            // copy.json `common.vouchTooltip` / `common.vouchedTooltip`, verbatim.
+            text: root.vouched ? "You vouched for this author — click to undo"
+                               : "Vouch for this author"
+            visible: stampHover.containsMouse
+        }
     }
 }

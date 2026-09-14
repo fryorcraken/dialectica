@@ -224,15 +224,42 @@ TestCase {
     // not on the rendered string, because `Text.text` returns the source
     // whatever the format is — measured in this piece, where the string-based
     // form survived a RichText mutation.
+    //
+    // IT DESCENDS `data`, NOT ONLY `children`, and that is the whole repair.
+    // A `ToolTip` is a `Popup`, which is not an `Item` and so never appears in
+    // `children` — the first version of this walker returned `[]` for a bar
+    // rendering `"<b>OWNED</b> <img src=x>"` through a tooltip whose content
+    // item was `StyledText`. Two explanations gave the same answer there ("no
+    // markup rendered" and "the walker never looked"), which is this suite's
+    // recorded defect family. `data` carries every child, visual or not, so a
+    // popup's content item is now walked like any other element.
     function nonPlainTextElements(item) {
         var out = [];
+        var visited = [];
+
+        function seen(node) {
+            for (var k = 0; k < visited.length; k++)
+                if (visited[k] === node)
+                    return true;
+            visited.push(node);
+            return false;
+        }
+
         function walk(node) {
-            if (!node)
+            if (!node || seen(node))
                 return;
             if (typeof node.text === "string" && node.textFormat !== undefined
                 && node.textFormat !== 0)
                 out.push(JSON.stringify(node.text) + " has textFormat "
                          + node.textFormat);
+            // A popup (ToolTip, Menu, Dialog) hangs off `data` and holds its
+            // Text in `contentItem`, which is not in its `children` either.
+            if (node.contentItem !== undefined && node.contentItem !== null)
+                walk(node.contentItem);
+            var d = node.data;
+            if (d !== undefined)
+                for (var j = 0; j < d.length; j++)
+                    walk(d[j]);
             var kids = node.children;
             if (kids !== undefined)
                 for (var i = 0; i < kids.length; i++)
@@ -243,9 +270,76 @@ TestCase {
     }
 
     function test_every_text_the_bar_renders_is_plain_text() {
-        var b = bar();
+        var b = bar({ deliveryText: "<b>OWNED</b> <img src=x>",
+                      storageText: "<i>x</i>",
+                      zoneText: "<b>y</b>" });
         var bad = nonPlainTextElements(b);
         compare(bad.length, 0, "a non-plain Text in the bar: " + bad.join(" | "));
+        b.destroy();
+    }
+
+    // THE WALKER ABOVE MUST ACTUALLY REACH A TOOLTIP, asserted separately
+    // because the two claims fail independently: a walker that reaches nothing
+    // reports a clean bar, and so does a bar that is genuinely clean. This
+    // counts what was found, so a walker narrowed back to `children` fails here
+    // with "found 0" rather than passing quietly.
+    //
+    // A lamp's `explanation` is the one free string this component takes — the
+    // sentence core supplies to explain a degraded lamp, which is where a
+    // peer-supplied fragment ends up — so this is the sink that matters.
+    function textFormatsOfTooltips(item) {
+        var out = [];
+        var visited = [];
+
+        function seen(node) {
+            for (var k = 0; k < visited.length; k++)
+                if (visited[k] === node)
+                    return true;
+            visited.push(node);
+            return false;
+        }
+
+        function walk(node) {
+            if (!node || seen(node))
+                return;
+            // A ToolTip: it has a content item and a text, and is not an Item
+            // (no `children`).
+            if (node.contentItem !== undefined && node.contentItem !== null
+                && typeof node.text === "string" && node.children === undefined)
+                out.push(node.contentItem.textFormat);
+            var d = node.data;
+            if (d !== undefined)
+                for (var j = 0; j < d.length; j++)
+                    walk(d[j]);
+            var kids = node.children;
+            if (kids !== undefined)
+                for (var i = 0; i < kids.length; i++)
+                    walk(kids[i]);
+        }
+        walk(item);
+        return out;
+    }
+
+    // Measured on Qt 6.10.3: a `ToolTip`'s DEFAULT content item is a `Text` at
+    // `textFormat: Text.StyledText` (2), so `ToolTip.text: lamp.explanation`
+    // renders markup. Against `"<b>OWNED</b> x"` the attached form painted at
+    // contentWidth 56.66 where a PlainText element paints 102.02 — the tags
+    // were consumed, not drawn. `contentItem.text` returns the raw source
+    // either way, which is why this reads `textFormat` and not the string.
+    function test_every_tooltip_the_bar_opens_is_plain_text() {
+        var b = bar({ deliveryText: "<b>OWNED</b> <img src=x>",
+                      storageText: "<i>x</i>",
+                      zoneText: "<b>y</b>" });
+        var formats = textFormatsOfTooltips(b);
+        compare(formats.length, 3,
+                "expected one tooltip per lamp, found " + formats.length
+                + " — if this is 0 the walker no longer reaches a popup and "
+                + "the plain-text test above is vacuous");
+        for (var i = 0; i < formats.length; i++)
+            compare(formats[i], 0,
+                    "lamp " + i + "'s tooltip renders as markup (textFormat "
+                    + formats[i] + ") — a lamp's explanation is peer-influenced "
+                    + "text and a ToolTip's default content item is StyledText");
         b.destroy();
     }
 
