@@ -25,7 +25,12 @@
 - [ ] review: readability — `code-reviewer`
 - [ ] review: architecture — `code-reviewer`
 - [ ] review: spec-test — `spec-test-reviewer`
-- [ ] review: design — `design-reviewer`
+- [x] review: design — `design-reviewer` — six findings, all gaps rather than
+      contradictions: the code takes every decision `design.md` records, and both
+      withdrawn prohibitions are explicitly retired in the deltas that own them.
+      One live falsified premise survives in `authoring.rs`'s `Published` doc and
+      one in PLAN §7.2 rule 5; the tiebreak, accept-and-clamp, and the end of
+      content-dedup are decisions taken but not recorded under Decisions.
 - [ ] findings all ticked, `findings/` deleted — `closer`
 - [ ] `openspec validate --strict`, then `archive` — `closer`
 - [ ] CI green, PR merged — `closer`
