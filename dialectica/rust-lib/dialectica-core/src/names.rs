@@ -8,14 +8,27 @@
 //! which is the one thing this forum is named for. So every identity renders
 //! under three drawn words: *pensive aporia of lampsakos*.
 //!
-//! # Derived from the PUBLIC KEY, not the address, and the difference matters
+//! # Derived from the PUBLIC KEY'S OWN BYTES, with no hash in between
 //!
-//! `H(NAME_PREFIX || public_key)`. An address is `SHA256(AUTHOR_ADDRESS_PREFIX
-//! || 0x01 || public_key)` — a hash of a *record* kept extensible against a
-//! future key log (§5.1, §5.3). Deriving a name from the key means the name
-//! tracks the key that signs, which is what a reader is actually being shown,
-//! and keeps "does a name change when a key does?" a question that arrives
-//! loudly rather than one pre-answered by which value happened to be hashed.
+//! The three draws read key bytes `18..23` directly. There is no digest, no
+//! domain separator and no preimage: `adjective = ADJECTIVES[be16(key[18..20]) %
+//! 8192]`, and so on for the noun and the place.
+//!
+//! **This replaced `H(NAME_PREFIX || public_key)`, and the reason is that the
+//! separator had nothing left to separate the name FROM.** A separator exists to
+//! make two derivations over one key independent functions of it. The
+//! counterpart was the author address, `SHA256(AUTHOR_ADDRESS_PREFIX || 0x01 ||
+//! public_key)`; issue #80 deletes it, so there is one derivation over the key
+//! and the separator separated the name from nothing.
+//!
+//! **What this costs is stated here because nothing else records it.** With no
+//! preimage there is nowhere to put a scheme version, so a wordlist can never
+//! change without every name changing at once and no property of either name
+//! saying which scheme produced it. The owner took this deliberately: a name is
+//! a pure local function, never published and recomputed wherever it is shown,
+//! so two peers on different builds rendering different names is a client-side
+//! rendering difference rather than a disagreement about anything being agreed
+//! on. It is a one-way door all the same.
 //!
 //! **The consequence decides which value a reply owes, and it is the KEY.** A
 //! reply reporting an author by *address* alone has handed its caller a hash
@@ -33,8 +46,10 @@
 //! An earlier pass put a `displayName` on the feed row, reasoning correctly from
 //! the address-only gap to the wrong remedy. Putting the public key on that row
 //! is a change to its `author` contract across several merged specs, so it is
-//! filed as its own piece; until it lands the feed path cannot render a name and
-//! `docs/UI-BRIEF.md` obligation 6 records the obligation.
+//! filed as its own piece — `key-identity-sweep` — and until it lands the feed
+//! path cannot render a name. What forbids the wrong remedy in the meantime is
+//! the `generated-names` spec's own requirement that **no reply carries a
+//! display name**, which is the authority here.
 //!
 //! # Determinism is the whole contract
 //!
@@ -60,15 +75,53 @@
 //! **Not a credential.** Anyone willing to press a regeneration button reaches
 //! any name they like, so no argument of the form "an attacker would have to
 //! grind for that" is available. What an attacker gets is a lookalike *name* on
-//! a different *address*; they cannot forge the address and cannot forge a
+//! a different *public key*; they cannot forge the key and cannot forge a
 //! signature, so nothing they publish is attributable to the identity they
-//! imitate. The attack is purely social and the address is what defeats it.
+//! imitate. The attack is purely social and the public key is what defeats it.
 //!
 //! **No method accepts one.** Not a lookup, not a moderation target, not a vote
-//! target. The address is the identity.
+//! target. The public key is the identity.
+//!
+//! # The byte allocation, and why disjointness is now load-bearing
+//!
+//! Three channels tell identities apart — this name, the mark, and the
+//! abbreviated key on screen — and under this scheme **all three read the same
+//! 32 bytes**. The `generated-names` spec allocates them pairwise disjoint
+//! ranges:
+//!
+//! | channel | key bytes |
+//! |---|---|
+//! | abbreviation — head | `0..3` |
+//! | mark | `4..11` |
+//! | abbreviation — middle | `14..17` |
+//! | **name** | **`18..23`** |
+//! | abbreviation — tail | `29..31` |
+//!
+//! Bytes `12..13` and `24..28` are read by no channel. They are **unallocated,
+//! not reserved**: nothing depends on their value and no channel may be extended
+//! onto them without the spec changing.
+//!
+//! **This is the mechanism three documents in this tree once correctly called
+//! fictional, made real.** While the name hashed the key under its own separator
+//! and the mark read an address — a different digest — the two could not
+//! overlap, so byte allocation between them was neither required nor possible,
+//! and any claim of a "reserved range" described nothing. That reasoning is
+//! withdrawn: with one shared value and no hash anywhere, two channels reading
+//! one byte are two searches that partly coincide, and byte-disjointness is the
+//! only thing making name-grinding and mark-grinding costs multiply rather than
+//! add. A byte the abbreviation **displays** is worse than merely shared — an
+//! attacker reads their progress off the screen while grinding it.
+//!
+//! Only this crate's half of that is enforceable here: the mark and the
+//! abbreviation are QML, so `tst_identicon.qml` is where the pairwise check
+//! lives, and what this crate can check is that the name's measured window is
+//! the allocated one and overlaps neither of the other two ranges.
 
+// **No hash is imported here, and that absence is the change.** The derivation
+// reads key bytes directly; `sha2` appears below only inside `mod tests`, where
+// it hashes the WORDLISTS to pin them entry by entry — a check on the lists'
+// contents, not a step in deriving a name.
 use crate::identity::{KeyError, PublicKey};
-use sha2::{Digest, Sha256};
 
 mod adjectives;
 mod nouns;
@@ -77,34 +130,6 @@ mod places;
 pub use adjectives::ADJECTIVES;
 pub use nouns::NOUNS;
 pub use places::PLACES;
-
-/// Domain separation for a display name.
-///
-/// A fixed 32 bytes in the same padded style as every prefix in
-/// [`crate::identity`], and distinct from all of them. The padding is not
-/// decoration: a variable-length prefix concatenated with variable-length data
-/// is the classic way to make two different inputs hash the same, and a fixed
-/// width removes the question rather than arguing about it.
-///
-/// **The version is in the string and is load-bearing.** The spec makes any
-/// change to the scheme or the wordlists a new version rather than an edit,
-/// because the derivation maps digest bytes to list *indices*: removing one word
-/// reindexes the list and every identity that drew at or after it renders
-/// differently — on peers that have updated and not on peers that have not. The
-/// same key then renders as two different people depending on who is looking.
-/// A version bump makes the old and new schemes two distinct derivations rather
-/// than two peers' answers to one question.
-///
-/// **Separation from the address prefixes is what makes the name and the mark
-/// independent**, and this is the mechanism — not any allocation of bytes. The
-/// name hashes the key under this prefix; the mark reads the *address*, a
-/// different digest of the same key. An attacker grinding keys for a target's
-/// name gets an unrelated address and mark each time, and grinding for the mark
-/// gets an unrelated name, so the two must be landed together and the costs
-/// multiply rather than add. Two documents independently invented a
-/// shared-digest story in which ranges of address bytes were "reserved" for the
-/// name; no such mechanism exists, and the independence is real without it.
-const NAME_PREFIX: &[u8; 32] = b"/dialectica/1/Name/Display\0\0\0\0\0\0";
 
 /// The literal text between the noun and the place.
 ///
@@ -116,28 +141,49 @@ const NAME_PREFIX: &[u8; 32] = b"/dialectica/1/Name/Display\0\0\0\0\0\0";
 /// content and misleads no reader about who published something.
 pub const CONNECTOR: &str = "of";
 
-/// The first byte past the name's slice of the digest.
+/// The public key's bytes the name reads: `18..24`, six of them.
 ///
-/// Six bytes: three 16-bit slots, one unconditional draw each. **This names no
-/// byte the derivation does not read**, which is the point of it being 6 rather
-/// than a wider figure with an unread tail. A bound stated wider than the draws
-/// records a boundary nothing enforces — a range read by nothing, which the next
-/// reader takes as load-bearing and designs around. That is the byte reservation
-/// this scheme has already had to retract once.
+/// **One range rather than a start and a length**, and that is a decision rather
+/// than a style. Two constants can disagree — a start moved without its length
+/// is a window that has silently slid onto a neighbouring byte, which produces a
+/// different name for every key with nothing else changed and nothing in any
+/// output to show it. A single range cannot be half-moved.
+///
+/// **It is an allocation, not merely an offset.** The spec gives the mark
+/// `4..11` and the abbreviation `0..3`, `14..17` and `29..31`; this range is
+/// pairwise disjoint from both, which under a scheme with no hash between the
+/// key and any channel is the whole of what keeps the three searches
+/// independent. Moving it is a change to that allocation and not a local edit.
 ///
 /// **It bounds by being what the derivation slices, not by being asserted.** An
-/// earlier version of this constant was compared to its own literal in a
+/// earlier version of the bound it replaces was compared to its own literal in a
 /// `debug_assert_eq!` — a tautology that compiled out in release and could not
-/// fail under any edit to the draws. [`name_from_digest`] now takes its six
-/// bytes as `digest[..NAME_DIGEST_BOUND]`, so moving the bound moves the read
-/// and a draw past it does not compile.
+/// fail under any edit to the draws. [`name_from_key_bytes`] takes its six bytes
+/// as `key_bytes[name_key_bytes()]`, so moving the range moves the read and a
+/// draw past it does not compile.
 ///
 /// The number of bytes a name consumes is therefore fixed rather than
-/// data-dependent: no input makes the derivation read a seventh byte. Reading
-/// without bound is what lets two implementations disagree about how far to read
-/// and so produce different names for one key, which is the failure this whole
-/// scheme exists to prevent.
-const NAME_DIGEST_BOUND: usize = 6;
+/// data-dependent: no input makes the derivation read a seventh. Reading without
+/// bound is what lets two implementations disagree about how far to read and so
+/// produce different names for one key, which is the failure this whole scheme
+/// exists to prevent.
+/// **A function rather than a `const Range`**, and that is not a style choice.
+/// A `const` of a non-`Copy` type is re-materialised as a fresh temporary at
+/// every use, so `NAME_KEY_BYTES.any(..)` mutates a temporary and `rustc` warns
+/// about it by default (`const_item_mutation`). A function hands out a genuine
+/// range each call, and iterating it needs no `.clone()` scattered at the call
+/// sites — which is the shape that would have invited someone to "simplify" the
+/// clone away and silently iterate nothing.
+const fn name_key_bytes() -> std::ops::Range<usize> {
+    18..24
+}
+
+/// How many bytes [`name_key_bytes`] spans: three 16-bit draws.
+///
+/// Derived from the range rather than written beside it, so the two cannot
+/// disagree. This is the array length the slice is converted into, which is what
+/// makes a widened range a compile error instead of a runtime surprise.
+const NAME_BYTE_COUNT: usize = name_key_bytes().end - name_key_bytes().start;
 
 /// A generated display name: three drawn words.
 ///
@@ -228,7 +274,7 @@ impl std::fmt::Display for NameError {
 /// The display name for a public key.
 ///
 /// **Total, and the return type says so.** Every well-formed key yields a name:
-/// three unconditional reductions over six digest bytes, with nothing that can
+/// three unconditional reductions over six key bytes, with nothing that can
 /// refuse, retry or run out. There is no `Result` here because there is no
 /// failure to report — a [`PublicKey`] cannot be constructed from malformed
 /// bytes, so the one failure this capability has is already behind us by the
@@ -241,7 +287,7 @@ impl std::fmt::Display for NameError {
 /// censorship-resistant forum, on a branch no input could reach. Making the
 /// derivation total deletes the branch rather than testing it.
 pub fn display_name(key: &PublicKey) -> DisplayName {
-    name_from_digest(&name_digest(key))
+    name_from_key_bytes(&key.to_bytes())
 }
 
 /// The display name for raw key bytes, parsing first.
@@ -260,25 +306,27 @@ pub fn display_name_from_bytes(bytes: &[u8]) -> Result<DisplayName, NameError> {
     Ok(display_name(&key))
 }
 
-/// The name's digest for a key: `SHA256(NAME_PREFIX || public_key)`.
+/// Turn a 32-byte public key value into three words.
 ///
-/// `pub` so that a test can compare it byte for byte against the same key's
-/// address and show the two are different digests — which is the whole of why
-/// no byte allocation between the name and the mark is required or possible.
-pub fn name_digest(key: &PublicKey) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    hasher.update(NAME_PREFIX);
-    hasher.update(key.to_bytes());
-    hasher.finalize().into()
-}
-
-/// Turn a digest into three words.
-///
-/// **Public, and separately callable from hashing a key, because the spec makes
-/// that a testability obligation rather than a convenience.** Reaching a chosen
-/// slot combination through a chosen *key* means grinding for one, so the
-/// pinning and uniformity requirements are checkable only if a digest can be
+/// **Public, and separately callable from [`display_name`], because the spec
+/// makes that a testability obligation rather than a convenience.** Reaching a
+/// chosen slot combination through a chosen *key* means grinding for one — a
+/// `PublicKey` is a curve point and its bytes cannot be chosen — so the pinning
+/// and uniformity requirements are checkable only if the 32 bytes can be
 /// supplied directly.
+///
+/// **This takes raw bytes rather than a [`PublicKey`] for that reason alone**,
+/// and it is not a widening of what callers should use: production callers hold
+/// a key and call [`display_name`] or [`display_name_from_bytes`], both of which
+/// parse. Handing arbitrary bytes here produces a name for a value that may be
+/// no key at all, which is exactly what the pinning tests need and exactly what
+/// a caller rendering an author must not do.
+///
+/// **It replaced a `name_from_digest` taking the first six bytes of
+/// `SHA256(NAME_PREFIX || key)`.** The rename is not cosmetic: the parameter
+/// stopped being a digest, and a function still called `…_from_digest` invites a
+/// caller to hand it one — which would silently produce a name for the wrong
+/// value, since a digest is 32 bytes too and nothing would refuse it.
 ///
 /// **Total, and infallible by construction.** Every draw is a single
 /// unconditional reduction: nothing refuses a combination, nothing retries, and
@@ -288,25 +336,26 @@ pub fn name_digest(key: &PublicKey) -> [u8; 32] {
 ///
 /// # The byte budget
 ///
-/// | bytes | slot |
+/// | key bytes | slot |
 /// |---|---|
-/// | `0..2` | adjective |
-/// | `2..4` | noun |
-/// | `4..6` | place |
+/// | `18..20` | adjective |
+/// | `20..22` | noun |
+/// | `22..24` | place |
 ///
-/// Bytes `6..32` are **never read**. The slice below is taken at
-/// [`NAME_DIGEST_BOUND`] rather than indexed past it, so the bound is what the
-/// derivation reads rather than a figure a comment asserts: widening a draw past
-/// it does not compile.
+/// Every other byte of the key is **never read** — including bytes `12..13` and
+/// `24..28`, which no channel reads and which are unallocated rather than
+/// reserved. The slice below is taken at [`NAME_KEY_BYTES`] rather than indexed
+/// relative to it, so the range is what the derivation reads rather than a
+/// figure a comment asserts: widening a draw past it does not compile.
 ///
 /// Each slot takes its index from bytes no other slot reads, so the three words
 /// are independent draws rather than three views of the same bits.
-pub fn name_from_digest(digest: &[u8; 32]) -> DisplayName {
-    // The bound, applied rather than asserted. Everything below reads from this
-    // slice, so there is no path that reaches a seventh byte.
-    let drawn: &[u8; NAME_DIGEST_BOUND] = digest[..NAME_DIGEST_BOUND]
+pub fn name_from_key_bytes(key_bytes: &[u8; 32]) -> DisplayName {
+    // The window, applied rather than asserted. Everything below reads from this
+    // slice, so there is no path that reaches a byte outside it.
+    let drawn: &[u8; NAME_BYTE_COUNT] = key_bytes[name_key_bytes()]
         .try_into()
-        .expect("a 32-byte digest always yields its first NAME_DIGEST_BOUND bytes");
+        .expect("name_key_bytes() lies inside a 32-byte key and spans NAME_BYTE_COUNT");
 
     // Big-endian so the bytes read in the order a hand-computed test vector is
     // written.
@@ -335,23 +384,20 @@ pub fn name_from_digest(digest: &[u8; 32]) -> DisplayName {
 /// Written-down names, shared with the modules whose rows must carry them.
 ///
 /// **These are the only values in the crate that cannot be re-derived from the
-/// implementation**, and that is their entire purpose. Change one byte of
-/// `NAME_PREFIX`, one entry of a list, the order of two entries, which bytes a
-/// slot reads, or the connector, and every peer's names change together with no
-/// error anywhere — each peer stays internally consistent while agreeing with
-/// nobody. A check that asks the implementation what it produced and agrees with
-/// the answer cannot see that. These were produced independently, by
-/// `examples/pin_name.rs`, which reads the wordlists from the text files in
-/// `wordlists/` and does the index arithmetic itself rather than calling
-/// [`name_from_digest`] — it does not link the derivation at all.
+/// implementation**, and that is their entire purpose. Change one entry of a
+/// list, the order of two entries, which bytes a slot reads, or the connector,
+/// and every peer's names change together with no error anywhere — each peer
+/// stays internally consistent while agreeing with nobody. A check that asks the
+/// implementation what it produced and agrees with the answer cannot see that.
+/// These were produced independently, by `examples/pin_name.rs`, which reads the
+/// wordlists from the text files in `wordlists/` and does the index arithmetic
+/// itself rather than calling [`name_from_key_bytes`] — it does not link the
+/// derivation at all.
 ///
 /// **If one of these fails, do not update it to match.** Work out what changed
 /// and whether the network can survive it.
 #[cfg(test)]
 pub mod tests_support {
-    pub const PINNED_NAME_FOR_KEY_4: &str = "quipful ismene of korykos";
-    pub const PINNED_NAME_FOR_KEY_5: &str = "periculous kreios of narthakion";
-
     /// Two distinct secret-key seeds whose keys derive the SAME display name.
     ///
     /// **Found by search, not constructed by stubbing the derivation**, so the
@@ -359,7 +405,19 @@ pub mod tests_support {
     /// than of a test double. The search walked seeds with a counter in the
     /// first four bytes and indexed by rendered name until one repeated; at a
     /// space of 2^33 a repeat arrives after roughly 2^16.5 keys, and this pair
-    /// turned up well inside three million.
+    /// turned up inside the first 150,000 seeds tried.
+    ///
+    /// **This pair replaces an earlier one that stopped colliding**, and the
+    /// reason is exactly the scheme change the doc below warns about: issue #80
+    /// moved the derivation from `H(NAME_PREFIX || key)` to raw key bytes
+    /// `18..23`, so which keys collide is an entirely different question. The old
+    /// pair was not papered over — it was re-searched because the derivation it
+    /// was found against no longer exists.
+    ///
+    /// Both keys' names were verified through `examples/pin_name.rs`, which
+    /// reads the wordlists from the text files and does not link the derivation:
+    /// each reaches indices `(2628, 768, 971)`. So the collision is a fact about
+    /// the scheme, not about the function that found it.
     ///
     /// They are written down rather than re-searched at test time because a
     /// search in the suite would be slow and, worse, would agree with whatever
@@ -371,26 +429,30 @@ pub mod tests_support {
     /// not go and find a new pair to paper over it.
     pub const COLLIDING_SEED_A: [u8; 32] = {
         let mut s = [0u8; 32];
-        s[1] = 0x00;
-        s[2] = 0xc6;
-        s[3] = 0x13;
+        s[0] = 0x1e;
+        s[1] = 0xd0;
+        s[2] = 0x01;
         s
     };
     pub const COLLIDING_SEED_B: [u8; 32] = {
         let mut s = [0u8; 32];
-        s[1] = 0x00;
-        s[2] = 0xff;
-        s[3] = 0xb1;
+        s[0] = 0xd1;
+        s[1] = 0x03;
+        s[2] = 0x02;
         s
     };
     /// The name both of the seeds above derive.
-    pub const COLLIDING_NAME: &str = "plurative archilochos of kyrrhos";
+    pub const COLLIDING_NAME: &str = "fearable pindaros of thorai";
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::identity::SecretKey;
+    // Only the tests hash anything. The derivation itself imports no hash — it
+    // reads key bytes — and this is used to pin the WORDLISTS entry by entry,
+    // which is a check on the lists rather than a step in deriving a name.
+    use sha2::{Digest, Sha256};
 
     fn a_key(seed: u8) -> SecretKey {
         SecretKey::from_bytes(&[seed; 32]).unwrap()
@@ -400,11 +462,11 @@ mod tests {
 
     #[test]
     fn the_name_scheme_is_pinned_to_known_answers() {
-        // EVERY constant this scheme rests on is consensus-critical: change one
-        // byte of NAME_PREFIX, one entry of a list, the order of two entries, or
-        // which bytes a slot reads, and this peer's names stop matching every
-        // other peer's — with no error anywhere, because each peer remains
-        // internally consistent.
+        // EVERY constant this scheme rests on is consensus-critical: move the
+        // name's byte window, change one entry of a list, or exchange the order
+        // of two entries, and this peer's names stop matching every other
+        // peer's — with no error anywhere, because each peer remains internally
+        // consistent.
         //
         // Every other test in this file is self-consistent and would pass
         // unchanged if someone edited a wordlist. This one would not. That is
@@ -418,70 +480,121 @@ mod tests {
         // written-down name is produced independently, so a change to the number
         // of words, the slot order or the connector fails it.
         //
+        // **TWO CASES, chosen so that the bytes OUTSIDE the window differ
+        // between them**, which the spec requires for a reason specific to this
+        // scheme: with the name reading the key directly, a slot reading bytes
+        // `16..17` instead of `18..19` produces a different name from the same
+        // key with nothing else changed, and the window is not otherwise visible
+        // in any output. Two keys whose out-of-window bytes coincided would let
+        // a slipped window read the same values and pass.
+        //
         // If this fails, do NOT update the expected values to match. Work out
         // what changed and whether the network can survive it.
-        let name = display_name(&a_key(7).public_key());
-        assert_eq!(
-            name.render(),
-            PINNED_NAME_FOR_KEY_7,
-            "the name derivation changed"
-        );
+        for (seed, key_hex, expected) in PINNED_CASES {
+            let key = a_key(seed).public_key();
 
-        // And the digest itself, so a wordlist change and a PREFIX change fail
-        // separately rather than both arriving as one unexplained string.
-        assert_eq!(
-            hex::encode(name_digest(&a_key(7).public_key())),
-            PINNED_DIGEST_FOR_KEY_7,
-            "the name digest changed"
-        );
+            // The key hex is pinned too, and it is not decoration: it is the
+            // input `examples/pin_name.rs` was given. Without it a reader cannot
+            // re-run the pin, and the name below would be a value to believe
+            // rather than one to check.
+            assert_eq!(
+                hex::encode(key.to_bytes()),
+                key_hex,
+                "the public key for seed {seed} is not the one the pin was \
+                 computed from, so the expected name below is about a \
+                 different key"
+            );
+
+            assert_eq!(
+                display_name(&key).render(),
+                expected,
+                "the name derivation changed for seed {seed}"
+            );
+        }
     }
 
-    /// The expected name for the key whose seed is 32 bytes of 0x07.
+    /// Pinned names, with the public key each was computed from.
     ///
-    /// Derived from `PINNED_DIGEST_FOR_KEY_7` by hand, so that this is an
-    /// independent statement and not the implementation agreeing with itself:
-    /// see `the_pinned_name_is_derivable_by_hand_from_the_pinned_digest`, which
-    /// does the index arithmetic in the test rather than by calling
-    /// `name_from_digest`.
-    const PINNED_NAME_FOR_KEY_7: &str = "expatiative karpos of pythion";
-    const PINNED_DIGEST_FOR_KEY_7: &str =
-        "09c2b1c9373894cc7c47ee573ca06a8d9950a834d0dbb69a35ffcbcb0cdf7e74";
+    /// `(secret-key seed byte, public key hex, expected name)`. Produced by
+    /// `examples/pin_name.rs`, which reads the wordlists from the TEXT FILES in
+    /// `wordlists/` and does the index arithmetic itself — it does not link the
+    /// derivation at all.
+    ///
+    /// **The two keys differ outside the name's window**, which is what makes a
+    /// slipped window visible: see the reasoning in the test above.
+    const PINNED_CASES: [(u8, &str, &str); 2] = [
+        (
+            7,
+            "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c",
+            "quartzous paris of sypalettos",
+        ),
+        (
+            11,
+            "66be7e332c7a453332bd9d0a7f7db055f5c5ef1a06ada66d98b39fb6810c473a",
+            "inpardonable paidagogos of myriandros",
+        ),
+    ];
 
     #[test]
-    fn the_pinned_name_is_derivable_by_hand_from_the_pinned_digest() {
-        // The pin above is only independent if it can be reached WITHOUT the
+    fn a_pinned_name_is_reproducible_from_its_key_by_hand() {
+        // The pins above are only independent if they can be reached WITHOUT the
         // function under test. This does the index arithmetic here, from the
-        // digest's bytes, and indexes the lists directly — so it fails if
-        // `name_from_digest` reads different bytes, reduces differently, orders
-        // the slots differently, or emits a different connector.
+        // KEY's own bytes, and indexes the lists directly — so it fails if
+        // `name_from_key_bytes` reads different bytes, reduces differently,
+        // orders the slots differently, or emits a different connector.
         //
-        // `PINNED_NAME_FOR_KEY_7` and `PINNED_DIGEST_FOR_KEY_7` were produced by
-        // `examples/pin_name.rs`, which reads the wordlists from the TEXT FILES
-        // in `wordlists/` that the modules were generated from, and which does
-        // not link the derivation. So three independent routes — that program,
-        // this arithmetic, and `display_name` — must agree.
-        let digest = hex::decode(PINNED_DIGEST_FOR_KEY_7).expect("the pin is hex");
+        // The three routes that must agree: `examples/pin_name.rs` reading the
+        // text files, this arithmetic, and `display_name`.
+        for (seed, key_hex, expected) in PINNED_CASES {
+            let key = hex::decode(key_hex).expect("the pinned key is hex");
 
-        // Bytes 0..2, 2..4, 4..6, big-endian, reduced into each list.
-        let adjective_index = u16::from_be_bytes([digest[0], digest[1]]) % 8_192;
-        let noun_index = u16::from_be_bytes([digest[2], digest[3]]) % 1_024;
-        let place_index = u16::from_be_bytes([digest[4], digest[5]]) % 1_024;
+            // Key bytes 18..20, 20..22, 22..24, big-endian, reduced into each
+            // list. The offsets are written out rather than taken from
+            // name_key_bytes(), so a moved window fails here instead of following
+            // the move — which is the whole difference between a pin and a
+            // restatement.
+            let adjective_index = u16::from_be_bytes([key[18], key[19]]) % 8_192;
+            let noun_index = u16::from_be_bytes([key[20], key[21]]) % 1_024;
+            let place_index = u16::from_be_bytes([key[22], key[23]]) % 1_024;
 
-        // Written out rather than computed from the constant, so this is a
-        // statement about WHICH entries rather than a restatement of the
-        // arithmetic above.
-        assert_eq!(adjective_index, 2_498);
-        assert_eq!(noun_index, 457);
-        assert_eq!(place_index, 824);
+            assert_eq!(
+                format!(
+                    "{} {} {CONNECTOR} {}",
+                    ADJECTIVES[adjective_index as usize],
+                    NOUNS[noun_index as usize],
+                    PLACES[place_index as usize]
+                ),
+                expected,
+                "seed {seed}: the hand arithmetic does not reach the pinned name"
+            );
+        }
+    }
 
-        assert_eq!(
-            format!(
-                "{} {} {CONNECTOR} {}",
-                ADJECTIVES[adjective_index as usize],
-                NOUNS[noun_index as usize],
-                PLACES[place_index as usize]
-            ),
-            PINNED_NAME_FOR_KEY_7
+    #[test]
+    fn the_pinned_cases_differ_outside_the_name_window() {
+        // The precondition the spec states for the pins, asserted rather than
+        // assumed. If the two pinned keys agreed on the bytes around the window,
+        // a slot that had slipped onto a neighbouring byte would read the same
+        // value in both and both pins would still pass — the pins would be
+        // green about a window that had moved.
+        //
+        // Checked at the bytes a ONE-BYTE SLIP in either direction would reach:
+        // 16 and 17 below the window, 24 and 25 above it. Those are the values a
+        // slipped draw would actually read, so this is a statement about the
+        // failure mode rather than a general "the keys differ".
+        let a = hex::decode(PINNED_CASES[0].1).expect("hex");
+        let b = hex::decode(PINNED_CASES[1].1).expect("hex");
+
+        let mut differing = 0;
+        for i in [16usize, 17, 24, 25] {
+            if a[i] != b[i] {
+                differing += 1;
+            }
+        }
+        assert!(
+            differing > 0,
+            "the two pinned keys agree on every byte a one-byte window slip \
+             would read, so a slipped window would pass both pins"
         );
     }
 
@@ -490,11 +603,11 @@ mod tests {
         // The spec requires pinned cases to reach **a low and a high index in
         // each of the three slots**, so that a pin is evidence about the index
         // arithmetic and not only about one region of one list. A pin drawn from
-        // a key reaches whatever index that key's digest happens to select —
-        // key 7 lands at (2498, 457, 824) — and no key can be chosen to land on
-        // a wanted index without grinding for one. So the span is reached
-        // through CONSTRUCTED DIGESTS, which is the testability seam
-        // `name_from_digest` is public for.
+        // a key reaches whatever index that key's own bytes happen to select,
+        // and no key can be chosen to land on a wanted index without grinding
+        // for one — a public key is a curve point, so its bytes are not free to
+        // pick. So the span is reached through CONSTRUCTED 32-BYTE VALUES, which
+        // is the testability seam `name_from_key_bytes` is public for.
         //
         // This replaces a pin on the redraw path. There is no redraw to pin:
         // every draw is now one unconditional reduction, so the only thing a
@@ -503,18 +616,18 @@ mod tests {
         // reserve pin, clustered at index 7 of all three lists, did not give.
         //
         // Both names below are WRITTEN DOWN, produced by `examples/pin_name.rs`
-        // reading the text files, not read back from `name_from_digest`.
+        // reading the text files, not read back from `name_from_key_bytes`.
         //
-        // Index 0 of each list. A digest of six zero bytes draws (0, 0, 0)
+        // Index 0 of each list. A window of six zero bytes draws (0, 0, 0)
         // because `0 % n == 0` for every n, so this fixture needs no arithmetic
         // to justify the indices it claims.
-        let low = name_from_digest(&digest_drawing(0, 0, 0));
+        let low = name_from_key_bytes(&key_bytes_drawing(0, 0, 0));
         assert_eq!(low.render(), PINNED_NAME_AT_LOW_INDICES);
 
         // The last index of each list: 8,191 and 1,023. Reached by drawing the
         // 16-bit value equal to the index itself, which is below every list's
         // length and so survives the reduction unchanged.
-        let high = name_from_digest(&digest_drawing(8_191, 1_023, 1_023));
+        let high = name_from_key_bytes(&key_bytes_drawing(8_191, 1_023, 1_023));
         assert_eq!(high.render(), PINNED_NAME_AT_HIGH_INDICES);
 
         // The two must actually differ in every slot, or "spanning" is one name
@@ -590,8 +703,11 @@ mod tests {
         // with itself. The doc comment above carries the three commands.
         //
         // If this fails, do NOT update the expected values to match. A wordlist
-        // change is a scheme change: it needs a new version in `NAME_PREFIX`,
-        // not a new constant here.
+        // change is a scheme change, and there is no longer a version to bump:
+        // the name reads raw key bytes, so there is no preimage a scheme version
+        // could sit in and no way to tell two schemes' names apart. Every
+        // identity renames at once. That is a migration to decide on, not a
+        // constant to edit here.
         for (list, which, expected) in [
             (ADJECTIVES, "adjectives", PINNED_ADJECTIVES_SHA256),
             (NOUNS, "nouns", PINNED_NOUNS_SHA256),
@@ -642,89 +758,232 @@ mod tests {
         );
     }
 
-    // ─── The digests are different functions ───────────────────────────────
+    // ─── The byte allocation: this crate's half ────────────────────────────
+    //
+    // **This replaces a domain-separation test, and the replacement is not a
+    // like-for-like.** The deleted test asserted that the name's digest was not
+    // the address, not a bare hash of the key, and not the key under any other
+    // capability's separator — the mechanism that made the name independent of
+    // the mark while the two read different digests. There is no digest now, so
+    // there is nothing left for it to assert: the name reads the key's own
+    // bytes, and so does every other channel.
+    //
+    // What replaces it is the property that now carries the same weight. The
+    // three channels share one 32-byte space, so byte-disjointness is the only
+    // thing making name-grinding and mark-grinding costs multiply rather than
+    // add — and a byte the abbreviation DISPLAYS is worse than merely shared,
+    // because an attacker reads their progress off the screen while grinding it.
+    //
+    // **Only one of the three channels is in this crate.** The mark and the
+    // abbreviation are QML, so the real pairwise check is
+    // `dialectica-ui/tests/tst_identicon.qml`, which measures all three by
+    // probing the components. What is checkable here is the name's side: that
+    // its measured window is the range the spec allocates, and that the range
+    // overlaps neither of the other two allocations.
+    //
+    // The other two ranges are therefore WRITTEN DOWN below, as the spec's
+    // figures. That is a restatement of the SPEC, not of another implementation
+    // — which is the distinction that matters, and the reason this is not the
+    // "computed version that cannot fail" that was deleted from the QML gate.
+    // Were these read out of `Identicon.qml` somehow, a change there would drag
+    // this along with it and the check would be vacuous.
+
+    /// The key bytes the mark reads, per the `generated-names` spec.
+    const SPEC_MARK_BYTES: std::ops::Range<usize> = 4..12;
+    /// The key bytes the abbreviation displays, per the spec: three groups.
+    const SPEC_ABBREVIATION_BYTES: [std::ops::Range<usize>; 3] = [0..4, 14..18, 29..32];
+
+    /// Which key byte indices actually move the name, MEASURED.
+    ///
+    /// Varying one byte at a time and watching the output, rather than reading
+    /// `name_key_bytes()` — which would make every test below a restatement of the
+    /// constant they exist to check. Several probe values per byte, because one
+    /// flip can coincide: a reduction can map two different bytes to the same
+    /// index, and a single-value probe would then report the byte as unread.
+    fn measured_name_bytes() -> Vec<usize> {
+        // Spread across the range so no modulus can collide on all of them.
+        const PROBES: [u8; 7] = [0xff, 0x01, 0x02, 0x05, 0x07, 0x3b, 0x91];
+
+        let base = [0u8; 32];
+        let reference = name_from_key_bytes(&base);
+        let mut read = Vec::new();
+        for b in 0..32 {
+            for probe in PROBES {
+                let mut varied = base;
+                varied[b] = probe;
+                if name_from_key_bytes(&varied) != reference {
+                    read.push(b);
+                    break;
+                }
+            }
+        }
+        read
+    }
 
     #[test]
-    fn the_name_digest_is_neither_the_address_nor_a_bare_hash() {
-        // The claim the whole channel-disjointness argument rests on: the name
-        // and the mark read DIFFERENT DIGESTS, so there is no shared space in
-        // which they could overlap and no allocation of address bytes to the
-        // name is required or possible.
-        let key = a_key(5).public_key();
-        assert_ne!(
-            name_digest(&key),
-            *key.address().as_bytes(),
-            "the name digest must not be the address"
+    fn the_name_reads_exactly_the_bytes_the_spec_allocates_to_it() {
+        // The measurement pinned against the spec's figure, which is also what
+        // makes `measured_name_bytes` trustworthy for the disjointness test
+        // below: a probe that had silently stopped detecting bytes would report
+        // an empty set, and an empty set is disjoint from everything.
+        assert_eq!(
+            measured_name_bytes(),
+            vec![18, 19, 20, 21, 22, 23],
+            "the name's measured window is not the 18..23 the spec allocates"
+        );
+    }
+
+    #[test]
+    fn the_names_bytes_overlap_neither_of_the_other_two_channels() {
+        // Pairwise, and against the spec's allocations for the channels this
+        // crate cannot see. Stated pairwise rather than as a union count
+        // because a union count passes when a set measures empty — the
+        // two-explanations-one-answer shape this repo keeps finding.
+        let read = measured_name_bytes();
+        assert!(
+            !read.is_empty(),
+            "the name reads no byte at all, so 'disjoint' would be satisfied \
+             by a measurement that found nothing"
         );
 
-        // And not an undomain-separated hash of the key either, or the prefix
-        // would be doing nothing.
-        let bare: [u8; 32] = {
-            let mut h = Sha256::new();
-            h.update(key.to_bytes());
-            h.finalize().into()
-        };
-        assert_ne!(name_digest(&key), bare);
-
-        // **The two assertions above pass without domain separation, and that
-        // is why this third one exists.** Measured: setting `NAME_PREFIX` to the
-        // author-address separator — a total loss of separation — left both of
-        // them passing, because the address hashes `PREFIX || 0x01 || key` while
-        // the name hashes `PREFIX || key`. It is the record-count byte that
-        // separates those two digests, not the prefix, so the test named for
-        // domain separation was blind to domain separation being removed.
-        //
-        // This asserts the separation directly: hashing the key under ANOTHER
-        // capability's separator, in this module's own `PREFIX || key` shape,
-        // must not reach the name digest. The separators are private consts in
-        // other modules, so each is WRITTEN DOWN here rather than imported —
-        // which is the right shape anyway, since importing them would let a
-        // future edit move a separator and this test together.
-        //
-        // If one of these fails, a separator has been duplicated. Do not update
-        // the literal to match; two capabilities hashing the same preimage means
-        // grinding for one grinds for the other, and the costs add instead of
-        // multiplying.
-        const OTHER_SEPARATORS: [(&str, &[u8; 32]); 5] = [
-            ("author address", b"/dialectica/1/Address/Author\0\0\0\0"),
-            ("stoa address", b"/dialectica/1/Address/Stoa\0\0\0\0\0\0"),
-            ("op signing", b"/dialectica/1/Signed/Op\0\0\0\0\0\0\0\0\0"),
-            ("op id", b"/dialectica/1/Id/Op\0\0\0\0\0\0\0\0\0\0\0\0\0"),
-            ("slate path", b"/dialectica/1/Slate/Path\0\0\0\0\0\0\0\0"),
-        ];
-        for (which, separator) in OTHER_SEPARATORS {
-            assert_ne!(
-                separator, NAME_PREFIX,
-                "the name's separator is the {which} separator, so the two \
-                 capabilities are one function of the key"
+        for byte in &read {
+            assert!(
+                !SPEC_MARK_BYTES.contains(byte),
+                "key byte {byte} is read by both the name and the mark, so \
+                 grinding for a lookalike name partly grinds for a lookalike \
+                 mark and the costs add instead of multiplying"
             );
-            let under_other: [u8; 32] = {
-                let mut h = Sha256::new();
-                h.update(separator);
-                h.update(key.to_bytes());
-                h.finalize().into()
-            };
-            assert_ne!(
-                name_digest(&key),
-                under_other,
-                "the name digest equals the key hashed under the {which} \
-                 separator, so name derivation is not domain-separated from it"
+            for group in SPEC_ABBREVIATION_BYTES {
+                assert!(
+                    !group.contains(byte),
+                    "key byte {byte} is read by the name and DISPLAYED by the \
+                     abbreviation — an attacker grinding a lookalike name reads \
+                     their progress off the rendered key"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_name_reads_no_unallocated_byte() {
+        // Bytes 12..13 and 24..28 are read by NO channel. They are unallocated
+        // rather than reserved: nothing depends on their value, and this asserts
+        // only that the name is not one of the things reading them. Extending
+        // any channel onto them is a spec change.
+        let read = measured_name_bytes();
+        for byte in [12usize, 13, 24, 25, 26, 27, 28] {
+            assert!(
+                !read.contains(&byte),
+                "key byte {byte} is unallocated but the name reads it"
             );
         }
     }
 
     #[test]
-    fn a_name_cannot_be_derived_from_an_address() {
-        // A caller holding only an address cannot arrive at the right name, which
-        // is precisely why core must return it. Feed the address bytes in where
-        // the DIGEST goes and the name differs from the key's real name.
+    fn the_spec_allocation_this_crate_restates_is_internally_consistent() {
+        // The two ranges above are written down, so nothing stops them being
+        // written down wrong — and a wrong MARK range would make the
+        // disjointness test pass while the real property failed. This checks the
+        // restatement against the one arithmetic fact the spec's table carries:
+        // the five allocations are pairwise disjoint and total 25 of 32 bytes.
+        //
+        // It cannot check that the figures match `Identicon.qml` — nothing in
+        // this crate can, which is why the QML gate exists and why this test is
+        // named for what it actually covers.
+        let mut allocated: Vec<usize> = SPEC_MARK_BYTES.collect();
+        for group in SPEC_ABBREVIATION_BYTES {
+            allocated.extend(group);
+        }
+        allocated.extend(name_key_bytes());
+
+        let before = allocated.len();
+        allocated.sort_unstable();
+        allocated.dedup();
+        assert_eq!(
+            before,
+            allocated.len(),
+            "the restated allocation overlaps itself, so the disjointness \
+             assertions above are checking against a contradictory table"
+        );
+        assert_eq!(
+            allocated.len(),
+            25,
+            "the spec's allocation totals 25 of 32 bytes; this restatement \
+             does not"
+        );
+        assert!(
+            allocated.iter().all(|b| *b < 32),
+            "an allocation names a byte outside a 32-byte key"
+        );
+    }
+
+    #[test]
+    fn no_other_32_byte_value_travelling_beside_a_key_reaches_its_name() {
+        // A caller holding something other than the key cannot arrive at the
+        // right name, which is why core must return the key.
+        //
+        // **This was written against the AUTHOR ADDRESS and is deliberately not
+        // written against it now.** Issue #80 deletes that value, so a test
+        // feeding `key.address()` here would go on passing while being about
+        // nothing that exists — green, and no longer evidence of anything. The
+        // property it was pinning survives the value that prompted it: a name is
+        // a function of THE KEY and of no other 32-byte value that travels
+        // beside it.
+        //
+        // So the fixtures are values that genuinely do travel beside a key and
+        // are genuinely 32 bytes: a Stoa address (which #80 keeps), the key's
+        // own bytes with the name's window zeroed, and the key's bytes reversed.
+        // Each is a plausible confusion for a caller holding the wrong thing.
         let key = a_key(11).public_key();
         let real = display_name(&key);
-        let from_address = name_from_digest(key.address().as_bytes());
-        assert_ne!(
-            real, from_address,
-            "an address must not reach the same name as its key"
-        );
+        let key_bytes = key.to_bytes();
+
+        let stoa = a_stoa_address_beside_this_key(&key);
+
+        let mut window_zeroed = key_bytes;
+        for i in name_key_bytes() {
+            window_zeroed[i] = 0;
+        }
+
+        let mut reversed = key_bytes;
+        reversed.reverse();
+
+        for (which, other) in [
+            ("a stoa address", stoa),
+            ("the key with the name's window zeroed", window_zeroed),
+            ("the key's bytes reversed", reversed),
+        ] {
+            // The fixture must actually differ from the key inside the window,
+            // or "a different value reaches a different name" is being asked of
+            // a value that is the key as far as the derivation can tell. This is
+            // what stops the test passing for the wrong reason.
+            let differs_in_window = name_key_bytes().any(|i| other[i] != key_bytes[i]);
+            assert!(
+                differs_in_window,
+                "{which} agrees with the key on every byte the name reads, so \
+                 it could not possibly reach a different name and this case \
+                 proves nothing"
+            );
+            assert_ne!(
+                real,
+                name_from_key_bytes(&other),
+                "{which} reached the same name as the key it travels beside"
+            );
+        }
+    }
+
+    /// A Stoa address to stand beside a key, as a bare 32-byte value.
+    ///
+    /// **Stoa addresses are untouched by issue #80** — it deletes the *author*
+    /// address only — so this is a value that really does travel next to a key
+    /// and really could be handed to a derivation by a confused caller. Derived
+    /// from the key's own bytes so the case is not trivially satisfied by two
+    /// unrelated random values.
+    fn a_stoa_address_beside_this_key(key: &PublicKey) -> [u8; 32] {
+        let mut h = Sha256::new();
+        h.update(b"/dialectica/1/Address/Stoa\0\0\0\0\0\0");
+        h.update(key.to_bytes());
+        h.finalize().into()
     }
 
     // ─── The shape ─────────────────────────────────────────────────────────
@@ -783,23 +1042,29 @@ mod tests {
     // ─── The byte budget ───────────────────────────────────────────────────
 
     #[test]
-    fn the_derivation_reads_no_byte_past_its_bound() {
-        // Two digests agreeing inside the bound and differing on EVERY byte
-        // beyond it. A derivation that read on would produce different names.
+    fn the_derivation_reads_no_byte_outside_its_window() {
+        // Two 32-byte values agreeing INSIDE the window and differing on EVERY
+        // byte outside it — on both sides, which the old digest-based version
+        // could not do because its window started at 0 and had no "before".
+        // A derivation that read anywhere else would produce different names.
         let mut a = [0u8; 32];
         let mut b = [0u8; 32];
-        for i in 0..NAME_DIGEST_BOUND {
-            a[i] = (i as u8) * 7 + 1;
-            b[i] = (i as u8) * 7 + 1;
+        for i in 0..32 {
+            if name_key_bytes().contains(&i) {
+                a[i] = (i as u8) * 7 + 1;
+                b[i] = (i as u8) * 7 + 1;
+            } else {
+                a[i] = 0x00;
+                b[i] = 0xff;
+            }
         }
-        for i in NAME_DIGEST_BOUND..32 {
-            a[i] = 0x00;
-            b[i] = 0xff;
-        }
+        // The fixture must actually differ somewhere, or this passes on two
+        // identical values.
+        assert_ne!(a, b, "the fixture must differ outside the window");
         assert_eq!(
-            name_from_digest(&a),
-            name_from_digest(&b),
-            "bytes past the bound must not participate"
+            name_from_key_bytes(&a),
+            name_from_key_bytes(&b),
+            "bytes outside the name's window must not participate"
         );
     }
 
@@ -809,13 +1074,17 @@ mod tests {
         // scheme feeding one byte to two slots fails this, and would have made
         // the three words three views of the same bits.
         let base = [0u8; 32];
-        let reference = name_from_digest(&base);
+        let reference = name_from_key_bytes(&base);
 
-        for (slot, bytes) in [("adjective", 0usize), ("noun", 2), ("place", 4)] {
+        // Offsets into the KEY, so each pair is the slot's real position rather
+        // than an offset within the window — a fixture built at 0, 2, 4 would
+        // vary bytes the derivation does not read and every assertion below
+        // would be about three unchanged slots.
+        for (slot, bytes) in [("adjective", 18usize), ("noun", 20), ("place", 22)] {
             let mut varied = base;
             varied[bytes] = 0x5a;
             varied[bytes + 1] = 0xa5;
-            let moved = name_from_digest(&varied);
+            let moved = name_from_key_bytes(&varied);
 
             match slot {
                 "adjective" => {
@@ -847,7 +1116,7 @@ mod tests {
         // times. A list whose size did not divide 65,536 would fail the second
         // half while passing the first.
         //
-        // **Driven through `name_from_digest`, not through the test's own
+        // **Driven through `name_from_key_bytes`, not through the test's own
         // modulo.** An earlier version computed `draw as u16 % len as u16` in
         // this body and never called the derivation at all, so it tested the
         // arithmetic of `%` — a property of Rust — rather than the derivation's
@@ -872,12 +1141,15 @@ mod tests {
 
             for draw in 0u32..=u16::MAX as u32 {
                 // Every other slot is held at zero, so only this slot's two
-                // bytes vary and the word read back is this slot's draw.
-                let mut digest = [0u8; 32];
-                digest[slot * 2] = (draw >> 8) as u8;
-                digest[slot * 2 + 1] = draw as u8;
+                // bytes vary and the word read back is this slot's draw. Written
+                // at 18 + slot*2, the slot's real position in the key: at
+                // slot*2 it would vary bytes the derivation never reads and
+                // every count would land on one word.
+                let mut key_bytes = [0u8; 32];
+                key_bytes[18 + slot * 2] = (draw >> 8) as u8;
+                key_bytes[18 + slot * 2 + 1] = draw as u8;
 
-                let name = name_from_digest(&digest);
+                let name = name_from_key_bytes(&key_bytes);
                 let word = name.words()[slot];
                 *counts
                     .get_mut(word)
@@ -907,22 +1179,30 @@ mod tests {
 
     // ─── Nothing filters a drawn name ──────────────────────────────────────
 
-    /// A digest whose three draws select exactly `(adjective, noun, place)`.
+    /// A 32-byte value whose three draws select exactly
+    /// `(adjective, noun, place)`.
     ///
-    /// Constructing the digest is the whole point and is the reason
-    /// [`name_from_digest`] is public: reaching a chosen slot combination
+    /// Constructing it is the whole point and is the reason
+    /// [`name_from_key_bytes`] is public: reaching a chosen slot combination
     /// through a chosen KEY means grinding for one, so a requirement about
-    /// *which* words come back is checkable only if a digest can be supplied
+    /// *which* words come back is checkable only if the bytes can be supplied
     /// directly.
     ///
+    /// **Written at the name's window, `18..23`, not at offset 0.** Placing the
+    /// draws at the start would build a value the derivation does not read, and
+    /// every test using this helper would then be asserting about three zero
+    /// draws — passing, and about nothing. The offsets are the spec's figures,
+    /// written out rather than taken from `name_key_bytes()`, so a moved window
+    /// fails these tests rather than dragging the fixtures along with it.
+    ///
     /// Each index is written big-endian into its slot's two bytes. An index
-    /// below its list's length survives the `%` unchanged, so the digest this
+    /// below its list's length survives the `%` unchanged, so the value this
     /// builds selects the indices it names.
-    fn digest_drawing(adjective: u16, noun: u16, place: u16) -> [u8; 32] {
+    fn key_bytes_drawing(adjective: u16, noun: u16, place: u16) -> [u8; 32] {
         let mut d = [0u8; 32];
         for (i, v) in [adjective, noun, place].iter().enumerate() {
-            d[i * 2] = (v >> 8) as u8;
-            d[i * 2 + 1] = *v as u8;
+            d[18 + i * 2] = (v >> 8) as u8;
+            d[18 + i * 2 + 1] = *v as u8;
         }
         d
     }
@@ -968,7 +1248,7 @@ mod tests {
         ];
 
         for (a, n, p) in cases {
-            let name = name_from_digest(&digest_drawing(a, n, p));
+            let name = name_from_key_bytes(&key_bytes_drawing(a, n, p));
             assert_eq!(
                 name.adjective, ADJECTIVES[a as usize],
                 "the adjective slot did not return the word its draw selected"
@@ -1004,11 +1284,11 @@ mod tests {
 
         // The indices are asserted as literals as well as looked up, so this
         // fails if a list is reordered rather than silently following the move.
-        // They were produced by `examples/pin_name.rs` — digest
-        // `141003f701af…` draws (5136, 1015, 431) — not read back from here.
+        // They are positions in the shipped lists, produced by reading the text
+        // files, not read back from here.
         assert_eq!((pensive, zenon, kition), (5_136, 1_015, 431));
 
-        let name = name_from_digest(&digest_drawing(pensive, zenon, kition));
+        let name = name_from_key_bytes(&key_bytes_drawing(pensive, zenon, kition));
         assert_eq!(
             name.render(),
             "pensive zenon of kition",
@@ -1018,32 +1298,36 @@ mod tests {
 
     #[test]
     fn a_name_is_a_function_of_six_bytes_and_nothing_else() {
-        // Two digests agreeing on bytes 0..6 and differing on every byte after.
-        // Equal names, WHATEVER the words drawn are — so no property of the
+        // Two values agreeing on the window and differing on every byte outside
+        // it. Equal names, WHATEVER the words drawn are — so no property of the
         // drawn words feeds back into the derivation, which is what forbids a
         // filter reading its own output.
         //
-        // Distinct from `the_derivation_reads_no_byte_past_its_bound` in what it
-        // rules out: that one is about the BOUND, this one about the absence of
-        // FEEDBACK. A scheme that read only six bytes but redrew on a refused
-        // pair would pass that test and fail this one, because the redraw would
-        // have to read further to redraw from anywhere.
+        // Distinct from `the_derivation_reads_no_byte_outside_its_window` in
+        // what it rules out: that one is about the WINDOW, this one about the
+        // absence of FEEDBACK. A scheme that read only six bytes but redrew on a
+        // refused pair would pass that test and fail this one, because the
+        // redraw would have to read further to redraw from anywhere. It is swept
+        // over chosen word combinations for that reason — a filter applies to
+        // some draws and not others, so the combination has to be steered.
         for (a, n, p) in [
             (0u16, 0u16, 0u16),
             (5_136, 1_015, 431),
             (8_191, 1_023, 1_023),
         ] {
-            let mut x = digest_drawing(a, n, p);
-            let mut y = digest_drawing(a, n, p);
-            for i in NAME_DIGEST_BOUND..32 {
-                x[i] = 0x00;
-                y[i] = 0xff;
+            let mut x = key_bytes_drawing(a, n, p);
+            let mut y = key_bytes_drawing(a, n, p);
+            for i in 0..32 {
+                if !name_key_bytes().contains(&i) {
+                    x[i] = 0x00;
+                    y[i] = 0xff;
+                }
             }
-            assert_ne!(x, y, "the fixture must actually differ past the bound");
+            assert_ne!(x, y, "the fixture must actually differ outside the window");
             assert_eq!(
-                name_from_digest(&x),
-                name_from_digest(&y),
-                "a name must be a function of bytes 0..6 alone"
+                name_from_key_bytes(&x),
+                name_from_key_bytes(&y),
+                "a name must be a function of key bytes 18..23 alone"
             );
         }
     }
@@ -1413,16 +1697,31 @@ mod tests {
 
         // The fixture must actually be two DIFFERENT identities, or "both are
         // served unchanged" is satisfied by one key compared with itself.
+        // **The PUBLIC KEY is what tells a colliding pair apart**, which is the
+        // sentence issue #80 changes. This asserted distinct ADDRESSES and gave
+        // that as the reason; the author address is being deleted, so a claim
+        // resting on it would be a claim about a value that is on its way out.
+        // The key is the identity, and its distinctness is what makes the two
+        // rows two people.
         assert_ne!(
             a.public_key().to_bytes(),
             b.public_key().to_bytes(),
-            "the fixture must be two distinct keys"
+            "the fixture must be two distinct keys — the key is what tells a \
+             colliding pair apart, so identical keys would make this one \
+             identity compared with itself"
         );
-        assert_ne!(
-            a.public_key().address(),
-            b.public_key().address(),
-            "two distinct keys must have distinct addresses — the addresses are \
-             what tells a colliding pair apart"
+
+        // And they must differ OUTSIDE the name's window too. Inside it they
+        // are equal by construction (that is the collision); if that were all
+        // that differed anywhere, "two distinct identities" would be a
+        // distinction no channel could render and the fixture would be weaker
+        // than it looks.
+        let ka = a.public_key().to_bytes();
+        let kb = b.public_key().to_bytes();
+        assert!(
+            (0..32).any(|i| !name_key_bytes().contains(&i) && ka[i] != kb[i]),
+            "the colliding pair differs only inside the name's window, so no \
+             other channel could tell them apart either"
         );
 
         let name_a = display_name(&a.public_key());
@@ -1447,64 +1746,82 @@ mod tests {
         }
     }
 
-    // ─── The scheme is versioned and frozen ────────────────────────────────
+    // ─── The scheme is frozen, with no version to bump ─────────────────────
 
     #[test]
-    fn a_different_scheme_version_gives_a_different_name_for_one_key() {
-        // "Names under two scheme versions SHALL be distinguishable, so that one
-        // version's names cannot be silently reproduced by the other." This is
-        // what a version bump BUYS, and without it the bump is bookkeeping: two
-        // schemes that mint the same names for the same keys have not been
-        // separated, they have only been relabelled.
+    fn a_names_whole_input_is_six_key_bytes_with_no_version_alongside_them() {
+        // **This inverts the test it replaces, and the inversion is the
+        // change.** The deleted version built a v2 separator from the shipped v1
+        // one and showed that the two schemes minted different names for one key
+        // — what a version bump BUYS. There is no separator now, so there is no
+        // version to vary and nothing to distinguish two schemes by. The spec
+        // records this as a cost taken deliberately rather than a property lost
+        // by accident.
         //
-        // **No API is widened to reach this.** An earlier `tasks.md` claimed the
-        // scenario needed `NAME_PREFIX` exposed; it does not. `mod tests` is
-        // inside this module and `use super::*` already brings the private const
-        // in, so the test builds a v2 separator from the shipped v1 one.
+        // **Asserting an absence is the hard part**, and the honest shape is a
+        // positive claim that would fail if a version reappeared: a name is a
+        // function of six key bytes and NOTHING ELSE, so any two 32-byte values
+        // agreeing on the window reach the same name whatever else differs. A
+        // scheme that mixed in a version — a constant, a build stamp, anything —
+        // would have to read it from somewhere, and if it read it from the key
+        // this fails, while if it read it from ambient state
+        // `a_name_is_unchanged_by_every_surrounding_state` fails.
         //
-        // The v2 digest is hashed HERE rather than by calling `name_digest`,
-        // which is what makes this a comparison of two independent routes rather
-        // than the derivation compared with itself.
-        assert_eq!(
-            NAME_PREFIX[12], b'1',
-            "the scheme version lives at byte 12 of the separator; if it has \
-             moved, this test is bumping the wrong byte and would pass while \
-             comparing v1 with v1"
-        );
-        let mut v2_prefix = *NAME_PREFIX;
-        v2_prefix[12] = b'2';
-        assert_ne!(
-            &v2_prefix, NAME_PREFIX,
-            "the two separators must actually differ, or every comparison below \
-             is one scheme compared with itself"
-        );
+        // What CANNOT be asserted here is the negative in general: a version
+        // compiled in as a literal is invisible to any runtime check, because it
+        // is indistinguishable from the wordlists themselves. That is exactly
+        // why the spec calls this a one-way door rather than a property under
+        // test, and the wordlist pins are what actually hold the scheme still.
+        let window: [u8; 6] = [0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc];
 
-        // Many keys rather than one: a single pair could differ by coincidence
-        // of one draw, where "the two schemes are separated" is a claim about
-        // every key.
-        let mut differed = 0;
-        for seed in 1u8..40 {
-            let key = a_key(seed).public_key();
-
-            let v2_digest: [u8; 32] = {
-                let mut h = Sha256::new();
-                h.update(v2_prefix);
-                h.update(key.to_bytes());
-                h.finalize().into()
-            };
-            let under_v2 = name_from_digest(&v2_digest);
-            let under_v1 = display_name(&key);
-
-            assert_ne!(
-                under_v1.render(),
-                under_v2.render(),
-                "seed {seed} renders identically under both scheme versions, so \
-                 a v1 name is silently reproducible by v2"
-            );
-            differed += 1;
+        let mut first = [0x00u8; 32];
+        let mut second = [0xffu8; 32];
+        for (i, b) in name_key_bytes().zip(window) {
+            first[i] = b;
+            second[i] = b;
         }
-        // The loop must have run, or "every key differed" is true of no key.
-        assert_eq!(differed, 39, "the sweep did not exercise every seed");
+
+        // The fixture must differ outside the window, or two identical values
+        // are being compared and the test cannot fail.
+        assert_ne!(first, second);
+        assert_eq!(
+            name_from_key_bytes(&first),
+            name_from_key_bytes(&second),
+            "two values agreeing only on the name's window reached different \
+             names, so something outside those six bytes feeds the derivation"
+        );
+    }
+
+    #[test]
+    fn a_name_carries_no_marker_of_which_scheme_produced_it() {
+        // The other half of the spec's scenario: with no version input, two
+        // schemes' names are also reported IDENTICALLY — a name carries nothing
+        // saying which wordlists produced it. So the rendered form is three
+        // drawn words and a connector, with no version field, no suffix and no
+        // punctuation that could hold one.
+        //
+        // This is a claim about the OUTPUT rather than about the input, and the
+        // two are different failures: a scheme could take a version and hide it,
+        // or take none and stamp one on. Swept over many keys because a marker
+        // could be conditional.
+        for seed in 1u8..40 {
+            let name = display_name(&a_key(seed).public_key());
+            let rendered = name.render();
+            assert!(
+                rendered.chars().all(|c| c.is_ascii_lowercase() || c == ' '),
+                "seed {seed}: {rendered} carries a character that could hold a \
+                 scheme marker"
+            );
+            assert_eq!(
+                rendered,
+                format!(
+                    "{} {} {CONNECTOR} {}",
+                    name.adjective, name.noun, name.place
+                ),
+                "seed {seed}: the rendered name carries something beyond the \
+                 three drawn words and the connector"
+            );
+        }
     }
 
     #[test]
