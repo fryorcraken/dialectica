@@ -9,7 +9,7 @@ Baseline, restored tree: **940 + 30 tests, all green.**
 
 ## Findings
 
-- [ ] **`tester`** — `wire.rs:2845` — the `words` field is unpinned against the
+- [x] **`tester`** — `wire.rs:2845` — the `words` field is unpinned against the
       one thing its own contract says it must not be. The trait doc at
       `dialectica/rust-lib/src/lib.rs` says `words` "is not derivable from `name`
       by splitting on spaces — a place may be a two-word toponym." **No test can
@@ -29,7 +29,31 @@ Baseline, restored tree: **940 + 30 tests, all green.**
       `words.len() == 3`. Severity: high — this is the field the view renders
       when it cannot fit the connector, and the bug ships a four-element array.
 
-- [ ] **`tester`** — `wire.rs:12760`,
+      **Fixed** in `ff041e8`, by the route you prescribe — searched the seed
+      space rather than assuming a fixture.
+
+      **Seed 166** is the one: `feed_key(166)` names
+      `intaxable eidos of thermai himeraiai`, so `words` is
+      `["intaxable", "eidos", "thermai himeraiai"]` — three elements, the last
+      containing a space — while the render is five space-separated tokens.
+      `words_is_the_three_drawn_words_and_not_the_rendered_name_split_on_spaces`
+      asserts `words.len() == 3`, `words[2] == "thermai himeraiai"`, and — the
+      part that keeps the fixture honest — that the render still has five
+      tokens, so the test says so rather than going quietly vacuous if the
+      fixture ever stops being a two-word case.
+
+      Re-ran your mutation verbatim. With
+      `name.render().split(' ').filter(|w| *w != "of")` in place, the new test
+      fails with
+      `words: ["intaxable","eidos","thermai","himeraiai"], left: 4, right: 3`
+      and 944 of the other 945 pass — the four-element array you predicted,
+      now visible. Reverted.
+
+      Your probe result (`seeds_with_two_word_place=0` over `1u8..40` plus the
+      pinned key) explains why every existing hardcoded `words` expectation
+      agreed with a split: 10 entries in 1,024, and no fixture drew one.
+
+- [x] **`tester`** — `wire.rs:12760`,
       `a_public_key_alone_is_enough_with_no_address_supplied` second half — the
       address assertion cannot fail, by either branch.
       **Scenario:** the test feeds `key.address().to_hex()` where a key goes and
@@ -52,7 +76,33 @@ Baseline, restored tree: **940 + 30 tests, all green.**
       already covers "the entry point does not name non-keys". Severity: medium
       — the test reads as covering the wrong-field-read case and covers nothing.
 
-- [ ] **`spec-writer`** — delta, *The entry point refuses anything that is not a
+      **Fixed** in `ff041e8`. Half one kept as you say; half two made real
+      rather than dropped.
+
+      Your "other branch is no better" point is the one that decided the fix.
+      Asserting the *refusal* would have pinned this fixture's accident — that
+      `PINNED_KEY_HEX`'s address is not a curve point — rather than the
+      property. So instead the fixture was changed to one where the address
+      **does** parse: seed 3, whose key names `temptatious eremia of donousa`
+      and whose address `88494840…c135e159` names
+      `subjectable syllogismos of rhode iberias`. The assertion is now a
+      comparison of two real names and can fail.
+
+      Both replies are `.expect()`ed, so if the fixture ever stops being an
+      address-that-parses the test fails loudly instead of reverting to
+      `None != Some(_)`.
+
+      Note the correctness reviewer measured 111 of 200 seeded addresses parsing
+      as keys — so the vacuous case was not even the likely one, and "an address
+      usually is not a curve point" is the wrong intuition that made the
+      original look adequate.
+
+      The wrong-field-read case this test *read* as covering is now covered
+      directly and separately, by
+      `the_key_is_read_from_the_public_key_field_and_from_no_other` — see the
+      correctness reviewer's first box.
+
+- [x] **`spec-writer`** — delta, *The entry point refuses anything that is not a
       public key*, scenario **"The entry point admits exactly what the identity
       layer admits"** — the requirement contradicts the behaviour the delta's own
       other scenarios require, and is untestable as written.
@@ -74,7 +124,29 @@ Baseline, restored tree: **940 + 30 tests, all green.**
       layer's", and enumerate the request-shape refusals (absent, wrong-typed,
       non-hex, over-bound) as their own scenario. Severity: medium.
 
-- [ ] **`spec-writer`** — delta, both ADDED requirements — **the reply shape is
+      **Fixed** in `ff041e8` by the `dev-writer`, since the `spec-writer` is not
+      returning to this piece and an unanswered box blocks the merge. Both parts
+      as prescribed.
+
+      The scenario is now scoped — *"WHEN key material **that reaches the
+      identity layer** is supplied…"* — so "exactly the cases it refuses" is
+      about material the identity layer actually rendered a verdict on, and has
+      a truth value.
+
+      The request-shape refusals are a scenario of their own: *"A request the
+      entry point cannot read as key material is refused before the identity
+      layer is reached"*, covering absent, wrong-typed, non-hex and over-bound,
+      and stating that the refusal is the entry point's own **because the
+      identity layer is given nothing to judge**. That last clause is the part
+      your finding made me write — it is what makes the two scenarios
+      non-overlapping rather than merely differently worded.
+
+      Your observation that the test at `wire.rs:12908` "is honest about its own
+      corpus; the scenario is not honest about its own scope" is exactly right,
+      and the test needed no change — it was measuring the narrower claim all
+      along. The spec now says the claim the test was already checking.
+
+- [x] **`spec-writer`** — delta, both ADDED requirements — **the reply shape is
       entirely unspecified, and the tests pin it anyway.** No requirement or
       scenario in the delta or the live capability mentions a `words` field, the
       field name `publicKey`, or hex as the key's encoding. The tests hardcode
@@ -94,7 +166,35 @@ Baseline, restored tree: **940 + 30 tests, all green.**
       medium — `words` is a whole field of the deliverable API with no
       requirement behind it.
 
-- [ ] **`spec-writer`** — delta, *"Failing to supply key material at all is a
+      **Fixed** in `ff041e8`, taking your second option (mark them) and adding
+      the design record the convention pairs with it.
+
+      Your grep was right — the piece added no `NO SPEC:` marker at all. There
+      are now two, both in the tests that pin the literals:
+      `a_name_is_obtainable_for_a_supplied_public_key` carries one naming
+      `name`, `words`, `publicKey` and hex as this change's choices, and
+      `absent_key_material_is_refused_distinguishably_from_bad_key_material`
+      carries one for the `missing field: publicKey` literal. `design.md` gains
+      **§5a**, which argues each choice and says plainly that a second
+      implementation reading the delta alone could ship `{"key":"<base64>"}`
+      with no `words` and satisfy every scenario — your scenario, kept because
+      it is the clearest statement of what is unspecified.
+
+      Did **not** take the first option (specify the reply shape in the delta).
+      Field spellings on the module surface are a decision about the deliverable
+      API, and the design reviewer's parallel box establishes the convention
+      here is marker-plus-design-entry rather than spec text — `wire.rs:1797` is
+      the precedent, and I read it before following it. If the owner later
+      decides the reply shape belongs in the capability, that is a spec change
+      with a `spec-writer` on it, and the marker is what will surface it.
+
+      One thing your box implies that I want to state rather than leave: the
+      live capability *does* require the three words be reachable separately
+      from the rendered name — that is what makes "the connector may be elided"
+      usable — so `words` is not a field with no requirement behind it. What is
+      unspecified is its **name**, not its existence. §5a says so.
+
+- [x] **`spec-writer`** — delta, *"Failing to supply key material at all is a
       distinct refusal from supplying bad key material"* — the requirement
       enumerates **two** refusal classes; the implementation has **four**, and
       the tests pin a third one the spec never names.
@@ -106,7 +206,34 @@ Baseline, restored tree: **940 + 30 tests, all green.**
       **Fix:** say whether a wrong-typed field is its own refusal, and if so that
       it too must be distinguishable. Severity: low-medium.
 
-- [ ] **`spec-writer`** — `docs/PLAN.md:2763` on `origin/main` — a stale premise
+      **Fixed** in `ff041e8` by the `dev-writer`, for the reason given on the
+      box above. The answer is **yes, it is its own refusal and it must be
+      distinguishable** — and the spec now says so for all three of the
+      request-shaped classes, not only the wrong-typed one.
+
+      The delta's second requirement gains a paragraph: key material of a
+      non-string type, key material that is not valid hex, and key material
+      longer than a public key's encoding admits are each refused by the entry
+      point itself, are a third class rather than a variety of absent-or-bad,
+      and SHALL each be distinguishable from absent — *"a caller that reads
+      'nothing supplied' when it supplied something malformed looks for the
+      wrong bug"*. It also states that the entry point MAY refuse over-long
+      material without examining it, which is what licenses bounding the length
+      before allocating from it.
+
+      Your "a build collapsing it into `missing field: publicKey` passes every
+      test" is now false, and measured so.
+      `every_request_shaped_refusal_is_distinguishable_from_the_others` pins all
+      five messages to literals and asserts every pair distinct; applying
+      exactly that collapse makes it fail with
+      `left: "missing field: publicKey", right: "publicKey must be a string"`.
+      Reverted after measuring.
+
+      That the implementation had four refusal classes to the spec's two was the
+      thread worth pulling — it is five, and `design.md` §4 said "three" over a
+      list of four. See the design reviewer's third box; both are fixed together.
+
+- [x] **`spec-writer`** — `docs/PLAN.md:2763` on `origin/main` — a stale premise
       the delta now contradicts, in the §9.1 feed description:
       `- the author, as the per-Stoa address (§5.2) — never a name, because there are` / `  no names`.
       **Scenario:** "never a name" is still right; **"because there are no
@@ -121,6 +248,21 @@ Baseline, restored tree: **940 + 30 tests, all green.**
       `generated-names` capability's *The name SHALL NOT travel*. Severity: low,
       but it is the exact shape CLAUDE.md's self-invalidating rule exists to
       catch. Verified against `origin/main`, not the branch copy.
+
+      **Fixed** in `ff041e8`, exactly as prescribed. The bullet keeps "never a
+      name" and the reason is now the prohibition rather than the absence:
+      *"because the `generated-names` capability's The name SHALL NOT travel
+      forbids a reply carrying one"*.
+
+      Added one sentence you did not ask for, and it is the CLAUDE.md point you
+      make: the bullet now records that the old reason was *"true when it was
+      written and is not now"*. A reader who remembers "there are no names"
+      needs to see it withdrawn, not just replaced — otherwise the withdrawn
+      premise survives in the reader rather than in the file.
+
+      Confirmed the line on the branch matches what you read on `origin/main`
+      (2763-2764, unmodified by this piece before now), so the edit is to the
+      same text you reviewed and not to a copy that had already drifted.
 
 ## Mutations run, and what they measured
 

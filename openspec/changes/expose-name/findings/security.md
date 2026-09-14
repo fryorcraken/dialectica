@@ -14,7 +14,7 @@ removed. The branch under review was left untouched.
 
 ---
 
-- [ ] **`tester`** — `dialectica-core/src/wire.rs:2828-2839` — the hex bound's
+- [x] **`tester`** — `dialectica-core/src/wire.rs:2828-2839` — the hex bound's
       **ordering** is unpinned, so the one mutation that reintroduces the DoS
       survives the whole suite
       **Scenario:** swap the `if hex_str.len() > MAX_PUBLIC_KEY_HEX_CHARS`
@@ -51,7 +51,25 @@ removed. The branch under review was left untouched.
       missing is the test that keeps it correct.
       *(Genuine gap, not a style preference.)*
 
-- [ ] **`tester`** — `dialectica-core/src/wire.rs:12857` — the wrong-length
+      **Fixed** in `ff041e8`, as the test you staged and measured:
+      `the_hex_bound_is_checked_before_the_decode_allocates` feeds
+      `"zz".repeat(100_000)` — oversized **and** unparseable — and asserts the
+      reply contains `"over the"` and does **not** contain `"not valid hex"`.
+      Modelled on `an_oversized_request_is_refused_before_it_is_parsed`, which
+      it cites, since you identified that as the shape one layer up.
+
+      Re-measured here rather than taken from your report. Swapping the two
+      blocks: the new test fails with
+      `oversized material must be refused for its size, got publicKey is not
+      valid hex`, and **944 of 945 pass** — your 940/940 with exactly one test
+      now able to see it, and no other test disturbed. Reverted.
+
+      The neighbouring test's comment now says why it cannot see this: it feeds
+      all-valid hex, which decodes under either ordering, so it asserts a
+      message the swap does not change. Leaving that unsaid is how the gap would
+      come back the next time someone reads the two tests as overlapping.
+
+- [x] **`tester`** — `dialectica-core/src/wire.rs:12857` — the wrong-length
       sweep's `64` entry is refused by the allocation bound, not by the identity
       layer, so the comment above it is false for that entry
       **Scenario:** `key_material_of_the_wrong_length_is_refused` sweeps
@@ -72,7 +90,25 @@ removed. The branch under review was left untouched.
       in the shipped code.
       *(Genuine gap in what a test measures, not a style preference.)*
 
-- [ ] **`dev-writer`** — `dialectica-core/src/wire.rs:2831-2834` — the size
+      **Fixed** in `ff041e8`, taking your second option: `64` stays in the sweep
+      and the comment now says which layer refuses what.
+
+      Kept rather than dropped because the sweep's assertion — refused, and not
+      named — is true and worth making at 128 characters regardless of which
+      layer answers; what was wrong was only the comment's account of why. It
+      now says 0, 1 and 31 bytes reach `PublicKey::from_bytes` while 33 and 64
+      bytes (66 and 128 characters) are refused by the allocation bound first,
+      and points at
+      `the_bound_decides_every_over_length_refusal_and_the_identity_layer_never_sees_one`
+      for the layer-by-layer pin.
+
+      Your framing is what made this worth more than a comment tweak: two
+      explanations giving the same answer is this repo's recorded defect family,
+      and the fix for the family is to make one test assert *which* explanation
+      holds — which is what that new test does, for every length either side of
+      the bound.
+
+- [x] **`dev-writer`** — `dialectica-core/src/wire.rs:2831-2834` — the size
       refusal reports a **byte** count while calling them "hex characters"
       **Scenario:** `{"publicKey":"<64 × 'é'>"}` — 64 characters, 128 bytes —
       answers `{"error":"publicKey is 128 hex characters, over the 64 a public
@@ -88,6 +124,20 @@ removed. The branch under review was left untouched.
       "the request's `publicKey` is over the N bytes a public key's hex holds".
       **Severity: low.**
       *(Genuine inaccuracy in contract surface, not a style preference.)*
+
+      **Fixed** in `ff041e8`, taking your second wording. The message is now
+      `publicKey is {N} bytes, over the 64 a public key's hex holds`.
+
+      Your reasoning for why a low-severity wording defect was worth fixing is
+      the part I kept: the danger is not the message, it is that someone later
+      "fixes" the mismatch by making the bound count characters, which leaves a
+      character bound guarding a byte allocation at up to 3x. So the code
+      carries that as a comment at the comparison itself, and the constant's doc
+      now has a paragraph on why comparing `str::len()` is sound here — bytes
+      are never fewer than characters, so it cannot under-bound — rather than
+      leaving a reader to work out whether the mismatch was deliberate.
+
+      The `é`-at-64 case you measured is what that paragraph is written around.
 
 ---
 

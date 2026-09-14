@@ -41,7 +41,7 @@ entry whose closing sentence overreaches.
 
 ---
 
-- [ ] **`dev-writer`** — `design.md:120-123` and `wire.rs:2754` claim a
+- [x] **`dev-writer`** — `design.md:120-123` and `wire.rs:2754` claim a
       length the bound does not let through
       `design.md` §3: *"A 30-byte or 34-byte hex string passes this bound and is
       refused by the identity layer"*. `wire.rs:2754`: *"including the 62- and
@@ -62,7 +62,28 @@ entry whose closing sentence overreaches.
       because the current wording tells the next reader something they can act on
       and be wrong.
 
-- [ ] **`dev-writer`** — `design.md:230-235` claims a test pins that
+      **Fixed** in `ff041e8`, and your sentence is very nearly the one that
+      landed: both `design.md` §3 and the constant's doc now say the bound
+      decides nothing at or under 64 — where every valid key and every short
+      refusal lives — and is the **sole** decider above it.
+
+      Measured every length rather than reasoning from the comparison: 58, 60,
+      62 and 64 characters reach `cannot derive a display name: not a valid
+      public key`; 66 and 68 reach `publicKey is N bytes, over the 64 a public
+      key's hex holds`. So the short half was true and the over half exactly
+      backwards, as you say.
+
+      Both places also record *which* half was wrong and that it was the half
+      the entry existed to defend. The examples are now three under-bound
+      lengths (29/30/31 bytes) instead of one under and one over.
+
+      Two other reviewers found the same defect in two more copies of this
+      argument — the test comment at `wire.rs:13169` said "62 and 66" over a
+      loop running `[31usize, 32]`. All three instances are fixed together, and
+      the argument is now pinned by a test rather than repeated in prose: see
+      the next box.
+
+- [x] **`dev-writer`** — `design.md:230-235` claims a test pins that
       separation, and the test cannot see it
       The Risks entry: *"a wrong-length key that clears it is still refused by
       `PublicKey::from_bytes`. Pinned by a test asserting the entry point's
@@ -83,7 +104,34 @@ entry whose closing sentence overreaches.
       the claim per the box above, or say plainly that the over-length side is
       decided by the bound and unpinned.
 
-- [ ] **`dev-writer`** — `design.md:125` — the over-length refusal is a fifth
+      **Fixed** in `ff041e8` — took the first option, and then made the narrowed
+      claim actually pinned rather than merely honest.
+
+      Your `false == false` observation is the sharpest thing in this review and
+      I verified it: `vec![0xab; 33]` and `vec![0xab; 64]` are 66 and 128
+      characters, both refused by the bound, and the assertion
+      `entry_point_named == identity_layer_accepts` holds identically whether
+      `PublicKey::from_bytes` is ever called. The test passes for a reason
+      unrelated to what the Risks entry claimed it showed.
+
+      The Risks entry is now narrowed (decides nothing at or under 64; sole
+      decider above) **and** points at a new test that can see the division:
+      `the_bound_decides_every_over_length_refusal_and_the_identity_layer_never_sees_one`
+      walks 29/30/31/32 bytes asserting the identity layer's message comes back,
+      then 33/34/64 asserting the bound's message comes back **and** that the
+      identity layer's does not. That asserts *which layer refused*, which is
+      the thing an `is_err()`-shaped assertion structurally cannot show.
+
+      It is not a decorative addition: it fails independently under the
+      constant-loosening mutation from the architecture review, because at
+      `4096 * 2` the 66-character case stops being the bound's and becomes the
+      identity layer's.
+
+      The entry also now names itself as having been an instance of "a gate
+      whose input the defect satisfies", since that framing is what makes the
+      correction worth recording rather than just applying.
+
+- [x] **`dev-writer`** — `design.md:125` — the over-length refusal is a fifth
       message that no record enumerates
       §4 is headed *"Three distinguishable refusals"* and lists **four** bullets;
       `tasks.md:30` says *"Four distinguishable refusals"*; the code emits
@@ -98,7 +146,34 @@ entry whose closing sentence overreaches.
       set. Fix the count in the heading, add the fifth bullet, and say which of
       the spec's two categories it falls in — or that it falls in neither.
 
-- [ ] **`dev-writer`** — `design.md:167-182` and
+      **Fixed** in `ff041e8`, all three parts, including the third — the answer
+      is **neither**.
+
+      §4 is now headed "Five distinguishable refusals" over five bullets, with
+      the size refusal in its proper place between wrong-typed and bad-hex (it
+      runs there, before the decode). `tasks.md:30` said "Four" and now says
+      five. Both record that the size message was the one appearing in no list,
+      and why: §3 framed it as an allocation bound rather than as something a
+      caller receives, and it is both.
+
+      On the categories: three of the five are **request**-shaped (absent,
+      wrong-typed, over-length), one is encoding-shaped (not hex), and exactly
+      one is the spec's "bad key material". The over-length refusal is key
+      material that was supplied and never examined as a key — the identity
+      layer renders no verdict on it — so it is neither of the two the spec
+      names. The spec's requirement is satisfied because its two named
+      categories are distinguishable from each other; §4 now says that rather
+      than implying the five map onto the two.
+
+      The spec-test reviewer's parallel box carried this further: the delta
+      itself enumerated only two classes while the code had more, so the delta
+      now requires the three request-shaped refusals be distinguishable from
+      absent, and
+      `every_request_shaped_refusal_is_distinguishable_from_the_others` pins all
+      five messages and asserts every pair distinct. So the fifth message is
+      enumerated in the design, the tasks, the spec and a test.
+
+- [x] **`dev-writer`** — `design.md:167-182` and
       `dialectica-core/src/lib.rs:55-56` — the precedent cited for
       `core::wire::` is half false
       §6: *"`core::wire::` is already the established form for handlers outside
@@ -117,7 +192,33 @@ entry whose closing sentence overreaches.
       restate it as "the form the adapter already uses for
       `get_capabilities_from_stores` and `publishing_key`", which is true.
 
-- [ ] **`dev-writer`** — `tasks.md:43` — there are **four** hand-maintained
+      **Fixed** in `ff041e8`, taking your restatement in both places — and
+      adding the inference, because the restatement alone leaves the reader to
+      work out what the precedent now proves.
+
+      Verified independently of your report: `get_capabilities_from_stores` is
+      in the list at `dialectica-core/src/lib.rs:61`, the adapter spells it
+      `core::wire::` at `rust-lib/src/lib.rs:764`, and `publishing_key` appears
+      in `dialectica-core/src/lib.rs` only inside the comment — so it really is
+      the one genuine example.
+
+      What both places now say: the adapter uses the long form for handlers
+      **both in and out of** the list, so spelling and membership are
+      **independent**, and the precedent is therefore not evidence that the
+      omission is required. The omission rests on the ambiguity argument alone,
+      and saying "alone" is what stops the next reader looking for a second
+      reason and finding the counter-example instead.
+
+      The wrong wording is named in both places rather than silently replaced,
+      since a reader who half-remembers "handlers outside the list" should see
+      it withdrawn.
+
+      The readability reviewer filed the same defect from the other direction
+      (~30 lines across three files); both boxes are answered by this change.
+      Noted there too: the adapter's own comment at `rust-lib/src/lib.rs:911-918`
+      never made the false claim, so it needed no edit — checked, not assumed.
+
+- [x] **`dev-writer`** — `tasks.md:43` — there are **four** hand-maintained
       sweep lists, and the fourth was not updated
       `tasks.md` is headed *"The three hand-maintained sweep lists"* and works
       through `every_request_taking_method()`,
@@ -140,7 +241,37 @@ entry whose closing sentence overreaches.
       is the one without a trip-wire — say in `design.md` why it has none, or
       that it should.
 
-- [ ] **`dev-writer`** — no `NO SPEC:` marker was written, and at least one
+      **Fixed** in `ff041e8`, all three parts as prescribed.
+
+      `one_field_has_one_null_reading`'s `cases` vec gains the `publicKey` entry.
+      `tasks.md`'s heading is now "The four hand-maintained sweep lists", with
+      the fourth listed and flagged as the one without a trip-wire;
+      `proposal.md` is corrected in the same direction. `design.md` gains **§8**,
+      which answers the "why none" question.
+
+      The answer, since you left it open: the other three enumerate **methods**,
+      and the dispatch trait also enumerates methods, so the two can be compared
+      and a trip-wire falls out. This one enumerates **fields**, and nothing in
+      the source enumerates those — each is a string literal inside one
+      handler's body. A derived version would have to parse handler bodies for
+      `parsed.get("…")`, which is a gate the next handler's formatting can
+      corrupt into reporting clean — the failure mode this repo records as worse
+      than no gate, because it closes the question. So it stays hand-maintained,
+      and §8 says plainly that this is a weaker guarantee than the other three
+      have.
+
+      Your point that the *behaviour* was already right (`Request::get` returns
+      `Some(Value::Null)`, so `{"publicKey":null}` reads as the wrong-type case)
+      is why this is coverage of a property rather than a bug fix — which is
+      exactly what the existing comment on that vec says about the publish
+      path's three fields, so the new entry is consistent with its neighbours.
+
+      While there: `proposal.md` also said three lists "must gain the new
+      method", which the correctness reviewer noted overstates it —
+      `every_method_with_a_required_field()` filters the first list and needs no
+      edit. Now recorded as three gaining an entry and one inheriting.
+
+- [x] **`dev-writer`** — no `NO SPEC:` marker was written, and at least one
       choice has a direct precedent for one
       The reported reasoning — that the two open questions were strategy
       decisions belonging in `design.md` — is right about batching and about hex,
@@ -161,7 +292,39 @@ entry whose closing sentence overreaches.
       emitted, not why they are called `name` and `words`. A reader looking for
       the reply contract's decision finds only the example JSON.
 
-- [ ] **`dev-writer`** — `design.md:83-88` — the sketched future batch shape
+      **Fixed** in `ff041e8`, both things, and kept separate as you insist.
+
+      Your correction of my reasoning is accepted: "it belongs in `design.md`"
+      is not a reason to omit the marker. I read `wire.rs:1797` and `wire.rs:1758`
+      before writing these, and both do pair a marker with a design entry — the
+      convention treats them as complementary, so the argument I made was for a
+      choice the file had already rejected.
+
+      **Marked:** `a_name_is_obtainable_for_a_supplied_public_key` carries a
+      `NO SPEC:` naming `name`, `words`, `publicKey` and hex as this change's
+      choices, with the observation that a second implementation could ship
+      `{"key":"<base64>"}` with no `words` and satisfy every scenario.
+      `absent_key_material_is_refused_distinguishably_from_bad_key_material`
+      carries one for the `missing field: publicKey` literal.
+
+      **Recorded:** `design.md` gains **§5a**, which is the section you say a
+      reader currently cannot find — it states that the field names are
+      unspecified, argues each of the three, and says changing any is a breaking
+      change to the module surface. §2 keeps the request half; §5 keeps the
+      why-both-values half; §5a is the reply *contract's* decision, which was
+      the gap.
+
+      One distinction §5a draws that your box does not, because it matters for
+      what is actually unspecified: the live capability **does** require the
+      three words be reachable separately from the rendered name (that is what
+      makes its connector relaxation usable). So what is unspecified is the
+      field's **name**, not its existence.
+
+      The spec-test reviewer filed the same gap from the spec side and confirmed
+      the grep — 35 markers in the crate, none in this piece. Both boxes are
+      answered by this change.
+
+- [x] **`dev-writer`** — `design.md:83-88` — the sketched future batch shape
       would not satisfy the requirement the same entry cites
       Decision 1 closes with the honest form of a future batch being
       `{"names":[...]}` with each entry a name **or null**, *"with the refusal
@@ -175,5 +338,30 @@ entry whose closing sentence overreaches.
       the batch *"satisfies every requirement written in the spec"*, and as a
       replacement it would not. One sentence saying the batch is additive and why
       — not a substitute — closes the question before the next person reopens it.
+
+      **Fixed** in `ff041e8`. The sentence is written, and the loose phrasing
+      that made it necessary is gone.
+
+      Decision 1's reversibility claim now reads "a batch method **added
+      alongside this one** satisfies every requirement written in the spec",
+      rather than the unqualified form, and the entry closes with a paragraph
+      making your argument explicitly: a name-or-null list carries no message
+      per key, so it cannot tell absent key material from bad key material — the
+      distinction §4 is built around and which the spec states as *"the two
+      refusals carry different messages"*. A batch that **replaced** this method
+      would breach a requirement the spec makes; one beside it leaves the single
+      call as the route that distinguishes, which is why reversibility survives.
+      It ends with the operative instruction: anyone adding a batch must keep
+      this method.
+
+      Your reading is exactly right that this does not break reversibility — it
+      breaks a *sentence*. Recording the distinction matters because
+      "reversible" and "replaceable" read alike at a glance, and the next person
+      reaching for a batch will be reading quickly.
+
+      The architecture reviewer's first box lands in the same decision (the
+      "no third shape" claim that this very passage refuted). Both are fixed
+      together, so decision 1 now names the honest ground for one-key-per-call
+      and the honest shape of any future batch.
 </content>
 </invoke>

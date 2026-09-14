@@ -9,7 +9,7 @@ lib + 30 `end_to_end`), clean tree, `origin/main` at `6eec84f`,
 
 ## Findings
 
-- [ ] **`dev-writer`** — `dialectica-core/src/wire.rs:2823` — the handler reads
+- [x] **`dev-writer`** — `dialectica-core/src/wire.rs:2823` — the handler reads
       `publicKey` but nothing stops a sibling field being read as key material,
       and no test can see it. The spec's requirement *"An author address SHALL
       NOT be required, in addition to or in place of the key"* is asserted only
@@ -27,7 +27,24 @@ lib + 30 `end_to_end`), clean tree, `origin/main` at `6eec84f`,
       code, but the requirement is currently unpinned, so the next edit to the
       field read is unguarded.
 
-- [ ] **`dev-writer`** — `dialectica-core/src/wire.rs:2830` —
+      **Fixed** in `ff041e8`:
+      `the_key_is_read_from_the_public_key_field_and_from_no_other` sweeps five
+      sibling spellings — `authorAddress` (the feed's own spelling, so the one a
+      handler would most plausibly grow), `address`, `author`, `key` and
+      `publickey` — and asserts each is answered `missing field: publicKey` with
+      no name.
+
+      Your mutation was applied verbatim and measured: with
+      `.or_else(|| parsed.get("authorAddress"))` in place, the new test fails
+      with `{"name":"temptatious eremia of donousa", …}` and **944 of the other
+      945 tests still pass**, which is your 970/970 result with exactly one test
+      now able to see it. Reverted after measuring.
+
+      One of three findings that converged on this constant's unguarded
+      properties; `design.md`'s Risks section now records all three together,
+      since they are one defect family rather than three coincidences.
+
+- [x] **`dev-writer`** — `dialectica-core/src/wire.rs:2830` —
       `MAX_PUBLIC_KEY_HEX_CHARS` is set to the key's **exact** hex length (64),
       so it stops being an allocation bound and starts deciding messages for
       inputs that are not oversized. `design.md` §3 claims it "bounds the hex
@@ -44,7 +61,41 @@ lib + 30 `end_to_end`), clean tree, `origin/main` at `6eec84f`,
       maximum with headroom, so a near-miss there still reaches `not valid hex`.
       Severity: **minor** — a misleading refusal, not a wrong name.
 
-- [ ] **`tester`** — `dialectica-core/src/wire.rs:12770-12790` — the second half
+      **Rejected** as to the remedy, **fixed** as to the false claim underneath
+      it — and the split matters, so both halves are argued.
+
+      *Rejected: loosening the bound.* Your measurements are right (`" 91a2…"` →
+      65, `"0x91a2…"` → 66, both the size message) and I re-ran them. But adding
+      headroom trades a misleading message for a real allocation: the bound's
+      whole job, per PHASE0-FINDINGS §3, is that a caller cannot choose the size
+      of a `Vec` we allocate, and every character of headroom is headroom an
+      attacker also gets. The near-misses you name are all *one or two*
+      characters over — a caller sending `" key"` or `"0xkey"` is told its input
+      is 65 or 66 bytes against a limit of 64, which names the excess precisely
+      enough to find a stray character. That is a worse message than
+      `not valid hex` would be, but `not valid hex` for a 4 MiB string is bought
+      with a 2 MiB allocation, and the two are not comparable in cost. The
+      `genesis_for` precedent differs because a genesis record has no fixed
+      length, so its bound *has* to be a maximum with headroom; a public key has
+      exactly one length, and a bound at that length is the tightest honest one.
+
+      *Fixed: the claim that made this look benign.* `design.md` §3 said the
+      bound "decides nothing about validity", and three comments cited 66- and
+      68-character strings as material that "clears this bound and is refused by
+      the identity layer". Measured, all three are backwards — **the bound
+      refuses them.** The honest division is now stated and asserted rather than
+      claimed: at or under 64 bytes the bound decides nothing and the identity
+      layer gives every verdict; over 64 the bound is the **sole** decider and
+      the identity layer is never reached. That is
+      `the_bound_decides_every_over_length_refusal_and_the_identity_layer_never_sees_one`,
+      which walks 29/30/31/32 bytes and asserts the identity layer's message,
+      then 33/34/64 and asserts the bound's.
+
+      So your reading of the behaviour was right and the record was wrong; what
+      I have not done is change the behaviour, because at an exact bound the
+      misleading message is the cheaper of the two available defects.
+
+- [x] **`tester`** — `dialectica-core/src/wire.rs:12770-12790` — the second half
       of `a_public_key_alone_is_enough_with_no_address_supplied` is **vacuous for
       its fixture**, confirming the author's own doubt. It feeds
       `key.address().to_hex()` where a key goes and asserts
@@ -63,6 +114,23 @@ lib + 30 `end_to_end`), clean tree, `origin/main` at `6eec84f`,
       seed whose address parses, and the assertion becomes a real comparison of
       two names. Severity: **moderate** — the test names a requirement it does
       not exercise.
+
+      **Fixed** in `ff041e8`, by the route you name: the fixture is chosen
+      rather than assumed.
+
+      Searched `feed_key`'s own seed space (`[seed; 32]`) for an address that
+      parses. **Seed 3 does** — key `ed4928c6…ac8737d1` names
+      `temptatious eremia of donousa`, its address `88494840…c135e159` parses as
+      a valid key and names `subjectable syllogismos of rhode iberias`. So the
+      assertion now compares two real, different names and can fail, where
+      before it was `None != Some(_)`.
+
+      Both sides are `.expect()`ed rather than left as `Option`s, so if the
+      fixture ever stops being an address-that-parses the test says so instead
+      of silently going vacuous again — which is the half that would otherwise
+      let this regress. The comment records your 111-of-200 measurement, because
+      "an address usually is not a curve point" is the intuition that made the
+      original fixture look adequate and it is wrong.
 
 ## What was clean
 

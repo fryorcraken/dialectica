@@ -9,7 +9,7 @@ including all three boundary mutants on the hex bound's `>` comparison.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `design.md:69` — "There is no third shape" is refuted by
+- [x] **`dev-writer`** — `design.md:69` — "There is no third shape" is refuted by
       `design.md:83` in the same decision, which names one
       **What is wrong:** Decision 1 rules the batch out by claiming its reply
       shape is *forbidden*, enumerating two shapes and asserting "There is no
@@ -36,7 +36,28 @@ including all three boundary mutants on the hex bound's `>` comparison.
       the two bad shapes as rejected alternatives, and delete "There is no third
       shape". **Severity: medium** (defect in the recorded decision, not in code).
 
-- [ ] **`dev-writer`** — `wire.rs:2738-2740` — the doc claims the bound is
+      **Fixed** in `ff041e8`, as prescribed. "There is no third shape" is gone;
+      the silent-drop shape is kept as a rejected alternative (it is genuinely
+      the worst of the three, since misaligned answers put somebody's name on
+      somebody else's post); and the entry now states the real ground outright:
+      **the batch is unnecessary until measured, and the per-item cost is the
+      cheapest call on this surface.**
+
+      Your scenario is recorded verbatim in the design, because the wrong turn
+      it describes is specific enough to be worth naming: I checked
+      `openspec/specs/module-wire-contract/spec.md:271` and it says exactly what
+      you quote — *"A reply SHALL NOT carry both an error and a result"* — which
+      is about the top-level envelope and does not reach a uniform name-or-null
+      list. A future reader hitting a slow feed is now pointed at measuring
+      round trips rather than at a prohibition that does not exist.
+
+      Related, from the design reviewer's box on the same decision: that batch
+      would be **additive, not a substitute**, since a name-or-null list carries
+      no per-key message and so cannot distinguish absent from bad key material.
+      Both halves now sit in decision 1, because "reversible" and "replaceable"
+      are different claims and only the first is true.
+
+- [x] **`dev-writer`** — `wire.rs:2738-2740` — the doc claims the bound is
       derived from the key's size; it is two literals and can drift
       **What is wrong:** the doc states *"The bound is derived from the key's own
       size rather than written as `64`, so it cannot drift from the type it is
@@ -56,7 +77,28 @@ including all three boundary mutants on the hex bound's `>` comparison.
       what pins it. **Severity: low-medium** (documentation asserts a structural
       property the code lacks).
 
-- [ ] **`tester`** — `wire.rs:2758` — the bound's *value* is unpinned; only its
+      **Fixed** in `ff041e8`, taking your second option.
+
+      I confirmed your grep: `identity.rs` exports no key-size constant, every
+      site spells `[u8; 32]` inline. Both the constant's doc and `design.md` §3
+      now say the `32` is a **duplicated literal**, that nothing ties it to
+      `PublicKey`, and that what pins the value is a test rather than the
+      expression.
+
+      Chose the comment over introducing `PublicKey::BYTE_LEN` because adding an
+      exported constant to the identity layer to serve one bound in `wire.rs` is
+      a change to an archived, pinned capability's surface for a caller's
+      convenience — the same trade decision 6 already declined when it refused
+      to rename `names::display_name`. If a second site ever needs the key's
+      size, that is the change that should introduce the constant, and then the
+      comment here becomes visibly wrong rather than quietly so.
+
+      Your framing — "worse than no comment, because it closes the question" —
+      is what made the third option (delete the sentence) inadequate: a reader
+      who notices `32 * 2` and finds nothing said about it re-derives the same
+      doubt. Saying "duplicated deliberately, pinned by *that* test" ends it.
+
+- [x] **`tester`** — `wire.rs:2758` — the bound's *value* is unpinned; only its
       comparison operator is
       **What is wrong:** `cargo mutants` catches all three `>` mutants because
       the comparison is exercised, but mutants does not mutate `const` values —
@@ -76,7 +118,25 @@ including all three boundary mutants on the hex bound's `>` comparison.
       exactly this for `MAX_REQUEST_BYTES` and records why; follow that pattern.
       **Severity: medium**.
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/src/lib.rs:339` — `display_name` is
+      **Fixed** in `ff041e8`, following the pattern you name.
+      `the_hex_bound_is_pinned_to_a_known_answer` is `assert_eq!(MAX_PUBLIC_KEY_HEX_CHARS, 64)`
+      — the literal, not the expression — with a comment recording your
+      measurement and why `cargo mutants` cannot cover it.
+
+      I re-ran your mutation: with the bound at `4096 * 2`, **two** tests now
+      fail — the pin (`left: 8192, right: 64`) and
+      `the_bound_decides_every_over_length_refusal_and_the_identity_layer_never_sees_one`,
+      which catches it independently because 66 characters stops being refused
+      by the bound and reaches the identity layer instead. That second one is
+      incidental but worth having: it fails on a loosening that a reworded pin
+      might not.
+
+      Read `request.rs:337-345` before writing it; the comment there ("a cap
+      that drifted upward would still refuse a 64 MiB request and still pass
+      every test that probes only absurd values") is the exact argument, so the
+      new test cites the pattern rather than restating it.
+
+- [x] **`dev-writer`** — `dialectica/rust-lib/src/lib.rs:339` — `display_name` is
       a noun phrase among fifteen verb phrases, and collides with
       `metadata.json`'s existing `display_name`
       **What is wrong:** every other method on the dispatch trait is an
@@ -107,7 +167,37 @@ including all three boundary mutants on the hex bound's `>` comparison.
       **Severity: medium** — cheap now, permanent once shipped; the core API is
       the deliverable and outlives any UI.
 
-- [ ] **`dev-writer`** — `design.md:207-212` — the per-call cost is mitigated
+      **Deferred — owner decision pending, raised by the runner.**
+
+      Not rejected, and the analysis is accepted in full. I verified both legs:
+      `dialectica/metadata.json:3` is `"display_name": "Dialectica"`, the
+      module's own label, so two `display_name` keys with unrelated meanings do
+      now exist on one module's surface; and the method is the only noun phrase
+      among the trait's verb phrases. Your point that §6 is a **symptom** rather
+      than an independent decision is the sharpest part — §6 spends a decision
+      buying a longer import path to route around an ambiguity that a verb-first
+      name would dissolve, and its rejected alternative assumed the JSON name
+      was fixed when this change is precisely what fixes it.
+
+      Renaming the wire method changes the core API, which CLAUDE.md names as
+      the deliverable, so it is the owner's call rather than mine or the
+      runner's. The runner has put it to the owner and no answer has come back.
+      The name stays `display_name` and §6 is **not** restructured in
+      anticipation of an answer either way.
+
+      What has landed so as not to lose the finding if the tracker is deleted:
+      `design.md` §6 now closes with a paragraph recording that the name is an
+      open question, naming `derive_display_name` and `name_for_key` as the
+      candidates you proposed, stating the `metadata.json:3` collision, and
+      saying the decision sits with the owner. So a reader of the design meets
+      the question rather than only the workaround.
+
+      If the owner says rename, §6 largely disappears and the handler can be
+      re-exported at the crate root like every other one — which is the outcome
+      you describe, and it should be a piece of its own since it touches the
+      trait, the adapter, the sweep lists and every test that names the method.
+
+- [x] **`dev-writer`** — `design.md:207-212` — the per-call cost is mitigated
       against an unstated bound; the number is 100
       **What is wrong:** the risk entry answers §2.4 with "a
       `clamp_per_page`-bounded row count" without saying what the bound is.
@@ -127,6 +217,23 @@ including all three boundary mutants on the hex bound's `>` comparison.
       future reader weighing a batch has the number and knows PLAN.md's wording
       points the other way. **Severity: low** (the decision stands; the record is
       thin at the point someone would revisit it).
+
+      **Fixed** in `ff041e8`, both halves.
+
+      Verified your citations rather than copying them: `feed.rs:96` and
+      `thread.rs:95` are both `MAX_PER_PAGE = 100` with `DEFAULT_PER_PAGE = 20`
+      (and `thread.rs:3010-3013` pins all four values plus their cross-file
+      equality), and `docs/PLAN.md:2680-2681` carries the sentence you quote,
+      word for word.
+
+      The Risks entry now states 100 worst case and 20 typical, then says
+      plainly that the design's counter is a **reframing** of PLAN.md rather
+      than a reading of it: §2.4's warning is about hot loops over *expensive*
+      calls, and PLAN.md's §9.1 passage argues on call *count*. That is the
+      half I would not have written unprompted, and it is the half that matters
+      — the decision stands, but someone revisiting it should know the source
+      they will go read points the other way, rather than discovering it and
+      concluding the design misread it.
 
 ## What was clean
 

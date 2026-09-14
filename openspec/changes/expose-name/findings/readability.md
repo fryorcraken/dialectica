@@ -17,7 +17,7 @@ correct; every instance of its evidence is not.
 
 ## The hex bound's rationale cites examples that disprove it
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:2754` —
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:2754` —
       `MAX_PUBLIC_KEY_HEX_CHARS`'s doc says the identity layer refuses "the 62-
       and 66-character strings that clear this". A 66-character string does not
       clear a `> 64` bound — it is refused *by the bound*, which is the exact
@@ -31,7 +31,23 @@ correct; every instance of its evidence is not.
       **Severity:** genuine defect — a reader trusting this comment will believe
       the bound is looser than it is. Fix: cite 62 alone, or 60 and 62.
 
-- [ ] **`dev-writer`** — `openspec/changes/expose-name/design.md:121-123` —
+      **Fixed** in `ff041e8`. The doc now cites **58, 60 and 62** — three
+      under-bound lengths, all measured — and states the division explicitly
+      rather than leaving it to the examples: at or under 64 the bound is
+      transparent, over 64 it is the sole decider.
+
+      Ran every length rather than reasoning about them, as instructed. 29 bytes
+      (58 chars), 30 (60), 31 (62) and 32 (64) all return
+      `cannot derive a display name: not a valid public key`; 33 bytes (66) and
+      34 (68) return the size refusal. So 66 was the one example in that
+      sentence that disproved it, exactly as you measured.
+
+      The doc also now names the error that was there, because "an earlier
+      wording cited 66 as a string that clears this, which is exactly backwards"
+      is the kind of thing a reader benefits from seeing corrected rather than
+      silently absent — the wrong version is intuitive enough to be re-derived.
+
+- [x] **`dev-writer`** — `openspec/changes/expose-name/design.md:121-123` —
       decision 3 makes the same error with different numbers: "A 30-byte or
       34-byte hex string passes this bound and is refused by the identity layer."
       A 34-byte hex string is 68 characters and does not pass the bound.
@@ -43,7 +59,25 @@ correct; every instance of its evidence is not.
       **Severity:** genuine defect. Fix: pick two under-bound lengths (e.g. 30
       and 31 bytes).
 
-- [ ] **`tester`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:13169-13171` —
+      **Fixed** in `ff041e8`. §3 now cites **29, 30 and 31 bytes** as the
+      material that clears the bound and is refused by the identity layer —
+      measured, not chosen by arithmetic — and says outright that above 64
+      characters the bound is the sole decider and the identity layer is never
+      reached.
+
+      Confirmed your 68-character measurement (34 bytes →
+      `publicKey is 68 bytes, over the 64 a public key's hex holds`). The entry
+      also now records *which* half of the original sentence was true and which
+      was backwards, because the over half was the half the sentence existed to
+      defend — the entry's whole point was that the bound decides no validity,
+      and on the over side it decides everything.
+
+      The claim is no longer only prose:
+      `the_bound_decides_every_over_length_refusal_and_the_identity_layer_never_sees_one`
+      asserts both sides, so the next version of this sentence cannot drift from
+      the behaviour without a red test.
+
+- [x] **`tester`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:13169-13171` —
       the comment inside
       `the_hex_bound_refuses_an_oversized_key_without_deciding_validity` says
       "62 and 66 hex characters are both under or at the cap's neighbourhood",
@@ -59,11 +93,27 @@ correct; every instance of its evidence is not.
       message.
       **Severity:** genuine defect — the comment misnames the fixture beside it.
 
+      **Fixed** in `ff041e8`. The comment now says **62 and 64** — what
+      `[31usize, 32]` actually runs — and goes further, because the trap you
+      describe is worth closing rather than just correcting: it states that 66
+      is deliberately **not** in the array, that it is over the bound, and that
+      the size message is the *correct* answer for it, so a reader adding 33
+      bytes on the comment's authority is warned off before writing the failing
+      test you predict.
+
+      Verified your prediction directly — 66 characters returns a message
+      containing `over the`, which is what the `assert!` in that loop forbids.
+
+      The comment also points at the new
+      `the_bound_decides_every_over_length_refusal_and_the_identity_layer_never_sees_one`,
+      which is where the over-64 cases now live, so the two tests read as a pair
+      with a stated division rather than as one test with a confusing gap.
+
 ---
 
 ## A fabricated wordlist citation
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:2788`
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:2788`
       and `openspec/changes/expose-name/design.md:154` — the two-word toponym
       offered as proof that `words` cannot be recovered by splitting `name` is
       `alexandria troas`, which **is not in `wordlists/places.txt`**. The list
@@ -82,11 +132,35 @@ correct; every instance of its evidence is not.
       citations get fabricated" failure mode. The reasoning is sound — replace
       the invented example with one of the ten that exist.
 
+      **Fixed** in `ff041e8`.
+
+      Confirmed both halves independently: `grep -c " " places.txt` → 10, and
+      `alexandria` is at line 49 with no `troas` anywhere in the file. The ten
+      are `antiocheia maiandros`, `arsinoe kyprou`, `euxeinos pontos`,
+      `herakleion egyptou`, `kimmerian bosporos`, `lokroi epizephyrioi`,
+      `makaron nesoi`, `rhode iberias`, `seleukeia kalykadnos`,
+      `thermai himeraiai`.
+
+      The code comment now cites `thermai himeraiai` and `kimmerian bosporos`;
+      `design.md` §5 lists **all ten**, so the claim "the list holds ten" is
+      checkable against the list rather than against a sample. Both places also
+      record that the earlier example was invented, since the reader most likely
+      to check a citation is the one a fabricated one misleads — your phrasing,
+      and it is the reason this is worth a note rather than a silent swap.
+
+      The stronger fix is beside it: the spec-test reviewer found that the same
+      claim was pinned by nothing (a split-on-spaces mutation passed the whole
+      suite, because no fixture drew one of the ten). Seed 166 draws
+      `thermai himeraiai`, and
+      `words_is_the_three_drawn_words_and_not_the_rendered_name_split_on_spaces`
+      now asserts against it — so the justification is executable, not just
+      correctly cited.
+
 ---
 
 ## A rationale whose own cited precedent contradicts it
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/lib.rs:49-58`,
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/lib.rs:49-58`,
       `dialectica/rust-lib/src/lib.rs:911-918` and
       `openspec/changes/expose-name/design.md:180-182` — roughly 30 lines across
       three files argue that `display_name` is spelled `core::wire::` *because*
@@ -109,11 +183,33 @@ correct; every instance of its evidence is not.
       claim, or restate it as "the adapter already uses the `core::wire::` form
       for some handlers regardless of re-export".
 
+      **Fixed** in `ff041e8`, taking your restatement and making the inference
+      explicit rather than leaving it to be re-derived.
+
+      Verified every leg: `get_capabilities_from_stores` is in the re-export
+      list (`dialectica-core/src/lib.rs:61`) and the adapter still spells it
+      `core::wire::` (`rust-lib/src/lib.rs:764`); `publishing_key` appears in
+      `dialectica-core/src/lib.rs` **only** in the comment, so it is genuinely
+      absent from the list and is the one real example.
+
+      Both `lib.rs` and `design.md` §6 now say what the precedent shows and what
+      it does not: the adapter uses the long form for handlers **both in and out
+      of** the list, so spelling and list membership are **independent**, and
+      the precedent is therefore not evidence that omission is required. The
+      omission rests on the ambiguity argument alone — which is enough, and
+      saying "alone" is what stops the next reader hunting for a second reason.
+
+      Both places name the wrong wording ("the established form for handlers
+      outside the list") so that a reader who half-remembers it can see it was
+      withdrawn. Note the adapter's own comment at `rust-lib/src/lib.rs:911-918`
+      never carried the false claim — it argues purely from the ambiguity — so
+      it needed no change, which I checked rather than assumed.
+
 ---
 
 ## A superseded mandate left contradicting its own change
 
-- [ ] **`spec-writer`** — `openspec/changes/expose-name/proposal.md:122-131` —
+- [x] **`spec-writer`** — `openspec/changes/expose-name/proposal.md:122-131` —
       the proposal still carries the instruction that **"`docs/UI-BRIEF.md`
       Obligation 6 becomes wrong when this lands, and the `dev-writer` MUST fix
       it in this change"**, and quotes the brief as authority for what core does
@@ -130,6 +226,27 @@ correct; every instance of its evidence is not.
       records was already done for `design.md`. Dropping the bullet entirely is
       also fine — `design.md`'s "What this change does not do" already records
       that the feed-row gap stays open, which is the only durable half of it.
+
+      **Fixed** in `ff041e8` by the `dev-writer`, since the `spec-writer` is not
+      coming back to this piece and an unanswered box blocks the merge.
+
+      Took your first option. The bullet no longer mentions `docs/UI-BRIEF.md`,
+      carries no MUST, and quotes it as authority for nothing. The durable half
+      — one of the two gaps closes here, the other does not — is re-grounded in
+      `openspec/specs/generated-names/spec.md:39-45`, which I read before
+      repointing at it: it says a name derived from an author address differs
+      from the name for that key, "**AND** so a caller holding only an address
+      cannot arrive at the right name". That is exactly the claim the bullet
+      needs, so the re-grounding is a real one rather than a citation swap.
+
+      Kept the bullet rather than dropping it because it is the only place the
+      proposal says what this change does *not* deliver, and a reader deciding
+      whether a feed row can render a name should meet that in the proposal
+      rather than only in `design.md`.
+
+      The owner's override stays recorded at `tasks.md:80-88`, which is the
+      right place for it — it is a record of a decision, not an instruction, so
+      it does not contradict anything now that the proposal's MUST is gone.
 
 ---
 
