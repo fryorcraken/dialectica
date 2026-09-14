@@ -48,7 +48,28 @@
       `spec-writer`. The central devices — `OpEntry` unable to name an
       `Arrival`, `OpClock` behind one `Option`, the wall clock reachable only as
       text, the migration as a sort key — all hold under attack.
-- [ ] review: spec-test — `spec-test-reviewer`
+- [x] review: spec-test — `spec-test-reviewer` — eight findings, six for
+      `tester` and two for `spec-writer`; implementation not read. **Two
+      surviving mutations**, both on `thread-read`'s clamping scenario:
+      hardcoding `"clamped": false` at `wire.rs:1872`, and disconnecting the
+      reader's clock at `thread.rs:787` so clamping can never fire, each pass
+      all 972 + 30 tests — the second with `rustc` warning `now_ms` unused into
+      a green run. Nothing asserts `clamped == true` anywhere; every thread and
+      wire fixture carries one asserted-time value, so *"the sequence does not
+      follow the asserted times"* cannot be tested non-vacuously either. What is
+      strong: the ordering rule fails **16 tests** when the counter arm is
+      replaced by ascending op id, migration fails **5** when the
+      counter/no-counter arms invert (with a counter-zero fixture), and the
+      advance bound fails **4** when `<=` becomes `<`. `arrival.rs`'s searched
+      disagreement fixture is the right answer to the recorded defect family;
+      two `authoring.rs` ordering assertions lack that guard and pass on digest
+      luck. The composer guard is honestly scoped — deleting it fails exactly
+      one test, not the four its comment claims.
+      `the_recorded_arrival_does_not_reach_the_sort_key_at_all` measures more
+      than the author credited: it drives five arrival shapes through `append`
+      and reads the stored sort columns back. Spec is self-consistent,
+      `validate --strict` passes, both `REMOVED` requirements are genuinely
+      subsumed, and PLAN.md has shed what the spec now carries.
 - [x] review: design — `design-reviewer` — six findings, all gaps rather than
       contradictions: the code takes every decision `design.md` records, and both
       withdrawn prohibitions are explicitly retired in the deltas that own them.
