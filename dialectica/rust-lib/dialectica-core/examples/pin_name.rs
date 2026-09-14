@@ -1,9 +1,9 @@
-//! Computes a pinned name from a digest BY HAND, without calling the
+//! Computes a pinned name from a PUBLIC KEY by hand, without calling the
 //! derivation under test.
 //!
 //! ```text
 //! cargo run --example pin_name --manifest-path \
-//!     dialectica/rust-lib/dialectica-core/Cargo.toml -- <digest-hex>
+//!     dialectica/rust-lib/dialectica-core/Cargo.toml -- <public-key-hex>
 //! ```
 //!
 //! **This is the whole point of a pin.** The expected value must be produced
@@ -17,10 +17,9 @@
 //! from the crate:
 //!
 //! ```text
-//! digest    = SHA256(NAME_PREFIX || public_key)
-//! adjective = ADJECTIVES[be16(digest[0..2]) % 8192]
-//! noun      = NOUNS     [be16(digest[2..4]) % 1024]
-//! place     = PLACES    [be16(digest[4..6]) % 1024]
+//! adjective = ADJECTIVES[be16(key[18..20]) % 8192]
+//! noun      = NOUNS     [be16(key[20..22]) % 1024]
+//! place     = PLACES    [be16(key[22..24]) % 1024]
 //! ```
 //!
 //! and reads the three lists from the **text files** in `wordlists/` rather than
@@ -28,13 +27,25 @@
 //! no `use dialectica_core::names` here, and adding one would silently turn
 //! every pin into the implementation agreeing with itself.
 //!
+//! **The input is the key itself, with no hash in between**, which is what
+//! issue #80 changed. An earlier version of this program took a digest —
+//! `SHA256(NAME_PREFIX || public_key)` — and drew from its first six bytes. There
+//! is no digest now and no separator; the name reads key bytes `18..23`, the
+//! range the `generated-names` spec allocates to it, and the window's offset is
+//! as much a part of the pin as the wordlists are. A window that slipped one byte
+//! reads different values and reaches a different name.
+//!
 //! It draws once. There is no second draw to compute — every draw is a single
 //! unconditional reduction, so a name is a function of six bytes and nothing
-//! else. An earlier version printed a `draw2` from bytes 6..12 for a redraw the
-//! scheme no longer has.
+//! else.
 
 use std::fs;
 use std::path::PathBuf;
+
+/// The first key byte the name reads. The spec's allocation table puts the
+/// name at `18..23`; this program states that figure from the SPEC rather than
+/// importing the crate's constant, which is what keeps the pin independent.
+const NAME_FIRST_BYTE: usize = 18;
 
 fn read_list(path: &std::path::Path) -> Vec<String> {
     fs::read_to_string(path)
@@ -57,19 +68,19 @@ fn main() {
     assert_eq!(nouns.len(), 1024);
     assert_eq!(places.len(), 1024);
 
-    let digest_hex = std::env::args()
+    let key_hex = std::env::args()
         .nth(1)
-        .expect("pass the 32-byte name digest as hex");
-    let digest: Vec<u8> = (0..digest_hex.len())
+        .expect("pass the 32-byte public key as hex");
+    let key: Vec<u8> = (0..key_hex.len())
         .step_by(2)
-        .map(|i| u8::from_str_radix(&digest_hex[i..i + 2], 16).expect("digest is hex"))
+        .map(|i| u8::from_str_radix(&key_hex[i..i + 2], 16).expect("the key is hex"))
         .collect();
-    assert!(digest.len() >= 6, "a name reads the first six digest bytes");
+    assert_eq!(key.len(), 32, "a public key is 32 bytes");
 
-    let be16 = |i: usize| u16::from_be_bytes([digest[i], digest[i + 1]]);
-    let a = be16(0) % 8192;
-    let n = be16(2) % 1024;
-    let p = be16(4) % 1024;
+    let be16 = |i: usize| u16::from_be_bytes([key[i], key[i + 1]]);
+    let a = be16(NAME_FIRST_BYTE) % 8192;
+    let n = be16(NAME_FIRST_BYTE + 2) % 1024;
+    let p = be16(NAME_FIRST_BYTE + 4) % 1024;
 
     println!("indices: adjective {a} noun {n} place {p}");
     println!(

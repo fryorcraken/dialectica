@@ -976,6 +976,16 @@ arriving from §5.2 needs.
 English adjective, a Greek noun, and a Greek place, joined by `of`. A name is
 recomputed wherever it is shown and is never published.
 
+**The wordlists can never change.** Issue #80 has the name read raw bytes of the
+public key with no hash and no domain separator, so there is no preimage in which
+a scheme version could sit and no way to make two schemes' names distinguishable.
+Changing a wordlist therefore renames every identity at once with nothing able to
+tell the two schemes apart. Taken deliberately, and cheap because a name is a
+pure local function that is never published — the `generated-names` spec's
+requirement *The scheme and its wordlists are frozen, with no version to bump*
+is the authority, and the change's `design.md` carries why the alternative (a
+per-channel hash under its own separator) was not taken.
+
 **What is being chosen is the key, and the name is the key's shadow.** This is
 the one sentence in this section that anyone writing copy has to hold: *"pick
 your identity"* is true, *"pick your username"* is false. A user who believes
@@ -1039,8 +1049,16 @@ invites the wrong conclusion — that between them the problem is handled:
 1. **The name space.** Reduces *accidental* collisions, and nothing else.
 2. **The mark** (`docs/IDENTICON.md`). A second recognition channel that varies
    independently of the name, so an attacker must land both at once and the
-   costs multiply rather than add. **Still forgeable in exactly the way the name
-   is** — a multiplied cost is still a cost a machine pays once.
+   costs multiply rather than add. **The conclusion survives #80 but its reason
+   changed**, and the distinction matters to anyone extending either channel:
+   independence used to come from domain separation — the two read different
+   digests, so whatever bytes each happened to read they could not overlap. With
+   no hash between the key and any channel, all three read the *same* 32 bytes,
+   and the independence now rests on the byte allocation being pairwise
+   disjoint. It is a property to gate rather than a property for free; the
+   `generated-names` requirement *The three channels read pairwise disjoint
+   bytes of the public key* is where it lives. **Still forgeable in exactly the
+   way the name is** — a multiplied cost is still a cost a machine pays once.
 3. **Vouching (§7.3) — the only layer an attacker cannot mint, and the most
    limited.** A vouch points at *a key*, so a lookalike gets the name, gets a
    near-matching glyph, and does not get the vouch. Two structural limits: it is
@@ -1048,13 +1066,18 @@ invites the wrong conclusion — that between them the problem is handled:
    impersonation of someone they have *already* vouched for; and weight accrues
    from what a reader has already done, so a new user's vouched set is empty.
    **The layer is weakest exactly where the exposure is highest.**
-4. **The address — the only thing that settles identity.** Unforgeable,
-   unmintable, and what every signature binds to. Its one weakness is not
-   cryptographic: **it settles the question only if someone looks.**
+4. ~~**The address**~~ **The public key — the only thing that settles
+   identity.** Unforgeable, unmintable, and what every signature binds to. Its
+   one weakness is not cryptographic: **it settles the question only if someone
+   looks.** Issue #80 deletes the author address, so a layer still pointing at it
+   would point at a value no longer carried; the `generated-names` requirement
+   *A name is never unique, never an identifier, and never numbered* is the
+   authority, and the rendering obligations below say the same thing. **Stoa
+   addresses are untouched** — this is the author address only.
 
 **Layers 1–3 make an honest mistake less likely; only layer 4 makes a dishonest
-claim false.** An interface showing a name and a glyph and no address has
-shipped three recognition aids and zero guarantees.
+claim false.** An interface showing a name and a glyph and no ~~address~~ public
+key has shipped three recognition aids and zero guarantees.
 
 #### Rendering obligations this creates
 
@@ -1062,14 +1085,19 @@ Collected for §11.1 ("Rendering obligations, collected"), which arrives with th
 `vouching-state` change. Each is a place where core's honest answer is
 incomplete without something the view says:
 
-- **A name is never unique and never an identifier.** The address is the
-  identity. This is the obligation Stoa titles already carry (§4.8, §5.7),
+- **A name is never unique and never an identifier.** ~~The address is the
+  identity.~~ **The public key is the identity** — issue #80 deletes the author
+  address, and the `generated-names` spec's requirement *A name is never unique,
+  never an identifier, and never numbered* is the authority. The obligation
+  itself is unchanged and is the one Stoa titles already carry (§4.8, §5.7),
   arriving a second time by a different route — which is the strongest evidence
-  it is the right rule rather than a local patch. It now applies to the thing
-  *every post is attributed to*, a much larger surface.
+  it is the right rule rather than a local patch. It applies to the thing *every
+  post is attributed to*, a much larger surface. **Stoa addresses are untouched**;
+  this is the author address only.
 - **A name alone is the forgeable half.** Wherever recognition carries weight,
-  and above all wherever a **moderator** is named, the address must be present
-  rather than one click away. Anyone can reach any name by pressing refresh.
+  and above all wherever a **moderator** is named, ~~the address~~ **the public
+  key** must be present rather than one click away. Anyone can reach any name by
+  pressing refresh.
 - **What a name may never do is renumber.** Appending `#2` to a colliding name
   requires agreeing which one was second, which is arrival order — a per-peer
   fact (§3.3), so two peers would number them oppositely and each would be sure

@@ -9,18 +9,19 @@ the mark for an identifier will be wrong in a way the code cannot tell them.
 **The mark is not unique and uniqueness is not achievable.** Addresses are 32
 bytes; any fixed-size visual encoding collides by pigeonhole, and the visual
 encoding here is very much smaller than 32 bytes. Two identities *will*
-eventually share a mark, and an attacker who can regenerate addresses freely
+eventually share a mark, and an attacker who can regenerate keys freely
 can search for one that resembles a target's.
 
-This is the same argument UI-BRIEF obligation 6 makes about generated names,
-and it applies with equal force here. **The address is the identity. The mark
-is a recognition aid.** Wherever recognition carries weight — above all
-wherever a moderator is named — the address must be on screen, not one click
-away. A better mark does not relax that requirement; it is a second forgeable
-channel, and a second forgeable channel is still forgeable.
+This is the same argument the `generated-names` spec makes about generated
+names — *a name is never unique, never an identifier* — and it applies with
+equal force here. **The public key is the identity. The mark is a recognition
+aid.** Wherever recognition carries weight — above all wherever a moderator is
+named — the key must be on screen, not one click away. A better mark does not
+relax that requirement; it is a second forgeable channel, and a second forgeable
+channel is still forgeable.
 
 What the mark buys is real and worth stating precisely: it raises the cost of
-*casual* impersonation, and it puts bytes of the address on screen that nothing
+*casual* impersonation, and it puts bytes of the key on screen that nothing
 else shows.
 
 ## Three numbers, and only one of them is the collision space
@@ -642,7 +643,7 @@ far less often than a name alone, *provided the two are independent*.
 
 `AddressLabel.qml` abbreviates to head 8, middle 8, tail 6 of the **hex body**,
 with the `k:`/`stoa:` prefix stripped *before* slicing — so the offsets are
-prefix-independent. For a 32-byte address (64 hex characters):
+prefix-independent. For a 32-byte value (64 hex characters):
 
 - head: body chars 0..7 → **bytes 0..3**
 - middle: `start = floor((64 - 8) / 2) = 28`, chars 28..35 → **bytes 14..17**
@@ -653,12 +654,35 @@ invisible** at feed density: bytes 4..13 and 18..28.
 
 The mark reads **bytes 4..11** — eight bytes, one per dimension.
 
-**`4..11` is chosen because it is the window the abbreviation cannot see.** It
-touches none of the three displayed groups and lies wholly inside the hidden
-region above. The mark's contribution to a reader is exactly the bytes it reads
-that the abbreviation hides, so a displayed byte contributes nothing — and is
-worse than merely wasted, because it is a byte an attacker can grind while
-watching their progress in the rendered address.
+**Since issue #80 the value being laid out is the PUBLIC KEY**, for an author.
+The author address is deleted, so the name, the mark and the abbreviation all
+read the same 32 bytes, and the layout above is one allocation across three
+channels rather than two channels dividing a digest nothing else reads:
+
+| channel | key bytes | count |
+|---|---|---|
+| abbreviation — head | `0..3` | 4 |
+| mark | `4..11` | 8 |
+| abbreviation — middle | `14..17` | 4 |
+| **generated name** | **`18..23`** | **6** |
+| abbreviation — tail | `29..31` | 3 |
+| **allocated** | | **25** |
+
+Bytes `12..13` and `24..28` — seven in all — are read by no channel. They are
+**unallocated rather than reserved**: nothing depends on their value, and no
+channel may be extended onto them without the `generated-names` spec changing.
+The budget closing with room to spare is what made disjointness affordable.
+
+**A Stoa address is still abbreviated by the same component**, and none of this
+allocation applies to it — #80 deletes the *author* address only, and there is
+no mark-and-name budget over a Stoa address.
+
+**`4..11` is chosen because it is a window no other channel touches.** It
+touches none of the three displayed groups, and it is clear of the name's
+`18..23`. The mark's contribution to a reader is exactly the bytes it reads that
+the abbreviation hides, so a displayed byte contributes nothing — and is worse
+than merely wasted, because it is a byte an attacker can grind while watching
+their progress in the rendered key.
 
 **This window was `12..19`** and overlapped the middle group on `{14, 15, 16,
 17}`: half of what the mark read was already on screen, and only `{12, 13, 18,
@@ -673,25 +697,48 @@ relative position is unchanged, and so is every modulus. Nothing was preserved
 across the move and nothing needed to be: no mark had been persisted and no
 user held one.
 
-**Name and mark are independent, and the reason is domain separation rather
-than a byte reservation.** An earlier version of this passage said bytes 0..11
-were "reserved for the generated-name scheme" and derived independence from
-that split. **That was wrong, and the error is recorded here rather than
-quietly removed**, because both this note and the name design invented the same
-false mechanism separately — which is the more interesting fact.
+**Name and mark are independent, and since issue #80 the reason IS the byte
+allocation.** This passage has now said the opposite twice, and both times it
+was right about the design in front of it. The history is worth keeping,
+because the conclusion has been stable while the argument under it has been
+replaced twice, and a reader who finds only the latest version cannot tell which
+kind of claim they are looking at.
 
-**The two schemes do not share a digest at all.** The name derives from
-`H(NAME_PREFIX || public_key)`; the mark reads the *address*, which is
+**First version, wrong when written.** It said bytes 0..11 were "reserved for
+the generated-name scheme" and derived independence from that split. There was
+no such mechanism. Both this note and the name design invented the same false
+reservation separately — which is the more interesting fact, and is why the
+error was recorded rather than quietly removed.
+
+**Second version, right when written and now superseded.** It replied that the
+two schemes did not share a digest at all: the name derived from
+`H(NAME_PREFIX || public_key)` while the mark read the *address*,
 `SHA256(AUTHOR_ADDRESS_PREFIX || 0x01 || public_key)`. Two distinct prefixes
-over the same key give two independent functions of it, so **a reservation
-between them does no work** — and the hazard the old text warned about, where
-"a near-miss on one correlates with a near-miss on the other", **cannot arise,
-because there are no shared bytes to overlap in.**
+over one key give two independent functions of it, so a reservation between them
+did no work, and the hazard the first version warned about — "a near-miss on one
+correlates with a near-miss on the other" — could not arise, because there were
+no shared bytes to overlap in.
 
-**The conclusion survives intact and is stronger than the argument it had.**
-Grinding for a target's *name* yields a random mark; grinding for the *mark*
-yields a random name; the costs **multiply rather than add**. That holds
-whichever bytes each side reads, and it would still hold if both read byte 0.
+**Third version, and the one that holds now.** Issue #80 deletes the author
+address and removes `NAME_PREFIX`. There is no second digest and no hash between
+the key and any channel, so all three read one shared 32-byte space. **Two
+channels reading one byte are two searches that partly coincide**, and the
+reservation the first version invented is now the thing doing the work. The
+hazard it warned about is real under this design, and the allocation table above
+is what prevents it.
+
+**The conclusion survives all three and is unchanged.** Grinding for a target's
+*name* yields an unrelated mark; grinding for the *mark* yields an unrelated
+name; the costs **multiply rather than add**. What changed is what that rests
+on. Under the second version it held whichever bytes each side read, and would
+have held if both read byte 0. **Under this one it holds only while the sets stay
+disjoint**, which is why `tst_identicon.qml` measures all three channels by
+probing the components rather than by restating their arithmetic.
+
+**The lesson this history actually teaches** is not that either correction was
+careless. It is that *a mechanism can be fictional under one design and
+load-bearing under the next*, so "we checked and it does not exist" has a
+shelf life tied to the design it was checked against.
 
 **Why eight bytes and not more.** The mark's *output* is about 13 bits of
 perceptually distinct results. Eight bytes of input is 64 bits, already exceeding
@@ -715,26 +762,41 @@ four-of-six to four-of-eight, not eliminated.
 
 That revision said moving the read "would fix it, at the cost of the name
 scheme's reserved range or of a coordination change". **Both costs were
-imaginary.** The reserved range was the invented mechanism this document already
-corrects two sections above — the name reads a different digest and reserves no
-address byte — so there was nothing to trade against, and the window moved to
-`4..11` in the `generated-names` change. The mark now reads **8 of the 21 hidden
-bytes and none of the 11 displayed ones**.
+imaginary at the time**, and the window moved to `4..11` in the
+`generated-names` change at no cost at all. The mark now reads **8 of the 21
+bytes the abbreviation hides and none of the 11 it displays**.
 
-The lesson is worth more than the fix: **a cost that is never re-checked
-outlives the reason for it.** This one was recorded honestly, believed for two
-revisions, and was false on the day it was written.
+**The reserved range has since become real, and the move is what left room for
+it.** Under issue #80 the name reads key bytes `18..23`, so there genuinely is
+a range the mark must stay clear of — the cost that was imaginary in one design
+is a live constraint in the next. Had the mark stayed at `12..19` it would now
+collide with the name as well as with the abbreviation, and moving it afterwards
+would have been a change to every identity's appearance made under pressure
+rather than on purpose.
+
+The lesson is worth more than the fix, and it is not the one this section
+originally drew. It said **a cost that is never re-checked outlives the reason
+for it**, which is true. What the sequel adds is the mirror image: *a cost
+correctly dismissed can come back*, because what made it imaginary was a
+property of the design rather than of the cost. Re-check in both directions.
 
 **The visible bundle is still not unique, and it is still grindable.** The
-abbreviation shows the *same byte positions for every address*, so an attacker
+abbreviation shows the *same byte positions for every key*, so an attacker
 grinding for a lookalike grinds only those fixed positions and gets the hidden
 ones free.
 
 **The bundle is grindable at any of the sizes this note has quoted** — 2^38.6
 when that figure was pinned here, 2^46.6 at the name space the `generated-names`
-spec now carries — with unlimited address regeneration. The conclusion has survived every
+spec now carries — with unlimited key regeneration. The conclusion has survived every
 restatement of the number, which is the point: this defeats casual impersonation,
-not a motivated attacker, and the address remains the identity.
+not a motivated attacker, and the public key remains the identity.
+
+**What the disjointness buys is a floor under that, not an escape from it.**
+Because the name, the mark and the abbreviation read disjoint bytes, grinding
+for a convincing bundle means landing all three at once — three independent
+searches whose costs multiply. Grinding any one of them alone is as cheap as it
+ever was. The figures above are about the bundle; they are not a claim that any
+single channel is hard to match.
 
 ## Which dimensions resist grinding
 
