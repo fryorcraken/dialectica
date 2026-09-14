@@ -317,6 +317,52 @@ jobs:
           done
           [ "$fail" -eq 0 ] && echo "ok: every Text declares a textFormat"
 
+      # A TOOLTIP IS A `Text` THE STEP ABOVE CANNOT COUNT, and that blindness
+      # shipped a live defect on this branch rather than being hypothetical.
+      #
+      # `ToolTip.text: someString` creates a Text element that matches neither
+      # of that step's patterns — it is not a `Text {` opening and it carries no
+      # `textFormat:` — so a file doing it passes at `opens=1 formats=1` while
+      # rendering markup through a second, uncounted element. Measured on
+      # `DStatusBar.qml`, where `ToolTip.text: lamp.explanation` bound the one
+      # free string the component takes.
+      #
+      # AND THE FORMAT IS NOT AutoText, which is what makes this its own rule
+      # rather than a wider net for the step above. A ToolTip's default content
+      # item is a `Text` at `textFormat: Text.StyledText` (2) — Controls sets it
+      # EXPLICITLY, so it is markup-rendering unconditionally rather than by
+      # sniffing, and none of the reasoning about AutoText reaches it. Measured
+      # on Qt 6.10.3 against `"<b>OWNED</b> x"`: the attached form paints at
+      # contentWidth 56.66 where a PlainText element paints 102.02 — the tags
+      # are consumed, not drawn.
+      #
+      # WHY A BAN RATHER THAN A COUNT. The attached form routes through a SHARED
+      # tooltip instance owned by the attached type, so there is no per-site
+      # content item a `textFormat:` could be added to — it cannot be fixed in
+      # place, only replaced. `DTip.qml` declares the tooltip and pins PlainText
+      # once, so the rule is total: no attached `ToolTip.<prop>:` binding
+      # anywhere in src/qml. A case-by-case exemption for "this one binds a
+      # literal" is what the step above's comment already warns against — the
+      # literal binding is one edit from a peer-supplied one, and that edit has
+      # no reason to think it touched rendering.
+      #
+      # `sed` strips `//` comments before matching: DTip.qml and both its callers
+      # DISCUSS `ToolTip.text` in prose, and a gate that fires on its own
+      # documentation gets deleted. Anchored to `ToolTip.<lowercase>` followed by
+      # a colon, so `DTip.qml`'s own `ToolTip { … }` root does not match.
+      - name: no bare ToolTip.text — tooltips render markup by default
+        run: |
+          set -eu
+          fail=0
+          for f in dialectica-ui/src/qml/*.qml; do
+            hits=$(sed 's://.*::' "$f" | grep -cE '(^|[^A-Za-z0-9_])ToolTip\.[a-z][A-Za-z]*[[:space:]]*:' || true)
+            if [ "$hits" -gt 0 ]; then
+              echo "::error file=$f::$hits attached ToolTip binding(s) — a ToolTip's default content item is a Text at textFormat StyledText (2), so this renders markup. Declare a 'DToolTip { text: ...; visible: ... }' child instead; it pins Text.PlainText once."
+              fail=1
+            fi
+          done
+          [ "$fail" -eq 0 ] && echo "ok: no attached ToolTip bindings"
+
       # Every `lgs basecamp` verb rewrites scaffold.toml — `setup`, `modules`
       # AND `install`, per PHASE0-FINDINGS §4. This gate used to count comment
       # lines, because the comments were the irreplaceable part and a wipe was

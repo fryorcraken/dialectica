@@ -19,3 +19,4 @@ DOnboardingScreen 1.0 DOnboardingScreen.qml
 DStatusBar 1.0 DStatusBar.qml
 DVouchStamp 1.0 DVouchStamp.qml
 DIdentityChip 1.0 DIdentityChip.qml
+DTip 1.0 DTip.qml
