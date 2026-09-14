@@ -22,7 +22,21 @@
 - [ ] tests — `tester`
 - [ ] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
-- [ ] review: readability — `code-reviewer`
+- [x] review: readability — `code-reviewer` — twelve findings, seven for
+      `dev-writer` and five for `tester`. The central distinction is stated at the
+      field, the sort, the wire and the schema, and reaches the designer brief;
+      `asserted_time.rs` and `arrival.rs` argue the shape rather than the rule.
+      What is wrong is prose that outlived the change: `feed.rs` still argues no
+      Lamport value reaches us (the retraction sweep listed four files and missed
+      it), `moderation.rs` still cites recorded arrivals in its convergence
+      argument, `Placed` claims a compiler guarantee privacy actually provides,
+      `design.md` cites a spec sentence that does not exist, `tasks.md` says six
+      decisions where there are nine, `check_layout` does not record the near-miss
+      that would have bricked every store, and `now_ms` names both clocks. On the
+      tests: two `arrival.rs` bound tests carry one identical assertion under two
+      names, `sqlite.rs`'s sentinel-regression loop is inert under the new
+      two-column shape while instructing the reader to preserve it, and a
+      `moderation.rs` test calls its fixtures forged while asserting they verify.
 - [ ] review: architecture — `code-reviewer`
 - [ ] review: spec-test — `spec-test-reviewer`
 - [x] review: design — `design-reviewer` — six findings, all gaps rather than
