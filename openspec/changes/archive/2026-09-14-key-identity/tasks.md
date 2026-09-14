@@ -11,9 +11,19 @@
 - [x] review: architecture — `code-reviewer`
 - [x] review: spec-test — `spec-test-reviewer`
 - [x] review: design — `design-reviewer`
-- [ ] findings all ticked, `findings/` deleted — `closer`
-- [ ] `openspec validate --strict`, then `archive` — `closer`
-- [ ] CI green, PR merged — `closer`
+- [x] findings all ticked, `findings/` deleted — `closer`. Both sides of the
+      gate run: no `- [ ]` line anywhere under `findings/`, and every file
+      carries boxes except `security.md`, which states **None** as an explicit
+      verdict backed by five run mutations and one drafted finding disproved by
+      execution. A zero-finding conclusion, not an entry the gate cannot see.
+- [x] `openspec validate --strict`, then `archive` — `closer`. Every MODIFIED
+      and REMOVED heading matched a live `### Requirement:` line character for
+      character before archiving; the one that did not (`…versioned together and
+      frozen`) is the RENAMED block's FROM. Archive reported + 1, ~ 6, - 2, → 1,
+      matching the delta. Promotion diffed: both REMOVED requirements gone, the
+      rename applied, the ADDED one present, `## Purpose` intact, and no
+      `name_digest`/`NAME_PREFIX` surviving.
+- [x] CI green, PR merged — `closer`
 
 ## Implementation
 
