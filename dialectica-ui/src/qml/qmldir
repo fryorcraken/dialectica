@@ -15,3 +15,6 @@ DClipboardSink 1.0 DClipboardSink.qml
 DStoaListScreen 1.0 DStoaListScreen.qml
 DJoinScreen 1.0 DJoinScreen.qml
 DOnboardingScreen 1.0 DOnboardingScreen.qml
+DStatusBar 1.0 DStatusBar.qml
+DVouchStamp 1.0 DVouchStamp.qml
+DIdentityChip 1.0 DIdentityChip.qml
