@@ -17,8 +17,26 @@ TestCase {
         DVouchStamp {}
     }
 
+    // THE HELPER SUPPLIES `hasIdentity: true` UNLESS THE CASE SETS IT, and the
+    // component's own default is `false`. The two are deliberately opposite.
+    //
+    // Every test below `test_the_identity_gate_defaults_closed` is about the
+    // (vouched, revealed) rule, and that rule is only observable on a machine
+    // that HAS an identity — so a helper defaulting closed would make each of
+    // them pass by rendering nothing, which is the vacuous-green shape this
+    // file exists to avoid. The component defaulting closed and the fixture
+    // defaulting open is the combination where each test asserts what it names.
+    //
+    // The component's default is pinned separately, by a test that builds
+    // through the factory directly rather than through this helper.
     function stamp(props) {
-        var s = stampFactory.createObject(null, props === undefined ? {} : props);
+        var p = {};
+        if (props !== undefined)
+            for (var k in props)
+                p[k] = props[k];
+        if (p.hasIdentity === undefined)
+            p.hasIdentity = true;
+        var s = stampFactory.createObject(null, p);
         verify(s !== null, "DVouchStamp failed to instantiate");
         return s;
     }
@@ -49,6 +67,73 @@ TestCase {
                 compare(s.opacity, 0, c.why);
             s.destroy();
         }
+    }
+
+    // SPEC.md:88 — "It is not drawn at all while this machine has no identity."
+    //
+    // The third condition, and it OVERRIDES both others. Without it a reader
+    // with no identity meets VOUCH prompts on hover for an action they cannot
+    // take — and, worse, a stamp already `vouched` would keep claiming a
+    // decision this machine can no longer make.
+    //
+    // ALL FOUR (vouched, revealed) COMBINATIONS are driven under
+    // `hasIdentity: false`, not just the hovered one. The sweep above is
+    // complete over the two properties that used to exist, so a gate applied to
+    // only one arm — say `opacity: hasIdentity && revealed ? …` keeping the
+    // `vouched ||` disjunct ungated — would pass three of these four and be
+    // caught by nothing else in the file.
+    function test_no_identity_means_no_stamp_in_any_state() {
+        var cases = [
+            { vouched: false, revealed: false },
+            { vouched: false, revealed: true },
+            { vouched: true,  revealed: false },
+            { vouched: true,  revealed: true }
+        ];
+        for (var i = 0; i < cases.length; i++) {
+            var s = stamp({ vouched: cases[i].vouched,
+                            revealed: cases[i].revealed,
+                            hasIdentity: false });
+            compare(s.opacity, 0,
+                    "a machine with no identity renders a stamp (vouched="
+                    + cases[i].vouched + " revealed=" + cases[i].revealed
+                    + ") — SPEC.md:88 says it is not drawn at all");
+            s.destroy();
+        }
+    }
+
+    // The converse, which stops the gate being satisfied by a stamp that never
+    // draws. Without this, `opacity: 0` would pass the test above.
+    function test_an_identity_restores_the_ordinary_rule() {
+        var s = stamp({ vouched: true, revealed: false, hasIdentity: false });
+        compare(s.opacity, 0);
+        s.hasIdentity = true;
+        // `Behavior on opacity` animates over 120ms, so the value immediately
+        // after the assignment is still mid-transition. `tryVerify` polls
+        // rather than sleeping a fixed time, so this neither flakes on a slow
+        // machine nor passes on a component that never moves.
+        tryVerify(function() { return s.opacity === 1; }, 2000,
+                  "gaining an identity did not bring the vouched stamp back — "
+                  + "the gate is read once rather than bound");
+        s.destroy();
+    }
+
+    // AND THE GATE DEFAULTS CLOSED. A caller that forgets the property gets no
+    // stamp rather than a stamp claiming an identity the machine may not have.
+    // This is the direction the chip's `=== true` discipline already takes:
+    // failing open here would put the obligation back on every screen.
+    //
+    // BUILT THROUGH THE FACTORY, NOT THROUGH `stamp()`, because the helper
+    // supplies `hasIdentity: true` on purpose (see its comment) and would hide
+    // exactly what this asserts.
+    function test_the_identity_gate_defaults_closed() {
+        var s = stampFactory.createObject(null,
+                                          { vouched: true, revealed: true });
+        verify(s !== null, "DVouchStamp failed to instantiate");
+        compare(s.hasIdentity, false,
+                "hasIdentity defaults true — a caller that forgets it renders "
+                + "a vouch affordance on a machine with no identity");
+        compare(s.opacity, 0);
+        s.destroy();
     }
 
     // The asymmetry stated on its own, because it is the decision: `revealed`

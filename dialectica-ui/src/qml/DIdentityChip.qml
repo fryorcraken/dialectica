@@ -61,7 +61,22 @@ Rectangle {
             // A generated name is derived from the key and is NOT an
             // identifier — two keys can produce names that look alike, and
             // arrival order differs per peer so they are never numbered apart.
-            // PlainText because a name is peer-supplied text like any other.
+            //
+            // PlainText as DEFENCE IN DEPTH, and NOT because the name is
+            // peer-supplied — which is what this comment used to say, and is
+            // contradicted by the merged contract. `generated-names/spec.md`
+            // requires that the name SHALL NOT travel ("no reply SHALL carry a
+            // display name... a name is derived by whoever holds the key, at
+            // the point of rendering") and that every wordlist entry is ASCII
+            // and lowercase, precisely so "a generated name can never itself
+            // carry a bidi override or a homoglyph — it removes the attack from
+            // this surface rather than mitigating it."
+            //
+            // So the format is pinned against a name arriving from somewhere
+            // the contract did not anticipate, not against the wire. Stating
+            // the wrong mechanism describes a larger hole than the code has and
+            // would send the next reader looking for a sanitiser this string
+            // does not need.
             text: root.generatedName
             font: DTheme.bodySmall
             color: DTheme.ink

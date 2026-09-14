@@ -22,9 +22,21 @@ import QtQuick.Layouts
 RowLayout {
     id: root
 
-    property string deliveryState: "ok"
-    property string storageState:  "ok"
-    property string zoneState:     "ok"
+    // DEFAULTED TO `degraded`, NOT `ok`, and the bundle's own default is `ok`.
+    //
+    // This is `normalisedState`'s rule applied to the case that reaches a screen
+    // FIRST. A lamp given a string the UI cannot interpret degrades, because
+    // green is a claim the software cannot back; a lamp given NOTHING has even
+    // less to back one with. An unbound bar rendering three green lamps is the
+    // interface asserting this machine works on the strength of no data at all,
+    // which is the same overclaim in its strongest form — and it is the state
+    // every screen passes through between appearing and core answering.
+    //
+    // NO SPEC: the bundle is silent on what an unbound lamp should claim.
+    // Marked in tst_status_bar.qml.
+    property string deliveryState: "degraded"
+    property string storageState:  "degraded"
+    property string zoneState:     "degraded"
     property string deliveryText: ""
     property string storageText:  ""
     property string zoneText:     ""

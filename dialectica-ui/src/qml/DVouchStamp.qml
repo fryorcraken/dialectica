@@ -6,6 +6,9 @@ import QtQuick
 //   vouched     — inked stamp, ALWAYS visible, because it is the viewer's own
 //                 record of a decision and must not need a hover to be found.
 //
+// Both are gated on `hasIdentity`. SPEC.md:88: "It is not drawn at all while
+// this machine has no identity."
+//
 // A VOUCH IS NEVER PUBLISHED AND NEVER COUNTED, so there is no number here and
 // no property that could hold one. That is a design constraint expressed as an
 // absence: a count is the thing a reader would most naturally want, and the
@@ -18,6 +21,23 @@ Rectangle {
 
     property bool vouched: false
     property bool revealed: false        // pointer is over the post row
+
+    // SPEC.md:88's third condition, and it DEFAULTS CLOSED.
+    //
+    // The gate is in the component rather than left to the caller, and that is
+    // the decision. A vouch stamp will be placed by every post row in every
+    // feed; a contract saying "gate this yourself" is one that has to be got
+    // right at each of those sites and is silent when it is not — the shape
+    // CLAUDE.md names as the signal to put the invariant in the data structure
+    // instead. Here it holds by construction for every consumer at once.
+    //
+    // `false` and not `true` for the same reason the chip's consumers are told
+    // to write `capability.canPost === true`: a caller that forgets the
+    // property gets no affordance, rather than a VOUCH prompt on a machine that
+    // cannot vouch. Failing open would put the obligation back on the caller
+    // and lose what moving the gate bought.
+    property bool hasIdentity: false
+
     signal toggled()
 
     // copy.json `common.vouch` / `common.vouched`, verbatim.
@@ -37,7 +57,13 @@ Rectangle {
     // The whole visibility rule, in one binding. `vouched ||` is the
     // load-bearing half: a vouch the viewer has to hover to rediscover is a
     // record they cannot rely on having made.
-    opacity:      vouched || revealed ? 1 : 0
+    //
+    // `hasIdentity &&` gates BOTH disjuncts, which is why it is written outside
+    // the parentheses rather than folded into one of them. Gating only the
+    // `revealed` arm would still draw a `vouched` stamp on a machine with no
+    // identity — a claim about a decision this machine can no longer make — and
+    // would pass three of the four states the no-identity sweep drives.
+    opacity:      hasIdentity && (vouched || revealed) ? 1 : 0
     Behavior on opacity { NumberAnimation { duration: 120 } }
 
     // The double rule of the press aesthetic: a paper gap, then a second rule.
