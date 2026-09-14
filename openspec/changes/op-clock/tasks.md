@@ -40,7 +40,26 @@
       its neighbours all carry — measured sound today, latent tomorrow.
       `cargo mutants` attempted and abandoned: the unmutated baseline alone is
       49s, so 120 mutants timed out at the cap.
-- [ ] review: security — `code-reviewer`
+- [x] review: security — `code-reviewer` — two findings in `findings/security.md`,
+      one for `dev-writer` and one for `spec-writer`. The piece's three
+      load-bearing defences hold under attack and the measurements are recorded
+      so they are not redone: the asserted time reaches no comparison anywhere
+      (`OpEntry` cannot name it, no numeric field leaves core, no SQL column
+      carries it) and `format_asserted` is total over a debug sweep of the `u64`
+      range; the ceiling attack is priced at ~1.8e13 ops and a `u64::MAX` op
+      leaves the victim publishing at its own unchanged clock; no path refuses or
+      rewrites an op for its clock, and the version-2 decoder survived every
+      prefix, all 1360 single-byte mutations and a lying list count without
+      panicking. What is wrong is a cost: the publish path now calls
+      `OpLog::clock`, whose only implementation is a trait default that decodes
+      every body in the Stoa to read one `u64` from each — 438 ms per publish
+      over 1000 ops of 140 KiB, linear, against an O(1) publish on `main`, with
+      the same answer available from the `score_epoch` column in a third of the
+      time. The second is a spec gap: a published counter is an intra-Stoa
+      reception oracle an observer can probe, and `op-ordering` names only the
+      cross-Stoa leak. `cargo mutants` attempted and abandoned — 99 mutants for
+      `asserted_time.rs` alone, each rebuilding the crate — so no mutation result
+      backs any claim here.
 - [x] review: readability — `code-reviewer` — twelve findings, seven for
       `dev-writer` and five for `tester`. The central distinction is stated at the
       field, the sort, the wire and the schema, and reaches the designer brief;
