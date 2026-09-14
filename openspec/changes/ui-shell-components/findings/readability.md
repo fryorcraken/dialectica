@@ -8,7 +8,7 @@ Reviewed at `d9fe78f`: the three new components, the `DTheme`/`FlatButton`/
 
 ## Findings
 
-- [ ] **`dev-writer`** — `openspec/changes/ui-shell-components/design.md:120` —
+- [x] **`dev-writer`** — `openspec/changes/ui-shell-components/design.md:120` —
       D4 cites `ModerationScreen.qml:94` as if it were a file in this tree
       **Scenario:** D4 opens "`ModerationScreen.qml:94` wants a de-emphasised mark".
       A reader takes that as the consumer justifying `muted` and goes looking:
@@ -24,7 +24,18 @@ Reviewed at `d9fe78f`: the three new components, the `DTheme`/`FlatButton`/
       lookup, and the failed lookup is the kind that reads as a missing file
       rather than as a bundle reference.
 
-- [ ] **`dev-writer`** — `openspec/changes/ui-shell-components/design.md:102` —
+      **Fixed.** D4 now opens "**The bundle's** `ModerationScreen.qml`" and says
+      in the same sentence that it is not a file in this tree and that Non-Goals
+      excludes building it, so the two lines the finding notes as contradictory
+      now sit together.
+
+      The line number is dropped rather than qualified: the bundle is
+      gitignored, so a line reference into it is one no reader of this repo can
+      check. Also recorded there, since the lookup was going to be attempted
+      anyway: the bundle's own `Identicon.qml` has **no `muted` property at
+      all**, so that `ModerationScreen` passes one that is silently dropped.
+
+- [x] **`dev-writer`** — `openspec/changes/ui-shell-components/design.md:102` —
       D3's citation `Identicon.qml:95-101` points at the wrong lines
       **Scenario:** D3 says "`Identicon.qml:95-101` records that the
       angular/curved split halved the vocabulary". Lines 95-101 of
@@ -40,7 +51,12 @@ Reviewed at `d9fe78f`: the three new components, the `DTheme`/`FlatButton`/
       "self-invalidating" rule warns about: it rots on any edit above it and
       cannot fail loudly. Cite the function (`_form()`) or the phrase instead.
 
-- [ ] **`tester`** — `dialectica-ui/src/qml/FlatButton.qml:29` — the `font`
+      **Fixed**, taking the suggestion: D3 now cites "the comment above
+      `_form()`" and quotes the phrase, with no line range. The old range and
+      why it was wrong are kept in a parenthesis, so the next reader learns the
+      rule rather than just inheriting the corrected text.
+
+- [x] **`tester`** — `dialectica-ui/src/qml/FlatButton.qml:29` — the `font`
       field of a kind is described in a comment and pinned by no test
       **Scenario:** `secondary-micro`'s comment says it is "`secondary` at label
       type with the padding pulled in", and the table's `font: DTheme.label` is
@@ -61,7 +77,22 @@ Reviewed at `d9fe78f`: the three new components, the `DTheme`/`FlatButton`/
       sixth entry added to the table with a field missing fails here" is true of
       four fields and false of the fifth.
 
-- [ ] **`dev-writer`** — `dialectica-ui/src/qml/DStatusBar.qml:14` — "the ONLY
+      **Fixed** in `648b462`, and the mutation this box measured surviving now
+      fails. `test_secondary_micro_is_a_smaller_secondary` asserts the label's
+      `font.pixelSize` against `DTheme.label.pixelSize` **and** as a relation to
+      `secondary`'s — the relation as well as the token, because a token
+      comparison alone passes when both sides read `undefined`, which is the
+      mechanism that let a renamed colour token through elsewhere in this piece.
+
+      Re-measured with `secondary-micro`'s `font` changed to `DTheme.body`:
+      `FAIL secondary-micro is not set at label type / Actual 15 / Expected 9`.
+
+      The stated promise is now true of all six fields, by a different route
+      than this box assumed: `test_every_kind_declares_every_field` sweeps every
+      required key over a kind list derived from the table itself. That was
+      filed separately by the architecture reviewer and the two fixes met.
+
+- [x] **`dev-writer`** — `dialectica-ui/src/qml/DStatusBar.qml:14` — "the ONLY
       green and orange in the design" is false as written; `DTheme.qml:65` is
       the qualified version
       **Scenario:** `DStatusBar.qml:14` says "The lamp colours are the ONLY green
@@ -77,6 +108,17 @@ Reviewed at `d9fe78f`: the three new components, the `DTheme`/`FlatButton`/
       **Severity:** low — defect in the prose, not the code. It matters because
       an absolute claim a reader disproves on first check stops being consulted,
       and this one is the reason a future author will not reach for green.
+
+      **Fixed** in `4ab8c84`, in **both** places rather than only the one the
+      box names. `DStatusBar.qml` now says "the only green and orange THE
+      INTERFACE uses"; `DTheme.qml`'s section header, which the box correctly
+      identifies as the unqualified half of the file it sends the reader to, is
+      now "the only INTERFACE green and orange".
+
+      Both carry the reason the qualifier is load-bearing rather than pedantic —
+      that the marks are outside the rule rather than exceptions to it, because
+      an identicon ink is selected by an address and never signals a state — so
+      a reader who checks finds the claim and its scope together.
 
 ## What was clean
 

@@ -127,6 +127,47 @@ TestCase {
         c.destroy();
     }
 
+    // ---- an identity claimed but not yet supplied ------------------------
+
+    // THE STATE EVERY SCREEN PASSES THROUGH: `hasIdentity: true` with the
+    // address not yet arrived from core.
+    //
+    // `Identicon` pads a short or malformed address to 64 hex characters so it
+    // renders something stable rather than throwing, which is right for the
+    // component and wrong here: an empty address pads to 64 zeros and draws a
+    // perfectly valid, deterministic, RECOGNISABLE mark — the mark of the zero
+    // address — while `CURRENT IDENTITY` sits beside it and `AddressLabel`
+    // renders empty.
+    //
+    // So the chip would assert "this is who you are" over a mark belonging to
+    // nobody, with the address that is supposed to be the real identifier
+    // absent. That is precisely what `Identicon`'s own placement obligation and
+    // this chip's header comment exist to prevent — "a reader who needs to know
+    // WHO this is reads the address", and here there is no address to read.
+    //
+    // Asserted on the MARK rather than on a new property, because the mark is
+    // the forgeable channel and the thing a reader would recognise.
+    function test_an_identity_with_no_address_yet_draws_no_mark() {
+        var c = chip({ hasIdentity: true, generatedName: "", identityAddress: "" });
+        compare(identiconsOf(c).length, 0,
+                "the chip draws a mark for an empty address — that is the "
+                + "zero address's mark, which belongs to nobody, labelled "
+                + "CURRENT IDENTITY");
+        c.destroy();
+    }
+
+    // And it comes back when the address arrives, so the guard above is not
+    // satisfied by a chip whose mark never draws.
+    function test_the_mark_arrives_with_the_address() {
+        var c = chip({ hasIdentity: true, generatedName: "", identityAddress: "" });
+        compare(identiconsOf(c).length, 0);
+        c.identityAddress = addr;
+        compare(identiconsOf(c).length, 1,
+                "the mark did not appear when the address arrived");
+        compare(identiconsOf(c)[0].address, addr);
+        c.destroy();
+    }
+
     // ---- no identity -----------------------------------------------------
 
     // copy.json feed.readOnlyFooter, verbatim and hardcoded.

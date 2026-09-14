@@ -20,7 +20,7 @@ not carry.
 
 ---
 
-- [ ] **`dev-writer`** — `openspec/changes/ui-shell-components/` has **no
+- [x] **`dev-writer`** — `openspec/changes/ui-shell-components/` has **no
       `.openspec.yaml` and no `proposal.md`**, so the no-spec decision is
       recorded only in prose the tooling cannot read, and the change **fails
       `openspec validate --strict` today**. **Verified by running it** from the
@@ -45,7 +45,35 @@ not carry.
       reads as two problems rather than one". Every one of the 24 archived
       changes carries a `proposal.md`; this is the first that does not.
 
-- [ ] **`dev-writer`** — `design.md` Decisions is **silent on
+      **Fixed.** Both files added, with the `schema: spec-driven` line and the
+      comment explaining why it is required. Verified by running the gate the
+      box names:
+
+      ```
+      $ openspec validate ui-shell-components --strict
+      Change 'ui-shell-components' is valid
+      ℹ [INFO] skip_specs is set in .openspec.yaml: change declares no
+        spec-level behavior changes, zero deltas accepted
+      ```
+
+      The INFO line is the confirmation that matters — it says `skip_specs` was
+      *honoured*, which is exactly what the missing `schema:` line would have
+      broken silently.
+
+      The no-delta argument is re-measured rather than copied from the
+      precedent: `grep -rniIl` over `openspec/specs/` for the three component
+      names returns **nothing**, and the two files matching
+      `tooltip|textFormat|PlainText` match on the cryptographic sense of
+      "plaintext" (`keystore/spec.md:33,309`,
+      `view-identity-onboarding/spec.md:562`). So there is no requirement to
+      modify and none to delete.
+
+      `.openspec.yaml` also names what `skip_specs` does **not** say: four
+      behaviours here are chosen rather than specified, each marked `NO SPEC:`
+      beside the test that pins it. (Four, not three — the lamp default became
+      the fourth; see the box below.)
+
+- [x] **`dev-writer`** — `design.md` Decisions is **silent on
       `statusFailed` being the same value as `accent`**, which is a decision with
       a real alternative and a paragraph of justification already written for it.
       `DTheme.qml:66-72` argues it at length — "A failed lamp and a destructive
@@ -60,7 +88,18 @@ not carry.
       to the roles staying separable. By the standing rule that anything a
       comment justifies at length was a decision, this belongs under Decisions.
 
-- [ ] **`dev-writer`** — `design.md` does not record that **all three lamp state
+      **Fixed** — `design.md` D5c. It carries the argument the box quotes (same
+      alarm at different scales; two tokens because two roles, not because the
+      values differ) and the rejected alternative (a fourth distinct red).
+
+      It also carries the cost the box identifies, which the source comment does
+      not: two assertions in this suite hold today partly *because* the values
+      happen to be equal, and neither would notice if the roles were collapsed
+      into one token. Recorded rather than fixed — the test that would catch it
+      asserts two tokens are separately *declared*, which is a statement about
+      source rather than about rendering and is not what those tests are for.
+
+- [x] **`dev-writer`** — `design.md` does not record that **all three lamp state
       properties default to `"ok"`** (`DStatusBar.qml:20-22`), which is the same
       claim D2 was written to prevent. D2 argues, correctly, that an
       unrecognised state must not read as green because "a lamp exists to say
@@ -77,7 +116,27 @@ not carry.
       unbound path — which is the shape CLAUDE.md flags as the moment to reshape
       rather than add a fourth check. No test pins the default either way.
 
-- [ ] **`dev-writer`** — `design.md` records no decision about **`DVouchStamp`
+      **Fixed by changing the code, not by arguing for the default.**
+
+      The box is right that this is D2's claim in a stronger form, and right
+      that "a screen always binds all three" is a fact about callers that do not
+      exist yet. The defaults are now `"degraded"`.
+
+      `test_a_bar_nobody_has_bound_yet_claims_nothing` pins it, written first
+      and watched fail against the old defaults (`Actual ok / Expected
+      degraded`). It asserts the rendered dot colour as well as the property, so
+      a default the constructor sets and the binding ignores would not pass.
+
+      Recorded as `design.md` **D2a**, deliberately its own entry rather than a
+      sentence inside D2 — the box's diagnosis is that this was a *partial
+      application* of D2's rule, and a separate entry is what makes the second
+      half visible.
+
+      The closing suggestion is taken too: it carries a `NO SPEC:` marker in
+      both the component and the test, so the fourth unspecified behaviour is
+      found by the same grep as the other three.
+
+- [x] **`dev-writer`** — `design.md` records no decision about **`DVouchStamp`
       duplicating an indicator `PostHeader.qml` already renders**, and the
       Non-Goals give a reason for leaving `PostHeader` alone that is not the real
       one. `design.md:43-45` says `PostHeader` is untouched because it "carr[ies]
@@ -93,7 +152,24 @@ not carry.
       "open design questions" means the next reader does not learn that the
       bundle already answered it.
 
-- [ ] **`dev-writer`** — `design.md` does not record that **`DVouchStamp`'s
+      **Fixed** — `design.md` **D10**, which states the specific situation the
+      box describes rather than the general one: `PostHeader` renders a rival
+      `YOU VOUCHED` chip, the bundle's own `PostHeader` has no such chip and
+      instantiates `VouchStamp` in its place with `onToggled`, so the bundle
+      resolves the duplication **by replacement**.
+
+      It names which survives — the stamp, because it is the bundle's answer and
+      it carries the hover rule and the identity gate, and the chip carries
+      neither — and who inherits the removal: whichever piece rewires
+      `PostHeader`'s attribution row, since that piece must thread `revealed`
+      from the feed row and pass `hasIdentity`, work with no meaning until a
+      feed row exists to thread from.
+
+      The Non-Goals sentence the box calls out is corrected there too: "open
+      design questions" is true of `PostHeader` and is not the reason for *this*
+      one, and D10 says so.
+
+- [x] **`dev-writer`** — `design.md` does not record that **`DVouchStamp`'s
       `vouched: bool` forecloses a distinction `docs/PLAN.md` requires**, and
       this is the one place the piece brushes PLAN. `PLAN.md:2240-2243`
       (`origin/main`) distinguishes **earned** weight from a **declared** vouch
@@ -112,7 +188,17 @@ not carry.
       `tst_vouch_stamp.qml:114-130` pins it by rendering rather than by property
       name. Worth an entry saying the boolean is deliberate and what it defers.
 
-- [ ] **`dev-writer`** — `DIdentityChip.qml:62-63` **states a reason for
+      **Fixed** — `design.md` **D10a**, which says exactly that: the boolean is
+      deliberate, the alternative (a tri-state, or a second property) was real,
+      and what it defers is PLAN's earned-versus-declared distinction that a
+      later screen piece will have to widen it for.
+
+      It keeps the box's own framing that this is **not** a contradiction, and
+      adds the reason the boolean is right today rather than merely convenient:
+      a tri-state whose third value nothing can produce is a wider surface with
+      no way to test the widening.
+
+- [x] **`dev-writer`** — `DIdentityChip.qml:62-63` **states a reason for
       `PlainText` that the merged contract contradicts**, and D3 discusses the
       chip's relationship to `Identicon` without touching it. The comment reads
       *"PlainText because a name is peer-supplied text like any other."* A
@@ -134,7 +220,33 @@ not carry.
       generated name, a value the contract says cannot exist; the assertion is
       still worth having, but its comment at `:234-235` repeats the same claim.
 
-- [ ] **`dev-writer`** — `design.md` does not record where **`generatedName`
+      **Fixed**, in the chip and in the test comment, and **not** in
+      `PostHeader.qml:32`.
+
+      The chip's comment now says the format is pinned as **defence in depth**
+      against a name arriving from somewhere the contract did not anticipate —
+      not against the wire — and quotes the two `generated-names` requirements
+      the box cites: the name SHALL NOT travel, and every wordlist entry is
+      ASCII and lowercase so the attack is removed from the surface rather than
+      mitigated on it. It also says why the wrong mechanism mattered: it
+      describes a larger hole than the code has and sends the next reader
+      looking for a sanitiser this string does not need.
+
+      `tst_identity_chip.qml`'s comment now states plainly that the fixture
+      feeds a value the contract says cannot exist, deliberately, and the
+      failure message no longer calls the name "peer-supplied".
+
+      **`PostHeader.qml:32` carries the same wrong comment — confirmed by
+      reading it — and is left alone.** It is outside this piece (Non-Goals),
+      and the box notes the risk that fixing one leaves two copies disagreeing.
+      That risk is accepted over the alternative of widening the piece into a
+      file it declares untouched: the chip's comment is now correct and says
+      why, so the disagreement resolves in favour of the right one for anyone
+      who reads both. Flagged in the report as work for whichever piece next
+      touches `PostHeader` — which, per D10, is the same piece that removes its
+      `YOU VOUCHED` chip.
+
+- [x] **`dev-writer`** — `design.md` does not record where **`generatedName`
       comes from**, and per the merged contract no caller can currently supply
       one. `generated-names/spec.md:74-79` states the gap explicitly: *"How a
       caller reaches the derivation is not settled here... the QML sandbox denies
@@ -149,7 +261,16 @@ not carry.
       precedent, but it is a choice, and a screen piece binding to this property
       will meet #81 with nothing in the record warning it.
 
-- [ ] **`dev-writer`** — three bundle divergences in `DVouchStamp.qml` and
+      **Fixed** — recorded in `design.md` **D11** (beside the DELIVERY lamp,
+      because the two are the same shape: a property whose value no caller can
+      currently supply) and in `docs/UI-BRIEF.md`'s new component section, which
+      is where a screen author binding it will actually be looking.
+
+      Both name issue #81 and say that passing `""` is correct until it lands,
+      so the existing consumer's `generatedName: ""` reads as conformance rather
+      than as an oversight.
+
+- [x] **`dev-writer`** — three bundle divergences in `DVouchStamp.qml` and
       `DIdentityChip.qml` are **unrecorded**, where D5a set the standard by
       recording one. D5a records the `implicitWidth` departure and explains it;
       these got no entry: (a) `DVouchStamp.qml:62` renames the bundle's
@@ -169,7 +290,28 @@ not carry.
       into this piece") and strengthens the case for reading the bundle's QML as
       a sketch rather than a source.
 
-- [ ] **`dev-writer`** — the **DELIVERY lamp has no honest source today**, and
+      **Fixed** — all three recorded, under D5a where the box says the standard
+      was set.
+
+      (a) The `id: text` → `id: stampText` rename, with the reason: the bundle's
+      spelling shadows the `text` property in `implicitWidth:
+      text.implicitWidth`, which is very likely D1's class of defect — a legal
+      spelling that silently resolves to something other than intended.
+
+      (b) The five added `textFormat: Text.PlainText` declarations, now stated
+      as a divergence from the bundle and not only as a fact about this tree's
+      CI, which the box correctly separates.
+
+      (c) The bundle's missing `muted`, recorded under D4 where the bundle's
+      `ModerationScreen` is discussed — the natural place, since that is the
+      file passing the dropped property. D4 now says the bundle asked for a
+      property it did not ship.
+
+      The box's conclusion is taken as well, not just its three items: D4 states
+      that together these make the case for reading the bundle's QML as a sketch
+      and its `SPEC.md` as the contract.
+
+- [x] **`dev-writer`** — the **DELIVERY lamp has no honest source today**, and
       `design.md` defers the wiring without recording that what it defers to does
       not exist. `design.md:46-48` says "No wiring of a status lamp to a real core
       probe... who computes that state is a screen's problem and a core-API
@@ -188,7 +330,23 @@ not carry.
       deferral should name PLAN's obligation rather than describe it as an open
       question.
 
-- [ ] **`dev-writer`** — D2's fallback sits against a **recorded repo-wide
+      **Fixed** — `design.md` **D11**, which quotes PLAN's "no in-flight state
+      is to be designed because no call produces the signal one would wait on"
+      and names the three owed items as "Still not built", rather than
+      describing the answer as elsewhere.
+
+      It states the consequence in the form a screen author meets it: a property
+      with three legal values and no call that can compute any of them. And it
+      says why the record is needed at all — the gap is invisible from the
+      component, because `DStatusBar` is otherwise complete and nothing about it
+      says one of its three lamps cannot currently be told the truth.
+
+      `docs/UI-BRIEF.md` carries it too, with the instruction that follows from
+      it: do not invent a heuristic to fill the lamp.
+
+      The same paragraph covers `generatedName`/#81, which is the same shape.
+
+- [x] **`dev-writer`** — D2's fallback sits against a **recorded repo-wide
       discipline that runs the other way**, and the entry does not acknowledge
       it. `docs/PLAN.md:2770-2773` (`origin/main`): *"An unrecognised ordering is
       an error, never defaulted — the same discipline `stoa.rs` applies to an
@@ -205,7 +363,27 @@ not carry.
       undetectable typo would be complete. A gate over the literal set is the
       obvious mitigation and is not proposed.
 
-- [ ] **`dev-writer`** — the **`UNMODERATE` vocabulary ships with no pointer to
+      **Fixed** — D2 now carries all four parts the box asks for: it names the
+      discipline and quotes `PLAN.md:2770-2773`, says why the rule does not
+      transfer, states the cost, and addresses the mitigation.
+
+      The two reasons it does not transfer, stated rather than asserted: **an
+      API has an error channel and a QML property does not** — `stoa.rs` can
+      return `Err`, where a `color:` binding must produce a colour and the only
+      question is which — and PLAN's objection is specifically to a silent
+      substitution that *overclaims*, where `degraded` claims strictly less than
+      its input did and is visually distinct from green.
+
+      The cost is stated in the box's own words: `lampState: "okk"` renders
+      orange and nothing catches it.
+
+      **On the gate over the literal set: named and not built**, which is a
+      weaker answer than fixing it and is the honest one. It is a piece of its
+      own, and the failure it would catch is a lamp that looks wrong rather than
+      one that lies — which is why it did not displace the tooltip defect or the
+      validation blocker in this pass.
+
+- [x] **`dev-writer`** — the **`UNMODERATE` vocabulary ships with no pointer to
       the irreversibility obligation PLAN calls "not optional"**. `D5` introduces
       `secondary-micro` explicitly as "the per-row `UNMODERATE` in a moderated
       list" (`design.md:182-184`, `FlatButton.qml:29-32`), and `D4` adds `muted`
@@ -224,6 +402,20 @@ not carry.
       it names does not bind, which is the "an affordance that looks pre-approved
       because a previous piece shipped its styling" shape. One line under D5
       naming `PLAN.md:2940-2942` closes it.
+
+      **Fixed** — D5's `secondary-micro` entry now carries it, quoting both
+      halves: that reversibility "exists in the format and is suspended in
+      practice" (`:3885-3890`) and that "an `Unhide` affordance must not be
+      offered as though it works... a UI that shows hide and unhide as a
+      symmetric pair is asserting a symmetry the resolver does not currently
+      have" (`:2940-2942`).
+
+      It keeps the box's own scoping — that strictly this piece contradicts
+      nothing, because a button *kind* is styling and PLAN says the obligation
+      fires when a hide button exists — and states the failure shape as the
+      reason to record it anyway: a screen author reaching for this kind finds a
+      ready-made `UNMODERATE` look with nothing attached saying the action it
+      names does not bind.
 
 ---
 

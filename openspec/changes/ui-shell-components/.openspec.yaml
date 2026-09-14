@@ -1,0 +1,37 @@
+# `schema` is REQUIRED for this file to be valid change metadata, and without it
+# `skip_specs` is silently NOT HONOURED — `openspec validate --strict` reports
+# the marker as ignored and then fails for having no deltas, which reads as two
+# problems rather than one. It must name a known schema; this project's is the
+# built-in `spec-driven`, set in `openspec/config.yaml`.
+schema: spec-driven
+
+# No spec delta: this change adds three shared QML components, two button kinds,
+# three theme tokens and an opacity property. It adds no requirement, because
+# there is no view-facing capability for a shared component to be a requirement
+# OF — every capability `openspec list --specs` reports contracts core behaviour
+# or a named screen, and this piece builds no screen.
+#
+# Measured rather than assumed. Over `openspec/specs/`:
+#
+#   * `grep -rniIl "status lamp\|StatusBar\|vouch stamp\|VouchStamp\|
+#     IdentityChip\|identity chip"` returns NOTHING. No merged requirement
+#     mentions any of the three components, so there is none to modify.
+#   * `grep -rniIl "tooltip\|textFormat\|PlainText"` returns two files, and both
+#     are false matches on the cryptographic sense of "plaintext" —
+#     `keystore/spec.md:33,309` and `view-identity-onboarding/spec.md:562`.
+#     Neither is about rendering.
+#
+# So there is no requirement to modify and none to delete. Adding one would put
+# a clause in the contract describing a QML component's constructor surface,
+# which is not a behaviour the system has — and the contract this piece is built
+# against is the design bundle (`SPEC.md` + `copy.json`), which is gitignored and
+# is not a spec this repo owns.
+#
+# WHAT THAT LEAVES UNCAPTURED, said here rather than left implicit. Four
+# behaviours in this piece are chosen rather than specified and are marked
+# `NO SPEC:` in the code and the tests — an unrecognised lamp state degrading, an
+# unrecognised button kind falling back to `secondary`, the `markMutedAlpha`
+# value, and the lamp state properties' default. A spec-writer grepping
+# `NO SPEC:` finds each decision beside the test that pins it. `skip_specs` says
+# this change writes no requirement; it does not say the behaviour is settled.
+skip_specs: true

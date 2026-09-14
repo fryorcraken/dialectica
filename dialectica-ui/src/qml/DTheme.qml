@@ -62,11 +62,18 @@ QtObject {
     readonly property color accent:    "#a33a2b"   // red: caveats, destructive, moderation
     readonly property color accent2:   "#4a6b74"   // teal: second fill ink, secondary marks
 
-    // ---- status lamps: the ONLY place green and orange are allowed --------
+    // ---- status lamps: the only INTERFACE green and orange ----------------
     // Three lamps replace every prose status line, and the colour is half of
     // what a lamp says. Using green or orange anywhere else would spend the
     // one signal the interface reserves for "is this machine working" on
     // something that is not that.
+    //
+    // "interface" and not "the design": the mark palette below carries
+    // `markGreen` and `markSage`, and they are outside this rule rather than
+    // exceptions to it — an identicon ink is selected by an address and never
+    // signals a state, so it spends nothing. An unqualified claim here is one
+    // a reader disproves thirty lines down, and a rule disproved on first
+    // check stops being consulted.
     //
     // statusFailed is deliberately the SAME value as `accent` rather than a
     // fourth red. A failed lamp and a destructive action are the same alarm at

@@ -10,7 +10,7 @@ for strings — as `tasks.md` states.
 
 ## Findings
 
-- [ ] **`tester`** — `dialectica-ui/tests/tst_vouch_stamp.qml`, the whole file
+- [x] **`tester`** — `dialectica-ui/tests/tst_vouch_stamp.qml`, the whole file
       **Spec clause unpinned:** `SPEC.md:88` — *"It is not drawn at all while
       this machine has no identity."* This is one of the vouch stamp's three
       specified behaviours and no test asserts it. `DVouchStamp` has exactly two
@@ -26,6 +26,35 @@ for strings — as `tasks.md` states.
       records that the gate is the caller's and names which piece owes it — at
       present neither document mentions the clause. **Severity: medium** — a
       silent gap in a spec obligation, not a defect in what was built.
+
+      **Fixed** in `648b462`, taking the first of the two options: **the stamp
+      takes the gate.**
+
+      The reason to put it in the component rather than the contract is this
+      box's own scenario — "a screen binds the stamp into a post row without
+      gating on `hasIdentity`". A stamp is placed by every post row in every
+      feed, so a contract saying "gate this yourself" must be got right at each
+      of those sites and is silent when it is not.
+
+      It defaults **`false`**, so the forgetful caller this box describes gets
+      no stamp rather than the prompts it names. Three tests pin it and all
+      three failed first:
+
+      - `test_no_identity_means_no_stamp_in_any_state` drives **all four**
+        `(vouched, revealed)` combinations under `hasIdentity: false`, not only
+        the hovered one — because the existing sweep is complete over the two
+        properties that existed, so a gate applied to one arm only would pass
+        three of four and be caught by nothing else. Proved: the mutation
+        `vouched || (hasIdentity && revealed)` fails it on the
+        `vouched=true revealed=false` case.
+      - `test_an_identity_restores_the_ordinary_rule` is the converse, so
+        `opacity: 0` cannot satisfy the gate.
+      - `test_the_identity_gate_defaults_closed` builds through the factory
+        rather than the file's helper, which supplies `hasIdentity: true` on
+        purpose so the other tests assert what their names say.
+
+      Recorded as `design.md` D9, and stated in `docs/UI-BRIEF.md` for the
+      screen author who must still pass the property.
 
 - [ ] **`spec-writer`** — `SPEC.md:133`, *"Green and orange appear nowhere else
       in the design"*
@@ -44,6 +73,20 @@ for strings — as `tasks.md` states.
       recording somewhere that outlives this PR. **Severity: low** for this
       piece, **medium** for the suite.
 
+      **`dev-writer` note — this box is addressed to `spec-writer` and is left
+      OPEN.** It asks for a static sweep that is a piece of its own, and I have
+      not written one, so ticking it would claim work nobody did.
+
+      What this pass did do, recorded so the next reader does not re-measure it:
+      the **prose** the box says is the only enforcement has been corrected
+      where it was false. Both `DStatusBar.qml` and `DTheme.qml` claimed green
+      and orange appear nowhere else "in the design", which `markGreen` and
+      `markSage` disprove in the very file cited; both now scope the claim to
+      the interface palette and say why the marks are outside the rule rather
+      than exceptions to it. That makes the comment true, which a sweep would
+      need it to be — it does not make the comment a gate, and this box's point
+      stands unchanged.
+
 - [ ] **`spec-writer`** — the six `copy.json status.tooltips` strings
       **No test checks them against the bundle.** `DStatusBar` takes
       `deliveryText`/`storageText`/`zoneText` as caller-supplied properties, and
@@ -60,6 +103,22 @@ for strings — as `tasks.md` states.
       The delegation itself is a sound design call (`design.md` Non-Goals is
       explicit that state computation is a screen's problem); what is missing is
       the record that the *strings* travel with it. **Severity: low.**
+
+      **`dev-writer` note — addressed to `spec-writer`, left OPEN, but the
+      record this box asks for now exists.**
+
+      `docs/UI-BRIEF.md`'s new *three shared components* section states it in
+      the terms this box uses: the six `copy.json status.tooltips` strings
+      travel with the screen that computes the states, and must be **verbatim**
+      — with this box's own reason, that losing "you have joined nothing yet"
+      from `deliveryNoPeers` costs the distinction between an empty feed and an
+      unreadable store.
+
+      Left open because the box asks a spec-writer whether that obligation
+      belongs in a spec rather than a brief, and that is a question about the
+      contract, not about this piece. The brief is where a screen author looks;
+      whether it is also where the requirement should *live* is the judgement I
+      am not making on their behalf.
 
 ## The three `NO SPEC:` markers — my read on each
 
@@ -98,6 +157,12 @@ survive a retune; **the test does not**. Measured — setting `markMutedAlpha` t
 hardcoded `compare(dim.opacity, 0.45)`. Pinning the literal is the right call
 for an unspecified value, so this is a sentence that overstates what was built,
 not a test that should change.
+
+**Taken, and the sentence changed rather than the test.** D4 now says the test
+asserts the relation *as well as* pinning the literal, and states plainly that
+the relation survives a retune while the test does not — with the reason
+pinning the literal is still right: it makes a retune a deliberate edit to a
+test rather than a silent drift.
 
 ## Mutations run
 
