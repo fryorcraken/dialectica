@@ -976,6 +976,16 @@ arriving from §5.2 needs.
 English adjective, a Greek noun, and a Greek place, joined by `of`. A name is
 recomputed wherever it is shown and is never published.
 
+**The wordlists can never change.** Issue #80 has the name read raw bytes of the
+public key with no hash and no domain separator, so there is no preimage in which
+a scheme version could sit and no way to make two schemes' names distinguishable.
+Changing a wordlist therefore renames every identity at once with nothing able to
+tell the two schemes apart. Taken deliberately, and cheap because a name is a
+pure local function that is never published — the `generated-names` spec's
+requirement *The scheme and its wordlists are frozen, with no version to bump*
+is the authority, and the change's `design.md` carries why the alternative (a
+per-channel hash under its own separator) was not taken.
+
 **What is being chosen is the key, and the name is the key's shadow.** This is
 the one sentence in this section that anyone writing copy has to hold: *"pick
 your identity"* is true, *"pick your username"* is false. A user who believes
@@ -1062,14 +1072,19 @@ Collected for §11.1 ("Rendering obligations, collected"), which arrives with th
 `vouching-state` change. Each is a place where core's honest answer is
 incomplete without something the view says:
 
-- **A name is never unique and never an identifier.** The address is the
-  identity. This is the obligation Stoa titles already carry (§4.8, §5.7),
+- **A name is never unique and never an identifier.** ~~The address is the
+  identity.~~ **The public key is the identity** — issue #80 deletes the author
+  address, and the `generated-names` spec's requirement *A name is never unique,
+  never an identifier, and never numbered* is the authority. The obligation
+  itself is unchanged and is the one Stoa titles already carry (§4.8, §5.7),
   arriving a second time by a different route — which is the strongest evidence
-  it is the right rule rather than a local patch. It now applies to the thing
-  *every post is attributed to*, a much larger surface.
+  it is the right rule rather than a local patch. It applies to the thing *every
+  post is attributed to*, a much larger surface. **Stoa addresses are untouched**;
+  this is the author address only.
 - **A name alone is the forgeable half.** Wherever recognition carries weight,
-  and above all wherever a **moderator** is named, the address must be present
-  rather than one click away. Anyone can reach any name by pressing refresh.
+  and above all wherever a **moderator** is named, ~~the address~~ **the public
+  key** must be present rather than one click away. Anyone can reach any name by
+  pressing refresh.
 - **What a name may never do is renumber.** Appending `#2` to a colliding name
   requires agreeing which one was second, which is arrival order — a per-peer
   fact (§3.3), so two peers would number them oppositely and each would be sure
