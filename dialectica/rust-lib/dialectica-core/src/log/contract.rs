@@ -127,6 +127,7 @@ fn a_moderation_op_from_a_peer_with_no_authority_is_stored<L: OpLog>(log: &mut L
     let op = Op {
         stoa: a_stoa("Agora"),
         author: random_peer.public_key(),
+        clock: None,
         kind: OpKind::Moderate {
             target: signed(a_post("victim")).op.id(),
             action: ModerationAction::Hide,
@@ -198,6 +199,7 @@ fn nothing_is_filtered_on_the_way_in<L: OpLog>(log: &mut L) {
         let op = Op {
             stoa,
             author: author.public_key(),
+            clock: None,
             kind,
         }
         .sign(&author);
@@ -359,7 +361,8 @@ fn a_second_arrival_does_not_overwrite_the_recorded_metadata<L: OpLog>(log: &mut
 
     log.append(op.clone(), Arrival::ordered(5, a_message_id(1)))
         .unwrap();
-    log.append(op, Arrival::ordered(9, a_message_id(2))).unwrap();
+    log.append(op, Arrival::ordered(9, a_message_id(2)))
+        .unwrap();
 
     let entry = log.get(&id).unwrap().unwrap();
     assert_eq!(entry.arrival.lamport(), Some(5));
@@ -396,7 +399,8 @@ fn a_richer_re_arrival_does_not_upgrade_a_poorer_recorded_one<L: OpLog>(log: &mu
     let id = op.op.id();
 
     log.append(op.clone(), Arrival::unordered()).unwrap();
-    log.append(op, Arrival::ordered(7, a_message_id(1))).unwrap();
+    log.append(op, Arrival::ordered(7, a_message_id(1)))
+        .unwrap();
 
     let entry = log.get(&id).unwrap().unwrap();
     assert_eq!(
@@ -405,7 +409,11 @@ fn a_richer_re_arrival_does_not_upgrade_a_poorer_recorded_one<L: OpLog>(log: &mu
         "first-wins keeps the poorer arrival; this is richer-wins"
     );
     assert_eq!(entry.arrival.message_id(), None);
-    assert!(!entry.arrival.is_ordered_by_transport());
+    // `lamport().is_none()` rather than the removed `is_ordered_by_transport()`:
+    // the predicate went with the ordering role, and this test is about the
+    // RECORD — first-wins on what a peer wrote down about a delivery, which is
+    // still a rule even though nothing orders by it.
+    assert!(entry.arrival.lamport().is_none());
 }
 
 #[test]
@@ -437,7 +445,7 @@ fn an_unordered_re_arrival_does_not_erase_a_recorded_order<L: OpLog>(log: &mut L
 
     let entry = log.get(&id).unwrap().unwrap();
     assert_eq!(entry.arrival.lamport(), Some(7));
-    assert!(entry.arrival.is_ordered_by_transport());
+    assert!(entry.arrival.lamport().is_some());
 }
 
 #[test]
@@ -454,24 +462,38 @@ fn a_re_arrival_does_not_move_the_op_in_the_read_order<L: OpLog>(log: &mut L) {
     // The consequence at the level that matters: a thread already rendered
     // must not reorder because a duplicate arrived. Hardcoded expected
     // sequence, both before and after.
-    // Lamport values assigned against op-id order, so a log ignoring the
-    // metadata would fail the `before` assertion rather than agree with it.
-    let (low, high) = two_posts_by_ascending_id();
+    //
+    // Counters assigned against op-id order, so a log ignoring the op's clock
+    // would fail the `before` assertion rather than agree with it.
+    //
+    // **The re-delivery is what this test is about, and the op clock makes the
+    // question sharper rather than softer.** A counter lives inside the signed
+    // preimage, so it is identical on every receipt of one op and cannot be the
+    // thing that moves it — but a re-arrival still carries a RECORDED Lamport
+    // value, and that value is per-delivery and can be anything. The second
+    // delivery below records `99`, which under the rule this change replaced
+    // would have hauled the op to the front. It must now change nothing at all.
+    let (lower_counter, higher_counter) = two_posts_whose_counter_and_id_disagree(1, 2);
 
-    log.append(low.clone(), Arrival::ordered(1, a_message_id(1)))
+    log.append(lower_counter.clone(), Arrival::ordered(1, a_message_id(1)))
         .unwrap();
-    log.append(high.clone(), Arrival::ordered(2, a_message_id(1)))
+    log.append(higher_counter.clone(), Arrival::ordered(2, a_message_id(1)))
         .unwrap();
 
     let before = ids(&log.iter().unwrap());
-    assert_eq!(before, vec![high.op.id(), low.op.id()]);
+    assert_eq!(before, vec![higher_counter.op.id(), lower_counter.op.id()]);
 
-    // Re-deliver the low op claiming a Lamport value that would put it first.
-    log.append(low.clone(), Arrival::ordered(99, a_message_id(1)))
+    // Re-deliver the lower-counter op under a recorded Lamport value that would
+    // put it first if anything still read the transport.
+    log.append(lower_counter.clone(), Arrival::ordered(99, a_message_id(1)))
         .unwrap();
 
     let after = ids(&log.iter().unwrap());
-    assert_eq!(after, vec![high.op.id(), low.op.id()], "the order moved");
+    assert_eq!(
+        after,
+        vec![higher_counter.op.id(), lower_counter.op.id()],
+        "the order moved"
+    );
 }
 
 #[test]
@@ -577,68 +599,154 @@ fn no_two_entries_in_a_read_ever_share_an_op_id_in_sqlite() {
 
 // ─── The read order is the ordering rule's ────────────────────────────────
 
-fn reading_returns_ops_in_lamport_order_not_insertion_order<L: OpLog>(log: &mut L) {
+/// Two ops carrying counters, whose counter order and op-id order DISAGREE.
+///
+/// `lower_counter` carries `low`, `higher_counter` carries `high`, and
+/// `lower_counter` has the LOWER op id — so `cmp_ops` must read
+/// `higher_counter` first while "ascending op id" would read `lower_counter`
+/// first. The two explanations give opposite answers, which is the whole
+/// reason this exists.
+///
+/// **Searched, not hardcoded**, in `two_posts_by_ascending_id`'s style and for
+/// its reason: the ids are hashes, and a body pair chosen by guess would make
+/// every caller's assertion pass under both rules the moment the guess was
+/// wrong — the "a fixture where two explanations give the same answer" family
+/// this project records. The `assert` before the return is what makes the
+/// property a requirement rather than an observation.
+///
+/// Both wall-clocks are `a_post_at`'s fixed one, so nothing here can pass
+/// because two ops differed in a field the order must not read.
+fn two_posts_whose_counter_and_id_disagree(low: u64, high: u64) -> (SignedOp, SignedOp) {
+    assert!(low < high, "the fixture's counters must differ, low first");
+    for n in 0..1000u32 {
+        let lower_counter = signed(a_post_at(&format!("counter {low} #{n}"), low));
+        let higher_counter = signed(a_post_at(&format!("counter {high} #{n}"), high));
+        if lower_counter.op.id() < higher_counter.op.id() {
+            return (lower_counter, higher_counter);
+        }
+    }
+    panic!("no disagreeing pair in 1000 candidates, which is astronomically unlikely");
+}
+
+fn reading_returns_ops_in_counter_order_not_insertion_order<L: OpLog>(log: &mut L) {
     // Hardcoded expected sequence. The ops are appended in exactly the
     // reverse of the order that must come out, so a log returning insertion
     // order fails rather than coincidentally agreeing.
     //
-    // The Lamport values are assigned AGAINST op-id order — the lower op id
-    // gets the lower timestamp — so a read that fell back to ordering by op
-    // id would return the reverse of what is asserted here. Without that,
-    // this test would pass for a log that consulted no metadata at all, on
+    // The counters are assigned AGAINST op-id order — the lower op id gets the
+    // lower counter — so a read that fell back to ordering by op id would
+    // return the reverse of what is asserted here. Without that, this test
+    // would pass for a log that consulted no ordering metadata at all, on
     // whatever order the fixture's hashes happened to land in.
-    let (low_id, high_id) = two_posts_by_ascending_id();
+    //
+    // **The counter is the op's own, and the recorded arrivals are identical**,
+    // so nothing here can pass by way of the transport: two ops with the same
+    // arrival that read back in a definite order read back in it because of
+    // what they carry.
+    let (lower_counter, higher_counter) = two_posts_whose_counter_and_id_disagree(1, 2);
 
-    log.append(low_id.clone(), Arrival::ordered(1, a_message_id(1)))
+    log.append(lower_counter.clone(), Arrival::ordered(1, a_message_id(1)))
         .unwrap();
-    log.append(high_id.clone(), Arrival::ordered(2, a_message_id(1)))
+    log.append(higher_counter.clone(), Arrival::ordered(1, a_message_id(1)))
         .unwrap();
 
     assert_eq!(
         ids(&log.iter().unwrap()),
-        vec![high_id.op.id(), low_id.op.id()],
-        "highest Lamport must read first, against op-id order"
+        vec![higher_counter.op.id(), lower_counter.op.id()],
+        "the highest counter must read first, against op-id order"
     );
 }
 
 #[test]
-fn reading_returns_ops_in_lamport_order_not_insertion_order_in_memory() {
-    reading_returns_ops_in_lamport_order_not_insertion_order(&mut memory());
+fn reading_returns_ops_in_counter_order_not_insertion_order_in_memory() {
+    reading_returns_ops_in_counter_order_not_insertion_order(&mut memory());
 }
 
 #[test]
-fn reading_returns_ops_in_lamport_order_not_insertion_order_in_sqlite() {
-    reading_returns_ops_in_lamport_order_not_insertion_order(&mut sqlite());
+fn reading_returns_ops_in_counter_order_not_insertion_order_in_sqlite() {
+    reading_returns_ops_in_counter_order_not_insertion_order(&mut sqlite());
 }
 
-fn the_message_id_tiebreak_is_used_and_is_not_the_op_id<L: OpLog>(log: &mut L) {
-    // Within one Lamport value, §5.7 breaks ties by ASCENDING message id.
-    // The message ids are assigned against op-id order for the same reason
-    // as above: a log that ignored the arrival and sorted by op id would
-    // return the reverse.
-    let (low_id, high_id) = two_posts_by_ascending_id();
+fn the_op_id_tiebreak_separates_ops_sharing_a_counter<L: OpLog>(log: &mut L) {
+    // Within one counter, the tie is broken by ASCENDING OP ID.
+    //
+    // **The tiebreak moved, and where it moved FROM is the finding.** It used to
+    // be the transport's message id: two ops at one Lamport value read in
+    // ascending message-id order. That is gone, and could not have stayed. A
+    // message id is a per-delivery fact — it is assigned by whatever carried the
+    // op, a peer that never received that delivery has none, and a peer that
+    // received the op twice has two. Ordering by it meant two honest peers
+    // holding the same two ops could put them in different orders, with no error
+    // anywhere. No message id reaches this system now.
+    //
+    // The op id is the opposite kind of value: it is a function of the op's own
+    // signed bytes, so every peer holding the op computes the same one, and an
+    // op has exactly one however many times it arrives. That is what makes it a
+    // tiebreak rather than a coin flip — the order two peers derive from it is
+    // the same order.
+    //
+    // A tie is not a rare case to be tolerated: the counter is the author's own,
+    // and two authors writing concurrently will genuinely assert the same one.
+    // Without this arm those two ops compare Equal and a sort leaves their
+    // relative order to its own stability, which differs with the sequence each
+    // peer received in.
+    //
+    // The ops are APPENDED in descending op-id order, so a log returning
+    // insertion order fails rather than coincidentally agreeing, and their
+    // recorded arrivals are deliberately different — a log still consulting the
+    // transport would order by the message ids below, which rank OPPOSITELY to
+    // the op ids.
+    let (low_id, high_id) = two_posts_at_one_counter(7);
 
-    // The op with the LOWER op id carries the HIGHER message id.
-    log.append(low_id.clone(), Arrival::ordered(7, a_message_id(9)))
-        .unwrap();
     log.append(high_id.clone(), Arrival::ordered(7, a_message_id(1)))
         .unwrap();
+    log.append(low_id.clone(), Arrival::ordered(7, a_message_id(9)))
+        .unwrap();
 
     assert_eq!(
         ids(&log.iter().unwrap()),
-        vec![high_id.op.id(), low_id.op.id()],
-        "the lower message id reads first, against op-id order"
+        vec![low_id.op.id(), high_id.op.id()],
+        "ops sharing a counter read in ascending op-id order"
     );
 }
 
-#[test]
-fn the_message_id_tiebreak_is_used_and_is_not_the_op_id_in_memory() {
-    the_message_id_tiebreak_is_used_and_is_not_the_op_id(&mut memory());
+/// Two ops carrying the SAME counter, lower op id first.
+///
+/// Determined rather than assumed, exactly as `two_posts_by_ascending_id` is and
+/// for its reason: the ids are hashes, so which of two bodies ranks lower is not
+/// something a reader should take on trust, and a stale hardcoded guess would
+/// make the tiebreak test assert the reverse of what it names while still
+/// passing on some other rule.
+fn two_posts_at_one_counter(counter: u64) -> (SignedOp, SignedOp) {
+    let one = signed(a_post_at("alpha", counter));
+    let two = signed(a_post_at("beta", counter));
+    assert_ne!(
+        one.op.id(),
+        two.op.id(),
+        "the fixture needs two distinct ops"
+    );
+    // Both carry the same counter, so the counter arm cannot separate them and
+    // the op-id arm is the only thing that can — which is the point.
+    assert_eq!(
+        one.op.clock.map(|c| c.counter),
+        two.op.clock.map(|c| c.counter),
+        "the fixture must put both ops at one counter"
+    );
+    if one.op.id() < two.op.id() {
+        (one, two)
+    } else {
+        (two, one)
+    }
 }
 
 #[test]
-fn the_message_id_tiebreak_is_used_and_is_not_the_op_id_in_sqlite() {
-    the_message_id_tiebreak_is_used_and_is_not_the_op_id(&mut sqlite());
+fn the_op_id_tiebreak_separates_ops_sharing_a_counter_in_memory() {
+    the_op_id_tiebreak_separates_ops_sharing_a_counter(&mut memory());
+}
+
+#[test]
+fn the_op_id_tiebreak_separates_ops_sharing_a_counter_in_sqlite() {
+    the_op_id_tiebreak_separates_ops_sharing_a_counter(&mut sqlite());
 }
 
 fn ops_the_transport_did_not_order_read_in_ascending_op_id<L: OpLog>(log: &mut L) {
@@ -650,10 +758,7 @@ fn ops_the_transport_did_not_order_read_in_ascending_op_id<L: OpLog>(log: &mut L
     log.append(high.clone(), Arrival::unordered()).unwrap();
     log.append(low.clone(), Arrival::unordered()).unwrap();
 
-    assert_eq!(
-        ids(&log.iter().unwrap()),
-        vec![low.op.id(), high.op.id()]
-    );
+    assert_eq!(ids(&log.iter().unwrap()), vec![low.op.id(), high.op.id()]);
 }
 
 #[test]
@@ -666,59 +771,89 @@ fn ops_the_transport_did_not_order_read_in_ascending_op_id_in_sqlite() {
     ops_the_transport_did_not_order_read_in_ascending_op_id(&mut sqlite());
 }
 
-fn ordered_and_unordered_ops_coexist_with_the_ordered_ones_first<L: OpLog>(log: &mut L) {
-    // The mixture the transport fix will produce: a peer's existing log is
-    // all unordered, and new arrivals carry Lamport values. Both must live
-    // in one log, and the ordering rule places the ordered ones first
-    // whatever their value.
-    // The ORDERED op is given the HIGHER op id, so a log that ignored the
-    // metadata and fell back to op id would put the unordered one first and
-    // fail. Lamport 0 is the sharp value: it must still beat "no metadata".
-    let (unordered, ordered_zero) = two_posts_by_ascending_id();
+/// Two ops — one carrying `counter`, one carrying none — with the
+/// COUNTER-CARRYING one given the HIGHER op id.
+///
+/// That direction is the whole fixture. `cmp_ops` puts every op carrying a
+/// counter ahead of every op that does not, so the counter-carrying op must read
+/// first — and giving it the higher op id means a log that ignored the clock and
+/// fell back to ascending op id returns the OPPOSITE sequence and fails. With
+/// the ids the other way round, both explanations agree and the test proves
+/// nothing.
+///
+/// Searched, not hardcoded, for `two_posts_by_ascending_id`'s reason.
+fn a_counter_carrying_op_with_the_higher_id(counter: u64) -> (SignedOp, SignedOp) {
+    for n in 0..1000u32 {
+        let without = signed(a_post(&format!("no counter #{n}")));
+        let with = signed(a_post_at(&format!("counter {counter} #{n}"), counter));
+        if with.op.id() > without.op.id() {
+            return (without, with);
+        }
+    }
+    panic!("no such pair in 1000 candidates, which is astronomically unlikely");
+}
 
-    log.append(unordered.clone(), Arrival::unordered()).unwrap();
-    log.append(ordered_zero.clone(), Arrival::ordered(0, a_message_id(1)))
-        .unwrap();
+fn ops_with_and_without_a_counter_coexist_with_the_counter_ones_first<L: OpLog>(log: &mut L) {
+    // The mixture rollout produces: a peer's existing log is all ops carrying no
+    // counter, and new ops carry one. Both must live in one log, and the
+    // ordering rule places the counter-carrying ones first WHATEVER the counter.
+    //
+    // The counter-carrying op is given the HIGHER op id, so a log that ignored
+    // the clock and fell back to op id would put the other one first and fail.
+    // Counter 0 is the sharp value: it must still beat "carries none", and it is
+    // precisely where a design encoding absence as a sentinel inside the counter
+    // breaks — `sqlite.rs`'s `counter_sort_key` records that draft.
+    //
+    // **The arrivals are identical**, so the transport cannot be what separates
+    // these two: the only difference between them that any rule could read is
+    // that one op carries a counter and the other does not.
+    let (without, with_zero) = a_counter_carrying_op_with_the_higher_id(0);
+
+    log.append(without.clone(), Arrival::unordered()).unwrap();
+    log.append(with_zero.clone(), Arrival::unordered()).unwrap();
 
     assert_eq!(
         ids(&log.iter().unwrap()),
-        vec![ordered_zero.op.id(), unordered.op.id()],
-        "even Lamport 0 beats an op the transport did not order"
+        vec![with_zero.op.id(), without.op.id()],
+        "even counter 0 beats an op that carries none"
     );
 }
 
 #[test]
-fn ordered_and_unordered_ops_coexist_with_the_ordered_ones_first_in_memory() {
-    ordered_and_unordered_ops_coexist_with_the_ordered_ones_first(&mut memory());
+fn ops_with_and_without_a_counter_coexist_with_the_counter_ones_first_in_memory() {
+    ops_with_and_without_a_counter_coexist_with_the_counter_ones_first(&mut memory());
 }
 
 #[test]
-fn ordered_and_unordered_ops_coexist_with_the_ordered_ones_first_in_sqlite() {
-    ordered_and_unordered_ops_coexist_with_the_ordered_ones_first(&mut sqlite());
+fn ops_with_and_without_a_counter_coexist_with_the_counter_ones_first_in_sqlite() {
+    ops_with_and_without_a_counter_coexist_with_the_counter_ones_first(&mut sqlite());
 }
 
 fn whether_an_arrival_was_ordered_survives_storage<L: OpLog>(log: &mut L) {
-    // The seam for the upstream fix: a peer must be able to say "this thread
-    // is ordered by the network" or "by op id". A store that dropped the
-    // distinction could not.
-    let ordered = signed(a_post("ordered"));
-    let unordered = signed(a_post("unordered"));
-    log.append(ordered.clone(), Arrival::ordered(1, a_message_id(1)))
+    // **This test's SUBJECT has changed and its name has not.** It used to be
+    // "the seam for the upstream fix: a peer must be able to say this thread is
+    // ordered by the network". That is no longer a question anything asks — the
+    // order comes from the op, and whether an op carries a counter is a property
+    // of the op rather than of an arrival.
+    //
+    // What it asserts now is narrower and still worth asserting: **a peer's
+    // record of a delivery survives storage verbatim.** It is a fact the peer
+    // wrote down, it orders nothing, and a store that quietly dropped it would
+    // be discarding evidence — which the `sqlite` schema comment on
+    // `arrival_lamport` is explicit about keeping.
+    let recorded = signed(a_post("recorded"));
+    let bare = signed(a_post("bare"));
+    log.append(recorded.clone(), Arrival::ordered(1, a_message_id(1)))
         .unwrap();
-    log.append(unordered.clone(), Arrival::unordered()).unwrap();
+    log.append(bare.clone(), Arrival::unordered()).unwrap();
 
-    assert!(log
-        .get(&ordered.op.id())
-        .unwrap()
-        .unwrap()
-        .arrival
-        .is_ordered_by_transport());
-    assert!(!log
-        .get(&unordered.op.id())
-        .unwrap()
-        .unwrap()
-        .arrival
-        .is_ordered_by_transport());
+    let back = |op: &crate::op::SignedOp| log.get(&op.op.id()).unwrap().unwrap().arrival;
+    assert_eq!(
+        back(&recorded),
+        Arrival::ordered(1, a_message_id(1)),
+        "a recorded arrival must survive storage verbatim"
+    );
+    assert_eq!(back(&bare), Arrival::unordered());
 }
 
 #[test]
@@ -736,11 +871,17 @@ fn an_empty_message_id_is_recorded_and_is_not_absence<L: OpLog>(log: &mut L) {
     // fact as "no message id was supplied".
     //
     // This is `absence_is_not_equal_to_a_zero_lamport_timestamp`'s shape at
-    // the store, and for SQLite it is what forces `sort_msg_present` to be its
-    // own column: a schema encoding presence as "the blob is not empty" would
-    // pass every other ordering test here and collapse these two arrivals,
-    // reordering an op carrying an empty id as though the transport had
-    // supplied nothing.
+    // the store: a schema encoding presence as "the blob is not empty" would
+    // pass every other test here and collapse these two arrivals, losing the
+    // difference between an op carrying an empty id and one for which the
+    // transport supplied nothing.
+    //
+    // **The distinction is now about the RECORD and not about the order.** It
+    // used to be what forced the message-id presence flag to be its own sort
+    // column; that column is gone with the message-id tiebreak, and no read
+    // consults either of these values for position. It is still a fact the peer
+    // wrote down, and a store that collapsed two different facts into one has
+    // lost evidence whether or not anything currently reads it.
     let empty = signed(a_post("empty id"));
     let absent = signed(a_post("no id"));
     log.append(
@@ -861,10 +1002,7 @@ fn two_stoas_sharing_an_address_prefix_are_not_confused<L: OpLog>(log: &mut L) {
         vec![here.op.id()],
         "a prefix match leaked a Stoa"
     );
-    assert_eq!(
-        ids(&log.iter_stoa(&addr_two).unwrap()),
-        vec![there.op.id()]
-    );
+    assert_eq!(ids(&log.iter_stoa(&addr_two).unwrap()), vec![there.op.id()]);
 }
 
 #[test]
@@ -895,6 +1033,7 @@ fn two_targets_sharing_an_op_id_prefix_are_not_confused<L: OpLog>(log: &mut L) {
     let moderate_one = Op {
         stoa: a_stoa("Agora"),
         author: author.public_key(),
+        clock: None,
         kind: OpKind::Moderate {
             target: target_one,
             action: ModerationAction::Hide,
@@ -904,6 +1043,7 @@ fn two_targets_sharing_an_op_id_prefix_are_not_confused<L: OpLog>(log: &mut L) {
     let moderate_two = Op {
         stoa: a_stoa("Agora"),
         author: author.public_key(),
+        clock: None,
         kind: OpKind::Moderate {
             target: target_two,
             action: ModerationAction::Unhide,
@@ -969,6 +1109,7 @@ fn a_target_restricted_read_returns_every_kind_that_names_the_target<L: OpLog>(l
     let revise = Op {
         stoa: a_stoa("Agora"),
         author: author.public_key(),
+        clock: None,
         kind: OpKind::Revise {
             target,
             body: "edited".to_string(),
@@ -979,6 +1120,7 @@ fn a_target_restricted_read_returns_every_kind_that_names_the_target<L: OpLog>(l
     let moderate = Op {
         stoa: a_stoa("Agora"),
         author: author.public_key(),
+        clock: None,
         kind: OpKind::Moderate {
             target,
             action: ModerationAction::Hide,
@@ -988,6 +1130,7 @@ fn a_target_restricted_read_returns_every_kind_that_names_the_target<L: OpLog>(l
     let vote = Op {
         stoa: a_stoa("Agora"),
         author: author.public_key(),
+        clock: None,
         kind: OpKind::Vote {
             target,
             direction: crate::op::VoteDirection::Up,
@@ -1069,6 +1212,7 @@ fn a_stoa_metadata_op_names_no_target<L: OpLog>(log: &mut L) {
     let metadata = Op {
         stoa,
         author: author.public_key(),
+        clock: None,
         kind: OpKind::StoaMetadata {
             title: "Renamed".to_string(),
             description: "now with a description".to_string(),
@@ -1124,40 +1268,61 @@ fn a_restricted_read_preserves_the_unrestricted_relative_order<L: OpLog>(log: &m
     // A resolver folds over a restricted read and takes the first match, so
     // the restriction must not reorder. Hardcoded expected sequence.
     //
-    // "First" means current under `cmp_ops`, which is most-recent only on
-    // the ORDERED branch — the one this test's fixture uses, and the one
-    // production does not reach today. The degraded branch is ascending op
-    // id and carries no recency; `arrival.rs` says so explicitly after the
-    // moderation resolver read recency into it.
+    // "First" means current under `cmp_ops`, which is most-recent only among ops
+    // that CARRY a counter — the branch this test's fixture uses. Ops carrying
+    // none fall to ascending op id, which carries no recency at all;
+    // `arrival.rs` says so explicitly after the moderation resolver read recency
+    // into it.
+    //
+    // **The two revisions are given counters running AGAINST their op ids**, by
+    // search rather than by guess, so a restricted read that reordered by op id
+    // — or that consulted the recorded arrival, which here says the opposite of
+    // the counters — returns the reverse and fails. Without that, "newest first"
+    // and "lowest id first" would be the same sequence and the assertion would
+    // hold under either.
     let post = signed(a_post("the subject"));
     let target = post.op.id();
     let author = a_key(2);
-    let older = Op {
-        stoa: a_stoa("Agora"),
-        author: author.public_key(),
-        kind: OpKind::Revise {
-            target,
-            body: "v2".to_string(),
-            attachments: vec![],
-        },
-    }
-    .sign(&author);
-    let newer = Op {
-        stoa: a_stoa("Agora"),
-        author: author.public_key(),
-        kind: OpKind::Revise {
-            target,
-            body: "v3".to_string(),
-            attachments: vec![],
-        },
-    }
-    .sign(&author);
+    let a_revision = |body: &str, counter: u64| {
+        Op {
+            stoa: a_stoa("Agora"),
+            author: author.public_key(),
+            clock: Some(crate::op::OpClock {
+                counter,
+                asserted_ms: 1_789_729_304_000,
+            }),
+            kind: OpKind::Revise {
+                target,
+                body: body.to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&author)
+    };
+
+    // The NEWER op (counter 3) must end up with the HIGHER op id. The expected
+    // sequence below is `[newer, older]`, so ascending op id yields the exact
+    // reverse — which is what makes "by counter" and "by op id" distinguishable
+    // here. With the ids the other way round both rules give `[newer, older]`
+    // and the assertion holds under either, which is this project's recorded
+    // "a fixture where two explanations give the same answer" defect. Measured,
+    // not reasoned: the first draft of this search had the comparison inverted
+    // and the test passed with `cmp_ops` replaced by a bare op-id comparison.
+    let (older, newer) = (0..1000u32)
+        .find_map(|n| {
+            let older = a_revision(&format!("v2 #{n}"), 2);
+            let newer = a_revision(&format!("v3 #{n}"), 3);
+            (newer.op.id() > older.op.id()).then_some((older, newer))
+        })
+        .expect("no disagreeing pair in 1000 candidates, which is astronomically unlikely");
 
     log.append(post, Arrival::ordered(1, a_message_id(1)))
         .unwrap();
-    log.append(older.clone(), Arrival::ordered(2, a_message_id(1)))
+    // The RECORDED arrivals run the other way from the counters: the older
+    // revision is recorded as arriving later. Nothing may read them.
+    log.append(older.clone(), Arrival::ordered(9, a_message_id(1)))
         .unwrap();
-    log.append(newer.clone(), Arrival::ordered(3, a_message_id(1)))
+    log.append(newer.clone(), Arrival::ordered(8, a_message_id(1)))
         .unwrap();
 
     assert_eq!(
@@ -1219,6 +1384,7 @@ fn a_revision_whose_target_is_absent_is_stored_and_readable<L: OpLog>(log: &mut 
     let orphan = Op {
         stoa: a_stoa("Agora"),
         author: author.public_key(),
+        clock: None,
         kind: OpKind::Revise {
             target: missing_target,
             body: "revises something we lack".to_string(),
@@ -1327,6 +1493,7 @@ fn storing_adversarial_ops_never_panics<L: OpLog>(log: &mut L) {
             let op = Op {
                 stoa,
                 author: author.public_key(),
+                clock: None,
                 kind: kind.clone(),
             }
             .sign(&author);
@@ -1387,6 +1554,7 @@ fn a_resolver_can_be_written_against_the_trait_alone<L: OpLog>(log: &mut L) {
     let hide = Op {
         stoa: a_stoa("Agora"),
         author: moderator.public_key(),
+        clock: None,
         kind: OpKind::Moderate {
             target,
             action: ModerationAction::Hide,
@@ -1396,6 +1564,7 @@ fn a_resolver_can_be_written_against_the_trait_alone<L: OpLog>(log: &mut L) {
     let unhide = Op {
         stoa: a_stoa("Agora"),
         author: moderator.public_key(),
+        clock: None,
         kind: OpKind::Moderate {
             target,
             action: ModerationAction::Unhide,
@@ -1509,6 +1678,7 @@ fn both_implementations_agree_on_a_target_restricted_read() {
             let op = Op {
                 stoa: a_stoa("Agora"),
                 author: author.public_key(),
+                clock: None,
                 kind: OpKind::Revise {
                     target,
                     body: format!("v{i}"),

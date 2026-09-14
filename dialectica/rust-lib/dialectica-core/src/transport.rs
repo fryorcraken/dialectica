@@ -671,6 +671,7 @@ mod tests {
         Op {
             stoa,
             author: a_key(2).public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -836,6 +837,7 @@ mod tests {
             let op = Op {
                 stoa,
                 author: author.public_key(),
+                clock: None,
                 kind,
             }
             .sign(&author);
@@ -1240,7 +1242,7 @@ mod tests {
         // indistinguishable from a real one forever after.
         assert_eq!(arrival.lamport(), None);
         assert_eq!(arrival.message_id(), None);
-        assert!(!arrival.is_ordered_by_transport());
+        assert!(arrival.lamport().is_none());
         assert_eq!(arrival, Arrival::unordered());
     }
 
@@ -1362,6 +1364,7 @@ mod tests {
             let op = Op {
                 stoa,
                 author: author.public_key(),
+                clock: None,
                 kind,
             }
             .sign(&author);
@@ -1372,12 +1375,13 @@ mod tests {
                 &mut log,
             )
             .unwrap();
-            assert!(!log
+            assert!(log
                 .get(&admitted.id)
                 .unwrap()
                 .unwrap()
                 .arrival
-                .is_ordered_by_transport());
+                .lamport()
+                .is_none());
         }
         assert_eq!(log.len().unwrap(), 5, "every kind must have been admitted");
     }
@@ -1567,7 +1571,7 @@ mod tests {
 
         let stored = log.get(&op.op.id()).unwrap().unwrap();
         assert_eq!(stored.op, op);
-        assert!(!stored.arrival.is_ordered_by_transport());
+        assert!(stored.arrival.lamport().is_none());
     }
 
     #[test]
@@ -2502,6 +2506,7 @@ mod tests {
         let hide = Op {
             stoa,
             author: random_peer.public_key(),
+            clock: None,
             kind: OpKind::Moderate {
                 target: signed_post_in(stoa, "victim").op.id(),
                 action: ModerationAction::Hide,

@@ -27,29 +27,59 @@
 //! other. This is why [`Op::canonical_bytes`] leads with the discriminant
 //! rather than treating field order as cosmetic.
 //!
+//! # The two clock fields, and why their authority is unequal
+//!
+//! An op of the current version carries a **Lamport counter** and an
+//! **author-asserted wall-clock**, both inside the signed preimage. They are not
+//! two of a kind, and reading them as one is the way this goes wrong:
+//!
+//! - **The counter is authoritative for every ordering.**
+//!   [`crate::arrival::cmp_ops`] leads with it and reads nothing else but the op
+//!   id. Its being inside the preimage is what a relay cannot defeat: raising it
+//!   to promote an op, lowering it to bury one, or stripping it to force the
+//!   degraded path each alters the bytes, so the signature fails and the op is
+//!   refused.
+//! - **The wall-clock decides nothing at all.** The author picks it and an
+//!   author can lie. It is carried because a reader is shown a time and expects
+//!   one, and it is defended not by a clamp but by having no decision to reach:
+//!   it orders nothing, breaks no tie, and gates nothing.
+//!
+//! **This file previously argued against both fields**, and the argument is
+//! answered rather than dropped. It read: *"A self-asserted Lamport value would
+//! be forgeable by the author it is meant to order, which defeats the purpose"*,
+//! and *"a forum that ordered by [a wall clock] would be ordering by a field its
+//! adversary sets"*. Both observations are true and neither is withdrawn. What
+//! changed is that the transport supplies no alternative and is not going to —
+//! the Reliable Channel API's `MessageReceivedEvent` carries exactly one field,
+//! the reassembled payload, so `delivery_module`'s `channelMessageReceived`
+//! cannot forward a Lamport value it was never given. The practical effect of
+//! the prohibition was therefore not a transport-assigned order but **no order
+//! at all**, with every resolver falling back to a hash.
+//!
+//! Each objection is answered somewhere a test can reach:
+//!
+//! - The **forgeable counter** is bounded by [`crate::arrival::ADVANCE_BOUND`]:
+//!   a received counter raises this peer's clock only within a fixed distance,
+//!   so an inflated one buys its author the head of one Stoa's order and moves
+//!   nothing else. Refusing it outright is not available — that is a censorship
+//!   vector — and accepting it unbounded would pin every receiving peer's clock
+//!   at the ceiling, silencing the Stoa for all of them.
+//! - The **adversary-set wall clock** is not bounded into safety; it is removed
+//!   from every decision, which is the stronger defence because there is no
+//!   decision left for a forged value to reach.
+//!
+//! The distinction that makes them two fields rather than one: a Lamport counter
+//! is meaningful only relative to ops a peer has seen, so a bound on it is
+//! expressible in terms of the peer's own knowledge. A wall-clock is an absolute
+//! claim about the world, which a peer has nothing to check against.
+//!
 //! # What an op does NOT carry, and why each omission is deliberate
 //!
-//! **No Lamport timestamp, and no message id.** §4.4 has SDS assigning both;
-//! §5.7 orders revisions by "the highest Lamport timestamp [...] ties broken by
-//! ascending message id — the same rule SDS already applies [...] so nothing
-//! new is invented". A self-asserted Lamport value would be forgeable by the
-//! author it is meant to order, which defeats the purpose. Both are transport
-//! metadata, recorded alongside the op rather than inside it.
-//!
-//! **This is currently owed by the transport rather than supplied by it.**
-//! `contracts/delivery_module.lidl` exposes
-//! `channelMessageReceived(channelId, senderId, payload, timestamp)` — no
-//! Lamport clock and no SDS message id — so §5.7's ordering rule has no input
-//! at the contract we actually have.
-//!
-//! The gap turns out to sit a layer BELOW that contract, and it is not
-//! dialectica's to close: the Reliable Channel API's `MessageReceivedEvent`,
-//! which `delivery_module` consumes, carries exactly one field — the reassembled
-//! payload — so `channelMessageReceived` cannot forward what it was never given.
-//! `channelMessageReceived`'s `timestamp` is the receiving peer's own
-//! `CLOCK_REALTIME` read and orders nothing. [`crate::arrival`] holds what a
-//! peer records instead, and the `op-ordering` change's `design.md` carries the
-//! citations and what each upstream layer would have to add.
+//! **No transport message id, and no sequence number of any kind.** §4.3's rule
+//! for the channel id — "not a session counter, not a local sequence number, not
+//! anything that varies with one peer's history" — applies with equal force to a
+//! value inside a signed op that every peer must agree about. [`crate::arrival`]
+//! holds what a peer records about a delivery; it no longer orders anything.
 //!
 //! **No `senderId`.** §4.1: "`senderId` is not an author identity, and the plan
 //! should not treat it as one." It binds at channel creation as a transport
@@ -61,15 +91,6 @@
 //! storage keys", so that one-channel-per-thread later becomes a routing change
 //! rather than a migration. The Stoa *address* is carried instead — it is a
 //! pure function of the addressed object, which is exactly what §4.5 asks for.
-//!
-//! **No wall-clock timestamp.** Nothing in the plan calls for one, an author
-//! chooses it freely, and a forum that ordered by it would be ordering by a
-//! field its adversary sets.
-//!
-//! **No sequence number of any kind.** §4.3's rule for the channel id — "not a
-//! session counter, not a local sequence number, not anything that varies with
-//! one peer's history" — applies with equal force to a value inside a signed op
-//! that every peer must agree about.
 //!
 //! **No posting policy, in the one kind that might have carried one.**
 //! [`OpKind::StoaMetadata`] supersedes a Stoa's *display* metadata and not its
@@ -91,12 +112,26 @@ use sha2::{Digest, Sha256};
 /// hash the same.
 const OP_ID_PREFIX: &[u8; 32] = b"/dialectica/1/Id/Op\0\0\0\0\0\0\0\0\0\0\0\0\0";
 
-/// The encoding generation.
+/// The encoding generation predating the clock fields.
 ///
 /// Not the same discriminant as the genesis record's, and not shared with it:
 /// the two formats version independently, because a change to one has no reason
 /// to invalidate the other.
+///
+/// **Still decoded, never written.** [`Op::canonical_bytes`] emits this only for
+/// an op whose [`Op::clock`] is `None`, which nothing in this build constructs
+/// except a decode of bytes that already carried it. An op of this version keeps
+/// the id it always had: its preimage is byte-for-byte what it was, because the
+/// clock fields are written only in the `Some` arm.
 const VERSION_1: u8 = 1;
+
+/// The encoding generation carrying the Lamport counter and the wall-clock.
+///
+/// **A version increment and not a new kind discriminant.** The kinds are
+/// unchanged; what changed is what every kind carries, so the discriminant that
+/// has to move is the one covering the whole preimage. A kind-level answer would
+/// have needed five new kinds and would have left `Op::kind` meaning two things.
+const VERSION_2: u8 = 2;
 
 /// The maximum length of any single variable-length field, in bytes.
 ///
@@ -473,6 +508,59 @@ impl OpKind {
     }
 }
 
+/// The two clock values an op of the current version carries.
+///
+/// # Why one struct rather than two fields on [`Op`]
+///
+/// **They are present or absent together, and nothing else is representable.**
+/// An op of [`VERSION_2`] carries both; an op of [`VERSION_1`] carries neither.
+/// A pair of independent `Option`s beside each other would admit two states the
+/// format does not have — a counter with no wall-clock, and the reverse — and
+/// each would need a guard at every site that reads either. One `Option` around
+/// this struct makes the encoding version and the presence of the fields **the
+/// same fact**, which is CLAUDE.md's "put the complexity in the data structure".
+///
+/// That is also what lets `Op` answer "does this carry a counter?" without
+/// anyone inferring it from an ordering result or from a sentinel value: it is
+/// [`Option::is_some`] on a field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpClock {
+    /// The author's Lamport counter for this op's Stoa.
+    ///
+    /// **Authoritative for every ordering**, and forgeable by its author like
+    /// every other field they sign. The defence is not that the value is
+    /// trustworthy — it is that a received counter advances this peer's own
+    /// clock only within [`crate::arrival::ADVANCE_BOUND`], so an absurd one
+    /// costs its author the head of one Stoa's order and costs every honest peer
+    /// nothing. See [`crate::arrival::clock_from_counters`].
+    pub counter: u64,
+    /// Milliseconds since the Unix epoch, **as the author asserts them**.
+    ///
+    /// # This value decides nothing, and that is its whole defence
+    ///
+    /// It SHALL NOT order, break a tie, establish which of two ops came first,
+    /// decide an expiry or a rate limit, or stand in for a counter that is
+    /// absent. A hostile author writes whatever ranks best and a broken one
+    /// writes whatever its system clock says; neither matters, because there is
+    /// no decision for either to reach.
+    ///
+    /// **It is never handed out as a number.** A read surfaces it only through
+    /// [`crate::asserted_time::format_asserted`], which returns display text and
+    /// a clamped flag. A view that wished to sort on it would have to parse a
+    /// string back into an instant first, which is the intent: it makes the
+    /// wrong thing visibly wrong in a diff rather than a plausible field access.
+    /// The nearest comparable project read an author-asserted timestamp for
+    /// ranking decay with nothing clamping it, and the defect was not a missing
+    /// check — it was that the value sat there as a number for whoever wanted to
+    /// rank by it.
+    ///
+    /// Every representable value is accepted and stored. Refusing an op for an
+    /// implausible clock is a censorship vector: a peer whose system clock is
+    /// skewed would be dropped by every conforming peer at once, silently, with
+    /// no error path by which its author could learn of it.
+    pub asserted_ms: u64,
+}
+
 /// A signed operation: the whole of what crosses the wire.
 ///
 /// The author's **public key** travels in the op, and it is the whole of how an
@@ -497,6 +585,19 @@ pub struct Op {
     /// Who wrote it. A per-Stoa key (§5.2), derived by
     /// [`identity::derive_stoa_key`].
     pub author: PublicKey,
+    /// The clock values, or `None` for an op encoded before they existed.
+    ///
+    /// **`None` is not "a counter of zero".** Zero is a representable counter
+    /// and orders above nothing; absence orders **below every op that carries
+    /// one**, which is this change's whole migration answer. Conflating the two
+    /// would place every pre-existing op among the new ones by a value nobody
+    /// asserted.
+    ///
+    /// **A public field, deliberately.** Every inline `Op { .. }` construction
+    /// must supply it, so the compiler enumerates the publish sites rather than
+    /// a grep somebody has to remember to run — which is the recorded
+    /// stale-sweep-list trap, and the reason this is not a defaulted builder.
+    pub clock: Option<OpClock>,
     pub kind: OpKind,
 }
 
@@ -586,6 +687,8 @@ impl Op {
     /// kind       1 byte      <- first, so a signature commits to the kind
     /// stoa      32 bytes
     /// author    32 bytes
+    /// counter    8 bytes     <- VERSION_2 only, big-endian u64
+    /// asserted   8 bytes     <- VERSION_2 only, big-endian u64
     /// <kind-specific fields>
     /// ```
     ///
@@ -594,16 +697,58 @@ impl Op {
     /// the value. Both rules exist for the same reason `stoa.rs` gives:
     /// concatenating variable-length fields lets distinct records collide,
     /// because `("ab","c")` and `("a","bc")` produce identical bytes.
+    ///
+    /// # The clock fields carry NO presence tag, and that is the format
+    ///
+    /// They are fixed-width at a fixed offset, and whether they are there is
+    /// decided by the **version byte** rather than by a tag beside them. An op
+    /// declaring [`VERSION_2`] either carries sixteen bytes of clock or is not
+    /// an op of that version and fails to decode.
+    ///
+    /// A presence tag would have made "a version-2 op with the fields stripped"
+    /// a representable, decodable op — which is exactly the downgrade a relay
+    /// must not be able to reach. It cannot reach it through the version byte
+    /// either, because that byte is inside the preimage: rewriting it breaks the
+    /// signature just as rewriting a counter does. So "some ops carry no
+    /// counter" is a fact about ops signed before the field existed, never a
+    /// state an attacker can manufacture.
+    ///
+    /// # A version-1 op's bytes are unchanged by this change
+    ///
+    /// The clock bytes are written only in the `Some` arm, so an op whose
+    /// [`Op::clock`] is `None` encodes to exactly what it always did and hashes
+    /// to exactly the id it always had. The migration needs no rewrite, no
+    /// re-signing and no recomputation, and it holds by construction rather than
+    /// by a test comparing against a recorded constant.
     pub fn canonical_bytes(&self) -> Vec<u8> {
         let mut out = Vec::new();
-        out.push(VERSION_1);
-        // The kind leads. This is the whole of the op-kind separation
-        // `identity.rs` said the serialiser owed it: two ops of different kinds
-        // cannot share a preimage, so no signature over one is a signature over
-        // the other.
-        out.push(self.kind.to_byte());
-        out.extend_from_slice(self.stoa.as_bytes());
-        out.extend_from_slice(&self.author.to_bytes());
+        // The version says whether the clock fields are present, so the two are
+        // written from one `match` and cannot disagree. A `push(VERSION_2)`
+        // separated from the field write by twenty lines is how a build emits a
+        // version whose bytes it did not write.
+        match &self.clock {
+            Some(clock) => {
+                out.push(VERSION_2);
+                // The kind leads, as it did before: this is the op-kind
+                // separation `identity.rs` said the serialiser owed it. Two ops
+                // of different kinds cannot share a preimage, so no signature
+                // over one is a signature over the other.
+                out.push(self.kind.to_byte());
+                out.extend_from_slice(self.stoa.as_bytes());
+                out.extend_from_slice(&self.author.to_bytes());
+                // Big-endian, like every other multi-byte integer in this
+                // format, so a reader never has to remember which field is
+                // which endianness.
+                out.extend_from_slice(&clock.counter.to_be_bytes());
+                out.extend_from_slice(&clock.asserted_ms.to_be_bytes());
+            }
+            None => {
+                out.push(VERSION_1);
+                out.push(self.kind.to_byte());
+                out.extend_from_slice(self.stoa.as_bytes());
+                out.extend_from_slice(&self.author.to_bytes());
+            }
+        }
 
         match &self.kind {
             OpKind::Post {
@@ -661,15 +806,43 @@ impl Op {
     pub fn decode(bytes: &[u8]) -> Result<Self, OpError> {
         let mut cursor = Cursor::new(bytes);
 
-        match cursor.take(1)?[0] {
-            VERSION_1 => {}
+        // Both versions decode, and which one this is is reported through
+        // `Op::clock` rather than through a separate field. `op-ordering` needs
+        // to place an op carrying no counter, and it asks the op.
+        let carries_clock = match cursor.take(1)?[0] {
+            VERSION_1 => false,
+            VERSION_2 => true,
+            // Named rather than reported as malformed: an unrecognised version
+            // means "a newer client wrote this", which is a different fact from
+            // corruption and calls for a different response.
             other => return Err(OpError::UnknownVersion(other)),
-        }
+        };
 
         let kind_byte = cursor.take(1)?[0];
         let stoa = Address::from_bytes(cursor.take_array::<32>()?);
-        let author =
-            PublicKey::from_bytes(cursor.take(32)?).map_err(OpError::InvalidAuthor)?;
+        let author = PublicKey::from_bytes(cursor.take(32)?).map_err(OpError::InvalidAuthor)?;
+
+        // Sixteen fixed bytes, or nothing. A version-2 op whose clock bytes were
+        // removed runs out of input here — or, if the kind's own fields happen
+        // to supply enough bytes to read, fails the `finish()` check below when
+        // the tail does not line up. Either way it is refused, and it is NEVER
+        // read as an op of the earlier version: the version byte said what it
+        // is, and this decoder does not second-guess it.
+        //
+        // No clock value is validated. Every `u64` is a representable counter
+        // and every `u64` is a representable instant; refusing one here would be
+        // refusing an op for a field, which is the censorship vector this format
+        // deliberately does not open. Nothing is compared against a local clock,
+        // so decoding reads no clock and its result does not depend on when it
+        // happened.
+        let clock = if carries_clock {
+            Some(OpClock {
+                counter: u64::from_be_bytes(cursor.take_array::<8>()?),
+                asserted_ms: u64::from_be_bytes(cursor.take_array::<8>()?),
+            })
+        } else {
+            None
+        };
 
         let kind = match kind_byte {
             OpKind::POST => OpKind::Post {
@@ -705,6 +878,7 @@ impl Op {
         Ok(Op {
             stoa,
             author,
+            clock,
             kind,
         })
     }
@@ -730,7 +904,10 @@ impl Op {
     /// one from ambient state is CLAUDE.md's "pass what it needs".
     pub fn sign(self, key: &SecretKey) -> SignedOp {
         let signature = sign_op_bytes(key, &self.canonical_bytes());
-        SignedOp { op: self, signature }
+        SignedOp {
+            op: self,
+            signature,
+        }
     }
 }
 
@@ -912,6 +1089,7 @@ mod tests {
         Op {
             stoa: a_stoa(),
             author: a_key(2).public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -925,8 +1103,46 @@ mod tests {
         OpId([seed; 32])
     }
 
-    /// Every op kind, for the properties that must hold across all of them.
+    /// A fixed asserted time, so an op id in this suite never depends on when
+    /// the test ran.
+    const A_TIME: u64 = 1_789_729_304_000;
+
+    /// Every op kind, **in both encoding versions**.
+    ///
+    /// # Why this returns twice as many ops as there are kinds
+    ///
+    /// The clock fields are carried by every kind, so a property asserted "for
+    /// every kind" that only ever saw version-1 ops would be asserting it for
+    /// half the format. `one_of_each_kind_carries_both_versions` pins the count
+    /// and the split, because this is the recorded hand-maintained-sweep shape:
+    /// ten tests read this list, and a version omitted from it loses coverage in
+    /// all ten silently.
+    ///
+    /// The version-2 half is derived by MAPPING over the version-1 half rather
+    /// than by writing the kinds out again. A second hand-written list is a
+    /// second list to keep in step, and the one that goes stale is always the
+    /// one nothing forces you to look at.
     fn one_of_each_kind() -> Vec<Op> {
+        let mut out = one_of_each_kind_without_a_clock();
+        let with_clocks: Vec<Op> = out
+            .iter()
+            .enumerate()
+            .map(|(i, op)| Op {
+                clock: Some(OpClock {
+                    // A DIFFERENT counter per op, so a test that round-trips
+                    // this list cannot pass by writing one value everywhere.
+                    counter: i as u64 + 1,
+                    asserted_ms: A_TIME + i as u64,
+                }),
+                ..op.clone()
+            })
+            .collect();
+        out.extend(with_clocks);
+        out
+    }
+
+    /// Every op kind, carrying no clock. The version-1 population.
+    fn one_of_each_kind_without_a_clock() -> Vec<Op> {
         let stoa = a_stoa();
         let author = a_key(2).public_key();
         vec![
@@ -934,6 +1150,7 @@ mod tests {
             Op {
                 stoa,
                 author: author.clone(),
+                clock: None,
                 kind: OpKind::Post {
                     thread: Some(an_id(7)),
                     parent: Some(an_id(8)),
@@ -944,6 +1161,7 @@ mod tests {
             Op {
                 stoa,
                 author: author.clone(),
+                clock: None,
                 kind: OpKind::Revise {
                     target: an_id(9),
                     body: "Edited".to_string(),
@@ -953,6 +1171,7 @@ mod tests {
             Op {
                 stoa,
                 author: author.clone(),
+                clock: None,
                 kind: OpKind::Moderate {
                     target: an_id(10),
                     action: ModerationAction::Hide,
@@ -961,6 +1180,7 @@ mod tests {
             Op {
                 stoa,
                 author: author.clone(),
+                clock: None,
                 kind: OpKind::Moderate {
                     target: an_id(10),
                     action: ModerationAction::Unhide,
@@ -969,6 +1189,7 @@ mod tests {
             Op {
                 stoa,
                 author: author.clone(),
+                clock: None,
                 kind: OpKind::Vote {
                     target: an_id(11),
                     direction: VoteDirection::Up,
@@ -977,6 +1198,7 @@ mod tests {
             Op {
                 stoa,
                 author,
+                clock: None,
                 kind: OpKind::StoaMetadata {
                     title: "The Agora, renamed".to_string(),
                     description: "A marketplace of arguments".to_string(),
@@ -992,8 +1214,15 @@ mod tests {
     // arithmetic. These mirror `canonical_bytes`'s documented layout:
     //
     //     version 1 | kind 1 | stoa 32 | author 32 | <kind-specific>
+    //
+    // **THESE ARE THE VERSION-1 OFFSETS**, and they stay that way. A version-2
+    // op inserts sixteen bytes of clock between the author and the kind-specific
+    // fields, so `KIND_FIELDS_AT` and everything derived from it is wrong for
+    // one. The clock tests below use `CLOCK_AT` and `V2_KIND_FIELDS_AT` instead,
+    // and no test may use a constant from one version against an op of the
+    // other — which is why they are named apart rather than parameterised.
 
-    /// Offset of the kind byte. Version is first, kind second.
+    /// Offset of the kind byte. Version is first, kind second, in both versions.
     const KIND_AT: usize = 1;
     /// Offset of the 32-byte Stoa address.
     const STOA_AT: usize = KIND_AT + 1;
@@ -1002,6 +1231,14 @@ mod tests {
     /// Offset of the first kind-specific byte — where every kind's own fields
     /// begin, and where the common header ends.
     const KIND_FIELDS_AT: usize = AUTHOR_AT + 32;
+
+    /// Offset of the 8-byte counter in a VERSION-2 op. Immediately after the
+    /// author, which is where the common header used to end.
+    const CLOCK_AT: usize = AUTHOR_AT + 32;
+    /// Offset of the 8-byte asserted wall-clock in a version-2 op.
+    const ASSERTED_AT: usize = CLOCK_AT + 8;
+    /// Where a version-2 op's kind-specific fields begin.
+    const V2_KIND_FIELDS_AT: usize = ASSERTED_AT + 8;
 
     /// Width of a length prefix. Every variable-length field carries one.
     const LEN_PREFIX: usize = 4;
@@ -1061,9 +1298,20 @@ mod tests {
         // Pinned as a layout, not inferred from a hash moving: mutating a byte
         // and asserting the id changes would test SHA-256, and would still
         // pass with a field deleted, because another slides into its place.
+        //
+        // The expected version is derived from the op's own `clock` rather than
+        // hardcoded, because this list now carries BOTH versions. Hardcoding
+        // either one would make this test assert the layout of half the format
+        // — and asserting "it is one of the two" would pass for an op that
+        // declared the wrong one of them.
         for op in one_of_each_kind() {
             let bytes = op.canonical_bytes();
-            assert_eq!(bytes[0], VERSION_1, "version must lead");
+            let expected = if op.clock.is_some() {
+                VERSION_2
+            } else {
+                VERSION_1
+            };
+            assert_eq!(bytes[0], expected, "version must lead, and must be right");
             assert_eq!(
                 bytes[KIND_AT],
                 op.kind.to_byte(),
@@ -1090,6 +1338,7 @@ mod tests {
         let moderate = Op {
             stoa,
             author: author.clone(),
+            clock: None,
             kind: OpKind::Moderate {
                 target,
                 action: ModerationAction::Hide,
@@ -1098,6 +1347,7 @@ mod tests {
         let vote = Op {
             stoa,
             author,
+            clock: None,
             kind: OpKind::Vote {
                 target,
                 direction: VoteDirection::Up,
@@ -1125,6 +1375,7 @@ mod tests {
         let vote = Op {
             stoa,
             author: key.public_key(),
+            clock: None,
             kind: OpKind::Vote {
                 target,
                 direction: VoteDirection::Up,
@@ -1137,6 +1388,7 @@ mod tests {
             op: Op {
                 stoa,
                 author: key.public_key(),
+                clock: None,
                 kind: OpKind::Moderate {
                     target,
                     action: ModerationAction::Hide,
@@ -1231,6 +1483,7 @@ mod tests {
         let hide = Op {
             stoa,
             author: author.clone(),
+            clock: None,
             kind: OpKind::Moderate {
                 target: an_id(1),
                 action: ModerationAction::Hide,
@@ -1239,6 +1492,7 @@ mod tests {
         let unhide = Op {
             stoa,
             author,
+            clock: None,
             kind: OpKind::Moderate {
                 target: an_id(1),
                 action: ModerationAction::Unhide,
@@ -1255,6 +1509,7 @@ mod tests {
         let up = Op {
             stoa,
             author: author.clone(),
+            clock: None,
             kind: OpKind::Vote {
                 target: an_id(1),
                 direction: VoteDirection::Up,
@@ -1263,6 +1518,7 @@ mod tests {
         let down = Op {
             stoa,
             author,
+            clock: None,
             kind: OpKind::Vote {
                 target: an_id(1),
                 direction: VoteDirection::Down,
@@ -1282,6 +1538,7 @@ mod tests {
         let one = Op {
             stoa,
             author: author.clone(),
+            clock: None,
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -1292,6 +1549,7 @@ mod tests {
         let two = Op {
             stoa,
             author,
+            clock: None,
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -1405,6 +1663,7 @@ mod tests {
         let op = Op {
             stoa: crate::identity::stoa_address(b"a genesis record"),
             author: a_key(7).public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -1534,6 +1793,7 @@ mod tests {
         let op = Op {
             stoa,
             author: key.public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -1553,7 +1813,10 @@ mod tests {
             let signed = op.sign(&key);
             let restored = SignedOp::from_bytes(&signed.to_bytes()).unwrap();
             assert_eq!(restored, signed);
-            assert!(restored.verify(), "verification must survive the round trip");
+            assert!(
+                restored.verify(),
+                "verification must survive the round trip"
+            );
         }
     }
 
@@ -1641,6 +1904,7 @@ mod tests {
         let op = Op {
             stoa: a_stoa(),
             author: a_key(2).public_key(),
+            clock: None,
             kind: OpKind::Moderate {
                 target: an_id(1),
                 action: ModerationAction::Hide,
@@ -1660,6 +1924,7 @@ mod tests {
         let op = Op {
             stoa: a_stoa(),
             author: a_key(2).public_key(),
+            clock: None,
             kind: OpKind::Vote {
                 target: an_id(1),
                 direction: VoteDirection::Up,
@@ -1883,6 +2148,7 @@ mod tests {
         let op = Op {
             stoa: a_stoa(),
             author: random_peer.public_key(),
+            clock: None,
             kind: OpKind::Moderate {
                 target: an_id(1),
                 action: ModerationAction::Hide,
@@ -1904,6 +2170,7 @@ mod tests {
         let op = Op {
             stoa: a_stoa(),
             author: stranger.public_key(),
+            clock: None,
             kind: OpKind::Revise {
                 target: an_id(1),
                 body: "Not mine to edit".to_string(),
@@ -1957,6 +2224,7 @@ mod tests {
         let op = Op {
             stoa: a_stoa(),
             author: a_key(2).public_key(),
+            clock: None,
             kind: OpKind::Vote {
                 target: an_id(3),
                 direction: VoteDirection::Up,
@@ -1981,6 +2249,7 @@ mod tests {
         Op {
             stoa: a_stoa(),
             author: a_key(2).public_key(),
+            clock: None,
             kind: OpKind::StoaMetadata {
                 title: "Renamed".to_string(),
                 description: "Now with a description".to_string(),
@@ -2035,6 +2304,7 @@ mod tests {
         let one = Op {
             stoa,
             author: author.clone(),
+            clock: None,
             kind: OpKind::StoaMetadata {
                 title: "ab".to_string(),
                 description: "c".to_string(),
@@ -2043,6 +2313,7 @@ mod tests {
         let two = Op {
             stoa,
             author,
+            clock: None,
             kind: OpKind::StoaMetadata {
                 title: "a".to_string(),
                 description: "bc".to_string(),
@@ -2089,6 +2360,7 @@ mod tests {
         let revise = Op {
             stoa,
             author: author.clone(),
+            clock: None,
             kind: OpKind::Revise {
                 target: OpId(target_bytes),
                 body: "wxyz".to_string(),
@@ -2098,6 +2370,7 @@ mod tests {
         let metadata = Op {
             stoa,
             author,
+            clock: None,
             kind: OpKind::StoaMetadata {
                 title,
                 description: String::new(),
@@ -2134,6 +2407,7 @@ mod tests {
         let metadata = Op {
             stoa,
             author: key.public_key(),
+            clock: None,
             kind: OpKind::StoaMetadata {
                 title: "Renamed".to_string(),
                 description: String::new(),
@@ -2145,6 +2419,7 @@ mod tests {
             op: Op {
                 stoa,
                 author: key.public_key(),
+                clock: None,
                 kind: OpKind::Moderate {
                     target: an_id(1),
                     action: ModerationAction::Hide,
@@ -2176,6 +2451,7 @@ mod tests {
         let op = Op {
             stoa: a_stoa(),
             author: a_key(2).public_key(),
+            clock: None,
             kind: OpKind::StoaMetadata {
                 title: "abcde".to_string(),         // 5 bytes
                 description: "fghijkl".to_string(), // 7 bytes
@@ -2228,6 +2504,7 @@ mod tests {
         Op {
             stoa: a_stoa(),
             author: a_key(2).public_key(),
+            clock: None,
             kind: OpKind::StoaMetadata {
                 title: "a".repeat(title_len),
                 description: "b".repeat(description_len),
@@ -2471,6 +2748,7 @@ mod tests {
         let rename = Op {
             stoa: address,
             author: a_key(1).public_key(),
+            clock: None,
             kind: OpKind::StoaMetadata {
                 title: "The Agora".to_string(),
                 description: "Renamed".to_string(),
@@ -2510,6 +2788,7 @@ mod tests {
         let op = Op {
             stoa: a_stoa(),
             author: random_peer.public_key(),
+            clock: None,
             kind: OpKind::StoaMetadata {
                 title: "Hijacked".to_string(),
                 description: String::new(),
@@ -2593,5 +2872,392 @@ mod tests {
                 "another kind reuses the Stoa metadata discriminant"
             );
         }
+    }
+
+    // ─── The clock fields ─────────────────────────────────────────────────
+
+    /// A post carrying a clock, for the tests below.
+    fn a_post_with_clock(counter: u64, asserted_ms: u64) -> Op {
+        Op {
+            clock: Some(OpClock {
+                counter,
+                asserted_ms,
+            }),
+            ..a_post()
+        }
+    }
+
+    #[test]
+    fn one_of_each_kind_carries_both_versions() {
+        // THE STALE-SWEEP GUARD. Ten tests iterate `one_of_each_kind`, and a
+        // version missing from it loses coverage in all ten with nothing
+        // failing. This asserts the split rather than leaving it to a comment.
+        let all = one_of_each_kind();
+        let bare = one_of_each_kind_without_a_clock();
+        assert_eq!(
+            all.len(),
+            bare.len() * 2,
+            "every kind must appear in both encoding versions"
+        );
+        assert_eq!(
+            all.iter().filter(|op| op.clock.is_none()).count(),
+            bare.len()
+        );
+        assert_eq!(
+            all.iter().filter(|op| op.clock.is_some()).count(),
+            bare.len()
+        );
+        // And the version-2 half covers every kind, not the same kind repeated.
+        let kinds: Vec<u8> = all
+            .iter()
+            .filter(|op| op.clock.is_some())
+            .map(|op| op.kind.to_byte())
+            .collect();
+        for kind in [
+            OpKind::POST,
+            OpKind::REVISE,
+            OpKind::MODERATE,
+            OpKind::VOTE,
+            OpKind::STOA_METADATA,
+        ] {
+            assert!(
+                kinds.contains(&kind),
+                "kind {kind} is missing from the version-2 half"
+            );
+        }
+    }
+
+    #[test]
+    fn the_version_byte_says_whether_the_clock_fields_are_there() {
+        assert_eq!(a_post().canonical_bytes()[0], VERSION_1);
+        assert_eq!(a_post_with_clock(1, 2).canonical_bytes()[0], VERSION_2);
+    }
+
+    #[test]
+    fn the_clock_occupies_a_fixed_width_at_a_fixed_offset() {
+        // No presence tag, and the fields are exactly where the layout says.
+        // Read back as big-endian, matching every other integer in this format.
+        let op = a_post_with_clock(0x0102_0304_0506_0708, 0x1112_1314_1516_1718);
+        let bytes = op.canonical_bytes();
+
+        assert_eq!(
+            &bytes[CLOCK_AT..CLOCK_AT + 8],
+            &0x0102_0304_0506_0708u64.to_be_bytes()
+        );
+        assert_eq!(
+            &bytes[ASSERTED_AT..ASSERTED_AT + 8],
+            &0x1112_1314_1516_1718u64.to_be_bytes()
+        );
+
+        // And the kind's own fields begin immediately after, with nothing in
+        // between that could be a tag.
+        let bare = a_post().canonical_bytes();
+        assert_eq!(
+            bytes.len(),
+            bare.len() + 16,
+            "the clock costs exactly sixteen bytes and no tag"
+        );
+        assert_eq!(
+            &bytes[V2_KIND_FIELDS_AT..],
+            &bare[KIND_FIELDS_AT..],
+            "the kind's own fields are unchanged and merely displaced"
+        );
+    }
+
+    #[test]
+    fn the_counter_round_trips_at_every_boundary_value() {
+        // Boundaries, not convenient middle values — a cast that truncates or a
+        // width that is wrong shows up at the ends and nowhere else.
+        let values = [0u64, 1, u64::MAX / 2, u64::MAX - 1, u64::MAX];
+        let mut seen: Vec<Vec<u8>> = Vec::new();
+        for counter in values {
+            let op = a_post_with_clock(counter, 7);
+            let bytes = op.canonical_bytes();
+            let back = Op::decode(&bytes).unwrap();
+            assert_eq!(
+                back.clock.unwrap().counter,
+                counter,
+                "counter {counter} must decode to itself"
+            );
+            assert_eq!(back, op);
+            seen.push(bytes);
+        }
+        // None is confused with any other: distinct counters, distinct bytes.
+        let before = seen.len();
+        seen.sort();
+        seen.dedup();
+        assert_eq!(before, seen.len(), "two counters encoded identically");
+    }
+
+    #[test]
+    fn any_representable_instant_decodes_including_implausible_ones() {
+        // Far future, far past, zero, maximum. Every one is accepted, and none
+        // is refused on account of its value — refusing an op for a clock is the
+        // censorship vector this format deliberately does not open.
+        for asserted in [0u64, 1, 1_262_303_999_999, u64::MAX / 2, u64::MAX] {
+            let op = a_post_with_clock(3, asserted);
+            let back = Op::decode(&op.canonical_bytes())
+                .unwrap_or_else(|e| panic!("asserted {asserted} was refused: {e}"));
+            assert_eq!(back.clock.unwrap().asserted_ms, asserted);
+        }
+    }
+
+    #[test]
+    fn both_clock_fields_participate_in_the_op_id() {
+        // A relay cannot raise a counter to promote an op, lower one to bury it,
+        // or rewrite a wall-clock to change what a reader is shown — each alters
+        // the preimage, so the id changes and the signature fails.
+        let base = a_post_with_clock(5, 100);
+        let other_counter = a_post_with_clock(6, 100);
+        let other_time = a_post_with_clock(5, 101);
+
+        assert_ne!(base.canonical_bytes(), other_counter.canonical_bytes());
+        assert_ne!(
+            base.id(),
+            other_counter.id(),
+            "the counter must change the id"
+        );
+        assert_ne!(base.canonical_bytes(), other_time.canonical_bytes());
+        assert_ne!(
+            base.id(),
+            other_time.id(),
+            "the wall-clock must change the id"
+        );
+    }
+
+    #[test]
+    fn changing_the_counter_breaks_the_signature() {
+        // `a_key(2)` because `a_post`'s author IS `a_key(2)`. Signing with any
+        // other key produces an op that fails verification for a reason that has
+        // nothing to do with the tamper, which would make the assertion below
+        // pass for the wrong reason.
+        let key = a_key(2);
+        let signed = a_post_with_clock(5, 100).sign(&key);
+        assert!(
+            signed.verify(),
+            "the fixture must verify before it is broken"
+        );
+
+        let tampered = SignedOp {
+            op: Op {
+                clock: Some(OpClock {
+                    counter: 6,
+                    asserted_ms: 100,
+                }),
+                ..signed.op.clone()
+            },
+            signature: signed.signature.clone(),
+        };
+        assert!(!tampered.verify(), "a raised counter must not verify");
+        // The original still verifies, so the failure is the tamper rather than
+        // a broken fixture.
+        assert!(signed.verify());
+    }
+
+    #[test]
+    fn changing_the_wall_clock_breaks_the_signature() {
+        let key = a_key(2);
+        let signed = a_post_with_clock(5, 100).sign(&key);
+        assert!(
+            signed.verify(),
+            "the fixture must verify before it is broken"
+        );
+
+        let tampered = SignedOp {
+            op: Op {
+                clock: Some(OpClock {
+                    counter: 5,
+                    asserted_ms: u64::MAX,
+                }),
+                ..signed.op.clone()
+            },
+            signature: signed.signature.clone(),
+        };
+        assert!(!tampered.verify(), "a rewritten wall-clock must not verify");
+        assert!(signed.verify());
+    }
+
+    #[test]
+    fn a_downgrade_to_the_earlier_version_does_not_verify() {
+        // The strip attack, stated as the relay would attempt it: rewrite the
+        // version byte so the op reads as one carrying no counter, and forward
+        // the original signature. The version is inside the preimage, so it
+        // fails exactly as rewriting a counter does.
+        let key = a_key(2);
+        let signed = a_post_with_clock(5, 100).sign(&key);
+        assert!(
+            signed.verify(),
+            "the fixture must verify before it is broken"
+        );
+
+        let downgraded = SignedOp {
+            op: Op {
+                clock: None,
+                ..signed.op.clone()
+            },
+            signature: signed.signature.clone(),
+        };
+        assert_eq!(
+            downgraded.op.canonical_bytes()[0],
+            VERSION_1,
+            "the fixture must actually be a downgrade"
+        );
+        assert!(!downgraded.verify(), "a stripped clock must not verify");
+        assert!(signed.verify(), "the original still verifies");
+    }
+
+    #[test]
+    fn an_op_of_this_version_carrying_no_counter_is_refused() {
+        // The clock bytes removed while the version byte still says version 2.
+        // It must fail to decode, and it must NOT be read as an op of the
+        // earlier version — the version says what it is, and the decoder does
+        // not second-guess it.
+        let bytes = a_post_with_clock(5, 100).canonical_bytes();
+        let mut stripped = bytes[..CLOCK_AT].to_vec();
+        stripped.extend_from_slice(&bytes[V2_KIND_FIELDS_AT..]);
+
+        let result = Op::decode(&stripped);
+        assert!(
+            result.is_err(),
+            "a version-2 op with no clock bytes must not decode, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn an_unrecognised_version_is_named_rather_than_reported_as_malformed() {
+        let mut bytes = a_post_with_clock(5, 100).canonical_bytes();
+        bytes[0] = 99;
+        assert_eq!(Op::decode(&bytes), Err(OpError::UnknownVersion(99)));
+    }
+
+    #[test]
+    fn both_versions_decode_and_report_which_they_are() {
+        // And the version-1 op reports carrying NO counter, rather than
+        // reporting a counter of zero — which is the distinction the whole
+        // migration rests on.
+        let bare = Op::decode(&a_post().canonical_bytes()).unwrap();
+        assert_eq!(bare.clock, None, "absence, not a counter of zero");
+
+        let with = Op::decode(&a_post_with_clock(0, 0).canonical_bytes()).unwrap();
+        assert_eq!(
+            with.clock,
+            Some(OpClock {
+                counter: 0,
+                asserted_ms: 0
+            }),
+            "a counter of zero is a counter, not an absence"
+        );
+        assert_ne!(bare.clock, with.clock);
+    }
+
+    #[test]
+    fn an_op_of_the_earlier_version_keeps_the_id_it_always_had() {
+        // THE MIGRATION GUARANTEE. The literal is the one
+        // `the_op_id_constant_is_pinned_to_a_known_answer` carries, and it was
+        // derived INDEPENDENTLY of this code — reconstructed from RFC 8032 point
+        // arithmetic and the documented layout — which is what makes it able to
+        // detect a present error rather than only a future change. A test
+        // comparing two values this build computed would agree with any bug both
+        // of them shared.
+        //
+        // The fixture is that test's, byte for byte, because the literal is only
+        // meaningful against the op it was derived for. The two tests assert
+        // different things over one value: that one pins the id derivation, and
+        // this one pins that ADDING THE CLOCK FIELDS TO THE FORMAT did not move
+        // it for an op that carries none.
+        let op = Op {
+            stoa: crate::identity::stoa_address(b"a genesis record"),
+            author: a_key(7).public_key(),
+            clock: None,
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: "pinned".to_string(),
+                attachments: vec![],
+            },
+        };
+        assert_eq!(
+            op.id().to_hex(),
+            "1a27fb18f40107bfb00393e935cdf20fe04ea78e0432de8676c1253cefb31fe8",
+            "adding the clock fields must not have changed a version-1 op's id"
+        );
+
+        // And the same op WITH a clock has a different id, so the test above is
+        // not passing because the field is being ignored.
+        let with_clock = Op {
+            clock: Some(OpClock {
+                counter: 1,
+                asserted_ms: 1,
+            }),
+            ..op.clone()
+        };
+        assert_ne!(op.id(), with_clock.id());
+    }
+
+    #[test]
+    fn decoding_reads_no_clock_and_does_not_depend_on_when_it_happened() {
+        // `Op::decode` is a pure function of its bytes. Asserted by decoding
+        // the same bytes repeatedly and comparing — which a decoder that
+        // compared an asserted time against the system clock would still pass,
+        // so the STRONGER statement is structural: `decode` takes only `&[u8]`,
+        // and there is no clock argument for it to read.
+        //
+        // What this test adds on top of the signature is that no HIDDEN clock
+        // read happens either — no `SystemTime::now()` inside.
+        let bytes = a_post_with_clock(5, u64::MAX).canonical_bytes();
+        let first = Op::decode(&bytes).unwrap();
+        let second = Op::decode(&bytes).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(first.clock.unwrap().asserted_ms, u64::MAX);
+    }
+
+    #[test]
+    fn a_version_2_op_carries_the_two_admitted_values_and_no_others() {
+        // The encoding's length is fully accounted for: a message id, a sequence
+        // number or a sender identifier could not be added without this
+        // changing. Stated as arithmetic over the named widths rather than as a
+        // magic number, so the assertion says WHICH fields it accounts for.
+        let op = a_post_with_clock(5, 100);
+        let bytes = op.canonical_bytes();
+
+        let version = 1;
+        let kind = 1;
+        let stoa = 32;
+        let author = 32;
+        let counter = 8;
+        let asserted = 8;
+        // The `Post`'s own fields: two option tags, a body length prefix, the
+        // body, and an empty attachment list's count.
+        let post_fields = OPTION_TAG + OPTION_TAG + LEN_PREFIX + "First".len() + LEN_PREFIX;
+
+        assert_eq!(
+            bytes.len(),
+            version + kind + stoa + author + counter + asserted + post_fields,
+            "the encoding's length must be exactly its fields"
+        );
+    }
+
+    #[test]
+    fn two_peers_encoding_one_op_agree_on_its_bytes() {
+        // Every value reaching the encoding travels in the op, so nothing either
+        // peer knows about its own history can change an op's identity. Asserted
+        // by encoding one op through two independently-constructed values.
+        let a = a_post_with_clock(5, 100);
+        let b = Op {
+            stoa: a_stoa(),
+            author: a_key(2).public_key(),
+            clock: Some(OpClock {
+                counter: 5,
+                asserted_ms: 100,
+            }),
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: "First".to_string(),
+                attachments: vec![],
+            },
+        };
+        assert_eq!(a.canonical_bytes(), b.canonical_bytes());
+        assert_eq!(a.id(), b.id());
     }
 }

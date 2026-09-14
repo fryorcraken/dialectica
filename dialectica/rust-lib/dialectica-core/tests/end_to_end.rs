@@ -564,6 +564,18 @@ fn a_key(seed: u8) -> SecretKey {
     SecretKey::from_bytes(&[seed; 32]).expect("every 32-byte string is a valid Ed25519 seed")
 }
 
+/// The one wall-clock reading this suite publishes and reads against. Fixed, so
+/// an op id is a function of the fixtures alone; and the same value on both
+/// sides, so an asserted time never clamps against the reader's clock.
+const A_TIME: u64 = 1_789_729_304_000;
+
+fn by(key: &SecretKey) -> authoring::Authorship<'_> {
+    authoring::Authorship {
+        key,
+        now_ms: A_TIME,
+    }
+}
+
 /// A Stoa's genesis record, with `creator` as its sole moderator.
 fn a_genesis(creator: &PublicKey, title: &str) -> Genesis {
     Genesis {
@@ -578,6 +590,7 @@ fn a_post(stoa: &Address, author: &SecretKey, body: &str) -> SignedOp {
     Op {
         stoa: *stoa,
         author: author.public_key(),
+        clock: None,
         kind: OpKind::Post {
             thread: None,
             parent: None,
@@ -593,6 +606,7 @@ fn a_reply(stoa: &Address, author: &SecretKey, parent: &OpId, body: &str) -> Sig
     Op {
         stoa: *stoa,
         author: author.public_key(),
+        clock: None,
         kind: OpKind::Post {
             thread: Some(*parent),
             parent: Some(*parent),
@@ -612,6 +626,7 @@ fn a_moderation(
     Op {
         stoa: *stoa,
         author: author.public_key(),
+        clock: None,
         kind: OpKind::Moderate {
             target: *target,
             action,
@@ -640,6 +655,7 @@ fn a_forged_post(stoa: &Address, claimed: &PublicKey, signer: &SecretKey, body: 
     let forged = Op {
         stoa: *stoa,
         author: claimed.clone(),
+        clock: None,
         kind: OpKind::Post {
             thread: None,
             parent: None,
@@ -1338,6 +1354,7 @@ fn a_forged_hide_does_not_displace_the_genuine_one_that_sorts_after_it() {
     let forged_unhide = Op {
         stoa,
         author: founder.public_key(),
+        clock: None,
         kind: OpKind::Moderate {
             target: post_id,
             action: ModerationAction::Unhide,
@@ -1859,6 +1876,7 @@ fn a_vote_is_stored_and_is_rendered_by_nothing() {
     let vote = Op {
         stoa,
         author: voter.public_key(),
+        clock: None,
         kind: OpKind::Vote {
             target: post_id,
             direction: VoteDirection::Up,
@@ -2146,7 +2164,7 @@ fn a_thread_read_over_a_store_on_disk_returns_the_root_and_its_replies() {
         root_id.to_hex(),
         hex::encode(genesis.canonical_bytes().expect("a short title encodes"))
     );
-    let reply_json = wire::read_thread_from_request(&request, || SqliteOpLog::open(&path));
+    let reply_json = wire::read_thread_from_request(&request, || SqliteOpLog::open(&path), A_TIME);
 
     let v: serde_json::Value =
         serde_json::from_str(&reply_json).expect("every reply is valid JSON, whatever happened");
@@ -2240,7 +2258,7 @@ fn a_hidden_reply_stays_hidden_across_a_restart_of_the_store() {
             genesis_hex,
             include_hidden
         );
-        let out = wire::read_thread_from_request(&request, || SqliteOpLog::open(&path));
+        let out = wire::read_thread_from_request(&request, || SqliteOpLog::open(&path), A_TIME);
         let v: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
         assert!(v.get("error").is_none(), "got {out}");
         v
@@ -2522,14 +2540,14 @@ fn a_store_seeded_from_two_identities_carries_exactly_those_two_authors() {
     // One root each, so authorship is visible in the FEED and not only in the log.
     let founders_root = authoring::post(
         &mut store,
-        &founder,
+        &by(&founder),
         stoa,
         "What does it mean for a forum to be decentralized?".to_string(),
     )
     .expect("a root post is publishable");
     let visitors_root = authoring::post(
         &mut store,
-        &visitor,
+        &by(&visitor),
         stoa,
         "On the difference between moderation and censorship".to_string(),
     )
@@ -2538,7 +2556,7 @@ fn a_store_seeded_from_two_identities_carries_exactly_those_two_authors() {
     // A reply each, crossing identities in both directions.
     authoring::reply(
         &mut store,
-        &visitor,
+        &by(&visitor),
         stoa,
         founders_root.id,
         "That it has no single party who can switch it off.".to_string(),
@@ -2546,7 +2564,7 @@ fn a_store_seeded_from_two_identities_carries_exactly_those_two_authors() {
     .expect("a reply is publishable");
     authoring::reply(
         &mut store,
-        &founder,
+        &by(&founder),
         stoa,
         visitors_root.id,
         "One is a Stoa deciding what it is.".to_string(),
@@ -2556,7 +2574,7 @@ fn a_store_seeded_from_two_identities_carries_exactly_those_two_authors() {
     // A vote each, so neither identity is present only as a poster.
     authoring::vote(
         &mut store,
-        &visitor,
+        &by(&visitor),
         stoa,
         founders_root.id,
         VoteDirection::Up,
@@ -2564,7 +2582,7 @@ fn a_store_seeded_from_two_identities_carries_exactly_those_two_authors() {
     .expect("a vote is publishable");
     authoring::vote(
         &mut store,
-        &founder,
+        &by(&founder),
         stoa,
         visitors_root.id,
         VoteDirection::Down,
@@ -2681,12 +2699,24 @@ fn the_seeding_sequence_builds_a_nested_thread_whose_author_the_probe_does_not_r
     let visitor = a_key(9);
 
     let mut store = dir.store();
-    let root = authoring::post(&mut store, &founder, stoa, "root".to_string())
+    let root = authoring::post(&mut store, &by(&founder), stoa, "root".to_string())
         .expect("a root post is publishable");
-    let reply = authoring::reply(&mut store, &visitor, stoa, root.id, "reply".to_string())
-        .expect("a reply is publishable");
-    let nested = authoring::reply(&mut store, &founder, stoa, reply.id, "nested".to_string())
-        .expect("a reply to a reply is publishable");
+    let reply = authoring::reply(
+        &mut store,
+        &by(&visitor),
+        stoa,
+        root.id,
+        "reply".to_string(),
+    )
+    .expect("a reply is publishable");
+    let nested = authoring::reply(
+        &mut store,
+        &by(&founder),
+        stoa,
+        reply.id,
+        "nested".to_string(),
+    )
+    .expect("a reply to a reply is publishable");
 
     let store = dir.reopen(store);
 
