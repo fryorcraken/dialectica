@@ -2760,8 +2760,11 @@ Each item carries what a feed row must render without a second call:
   different things the moment the post has been edited
 - whether the root post has been revised (§5.7's "the UI can show that a post
   was edited")
-- the author, as the per-Stoa address (§5.2) — never a name, because there are
-  no names
+- the author, as the per-Stoa address (§5.2) — never a name, because the
+  `generated-names` capability's *The name SHALL NOT travel* forbids a reply
+  carrying one. (The reason used to read "because there are no names", which was
+  true when it was written and is not now: names are built, and a caller holding
+  a key can obtain one. What survives is the prohibition, not the absence.)
 - a reply count, and the id of the thread's most recent non-hidden reply
 
 **Ordering is a parameter, and the accepted values are `new` and `active`**
