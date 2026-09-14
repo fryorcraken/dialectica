@@ -29,21 +29,24 @@ These get conflated, so they are separated here deliberately.
 
 | | before | after |
 |---|---|---|
-| **bytes consumed** | 6 (bytes 0..5) | 8 (bytes 12..19) |
+| **bytes consumed** | 6 (bytes 0..5) | 8 (bytes 4..11) |
 | **perceptually distinct marks** | ~1,700 | ~12,400 |
 | **combined with the generated name** | mark x name | mark x name |
 
 **The combined row deliberately names no figure.** Earlier revisions pinned
 ~2^36 and ~2^38.6 here; both were the mark multiplied by a name space this note
-does not own, and both went stale when PLAN.md changed — see the note below and
-the worked example further down. **Multiply ~12,400 (2^13.6) by the name space in
-PLAN.md §5.2.1**, which is the only place that figure is current.
+does not own, and both went stale when that space changed — see the note below
+and the worked example further down. **Multiply ~12,400 (2^13.6) by the name
+space in the `generated-names` spec**, which is the only place that figure is
+current.
 
 > **Several figures in earlier revisions of this note were wrong, and the
 > corrections are recorded in place rather than quietly replaced.** Two rounds of
 > independent review found:
 >
-> - **20 bytes** claimed, **8** actually read (12..19) — the code never read more.
+> - **20 bytes** claimed, **8** actually read — the code never read more. (That
+>   eight was `12..19` at the time; it is `4..11` now, for the reason the byte
+>   layout section gives. The count was the error, not the window.)
 > - **~66,000 marks** claimed, from counting the outline at full cardinality after
 >   describing the same ring as barely legible at feed size.
 > - **a 0.080 colour floor** claimed, hand-computed with a gamma error that hid a
@@ -610,7 +613,8 @@ one.** The two multiply, and the pair collides only when both collide.
 of this note multiplied against 2^25 and quoted a combined 2^38.6 — but that
 was the *superseded three-word* scheme, and the figure was already stale when
 it merged. A number owned by another document does not belong pinned in this
-one; **read the current space from PLAN.md §5.2.1 and multiply by 2^13.6.**
+one; **read the current space from the `generated-names` spec and multiply by
+2^13.6.**
 
 Worked for the three-word scheme at the time of writing (2^33), so the method is
 checkable rather than merely asserted:
@@ -647,7 +651,27 @@ prefix-independent. For a 32-byte address (64 hex characters):
 The abbreviation therefore shows **11 of 32 bytes**, and **21 bytes are
 invisible** at feed density: bytes 4..13 and 18..28.
 
-The mark reads **bytes 12..19** — eight bytes, one per dimension.
+The mark reads **bytes 4..11** — eight bytes, one per dimension.
+
+**`4..11` is chosen because it is the window the abbreviation cannot see.** It
+touches none of the three displayed groups and lies wholly inside the hidden
+region above. The mark's contribution to a reader is exactly the bytes it reads
+that the abbreviation hides, so a displayed byte contributes nothing — and is
+worse than merely wasted, because it is a byte an attacker can grind while
+watching their progress in the rendered address.
+
+**This window was `12..19`** and overlapped the middle group on `{14, 15, 16,
+17}`: half of what the mark read was already on screen, and only `{12, 13, 18,
+19}` reached the reader as new information. That is the flaw the section below
+recorded as unfixed, and it is now fixed. **Moving the mark rather than the
+abbreviation** is what preserves the 8-8-6 shape and its vanity-defeating middle
+group, which is the property worth keeping.
+
+The move is a uniform shift of −8 across all eight dimensions — `_form` from
+byte 12 to byte 4, `_weave` from 19 to 11 — so which dimension reads which
+relative position is unchanged, and so is every modulus. Nothing was preserved
+across the move and nothing needed to be: no mark had been persisted and no
+user held one.
 
 **Name and mark are independent, and the reason is domain separation rather
 than a byte reservation.** An earlier version of this passage said bytes 0..11
@@ -679,20 +703,27 @@ that claim was simply false about the code, which has only ever read eight.
 Widening the read to look thorough would have been the exact confusion this
 document argues against.
 
-### Two flaws this does not fix
+### One flaw this fixes, and one it does not
 
-**The mark does not cover what the abbreviation hides, as much as intended.** The
-abbreviation shows bytes 0..3, 14..17 and 29..31. Intersecting the mark's actual
-reads with the *hidden* set gives only **{12, 13, 18, 19} — 4 of the 21 hidden
-bytes**, not the 13 an earlier revision claimed. Worse, **bytes 14..17 are half of
-what the mark reads and are already on screen in the middle group**, so half the
-mark's input sits on ground the abbreviation already covers. That is a weaker
-version of the criticism this design makes of the bundle's original mark — reduced
-from four-of-six to four-of-eight, not eliminated.
+**The overlap with the abbreviation is fixed, and the fix cost nothing.** An
+earlier revision of this section recorded it as a known imperfection: the mark
+read `12..19`, the abbreviation displayed `14..17`, and **half of what the mark
+read was already on screen** — only `{12, 13, 18, 19}`, 4 of the 21 hidden
+bytes, reached the reader as new information. That was a weaker version of the
+criticism this design makes of the bundle's original mark: reduced from
+four-of-six to four-of-eight, not eliminated.
 
-Moving the read to a fully hidden window would fix it, at the cost of the name
-scheme's reserved range or of a coordination change; it is recorded here as a
-known imperfection rather than silently improved on paper.
+That revision said moving the read "would fix it, at the cost of the name
+scheme's reserved range or of a coordination change". **Both costs were
+imaginary.** The reserved range was the invented mechanism this document already
+corrects two sections above — the name reads a different digest and reserves no
+address byte — so there was nothing to trade against, and the window moved to
+`4..11` in the `generated-names` change. The mark now reads **8 of the 21 hidden
+bytes and none of the 11 displayed ones**.
+
+The lesson is worth more than the fix: **a cost that is never re-checked
+outlives the reason for it.** This one was recorded honestly, believed for two
+revisions, and was false on the day it was written.
 
 **The visible bundle is still not unique, and it is still grindable.** The
 abbreviation shows the *same byte positions for every address*, so an attacker
@@ -700,8 +731,8 @@ grinding for a lookalike grinds only those fixed positions and gets the hidden
 ones free.
 
 **The bundle is grindable at any of the sizes this note has quoted** — 2^38.6
-when that figure was pinned here, 2^46.6 at the name space PLAN.md §5.2.1 now
-carries — with unlimited address regeneration. The conclusion has survived every
+when that figure was pinned here, 2^46.6 at the name space the `generated-names`
+spec now carries — with unlimited address regeneration. The conclusion has survived every
 restatement of the number, which is the point: this defeats casual impersonation,
 not a motivated attacker, and the address remains the identity.
 

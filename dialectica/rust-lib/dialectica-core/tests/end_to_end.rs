@@ -1893,6 +1893,21 @@ fn a_vote_is_stored_and_is_rendered_by_nothing() {
         &voter.public_key().address().to_hex(),
         "and never to whoever voted on it"
     );
+    // **No name on the row, and the destructure above is what pins that.**
+    // `generated-names` requires that a name never travels on any reply, so the
+    // attribution a view renders comes from deriving on the key rather than
+    // from a field here. The row carries the address; the key it owes a caller
+    // is the known gap recorded on `FeedRow::author`.
+    //
+    // The destructure is the guard: restoring `display_name` to `FeedRow` makes
+    // this test stop COMPILING, which is louder than a failed assertion and
+    // cannot be skipped. It is the same mechanism the score comment above
+    // describes, now doing double duty.
+    //
+    // Note what is still asserted: the row is attributed to the POSTER and not
+    // the voter. That was the substance of the two name assertions removed from
+    // here — a vote-rendering bug shows up as the wrong author — and it is
+    // checked on the address just above, which is the field that survives.
     assert_eq!(body.text, "voted on");
     assert!(attachments.is_empty());
     assert!(!is_revised);

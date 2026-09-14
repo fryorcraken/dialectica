@@ -117,10 +117,25 @@ pub struct FeedRow {
     pub current_version: String,
     /// The author's per-Stoa address (§5.2), hex.
     ///
-    /// **An address and never a name.** There are no names in core — the
-    /// generated name is a pure function of this address and is the view's to
-    /// derive. Sending a name from here would put a second, forgeable identifier
-    /// on the wire beside the real one.
+    /// **The address is the identity.** No display name rides beside it: the
+    /// `generated-names` capability requires that a name never travels, on any
+    /// reply, because a derived value beside the material it derives from is two
+    /// values that must agree and could disagree — and a name on the wire is one
+    /// a relay could strip or forge.
+    ///
+    /// This comment used to read: *"An address and never a name. There are no
+    /// names in core — the generated name is a pure function of this address and
+    /// is the view's to derive."* **The correction is kept because the false
+    /// half is still false**, and it is the half that matters: a name is a pure
+    /// function of the **public key**, not of the address. A holder of an
+    /// address alone cannot derive a name, because an address is a hash from
+    /// which no key is recoverable.
+    ///
+    /// **So this row does not yet put a caller in a position to render a name**,
+    /// and that is a known gap rather than a settled shape. What the row owes is
+    /// the derivation's *input* — the public key — which is a change to this
+    /// field's contract and to several merged specs, filed as its own issue.
+    /// `docs/UI-BRIEF.md` obligation 6 carries the rendering obligation.
     pub author: String,
     /// The post body, sanitised for display.
     pub body: Sanitised,
@@ -429,7 +444,10 @@ mod tests {
         .sign(&creator);
         let log = a_log(vec![head.clone(), other.clone(), hide]);
 
-        let default_view: Vec<String> = all_of(&log, false).iter().map(|r| r.thread.clone()).collect();
+        let default_view: Vec<String> = all_of(&log, false)
+            .iter()
+            .map(|r| r.thread.clone())
+            .collect();
         assert_eq!(default_view, vec![other.op.id().to_hex()]);
 
         let hidden_view = all_of(&log, true);
@@ -464,11 +482,18 @@ mod tests {
             },
         }
         .sign(&impostor);
-        assert!(hide.verify(), "the op is authentic; it is the AUTHORITY that fails");
+        assert!(
+            hide.verify(),
+            "the op is authentic; it is the AUTHORITY that fails"
+        );
 
         let log = a_log(vec![head.clone(), hide]);
         let rows = all_of(&log, false);
-        assert_eq!(rows.len(), 1, "a non-moderator must not be able to hide a post");
+        assert_eq!(
+            rows.len(),
+            1,
+            "a non-moderator must not be able to hide a post"
+        );
         assert!(!rows[0].is_hidden);
     }
 
@@ -603,6 +628,153 @@ mod tests {
     }
 
     #[test]
+    fn a_row_carries_the_address_and_no_derived_display_name() {
+        // "No reply SHALL carry a display name: not a feed row, not a thread
+        // item, not an onboarding slate candidate."
+        //
+        // **Pinned POSITIVELY rather than left as the current shape.** An
+        // earlier pass put a `displayName` on this row; the owner reversed it,
+        // and an absence nobody asserts is an absence a later pass restores
+        // with every test still green. The same shape caught a re-exclusion in
+        // `names.rs` — `the_lists_carry_no_exclusion_of_any_kind` pins words as
+        // PRESENT for exactly this reason.
+        //
+        // **The JSON side is pinned separately and more strongly**, by
+        // `the_feed_json_is_pinned_to_the_exact_shape_a_view_is_written_against`
+        // in `wire.rs`, which asserts the row's whole key set — so a restored
+        // `displayName` fails there on an ADDED key. This half pins the struct,
+        // which is where such a field would be added first.
+        //
+        // Both are wanted: a field on `FeedRow` that never reaches the wire
+        // would not violate the requirement but is the step before one that
+        // does, and a reader of `feed.rs` should not have to open `wire.rs` to
+        // learn that the absence is deliberate.
+        let head = a_thread(4, "mine");
+        let log = a_log(vec![head]);
+        let rows = all_of(&log, false);
+
+        assert_eq!(rows[0].author, a_key(4).public_key().address().to_hex());
+
+        // The struct's fields, enumerated by destructuring rather than by a
+        // list someone keeps up to date: adding a field to `FeedRow` makes this
+        // stop compiling, which is a louder failure than an assertion and one
+        // that cannot go stale.
+        let FeedRow {
+            thread: _,
+            current_version: _,
+            author: _,
+            body: _,
+            attachments: _,
+            is_revised: _,
+            is_hidden: _,
+        } = &rows[0];
+    }
+
+    #[test]
+    fn two_keys_that_derive_one_name_stay_two_rows_with_two_addresses() {
+        // The collision case, with two REAL colliding keys rather than a stubbed
+        // derivation — the pair was found by searching the shipped scheme (see
+        // `names::tests_support::COLLIDING_SEED_A`).
+        //
+        // **What the feed owes here is narrower than it was**, now that no row
+        // carries a name: two identities whose keys happen to derive one name
+        // must still be two rows with two addresses. The feed must not collapse,
+        // deduplicate or otherwise merge them — the addresses are what tells
+        // them apart, and they are the only thing on the row that could.
+        //
+        // The pair is kept rather than replaced by two arbitrary keys because it
+        // exercises the case where everything a reader *sees rendered* is
+        // identical. Two unrelated keys would not.
+        let ka = SecretKey::from_bytes(&crate::names::tests_support::COLLIDING_SEED_A).unwrap();
+        let kb = SecretKey::from_bytes(&crate::names::tests_support::COLLIDING_SEED_B).unwrap();
+
+        // The fixture must actually be a colliding pair, or this test is about
+        // two ordinary keys and its name is a lie.
+        assert_eq!(
+            crate::names::display_name(&ka.public_key()).render(),
+            crate::names::display_name(&kb.public_key()).render(),
+            "the fixture's two keys must still derive the same name"
+        );
+
+        let post = |key: &SecretKey, body: &str| {
+            Op {
+                stoa: a_stoa(),
+                author: key.public_key(),
+                kind: OpKind::Post {
+                    thread: None,
+                    parent: None,
+                    body: body.to_string(),
+                    attachments: vec![],
+                },
+            }
+            .sign(key)
+        };
+
+        let log = a_log(vec![post(&ka, "from a"), post(&kb, "from b")]);
+        let rows = all_of(&log, false);
+        assert_eq!(rows.len(), 2, "the fixture must produce two rows");
+
+        assert_ne!(
+            rows[0].author, rows[1].author,
+            "the two rows must carry different author addresses"
+        );
+        assert_eq!(
+            rows[0].author,
+            ka.public_key().address().to_hex(),
+            "each row's address must be its own signer's"
+        );
+        assert_eq!(rows[1].author, kb.public_key().address().to_hex());
+    }
+
+    #[test]
+    fn two_posts_by_one_author_carry_one_address() {
+        let first = a_thread(4, "one");
+        let key = a_key(4);
+        let second = Op {
+            stoa: a_stoa(),
+            author: key.public_key(),
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: "two".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&key);
+        let log = a_log(vec![first, second]);
+
+        let rows = all_of(&log, false);
+        assert_eq!(rows.len(), 2, "the fixture must produce two rows");
+        assert_eq!(rows[0].author, rows[1].author);
+    }
+
+    #[test]
+    fn a_name_in_a_posts_body_reaches_no_author_field() {
+        // "A name does not travel as content." An op has no name field to strip
+        // — `OpKind::Post` carries `body`, `attachments`, `thread` and `parent`
+        // and nothing else — so a name-shaped string in a body is body text and
+        // is never treated as the author's name.
+        //
+        // Satisfied by construction rather than by a filter: there is no field
+        // for a name to arrive in, and now no field for one to leave in either.
+        // This asserts the consequence anyway, because "by construction" is a
+        // claim about a data shape that a future field could silently undo.
+        //
+        // The body is a REAL derivable name (`pensive aporia of lampsakos`,
+        // each word verified by index in `names.rs`), so the test exercises a
+        // string the scheme could actually produce rather than one it could not.
+        let head = a_thread(4, "pensive aporia of lampsakos");
+        let log = a_log(vec![head]);
+        let rows = all_of(&log, false);
+
+        assert_eq!(rows[0].author, a_key(4).public_key().address().to_hex());
+        assert_ne!(
+            rows[0].author, "pensive aporia of lampsakos",
+            "the body's text must not become the author field"
+        );
+    }
+
+    #[test]
     fn the_author_is_an_address_and_matches_the_key_that_signed() {
         // §11.1 obligation 6: the address is the identity. It must be the
         // address of the key that actually signed, not of the field's claim —
@@ -633,8 +805,14 @@ mod tests {
             backwards.append(op.clone(), Arrival::unordered()).unwrap();
         }
 
-        let a: Vec<String> = all_of(&forwards, false).iter().map(|r| r.thread.clone()).collect();
-        let b: Vec<String> = all_of(&backwards, false).iter().map(|r| r.thread.clone()).collect();
+        let a: Vec<String> = all_of(&forwards, false)
+            .iter()
+            .map(|r| r.thread.clone())
+            .collect();
+        let b: Vec<String> = all_of(&backwards, false)
+            .iter()
+            .map(|r| r.thread.clone())
+            .collect();
         assert_eq!(a, b);
         assert_eq!(a.len(), 4, "the fixture must exercise all four");
     }
@@ -657,7 +835,10 @@ mod tests {
             .iter()
             .map(|e| e.id().to_hex())
             .collect();
-        let from_feed: Vec<String> = all_of(&log, false).iter().map(|r| r.thread.clone()).collect();
+        let from_feed: Vec<String> = all_of(&log, false)
+            .iter()
+            .map(|r| r.thread.clone())
+            .collect();
         assert_eq!(from_feed, from_log);
     }
 
@@ -668,9 +849,14 @@ mod tests {
         // The property paging must have and the one an off-by-one breaks. Three
         // pages of two over five rows: the concatenation must equal the whole
         // feed exactly.
-        let ops: Vec<SignedOp> = (0..5).map(|i| a_thread(2 + i, &format!("post {i}"))).collect();
+        let ops: Vec<SignedOp> = (0..5)
+            .map(|i| a_thread(2 + i, &format!("post {i}")))
+            .collect();
         let log = a_log(ops);
-        let whole: Vec<String> = all_of(&log, false).iter().map(|r| r.thread.clone()).collect();
+        let whole: Vec<String> = all_of(&log, false)
+            .iter()
+            .map(|r| r.thread.clone())
+            .collect();
         assert_eq!(whole.len(), 5);
 
         let mut seen = Vec::new();
@@ -687,7 +873,9 @@ mod tests {
         // At the boundary, not past it: with 4 rows and a page size of 2, page
         // 1 is the LAST page and must report false. A test using 10 rows would
         // pass against an implementation that always said true.
-        let ops: Vec<SignedOp> = (0..4).map(|i| a_thread(2 + i, &format!("post {i}"))).collect();
+        let ops: Vec<SignedOp> = (0..4)
+            .map(|i| a_thread(2 + i, &format!("post {i}")))
+            .collect();
         let log = a_log(ops);
 
         let first = list_threads(&log, &moderators(), &a_stoa(), 0, 2, false).unwrap();
@@ -706,7 +894,9 @@ mod tests {
     fn an_exactly_full_single_page_does_not_claim_more() {
         // The other boundary: rows == per_page exactly. An implementation
         // computing `has_more` as `start + per_page <= len` gets this wrong.
-        let ops: Vec<SignedOp> = (0..3).map(|i| a_thread(2 + i, &format!("post {i}"))).collect();
+        let ops: Vec<SignedOp> = (0..3)
+            .map(|i| a_thread(2 + i, &format!("post {i}")))
+            .collect();
         let log = a_log(ops);
         let p = list_threads(&log, &moderators(), &a_stoa(), 0, 3, false).unwrap();
         assert_eq!(p.items.len(), 3);
@@ -742,12 +932,17 @@ mod tests {
         // gaps, and a reader clicking "next" silently skips rows. Two of four
         // threads are hidden, so one full page of two must come back — not a
         // page of two containing the survivors of the first two.
-        let heads: Vec<SignedOp> = (0..4).map(|i| a_thread(2 + i, &format!("post {i}"))).collect();
+        let heads: Vec<SignedOp> = (0..4)
+            .map(|i| a_thread(2 + i, &format!("post {i}")))
+            .collect();
         let creator = a_key(1);
         let log_all = a_log(heads.clone());
         // Hide whichever two the convergent order puts FIRST, so that a
         // filter-after-paging implementation would return an empty first page.
-        let order: Vec<String> = all_of(&log_all, false).iter().map(|r| r.thread.clone()).collect();
+        let order: Vec<String> = all_of(&log_all, false)
+            .iter()
+            .map(|r| r.thread.clone())
+            .collect();
         let mut ops = heads.clone();
         for hex in order.iter().take(2) {
             ops.push(

@@ -25,6 +25,7 @@ pub mod keystore;
 pub mod log;
 pub mod membership;
 pub mod moderation;
+pub mod names;
 pub mod onboarding;
 pub mod op;
 pub mod revision;

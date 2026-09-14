@@ -20,14 +20,15 @@ argument between positions.
 > reconciled against **PLAN.md §7.2-§7.3** (votes and vouching), **§9.1**
 > (the Phase 3 API) and **§5.2.1** (what an identity is called).
 >
-> **The generated name's shape is settled as of §5.2.1**: three words —
-> **adjective + Greek noun + "of" + Greek place**, as in *measured aporia of
-> lampsacus* — derived from the key and never typed. Earlier versions of this
-> block said "adjectives plus a noun" and then "four words — two adjectives and
-> two nouns"; both are superseded, and the four-word version was the one this
-> brief was designed against for a while. The *word lists* remain curation work,
-> but the shape, the sizes and the sources are decided. `git log docs/PLAN.md`
-> answers what has landed; this block does not try to.
+> **The generated name's shape is settled, and the `generated-names` spec is
+> now the authority on it** rather than PLAN.md: three words — **adjective +
+> Greek noun + "of" + Greek place**, as in *pensive aporia of lampsakos* —
+> derived from the key and never typed. Earlier versions of this block said
+> "adjectives plus a noun" and then "four words — two adjectives and two nouns";
+> both are superseded, and the four-word version was the one this brief was
+> designed against for a while. The word lists are written and the sizes are
+> fixed. `git log docs/PLAN.md` answers what has landed; this block does not try
+> to.
 >
 > Also reconciled against **§9.2** (the first release's scope), which suspends
 > one property this brief previously stated as fact — see the box below.
@@ -127,25 +128,35 @@ switched on, and switching it on later is not a redesign.
 
 **Identities have generated names, and this is new.** An identity renders as
 **an adjective, a Greek noun, the word "of", and a Greek place** — something like
-*measured aporia of lampsacus*, *brittle kairos of abdera* or *luminous stasis of
-delos* —
-computed from the key itself. Nobody types a name; there is no registry to hold
+*pensive aporia of lampsakos*, *quipful ismene of korykos* or *luminous stasis of
+delos* — computed from the key itself. Nobody types a name; there is no registry to hold
 one, and a typed name carried between Stoas would undo the unlinkability above
 with a text field — which is a reason that outlives the first release's
 suspension of it, since a name field would make the property unrestorable rather
 than merely switched off.
 
-**The register is deliberate and it is the point: sober, plain, adult — but only
-two of the three words carry it.** The **noun** pools the vocabulary of Greek
-thought (`logos`, `praxis`, `techne`, `aporia`, `kairos`) with thinkers and
-writers (`thales`, `hypatia`, `solon`, `sappho`), and the **place** is a Greek
-place, real or mythological (`lampsacus`, `abdera`, `delos`, `elea`). The
-**adjective is any English adjective** and is not screened for register at all, so
-`brittle`, `luminous` and `damp` draw alongside `measured` and `attic`. What
-carries the classical register is the *X of Y* shape and the two Greek words in
-it. **If a name reads like a fantasy handle, something has gone wrong** — an
-earlier draft drew on science fiction and produced *vermilion patient sandworm*,
-which is why this note exists.
+**A one-line gloss for the identity selection screen**, on hover or beside the
+slate — the noun and the place are Greek, and a user has no other way to know
+why the words look the way they do:
+
+> The noun and the place are ancient Greek; the adjective is English.
+
+**Core does not serve a gloss for the individual words, and nothing should be
+designed as though it did.** A user shown *pensive aporia of lampsakos* has no
+way to learn what `aporia` means or where `lampsakos` was: the view cannot look
+anything up, and core has nothing to answer with. The line above is the whole of
+what can be said about the words — it explains why they look the way they do, and
+it is fixed copy rather than a lookup.
+
+**Per-word glosses are intended and unbuilt**, tracked as issue #82. Design for
+the words being opaque; do not design a tap, a hover or a detail view whose
+content core cannot supply, because it would come up empty on every word. If and
+when #82 lands, two things about it will shape the affordance and are worth
+knowing now: it is **fetched per word, on request** rather than carried with the
+name, so it would suit a tap or a hover and would not be free to render 50 rows'
+worth in a feed; and **only the noun and the place would ever have one**, the
+adjective being English, so an affordance implying all three words are
+explainable would come up empty on the first one regardless.
 
 **Three content words, and they all matter — but the `of` is free.** The
 adjective, the noun and the place are each an independent draw and each is part of
@@ -153,7 +164,7 @@ what makes accidental collisions rare (see below), so **do not truncate or elide
 any of them, and never cut one mid-word**: dropping the tail removes the place,
 which is a third of what distinguishes one name from another and is often the only
 part that differs between two similar names. **The one thing a cramped row may
-drop is the connector** — *measured aporia lampsacus* loses nothing, because "of"
+drop is the connector** — *pensive aporia lampsakos* loses nothing, because "of"
 is fixed literal text and carries no information. If a row cannot hold three
 words, the row is wrong.
 
@@ -936,16 +947,19 @@ wrong twice. The name is **not** derived from the address: it is derived from th
 inputs. So a view holding only an address **cannot** compute the name.*
 
 *The correction to the previous version: core does **not** hand you a rendered
-name, and should not — a name is a pure function of the key, so sending both
-would put a derived value on the wire beside the material it comes from, where
-the two could disagree. **Core gives you the address and the public key**, and
-deriving the name from the key is the interface's job, as deriving the mark from
-the address already is.*
+name on a reply, and should not — a name is a pure function of the key, so
+sending both would put a derived value on the wire beside the material it comes
+from, where the two could disagree. **Core gives you the address and the public
+key**, and the name is obtained from that key.*
 
-*The thread read does this (the `thread-read` spec). **The feed read does not
-yet** — it returns an address per row and drops the key, which is why the feed
-screen renders an empty name today. That is a known gap with an owner, not a
-design decision to build around.)*
+*Two gaps stand between that and a name on screen, and both are known gaps with
+owners rather than design decisions to build around.* **Core has no call that
+turns a key into a name yet** *(issue #81) — the derivation exists in core but
+nothing reaches it, and the view cannot do it itself: the sandbox gives it no
+filesystem and no network, so it holds none of the 10,240 wordlist entries. And*
+**the feed read returns an address per row and drops the key** *(the thread read
+does ship it, per the `thread-read` spec). Between them, the feed screen renders
+an empty name today.)*
 
 **Uniqueness is not merely unbuilt — it is unavailable.** A uniqueness check
 needs agreement about who holds which name, and there is no authority to hold
