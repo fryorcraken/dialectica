@@ -157,7 +157,16 @@ pub fn panic_probe(request: &str) -> String {
 /// no branch to get wrong.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Capability {
-    /// Posting is possible, under this author address (hex).
+    /// Posting is possible, under this author public key (hex).
+    ///
+    /// **The field name is `identity` and stays**, which is what lets the value
+    /// it carries change without the contract moving: `posting-capability` is
+    /// written over *"the identity that would post"* and *"the one an op
+    /// published now would be attributed to, derived from the key that would
+    /// actually sign it"*, never over an address. Issue #80 made that the public
+    /// key's hex where it had been an author address's; both are 32 bytes and
+    /// render as 64 hex characters, so the shape does not move and every
+    /// requirement governing it stays true.
     CanPost { identity: String },
     /// Posting is not possible. The reason **names the fix** — the
     /// `posting-capability` spec requires it, and it is the difference between
@@ -279,7 +288,8 @@ pub fn capability_for(
     }
 }
 
-/// The address an op published now would be attributed to, for the probe to report.
+/// The public key an op published now would be attributed to, for the probe to
+/// report.
 ///
 /// # This exists because two methods were answering "who posts here" differently
 ///
@@ -289,7 +299,7 @@ pub fn capability_for(
 /// posts under another."* That was the live state. `whoAmI` used the path-taking
 /// derivation under salt `/dialectica/2/…`; the probe's lookup was still the
 /// pathless one under `/dialectica/1/…`, and `identity.rs`'s own test asserts the
-/// two schemes **must** disagree. So the onboarding flow showed one address and the
+/// two schemes **must** disagree. So the onboarding flow showed one identity and the
 /// posting gate reported another, for one user in one Stoa, with no field in either
 /// reply to tell them apart.
 ///
@@ -321,7 +331,7 @@ pub fn posting_identity(
     paths: &crate::identity_store::IdentityStore,
 ) -> Result<String, String> {
     match paths.path_for(stoa) {
-        Ok(Some(path)) => Ok(keystore.stoa_address_at_path(stoa, path).to_hex()),
+        Ok(Some(path)) => Ok(keystore.stoa_public_key_at_path(stoa, path).to_hex()),
         Ok(None) => Err(NO_CHOICE_FOR_THIS_STOA.to_string()),
         Err(e) => Err(e.to_string()),
     }
@@ -336,7 +346,7 @@ pub fn posting_identity(
 /// probe reports an identity for a Stoa and a post is then published into that
 /// Stoa, THEN the published op's author is the identity the probe reported"* —
 /// and the probe reports [`posting_identity`], which is
-/// `stoa_address_at_path(stoa, recorded_path)`.
+/// `stoa_public_key_at_path(stoa, recorded_path)`.
 ///
 /// The publish path signed with `keystore.stoa_key(&stoa)` instead: the
 /// **pathless** per-Stoa scheme, under a different salt. `identity.rs`'s own
@@ -483,16 +493,16 @@ fn parse_stoa(parsed: &Request) -> Result<crate::identity::Address, String> {
 /// A slate is not a nonce. It is a **`(master key, nonce)` pair** — the nonce
 /// fixes the five *paths* and the master key fixes the five *identities* at those
 /// paths. `derive_path` takes only the nonce, so two different master keys and one
-/// nonce give the same five paths and five completely different addresses.
+/// nonce give the same five paths and five completely different public keys.
 ///
 /// The first version of this change held only the nonce, and the adapter minted a
 /// fresh master key on each of the two calls. Every guard fired correctly and the
 /// outcome was still wrong: the slate showed candidates of key *A*, the keep wrote
-/// key *B*, reported `kept: true`, and named an address the user had never seen.
+/// key *B*, reported `kept: true`, and named an identity the user had never seen.
 /// Three reviewers reached it independently. The spec calls storing an identity the
 /// user did not choose unrecoverable *"because the choice cannot be recomputed"*,
-/// and an address is *"the only unforgeable way to tell two candidates apart"* —
-/// so the value the choice was made on was precisely the value that changed.
+/// and the public key is *"the only unforgeable way to tell two candidates apart"*
+/// — so the value the choice was made on was precisely the value that changed.
 ///
 /// The nonce check cannot catch it. Both slates are equally live and the nonce is
 /// the same; what differs is a thing the nonce says nothing about.
@@ -703,6 +713,15 @@ pub fn generate_identity_slate(
 /// identity does not already reveal"* — and a view that can show the user which
 /// path they are about to keep is a view that can render the recovery warning
 /// truthfully. What is NOT here is any secret, which the spec requires by name.
+///
+/// **`address` is absent, and its absence is required rather than incidental.**
+/// A candidate carried one until issue #80; the spec now states that *"no
+/// candidate SHALL carry an author address"*, and the capability's closed-field
+/// requirement makes this forced rather than optional — the field set must be
+/// exactly what the requirements name, and none of them names an address. The
+/// key set pinned by
+/// `the_slate_json_is_pinned_to_the_exact_shape_a_view_is_written_against` is
+/// what makes a reintroduction fail rather than pass quietly.
 fn slate_json(slate: &crate::onboarding::Slate) -> String {
     let candidates: Vec<serde_json::Value> = slate
         .candidates
@@ -711,7 +730,6 @@ fn slate_json(slate: &crate::onboarding::Slate) -> String {
             serde_json::json!({
                 "index": c.index,
                 "path": c.path,
-                "address": c.address.to_hex(),
                 "publicKey": c.public_key.to_hex(),
             })
         })
@@ -734,8 +752,13 @@ fn slate_json(slate: &crate::onboarding::Slate) -> String {
 pub enum Kept {
     /// The identity is stored. Carries what it is, and whether the master key was
     /// encrypted at rest.
+    ///
+    /// **An `address` rode beside `public_key` until issue #80**, and its
+    /// deletion is the closed-field requirement working rather than a separate
+    /// decision: the spec's keep scenario now says the reply *"carries that
+    /// identity's public key AND carries no author address"*, so a reply still
+    /// carrying one carries a field no contract names.
     Stored {
-        address: String,
         public_key: String,
         path: u32,
         encrypted: bool,
@@ -749,13 +772,11 @@ impl Kept {
     pub fn to_json(&self) -> String {
         match self {
             Kept::Stored {
-                address,
                 public_key,
                 path,
                 encrypted,
             } => serde_json::json!({
                 "kept": true,
-                "address": address,
                 "publicKey": public_key,
                 "path": path,
                 "encrypted": encrypted,
@@ -984,7 +1005,6 @@ pub fn keep_selection(
     }
 
     Kept::Stored {
-        address: candidate.address.to_hex(),
         public_key: candidate.public_key.to_hex(),
         path: candidate.path,
         encrypted,
@@ -1000,8 +1020,13 @@ pub fn keep_selection(
 #[derive(Debug, PartialEq, Eq)]
 pub enum Whoami {
     /// There is an identity.
+    ///
+    /// **Named by its public key and by nothing beside it.** An `address` rode
+    /// here until issue #80; the spec now requires this reply *"SHALL name the
+    /// identity by its public key and SHALL NOT carry an author address"*, the
+    /// public key being the sole author identifier and what the generated display
+    /// name and the visual mark are both derived from.
     Identity {
-        address: String,
         public_key: String,
         path: u32,
         /// Whether recovering this identity needs more than the master key.
@@ -1025,13 +1050,11 @@ impl Whoami {
     pub fn to_json(&self) -> String {
         match self {
             Whoami::Identity {
-                address,
                 public_key,
                 path,
                 recovery_needs_the_record,
             } => serde_json::json!({
                 "hasIdentity": true,
-                "address": address,
                 "publicKey": public_key,
                 "path": path,
                 "recoveryNeedsTheRecord": recovery_needs_the_record,
@@ -1145,7 +1168,6 @@ pub fn whoami_for(
 
     let public_key = keystore.stoa_public_key_at_path(stoa, path);
     Whoami::Identity {
-        address: public_key.address().to_hex(),
         public_key: public_key.to_hex(),
         path,
         // Always true in this change: no export or remote backup exists, so the
@@ -1793,10 +1815,15 @@ fn thread_page_json(page: &crate::thread::ThreadPage) -> String {
                 "thread": item.thread,
                 "id": item.id,
                 "currentVersion": item.current_version,
+                // NO SPEC: `author` carries the public key's hex, and `authorKey`
+                // is gone. `thread-read` requires "every item carries its
+                // author's public key" and "no item carries an author address",
+                // and names no JSON field for either — so which of the two
+                // spellings survives the collapse from two fields to one is this
+                // change's choice. `author` was kept because it is how every
+                // other reply here spells the same job; `design.md` §4 carries
+                // it, including why a missing `authorKey` is the loud failure.
                 "author": item.author,
-                // NO SPEC: the field NAME is this change's choice — the spec
-                // requires the value and names no field. `design.md` carries it.
-                "authorKey": item.author_key,
                 "isRevised": item.is_revised,
                 "moderation": { "state": state },
             });
@@ -3300,51 +3327,54 @@ mod tests {
         // could see the probe reporting one identity while the user posted
         // under another — which is the thing this requirement exists to stop.
         //
-        // The keystore's root is fixed, so the expected address comes from a
+        // The keystore's root is fixed, so the expected identity comes from a
         // derivation this test performs independently rather than from the
         // probe's own answer.
-        use crate::identity::{derive_stoa_key, sign_op_bytes, verify_authored_op};
+        use crate::identity::{derive_stoa_key, sign_op_bytes, verify_authored_op, PublicKey};
 
         let root = [7u8; 32];
         let stoa = a_stoa();
         let request = format!(r#"{{"stoa":"{}"}}"#, stoa.to_hex());
 
         let out = get_capabilities(&request, |s| {
-            Ok(derive_stoa_key(&root, s).public_key().address().to_hex())
+            Ok(derive_stoa_key(&root, s).public_key().to_hex())
         });
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["canPost"], true, "got {out}");
         let reported = v["identity"].as_str().unwrap();
 
-        // Now sign something as that identity would, and verify the op is
-        // attributed to the address the probe named.
+        // Now sign something as that identity would, and verify the op
+        // authenticates under the key the probe named.
         let key = derive_stoa_key(&root, &stoa);
         let sig = sign_op_bytes(&key, b"a post");
-        let author = Address::from_hex(reported).expect("the probe reports a parseable address");
+        let author = PublicKey::from_bytes(&hex::decode(reported).expect("hex"))
+            .expect("the probe reports a parseable public key");
         assert!(
-            verify_authored_op(
-                &author,
-                &key.public_key().to_bytes(),
-                b"a post",
-                &sig.to_bytes()
-            ),
-            "an op signed by this identity is not attributed to the address the \
+            verify_authored_op(&author.to_bytes(), b"a post", &sig.to_bytes()),
+            "an op signed by this identity does not verify under the key the \
              probe reported"
         );
 
-        // And the negative: a DIFFERENT Stoa's key must not verify against the
-        // reported address, or the assertion above would hold for any key.
+        // And the negative, or the assertion above would hold for any pairing: a
+        // DIFFERENT Stoa's signature must not verify under the reported key.
+        //
+        // The substituted value is the SIGNATURE rather than the presented key.
+        // It used to be the key, held against a fixed claimed address — but issue
+        // #80 left no separate identifier to hold fixed, and the signature check
+        // is what produced the refusal in either spelling.
         let other = derive_stoa_key(&root, &stoa_address(b"some other stoa"));
         let other_sig = sign_op_bytes(&other, b"a post");
         assert!(
-            !verify_authored_op(
-                &author,
-                &other.public_key().to_bytes(),
-                b"a post",
-                &other_sig.to_bytes()
-            ),
-            "another Stoa's key verified against this Stoa's reported identity"
+            !verify_authored_op(&author.to_bytes(), b"a post", &other_sig.to_bytes()),
+            "another Stoa's signature verified under this Stoa's reported identity"
         );
+        // That signature is genuinely valid under its own key, so the refusal is a
+        // mismatch and not a malformed signature.
+        assert!(verify_authored_op(
+            &other.public_key().to_bytes(),
+            b"a post",
+            &other_sig.to_bytes()
+        ));
     }
 
     #[test]
@@ -3689,10 +3719,11 @@ mod tests {
             keys.sort_unstable();
             assert_eq!(
                 keys,
-                ["address", "index", "path", "publicKey"],
+                ["index", "path", "publicKey"],
                 "a candidate's key set changed. An ADDED key fails here too, which \
-                 is the point: the spec requires no candidate carry a display name \
-                 or a visual mark, and this capability does not define either. {v}"
+                 is the point: the spec requires no candidate carry a display name, \
+                 a visual mark or an author address, and this capability defines \
+                 none of them. {v}"
             );
         }
         // And the candidates are indexed 0..5 in order, because a caller selects
@@ -3704,26 +3735,29 @@ mod tests {
     }
 
     #[test]
-    fn a_slate_reply_carries_an_address_and_a_public_key_for_every_candidate() {
-        // The spec requires both, with a reason for each: the address "is the only
-        // unforgeable way to tell two candidates apart", and the public key
-        // because "the generated display name is derived from the public key
-        // rather than from the address".
+    fn a_slate_reply_carries_a_public_key_and_no_address_for_every_candidate() {
+        // The spec: "A candidate's public key SHALL be present … **No candidate
+        // SHALL carry an author address**". The key is the only unforgeable way to
+        // tell two candidates apart, and it is what every value shown beside a
+        // candidate is derived from.
         //
-        // Checked as PARSEABLE values of the right length, not merely present — a
-        // field holding the empty string would satisfy a presence check and be
-        // useless to a view.
+        // Checked as a PARSEABLE key, not merely present — a field holding the
+        // empty string would satisfy a presence check and be useless to a view.
+        // The address is checked as ABSENT by name here, and the key-set
+        // assertion in
+        // `the_slate_json_is_pinned_to_the_exact_shape_a_view_is_written_against`
+        // is what closes the general case of a field arriving under some other
+        // spelling.
         let (v, _) = slate_through_the_wire();
         for candidate in v["candidates"].as_array().unwrap() {
-            let address = candidate["address"].as_str().unwrap();
-            assert!(
-                crate::identity::Address::from_hex(address).is_ok(),
-                "a candidate's address does not parse: {address}"
-            );
             let key = hex::decode(candidate["publicKey"].as_str().unwrap()).unwrap();
             assert!(
                 crate::identity::PublicKey::from_bytes(&key).is_ok(),
                 "a candidate's public key does not parse"
+            );
+            assert!(
+                candidate.get("address").is_none(),
+                "a candidate carries an author address: {candidate}"
             );
         }
     }
@@ -3761,7 +3795,7 @@ mod tests {
 
         // The detection must work, or the assertions above prove nothing: a value
         // that IS in the reply must be found.
-        let present = v["candidates"][0]["address"].as_str().unwrap();
+        let present = v["candidates"][0]["publicKey"].as_str().unwrap();
         assert!(
             out.contains(present),
             "the search is broken, so the assertions above prove nothing"
@@ -3952,16 +3986,17 @@ mod tests {
         let v = keep_through_the_wire(&dir, nonce, Some(nonce), 2, &Unlock::Unencrypted);
         assert_eq!(v["kept"], true, "got {v}");
 
-        // The expected address is derived HERE, independently, from the fixed
+        // The expected key is derived HERE, independently, from the fixed
         // master key and the path the reply named — not read back from the reply's
-        // own address field.
+        // own publicKey field.
         let path = v["path"].as_u64().unwrap() as u32;
         let expected = crate::identity::derive_stoa_key_at_path(&[7u8; 32], &a_stoa(), path)
             .public_key()
-            .address()
             .to_hex();
-        assert_eq!(v["address"], expected, "got {v}");
+        assert_eq!(v["publicKey"], expected, "got {v}");
         assert!(v.get("reason").is_none(), "got {v}");
+        // The spec: a successful keep "carries no author address".
+        assert!(v.get("address").is_none(), "got {v}");
 
         // And the path that reached the record is the one reported, checked
         // through the store rather than through the reply.
@@ -3977,7 +4012,7 @@ mod tests {
         let dir = OnboardingDir::new("keep-survives");
         let nonce = SlateNonce::generate().unwrap();
         let kept = keep_through_the_wire(&dir, nonce, Some(nonce), 1, &Unlock::Unencrypted);
-        let kept_address = kept["address"].as_str().unwrap().to_string();
+        let kept_key = kept["publicKey"].as_str().unwrap().to_string();
 
         for reload in 0..2 {
             let v: serde_json::Value = serde_json::from_str(&who_am_i(
@@ -3988,7 +4023,7 @@ mod tests {
             .unwrap();
             assert_eq!(v["hasIdentity"], true, "reload {reload}: {v}");
             assert_eq!(
-                v["address"], kept_address,
+                v["publicKey"], kept_key,
                 "reload {reload} reported a different identity than was kept"
             );
         }
@@ -3998,16 +4033,18 @@ mod tests {
     fn a_kept_identity_can_sign_as_the_identity_it_reported() {
         // The spec: "an op signed by the identity it yields has as its author the
         // identity that keeping it reported". END TO END through a real keystore
-        // on disk and a real signature — every other keep test compares addresses,
-        // so none of them could see a keep that reported one identity while the
-        // user posted under another.
-        use crate::identity::{sign_op_bytes, verify_authored_op, Address};
+        // on disk and a real signature — every other keep test compares reported
+        // values, so none of them could see a keep that reported one identity
+        // while the user posted under another.
+        use crate::identity::{sign_op_bytes, verify_authored_op, PublicKey};
 
         let dir = OnboardingDir::new("keep-signs");
         let nonce = SlateNonce::generate().unwrap();
         let kept = keep_through_the_wire(&dir, nonce, Some(nonce), 0, &Unlock::Unencrypted);
-        let reported =
-            Address::from_hex(kept["address"].as_str().unwrap()).expect("a parseable address");
+        let reported = PublicKey::from_bytes(
+            &hex::decode(kept["publicKey"].as_str().unwrap()).expect("hex"),
+        )
+        .expect("a parseable public key");
         let path = kept["path"].as_u64().unwrap() as u32;
 
         // Reopened from disk, not the in-memory keystore the keep used — the
@@ -4016,23 +4053,25 @@ mod tests {
         let key = reloaded.stoa_key_at_path(&a_stoa(), path);
         let sig = sign_op_bytes(&key, b"a post");
         assert!(
-            verify_authored_op(
-                &reported,
-                &key.public_key().to_bytes(),
-                b"a post",
-                &sig.to_bytes()
-            ),
-            "an op signed by the kept identity is not attributed to the reported address"
+            verify_authored_op(&reported.to_bytes(), b"a post", &sig.to_bytes()),
+            "an op signed by the kept identity does not verify under the reported key"
         );
 
-        // The negative: another path's key must not verify, or the assertion
-        // above would hold for any key.
+        // The negative, or the assertion above would hold for any pairing:
+        // another path's SIGNATURE must not verify under the reported key.
         let other = reloaded.stoa_key_at_path(&a_stoa(), path.wrapping_add(1));
+        let other_sig = sign_op_bytes(&other, b"a post");
         assert!(!verify_authored_op(
-            &reported,
+            &reported.to_bytes(),
+            b"a post",
+            &other_sig.to_bytes()
+        ));
+        // That signature is valid under its own key, so the refusal above is a
+        // mismatch rather than a malformed signature.
+        assert!(verify_authored_op(
             &other.public_key().to_bytes(),
             b"a post",
-            &sign_op_bytes(&other, b"a post").to_bytes()
+            &other_sig.to_bytes()
         ));
     }
 
@@ -4272,13 +4311,12 @@ mod tests {
         // precedent.
         assert_eq!(
             Kept::Stored {
-                address: "aa".into(),
                 public_key: "bb".into(),
                 path: 7,
                 encrypted: true,
             }
             .to_json(),
-            r#"{"address":"aa","encrypted":true,"kept":true,"path":7,"publicKey":"bb"}"#
+            r#"{"encrypted":true,"kept":true,"path":7,"publicKey":"bb"}"#
         );
         assert_eq!(
             Kept::Refused {
@@ -4334,7 +4372,9 @@ mod tests {
             let v: serde_json::Value = serde_json::from_str(&out).unwrap();
             assert!(v.get("error").is_some(), "for {bad:?}, got {out}");
             assert!(
-                v.get("kept").is_none() && v.get("address").is_none(),
+                v.get("kept").is_none()
+                    && v.get("publicKey").is_none()
+                    && v.get("address").is_none(),
                 "a failure must never also carry a result — §2.5, got {out}"
             );
             assert!(
@@ -4347,9 +4387,9 @@ mod tests {
     // ─── Who the user is ──────────────────────────────────────────────────
 
     #[test]
-    fn who_am_i_reports_an_identity_with_its_address_and_public_key() {
+    fn who_am_i_reports_an_identity_by_its_public_key_and_no_address() {
         // The spec: "the reply states that there is an identity, AND carries its
-        // address and its public key, AND carries no reason". All three.
+        // public key, AND carries no author address, AND carries no reason".
         let dir = OnboardingDir::new("whoami-yes");
         let nonce = SlateNonce::generate().unwrap();
         let kept = keep_through_the_wire(&dir, nonce, Some(nonce), 2, &Unlock::Unencrypted);
@@ -4361,19 +4401,35 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(v["hasIdentity"], true, "got {v}");
-        assert_eq!(v["address"], kept["address"], "got {v}");
+        assert_eq!(v["publicKey"], kept["publicKey"], "got {v}");
         assert!(v.get("reason").is_none(), "got {v}");
-        // The public key must be present AND must be the one the address derives
-        // from, which is the only way the "display name is derived from the public
-        // key" requirement is useful.
+        assert!(v.get("address").is_none(), "got {v}");
+
+        // The reported key must PARSE as a public key, not merely be present — a
+        // field holding the empty string would satisfy a presence check and be
+        // useless to a view, which is what has to derive the display name from it.
+        //
+        // This replaces an assertion that the reported key derived the reported
+        // address. That check could only restate the derivation it was checking,
+        // since `whoami_for` computed the address by calling `.address()` on the
+        // very key it reported. With the address deleted, what is left to check is
+        // that the surviving value is the right KIND and the right one — and the
+        // equality above, against a key derived through the keep, is what pins
+        // which key it is.
         let key = hex::decode(v["publicKey"].as_str().unwrap()).unwrap();
+        assert!(
+            crate::identity::PublicKey::from_bytes(&key).is_ok(),
+            "the reported identity does not parse as a public key: {v}"
+        );
+        // And it is the key the recorded path derives, computed here from the
+        // fixed master key rather than read back from either reply.
+        let path = v["path"].as_u64().unwrap() as u32;
         assert_eq!(
-            crate::identity::PublicKey::from_bytes(&key)
-                .unwrap()
-                .address()
+            v["publicKey"].as_str().unwrap(),
+            crate::identity::derive_stoa_key_at_path(&[7u8; 32], &a_stoa(), path)
+                .public_key()
                 .to_hex(),
-            v["address"].as_str().unwrap(),
-            "the reported public key does not derive the reported address: {v}"
+            "the reported identity is not the one the recorded path derives: {v}"
         );
     }
 
@@ -4489,27 +4545,26 @@ mod tests {
         match (&a, &b) {
             (
                 Whoami::Identity {
-                    address: addr_a,
+                    public_key: key_a,
                     path: path_a,
                     ..
                 },
                 Whoami::Identity {
-                    address: addr_b,
+                    public_key: key_b,
                     path: path_b,
                     ..
                 },
             ) => {
                 assert_eq!(*path_a, 1);
                 assert_eq!(*path_b, 2);
-                assert_ne!(addr_a, addr_b, "two Stoas reported one address");
-                // And each address is the one the recorded path derives, computed
+                assert_ne!(key_a, key_b, "two Stoas reported one identity");
+                // And each key is the one the recorded path derives, computed
                 // here rather than read from the reply.
-                for (stoa, path, addr) in [(&here, 1u32, addr_a), (&elsewhere, 2, addr_b)] {
+                for (stoa, path, key) in [(&here, 1u32, key_a), (&elsewhere, 2, key_b)] {
                     assert_eq!(
-                        addr,
+                        key,
                         &crate::identity::derive_stoa_key_at_path(&[7u8; 32], stoa, path)
                             .public_key()
-                            .address()
                             .to_hex()
                     );
                 }
@@ -4522,13 +4577,12 @@ mod tests {
     fn the_whoami_json_is_pinned_to_the_exact_shape_a_view_is_written_against() {
         assert_eq!(
             Whoami::Identity {
-                address: "aa".into(),
                 public_key: "bb".into(),
                 path: 7,
                 recovery_needs_the_record: true,
             }
             .to_json(),
-            r#"{"address":"aa","hasIdentity":true,"path":7,"publicKey":"bb","recoveryNeedsTheRecord":true}"#
+            r#"{"hasIdentity":true,"path":7,"publicKey":"bb","recoveryNeedsTheRecord":true}"#
         );
         assert_eq!(
             Whoami::Nobody {
@@ -4985,7 +5039,7 @@ mod tests {
         //
         // Asserted against candidates derived HERE from the fixed master key and
         // the paths the reply named, so the expectation does not come from the
-        // reply's own address field.
+        // reply's own publicKey field.
         let here = a_stoa();
         let elsewhere = stoa_address(b"a different stoa entirely");
         assert_ne!(here, elsewhere);
@@ -5004,7 +5058,6 @@ mod tests {
                     expected.to_hex(),
                     "a candidate is not derived for the Stoa that was asked about: {v}"
                 );
-                assert_eq!(candidate["address"], expected.address().to_hex(), "got {v}");
             }
         }
     }
@@ -5038,7 +5091,6 @@ mod tests {
                 "index {index}: the keep stored a candidate the slate did not \
                  offer at that index. Offered {offered}, kept {kept}"
             );
-            assert_eq!(kept["address"], offered["address"], "index {index}");
             assert_eq!(kept["path"], offered["path"], "index {index}");
         }
     }
@@ -5060,7 +5112,7 @@ mod tests {
         // NO KEYSTORE, which is the fresh install that onboarding exists for and
         // the only state where minting happens at all. If the key is minted per
         // call, the slate shows candidates of key A, the keep writes key B, and
-        // the addresses differ — which is exactly what was measured.
+        // the public keys differ — which is exactly what was measured.
         //
         // No fixed root anywhere. The assertion is a relationship between two
         // replies, not a comparison against a constant, so it holds whatever the
@@ -5106,13 +5158,12 @@ mod tests {
 
             assert_eq!(kept["kept"], true, "index {index}: {kept_out}");
             assert_eq!(
-                kept["address"], offered["address"],
+                kept["publicKey"], offered["publicKey"],
                 "index {index}: on a fresh install the identity KEPT is not the \
                  candidate the slate SHOWED. The user chose {offered} and was given \
-                 {kept}. The address is the only unforgeable way to tell two \
+                 {kept}. The public key is the only unforgeable way to tell two \
                  candidates apart, so this is the choice being silently replaced."
             );
-            assert_eq!(kept["publicKey"], offered["publicKey"], "index {index}");
             assert_eq!(kept["path"], offered["path"], "index {index}");
 
             // And the identity that is actually ON DISK is that one too, read back
@@ -5129,8 +5180,10 @@ mod tests {
                 .expect("the record reads")
                 .expect("the keep recorded a path");
             assert_eq!(
-                written.stoa_address_at_path(&a_stoa(), recorded).to_hex(),
-                offered["address"].as_str().unwrap(),
+                written
+                    .stoa_public_key_at_path(&a_stoa(), recorded)
+                    .to_hex(),
+                offered["publicKey"].as_str().unwrap(),
                 "index {index}: the keystore on disk does not derive the identity \
                  the slate showed at the path that was recorded"
             );
@@ -5170,15 +5223,15 @@ mod tests {
 
         // The proof that one key produced both: reproduce the SECOND slate from the
         // FIRST slate's nonce-independent ingredient — the session's key — by asking
-        // the session to keep a candidate of the second slate and checking the
-        // address it reports is derived from the same root the first slate's
-        // addresses were. The only value both slates share is that root, so a
-        // per-call mint makes this impossible to satisfy.
+        // the session to keep a candidate of the second slate and checking the key
+        // it reports is derived from the same root the first slate's keys were.
+        // The only value both slates share is that root, so a per-call mint makes
+        // this impossible to satisfy.
         //
         // Done by elimination rather than by reading the root, which is deliberately
-        // not accessible: for each candidate of the second slate, its address must
-        // NOT appear in the first slate (different paths) while both slates' paths
-        // must derive from one key — established by the keep below, which writes the
+        // not accessible: for each candidate of the second slate, its key must NOT
+        // appear in the first slate (different paths) while both slates' paths must
+        // derive from one key — established by the keep below, which writes the
         // held key and lets the written file re-derive the first slate's candidates.
         let dir = OnboardingDir::new("refresh-one-key");
         let paths = dir.paths();
@@ -5212,8 +5265,8 @@ mod tests {
         for candidate in first["candidates"].as_array().unwrap() {
             let path = candidate["path"].as_u64().unwrap() as u32;
             assert_eq!(
-                written.stoa_address_at_path(&a_stoa(), path).to_hex(),
-                candidate["address"].as_str().unwrap(),
+                written.stoa_public_key_at_path(&a_stoa(), path).to_hex(),
+                candidate["publicKey"].as_str().unwrap(),
                 "the first slate's candidate at path {path} is not derivable from \
                  the key the second slate's keep wrote — a refresh minted a new \
                  master key. First {first}, second {second}"
@@ -5302,8 +5355,8 @@ mod tests {
         );
 
         // Each Stoa got the candidate its own slate showed.
-        assert_eq!(second_kept["address"], second_offered["address"]);
-        assert_eq!(first_kept["address"], first_offered["address"]);
+        assert_eq!(second_kept["publicKey"], second_offered["publicKey"]);
+        assert_eq!(first_kept["publicKey"], first_offered["publicKey"]);
 
         // Two rows, one per Stoa — the scenario the primary key is supposed to
         // discharge, now actually reachable. Expectations hardcoded from the
@@ -5324,12 +5377,12 @@ mod tests {
         // And the two identities are genuinely different, which is what makes
         // per-Stoa identity mean anything.
         assert_ne!(
-            first_kept["address"], second_kept["address"],
+            first_kept["publicKey"], second_kept["publicKey"],
             "two Stoas must not report one identity"
         );
 
         // One master key, reused rather than replaced: the written keystore
-        // re-derives BOTH kept addresses at their recorded paths. A second keep that
+        // re-derives BOTH kept keys at their recorded paths. A second keep that
         // had minted and written a new key would break the first Stoa's identity
         // silently, which is the failure the old `AlreadyExists` refusal was
         // (accidentally) preventing — so this is the assertion that has to replace
@@ -5345,8 +5398,8 @@ mod tests {
                 .expect("the record reads")
                 .expect("a path is recorded");
             assert_eq!(
-                written.stoa_address_at_path(stoa, path).to_hex(),
-                kept["address"].as_str().unwrap(),
+                written.stoa_public_key_at_path(stoa, path).to_hex(),
+                kept["publicKey"].as_str().unwrap(),
                 "the keystore on disk does not derive the identity kept for Stoa {}",
                 stoa.to_hex()
             );
@@ -5440,8 +5493,8 @@ mod tests {
         // through the PATHLESS trio under salt `/dialectica/1/…` while `whoAmI` used
         // the PATH-TAKING one under `/dialectica/2/…`. `identity.rs`'s own test
         // asserts those two schemes must disagree — so two shipped wire methods
-        // answered "who posts here" with two different addresses for one user in one
-        // Stoa, and no field in either reply told them apart.
+        // answered "who posts here" with two different identities for one user in
+        // one Stoa, and no field in either reply told them apart.
         //
         // `posting-capability`'s requirement is explicit that the probe's identity
         // "SHALL be the one an op published now would be attributed to, derived from
@@ -5473,8 +5526,8 @@ mod tests {
         assert_eq!(probe["canPost"], true, "got {probe_out}");
         assert_eq!(who["hasIdentity"], true, "got {who_out}");
         assert_eq!(
-            probe["identity"], who["address"],
-            "getCapabilities and whoAmI report DIFFERENT addresses for one user in \
+            probe["identity"], who["publicKey"],
+            "getCapabilities and whoAmI report DIFFERENT identities for one user in \
              one Stoa. The probe says {probe}, whoAmI says {who}. A view rendering \
              'you are posting as X' from the probe and 'you are X' from whoAmI shows \
              two identities and has no way to decide which one signs."
@@ -5483,31 +5536,41 @@ mod tests {
         // And both agree with what was actually kept, so "they agree" cannot be
         // satisfied by both being wrong in the same way.
         assert_eq!(
-            probe["identity"], kept["address"],
+            probe["identity"], kept["publicKey"],
             "the probe's identity is not the one the keep stored"
         );
 
         // The strongest form: an op signed by the key at the recorded path verifies
-        // against the address the probe reported. That is the requirement's own
-        // wording — "derived from the key that would actually sign it" — rather than
-        // a comparison of two derivations that could both be wrong.
+        // under the key the probe reported. That is the requirement's own wording —
+        // "derived from the key that would actually sign it" — rather than a
+        // comparison of two derivations that could both be wrong.
         let recorded = paths
             .path_for(&a_stoa())
             .expect("the record reads")
             .expect("a path is recorded");
         let signing = a_master_key().stoa_key_at_path(&a_stoa(), recorded);
         let sig = crate::identity::sign_op_bytes(&signing, b"a post");
-        let author = Address::from_hex(probe["identity"].as_str().unwrap())
-            .expect("the probe reports a parseable address");
+        let reported_key = hex::decode(probe["identity"].as_str().unwrap())
+            .expect("the probe reports hex");
         assert!(
-            crate::identity::verify_authored_op(
-                &author,
-                &signing.public_key().to_bytes(),
+            crate::identity::PublicKey::from_bytes(&reported_key).is_ok(),
+            "the probe must report a parseable public key, got {probe}"
+        );
+        assert!(
+            crate::identity::verify_authored_op(&reported_key, b"a post", &sig.to_bytes()),
+            "an op signed by the key at the recorded path does not verify under the \
+             key the probe reported"
+        );
+        // The negative, or the assertion above would hold for any reported value: a
+        // signature from a different path must not verify under it.
+        let elsewhere = a_master_key().stoa_key_at_path(&a_stoa(), recorded.wrapping_add(1));
+        assert!(
+            !crate::identity::verify_authored_op(
+                &reported_key,
                 b"a post",
-                &sig.to_bytes()
+                &crate::identity::sign_op_bytes(&elsewhere, b"a post").to_bytes()
             ),
-            "an op signed by the key at the recorded path is not attributed to the \
-             address the probe reported"
+            "another path's signature verified under the probe's reported identity"
         );
     }
 
@@ -5521,7 +5584,7 @@ mod tests {
         //
         // The publish path signed with `keystore.stoa_key(&stoa)` — the
         // PATHLESS per-Stoa scheme — while the probe reports
-        // `stoa_address_at_path`. `identity.rs`'s
+        // `stoa_public_key_at_path`. `identity.rs`'s
         // `the_path_taking_scheme_does_not_collide_with_the_pathless_one`
         // asserts the two MUST disagree, so this is not a near-miss: every op a
         // user published was authored by an identity no method on the surface
@@ -5550,7 +5613,7 @@ mod tests {
         // Through the WIRE, not through `publishing_key` twice. Asking the
         // function that was just called what it returns would agree with itself
         // whatever it returns; what has to hold is that an op the publish
-        // handler actually wrote carries the probe's address as its author.
+        // handler actually wrote carries the probe's key as its author.
         let mut log = MemoryOpLog::new();
         let publish = format!(
             r#"{{"stoa":"{}","body":"who signed this"}}"#,
@@ -5563,12 +5626,12 @@ mod tests {
         let id = crate::op::OpId::from_hex(published["opId"].as_str().unwrap()).unwrap();
         let entry = log.get(&id).unwrap().expect("the op must be in the log");
         assert_eq!(
-            entry.op.op.author.address().to_hex(),
+            entry.op.op.author.to_hex(),
             probe["identity"].as_str().unwrap(),
             "the published op's author is NOT the identity the probe reports. \
              The probe says {probe}, the op was signed as {}. A user is posting \
              under a handle no method on this surface will ever show them.",
-            entry.op.op.author.address().to_hex()
+            entry.op.op.author.to_hex()
         );
 
         // And the pathless key is the WRONG answer, asserted rather than
@@ -5577,7 +5640,7 @@ mod tests {
         // this project has recorded: two explanations giving one answer.
         let pathless = a_master_key().stoa_key(&a_stoa());
         assert_ne!(
-            pathless.public_key().address().to_hex(),
+            pathless.public_key().to_hex(),
             probe["identity"].as_str().unwrap(),
             "the pathless scheme agrees with the probe, so this test cannot \
              distinguish the fix from the defect"
@@ -5616,7 +5679,7 @@ mod tests {
         // re-appearing at the wire.
         //
         // `canPost:false` here is the substantive half: the probe previously
-        // answered `true` with a pathless address, asserting posting ability for an
+        // answered `true` with a pathless identity, asserting posting ability for an
         // identity that has no recorded path and that nothing in the signing path
         // would ever use.
         let dir = OnboardingDir::new("probe-no-choice");
@@ -5661,16 +5724,15 @@ mod tests {
         let nonce = SlateNonce::generate().unwrap();
         let kept = keep_through_the_wire(&origin, nonce, Some(nonce), 3, &Unlock::Unencrypted);
         assert_eq!(kept["kept"], true, "got {kept}");
-        let kept_address = kept["address"].as_str().unwrap().to_string();
+        let kept_key = kept["publicKey"].as_str().unwrap().to_string();
         let kept_path = kept["path"].as_u64().unwrap() as u32;
 
         // The expected identity, derived HERE from the fixed master key and the
         // path — not read back from either file.
         let expected = crate::identity::derive_stoa_key_at_path(&[7u8; 32], &a_stoa(), kept_path)
             .public_key()
-            .address()
             .to_hex();
-        assert_eq!(kept_address, expected, "got {kept}");
+        assert_eq!(kept_key, expected, "got {kept}");
 
         let restored = OnboardingDir::new("restore-target");
         // The target starts empty, or the "restore" would be reading what was
@@ -5698,7 +5760,7 @@ mod tests {
             "the restored record names a different path: {v}"
         );
         assert_eq!(
-            v["address"], expected,
+            v["publicKey"], expected,
             "the restored identity is not the one the record names: {v}"
         );
 
@@ -5720,16 +5782,15 @@ mod tests {
         assert_eq!(w["hasIdentity"], true, "got {w}");
         assert_eq!(w["path"], other_path, "got {w}");
         assert_ne!(
-            w["address"], v["address"],
+            w["publicKey"], v["publicKey"],
             "two records naming different paths reported one identity, so the \
              record is not being read: {w}"
         );
         // And the expectation for it is also derived here.
         assert_eq!(
-            w["address"],
+            w["publicKey"],
             crate::identity::derive_stoa_key_at_path(&[7u8; 32], &a_stoa(), other_path)
                 .public_key()
-                .address()
                 .to_hex(),
             "got {w}"
         );
@@ -5892,12 +5953,12 @@ mod tests {
             "a feed row must carry no display name: {out}"
         );
 
-        // The address is still an address, so this passes because the name is
-        // gone rather than because the row is empty.
+        // The author field still carries an identifier, so this passes because
+        // the name is gone rather than because the row is empty.
         assert_eq!(
             row["author"].as_str().unwrap(),
-            feed_key(2).public_key().address().to_hex(),
-            "the address is the identity and stays on the row"
+            feed_key(2).public_key().to_hex(),
+            "the public key is the identity and stays on the row"
         );
     }
 
@@ -5905,7 +5966,7 @@ mod tests {
     fn no_method_accepts_a_display_name_where_an_identity_is_required() {
         // "A name is never unique, never an identifier": no lookup, no
         // moderation target, no vote target and no request naming an author may
-        // resolve a name to any identity. The address is the identity.
+        // resolve a name to any identity. The public key is the identity.
         //
         // A name reaching an identity field is not a hypothetical: it is what a
         // view does when someone pastes what they see on screen, and resolving
@@ -6449,7 +6510,6 @@ mod tests {
             "id",
             "currentVersion",
             "author",
-            "authorKey",
             "body",
             "attachments",
             "isRevised",
@@ -6547,7 +6607,6 @@ mod tests {
             vec![
                 "attachments",
                 "author",
-                "authorKey",
                 "body",
                 "currentVersion",
                 "id",
@@ -6555,15 +6614,15 @@ mod tests {
                 "moderation",
                 "thread",
             ],
-            "the root's complete key set — no parent, and nothing derived from \
-             `authorKey` by any further transformation: {plain}"
+            "the root's complete key set — no parent, ONE author field, and \
+             nothing derived from it by any further transformation. An `address` \
+             or a restored `authorKey` fails here whatever else is right: {plain}"
         );
         assert_eq!(
             items[1],
             vec![
                 "attachments",
                 "author",
-                "authorKey",
                 "body",
                 "currentVersion",
                 "id",
@@ -6587,7 +6646,6 @@ mod tests {
             withheld_items[0],
             vec![
                 "author",
-                "authorKey",
                 "currentVersion",
                 "id",
                 "isRevised",
@@ -6628,28 +6686,35 @@ mod tests {
     }
 
     #[test]
-    fn the_wire_reports_the_author_as_an_address_and_a_key_and_no_name() {
-        // Two independent digests: the generated name comes from the KEY, the
-        // mark from the ADDRESS, and an address is a one-way hash — so an item
-        // carrying only an address is one whose name a view cannot compute.
+    fn the_wire_reports_the_author_as_one_key_and_no_name() {
+        // `thread-read`: an item carries its author's public key, and no item
+        // carries an author address. One field where there were two — both the
+        // display name and the mark now read the key's own bytes, so an address
+        // was an input to nothing a reader is shown.
+        //
+        // NO SPEC: that the surviving JSON field is spelled `author` rather than
+        // `authorKey` is this change's choice — `thread-read` requires the value
+        // and names no field for it. `design.md` §4 carries the reasoning,
+        // including that a caller still reading `authorKey` gets a missing field
+        // rather than a wrong value.
         let out = read_thread(&thread_request(""), &a_thread_log(), &feed_genesis());
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         let root = &v["items"][0];
 
-        assert_eq!(
-            root["author"],
-            feed_key(2).public_key().address().to_hex(),
-            "got {out}"
-        );
-        assert_eq!(
-            root["authorKey"],
-            hex::encode(feed_key(2).public_key().to_bytes())
-        );
-        assert_ne!(root["author"], root["authorKey"]);
-        // And NO name of any kind travels: a name is a pure function of the key,
-        // so sending one would put a derivable identifier on the wire beside the
-        // material it is derived from, where the two could disagree.
-        for absent in ["name", "displayName", "generatedName", "mark"] {
+        assert_eq!(root["author"], feed_key(2).public_key().to_hex(), "got {out}");
+        // And NO name of any kind travels, nor a second author identifier: a name
+        // and a mark are pure functions of the key, so sending one would put a
+        // derivable value on the wire beside the material it is derived from,
+        // where the two could disagree.
+        for absent in [
+            "name",
+            "displayName",
+            "generatedName",
+            "mark",
+            "address",
+            "authorAddress",
+            "authorKey",
+        ] {
             assert!(
                 root.get(absent).is_none(),
                 "an item must not carry {absent}: {out}"
@@ -12550,17 +12615,23 @@ mod tests {
         // with is a Stoa nobody can moderate — permanently, and with no error
         // anywhere.
         //
-        // WHY THIS TEST AND NOT `keystore.rs`'s. That one asserts
-        // `identity_address() == identity_public_key().address()`, which is a fact
-        // about two `Keystore` methods and is true whatever the module wires up.
-        // This one goes through the two WIRE HANDLERS, each reached through the
+        // WHY THIS TEST AND NOT `keystore.rs`'s. That one asserts a fact about
+        // `Keystore` methods, true whatever the module wires up. This one goes
+        // through the two WIRE HANDLERS, each reached through the
         // `core::keystore` function the adapter calls — so it fails for the
-        // mutation that actually shipped: pointing one of the two at
-        // `stoa_address(stoa)` while leaving the other alone.
+        // mutation that actually shipped: pointing one of the two at a different
+        // derivation while leaving the other alone.
         //
-        // The mutation it catches, verified by running it: change
-        // `creator_and_poster_in`'s second element to `ks.stoa_address(&creator.address())`
-        // and this test fails, where the whole rest of the suite passes.
+        // The mutation it catches: change the probe's lookup to
+        // `ks.stoa_public_key(&stoa)` — the pathless per-Stoa scheme rather than
+        // the root key — and this test fails, where the whole rest of the suite
+        // passes.
+        //
+        // **The pairing this reaches is now one value.** It was
+        // `creator_and_poster_in`, returning `(PublicKey, Address)`; issue #80
+        // deleted the author address and the second element with it, so
+        // `creator_key_in` is both halves and the two handlers below are handed
+        // the same expression rather than two projections of one call.
         let dir = WireTempDir::new("creator-is-poster");
         crate::keystore::Keystore::generate()
             .expect("the test host has randomness")
@@ -12584,27 +12655,36 @@ mod tests {
         );
         let stoa = crate::identity::Address::from_hex(created["stoa"].as_str().unwrap()).unwrap();
 
-        // `get_capabilities` is given the `creator_and_poster_in` half of the
-        // pairing, which is what this test is about.
+        // `get_capabilities` is given the same `creator_key_in` the creation was.
         //
         // **It is no longer what the adapter passes**, and saying so is the point.
         // This comment claimed it was, and `main`'s `identity-onboarding` made that
         // false: the adapter now calls `get_capabilities_from_stores`, whose lookup
-        // is `posting_identity` — a PATH-DERIVED per-Stoa address read out of the
+        // is `posting_identity` — a PATH-DERIVED per-Stoa identity read out of the
         // identity record. So the live probe and `create_stoa`'s root-derived
-        // creator are two different keys again, which is the very divergence
-        // `creator_and_poster_in` exists to prevent, reintroduced by a merge rather
+        // creator are two different keys again, which is the very divergence the
+        // one-expression pairing exists to prevent, reintroduced by a merge rather
         // than by an edit. This test cannot see it, because it injects both halves;
         // the gap is recorded in `design.md` under Decisions and reported as a spec
         // question rather than patched here.
         //
         // What the test still proves is the pairing itself: given the pairing, the
         // creator a creation names IS the identity the probe reports.
+        //
+        // **And the pairing is now weaker as a TEST for the same reason it is
+        // stronger as CODE.** Both handlers are handed the identical expression,
+        // so "they agree" is guaranteed by there being one derivation rather than
+        // established by this comparison — which is what the collapse to one value
+        // bought. What the test still does is go through the two wire handlers and
+        // assert the creator reaching the genesis record is the value the probe
+        // reports, which would fail if either handler transformed it. The
+        // assertion against `derive_stoa_key` below is what keeps a wrong-but-
+        // consistent derivation from passing.
         let probe = get_capabilities(
             &serde_json::json!({ "stoa": stoa.to_hex() }).to_string(),
             |_stoa| {
-                crate::keystore::poster_address_in(dir.path())
-                    .map(|a| a.to_hex())
+                crate::keystore::creator_key_in(dir.path())
+                    .map(|k| k.to_hex())
                     .map_err(|e| e.to_string())
             },
         );
@@ -12616,29 +12696,34 @@ mod tests {
         let genesis = store.get(&stoa).unwrap().unwrap().genesis;
         let moderators = crate::moderation::Moderators::of(&genesis).unwrap();
 
-        // Half one: the identity the probe reports IS the creator's own address.
-        // This is the half that fails when the two derivations diverge.
+        // Half one: the identity the probe reports IS the creator the record
+        // names. This is the half that fails when the two derivations diverge.
         assert_eq!(
             probed["identity"].as_str(),
-            Some(genesis.creator.address().to_hex().as_str()),
-            "the identity the probe reports must be the address of the key the \
-             creation named as creator, or a view shows the user an identity that \
-             cannot moderate what they just made: probe {probe}"
+            Some(genesis.creator.to_hex().as_str()),
+            "the identity the probe reports must be the key the creation named as \
+             creator, or a view shows the user an identity that cannot moderate \
+             what they just made: probe {probe}"
         );
 
         // Half two: and that key is therefore the Stoa's moderator, which is the
-        // authority check the whole pairing exists to satisfy.
-        let reported =
-            crate::identity::Address::from_hex(probed["identity"].as_str().unwrap()).unwrap();
+        // authority check the whole pairing exists to satisfy. The reported hex is
+        // PARSED back to a key and handed to `Moderators::contains`, so the
+        // assertion runs through the authority check rather than comparing two
+        // strings.
+        let reported = crate::identity::PublicKey::from_bytes(
+            &hex::decode(probed["identity"].as_str().unwrap()).expect("the probe reports hex"),
+        )
+        .expect("the probe reports a parseable public key");
         assert_eq!(moderators.stoa(), &stoa);
+        assert!(
+            moderators.contains(&reported),
+            "the key the probe reported must be the Stoa's moderator, or the user \
+             cannot moderate the Stoa they just made: probe {probe}"
+        );
         assert!(
             moderators.contains(&genesis.creator),
             "the creator must be the Stoa's moderator"
-        );
-        assert_eq!(
-            reported,
-            genesis.creator.address(),
-            "and the moderator's address must be the one the probe reported"
         );
     }
 
@@ -13094,48 +13179,46 @@ mod tests {
     }
 
     #[test]
-    fn a_public_key_alone_is_enough_with_no_address_supplied() {
-        // Nothing beyond the key may be required. A caller holding only an
-        // address cannot arrive at the right name, so an entry point demanding
-        // one would oblige every caller to carry a value the derivation does not
-        // use.
-        //
-        // The request names the key and NOTHING else, and is served.
+    fn a_public_key_alone_is_enough_and_no_other_value_reaches_its_name() {
+        // Nothing beyond the key may be required. The request names the key and
+        // NOTHING else, and is served.
         let v = name_request(PINNED_KEY_HEX);
         assert_eq!(v["name"].as_str(), Some(PINNED_NAME_ON_THE_WIRE));
 
-        // And supplying an address INSTEAD must not reach the key's name — an
-        // address is 32 bytes of hex like a key, so this is the case where a
-        // handler reading the wrong value would silently produce a plausible
-        // wrong name.
+        // And a DIFFERENT 32-byte value must not reach that key's name. This is
+        // the case where a handler reading the wrong value — or ignoring its
+        // input — would silently produce a plausible wrong name, and it is
+        // checkable only because both values are the same shape on the wire.
         //
-        // The fixture is CHOSEN rather than assumed, and that is the whole point
-        // of this half. `PINNED_KEY_HEX`'s own address is not a valid curve
-        // point, so feeding it here made the reply a refusal, `["name"]` a
-        // `None`, and the assertion below `None != Some(_)` — a tautology no
-        // implementation could fail short of a SHA-256 collision. Measured: 111
-        // of 200 seeded addresses DO parse as keys, so the vacuous case was not
-        // even the common one; the test had simply drawn one of the 45%.
-        //
-        // Seed 3's address parses, so the comparison below is between two real
+        // **This half used to feed the key's own AUTHOR ADDRESS.** Issue #80
+        // deleted that value, so the second value is now another key: seed 4's,
+        // which parses and names, so the comparison below is between two real
         // names and the assertion can actually fail.
+        //
+        // The `expect` is load-bearing and is why the substitute is a KEY rather
+        // than arbitrary bytes. The address version of this test once drew a
+        // fixture whose address was not a valid curve point: the reply was a
+        // refusal, `["name"]` was `None`, and the assertion became
+        // `None != Some(_)` — a tautology no implementation could fail. A key
+        // always parses, so that failure mode is gone by construction rather than
+        // by having picked a lucky fixture.
         let key = feed_key(3).public_key();
         let key_reply = name_request(&key.to_hex());
         let key_name = key_reply["name"].as_str().expect("the key names");
 
-        let address_hex = key.address().to_hex();
+        let other = feed_key(4).public_key();
         assert_ne!(
-            address_hex,
+            other.to_hex(),
             key.to_hex(),
             "the fixture must actually differ from the key, or this proves nothing"
         );
-        let from_address = name_request(&address_hex);
-        let address_name = from_address["name"]
+        let from_other = name_request(&other.to_hex());
+        let other_name = from_other["name"]
             .as_str()
-            .expect("this fixture's address parses as a key, so it names — see above");
+            .expect("a public key always parses, so it always names");
         assert_ne!(
-            address_name, key_name,
-            "an address must not reach its key's name, got {from_address}"
+            other_name, key_name,
+            "a different key must not reach this key's name, got {from_other}"
         );
     }
 
@@ -13688,21 +13771,28 @@ mod tests {
 
     #[test]
     fn the_key_is_read_from_the_public_key_field_and_from_no_other() {
-        // The spec requires that an author address SHALL NOT be required "in
-        // addition to or in place of the key". The tests for that all place
-        // material in the `publicKey` field, so none of them can see a handler
-        // that ALSO reads a sibling field — and a handler reading
+        // The spec requires that nothing beyond the key be required "in addition
+        // to or in place of the key". The tests for that all place material in
+        // the `publicKey` field, so none of them can see a handler that ALSO
+        // reads a sibling field — and a handler reading
         // `parsed.get("publicKey").or_else(|| parsed.get("authorAddress"))`
-        // was measured passing all 970 tests while answering a caller that
-        // holds only an address with a name.
+        // was measured passing the whole suite while answering a caller that
+        // supplied something other than the key with a name.
         //
-        // A name derived from an address is attributable to nobody, which is
-        // the outcome the requirement exists to forbid, so the field the key is
-        // read from is pinned here directly.
+        // A name derived from anything but the key is attributable to nobody,
+        // which is the outcome the requirement exists to forbid, so the field the
+        // key is read from is pinned here directly.
         //
-        // `authorAddress` is the spelling the feed emits, so it is the field a
-        // handler would most plausibly grow; the others are the neighbouring
-        // spellings on this surface.
+        // **The list is the neighbouring spellings on this surface**, kept rather
+        // than trimmed after issue #80 deleted the author address. `author` is
+        // what a feed row and a thread item emit, and it now carries a key's hex —
+        // so a handler growing an `or_else` for it would be reading a value that
+        // *is* a key, which is the case most likely to be added on purpose and
+        // least likely to be noticed. `authorAddress` and `address` name values
+        // that no longer exist, and refusing them still costs nothing: a caller
+        // sending one is confused about this API either way, and being told so is
+        // the right answer. That is `content-authoring`'s reasoning about its own
+        // inbound prohibition, applied here.
         let key = feed_key(3).public_key();
         for field in ["authorAddress", "address", "author", "key", "publickey"] {
             let request = format!(r#"{{"{field}":"{}"}}"#, key.to_hex());

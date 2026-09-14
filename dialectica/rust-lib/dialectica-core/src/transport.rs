@@ -336,14 +336,18 @@ pub enum InboundRefusal {
     TooLong { bytes: usize, limit: usize },
     /// The op decoder did not accept the payload.
     Undecodable(OpError),
-    /// The signature does not verify, or the presented key does not bind to the
-    /// author the op claims.
+    /// The signature does not verify under the public key the op carries.
     ///
-    /// One variant for both, because [`SignedOp::verify`] answers them together —
-    /// it re-derives the author address from the presented key and compares, so a
-    /// caller cannot be told which half failed without splitting a function whose
-    /// whole purpose is that the pair is checked as one. The spec lists them in
-    /// one bullet for the same reason.
+    /// **One variant, and it used to be one variant for two mechanisms.** It read
+    /// "the signature does not verify, **or** the presented key does not bind to
+    /// the author the op claims", on the reasoning that [`SignedOp::verify`]
+    /// answered both together. Issue #80 deleted the author address, so there is
+    /// no separately-claimed author for a key to fail to bind to: substituting
+    /// the author substitutes the key, and the signature then fails under it.
+    ///
+    /// The forged-authorship case is therefore wholly caught by the signature
+    /// check. The spec's list still has five refusals — it was always this
+    /// bullet's second mechanism that went, not a bullet.
     FailsVerification,
     /// The op names a Stoa other than the one whose channel it arrived on.
     ///

@@ -674,7 +674,7 @@ channel may be extended onto them without the `generated-names` spec changing.
 The budget closing with room to spare is what made disjointness affordable.
 
 **A Stoa address is still abbreviated by the same component**, and none of this
-allocation applies to it — #80 deletes the *author* address only, and there is
+allocation applies to it — #80 deleted the *author* address only, and there is
 no mark-and-name budget over a Stoa address.
 
 **`4..11` is chosen because it is a window no other channel touches.** It
@@ -719,8 +719,8 @@ did no work, and the hazard the first version warned about — "a near-miss on o
 correlates with a near-miss on the other" — could not arise, because there were
 no shared bytes to overlap in.
 
-**Third version, and the one that holds now.** Issue #80 deletes the author
-address and removes `NAME_PREFIX`. There is no second digest and no hash between
+**Third version, and the one that holds now.** Issue #80 deleted the author
+address and removed `NAME_PREFIX`. There is no second digest and no hash between
 the key and any channel, so all three read one shared 32-byte space. **Two
 channels reading one byte are two searches that partly coincide**, and the
 reservation the first version invented is now the thing doing the work. The

@@ -18,7 +18,7 @@
 //! separator had nothing left to separate the name FROM.** A separator exists to
 //! make two derivations over one key independent functions of it. The
 //! counterpart was the author address, `SHA256(AUTHOR_ADDRESS_PREFIX || 0x01 ||
-//! public_key)`; issue #80 deletes it, so there is one derivation over the key
+//! public_key)`; issue #80 deleted it, so there is one derivation over the key
 //! and the separator separated the name from nothing.
 //!
 //! **What this costs is stated here because nothing else records it.** With no
@@ -31,9 +31,11 @@
 //! on. It is a one-way door all the same.
 //!
 //! **The consequence decides which value a reply owes, and it is the KEY.** A
-//! reply reporting an author by *address* alone has handed its caller a hash
-//! from which no key is recoverable, so that caller cannot compute the name —
-//! which is a real gap, and [`crate::feed::FeedRow`] currently has it.
+//! reply reporting an author by *address* alone would hand its caller a hash
+//! from which no key is recoverable, so that caller could not compute the name.
+//! That was a real gap and [`crate::feed::FeedRow`] had it; issue #80 closed it
+//! by deleting the address, so every reply naming an author now names it by the
+//! key — which is this derivation's input.
 //!
 //! **The fix is to carry the key, never the name.** A name beside the key it
 //! derives from is two values that must agree and could disagree, with no way
@@ -44,12 +46,13 @@
 //! consensus-critical scheme it holds no wordlists for.
 //!
 //! An earlier pass put a `displayName` on the feed row, reasoning correctly from
-//! the address-only gap to the wrong remedy. Putting the public key on that row
-//! is a change to its `author` contract across several merged specs, so it is
-//! filed as its own piece — `key-identity-sweep` — and until it lands the feed
-//! path cannot render a name. What forbids the wrong remedy in the meantime is
-//! the `generated-names` spec's own requirement that **no reply carries a
-//! display name**, which is the authority here.
+//! the address-only gap to the wrong remedy. The right remedy was to put the
+//! public key on that row, which is a change to its `author` contract across
+//! several merged specs — filed as its own piece and **landed** by the sweep that
+//! deleted the author address. So the feed path now holds this derivation's
+//! input and can render a name; what still forbids the wrong remedy is the
+//! `generated-names` requirement that **no reply carries a display name**, which
+//! is the authority here and is unchanged by the gap having closed.
 //!
 //! # Determinism is the whole contract
 //!
@@ -1090,15 +1093,16 @@ mod tests {
         // right name, which is why core must return the key.
         //
         // **This was written against the AUTHOR ADDRESS and is deliberately not
-        // written against it now.** Issue #80 deletes that value, so a test
-        // feeding `key.address()` here would go on passing while being about
-        // nothing that exists — green, and no longer evidence of anything. The
+        // written against it now.** Issue #80 deleted that value, so a test
+        // feeding `key.address()` here would not compile — and had it been left
+        // as a hand-rolled recomputation of the retired derivation, it would have
+        // gone on passing while being about nothing that exists. The
         // property it was pinning survives the value that prompted it: a name is
         // a function of THE KEY and of no other 32-byte value that travels
         // beside it.
         //
         // So the fixtures are values that genuinely do travel beside a key and
-        // are genuinely 32 bytes: a Stoa address (which #80 keeps), the key's
+        // are genuinely 32 bytes: a Stoa address (which #80 kept), the key's
         // own bytes with the name's window zeroed, and the key's bytes reversed.
         // Each is a plausible confusion for a caller holding the wrong thing.
         let key = a_key(11).public_key();
@@ -1195,9 +1199,10 @@ mod tests {
         // That is the "name attributable to nobody" that
         // `a_failure_is_never_reported_as_a_name` exists to forbid, arrived at
         // through the formatting impl rather than through the error path. It is
-        // latent today only because no production caller reaches the derivation
-        // at all; it goes live with `key-identity-sweep`, which is exactly the
-        // wrong moment to discover it.
+        // latent only while no production caller reached the derivation at all.
+        // The sweep that deleted the author address put the public key on every
+        // reply naming an author, so a renderer now HAS the input — which is
+        // exactly the wrong moment to discover this, and why the test exists.
         //
         // Both routes are asserted, because `to_string()` goes through `Display`
         // while `format!("{}")` is the one a renderer is likelier to write, and
@@ -1908,11 +1913,11 @@ mod tests {
         // The fixture must actually be two DIFFERENT identities, or "both are
         // served unchanged" is satisfied by one key compared with itself.
         // **The PUBLIC KEY is what tells a colliding pair apart**, which is the
-        // sentence issue #80 changes. This asserted distinct ADDRESSES and gave
-        // that as the reason; the author address is being deleted, so a claim
-        // resting on it would be a claim about a value that is on its way out.
-        // The key is the identity, and its distinctness is what makes the two
-        // rows two people.
+        // sentence issue #80 changed. This asserted distinct ADDRESSES and gave
+        // that as the reason; the author address is now deleted, so a claim
+        // resting on it would be a claim about a value that does not exist. The
+        // key is the identity, and its distinctness is what makes the two rows
+        // two people.
         assert_ne!(
             a.public_key().to_bytes(),
             b.public_key().to_bytes(),

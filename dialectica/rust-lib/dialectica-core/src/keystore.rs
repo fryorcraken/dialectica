@@ -449,38 +449,27 @@ pub fn open_in(dir: &Path) -> Result<Keystore, KeystoreError> {
 /// agree is not the same thing as one derivation**, and the two sites were in
 /// `cfg(logos_scaffold)` code that `cargo test` does not compile, no CI job reads
 /// and `cargo mutants` reports unviable on — so re-diverging them restored the
-/// bug with every gate green. Naming the pairing here is what lets a test reach
-/// it: see [`creator_and_poster_in`].
+/// bug with every gate green. Naming the derivation here is what lets a test
+/// reach it.
+///
+/// # The pair that used to be here, and why one value replaces it
+///
+/// This was `creator_and_poster_in`, returning `(PublicKey, Address)` — the
+/// creator key and the poster address — with `creator_key_in` and
+/// `poster_address_in` as its two projections. The pairing existed so that a
+/// Stoa's creator and the identity its creator posts under could not be two
+/// different derivations, which had already shipped wrong once.
+///
+/// Issue #80 deleted the author address, and with it the second element: it was
+/// `creator.address()`, a pure function of the first. **A pair whose second half
+/// is derived from its first is not a pair**, and the property the pairing bought
+/// is now carried by there being one value — nothing can diverge from itself.
+///
+/// So `creator_key_in` is the whole of it. `poster_address_in` and
+/// `creator_and_poster_in` are gone; a caller wanting the identity this peer
+/// posts under wants this key's hex.
 pub fn creator_key_in(dir: &Path) -> Result<PublicKey, KeystoreError> {
-    Ok(creator_and_poster_in(dir)?.0)
-}
-
-/// The address this peer posts and is known by — what the capability probe
-/// reports.
-///
-/// The partner of [`creator_key_in`]; both are [`creator_and_poster_in`], which
-/// is where the reasoning is.
-pub fn poster_address_in(dir: &Path) -> Result<Address, KeystoreError> {
-    Ok(creator_and_poster_in(dir)?.1)
-}
-
-/// The creator key and the poster address, **derived once, together**.
-///
-/// This is the function that makes "a Stoa's creator is the key its creator will
-/// actually sign with" a property of one expression rather than of two call sites
-/// agreeing. Both halves come from the one [`Keystore::identity_key`] root, so
-/// they cannot be two keys: there is no argument to pass differently and no
-/// second accessor to reach for.
-///
-/// `identity_*` and **not** `stoa_*`: PLAN.md §5.2's MVP subsection gives a user
-/// one identity across every Stoa, which means not calling `derive_stoa_key` at
-/// all. `Keystore::stoa_key` and its siblings still exist and still take a
-/// caller-chosen `Address`; nothing in this module's wired surface reaches them.
-pub fn creator_and_poster_in(dir: &Path) -> Result<(PublicKey, Address), KeystoreError> {
-    let ks = open_in(dir)?;
-    let creator = ks.identity_public_key();
-    let poster = creator.address();
-    Ok((creator, poster))
+    Ok(open_in(dir)?.identity_public_key())
 }
 
 /// Everything that can go wrong, each arm distinguishable.
@@ -799,15 +788,18 @@ impl Keystore {
         crate::identity::derive_stoa_key(&self.root, stoa)
     }
 
-    /// The public key this identity presents in a Stoa.
+    /// The public key this identity presents in a Stoa — what the probe reports,
+    /// and what an op published now is attributed to.
+    ///
+    /// **There is no `stoa_address` beside this**, and the name it had is worth
+    /// recording: `Keystore::stoa_address(&self, stoa: &Address) -> Address` took
+    /// a **Stoa** address and returned an **author** one. Issue #80 deleted the
+    /// author address, so a sweep by name would have reached for
+    /// [`crate::identity::stoa_address`] — the Stoa derivation, which stays — and
+    /// kept this one. It is deleted; the value this method returns is the
+    /// identity.
     pub fn stoa_public_key(&self, stoa: &Address) -> PublicKey {
         self.stoa_key(stoa).public_key()
-    }
-
-    /// The author address this identity posts under in a Stoa — what the probe
-    /// reports, and what an op published now is attributed to.
-    pub fn stoa_address(&self, stoa: &Address) -> Address {
-        self.stoa_public_key(stoa).address()
     }
 
     /// **The** signing key of this identity: the root key itself, used directly.
@@ -834,14 +826,14 @@ impl Keystore {
     }
 
     /// The public half of [`Keystore::identity_key`] — what a genesis record
-    /// names as its creator, and what an op published now is attributed to.
+    /// names as its creator, what the capability probe reports, and what an op
+    /// published now is attributed to.
+    ///
+    /// `identity_address` used to sit beside this and returned
+    /// `self.identity_public_key().address()`. Issue #80 deleted it: the key is
+    /// the identity, so the address was a second name for one value.
     pub fn identity_public_key(&self) -> PublicKey {
         self.identity_key().public_key()
-    }
-
-    /// The address this identity is known by — what the capability probe reports.
-    pub fn identity_address(&self) -> Address {
-        self.identity_public_key().address()
     }
 
     /// The per-Stoa signing key at a **chosen derivation path**.
@@ -860,15 +852,15 @@ impl Keystore {
         crate::identity::derive_stoa_key_at_path(&self.root, stoa, path)
     }
 
-    /// The public key this identity presents in a Stoa at a chosen path.
+    /// The public key this identity presents in a Stoa at a chosen path — what a
+    /// slate candidate shows, and what a kept identity posts under.
+    ///
+    /// `stoa_address_at_path` is deleted, and it is the second of the two
+    /// methods whose name pointed at the wrong kind of address: it took a
+    /// **Stoa** address and returned an **author** one. See
+    /// [`Keystore::stoa_public_key`].
     pub fn stoa_public_key_at_path(&self, stoa: &Address, path: u32) -> PublicKey {
         self.stoa_key_at_path(stoa, path).public_key()
-    }
-
-    /// The author address for a chosen path — what a slate candidate shows, and
-    /// what a kept identity posts under.
-    pub fn stoa_address_at_path(&self, stoa: &Address, path: u32) -> Address {
-        self.stoa_public_key_at_path(stoa, path).address()
     }
 
     /// A fresh slate of candidate identities for a Stoa.
@@ -1614,22 +1606,23 @@ mod tests {
         // identifier other peers know the user by.
         let dir = TempDir::new("restart");
         let stoa = crate::identity::stoa_address(b"a genesis record");
-        let before = a_keystore(7).stoa_address(&stoa);
+        let before = a_keystore(7).stoa_public_key(&stoa).to_hex();
         a_keystore(7)
             .create(&dir.path(), &a_pass("pw"))
             .unwrap();
         let after = Keystore::open(&dir.path(), &a_pass("pw"))
             .unwrap()
-            .stoa_address(&stoa);
+            .stoa_public_key(&stoa)
+            .to_hex();
         assert_eq!(before, after);
 
-        // And it is the address that follows from a value `identity.rs`
+        // And it is the identity that follows from a value `identity.rs`
         // ALREADY pins, reached by a different route.
         //
         // `identity.rs::the_wire_constants_are_pinned_to_known_answers` fixes
         // `derive_stoa_key([7; 32], stoa_address(b"a genesis record"))` to the
         // seed below. This rebuilds a key from that hardcoded seed and takes
-        // its address — so the assertion is against a constant from another
+        // its public half — so the assertion is against a constant from another
         // test file, not against whatever this keystore just computed. If the
         // keystore ever derived by a different path, the two would part.
         let pinned_seed =
@@ -1638,7 +1631,7 @@ mod tests {
         let expected = crate::identity::SecretKey::from_bytes(&pinned_seed)
             .unwrap()
             .public_key()
-            .address();
+            .to_hex();
         assert_eq!(
             after, expected,
             "the keystore's per-Stoa identity no longer matches the pinned derivation"
@@ -3220,8 +3213,10 @@ mod tests {
         // holds rather than through the primitive underneath it.
         let ks = a_keystore(7);
         assert_ne!(
-            ks.stoa_address(&crate::identity::stoa_address(b"stoa one")),
-            ks.stoa_address(&crate::identity::stoa_address(b"stoa two"))
+            ks.stoa_public_key(&crate::identity::stoa_address(b"stoa one"))
+                .to_hex(),
+            ks.stoa_public_key(&crate::identity::stoa_address(b"stoa two"))
+                .to_hex()
         );
     }
 
@@ -3327,12 +3322,10 @@ mod tests {
             ks.stoa_public_key_at_path(&stoa, 4),
             crate::identity::derive_stoa_key_at_path(&[7u8; 32], &stoa, 4).public_key()
         );
-        assert_eq!(
-            ks.stoa_address_at_path(&stoa, 4),
-            crate::identity::derive_stoa_key_at_path(&[7u8; 32], &stoa, 4)
-                .public_key()
-                .address()
-        );
+        // The trio was a quartet: `stoa_address_at_path` sat below these and
+        // returned the public key's AUTHOR address. It is deleted with that
+        // value — and it is the one whose name pointed at the wrong kind of
+        // address, taking a Stoa address and returning an author one.
     }
 
     #[test]
@@ -3362,19 +3355,24 @@ mod tests {
              presents in that Stoa, or the Stoa's sole moderator is an identity \
              it will never sign an op with"
         );
-        // And the probe's answer is that same key's address, so what a view shows
-        // as "you" is what the record names.
+        // And the probe's answer is that same key, so what a view shows as "you"
+        // is what the record names.
         //
-        // This asserts a property of TWO `Keystore` METHODS, and it is true
-        // whatever the module wires up — it once read as though it checked the
-        // adapter's pairing, which it cannot. The pairing the module actually
-        // uses is `keystore::creator_and_poster_in`, pinned through both wire
-        // handlers by `wire.rs`'s
+        // **This was a stronger-looking assertion than it was.** It compared
+        // `ks.identity_address()` against `genesis.creator.address()` — the same
+        // derivation applied to two values already asserted equal one line above,
+        // so it could only restate the `contains` check. Issue #80 deleted the
+        // address, and what is left is the honest form: the key the record names
+        // IS the key the keystore hands back, compared as hex so a failure prints
+        // the two identities rather than two opaque byte arrays.
+        //
+        // The pairing the module actually uses is `keystore::creator_key_in`,
+        // pinned through both wire handlers by `wire.rs`'s
         // `the_creator_a_creation_names_is_the_identity_the_probe_reports`.
         assert_eq!(
-            ks.identity_address().to_hex(),
-            genesis.creator.address().to_hex(),
-            "the probe's identity must be the creator's own address"
+            ks.identity_public_key().to_hex(),
+            genesis.creator.to_hex(),
+            "the probe's identity must be the creator the record names"
         );
         assert_eq!(moderators.stoa(), &stoa);
     }
@@ -3403,11 +3401,11 @@ mod tests {
     #[test]
     fn a_path_taking_keystore_identity_is_the_one_that_signs() {
         // The property `posting-capability` requires of the probe, checked for the
-        // path-taking chain: an op signed by the key the keystore hands back must
-        // be attributable to the address the keystore reported. Every other test
-        // here compares two derivations; this one goes through a real signature,
-        // which is what would catch a trio whose three members disagreed about
-        // which key they were describing.
+        // path-taking chain: an op signed by the SECRET the keystore hands back
+        // must authenticate under the PUBLIC key the keystore reports for the same
+        // path. Every other test here compares two derivations; this one goes
+        // through a real signature, which is what would catch a pair whose two
+        // members disagreed about which key they were describing.
         use crate::identity::{sign_op_bytes, verify_authored_op};
 
         let stoa = crate::identity::stoa_address(b"a genesis record");
@@ -3416,25 +3414,41 @@ mod tests {
         let sig = sign_op_bytes(&key, b"a post");
         assert!(
             verify_authored_op(
-                &ks.stoa_address_at_path(&stoa, 4),
                 &ks.stoa_public_key_at_path(&stoa, 4).to_bytes(),
                 b"a post",
                 &sig.to_bytes()
             ),
-            "an op signed at this path is not attributed to the address reported for it"
+            "an op signed at this path does not verify under the key reported for it"
         );
 
-        // The negative, or the assertion above would hold for any key: a
-        // DIFFERENT path's key must not verify against this path's address.
+        // The negative, or the assertion above would hold for any pairing: a
+        // DIFFERENT path's signature must not verify under THIS path's key.
+        //
+        // **The substitution moved when the author address was deleted.** It used
+        // to swap the presented key while holding a claimed address fixed, which
+        // is no longer expressible: there is no separate identifier left for a key
+        // to fail to bind to. What is expressible — and what was always the
+        // mechanism doing the refusing — is a signature that does not match the
+        // key it is checked under, so the signature is the value substituted.
         let other = ks.stoa_key_at_path(&stoa, 5);
         assert!(
             !verify_authored_op(
-                &ks.stoa_address_at_path(&stoa, 4),
+                &ks.stoa_public_key_at_path(&stoa, 4).to_bytes(),
+                b"a post",
+                &sign_op_bytes(&other, b"a post").to_bytes()
+            ),
+            "another path's signature verified under this path's reported identity"
+        );
+        // And that other signature is genuinely valid under its own key, so the
+        // refusal above is a mismatch rather than a malformed signature. Without
+        // this, a build that refused every op would pass.
+        assert!(
+            verify_authored_op(
                 &other.public_key().to_bytes(),
                 b"a post",
                 &sign_op_bytes(&other, b"a post").to_bytes()
             ),
-            "another path's key verified against this path's reported identity"
+            "the other path's own signature must verify under its own key"
         );
     }
 }
