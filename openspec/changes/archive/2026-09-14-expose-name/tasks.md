@@ -11,8 +11,13 @@
 - [x] review: architecture — `code-reviewer`
 - [x] review: spec-test — `spec-test-reviewer`
 - [x] review: design — `design-reviewer`
-- [ ] findings all ticked, `findings/` deleted — `closer`
-- [ ] `openspec validate --strict`, then `archive` — `closer`
+- [x] findings all ticked, `findings/` deleted — `closer`. 30 boxes across six
+      files, none empty; every file non-zero, so none was a heading the gate
+      cannot see. The deferred finding's question survives in `design.md` §6.
+- [x] `openspec validate --strict`, then `archive` — `closer`. Promotion diffed:
+      one appended hunk into `generated-names`, byte-for-byte the delta with its
+      `## ADDED Requirements` heading dropped. Nothing else in the live spec
+      touched.
 - [ ] CI green, PR merged — `closer`
 
 ## Implementation
