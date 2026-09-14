@@ -2727,6 +2727,129 @@ pub fn publish_vote<L: crate::log::OpLog>(
     })
 }
 
+// ─── The name derivation, reached by a caller ─────────────────────────────
+//
+// The contract is the `generated-names` spec; the reasoning behind the shape is
+// in the `expose-name` change's `design.md`. What is repeated here is only what
+// a reader of THIS code needs in order not to undo it.
+
+/// The largest `publicKey` hex string this method will decode, in characters.
+///
+/// A public key is 32 bytes, so its hex form is exactly 64 characters. The bound
+/// is derived from the key's own size rather than written as `64`, so it cannot
+/// drift from the type it is bounding.
+///
+/// **This is a bound on ALLOCATION, not a verdict on validity**, and the
+/// distinction is the whole reason it is safe to have here. `hex::decode`
+/// allocates `len / 2` bytes from a length the caller chose, and
+/// [`MAX_REQUEST_BYTES`] admits a 4 MiB request — so without this, a caller
+/// spends a 2 MiB `Vec` to be told its key is the wrong length. The same
+/// ordering, and the same measured reason, as [`genesis_for`]: per
+/// PHASE0-FINDINGS §3 the price of an allocation failure in a dispatch handler
+/// is a module **abort**, not an error reply.
+///
+/// **It is deliberately not a second length check competing with the identity
+/// layer's.** Anything that clears this bound is still handed to
+/// [`crate::identity::PublicKey::from_bytes`], which remains the sole authority
+/// on whether bytes are a key — including the 62- and 66-character strings that
+/// clear this and are refused there. The spec states the refusal against the
+/// identity layer's answer precisely so that no list of shapes in this file can
+/// drift from it, and a bound that decided validity would be exactly that list.
+const MAX_PUBLIC_KEY_HEX_CHARS: usize = 32 * 2;
+
+/// The display name for a public key the caller supplies.
+///
+/// Takes `{"publicKey":"<64 hex chars>"}` and returns
+/// `{"name":"pensive aporia of lampsakos","words":["pensive","aporia","lampsakos"]}`.
+///
+/// # Why core has to answer this at all
+///
+/// The view cannot. Basecamp sandboxes the QML engine with a deny-all network
+/// access manager and no filesystem access outside the plugin directory, so a
+/// view holds none of the 10,240 wordlist entries and cannot derive a name for
+/// itself. The alternative to this method is the derivation written a second
+/// time in QML — and two implementations of one scheme that must agree forever
+/// is precisely the "one key, two names" divergence that `generated-names`'
+/// pinning requirements exist to prevent.
+///
+/// # This is a derivation service, not a licence to attach names to replies
+///
+/// *The name SHALL NOT travel*, and this method does not weaken it. A caller
+/// reaches a name by asking for one **with a key in hand**, which is the only
+/// route: no feed row, thread item or slate candidate carries a name field, and
+/// none may gain one. A name beside the key it derives from is two values that
+/// must agree and could disagree, with no way for a recipient to tell which is
+/// wrong — and the one on the wire is the one a relay could strip or forge.
+///
+/// # Both `name` and `words`, which is not redundancy
+///
+/// `words` is the three drawn words without the connector, for a caller too
+/// cramped to render `of`. A caller cannot derive it from `name` by splitting on
+/// spaces: a place entry may be a two-word toponym (`alexandria troas`), so the
+/// naive split yields five tokens and silently truncates the place. Shipping
+/// only `name` would oblige every caller to reimplement a split the wordlists
+/// make unsound. The connector is the one part of a name that may be dropped,
+/// and it is droppable precisely because it is the only part not derived from
+/// the key.
+///
+/// # Malformed key material is the whole of what can fail
+///
+/// The derivation is **total** over well-formed keys — [`crate::names::display_name`]
+/// returns a `DisplayName` and not a `Result` — so once the key parses there is
+/// no second error condition to report, and in particular none a well-formed key
+/// belonging to a real identity could reach. An error a caller cannot provoke is
+/// a branch it handles for nothing and a reader takes as evidence of a failure
+/// that does not exist.
+///
+/// **The refusal defers to the identity layer's words rather than restating
+/// them**, which is what makes "this admits exactly what the identity layer
+/// admits" true by construction rather than by a list that could drift. A
+/// **low-order point** — 32 valid hex bytes decoding to a valid Edwards point,
+/// refused because a key that can never verify a signature is not a key worth
+/// holding — therefore reads as *"low-order public key, which can never verify a
+/// signature"*, distinct from *"not a valid public key"*, without this function
+/// knowing either case exists.
+pub fn display_name(request: &str) -> String {
+    guarded("display_name", || {
+        let parsed = match Request::parse(request) {
+            Ok(r) => r,
+            Err(e) => return e,
+        };
+        // Three caller mistakes, three messages. The spec requires absent and
+        // malformed key material be told apart — a caller that cannot tell them
+        // apart cannot tell a request it malformed from a key it should stop
+        // trusting — and a wrong-typed field is a third mistake that earns the
+        // same treatment.
+        let hex_str = match parsed.get("publicKey") {
+            Some(serde_json::Value::String(s)) => s,
+            Some(_) => return error_json("publicKey must be a string"),
+            None => return error_json("missing field: publicKey"),
+        };
+        // BEFORE the decode; see MAX_PUBLIC_KEY_HEX_CHARS for why the ordering
+        // rather than the bound is the point.
+        if hex_str.len() > MAX_PUBLIC_KEY_HEX_CHARS {
+            return error_json(&format!(
+                "publicKey is {} hex characters, over the {MAX_PUBLIC_KEY_HEX_CHARS} a public key holds",
+                hex_str.len()
+            ));
+        }
+        let bytes = match hex::decode(hex_str) {
+            Ok(b) => b,
+            Err(_) => return error_json("publicKey is not valid hex"),
+        };
+        // The identity layer decides, and its message is carried through
+        // unchanged. Nothing here enumerates what a key may be.
+        match crate::names::display_name_from_bytes(&bytes) {
+            Ok(name) => serde_json::json!({
+                "name": name.render(),
+                "words": name.words(),
+            })
+            .to_string(),
+            Err(e) => error_json(&e.to_string()),
+        }
+    })
+}
+
 // ─── The two halves of the delivery bridge that CAN be tested ─────────────
 //
 // `modules().delivery_module` cannot appear in this file: it calls `lp_*`
@@ -9169,6 +9292,17 @@ mod tests {
             let mut log = a_log_seeded_with_a_root();
             publish_vote(r, &mut log, &publish_key(), &mut ignored_delivery)
         }
+        // `expose-name`'s one method. It reads `publicKey`, so it is inside the
+        // envelope rule's first case.
+        //
+        // The only entry here taking NO fixture argument, because the derivation
+        // reads no state: no log, no store, no keystore, no session. That is the
+        // same property the adapter's one-line forward rests on, and it is why
+        // this wrapper needs no fresh-per-call fixture — there is nothing one
+        // sweep could leave behind for the next.
+        fn display_name_m(r: &str) -> String {
+            display_name(r)
+        }
         vec![
             ("ping", ping_m),
             ("get_capabilities", caps_m),
@@ -9186,6 +9320,7 @@ mod tests {
             ("publish_post", publish_post_m),
             ("publish_reply", publish_reply_m),
             ("publish_vote", publish_vote_m),
+            ("display_name", display_name_m),
         ]
     }
 
@@ -9776,6 +9911,15 @@ mod tests {
                 r#""target":"{}","direction":"up""#,
                 a_seeded_root_id()
             )),
+            // A real public key, derived rather than spelled as a literal: the
+            // sweeps need this request to be SERVED, and a hand-written hex
+            // string that happened not to be a valid Edwards point would be
+            // refused — which the sweeps asserting a served request would then
+            // attribute to whatever they were varying.
+            "display_name" => format!(
+                r#"{{"publicKey":"{}"}}"#,
+                feed_key(13).public_key().to_hex()
+            ),
             other => panic!("no served request known for {other}"),
         }
     }
@@ -12520,5 +12664,522 @@ mod tests {
             "a mismatched record must be refused, got {from_empty}"
         );
         assert!(v.get("stoa").is_none());
+    }
+
+    // ─── The name derivation, reached by a caller ──────────────────────────
+
+    /// A `display_name` request for a key, and the parsed reply.
+    fn name_request(public_key_hex: &str) -> serde_json::Value {
+        let out = display_name(&format!(r#"{{"publicKey":"{public_key_hex}"}}"#));
+        serde_json::from_str(&out)
+            .unwrap_or_else(|e| panic!("the reply must be valid JSON ({e}): {out}"))
+    }
+
+    /// The public key whose name is pinned below, as the wire carries it.
+    ///
+    /// Seed `[13u8; 32]`, which is how every key fixture in this file is built.
+    const PINNED_KEY_HEX: &str = "91a28a0b74381593a4d9469579208926afc8ad82c8839b7644359b9eba9a4b3a";
+
+    /// The name that key derives, **written down rather than read back**.
+    ///
+    /// Produced by `examples/pin_name.rs`, which reads the wordlists from the
+    /// text files in `wordlists/` and does the index arithmetic itself — it does
+    /// not link the derivation at all. The digest it was given,
+    /// `3892664a…247f73`, is that key's `name_digest`, and the generator reported
+    /// indices (6290, 586, 81).
+    ///
+    /// **This is the only test in this section that can see a silent consensus
+    /// change.** Every other assertion here is self-consistent: it compares the
+    /// wire method against `names::display_name`, so both move together if the
+    /// scheme changes and both stay green. This one is an independent statement
+    /// about what the method must answer.
+    ///
+    /// If it fails, do **not** update it to match. Work out what changed in the
+    /// derivation or the wordlists and whether the network can survive it.
+    const PINNED_NAME_ON_THE_WIRE: &str = "riskful megaron of anemourion";
+
+    #[test]
+    fn a_name_is_obtainable_for_a_supplied_public_key() {
+        // The requirement at its plainest: a caller supplies a well-formed key
+        // and gets that key's name back.
+        //
+        // Pinned against a HARDCODED name rather than against what the code just
+        // produced. `assert_eq!(v["name"], display_name_of(key))` would agree
+        // with an implementation that renamed every identity, because both sides
+        // would have moved; a written-down string produced by a program that
+        // does not link the derivation cannot.
+        let v = name_request(PINNED_KEY_HEX);
+        assert_eq!(
+            v["name"].as_str(),
+            Some(PINNED_NAME_ON_THE_WIRE),
+            "the wire method must answer this key's name, got {v}"
+        );
+
+        // And the three words, also written down rather than split out of the
+        // name above — splitting would make this a restatement of the line
+        // before it rather than a claim about the `words` field.
+        assert_eq!(
+            v["words"],
+            serde_json::json!(["riskful", "megaron", "anemourion"]),
+            "the three drawn words must come back without the connector, got {v}"
+        );
+
+        // A refusal is not hiding behind a served-looking reply.
+        assert!(v.get("error").is_none(), "got {v}");
+    }
+
+    #[test]
+    fn the_name_returned_is_this_derivation_and_not_a_second_one() {
+        // The entry point must REACH the derivation `generated-names` specifies,
+        // rather than reimplementing it. So the wire answer is compared against
+        // `names::display_name` over many keys — if the handler grew its own
+        // copy of the arithmetic, the two would diverge for some key even though
+        // both would still look like names.
+        //
+        // Self-consistent by construction, which is exactly why the pinned test
+        // above exists beside it: this one proves the two agree, that one proves
+        // what they agree ON.
+        for seed in 1u8..40 {
+            let key = feed_key(seed).public_key();
+            let v = name_request(&key.to_hex());
+            let direct = crate::names::display_name(&key);
+            assert_eq!(
+                v["name"].as_str(),
+                Some(direct.render().as_str()),
+                "seed {seed}: the wire name must be the derivation's name, got {v}"
+            );
+            assert_eq!(
+                v["words"],
+                serde_json::json!(direct.words()),
+                "seed {seed}: the wire words must be the derivation's words, got {v}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_public_key_alone_is_enough_with_no_address_supplied() {
+        // Nothing beyond the key may be required. A caller holding only an
+        // address cannot arrive at the right name, so an entry point demanding
+        // one would oblige every caller to carry a value the derivation does not
+        // use.
+        //
+        // The request names the key and NOTHING else, and is served.
+        let v = name_request(PINNED_KEY_HEX);
+        assert_eq!(v["name"].as_str(), Some(PINNED_NAME_ON_THE_WIRE));
+
+        // And supplying an address INSTEAD is refused rather than answered —
+        // an address is 32 bytes of hex like a key, so this is the case where a
+        // handler reading the wrong field would silently produce a plausible
+        // wrong name. `display_name` must not accept it as key material.
+        let key =
+            crate::identity::PublicKey::from_bytes(&hex::decode(PINNED_KEY_HEX).unwrap()).unwrap();
+        let address_hex = key.address().to_hex();
+        assert_ne!(
+            address_hex, PINNED_KEY_HEX,
+            "the fixture must actually differ from the key, or this proves nothing"
+        );
+        let from_address = name_request(&address_hex);
+        // An address is not generally a valid curve point, so this is normally a
+        // refusal — but if it happened to parse, the name it produced must not
+        // be the key's name. Either outcome is acceptable; naming the KEY's name
+        // from an ADDRESS is not.
+        assert_ne!(
+            from_address["name"].as_str(),
+            Some(PINNED_NAME_ON_THE_WIRE),
+            "an address must not reach its key's name, got {from_address}"
+        );
+    }
+
+    #[test]
+    fn the_same_key_reaches_the_same_name_on_every_call() {
+        let first = name_request(PINNED_KEY_HEX);
+        let second = name_request(PINNED_KEY_HEX);
+        assert_eq!(first, second, "two calls for one key must agree");
+        assert_eq!(first["name"].as_str(), Some(PINNED_NAME_ON_THE_WIRE));
+    }
+
+    #[test]
+    fn a_name_is_obtainable_for_a_key_belonging_to_no_known_identity() {
+        // There is nothing to look up, so there is nothing that could fail to be
+        // FOUND. A freshly generated key this peer has never seen — no keystore,
+        // no membership, no op log, none of which this handler can even reach —
+        // must name rather than fail.
+        let stranger = crate::identity::SecretKey::generate()
+            .expect("the test host has randomness")
+            .public_key();
+        let v = name_request(&stranger.to_hex());
+        assert!(
+            v.get("error").is_none(),
+            "an unknown key must name rather than fail, got {v}"
+        );
+        // A real, complete name rather than an empty or partial value.
+        let words = v["words"].as_array().expect("words must be an array");
+        assert_eq!(words.len(), 3, "got {v}");
+        for word in words {
+            assert!(
+                !word.as_str().expect("each word is a string").is_empty(),
+                "a stranger's name has an empty slot: {v}"
+            );
+        }
+    }
+
+    #[test]
+    fn obtaining_a_name_changes_nothing_that_a_later_call_answers() {
+        // The handler must consult and mutate no state. Shown by interleaving:
+        // a key's name is taken, then a DIFFERENT key's, then the first key's
+        // again — and the first answer must be unchanged.
+        //
+        // A handler that cached, accumulated or otherwise remembered anything
+        // across calls is what this is aimed at; the third call would be the one
+        // to show it.
+        let first = name_request(PINNED_KEY_HEX);
+        let other = name_request(&feed_key(21).public_key().to_hex());
+        let first_again = name_request(PINNED_KEY_HEX);
+
+        assert_ne!(
+            first["name"], other["name"],
+            "the two fixture keys must derive different names, or the \
+             interleaving proves nothing"
+        );
+        assert_eq!(
+            first, first_again,
+            "a name must not be affected by a call made between two for one key"
+        );
+        assert_eq!(first_again["name"].as_str(), Some(PINNED_NAME_ON_THE_WIRE));
+    }
+
+    // ─── What the entry point refuses ──────────────────────────────────────
+
+    #[test]
+    fn key_material_of_the_wrong_length_is_refused() {
+        // Shorter and longer than a public key, in hex so the decode succeeds
+        // and the LENGTH is what the identity layer objects to.
+        for bytes in [0usize, 1, 31, 33, 64] {
+            let v = name_request(&hex::encode(vec![0xabu8; bytes]));
+            assert!(
+                v.get("error").is_some(),
+                "{bytes}-byte key material must be refused, got {v}"
+            );
+            assert!(
+                v.get("name").is_none() && v.get("words").is_none(),
+                "{bytes}-byte key material must not be named, got {v}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_low_order_point_is_refused_rather_than_named() {
+        // THE CASE A LENGTH CHECK MISSES, and the reason this test is written
+        // separately from the length sweep above rather than as another entry in
+        // it.
+        //
+        // The all-zero point is 32 bytes — the right length — and it DECODES to
+        // a valid Edwards point, so an entry point that checked only the length,
+        // or only that `VerifyingKey::from_bytes` succeeded, would name it. It
+        // is refused because a key that can never verify a signature is not a
+        // key worth holding, and naming one would make this the single place in
+        // the module where a weak key is admitted.
+        let v = name_request(&"00".repeat(32));
+        assert!(
+            v.get("name").is_none(),
+            "a low-order point must not be named, got {v}"
+        );
+
+        // And the refusal says WHICH refusal it is, carried through from the
+        // identity layer. Asserted against the hardcoded words rather than
+        // against `KeyError::WeakPublicKey.to_string()`, so a reword of that
+        // message is a visible change here rather than one both sides make
+        // together.
+        let message = v["error"].as_str().expect("the error shape, got {v}");
+        assert!(
+            message.contains("low-order public key"),
+            "the refusal must name the low-order case, got {message}"
+        );
+
+        // It must NOT read as the generic not-a-key refusal, or the two cases a
+        // reader is sent to different places by have collapsed into one.
+        assert!(
+            !message.contains("not a valid public key"),
+            "the low-order refusal must be told from the not-a-key one, got {message}"
+        );
+    }
+
+    #[test]
+    fn the_entry_point_admits_exactly_what_the_identity_layer_admits() {
+        // The requirement is stated against the identity layer's ANSWER rather
+        // than against a list of shapes, so this is written the same way: for
+        // each corpus entry, the wire method's verdict must match
+        // `PublicKey::from_bytes`'s verdict on the same bytes.
+        //
+        // A handler that grew its own validity rule — a length check, a
+        // "looks like hex" check, an is-it-a-point check that forgot the
+        // low-order case — diverges here on the entry that rule gets wrong.
+        //
+        // The corpus deliberately spans BOTH verdicts, because a corpus of only
+        // refusals passes against a method that refuses everything.
+        let mut corpus: Vec<Vec<u8>> = vec![
+            vec![],                                // nothing
+            vec![0xab; 1],                         // far too short
+            vec![0xab; 31],                        // one byte short
+            vec![0xab; 33],                        // one byte long
+            vec![0xab; 64],                        // twice the length
+            vec![0u8; 32],                         // the low-order all-zero point
+            [&[2u8][..], &[0u8; 31][..]].concat(), // right length, not a point
+        ];
+        // Valid keys, so the corpus spans the accepting verdict too.
+        for seed in 1u8..6 {
+            corpus.push(feed_key(seed).public_key().to_bytes().to_vec());
+        }
+
+        let mut accepted = 0usize;
+        let mut refused = 0usize;
+        for bytes in &corpus {
+            let identity_layer_accepts = crate::identity::PublicKey::from_bytes(bytes).is_ok();
+            let v = name_request(&hex::encode(bytes));
+            let entry_point_named = v.get("name").is_some();
+
+            assert_eq!(
+                entry_point_named,
+                identity_layer_accepts,
+                "the entry point and the identity layer disagree about {}: \
+                 named={entry_point_named}, parsed={identity_layer_accepts}, reply {v}",
+                hex::encode(bytes)
+            );
+            if identity_layer_accepts {
+                accepted += 1;
+            } else {
+                refused += 1;
+            }
+        }
+
+        // The corpus must actually span both verdicts, or "agrees with the
+        // identity layer" is a claim about one of them.
+        assert!(accepted >= 5, "the corpus reached {accepted} accepted keys");
+        assert!(refused >= 7, "the corpus reached {refused} refusals");
+    }
+
+    #[test]
+    fn absent_key_material_is_refused_distinguishably_from_bad_key_material() {
+        // The spec requires these two be told apart: a caller that cannot tell
+        // them apart cannot tell a request it malformed from a key it should
+        // stop trusting.
+        let absent = error_message(&display_name("{}"));
+        let bad = error_message(&display_name(&format!(
+            r#"{{"publicKey":"{}"}}"#,
+            "00".repeat(32)
+        )));
+
+        assert_ne!(
+            absent, bad,
+            "the two refusals must carry different messages"
+        );
+
+        // Asserted against hardcoded expectations rather than only `assert_ne!`,
+        // because two DIFFERENT wrong messages also compare unequal. The
+        // absent-field message is pinned to its literal; the bad-key one must
+        // say a name could not be derived.
+        assert_eq!(absent, "missing field: publicKey");
+        assert!(
+            bad.contains("cannot derive a display name"),
+            "a bad key must say a name could not be derived, got {bad}"
+        );
+
+        // And neither reads as the other's mistake.
+        assert!(
+            !absent.contains("cannot derive"),
+            "the absent-field refusal must not read as a bad key, got {absent}"
+        );
+        assert!(
+            !bad.contains("missing field"),
+            "the bad-key refusal must not read as a malformed request, got {bad}"
+        );
+    }
+
+    #[test]
+    fn a_refusal_is_never_reported_as_a_name() {
+        // No placeholder, no name for "unknown", no name derived from truncated
+        // or padded input — each would render as an ordinary participant, which
+        // is a name attributable to nobody presented as one attributable to
+        // somebody.
+        //
+        // Every refusal shape this method has, swept: absent, wrong-typed, bad
+        // hex, over-length hex, and key material the identity layer refuses.
+        let refusals = [
+            "{}".to_string(),
+            r#"{"publicKey":7}"#.to_string(),
+            r#"{"publicKey":null}"#.to_string(),
+            r#"{"publicKey":"zz"}"#.to_string(),
+            format!(r#"{{"publicKey":"{}"}}"#, "ab".repeat(200)),
+            format!(r#"{{"publicKey":"{}"}}"#, "00".repeat(32)),
+            format!(r#"{{"publicKey":"{}"}}"#, hex::encode([0xabu8; 31])),
+        ];
+        for request in refusals {
+            let out = display_name(&request);
+            let v: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+            assert!(v.get("error").is_some(), "{request} must be refused: {out}");
+            assert!(
+                v.get("name").is_none(),
+                "{request} must carry no name: {out}"
+            );
+            assert!(
+                v.get("words").is_none(),
+                "{request} must carry no words: {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_short_key_is_refused_rather_than_padded_to_one_that_names() {
+        // The no-padding half of "a refusal is not a name", which the sweep above
+        // cannot see: an implementation that zero-padded a short key to 32 bytes
+        // would return a NAME, so `is_err()` would catch it — but only this says
+        // WHICH name was avoided, so an implementation that refused short keys
+        // for some unrelated reason while padding elsewhere is still caught.
+        //
+        // The fixture must be CHOSEN rather than assumed: zero-padding an
+        // arbitrary short string usually produces bytes that are not a valid
+        // curve point, so the padded value would be refused at the parse anyway
+        // and the test would prove nothing about padding. `names.rs` records
+        // this as measured rather than supposed. So the prefix is searched for.
+        let mut prefix: Option<Vec<u8>> = None;
+        for n in 1u16..=1024 {
+            let mut candidate = [0u8; 32];
+            candidate[0] = (n & 0xff) as u8;
+            candidate[1] = (n >> 8) as u8;
+            if crate::names::display_name_from_bytes(&candidate).is_ok() {
+                prefix = Some(candidate[..2].to_vec());
+                break;
+            }
+        }
+        let prefix = prefix.expect("no zero-padded prefix in the search range parsed as a key");
+
+        let mut padded = [0u8; 32];
+        padded[..prefix.len()].copy_from_slice(&prefix);
+        let padded_reply = name_request(&hex::encode(padded));
+        let padded_name = padded_reply["name"]
+            .as_str()
+            .expect("the zero-padded value must itself name, or this proves nothing about padding");
+
+        // The short form of that same prefix must be refused, and must not reach
+        // the padded value's name.
+        let short_reply = name_request(&hex::encode(&prefix));
+        assert!(
+            short_reply.get("error").is_some(),
+            "a {}-byte key must be refused rather than widened, got {short_reply}",
+            prefix.len()
+        );
+        assert_ne!(
+            short_reply["name"].as_str(),
+            Some(padded_name),
+            "the short key reached the padded value's name, so the entry point \
+             pads rather than refusing"
+        );
+    }
+
+    #[test]
+    fn arbitrary_key_material_does_not_take_the_module_down() {
+        // Key material here is attacker-controlled: it arrives inside an inbound
+        // op and is handed on by a view rendering somebody else's authorship. A
+        // crash takes the module down for every caller, which makes a refusal
+        // that panics a remotely triggerable denial of service rather than a
+        // robustness nicety.
+        //
+        // A panic in this sweep ABORTS the test binary rather than failing the
+        // test — `guarded` catches an unwind, but the failure is visible either
+        // way and neither way is green.
+        for n in 0usize..70 {
+            for fill in [0x00u8, 0x01, 0x7f, 0xff] {
+                let v = name_request(&hex::encode(vec![fill; n]));
+                assert!(
+                    v.is_object(),
+                    "every call must answer with an object, got {v}"
+                );
+            }
+        }
+        // Non-hex, wrong-typed and structurally odd inputs too.
+        for request in [
+            r#"{"publicKey":""}"#,
+            r#"{"publicKey":"z"}"#,
+            r#"{"publicKey":"0"}"#,
+            r#"{"publicKey":[1,2,3]}"#,
+            r#"{"publicKey":{"a":1}}"#,
+            r#"{"publicKey":true}"#,
+        ] {
+            let out = display_name(request);
+            let _: serde_json::Value =
+                serde_json::from_str(&out).unwrap_or_else(|e| panic!("{request}: {e}: {out}"));
+        }
+
+        // AND the entry point answers a later well-formed call normally, which
+        // is the half that shows nothing was left broken behind.
+        let after = name_request(PINNED_KEY_HEX);
+        assert_eq!(
+            after["name"].as_str(),
+            Some(PINNED_NAME_ON_THE_WIRE),
+            "a well-formed call after the sweep must answer normally, got {after}"
+        );
+    }
+
+    #[test]
+    fn a_well_formed_key_reaches_no_failure() {
+        // Key material is the ONLY thing that can fail, so many distinct
+        // well-formed keys must all name. An error a caller cannot provoke is a
+        // branch it handles for nothing and a reader takes as evidence of a
+        // failure that does not exist — this is what would catch one appearing.
+        //
+        // Randomly generated rather than seeded, so the keys are not a family
+        // the derivation might treat alike.
+        let mut names = std::collections::HashSet::new();
+        for _ in 0..64 {
+            let key = crate::identity::SecretKey::generate()
+                .expect("the test host has randomness")
+                .public_key();
+            let v = name_request(&key.to_hex());
+            assert!(
+                v.get("error").is_none(),
+                "a well-formed key must never fail, got {v}"
+            );
+            names.insert(v["name"].as_str().expect("a name").to_string());
+        }
+        // The derivation must depend on its input: a method returning one
+        // constant name would satisfy every assertion above.
+        assert!(
+            names.len() > 50,
+            "64 random keys produced only {} distinct names",
+            names.len()
+        );
+    }
+
+    #[test]
+    fn the_hex_bound_refuses_an_oversized_key_without_deciding_validity() {
+        // The bound exists to stop `hex::decode` allocating from a length the
+        // caller chose; it is NOT a second validity rule.
+        //
+        // Half one: a hex string far over the bound is refused for its SIZE,
+        // naming the limit, rather than being decoded into a large Vec first.
+        let huge = format!(r#"{{"publicKey":"{}"}}"#, "ab".repeat(100_000));
+        let message = error_message(&display_name(&huge));
+        assert!(
+            message.contains("over the"),
+            "an oversized key must be refused for its size, got {message}"
+        );
+
+        // Half two, and the one that matters: lengths that CLEAR the bound but
+        // are still not keys are refused by the identity layer, not by the
+        // bound. 62 and 66 hex characters are both under or at the cap's
+        // neighbourhood and both wrong — and neither may be refused with the
+        // size message, or the bound has become the validity rule.
+        for bytes in [31usize, 32] {
+            let material = vec![0xabu8; bytes];
+            let v = name_request(&hex::encode(&material));
+            // 32 bytes of 0xab may or may not be a valid point; what is asserted
+            // is only that whichever verdict is reached, it is not the SIZE one.
+            if let Some(err) = v.get("error").and_then(|e| e.as_str()) {
+                assert!(
+                    !err.contains("over the"),
+                    "{bytes} bytes must not be refused for size, got {err}"
+                );
+            }
+        }
     }
 }

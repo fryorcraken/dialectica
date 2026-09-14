@@ -313,6 +313,31 @@ pub trait DialecticaModule: Send + 'static {
     /// exists is not a property of publishing one.
     fn publish_vote(&mut self, request: String) -> String;
 
+    /// The display name for a public key the caller supplies.
+    ///
+    /// Takes `{"publicKey":"<hex>"}` and returns
+    /// `{"name":"pensive aporia of lampsakos","words":["pensive","aporia","lampsakos"]}`.
+    ///
+    /// **This is the only route to a name, and that is deliberate.** No reply on
+    /// this surface carries a name — not a feed row, not a thread item, not a
+    /// slate candidate — because a name beside the key it derives from is two
+    /// values that must agree and could disagree, with the wire copy being the
+    /// one a relay could strip or forge. A caller obtains a name by asking for
+    /// one with a key it already holds.
+    ///
+    /// A view cannot compute this itself: the QML sandbox gives it no filesystem
+    /// and no network, so it holds none of the 10,240 wordlist entries.
+    ///
+    /// Malformed key material is the only failure. The derivation is total over
+    /// well-formed keys, so a key that parses always names — including one
+    /// belonging to no identity this peer has ever seen, since a name is a
+    /// function of the key alone and there is nothing to look up.
+    ///
+    /// `words` is the three drawn words without the connector, for a caller too
+    /// cramped to render `of`. It is not derivable from `name` by splitting on
+    /// spaces — a place may be a two-word toponym.
+    fn display_name(&mut self, request: String) -> String;
+
     /// Framework plumbing, not a contract method — the generator skips
     /// defaulted methods when deriving the `.lidl`.
     fn on_context_ready(&mut self, _ctx: &RustModuleContext) {}
@@ -875,6 +900,24 @@ impl DialecticaModule for Dialectica {
 
     fn publish_vote(&mut self, request: String) -> String {
         self.publishing(&request, core::publish_vote)
+    }
+
+    /// A forwarding line, because the derivation reads no state.
+    ///
+    /// No keystore, no store, no persistence path — a name is a pure function of
+    /// the key the caller supplies, which is what lets this method answer for a
+    /// key belonging to no identity this peer has seen.
+    ///
+    /// **Spelled `core::wire::` rather than `core::`, and deliberately so.**
+    /// Every other handler is re-exported at the crate root, and this one is not:
+    /// `core::display_name` would sit one word away from
+    /// `core::names::display_name`, the derivation itself, which takes a
+    /// `&PublicKey` and returns a `DisplayName` rather than taking and returning
+    /// wire JSON. Two functions of one name at one import depth, differing only
+    /// in which is the wire boundary, is a confusion worth a longer path to
+    /// avoid — so the root re-export list omits this one on purpose.
+    fn display_name(&mut self, request: String) -> String {
+        core::wire::display_name(&request)
     }
 
     fn on_context_ready(&mut self, ctx: &RustModuleContext) {

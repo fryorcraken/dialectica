@@ -45,6 +45,17 @@ pub mod wire;
 // inherited rather than remembered. `Request` itself lives in `wire::request`
 // rather than in `wire` — a file with no handler in it, so its private field is
 // private to somewhere a handler cannot reach.
+//
+// **`wire::display_name` is deliberately NOT re-exported here**, and it is the
+// one handler that is not. `names::display_name` already holds that name at one
+// import depth from this root, and the two are easy to confuse and different in
+// kind: the `names` one takes a `&PublicKey` and returns a `DisplayName`, the
+// `wire` one takes and returns wire JSON and is the boundary that refuses
+// malformed key material. The adapter reaches the handler as
+// `core::wire::display_name`, which is the form it already uses for
+// `get_capabilities_from_stores` and `publishing_key`. Adding it to this list
+// would put two functions of one name a single word apart, which is the kind of
+// ambiguity a longer path is worth avoiding.
 pub use wire::{
     callee_error, channel_exists_reply, create_stoa, error_json, generate_identity_slate,
     get_capabilities, get_capabilities_from_stores, guarded, join_stoa, keep_identity, list_stoas,
