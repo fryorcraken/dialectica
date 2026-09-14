@@ -135,7 +135,13 @@ pub struct FeedRow {
     /// and that is a known gap rather than a settled shape. What the row owes is
     /// the derivation's *input* — the public key — which is a change to this
     /// field's contract and to several merged specs, filed as its own issue.
-    /// `docs/UI-BRIEF.md` obligation 6 carries the rendering obligation.
+    /// What a caller may *not* conclude once it can: that a rendered name
+    /// identifies anyone. A name is a short derivation of a key, so distinct
+    /// keys collide by pigeonhole, and an attacker who regenerates freely can
+    /// grind for one resembling a target's. The `generated-names` spec
+    /// contracts that half — *"A name is never unique, never an identifier,
+    /// and never numbered"* — and it binds whatever renders this row: a name
+    /// is a recognition aid, and the key material is what distinguishes.
     pub author: String,
     /// The post body, sanitised for display.
     pub body: Sanitised,

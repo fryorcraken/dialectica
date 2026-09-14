@@ -49,7 +49,10 @@
 //! filed as its own piece — `key-identity-sweep` — and until it lands the feed
 //! path cannot render a name. What forbids the wrong remedy in the meantime is
 //! the `generated-names` spec's own requirement that **no reply carries a
-//! display name**, which is the authority here.
+//! display name**, which is the authority here. When the feed path can render a
+//! name, *What a name is NOT* below governs what may be claimed of it: a name is
+//! never unique and never an identifier, so it recognises rather than
+//! distinguishes.
 //!
 //! # Determinism is the whole contract
 //!

@@ -111,3 +111,35 @@ being deleted.
       the change and re-running for byte-identical output. Not introduced here.
 - [x] 6.5 Re-run the survey grep and confirm it returns nothing outside
       `openspec/changes/archive/`.
+
+## 7. Two citations arriving with the rebase
+
+The rebase onto `6eec84f` brought in two citations that did not exist when §4
+ran: PR #78 introduced `names.rs` entire and added the `feed.rs` line. Verified
+against `3901e99`, where `feed.rs` holds no UI-BRIEF reference and `names.rs`
+does not exist. Neither was a miss in the survey — they post-date it.
+
+- [x] 7.1 `feed.rs` — the `author` doc comment's closing line. Replaced with the
+      obligation's own argument: a name is a short derivation of a key, so
+      distinct keys collide by pigeonhole and an attacker who regenerates freely
+      can grind for one resembling a target's. Cites `generated-names`'
+      requirement **by heading** — *"A name is never unique, never an
+      identifier, and never numbered"*, verified at
+      `openspec/specs/generated-names/spec.md:586` — which is the practice
+      `end_to_end.rs` (§4.6) records as the durable lesson.
+- [x] 7.2 `names.rs` — the module doc's deferred-gap paragraph. Points at this
+      module's **own** *What a name is NOT* section rather than any external
+      document: the argument was already here, so the citation had no reason to
+      leave the file.
+- [x] 7.3 Both written to survive issue #80, which deletes the author address
+      and makes the public key the sole author identifier. Neither replacement
+      asserts that *the address* is the identity or must be on screen — they
+      state only the name-side claim, that a name is not an identifier. Note
+      that `generated-names/spec.md:604` **does** say "The address is the
+      identity", so citing that requirement by heading rather than quoting its
+      body was load-bearing, not stylistic. §3.8's `IDENTICON.md` repair does
+      carry the address claim and is a sentence #80 will need to correct.
+- [x] 7.4 Gates: `cargo test -p dialectica -p dialectica-core` — 925 + 30
+      passed, 0 failed, doctests clean. `cargo fmt --check` — **no output**,
+      where §6.4 had to argue a diff was pre-existing; that diff is gone, so the
+      argument is no longer needed.
