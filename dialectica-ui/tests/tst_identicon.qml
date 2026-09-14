@@ -170,29 +170,48 @@ TestCase {
         }
     }
 
-    // ─── Disjointness, pinned from the ABBREVIATION's side ─────────────────
+    // ─── Disjointness, measured across all THREE channels ──────────────────
     //
     // `test_no_byte_the_abbreviation_displays_reaches_the_mark` above pins this
     // from the mark's side, but it hardcodes WHICH bytes the abbreviation shows
     // (0..3, 14..17, 29..31) in its fixture string. That set is not a constant:
-    // `abbreviate()` derives it from `Theme.headChars`, `Theme.middleChars` and
-    // `Theme.tailChars`, and the middle group is CENTRED, so widening it walks
-    // the group outward from the middle in both directions.
+    // `abbreviate()` derives it from `DTheme.headChars`, `DTheme.middleChars`
+    // and `DTheme.tailChars`, and the middle group is CENTRED, so widening it
+    // walks the group outward from the middle in both directions.
     //
-    // So a Theme edit can slide the middle group onto a byte the mark reads
+    // So a DTheme edit can slide the middle group onto a byte the mark reads
     // while that test keeps passing — it would go on flipping bytes 14..17,
     // which by then are no longer the group. Measured, not supposed: with
     // `middleChars: 20` the group becomes bytes 11..20 and overlaps the mark's
-    // byte 11 (`_weave`), and all eight tests in this file still passed.
+    // byte 11 (`_weave`), and every test in this file still passed.
     //
-    // These two ask `AddressLabel` what it actually displays and compare that
-    // against what `Identicon` actually reads. Neither set is written down here,
-    // so moving EITHER window — the mark's offsets or any of the three Theme
-    // group sizes — fails these rather than silently removing the property.
+    // These ask each component what it ACTUALLY reads or displays and compare
+    // the three measured sets. No set is written down except in the meta-test
+    // below, so moving ANY window — the mark's offsets, the name's window, or
+    // any of the three DTheme group sizes — fails these rather than silently
+    // removing the property.
+    //
+    // **THERE ARE THREE CHANNELS HERE NOW, AND THAT IS THE CHANGE.** Until issue
+    // #80 the name derived from H(NAME_PREFIX || public_key) while the mark and
+    // the abbreviation read the AUTHOR ADDRESS, a different digest of the same
+    // key. Two digests cannot overlap, so the name's independence came from
+    // domain separation whatever bytes it read, and it had no place in a byte
+    // gate — which is exactly why these tests were a pair rather than a triple.
+    //
+    // With the author address deleted and no hash between the key and any
+    // channel, all three read the SAME 32 bytes. Byte-disjointness stops being
+    // decorative and becomes the only thing making the three grinding searches
+    // independent, so the name joins the gate. `DKeyNameWindow` exists for no
+    // other reason than to give this file a third thing to probe.
 
     Component {
         id: labelFactory
         AddressLabel {}
+    }
+
+    Component {
+        id: nameWindowFactory
+        DKeyNameWindow {}
     }
 
     // Several probe values per byte, NOT one.
@@ -252,16 +271,57 @@ TestCase {
         return read;
     }
 
+    // The byte indices the GENERATED NAME reads, discovered the same way: vary a
+    // byte and see whether any of the three draw indices moves.
+    //
+    // **THIS IS THE THIRD CHANNEL, and before issue #80 it had no place here.**
+    // While the name derived from H(NAME_PREFIX || public_key) and the mark read
+    // the ADDRESS, the two read different digests and could not overlap — their
+    // independence came from domain separation whatever bytes each happened to
+    // read, and a byte allocation between them was neither required nor
+    // possible. With the author address deleted and no hash between the key and
+    // any channel, all three read the same 32 bytes and byte-disjointness is the
+    // ONLY thing making the three grinding searches independent.
+    //
+    // **Measured, never restated.** `DKeyNameWindow` exists so that this can be
+    // a measurement: probing it follows the arithmetic wherever it goes, where a
+    // probe that read the window out of a constant would follow the constant and
+    // could never report an overlap. That is the failure mode that got the
+    // computed version of these tests deleted — see the note below.
+    function _nameBytes() {
+        var base = "";
+        for (var i = 0; i < 32; i++) base += "00";
+        var win = nameWindowFactory.createObject(null, { key: "k:" + base });
+        function draws() {
+            return [win.adjectiveIndex(), win.nounIndex(), win.placeIndex()].join("|");
+        }
+        var reference = draws();
+        var read = [];
+        for (var b = 0; b < 32; b++) {
+            for (var v = 0; v < probeValues.length; v++) {
+                var hex = base.substr(0, b * 2) + probeValues[v]
+                        + base.substr(b * 2 + 2);
+                win.key = "k:" + hex;
+                if (draws() !== reference) { read.push(b); break; }
+            }
+            win.key = "k:" + base;
+        }
+        win.destroy();
+        return read;
+    }
+
     // The measurement itself must be sound, or "disjoint" is satisfied by a
-    // probe that finds nothing. This pins both measurements against their known
-    // windows — the one place in these tests where the windows ARE written down,
-    // so that a probe which silently stopped detecting bytes fails here rather
-    // than reporting a false all-clear from the two tests below.
+    // probe that finds nothing. This pins all three measurements against their
+    // known windows — the one place in these tests where the windows ARE written
+    // down, so that a probe which silently stopped detecting bytes fails here
+    // rather than reporting a false all-clear from the tests below.
     function test_the_byte_probes_find_the_windows_they_should() {
         compare(_markBytes().join(","), "4,5,6,7,8,9,10,11",
                 "the mark probe does not see the mark's documented window");
         compare(_displayedBytes().join(","), "0,1,2,3,14,15,16,17,29,30,31",
                 "the abbreviation probe does not see the documented groups");
+        compare(_nameBytes().join(","), "18,19,20,21,22,23",
+                "the name probe does not see the name's documented window");
     }
 
     // The security property itself: grinding for a lookalike mark and grinding
@@ -281,24 +341,238 @@ TestCase {
     // the mirroring test PASSED while the two probe tests here failed. A test
     // that restates the production arithmetic can only see its inputs move, not
     // the arithmetic; these measure the component.
-    function test_the_mark_and_the_abbreviation_share_no_byte() {
+    function test_the_three_channels_read_pairwise_disjoint_bytes() {
+        var channels = [
+            { name: "the abbreviation", bytes: _displayedBytes() },
+            { name: "the mark",         bytes: _markBytes() },
+            { name: "the generated name", bytes: _nameBytes() }
+        ];
+
+        // Every set must be non-empty, or "disjoint" would be satisfied by a
+        // measurement that found nothing — the two-explanations-one-answer
+        // shape. Checked per channel rather than as a total, because a total
+        // stays comfortably large while one channel measures zero.
+        for (var c = 0; c < channels.length; c++) {
+            verify(channels[c].bytes.length > 0,
+                   channels[c].name + " reads no byte at all, so every "
+                   + "disjointness assertion below is vacuous for it");
+        }
+
+        // PAIRWISE, which is what the spec says and is not the same as "the
+        // union has 25 distinct entries". A union count passes when a set
+        // measures empty; a pairwise sweep with the non-emptiness precondition
+        // above states what is actually required, and names the overlapping byte
+        // when it fails.
+        for (var i = 0; i < channels.length; i++) {
+            for (var j = i + 1; j < channels.length; j++) {
+                var a = channels[i], b = channels[j];
+                for (var k = 0; k < a.bytes.length; k++) {
+                    verify(b.bytes.indexOf(a.bytes[k]) === -1,
+                           "key byte " + a.bytes[k] + " is read by BOTH "
+                           + a.name + " and " + b.name + " — "
+                           + a.name + " reads [" + a.bytes.join(",") + "], "
+                           + b.name + " reads [" + b.bytes.join(",") + "], at "
+                           + "head " + DTheme.headChars + ", middle "
+                           + DTheme.middleChars + ", tail " + DTheme.tailChars
+                           + ". The three channels read the same 32 bytes, so a "
+                           + "shared byte makes two grinding searches partly "
+                           + "coincide and their costs add instead of "
+                           + "multiplying");
+                }
+            }
+        }
+    }
+
+    // A byte the abbreviation DISPLAYS is worse than a merely shared one, and
+    // the spec says so in those words: an attacker reads their progress off the
+    // rendered key while grinding it, so it contributes nothing an observer
+    // could not have been handed directly.
+    //
+    // This is a SEPARATE test from the pairwise sweep above, not a duplicate of
+    // two of its pairs. The sweep would fail on any overlap and report it as one
+    // of three symmetrical cases; this one says which overlap is the severe one,
+    // so a reader looking at a failure knows whether a hidden byte leaked into
+    // two channels or a displayed byte reached a derived one.
+    function test_no_byte_on_screen_reaches_the_mark_or_the_name() {
         var shown = _displayedBytes();
-        var read = _markBytes();
-
-        // Both windows must be non-empty, or "disjoint" would be satisfied by a
-        // measurement that found nothing — the two-explanations-one-answer shape.
         verify(shown.length > 0, "the abbreviation displays no byte at all");
-        verify(read.length > 0, "the mark reads no byte at all");
 
-        for (var i = 0; i < read.length; i++) {
-            verify(shown.indexOf(read[i]) === -1,
-                   "byte " + read[i] + " is both read by the mark and displayed "
-                   + "by the abbreviation (mark reads [" + read.join(",")
-                   + "], abbreviation shows [" + shown.join(",")
-                   + "]) at head " + DTheme.headChars + ", middle "
-                   + DTheme.middleChars + ", tail " + DTheme.tailChars
-                   + " — an attacker grinding a lookalike mark can read their "
-                   + "progress off the rendered address");
+        var derived = [
+            { name: "the mark", bytes: _markBytes() },
+            { name: "the generated name", bytes: _nameBytes() }
+        ];
+        for (var d = 0; d < derived.length; d++) {
+            verify(derived[d].bytes.length > 0,
+                   derived[d].name + " reads no byte at all");
+            for (var i = 0; i < shown.length; i++) {
+                verify(derived[d].bytes.indexOf(shown[i]) === -1,
+                       "key byte " + shown[i] + " is DISPLAYED by the "
+                       + "abbreviation and also read by " + derived[d].name
+                       + " — an attacker grinding a lookalike can read their "
+                       + "progress off the rendered key");
+            }
+        }
+    }
+
+    // **The reduction arithmetic now exists in two languages**, and this is the
+    // pin that keeps them from drifting apart silently.
+    //
+    // `DKeyNameWindow` reproduces what `dialectica-core`'s `names.rs` does — the
+    // same window, the same big-endian draws, the same moduli — because the
+    // pairwise gate above needs a third channel to probe and core is not
+    // reachable from `qmltestrunner`. That duplication is the design's accepted
+    // trade-off, and an unpinned duplicate is how two implementations of one
+    // scheme quietly diverge.
+    //
+    // **Both the key and the expected indices are WRITTEN DOWN**, produced by
+    // `dialectica-core/examples/pin_name.rs`, which reads the wordlists from the
+    // text files and does not link the derivation. The same pair is pinned on
+    // the Rust side in `names.rs`'s `PINNED_CASES`, so the two sides agree with
+    // a third party rather than with each other.
+    //
+    // If this fails, do NOT adjust it to match. Either this file's arithmetic or
+    // core's has moved, and the two are now deriving different names from the
+    // same key on the same build.
+    function test_the_name_window_agrees_with_cores_pinned_case() {
+        // The public key for the secret-key seed of 32 bytes of 0x07, which is
+        // `names.rs`'s first pinned case.
+        var key = "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c";
+        var win = nameWindowFactory.createObject(null, { key: "k:" + key });
+
+        // Produced by pin_name.rs: `indices: adjective 5806 noun 702 place 914`.
+        // The corresponding name is `quartzous paris of sypalettos`, which core
+        // pins; this file holds no wordlists, so it pins the indices instead.
+        compare(win.adjectiveIndex(), 5806, "adjective index");
+        compare(win.nounIndex(), 702, "noun index");
+        compare(win.placeIndex(), 914, "place index");
+
+        // The prefix must not shift the offsets, for the same reason it must
+        // not for the mark: a "k:" key and a bare one are one identity.
+        win.key = key;
+        compare(win.adjectiveIndex(), 5806, "adjective index without a prefix");
+        compare(win.nounIndex(), 702, "noun index without a prefix");
+        compare(win.placeIndex(), 914, "place index without a prefix");
+
+        win.destroy();
+    }
+
+    // Peer-supplied strings reach this component too, so a short or malformed
+    // key must yield stable in-range indices rather than NaN — the same
+    // obligation `test_a_malformed_address_still_selects_valid_values` places on
+    // the mark. An index of NaN would index a wordlist with `undefined` in core's
+    // place and render nothing, which is a name attributable to nobody.
+    function test_a_malformed_key_still_yields_indices_in_range() {
+        var cases = ["", "k:", "stoa:zzzz", "k:0", "not-a-key"];
+        for (var i = 0; i < cases.length; i++) {
+            var win = nameWindowFactory.createObject(null, { key: cases[i] });
+            var a = win.adjectiveIndex(), n = win.nounIndex(), p = win.placeIndex();
+            verify(!isNaN(a) && a >= 0 && a < 8192,
+                   "adjective index out of range for " + cases[i] + ": " + a);
+            verify(!isNaN(n) && n >= 0 && n < 1024,
+                   "noun index out of range for " + cases[i] + ": " + n);
+            verify(!isNaN(p) && p >= 0 && p < 1024,
+                   "place index out of range for " + cases[i] + ": " + p);
+            win.destroy();
+        }
+    }
+
+    // Disjointness stated as the CONSEQUENCE a reader can check, rather than as
+    // a set comparison: vary a byte exactly one channel reads, and that
+    // channel's output must move while the other two stand still.
+    //
+    // **This is a different claim from the pairwise sweep**, not a restatement
+    // of it. The sweep compares three measured sets and would pass on three
+    // channels that each read nothing at all except for the non-emptiness
+    // precondition; this one exhibits the channels actually responding, one byte
+    // at a time, which is the property a reader cares about. The two together
+    // are what make "independent channels" mean something.
+    //
+    // One byte per channel rather than the whole window, because the point is
+    // the ISOLATION rather than the coverage — and the windows themselves are
+    // already pinned by the meta-test above.
+    function test_a_byte_one_channel_reads_moves_only_that_channel() {
+        var base = "";
+        for (var i = 0; i < 32; i++) base += "00";
+
+        function outputs(hex) {
+            var m = mark("k:" + hex);
+            var label = labelFactory.createObject(null, { address: "k:" + hex });
+            var win = nameWindowFactory.createObject(null, { key: "k:" + hex });
+            var out = {
+                mark: [m._form(), String(m._inkA()), String(m._inkB()),
+                       String(m._outlineInk()), m._angleDeg(), m._pitch(),
+                       m._duty(), m._weave()].join("|"),
+                shown: label.text,
+                name: [win.adjectiveIndex(), win.nounIndex(),
+                       win.placeIndex()].join("|")
+            };
+            m.destroy(); label.destroy(); win.destroy();
+            return out;
+        }
+
+        var reference = outputs(base);
+
+        // One byte from each channel's own window: 0 is the abbreviation's
+        // head, 4 the mark's first dimension, 18 the name's adjective slot.
+        // `probeValues` rather than a single flip, for the reason given above
+        // it: `0x00 % 3` and `0xff % 3` are both 0, so one value can look like
+        // no change at all.
+        var cases = [
+            { byte: 0,  moves: "shown" },
+            { byte: 4,  moves: "mark" },
+            { byte: 18, moves: "name" }
+        ];
+        var fields = ["shown", "mark", "name"];
+
+        for (var c = 0; c < cases.length; c++) {
+            var b = cases[c].byte;
+            var moved = false;
+            for (var v = 0; v < probeValues.length && !moved; v++) {
+                var hex = base.substr(0, b * 2) + probeValues[v]
+                        + base.substr(b * 2 + 2);
+                var got = outputs(hex);
+
+                // The other two must be untouched for EVERY probe value, not
+                // merely for the one that moved the target channel — a channel
+                // that leaked on some values and not others would otherwise pass
+                // as soon as one clean value was found.
+                for (var f = 0; f < fields.length; f++) {
+                    if (fields[f] === cases[c].moves) continue;
+                    compare(got[fields[f]], reference[fields[f]],
+                            "key byte " + b + " belongs to " + cases[c].moves
+                            + " but moved " + fields[f] + " as well");
+                }
+                if (got[cases[c].moves] !== reference[cases[c].moves])
+                    moved = true;
+            }
+            verify(moved,
+                   "key byte " + b + " moved " + cases[c].moves
+                   + " for no probe value, so that channel does not read the "
+                   + "byte the allocation gives it");
+        }
+    }
+
+    // The seven bytes no channel reads: 12..13 and 24..28. They are UNALLOCATED
+    // rather than reserved — nothing depends on their value — and this asserts
+    // only that none of the three has quietly been extended onto them.
+    //
+    // Without it the pairwise test alone is satisfied by three channels that had
+    // each grown into the gaps in different directions, which would still be
+    // disjoint and would still have spent the budget the allocation left spare.
+    function test_no_channel_reads_an_unallocated_byte() {
+        var unallocated = [12, 13, 24, 25, 26, 27, 28];
+        var channels = [
+            { name: "the abbreviation", bytes: _displayedBytes() },
+            { name: "the mark",         bytes: _markBytes() },
+            { name: "the generated name", bytes: _nameBytes() }
+        ];
+        for (var c = 0; c < channels.length; c++) {
+            for (var u = 0; u < unallocated.length; u++) {
+                verify(channels[c].bytes.indexOf(unallocated[u]) === -1,
+                       "key byte " + unallocated[u] + " is unallocated but "
+                       + channels[c].name + " reads it; extending a channel is "
+                       + "a change to the generated-names spec");
+            }
         }
     }
 

@@ -3,6 +3,7 @@ singleton Core 1.0 Core.qml
 singleton DStoaReference 1.0 DStoaReference.qml
 Identicon 1.0 Identicon.qml
 AddressLabel 1.0 AddressLabel.qml
+DKeyNameWindow 1.0 DKeyNameWindow.qml
 VoteControl 1.0 VoteControl.qml
 PostHeader 1.0 PostHeader.qml
 FlatButton 1.0 FlatButton.qml

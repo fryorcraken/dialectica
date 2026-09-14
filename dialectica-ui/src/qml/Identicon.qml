@@ -4,7 +4,7 @@ import QtQuick
 //
 // DETERMINISM IS THE WHOLE CONTRACT, and the honest version of it is
 // PATTERN-identity rather than pixel-identity. Every selector below is an
-// integer index off the address hex, so the same address picks the same form,
+// integer index off the key hex, so the same key picks the same form,
 // the same three inks, the same weave, angle, pitch and duty on every peer
 // forever. There is no randomness, no clock, no locale, no system font, and no
 // float is accumulated across iterations or compared for equality.
@@ -17,10 +17,10 @@ import QtQuick
 // change WHICH shape or WHICH inks are drawn, which is the part recognition
 // depends on and the part this contract covers.
 //
-// EIGHT BYTES of the address are read — bytes 4..11, one per dimension — and
+// EIGHT BYTES of the public key are read — bytes 4..11, one per dimension — and
 // TWENTY-FOUR are not, which is exactly why this can never stand in for showing
-// the address. The mark is a recognition aid; the address is the identity. A
-// reader who needs to know WHO this is reads the address, always.
+// the key. The mark is a recognition aid; the public key is the identity. A
+// reader who needs to know WHO this is reads the key, always.
 //
 // Why eight bytes and not some wider window: the mark's OUTPUT is about 16 bits
 // of perceptually distinct results, so eight bytes of input (64 bits) already
@@ -30,14 +30,12 @@ import QtQuick
 // thorough would be the exact confusion this file's design note argues against.
 // That reasoning is about the COUNT and is unaffected by which eight.
 //
-// WHY 4..11 SPECIFICALLY: it is the window the abbreviation cannot see.
-// AddressLabel shows head 8, middle 8, tail 6 of the hex body — bytes 0..3,
-// 14..17 and 29..31 — so 21 bytes are hidden at feed density (4..13 and 18..28).
-// Bytes 4..11 lie wholly inside that hidden region and touch none of the three
-// displayed groups. A byte the abbreviation displays is worse than merely
-// shared: it is a byte an attacker can grind while reading their progress off
-// the screen, and it tells the reader nothing the address has not already told
-// them.
+// WHY 4..11 SPECIFICALLY: it is a window no other channel touches. AddressLabel
+// shows head 8, middle 8, tail 6 of the hex body — bytes 0..3, 14..17 and
+// 29..31 — and the generated name reads bytes 18..23. Bytes 4..11 touch none of
+// those. A byte the abbreviation displays is worse than merely shared: it is a
+// byte an attacker can grind while reading their progress off the screen, and it
+// tells the reader nothing the key has not already told them.
 //
 // This window was 12..19 and overlapped the middle group on {14, 15, 16, 17} —
 // HALF of what the mark read was already on screen, so only {12, 13, 18, 19}
@@ -47,24 +45,61 @@ import QtQuick
 // 8-8-6 shape and its vanity-defeating middle group, which is the property worth
 // keeping.
 //
-// THE GENERATED NAME READS NONE OF THIS AND RESERVES NONE OF IT. An earlier
-// version of this comment said bytes 0..11 were "reserved for the generated-name
-// scheme" and called that disjointness load-bearing. THE MECHANISM IT DESCRIBED
-// DOES NOT EXIST. The name derives from H(NAME_PREFIX || public_key); the mark
-// and the abbreviation read the ADDRESS, which is
-// SHA256(AUTHOR_ADDRESS_PREFIX || 0x01 || public_key). Two different digests, so
-// byte 3 of one and byte 3 of the other are unrelated values and there is no
-// shared space in which they could overlap — no allocation of address bytes to
-// the name is required, or even possible.
+// THE GENERATED NAME NOW READS BYTES 18..23 OF THIS SAME VALUE, AND THAT CHANGES
+// THE ARGUMENT COMPLETELY.
 //
-// The independence is real and it comes from DOMAIN SEPARATION: grinding for a
-// lookalike name yields an unrelated mark and grinding for a lookalike mark
-// yields an unrelated name, so the costs multiply rather than add. That holds
-// whichever bytes each side reads, and it would hold if both read byte 0.
+// An earlier version of this comment said bytes 0..11 were "reserved for the
+// generated-name scheme"; a later one replied, in capitals, that THE MECHANISM
+// IT DESCRIBED DOES NOT EXIST. Both were right when written and both are now
+// superseded. The retraction was correct about the design it described: while
+// the name derived from H(NAME_PREFIX || public_key) and the mark read the
+// ADDRESS — SHA256(AUTHOR_ADDRESS_PREFIX || 0x01 || public_key) — they were two
+// different digests, so byte 3 of one and byte 3 of the other were unrelated,
+// there was no shared space to overlap in, and no allocation was required or
+// possible.
+//
+// Issue #80 deletes the author address and removes NAME_PREFIX. The name, the
+// mark and the abbreviation all read the SAME 32 bytes now, with no hash between
+// the key and any of them, so THE ALLOCATION IS REAL AND IS LOAD-BEARING. Two
+// channels reading one byte are two searches that partly coincide. Disjointness
+// is what makes grinding for a lookalike name and grinding for a lookalike mark
+// independent searches whose costs MULTIPLY rather than add — the conclusion the
+// old domain-separation argument reached, now resting on byte allocation, which
+// is the thing that argument said could never carry it.
+//
+//     channel                 key bytes
+//     abbreviation head       0..3
+//     mark (this file)        4..11
+//     abbreviation middle     14..17
+//     generated name          18..23
+//     abbreviation tail       29..31
+//
+// Bytes 12..13 and 24..28 are read by no channel. They are UNALLOCATED, NOT
+// RESERVED: nothing depends on their value, and no channel may be extended onto
+// them without the `generated-names` spec changing.
+//
+// The gate is `tst_identicon.qml`, which measures all three channels by probing
+// the components rather than by restating their arithmetic — see the note there
+// about the computed version that was deleted for passing under a real defect.
 Canvas {
     id: root
 
-    property string address: ""       // with or without a "stoa:" / "k:" prefix
+    // The 32-byte value to render, as hex, with or without a "stoa:" / "k:"
+    // prefix.
+    //
+    // **Still named `address`, and that is deliberate rather than overlooked.**
+    // For an AUTHOR this now carries the public key; for a STOA it carries the
+    // Stoa address, which issue #80 keeps. Renaming the property is a change to
+    // every call site — FeedScreen, PostHeader, the screens — and those are
+    // `key-identity-sweep`'s, which is also what rewires the author call sites
+    // to pass a key instead of an address. Renaming here and rewiring there
+    // would split one rename across two pieces and leave the tree not compiling
+    // in between.
+    //
+    // The arithmetic below does not care: it reads 32 bytes of hex. What the
+    // byte allocation above is about is which bytes each channel reads OF THE
+    // AUTHOR'S KEY, and that is unchanged by the name this property carries.
+    property string address: ""
     property int    size: 40
     property int    stroke: size >= 34 ? 3 : 2
 
@@ -97,11 +132,11 @@ Canvas {
         DTheme.markSteel, DTheme.markLavender, DTheme.markSage
     ]
 
-    // ---- address bytes --------------------------------------------------
+    // ---- the value's bytes ----------------------------------------------
     // The hex body, prefix stripped, padded to 64 characters so a short or
-    // malformed address still renders something stable rather than throwing.
+    // malformed value still renders something stable rather than throwing.
     // Peer-supplied strings reach this component, so it must not assume a
-    // well-formed address.
+    // well-formed 32-byte value.
     readonly property string _body: {
         var a = address.replace(/^[a-z]+:/i, "").replace(/[^0-9a-f]/gi, "").toLowerCase();
         return (a + "00000000000000000000000000000000000000000000000000000000000000000").slice(0, 64);
@@ -113,9 +148,9 @@ Canvas {
     // them: the bundle's original mark drove side-count, cut-corner and
     // curved-form all from byte 0, so two of those three were always dead.
 
-    // Contour. One pooled family of eleven forms available to EVERY address.
+    // Contour. One pooled family of eleven forms available to EVERY identity.
     // The angular/curved split the first draft used halved the vocabulary any
-    // one address could reach, and it was restating what position already
+    // one identity could reach, and it was restating what position already
     // said: a Stoa's mark renders in the Stoa header, a person's beside their
     // name in a post. That distinction is now carried by POSITION ALONE — if
     // a mark is ever rendered somewhere the context does not disambiguate,
@@ -351,7 +386,7 @@ Canvas {
         var ctx = getContext("2d");
         ctx.reset();
         if (size < DTheme.markMinDraw)
-            return;   // the caller prints the address instead
+            return;   // the caller prints the identifier instead
 
         // The outline is always drawn, so a mark never bleeds into the row
         // behind it and is never transparent.
