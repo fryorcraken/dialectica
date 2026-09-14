@@ -25,7 +25,14 @@ import QtQuick
 // and a byte this label DISPLAYS is the worst kind to share: an attacker
 // grinding a lookalike reads their progress straight off the screen. The middle
 // group is CENTRED, so widening it walks outward in both directions at once —
-// `middleChars: 20` reaches key byte 11, which the mark reads.
+// and **both directions land on something**, which is the half of this example a
+// reader needs and the half it used to omit. At `middleChars: 20`,
+// `start = floor((64 - 20) / 2) = 22`, so chars 22..41 are shown: key bytes
+// **11..20**. That is byte 11 leftward, which the mark reads, AND bytes 18, 19,
+// 20 rightward, which are the generated name's window — a displayed byte
+// reaching a derived one, the case the paragraph above calls the worst kind to
+// share. Checking only the leftward collision and moving the group left would
+// look like a fix and would not be one.
 //
 // That is measured rather than supposed, and it is why `tst_identicon.qml`
 // probes this component for what it displays instead of recomputing the

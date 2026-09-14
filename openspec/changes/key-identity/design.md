@@ -41,6 +41,53 @@ is the pattern the third probe has to join, not a pattern to redesign.
 
 ## Decisions
 
+### Why the name's six bytes are `18..23`: contiguous, and the gaps left empty
+
+The allocation is the decision this piece exists to make, so it gets its own
+entry rather than sharing one with the question of how the window is *expressed*
+(below). The spec's table gives the mark `4..11`, the abbreviation `0..3`,
+`14..17` and `29..31`, and the name `18..23` — 25 of 32 bytes, leaving seven
+unallocated in two runs, `12..13` and `24..28`.
+
+**Alternative considered: split the name across the gaps.** Six of the seven free
+bytes — `12`, `13`, `24`, `25`, `26`, `27` — would have held the name entirely
+inside what the abbreviation hides, and left a contiguous run free for whatever
+comes next. That is a real option and it was not taken.
+
+What ruled it out is that a split window stops being one fact. The derivation is
+`key_bytes[name_key_bytes()]` — a single slice, so the window is *what the code
+reads* rather than a figure a comment asserts, and the whole argument in the next
+entry (one range cannot be half-moved) depends on there being one range. A split
+window needs a list of ranges, a slot-to-range mapping, and `pin_name.rs`'s
+`NAME_FIRST_BYTE + 2` arithmetic stops working; each of those is a place two
+implementations can disagree about how far to read, which is the failure the
+scheme exists to prevent. The gain — one contiguous free run instead of two — is
+speculative, for a fourth channel nobody has specified.
+
+**A contiguous window is also the half a human can check.** Bytes 18..23 are six
+hex pairs a holder reads off consecutively; a name derived from bytes 12, 13, 24,
+25, 26, 27 cannot be hand-verified without a diagram.
+
+**Alternative considered: call the seven bytes reserved rather than unallocated.**
+Rejected, and the wording is load-bearing rather than pedantic. "Reserved" claims
+something is coming; nothing is. The spec's own warning is that a range read by
+nothing gets taken as load-bearing by the next reader — and this is not
+hypothetical here. `docs/IDENTICON.md` records that an earlier version of this
+very document claimed bytes 0..11 were "reserved for the generated-name scheme"
+and derived the two channels' independence from it, when no such mechanism
+existed; two documents invented the same false reservation independently. The
+word is what did that, so the four sites that mention the gaps
+(`names.rs`'s module header, `names.rs`'s unallocated-byte test, `Identicon.qml`,
+`IDENTICON.md`) each say **unallocated, not reserved**, and say that extending a
+channel onto them is a spec change rather than a local edit. The gate
+`the_name_reads_no_unallocated_byte` is the enforcement.
+
+What this forecloses, recorded because it is the cost: no channel can be widened
+without changing the spec's table, and a fourth channel must be specified into
+the gaps rather than helping itself to them. That is the intended direction —
+the gaps are free for a future spec to allocate, not free for a future commit to
+take.
+
 ### The name reads `key.to_bytes()[18..23]`, and the type carries the window
 
 `name_from_digest(&[u8; 32])` becomes `name_from_key_bytes(&[u8; 32])`, and the
@@ -94,6 +141,28 @@ versioning seam**, so a wordlist change renames everyone at once with no way to
 tell the schemes apart. The owner took this deliberately on issue #80; the name
 is a pure local function and never published, so the divergence is a client-side
 rendering difference.
+
+**Alternative considered: keep a hash, but one per channel, each under its own
+separator.** This is the shape that would have preserved the versioning seam —
+`H(NAME_V1 || key)` for the name, `H(MARK_V1 || key)` for the mark — and it is
+the obvious thing to reach for once the cost above is stated, so it is recorded
+here rather than left for the next reader to re-derive.
+
+It was ruled out by the owner's ruling on #80, which is that the name reads the
+key's own bytes with no hash anywhere. What that ruling buys is that a name is
+verifiable by hand: three 16-bit big-endian draws off bytes 18..23 of a key the
+holder can read on screen, so a second implementation is a page of arithmetic
+rather than a SHA-256 and a separator string that must match byte for byte.
+Per-channel separators also put the independence of the three channels somewhere
+invisible — a reader cannot tell by looking whether two separators differ in a
+way that matters — where byte disjointness is a table anyone can check and a gate
+can measure.
+
+What it costs is exactly the one item recorded above and nothing further: the
+seam. Independence is not among the costs, which is the thing worth being
+explicit about — it moved from domain separation to the byte allocation rather
+than being given up, and this change is what makes that allocation a stated
+requirement with a gate on both sides of it instead of an accident.
 
 ### The disjointness gate is two gates, because the channels are in two languages
 

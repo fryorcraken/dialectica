@@ -92,6 +92,18 @@ const STOA_KEY_SALT_WITH_PATH: &[u8] = b"/dialectica/2/Identity/Stoa";
 /// prefixes, and because a `String` here would invite a caller to compare an
 /// address to a display form. Comparison is on the bytes.
 ///
+/// **Half of that sentence is scheduled for deletion.** Issue #80 removes the
+/// *author* address — the public key becomes the identity, and the generated
+/// name and the mark now read the key's own bytes rather than a digest of it.
+/// The `key-identity` change states that allocation; the `key-identity-sweep`
+/// change performs the removal, and nothing in this file changes until it lands.
+/// So between the two, this doc comment still offers "an author's" and
+/// [`PublicKey::address`] still exists, deliberately: renaming here and rewiring
+/// the call sites there would split one rename across two pieces and leave the
+/// tree non-compiling in between.
+///
+/// **Stoa addresses are untouched** and this type survives the sweep for them.
+///
 /// `Ord` and `Hash` are here for the store (§3.3), which keys and indexes by
 /// address: they make an `Address` usable as a map key and give a deterministic
 /// sort, which matters because every peer must order a rebuilt projection the
@@ -252,6 +264,15 @@ impl PublicKey {
     }
 
     /// This key's author address.
+    ///
+    /// **Scheduled for deletion by `key-identity-sweep` (issue #80).** The
+    /// public key is the identity; nothing needs a second unforgeable name for
+    /// an author, and the generated name and the mark now read the key's bytes
+    /// directly. This survives only because the sweep owns the call-site
+    /// rewiring — see the note on [`Address`]. Do not add a caller.
+    ///
+    /// Everything below describes the scheme as it stands and is why it was
+    /// built this way, not an argument for keeping it.
     ///
     /// **A record is hashed, not the bare key** — §5.1 is explicit, and the
     /// reason is forward compatibility: if rotation ever lands (§5.3), the

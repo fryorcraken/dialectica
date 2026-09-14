@@ -12,7 +12,7 @@ whole of the verification.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/names.rs:1716-1720` —
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/names.rs:1716-1720` —
       the parenthetical that exists to stop a reader confusing an array index
       with a file line number states both offsets one too low, so following its
       own instruction produces the wrong line.
@@ -32,7 +32,17 @@ whole of the verification.
       and a reader who trusts it lands on the neighbouring word.
       **Fix:** 27 → 28 and 23 → 24.
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/names.rs:347` —
+      **Fixed.** Both offsets corrected, and I re-ran your two greps rather than
+      taking them: `"zenon"` → `nouns.rs:1043`, `"kition"` → `places.rs:455`, and
+      the first literals are `"acheron"` at `nouns.rs:28` and `"abai"` at
+      `places.rs:24` with the `pub const … = &[` lines at 27 and 23 exactly as
+      you found. The comment now also *shows* the arithmetic it is asking a
+      reader to do — `1015 + 28 = 1043`, `431 + 24 = 455` — so the offset and the
+      answer are both checkable against one grep, rather than the offset alone
+      being asserted. No test covers this (it is a comment); the correction is
+      verified by the two greps above.
+
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/names.rs:347` —
       a rustdoc intra-doc link to `[`NAME_KEY_BYTES`]`, an identifier this change
       deleted. The item is now the `const fn name_key_bytes()` declared 170 lines
       above, and `names.rs:172` already refers to the old name in prose where it
@@ -50,7 +60,27 @@ whole of the verification.
       no output), so nothing catches it.
       **Fix:** `[`NAME_KEY_BYTES`]` → `[`name_key_bytes`]`.
 
-- [ ] **`dev-writer`** — `dialectica-ui/src/qml/AddressLabel.qml:27-28` — the
+      **Fixed** as you specify. `grep -n "NAME_KEY_BYTES" names.rs` now returns
+      one hit, line 172, which is the prose about the rejected `const` form and
+      is correct there — your reading of the two sites was right.
+
+      The same sentence carried a second and worse defect, which the architecture
+      reviewer filed separately and which is fixed in the same edit: it ended
+      *"widening a draw past it does not compile"*, and that is false. I measured
+      both halves rather than trusting either review — `word(4)` → `word(5)`
+      **compiles** and panics at `names.rs:362` (`index out of bounds: the len is
+      6 but the index is 6`); widening the range to `18..25` **compiles** and
+      fails two tests at runtime. The doc now says the invariant is structural
+      (the two constants cannot disagree) but the enforcement is test-caught, and
+      names the two tests that catch it.
+
+      `design.md` also described the window as a `Range<usize>` **constant**
+      called `NAME_KEY_BYTES` and showed `key_bytes[NAME_KEY_BYTES]`, which is
+      the same dead name one document further out; corrected there too, with a
+      line saying it began as a `const` and why it is not one, so the entry below
+      that explains the rename is no longer contradicted by the entry above it.
+
+- [x] **`dev-writer`** — `dialectica-ui/src/qml/AddressLabel.qml:27-28` — the
       worked example names only half of what it demonstrates, and the half it
       omits is the one the surrounding paragraph calls the severe case.
       **Scenario:** the comment says *"The middle group is CENTRED, so widening
@@ -72,7 +102,24 @@ whole of the verification.
       **Fix:** extend the example to say `middleChars: 20` reaches key bytes
       11..20, colliding with the mark at 11 and with the name at 18..20.
 
-- [ ] **`spec-writer`** — `openspec/changes/key-identity/specs/generated-names/spec.md:506-508` —
+      **Fixed**, and I re-derived the arithmetic rather than taking it: `start =
+      Math.floor((body.length - mid) / 2)` at `AddressLabel.qml:52`, so at
+      `mid: 20` over a 64-character body `start = floor(44/2) = 22`, chars 22..41,
+      key bytes **11..20** — your figures exactly. The comment now states the
+      full range, names both collisions (the mark at 11, the name at 18, 19, 20),
+      shows the `floor` step so the next person retuning the group can redo it,
+      and closes on the trap you identified: *"Checking only the leftward
+      collision and moving the group left would look like a fix and would not be
+      one."*
+
+      No test covers the comment, but the behaviour it describes is covered —
+      `test_no_byte_on_screen_reaches_the_mark_or_the_name` is what fails if
+      anyone acts on the example and widens the group, and the security review
+      measured `middleChars: 8 → 14` failing it with "key byte 18 is DISPLAYED by
+      the abbreviation and also read by the generated name". The comment was
+      wrong about which collisions exist; the gate was never wrong.
+
+- [x] **`spec-writer`** — `openspec/changes/key-identity/specs/generated-names/spec.md:506-508` —
       a migration pointer cites a requirement by a title this same delta renames,
       so "above" sends a reader to a heading that will not exist once the change
       is applied.
@@ -93,6 +140,17 @@ whole of the verification.
       Severity: low — the rename block sits above and resolves it — but the
       citation is the kind a later reader greps for and does not find.
       **Fix:** cite the post-rename title, or say explicitly "renamed above to".
+
+      **Fixed**, taking both halves of your suggestion rather than choosing: the
+      citation is now the post-rename title *The scheme and its wordlists are
+      frozen, with no version to bump*, it says explicitly that this change
+      renames it from the old one and points at the `## RENAMED Requirements`
+      block, and it states why the post-rename title is the one cited — it is the
+      heading that exists once the change applies. Keeping the old title visible
+      in the sentence means a reader who greps for either finds this.
+
+      Verified: `grep -n "^### Requirement"` on the delta puts the cited title at
+      line 206, and `openspec validate key-identity --strict` passes.
 
 ## What was checked and is correct
 

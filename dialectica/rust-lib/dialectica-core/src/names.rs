@@ -159,8 +159,27 @@ pub const CONNECTOR: &str = "of";
 /// earlier version of the bound it replaces was compared to its own literal in a
 /// `debug_assert_eq!` — a tautology that compiled out in release and could not
 /// fail under any edit to the draws. [`name_from_key_bytes`] takes its six bytes
-/// as `key_bytes[name_key_bytes()]`, so moving the range moves the read and a
-/// draw past it does not compile.
+/// as `key_bytes[name_key_bytes()]`, so moving the range moves the read: there is
+/// no second place holding a copy of the window that could disagree with this
+/// one.
+///
+/// **What that gives is a structural invariant, not a compile error**, and this
+/// comment claimed the stronger thing until it was measured. Two things hold and
+/// two do not:
+///
+/// - *Holds:* the two constants cannot disagree, because [`NAME_BYTE_COUNT`] is
+///   derived from this range rather than written beside it, and the derivation
+///   reads one slice rather than indexing the key directly.
+/// - *Does not hold:* "a draw past the range does not compile". `word(i)` indexes
+///   the slice through a closure, so `i` is a runtime value — `word(4)` to
+///   `word(5)` **compiles** and panics with `index out of bounds: the len is 6
+///   but the index is 6`. Widening this range to `18..25` **also compiles**, and
+///   fails two tests at runtime rather than at the build.
+///
+/// So the enforcement is test-caught, and the tests that catch it are
+/// `the_restated_channels_are_the_spec_s_byte_sets_and_not_merely_disjoint_ones`
+/// and `the_spec_allocation_this_crate_restates_is_internally_consistent`.
+/// Weakening those weakens this.
 ///
 /// The number of bytes a name consumes is therefore fixed rather than
 /// data-dependent: no input makes the derivation read a seventh. Reading without
@@ -344,9 +363,16 @@ pub fn display_name_from_bytes(bytes: &[u8]) -> Result<DisplayName, NameError> {
 ///
 /// Every other byte of the key is **never read** — including bytes `12..13` and
 /// `24..28`, which no channel reads and which are unallocated rather than
-/// reserved. The slice below is taken at [`NAME_KEY_BYTES`] rather than indexed
+/// reserved. The slice below is taken at [`name_key_bytes`] rather than indexed
 /// relative to it, so the range is what the derivation reads rather than a
-/// figure a comment asserts: widening a draw past it does not compile.
+/// figure a comment asserts.
+///
+/// **What enforces that is a runtime bound, not the compiler**, and an earlier
+/// version of this sentence claimed otherwise. `word(i)` indexes `drawn` through
+/// a closure, so `i` is a runtime value: changing `word(4)` to `word(5)`
+/// **compiles**, and panics at the draw with `index out of bounds: the len is 6
+/// but the index is 6` — measured. The tests are what catch it, so a reader who
+/// believes rustc is holding this will not notice if those tests are weakened.
 ///
 /// Each slot takes its index from bytes no other slot reads, so the three words
 /// are independent draws rather than three views of the same bits.
@@ -1158,6 +1184,47 @@ mod tests {
     }
 
     #[test]
+    fn displaying_a_name_gives_the_same_text_as_rendering_it() {
+        // **The `Display` impl had no test at all**, and `cargo mutants` found
+        // it: replacing `fmt`'s body with `Ok(())` left 962 of 962 tests green,
+        // the single survivor of 26 mutants. Every assertion in this file reached
+        // a name through `.render()`, so a caller reaching one through `{}` or
+        // `.to_string()` would have displayed the empty string with nothing able
+        // to notice.
+        //
+        // That is the "name attributable to nobody" that
+        // `a_failure_is_never_reported_as_a_name` exists to forbid, arrived at
+        // through the formatting impl rather than through the error path. It is
+        // latent today only because no production caller reaches the derivation
+        // at all; it goes live with `key-identity-sweep`, which is exactly the
+        // wrong moment to discover it.
+        //
+        // Both routes are asserted, because `to_string()` goes through `Display`
+        // while `format!("{}")` is the one a renderer is likelier to write, and
+        // an impl could in principle satisfy one and not the other.
+        for seed in 1u8..30 {
+            let name = display_name(&a_key(seed).public_key());
+            let rendered = name.render();
+
+            assert!(
+                !rendered.is_empty(),
+                "the fixture must render something, or both assertions below \
+                 are satisfied by two empty strings"
+            );
+            assert_eq!(
+                name.to_string(),
+                rendered,
+                "`to_string()` must give the name, not something else"
+            );
+            assert_eq!(
+                format!("{name}"),
+                rendered,
+                "`{{}}` must give the name, not something else"
+            );
+        }
+    }
+
+    #[test]
     fn the_slots_draw_from_the_lists_they_are_specified_to_draw_from() {
         for seed in 1u8..40 {
             let name = display_name(&a_key(seed).public_key());
@@ -1755,11 +1822,13 @@ mod tests {
         // what makes it a demonstration rather than an illustration: the
         // collision is with list contents rather than with invented words.
         //
-        // (Those are ARRAY indices, not file line numbers. The literals start
-        // at line 27 of `nouns.rs` and line 23 of `places.rs`, so a grep's line
-        // number is the index plus that offset — a trap worth naming, because
-        // reading a grep hit as an index is how a wrong index gets written
-        // down confidently.)
+        // (Those are ARRAY indices, not file line numbers. The FIRST LITERAL is
+        // at line 28 of `nouns.rs` and line 24 of `places.rs` — one past the
+        // `pub const NOUNS/PLACES = &[` line, which is the off-by-one to avoid —
+        // so a grep's line number is the index plus that offset: `zenon` at
+        // 1015 + 28 = 1043, `kition` at 431 + 24 = 455. Both verified by grep.
+        // A trap worth naming, because reading a grep hit as an index is how a
+        // wrong index gets written down confidently.)
         //
         // This is a rule about ONE LITERAL SUBSTRING and not a semantic screen:
         // what the noun means is still no part of whether it is in. The bare

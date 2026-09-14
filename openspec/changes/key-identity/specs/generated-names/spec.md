@@ -504,8 +504,11 @@ being replayed as a signature over another. Removing the name's separator
 reaches nothing on the signing path.
 
 The scheme-version half of this requirement is carried by *The scheme and its
-wordlists are versioned together and frozen*, above, whose text this change
-rewrites to record that the versioning seam is gone and what its loss costs.
+wordlists are frozen, with no version to bump* — which this change renames from
+*The scheme and its wordlists are versioned together and frozen* (see `##
+RENAMED Requirements` above) and whose text it rewrites to record that the
+versioning seam is gone and what its loss costs. The post-rename title is the
+one cited here, because it is the heading that exists once this change applies.
 
 ### Requirement: The mark and the abbreviated address read disjoint address bytes
 

@@ -1049,8 +1049,16 @@ invites the wrong conclusion — that between them the problem is handled:
 1. **The name space.** Reduces *accidental* collisions, and nothing else.
 2. **The mark** (`docs/IDENTICON.md`). A second recognition channel that varies
    independently of the name, so an attacker must land both at once and the
-   costs multiply rather than add. **Still forgeable in exactly the way the name
-   is** — a multiplied cost is still a cost a machine pays once.
+   costs multiply rather than add. **The conclusion survives #80 but its reason
+   changed**, and the distinction matters to anyone extending either channel:
+   independence used to come from domain separation — the two read different
+   digests, so whatever bytes each happened to read they could not overlap. With
+   no hash between the key and any channel, all three read the *same* 32 bytes,
+   and the independence now rests on the byte allocation being pairwise
+   disjoint. It is a property to gate rather than a property for free; the
+   `generated-names` requirement *The three channels read pairwise disjoint
+   bytes of the public key* is where it lives. **Still forgeable in exactly the
+   way the name is** — a multiplied cost is still a cost a machine pays once.
 3. **Vouching (§7.3) — the only layer an attacker cannot mint, and the most
    limited.** A vouch points at *a key*, so a lookalike gets the name, gets a
    near-matching glyph, and does not get the vouch. Two structural limits: it is
@@ -1058,13 +1066,18 @@ invites the wrong conclusion — that between them the problem is handled:
    impersonation of someone they have *already* vouched for; and weight accrues
    from what a reader has already done, so a new user's vouched set is empty.
    **The layer is weakest exactly where the exposure is highest.**
-4. **The address — the only thing that settles identity.** Unforgeable,
-   unmintable, and what every signature binds to. Its one weakness is not
-   cryptographic: **it settles the question only if someone looks.**
+4. ~~**The address**~~ **The public key — the only thing that settles
+   identity.** Unforgeable, unmintable, and what every signature binds to. Its
+   one weakness is not cryptographic: **it settles the question only if someone
+   looks.** Issue #80 deletes the author address, so a layer still pointing at it
+   would point at a value no longer carried; the `generated-names` requirement
+   *A name is never unique, never an identifier, and never numbered* is the
+   authority, and the rendering obligations below say the same thing. **Stoa
+   addresses are untouched** — this is the author address only.
 
 **Layers 1–3 make an honest mistake less likely; only layer 4 makes a dishonest
-claim false.** An interface showing a name and a glyph and no address has
-shipped three recognition aids and zero guarantees.
+claim false.** An interface showing a name and a glyph and no ~~address~~ public
+key has shipped three recognition aids and zero guarantees.
 
 #### Rendering obligations this creates
 
