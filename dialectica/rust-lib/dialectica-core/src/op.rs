@@ -53,7 +53,9 @@
 //!
 //! **No `senderId`.** §4.1: "`senderId` is not an author identity, and the plan
 //! should not treat it as one." It binds at channel creation as a transport
-//! self-filter. The author identity in an op is the key and the address.
+//! self-filter. The author identity in an op is the key it carries, and nothing
+//! else — issue #80 deleted the author address that used to be named here
+//! alongside it.
 //!
 //! **No `channelId`.** §4.5: "never let channel identity leak into payloads or
 //! storage keys", so that one-channel-per-thread later becomes a routing change
@@ -82,8 +84,8 @@ use sha2::{Digest, Sha256};
 
 /// Domain separation for an op id.
 ///
-/// Distinct from every address prefix in `identity.rs`, so no byte string is
-/// ever both a valid op id and a valid author or Stoa address. Padded to a
+/// Distinct from the Stoa-address prefix in `identity.rs`, so no byte string is
+/// ever both a valid op id and a valid Stoa address. Padded to a
 /// fixed 32 bytes for the same reason those are: a variable-length prefix
 /// concatenated with variable-length data is how two different inputs come to
 /// hash the same.
@@ -473,11 +475,16 @@ impl OpKind {
 
 /// A signed operation: the whole of what crosses the wire.
 ///
-/// The author's **public key** travels in the op, not merely their address.
-/// §3.3 puts verification on read with no directory to resolve an address
-/// against, so a peer holding only an address could not check the signature.
-/// The address is recoverable from the key ([`PublicKey::address`]), which is
-/// what [`identity::verify_authored_op`] re-derives.
+/// The author's **public key** travels in the op, and it is the whole of how an
+/// op names its author. §3.3 puts verification on read with no directory to
+/// resolve any other identifier against, so a peer must hold the key itself in
+/// order to check the signature.
+///
+/// **No second author identifier is carried or derivable.** The key is the
+/// author, so there is nothing beside it for a recipient to reconcile it
+/// against, and nothing a relay could strip or forge separately from the value
+/// the signature is checked under. An author address used to ride here too;
+/// issue #80 deleted it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Op {
     /// Which Stoa this belongs to.
@@ -705,8 +712,8 @@ impl Op {
     /// This op's id: the hash of its canonical bytes, domain-separated.
     ///
     /// Prefixed like every other hash in this crate, so an op id can never
-    /// collide with an author address or a Stoa address — which matters because
-    /// all three are 32 bytes and a moderation op names one of them.
+    /// collide with a Stoa address — which matters because both are 32 bytes and
+    /// a moderation op names one of them.
     pub fn id(&self) -> OpId {
         let mut hasher = Sha256::new();
         hasher.update(OP_ID_PREFIX);
@@ -716,11 +723,11 @@ impl Op {
 
     /// Sign this op, producing the envelope that crosses the wire.
     ///
-    /// The key must be the author's per-Stoa key ([`identity::derive_stoa_key`])
-    /// — signing with any other key produces an op that
-    /// [`SignedOp::verify`] rejects, since the address it re-derives will not
-    /// match. Taking the key rather than reading one from ambient state is
-    /// CLAUDE.md's "pass what it needs".
+    /// The key must be the one named in [`Op::author`]
+    /// ([`identity::derive_stoa_key`]) — signing with any other key produces an
+    /// op that [`SignedOp::verify`] rejects, because the **signature** will not
+    /// verify under the key the op carries. Taking the key rather than reading
+    /// one from ambient state is CLAUDE.md's "pass what it needs".
     pub fn sign(self, key: &SecretKey) -> SignedOp {
         let signature = sign_op_bytes(key, &self.canonical_bytes());
         SignedOp { op: self, signature }
@@ -730,9 +737,18 @@ impl Op {
 impl SignedOp {
     /// Whether this op is authentically from the author it claims.
     ///
-    /// Delegates to [`identity::verify_authored_op`], which is the function
-    /// that binds the key to the claimed address — the check that a caller
-    /// doing the steps by hand forgets. Nothing here re-implements it.
+    /// Delegates to [`identity::verify_authored_op`], which establishes that the
+    /// key this op carries signed the op's bytes. **That is the whole of
+    /// authorship**: an op names its author by carrying the author's public key,
+    /// so an op claiming a different author carries a different key and the
+    /// signature then fails under it.
+    ///
+    /// This used to pass a fourth argument, `self.op.author.address()` — the
+    /// claimed author, computed by calling `.address()` on the op's **own** key,
+    /// which the callee then compared against `key.address()`. A value against
+    /// itself. Issue #80 deleted the address and the parameter with it; nothing
+    /// here re-implements the check, because there was never a check to
+    /// re-implement on this path.
     ///
     /// **This answers authenticity only.** It does not ask whether the signer
     /// is a moderator (§6), whether a revision's author owns the post it
@@ -744,7 +760,6 @@ impl SignedOp {
     /// never on the read path".
     pub fn verify(&self) -> bool {
         verify_authored_op(
-            &self.op.author.address(),
             &self.op.author.to_bytes(),
             &self.op.canonical_bytes(),
             &self.signature.to_bytes(),
@@ -1320,9 +1335,9 @@ mod tests {
 
     #[test]
     fn an_op_id_is_not_a_bare_hash_of_the_canonical_bytes() {
-        // Domain separation, for the same reason `identity.rs` separates its
-        // two address derivations: an op id, an author address and a Stoa
-        // address are all 32 bytes, and a moderation op names one of them.
+        // Domain separation, for the same reason `identity.rs` prefixes its Stoa
+        // address: an op id and a Stoa address are both 32 bytes, and a
+        // moderation op names one of them.
         let op = a_post();
         let bare = {
             let mut h = Sha256::new();

@@ -964,8 +964,11 @@ exists.** `derive_stoa_key(root, stoa_address)` is built and tested
 (`dialectica-core`'s `identity.rs`; the HKDF expansion and its reasoning are in
 that function's own doc comment). One identity per user means **not calling it**
 and signing with the root key directly. Restoring per-Stoa identity is switching
-that call back on, not a redesign — no wire-format change, no address change, no
-new primitive.
+that call back on, not a redesign — no wire-format change, no new primitive, and
+no change to which VALUE names an author, since the author is its public key
+either way. (That last clause read "no address change" until issue #80 deleted
+the author address; with the value gone, the sentence it made would have been
+about nothing.)
 
 **The deferred work is the flows, not the crypto.** Creating or joining a Stoa
 has to ask *which* identity, which means a create-or-select step at both of
@@ -1085,7 +1088,7 @@ invites the wrong conclusion — that between them the problem is handled:
 4. ~~**The address**~~ **The public key — the only thing that settles
    identity.** Unforgeable, unmintable, and what every signature binds to. Its
    one weakness is not cryptographic: **it settles the question only if someone
-   looks.** Issue #80 deletes the author address, so a layer still pointing at it
+   looks.** Issue #80 deleted the author address, so a layer still pointing at it
    would point at a value no longer carried; the `generated-names` requirement
    *A name is never unique, never an identifier, and never numbered* is the
    authority, and the rendering obligations below say the same thing. **Stoa
@@ -1102,7 +1105,7 @@ Collected for §11.1 ("Rendering obligations, collected"), which arrives with th
 incomplete without something the view says:
 
 - **A name is never unique and never an identifier.** ~~The address is the
-  identity.~~ **The public key is the identity** — issue #80 deletes the author
+  identity.~~ **The public key is the identity** — issue #80 deleted the author
   address, and the `generated-names` spec's requirement *A name is never unique,
   never an identifier, and never numbered* is the authority. The obligation
   itself is unchanged and is the one Stoa titles already carry (§4.8, §5.7),

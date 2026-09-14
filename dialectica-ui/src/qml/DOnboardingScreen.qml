@@ -15,10 +15,15 @@ import QtQuick.Layouts
 //      branched on `ok` alone would report an identity that was never stored.
 //   2. **Nothing is pre-selected.** A pre-selected candidate plus one press is a
 //      permanent choice the user never made.
-//   3. **Addresses are shown in full here.** This is where the decision is
-//      made, and the address is the only unforgeable way to tell two candidates
+//   3. **Public keys are shown in full here.** This is where the decision is
+//      made, and the key is the only unforgeable way to tell two candidates
 //      apart. Elsewhere they are abbreviated; the abbreviation lives in
 //      AddressLabel and is never hand-rolled a second time.
+//
+// The slate and keep replies carried an author ADDRESS beside the public key
+// until issue #80 deleted that value. This screen reads `publicKey` where it
+// read `address`; `AddressLabel` and `Identicon` keep their `address` property
+// because both are generic and also render Stoa addresses, which survive.
 ScreenFrame {
     id: screen
 
@@ -69,7 +74,7 @@ ScreenFrame {
     property int selectedIndex: nothingSelected
 
     // The identity as the KEEP REPLY reported it — never the row that was sent.
-    // Null until a reply said `kept:true` and carried an address.
+    // Null until a reply said `kept:true` and carried a public key.
     //
     // `encrypted` is copied across raw rather than coerced with `=== true`. An
     // absent field and a reported `false` mean different things: one is "the
@@ -142,7 +147,7 @@ ScreenFrame {
         // above establishes that `candidates` is a list; it says nothing about
         // what is in it. An array of `[null,"str",…]` passed it, reached the
         // slate phase and built rows that threw on every access — rendering a
-        // blank row with no address and no mark, and inviting the user to
+        // blank row with no key and no mark, and inviting the user to
         // choose between it and a real one.
         //
         // This runs BEFORE anything is assigned, so a bad entry anywhere means
@@ -193,9 +198,11 @@ ScreenFrame {
             return false
         if (value.index < 0 || Math.floor(value.index) !== value.index)
             return false
-        // The address is the only unforgeable way to tell two candidates apart,
-        // so one without a usable address is not something to choose between.
-        if (typeof value.address !== "string" || value.address === "")
+        // The public key is the only unforgeable way to tell two candidates
+        // apart, so one without a usable key is not something to choose between.
+        // It is also what the mark and the generated name are both derived from,
+        // so a candidate missing it can render neither.
+        if (typeof value.publicKey !== "string" || value.publicKey === "")
             return false
         return true
     }
@@ -267,10 +274,10 @@ ScreenFrame {
             return
         }
 
-        // A `kept:true` with no address is a reply this screen cannot read.
-        // Rendering it would show a kept identity with an empty address, which
+        // A `kept:true` with no public key is a reply this screen cannot read.
+        // Rendering it would show a kept identity with an empty key, which
         // claims a success the reply did not actually describe.
-        if (typeof reply.value.address !== "string" || reply.value.address === "") {
+        if (typeof reply.value.publicKey !== "string" || reply.value.publicKey === "") {
             screen.enterFailed("The core module reported an identity was kept but did "
                              + "not say which, so what is stored is unknown.")
             return
@@ -280,7 +287,6 @@ ScreenFrame {
         // when core is right, and when they disagree the reply is what is true
         // about the store.
         screen.keptIdentity = {
-            address: reply.value.address,
             publicKey: reply.value.publicKey,
             path: reply.value.path,
             encrypted: reply.value.encrypted
@@ -394,15 +400,22 @@ ScreenFrame {
     // ---- phase: candidates ----------------------------------------------
     //
     // One row per candidate the reply carried, in the reply's order. A row
-    // shows the mark and the address IN FULL and presents nothing as a name.
+    // shows the mark and the PUBLIC KEY IN FULL and presents nothing as a name.
+    //
+    // **The row shows the key because the key is what a candidate is.** It
+    // carried an author address alongside until issue #80 deleted that value;
+    // the key is now the sole identifier an identity has, and it is what the mark
+    // and the name are both computed from. `generated-names`' *The three channels
+    // read pairwise disjoint bytes of the public key* is the authority on which
+    // bytes each reads.
     //
     // **There is no name to show.** Core deliberately carries none — which
-    // words a key produces is a separate contract — and the view cannot compute
-    // one, because the derivation is not built. So the row shows no derivation
-    // path, no index, no position number and no truncated address in a name's
-    // place: each would be read as the thing the user is choosing, and none of
-    // them is. The name arrives as one Text above the address in the column
-    // below, and nothing else about this row changes when it does.
+    // words a key produces is a separate contract — and this row does not derive
+    // one. So it shows no derivation path, no index, no position number and no
+    // truncated key in a name's place: each would be read as the thing the user
+    // is choosing, and none of them is. The name arrives as one Text above the
+    // key in the column below, and nothing else about this row changes when it
+    // does.
     Repeater {
         model: (screen.phase === "slate" || screen.phase === "refused") ? screen.candidates : []
 
@@ -425,23 +438,27 @@ ScreenFrame {
                 spacing: 14
 
                 Identicon {
-                    address: row.modelData.address
+                    address: row.modelData.publicKey
                     size: 38
                 }
 
-                // The column a generated name will join, above the address.
-                // Empty of anything name-shaped today rather than holding a
-                // placeholder: a bound "" would be filled by accident.
+                // The column a generated name will join, above the key. Empty of
+                // anything name-shaped today rather than holding a placeholder: a
+                // bound "" would be filled by accident.
                 ColumnLayout {
                     spacing: 2
                     Layout.fillWidth: true
 
                     AddressLabel {
-                        // IN FULL. The user is choosing between keys and the
-                        // addresses are the only unforgeable way to tell the
-                        // candidates apart. `full` is AddressLabel's own mode —
-                        // no elision is hand-rolled here or anywhere.
-                        address: row.modelData.address
+                        // IN FULL. The user is choosing between keys and the keys
+                        // are the only unforgeable way to tell the candidates
+                        // apart. `full` is AddressLabel's own mode — no elision is
+                        // hand-rolled here or anywhere.
+                        //
+                        // `AddressLabel` keeps its `address` property because it
+                        // is generic and also renders Stoa addresses; what flows
+                        // in here is a public key.
+                        address: row.modelData.publicKey
                         full: true
                         Layout.fillWidth: true
                     }
@@ -520,9 +537,14 @@ ScreenFrame {
     // The uniqueness obligation, in the body — which is now the only copy.
     //
     // The spec requires this screen to state that generated names are not
-    // unique and not identifiers, and that the address is what distinguishes
+    // unique and not identifiers, and that the PUBLIC KEY is what distinguishes
     // two participants — required *"even though no row shows a name"*, because
     // what the user is choosing is a key whose name follows from it.
+    //
+    // The requirement said "address" until issue #80 deleted the author address.
+    // The sentence below says "public key", because that is now the only
+    // identifier an identity has and the copy would otherwise name a value the
+    // user will never be shown.
     //
     // It was once only a `MarginNote` in `apparatus`, which made a spec'd
     // obligation depend on a column that was not load-bearing: a change
@@ -539,10 +561,10 @@ ScreenFrame {
     // the count: uniqueness is not merely unbuilt but UNAVAILABLE, since there
     // is no authority to hold a namespace — so the interface has to stay
     // correct when two identities present the same name, and the correctness
-    // is that the address is always present.
+    // is that the public key is always present.
     Text {
         visible: screen.phase === "slate" || screen.phase === "refused"
-        text: "Names are not unique and are not identifiers. Someone else in this Stoa may hold the same name. Your address is what tells you apart, so it is printed beside your name everywhere."
+        text: "Names are not unique and are not identifiers. Someone else in this Stoa may hold the same name. Your public key is what tells you apart, so it is printed beside your name everywhere."
         font: DTheme.bodySmall
         color: DTheme.inkSoft
         wrapMode: Text.WordWrap
@@ -630,14 +652,17 @@ ScreenFrame {
                 spacing: 14
 
                 Identicon {
-                    address: screen.keptIdentity !== null ? screen.keptIdentity.address : ""
+                    address: screen.keptIdentity !== null ? screen.keptIdentity.publicKey : ""
                     size: DTheme.markInList
                 }
 
                 AddressLabel {
-                    // The REPLY's address. If it differed from the row that was
-                    // sent, this is the one that is true about the store.
-                    address: screen.keptIdentity !== null ? screen.keptIdentity.address : ""
+                    // The REPLY's public key. If it differed from the row that
+                    // was sent, this is the one that is true about the store.
+                    // `AddressLabel` keeps its `address` property because it is
+                    // generic and also renders Stoa addresses; what flows in
+                    // here is a public key.
+                    address: screen.keptIdentity !== null ? screen.keptIdentity.publicKey : ""
                     full: true
                     Layout.fillWidth: true
                 }

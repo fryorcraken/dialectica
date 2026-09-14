@@ -220,9 +220,11 @@ pub trait DialecticaModule: Send + 'static {
     /// a number that decides how much key derivation this module performs. The
     /// count is reported so a view need not hardcode it.
     ///
-    /// Each candidate carries an address and a public key and **no secret** — the
-    /// view cannot sign, and a secret that has crossed this boundary cannot be
-    /// recalled.
+    /// Each candidate carries its public key and **no secret** — the view cannot
+    /// sign, and a secret that has crossed this boundary cannot be recalled. The
+    /// key is the whole of how a candidate is identified, and it is what a
+    /// display name and a visual mark are both derived from; a candidate carried
+    /// an author address beside it until issue #80 deleted that value.
     ///
     /// Nothing is written. A slate that persisted would record a choice the user
     /// has not made.
@@ -231,7 +233,7 @@ pub trait DialecticaModule: Send + 'static {
     /// Keep one candidate from the slate, making it this user's identity.
     ///
     /// Takes `{"stoa":"<hex>","slate":"<hex>","index":N}` and returns
-    /// `{"kept":true,"address":"…","publicKey":"…","path":N,"encrypted":bool}` or
+    /// `{"kept":true,"publicKey":"…","path":N,"encrypted":bool}` or
     /// `{"kept":false,"reason":"…"}` — the two are exclusive.
     ///
     /// The `slate` field is the identifier the slate was returned with, and a
@@ -250,7 +252,7 @@ pub trait DialecticaModule: Send + 'static {
     /// Who the user is in a Stoa, or why there is nobody.
     ///
     /// Takes `{"stoa":"<hex>"}` and returns
-    /// `{"hasIdentity":true,"address":"…","publicKey":"…","path":N,"recoveryNeedsTheRecord":bool}`
+    /// `{"hasIdentity":true,"publicKey":"…","path":N,"recoveryNeedsTheRecord":bool}`
     /// or `{"hasIdentity":false,"reason":"…"}` — the two are exclusive.
     ///
     /// **A different question from `getCapabilities`**, and the two can honestly
@@ -632,7 +634,7 @@ impl Dialectica {
             // the same correction `get_capabilities` above already carries.
             //
             // This was `keystore.stoa_key(&stoa)` — the PATHLESS per-Stoa scheme
-            // — while the probe reports `stoa_address_at_path`. The two schemes
+            // — while the probe reports `stoa_public_key_at_path`. The two schemes
             // are asserted to DISAGREE in `identity.rs`, so every published op
             // was authored by an identity neither `getCapabilities` nor `whoAmI`
             // would name. `core::wire::publishing_key` is the same derivation
@@ -678,7 +680,7 @@ impl Dialectica {
 // where the guard and the decisions live, because nothing in this file is reached
 // by `cargo test`, by clippy, by fmt, or by `cargo mutants` — a wrong line here
 // ships with every gate green, and one already did (see
-// `core::keystore::creator_and_poster_in`).
+// `core::keystore::creator_key_in`).
 //
 // THE RULE, stated as what it actually permits. A body here may derive a host path
 // and pass it in; it may not make a decision. `storage_dir()` plus one `core` call
@@ -754,9 +756,9 @@ impl DialecticaModule for Dialectica {
         //
         // The DERIVATION is no longer here. It was — `ks.stoa_address(stoa)`, the
         // pathless scheme — while `whoAmI` used the path-taking one under a bumped
-        // salt, so the two methods reported two different addresses for one user in
-        // one Stoa. It could not be tested where it was, because this file is not
-        // compiled by `cargo test`; see `core::wire::posting_identity`.
+        // salt, so the two methods reported two different identities for one user
+        // in one Stoa. It could not be tested where it was, because this file is
+        // not compiled by `cargo test`; see `core::wire::posting_identity`.
         let dir = match self.storage_dir() {
             Ok(d) => d,
             Err(e) => return e,
@@ -810,8 +812,9 @@ impl DialecticaModule for Dialectica {
         core::with_membership_store(&core::membership_path_in(&dir), |store| {
             // The SAME derivation `get_capabilities` above reports — one
             // expression in `core`, not two call sites here agreeing. See
-            // `core::keystore::creator_and_poster_in` for why that distinction is
-            // the whole point.
+            // `core::keystore::creator_key_in` for why that distinction is the
+            // whole point — and for why the pair it used to return collapsed to
+            // one value when the author address was deleted.
             core::create_stoa(&request, || core::keystore::creator_key_in(&dir), store)
         })
     }

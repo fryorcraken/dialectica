@@ -196,10 +196,15 @@ pub fn derive_path(nonce: &SlateNonce, index: u32) -> u32 {
 /// additive, while a secret that has crossed the module boundary cannot be
 /// recalled.
 ///
-/// The public key is present as well as the address, because the spec requires
-/// it: the generated display name is derived from the public key rather than from
-/// the address. What that derivation IS belongs to a different capability — this
-/// one *"SHALL NOT define how a display name or a visual mark is derived from a
+/// **The public key is the whole of how a candidate is identified**, and it used
+/// to be carried beside an author address. Issue #80 deleted the address: the
+/// spec now requires that *"no candidate SHALL carry an author address"*, on the
+/// ground that an address would be a second identifier beside the one it was
+/// derived from, where the two could disagree and a reader could not tell which
+/// was wrong. Both the display name and the visual mark read the key's own bytes.
+///
+/// What those derivations ARE belongs to a different capability — this one
+/// *"SHALL NOT define how a display name or a visual mark is derived from a
 /// key"* — so this type carries the input and names nothing about the output.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Candidate {
@@ -208,10 +213,9 @@ pub struct Candidate {
     pub index: usize,
     /// The derivation path. Public, and the value that gets recorded.
     pub path: u32,
-    /// The address this identity would post under — the only unforgeable way to
-    /// tell two candidates apart.
-    pub address: Address,
-    /// The public key, because a display name is derived from it.
+    /// The public key this identity would post under — the only unforgeable way
+    /// to tell two candidates apart, and what a display name and a mark are both
+    /// derived from.
     pub public_key: PublicKey,
 }
 
@@ -244,10 +248,10 @@ impl Slate {
     ///
     /// # The walk, and why it is not a retry loop
     ///
-    /// The spec requires no two candidates in a set share a public key or an
-    /// address. Two paths from one nonce could in principle collide, so distinctness
-    /// is established rather than assumed: the index walks forward and a path
-    /// already held is skipped.
+    /// The spec requires no two candidates in a set share a public key or a
+    /// derivation path. Two paths from one nonce could in principle collide, so
+    /// distinctness is established rather than assumed: the index walks forward
+    /// and a path already held is skipped.
     ///
     /// A retry loop with a fresh nonce would have been the obvious alternative and
     /// is worse: it makes the slate non-reproducible from its nonce, which is the
@@ -255,11 +259,9 @@ impl Slate {
     /// reproducibility, because `keep` performs the identical walk.
     ///
     /// Distinctness of *paths* is what is checked, and it gives distinctness of
-    /// keys and addresses for free: derivation is deterministic and injective in
-    /// practice, so two distinct paths give two distinct keys, and two distinct
-    /// keys give two distinct addresses because an address is a hash of a record
-    /// containing the key. Checking the paths is checking the thing that is
-    /// actually under this function's control.
+    /// keys for free: derivation is deterministic and injective in practice, so
+    /// two distinct paths give two distinct keys. Checking the paths is checking
+    /// the thing that is actually under this function's control.
     pub fn from_nonce(
         master_key: &[u8; 32],
         stoa: &Address,
@@ -312,7 +314,6 @@ impl Slate {
             candidates.push(Candidate {
                 index: candidates.len(),
                 path,
-                address: public_key.address(),
                 public_key,
             });
         }
@@ -502,15 +503,18 @@ mod tests {
 
     #[test]
     fn every_candidate_in_a_slate_is_distinct() {
-        // The spec: no two candidates share a public key, and no two share an
-        // address. Checked on all three of path, key and address — the path is
-        // what the walk establishes, and the other two are what the spec names.
+        // The spec: no two candidates share a public key, and no two share a
+        // derivation path. Both are checked — the path is what the walk
+        // establishes, and the key is what a user actually chooses between.
+        //
+        // A third clause compared addresses until issue #80 deleted them. It is
+        // not replaced: an address was a pure function of the key, so that clause
+        // could only fail where the key clause already had.
         let slate = Slate::generate(&[7u8; 32], &a_stoa()).unwrap();
         for (i, a) in slate.candidates.iter().enumerate() {
             for b in slate.candidates.iter().skip(i + 1) {
                 assert_ne!(a.path, b.path, "two candidates share a path");
                 assert_ne!(a.public_key, b.public_key, "two candidates share a key");
-                assert_ne!(a.address, b.address, "two candidates share an address");
             }
         }
         // And the indices are 0..SLATE_SIZE in order, since a caller selects by
@@ -660,16 +664,14 @@ mod tests {
                 "candidate {} does not come from the path-taking derivation",
                 candidate.index
             );
-            assert_eq!(candidate.address, candidate.public_key.address());
         }
     }
 
     #[test]
     fn a_candidate_is_an_identity_that_can_sign() {
-        // A candidate must be a usable identity, not merely a displayable one.
-        // Through the wire-level entry point, which is where the address binding
-        // lives: an op signed by the candidate's key must be attributable to the
-        // address the candidate showed.
+        // A candidate must be a usable identity, not merely a displayable one:
+        // an op signed by the secret at the candidate's path must authenticate
+        // under the public key the candidate showed.
         let master = [7u8; 32];
         let stoa = a_stoa();
         let slate = Slate::from_nonce(&master, &stoa, a_nonce()).unwrap();
@@ -677,23 +679,29 @@ mod tests {
         let key = crate::identity::derive_stoa_key_at_path(&master, &stoa, candidate.path);
         let sig = sign_op_bytes(&key, b"a post");
         assert!(
-            verify_authored_op(
-                &candidate.address,
-                &candidate.public_key.to_bytes(),
-                b"a post",
-                &sig.to_bytes()
-            ),
-            "an op signed as this candidate is not attributed to its address"
+            verify_authored_op(&candidate.public_key.to_bytes(), b"a post", &sig.to_bytes()),
+            "an op signed as this candidate does not verify under the key it showed"
         );
-        // The negative: another candidate's key must not verify against this
-        // one's address, or the assertion above would hold for any key.
+        // The negative, or the assertion above would hold for any pairing:
+        // another candidate's signature must not verify under this one's key.
+        //
+        // The substituted value is the SIGNATURE rather than the presented key,
+        // because issue #80 left no separate identifier for a key to fail to bind
+        // to — and the signature check is what was doing the refusing all along.
         let other = slate.candidate(3).unwrap();
         let other_key = crate::identity::derive_stoa_key_at_path(&master, &stoa, other.path);
+        let other_sig = sign_op_bytes(&other_key, b"a post");
         assert!(!verify_authored_op(
-            &candidate.address,
-            &other_key.public_key().to_bytes(),
+            &candidate.public_key.to_bytes(),
             b"a post",
-            &sign_op_bytes(&other_key, b"a post").to_bytes()
+            &other_sig.to_bytes()
+        ));
+        // And that signature is genuinely valid under its own candidate's key, so
+        // the refusal above is a mismatch and not a malformed signature.
+        assert!(verify_authored_op(
+            &other.public_key.to_bytes(),
+            b"a post",
+            &other_sig.to_bytes()
         ));
     }
 
@@ -777,7 +785,6 @@ mod tests {
         exposed.extend_from_slice(slate.nonce.as_bytes());
         for c in &slate.candidates {
             exposed.extend_from_slice(&c.path.to_be_bytes());
-            exposed.extend_from_slice(c.address.as_bytes());
             exposed.extend_from_slice(&c.public_key.to_bytes());
         }
 
@@ -798,7 +805,7 @@ mod tests {
         // The detection itself must work, or the assertions above prove nothing.
         // A value that IS in there must be found.
         assert!(
-            contains_window(&exposed, slate.candidates[0].address.as_bytes()),
+            contains_window(&exposed, &slate.candidates[0].public_key.to_bytes()),
             "the search is broken, so the assertions above prove nothing"
         );
     }
@@ -822,12 +829,15 @@ mod tests {
         let slate = Slate::from_nonce(&master, &stoa, a_nonce()).unwrap();
 
         // Every 32-byte value a slate exposes: the nonce, and each candidate's
-        // address and public key. The master key is deliberately NOT in this list
-        // — it is not something a slate exposes, which is what the test above
-        // asserts, and putting it here would be testing a different claim.
+        // public key. The master key is deliberately NOT in this list — it is not
+        // something a slate exposes, which is what the test above asserts, and
+        // putting it here would be testing a different claim.
+        //
+        // A candidate's author address was in this list until issue #80. It is
+        // gone with the value; the public key beside it stays and is the whole of
+        // what a candidate exposes as an identifier.
         let mut as_key_material: Vec<[u8; 32]> = vec![*slate.nonce.as_bytes()];
         for c in &slate.candidates {
-            as_key_material.push(*c.address.as_bytes());
             as_key_material.push(c.public_key.to_bytes());
         }
 
