@@ -2,14 +2,15 @@
 //!
 //! # Why this is core's job and not the view's
 //!
-//! Sanitisation is naturally read as the interface's job, on the reasoning that
-//! it is the interface that renders and that the core "deliberately does not
-//! sanitise". Both halves of that are true and they do not imply the conclusion,
-//! because §2.1 puts the QML engine in a sandbox with no filesystem and no
-//! network: **every byte the view renders arrives through a core method**. A
-//! view cannot sanitise text it is handed already rendered, and a view that
-//! sanitised in QML would be running attacker-supplied strings through a
-//! scripting layer that also holds the rendering primitives.
+//! `SPEC.md` assigns sanitisation to the interface, under the heading "Text
+//! sanitisation — the interface's job, because the core deliberately does not".
+//! Both halves of that heading are true — it *is* the interface that renders,
+//! and the core *does* deliberately leave ops unmutated — and they do not imply
+//! the conclusion, because §2.1 puts the QML engine in a sandbox with no
+//! filesystem and no network: **every byte the view renders arrives through a
+//! core method**. A view cannot sanitise text it is handed already rendered,
+//! and a view that sanitised in QML would be running attacker-supplied strings
+//! through a scripting layer that also holds the rendering primitives.
 //!
 //! So the obligation is the interface's and the *implementation* is core's, and
 //! the two are compatible because the boundary is where the string is built.
@@ -20,9 +21,12 @@
 //!
 //! # Mark, do not correct — and the asymmetry between the two lists
 //!
-//! The line this module is built around: **strip or visibly mark bidirectional
-//! overrides; mark homoglyph mixing (a Cyrillic `а` inside a Latin word) rather
-//! than correcting it — because correcting changes what the record says.**
+//! `SPEC.md` — the designer's handoff, which is where the interface's
+//! obligations arrive from — draws a line this module is built around:
+//!
+//! > Strip or visibly mark bidirectional overrides [...] Mark homoglyph mixing
+//! > (a Cyrillic a inside a Latin word) rather than correcting it — **correcting
+//! > changes what the record says.**
 //!
 //! The two categories get different treatment because they are different kinds
 //! of problem:
@@ -38,8 +42,7 @@
 //!   change the text into one the author did not publish, and a reader comparing
 //!   two peers' renderings would find them disagreeing about the post's content.
 //!   So the character stays exactly where it is and the *count* travels beside
-//!   it, for the view to render as a marker on the text — see the note below on
-//!   why that is a count rather than a flag.
+//!   it, for the view to render as the chip `SPEC.md` describes.
 //!
 //! # What the view is told, and why it is a count rather than a flag
 //!

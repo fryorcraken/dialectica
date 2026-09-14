@@ -48,24 +48,27 @@
 - [x] 3.5 `docs/PLAN.md` §11 (`:3786`) — the "recorded in the brief too" aside
       becomes a statement that this is a gap to surface to whoever designs the
       feed. **Claim stated.**
-- [x] 3.6 `docs/PLAN.md` §12 (`:4414`) — the publish prohibition, which PLAN.md
-      had deliberately declined to state because the brief held it, is now
-      stated in PLAN.md. **Claim stated**; this is the most consequential of the
-      six.
-- [x] 3.7 `docs/PLAN.md` (`:1368`) — the `agora` wordlist entry is **kept**, its
-      reason re-grounded on the Rust test fixtures, which were verified with
-      `grep -rn '"Agora"' dialectica/rust-lib/` rather than assumed.
-- [x] 3.8 `docs/IDENTICON.md:15` — the sentence makes its own argument and
-      cites `view-identity-onboarding`'s surviving requirement.
+- [x] 3.6 `docs/PLAN.md` §12 (`:4414`) — the publish prohibition is
+      **re-grounded on `composer-view`'s "A successful publish claims local
+      storage and never delivery"**, which contracted it in prose throughout.
+      PLAN.md keeps only the ordering decision. (An earlier pass *restated* the
+      rule here on the false premise that nothing else held it — finding 2.)
+- [x] 3.7 `docs/PLAN.md` (`:1368`) — **no such entry exists and nothing was
+      done.** This task was written against a fabricated decision record; no
+      wordlist, `names/` or spec file is in this diff. See `design.md` §2.3.
+- [x] 3.8 `docs/IDENTICON.md:15` — the reconstructed obligation-6 paragraph is
+      **removed**; what remains cites `generated-names`' requirement heading and
+      `SPEC.md`'s address-on-screen rule, both of which stand on their own.
 
 ## 4. Repair the source and test comments
 
 Each explains *why* the code is as it is, so each states its rule rather than
 being deleted.
 
-- [x] 4.1 `sanitise.rs` — the module doc's opening argument no longer attributes
-      the assignment to the brief, and the block quote becomes a direct
-      statement of the rule. See §5 for the `SPEC.md` finding this exposed.
+- [x] 4.1 `sanitise.rs` — the module doc now attributes the assignment and the
+      block quote to **`SPEC.md`**, the designer's handoff, rather than to the
+      brief. An earlier pass dissolved both into prose on the mistaken belief
+      that `SPEC.md` was a phantom; reverted. See `design.md` §4.
 - [x] 4.2 `wire.rs:512` — the slate-refresh flow is stated, not cited.
 - [x] 4.3 `wire.rs:4973` — same, in the test comment.
 - [x] 4.4 `wire.rs:11053` — points at `sanitise.rs`, which is where the
@@ -96,21 +99,27 @@ being deleted.
       rather than being deleted, and why it is not a new document.
 - [x] 5.2 `ScreenFrame.qml:47` — points at the contract at the top of its own
       file.
-- [x] 5.3 Record the pre-existing **`SPEC.md` citations point at a file that
-      never existed** finding. Two fixed because they were inside the block
-      being repaired and one quoted the deleted file; four left alone and
-      reported. `design.md` §4.
+- [x] 5.3 **Withdrawn: there is no `SPEC.md` defect.** The "points at a file that
+      never existed" finding was wrong — `SPEC.md` is the designer's handoff at
+      `tmp/ui-bundle-new/handoff/SPEC.md`, gitignored, which is why a history
+      search could not see it. All **seven** citations resolve. The two rewrites
+      are reverted and nothing is deferred. `design.md` §4.
+- [x] 5.4 Flag the one rule left with no contract: the **extent-locality** rule,
+      marked `NO SPEC:` at `tst_feed_extent_claim.qml`. `design.md` §5.1.
 
 ## 6. Gates
 
-- [x] 6.1 `cargo test -p dialectica -p dialectica-core` — 889 + 30 passed, 0
+- [x] 6.1 `cargo test -p dialectica -p dialectica-core` — 925 + 30 passed, 0
       failed.
-- [x] 6.2 `run-qml-tests.sh` — 13 spec files, 274 passed, 0 failed.
+- [x] 6.2 `run-qml-tests.sh` — 13 spec files, 278 passed, 0 failed.
 - [x] 6.3 `check_qml_names.py` and `check_qml_members.sh` — both ok.
 - [x] 6.4 `cargo fmt --check` diffs shown to be **pre-existing**, by stashing
       the change and re-running for byte-identical output. Not introduced here.
-- [x] 6.5 Re-run the survey grep and confirm it returns nothing outside
-      `openspec/changes/archive/`.
+      Note the workspace manifest reports clean; the diffs need
+      `dialectica-core/Cargo.toml` directly, which is the known fmt gap.
+- [x] 6.5 Re-run the survey grep (`git grep`, not `grep -rn`, which descends
+      into `rust-lib/target/`). One deliberate hit remains: the `NO SPEC:`
+      marker at `tst_feed_extent_claim.qml:21`.
 
 ## 7. Two citations arriving with the rebase
 
@@ -119,26 +128,22 @@ ran: PR #78 introduced `names.rs` entire and added the `feed.rs` line. Verified
 against `3901e99`, where `feed.rs` holds no UI-BRIEF reference and `names.rs`
 does not exist. Neither was a miss in the survey — they post-date it.
 
-- [x] 7.1 `feed.rs` — the `author` doc comment's closing line. Replaced with the
-      obligation's own argument: a name is a short derivation of a key, so
-      distinct keys collide by pigeonhole and an attacker who regenerates freely
-      can grind for one resembling a target's. Cites `generated-names`'
-      requirement **by heading** — *"A name is never unique, never an
-      identifier, and never numbered"*, verified at
-      `openspec/specs/generated-names/spec.md:586` — which is the practice
-      `end_to_end.rs` (§4.6) records as the durable lesson.
+- [x] 7.1 `feed.rs` — the `author` doc comment's closing line. The earlier pass
+      **reconstructed** obligation 6's argument here (pigeonhole, grinding);
+      that is removed, since its only source was the brief. What remains is the
+      bare citation to `generated-names`' requirement **by heading** — *"A name
+      is never unique, never an identifier, and never numbered"*, verified at
+      `openspec/specs/generated-names/spec.md:586`.
 - [x] 7.2 `names.rs` — the module doc's deferred-gap paragraph. Points at this
-      module's **own** *What a name is NOT* section rather than any external
-      document: the argument was already here, so the citation had no reason to
-      leave the file.
-- [x] 7.3 Both written to survive issue #80, which deletes the author address
-      and makes the public key the sole author identifier. Neither replacement
-      asserts that *the address* is the identity or must be on screen — they
-      state only the name-side claim, that a name is not an identifier. Note
-      that `generated-names/spec.md:604` **does** say "The address is the
-      identity", so citing that requirement by heading rather than quoting its
-      body was load-bearing, not stylistic. §3.8's `IDENTICON.md` repair does
-      carry the address claim and is a sentence #80 will need to correct.
+      module's **own** *What a name is NOT* section and nothing else; the
+      reworded restatement of what that section says is removed, because the
+      section says it.
+- [x] 7.3 Both survive issue #80, which deletes the author address and makes the
+      public key the sole author identifier. Neither asserts that *the address*
+      is the identity. `generated-names/spec.md:604` **does** say so in its body,
+      so citing by heading rather than quoting the body was load-bearing.
+      `IDENTICON.md` still carries the address claim on its own account — it is
+      that file's subject — and is a sentence #80 will need to revisit.
 - [x] 7.4 Gates: `cargo test -p dialectica -p dialectica-core` — 925 + 30
       passed, 0 failed, doctests clean. `cargo fmt --check` — **no output**,
       where §6.4 had to argue a diff was pre-existing; that diff is gone, so the

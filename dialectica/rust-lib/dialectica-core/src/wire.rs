@@ -509,8 +509,8 @@ fn parse_stoa(parsed: &Request) -> Result<crate::identity::Address, String> {
 /// answer available. It also makes two properties true that the per-call mint made
 /// false, and both are user-visible: refreshing a slate now offers **more
 /// candidates of one identity's key** rather than candidates of a different key
-/// each press, which is what "five identities, pick one, refresh for more" means
-/// and what a user pressing the button is entitled to assume; and
+/// each press, which is what `SPEC.md`'s "five generated identities and a
+/// refresh that draws five more" describes; and
 /// keeping a candidate for a *second* Stoa reuses the master key the first keep
 /// wrote, which is what makes one master key per install mean anything.
 ///
@@ -5140,10 +5140,10 @@ mod tests {
 
     #[test]
     fn refreshing_a_slate_offers_candidates_of_one_master_key() {
-        // The other half of holding the key. The onboarding flow is "five
-        // identities, pick one, refresh for more"; with a per-call mint that was
-        // false — each refresh offered candidates of a DIFFERENT master key, so
-        // "more" was the wrong word for what the button did.
+        // The other half of holding the key. `SPEC.md` specifies the slate as
+        // "five generated identities and a refresh that draws five more"; with a
+        // per-call mint that was false — each refresh offered candidates of a
+        // DIFFERENT master key, so "more" was the wrong word for the button.
         //
         // Asserted as a relationship rather than against a constant: two slates from
         // one session must differ in their paths (a fresh nonce each time) and agree

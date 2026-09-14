@@ -42,8 +42,8 @@ QtObject {
     // Never both, and never a third shape. A caller that has to distinguish
     // "failed" from "succeeded with nothing" is the caller that eventually
     // renders a broken store as an empty feed — the one confusion this shape
-    // exists to prevent, because the two look identical to a reader and mean
-    // opposite things.
+    // exists to prevent, and the one `SPEC.md` forbids being resolved "by the
+    // same neutral empty list".
     //
     // **This separates a failure from an answer. It does not tell you the
     // operation succeeded** — for three methods the answer itself can be no.

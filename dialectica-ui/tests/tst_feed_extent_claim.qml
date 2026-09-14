@@ -5,6 +5,7 @@ import "../src/qml"
 // The rendering rule this file exists for: **where the interface asserts
 // extent, that assertion must be readable as local.**
 //
+// It is derived here rather than cited, because the derivation is the argument.
 // The feed's extent claim is the pagination control. `hasMore` is computed by
 // `feed::list_threads` from this peer's log alone, so "Next" means *this machine
 // holds another page* — while a reader meeting a full page and a "Next" button
@@ -13,6 +14,13 @@ import "../src/qml"
 // There is an explicit NON-obligation beside it: a screen asserting no extent
 // owes nothing, because a locality line printed once per screen is a disclaimer
 // at the reader rather than a discharged obligation.
+//
+// NO SPEC: no live requirement in `openspec/specs/` contracts this. `SPEC.md`
+// requires "Pagination only. No infinite scroll, no totals", which fixes the
+// CONTROL but says nothing about what the control may be read as claiming. The
+// rule was previously carried only by `docs/UI-BRIEF.md`, which is deleted; the
+// tests below are now the only thing enforcing it, and they are why it is
+// written out here rather than dropped with the document.
 //
 // **Why these tests assert a shared PARENT rather than `visible`.** A QML item's
 // `visible` reports EFFECTIVE visibility, and a `TestCase` is itself invisible

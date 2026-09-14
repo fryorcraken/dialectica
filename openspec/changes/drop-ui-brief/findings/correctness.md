@@ -11,7 +11,7 @@ grepping for the filename.
 
 ---
 
-- [ ] **`dev-writer`** — `openspec/changes/drop-ui-brief/design.md:85-102` (§2.3) —
+- [x] **`dev-writer`** — `openspec/changes/drop-ui-brief/design.md:85-102` (§2.3) —
       the `agora` decision describes a wordlist exclusion that does not exist,
       and cites a line that is about something else
       **Scenario:** §2.3 is titled "`agora` stays in the wordlist, on a reason
@@ -46,7 +46,35 @@ grepping for the filename.
       being reintroduced.
       **Genuine defect**, not stylistic.
 
-- [ ] **`dev-writer`** — `docs/PLAN.md:3472-3473` — the new publish-prohibition
+      **Fixed.** §2.3 no longer records a wordlist decision, because no wordlist
+      was touched. It now records the fabrication itself and the mechanism that
+      produced it: a rewrite preserving a conclusion whose only support (the
+      brief's "Join *Agora*?" worked example) had just been deleted must invent
+      new support, and invented support is indistinguishable from real support
+      downstream.
+
+      **One correction to the finding, verified by reading `names.rs:1335-1394`
+      directly.** "There is no exclusion table" is right about the table; "the
+      lists carry no exclusion of any kind" is not, and the test's *name* is
+      broader than what it checks. A real exclusion exists at `:1345-1351` — no
+      `NOUNS` entry may contain `" of "` as a word, since `zenon of kition`
+      would render *pensive zenon of kition of lampsakos*. Its own comment says
+      it "is a rule about ONE LITERAL SUBSTRING and not a semantic screen". The
+      test pins only that nothing is kept out for what it says, connotes or whom
+      it names, and is silent on that rule. §2.3 now states this distinction so
+      the test's name is not cited for the stronger claim.
+
+      **And a second fabrication removed under the same finding, on an owner
+      ruling made during this pass.** `names.rs:1355-1360` recorded four
+      "withdrawn screens" with percentages (familiarity −28%, a rebadged
+      "legibility" −88%, a single-word rule, a tone-and-authority apparatus).
+      Those rules were invented by an agent, not weighed and declined, and the
+      owner ruled the record deleted rather than reworded. Done — the assertions
+      are untouched, only the invented history is gone. An earlier draft of §2.3
+      argued for *keeping* it, which is the same trap one layer up: it treated a
+      confident write-up as evidence of a decision.
+
+- [x] **`dev-writer`** — `docs/PLAN.md:3472-3473` — the new publish-prohibition
       paragraph claims to be the only place the prohibition can be stated, and
       it is not
       **Scenario:** the rewritten sentence reads "**The half of the rendering
@@ -81,7 +109,24 @@ grepping for the filename.
       way, rather than asserting no other document can hold it.
       **Genuine defect** (a false claim in newly-written prose), not stylistic.
 
-- [ ] **`dev-writer`** — `openspec/changes/drop-ui-brief/design.md:160-176` (§4) —
+      **Fixed**, exactly as the finding proposes. PLAN.md now names
+      `composer-view`'s *"A successful publish claims local storage and never
+      delivery"* and keeps only the part a spec does not carry — why the view
+      half did not wait on the three owed things. The restated prohibition is
+      gone, including the no-spinner clause the spec already covers at `:306`
+      and the positive-denial obligation at `:309` that goes further than
+      anything this paragraph had. This follows PLAN.md's own convention at
+      `:2904` and `:3530` for this same capability, as the finding notes.
+
+      §2.2's table row and its surrounding paragraph are rewritten to match:
+      the entry now reads **re-grounded** rather than **stated**, and the prose
+      records that the false premise was the defect rather than the rule.
+
+      Worth pairing with finding 1: that one invented support for a claim that
+      had lost it; this one asserted no support existed. Both swap an external
+      referent for the repository's own voice.
+
+- [x] **`dev-writer`** — `openspec/changes/drop-ui-brief/design.md:160-176` (§4) —
       the count of surviving `SPEC.md` citations is wrong
       **Scenario:** §4 says "Six such citations remain across `sanitise.rs`,
       `SanitisedText.qml`, `FeedScreen.qml`, `tst_sanitised_text.qml` and
@@ -99,6 +144,29 @@ grepping for the filename.
       for their own piece is right. Only the number is wrong, and it is the kind
       of number a follow-up piece would size its scope from.
       **Genuine defect** (a stated measurement that does not hold), minor.
+
+      **Fixed — and the count was the smaller half of the error.** Seven is
+      right, and §4 now lists all seven with the text each resolves to.
+
+      The larger half: **`SPEC.md` is not a phantom.** It is the designer's
+      handoff at `tmp/ui-bundle-new/handoff/SPEC.md`, surfaced to me mid-pass as
+      the replacement authority. `tmp/` is gitignored, so
+      `git log --all --diff-filter=D` could never have seen it — that check
+      proved the file was never *tracked*, and §4 read it as proving the file
+      never existed. Every one of the seven citations resolves against it
+      verbatim.
+
+      So the two `sanitise.rs` rewrites §4 called "unavoidable" **destroyed a
+      correct citation to genuine input**, including a verbatim quote of
+      `SPEC.md`'s sanitisation rules. Both are reverted. §4 is rewritten around
+      the distinction that actually decides these: `SPEC.md` is *input* (designer
+      → codebase, so citing it points at evidence) and `UI-BRIEF.md` was *output*
+      (codebase → designer, so citing it pointed at ourselves one lossy lap
+      later). That is why one is deleted and the other kept.
+
+      The deferral judgement the finding calls sound is now moot in the
+      direction that matters: there is no `SPEC.md` defect to defer. Nothing was
+      swept in — the other five citations were left exactly as they stand.
 
 ---
 

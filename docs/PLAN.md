@@ -1528,8 +1528,9 @@ weight anyone**, and the answer needs no new mechanism:
   `dialectica-nft-eth`" is a recommendation rendered to a human, never an
   instruction a client follows. A module name arriving over the network is
   attacker-influenced content in the same class as a Stoa address embedded in a
-  post, and that class is already settled: render it as an affordance the reader
-  chooses to act on, and **never auto-join**. Same rule, new surface.
+  post, and that class is already contracted by `stoa-navigation-view`'s
+  "Joining shows what is being joined, and joins nothing until the user acts".
+  Same rule, new surface.
 
 **Two interface notes**, recorded here because no surface exists yet for them to
 be contracted against:
@@ -2872,8 +2873,7 @@ Both are built from the same resolver, so a view must currently branch on which
 call produced an item — which §2.5's "JSON shapes are source-independent"
 forbids. The thread read's shape is the correct one; the feed's is the older.
 Until the feed is brought to it, `restored` is a state the feed cannot express
-at all. Whoever designs the feed meets this on their second screen, so it is a
-gap to surface to them rather than one to leave for them to discover.
+at all.
 
 **And one obligation the core does not meet**: a view must not render a hidden
 post indistinguishably from a visible one in the show-hidden view. A reader who
@@ -3500,19 +3500,17 @@ an op in flight, and what it records for one that never propagated. **Still not
 built** — meeting it needs state outliving the publish call and a clock, which is
 a component rather than a branch.
 
-**The half of the rendering obligation that is true today is the prohibition, and
-it is stated here because no other half can be.** A successful publish must not
-be rendered as sent, delivered or seen, and **no in-flight state may be designed**
-— no spinner, no pending badge, no retry control — because no call produces the
-signal one would wait on, and a spinner that can never resolve is worse than no
-spinner. A view may say the post was *saved* and may show it in the author's own
-feed, because it is genuinely there.
+**The view half is contracted by the `composer-view` spec**, as the requirement
+*"A successful publish claims local storage and never delivery"* — which goes
+further than a prohibition and requires the view to positively deny delivery
+knowledge in the screen's own body.
 
-The prohibition does not wait on the three owed things, and that ordering is the
-decision. A document silent about it is one designed against by someone free to
-render success as "posted" — so the prohibition is stated now, and the *positive*
-half (what a view shows for an op in flight versus one that never propagated) is
-additive when the three are answered rather than a replacement for it.
+What belongs here is the *ordering*, which is a decision rather than a
+requirement: the view half did not wait on the three owed things above. It could
+have, since the positive half (what a view shows for an op in flight versus one
+that never propagated) is genuinely blocked on them — but a contract silent about
+delivery is one designed against by someone free to render success as "posted",
+and the positive half is additive to that rather than a replacement for it.
 
 Moving `deliver` outside `guarded` was rejected — PHASE0-FINDINGS §3 measured what
 an unguarded panic costs (the module aborts, the caller waits out a 20-second

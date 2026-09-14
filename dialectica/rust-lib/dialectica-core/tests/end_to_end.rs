@@ -2344,19 +2344,19 @@ fn a_store_on_disk_that_is_not_a_database_reaches_the_view_as_the_error_shape() 
     // can only half-prove. `a_store_that_is_not_a_database_is_a_storage_failure…`
     // above shows the read returns `Err`; it cannot show what a view receives,
     // because `Err` is not a JSON reply. The obligation is about what the READER
-    // sees — **an empty result and a failed one must be distinguishable, because
-    // a storage failure rendered as an empty feed says the opposite of what
-    // happened** — so it is only discharged at the layer that produces what the
-    // reader is shown.
+    // sees, so it is only discharged at the layer that produces what the reader
+    // is shown — and `SPEC.md` puts it on the interface in those terms: an empty
+    // feed and an unreadable store are told apart by a named failure, never by
+    // the same neutral empty list.
     //
-    // The promoted half of the same rule is `module-wire-contract`'s "Failure is
-    // always the error shape, and never a partial success", which is what the
-    // assertions below actually check. That requirement is the citable one;
-    // **cite a requirement by its heading and never by an ordinal**, which is
-    // the lesson an earlier version of this comment cost: it cited "§11.1
-    // obligation 5", and `docs/PLAN.md` says at §11's head that §11.1 arrives
-    // with the `vouching-state` change and is absent until then — so the
-    // section was a phantom and the number located nothing.
+    // What the assertions below actually check is `module-wire-contract`'s
+    // "Failure is always the error shape, and never a partial success" — the
+    // half that is contracted, and the citable one. **Cite a requirement by its
+    // heading and never by an ordinal**, which is the lesson an earlier version
+    // of this comment cost: it cited "§11.1 obligation 5", and `docs/PLAN.md`
+    // says at §11's head that §11.1 arrives with the `vouching-state` change and
+    // is absent until then — so the section was a phantom and the number located
+    // nothing.
     //
     // Same fixture as that test deliberately: identical bytes on disk, one layer
     // further out, so the pair shows the failure surviving the JSON crossing

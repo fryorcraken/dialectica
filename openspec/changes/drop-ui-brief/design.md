@@ -31,9 +31,15 @@ found **seven more**, and two of them were load-bearing:
 
 `ScreenFrame.qml:8` is the one that mattered most — see §3.
 
-**The grep to re-run** is `grep -rn "UI-BRIEF\|UI brief\|ui-brief\|UI_BRIEF"`
-over `docs/`, `dialectica/`, `dialectica-ui/`, `CLAUDE.md`, `.claude/` and
-`openspec/specs/`. It returns nothing on this branch.
+**The grep to re-run** is `git grep -n "UI-BRIEF\|UI brief\|ui-brief\|UI_BRIEF"`
+over `docs/`, `dialectica/`, `dialectica-ui/`, `CLAUDE.md` and
+`openspec/specs/`. (`git grep` rather than `grep -rn`: the latter descends into
+`rust-lib/target/`, where build artefacts produce hundreds of spurious hits.)
+
+It returns **one** hit on this branch, deliberately: the `NO SPEC:` marker at
+`tst_feed_extent_claim.qml:21`, which records that the extent-locality rule was
+carried only by the deleted document and is now held up by those tests alone.
+That is the one place naming the file is the point — see §5.1.
 
 `openspec/changes/archive/` is deliberately excluded: 23 citations live there
 and all 23 stay. An archive records what was decided *at the time*, and a reader
@@ -69,37 +75,77 @@ is precisely the condition under which PLAN.md should state it.
 | Site | Was | Now |
 |---|---|---|
 | §5.5 (`:2484`) | "the rendering obligations in `docs/UI-BRIEF.md` are policy" | **stated** — the policy layer is real and is now named by its three concrete instances, each of which lives in a spec |
-| §5.5 (`:2446`) | quoted the brief's "never auto-join" rule | **stated** — the quotation becomes PLAN.md's own sentence |
+| §5.5 (`:2446`) | quoted the brief's "never auto-join" rule | **re-grounded** — cites `stoa-navigation-view`'s "Joining shows what is being joined, and joins nothing until the user acts" |
 | §5.5 (`:2451`) | "`docs/UI-BRIEF.md` describes only what does" | **restated** — the two interface notes are recorded here because no surface exists for them to be contracted against, which is the real reason |
-| §12 (`:4414`) | "the brief carries the half of the rendering obligation that is true today" | **stated** — the prohibition (not sent, not delivered, no in-flight state) is now PLAN.md's own text |
+| §12 (`:4414`) | "the brief carries the half of the rendering obligation that is true today" | **re-grounded** — the view half is contracted by `composer-view`'s "A successful publish claims local storage and never delivery"; PLAN.md keeps only the *ordering* decision |
 
-The last is the most consequential. PLAN.md had *deliberately* declined to state
-the prohibition, on the grounds that the brief carried it. With the brief gone
-there is no other document that states it in prose, so PLAN.md states it — and
-keeps the reasoning about *why* it did not wait on the three owed things, which
-is the durable part.
+The last is the most consequential, and an earlier draft got it wrong in an
+instructive way: it **restated** the prohibition in PLAN.md, on the stated
+premise that "no other document states it in prose". That premise was false.
+`openspec/specs/composer-view/spec.md:294` had contracted it throughout, in
+prose, with five scenarios — covering every clause the restatement offered plus
+a stronger obligation the brief never had (`:309`, the view must *positively
+deny* delivery knowledge rather than merely stay silent). Specs were untouched
+by this piece, so that requirement was live the whole time.
 
-**One claim was re-grounded rather than stated or dropped**: the `agora`
-wordlist entry (`:1368`). See §2.3.
+The rule was right and the reason was invented. That is the same shape as §2.3,
+reached from the other direction: rather than fabricating support, it asserted
+that no support existed. **Re-grounded on the spec**, which is what PLAN.md's own
+convention does at `:2904` and `:3530` for this very capability. What stays in
+PLAN.md is the part a spec does not carry — why the view half did not wait on
+the three owed things.
 
-### 2.3 `agora` stays in the wordlist, on a reason that survives
+### 2.3 A fabricated decision record, withdrawn
 
-The entry existed because the brief used "Join *Agora*?" as its worked example
-of a forgeable Stoa title. That example is gone, so the *stated* reason died
-with it — but the entry's underlying reason did not.
+An earlier draft of this section recorded a decision to keep `agora` in a
+**"wordlist exclusion table"** with a **"first-to-drop flag"**, re-grounded on
+test fixtures, citing `docs/PLAN.md:1368`. **Every load-bearing part of that was
+false**, and it is recorded here rather than silently deleted because the way it
+came to be written is the thing worth carrying.
 
-**Kept, re-grounded on the test fixtures.** `Agora` is this project's standing
-worked example of a Stoa *title* throughout the Rust suite, verified rather than
-assumed: `grep -rn '"Agora"' dialectica/rust-lib/` returns matches across
-`membership.rs`, `feed.rs`, `moderation.rs`, `wire.rs`, `end_to_end.rs` and
-`log/fixtures.rs`. A generated *user* name reading as `agora` is therefore a
-user who reads like a Stoa, which is the same failure `stoa` itself is excluded
-for, one step removed. The first-to-drop flag stays.
+- **No such table exists.** The only exclusion in `names.rs` is a two-line
+  literal-substring check (`:1345-1351`): no `NOUNS` entry may contain the
+  connector `" of "` as a word, because `zenon of kition` would render *pensive
+  zenon of kition of lampsakos*. Its own comment insists it "is a rule about ONE
+  LITERAL SUBSTRING and not a semantic screen".
+- **There is no first-to-drop flag**, anywhere.
+- **`stoa` is not excluded.** The test at `:1354` asserts `stoa` and `agora` are
+  **present**, so "the same failure `stoa` itself is excluded for" inverted the
+  contract. (That test's *name* says the lists carry no exclusion of any kind,
+  which is broader than what it checks — it pins that nothing is kept out for
+  what it says, connotes or whom it names, and is silent on the compound-noun
+  rule twenty lines above it. Do not cite the name for the stronger claim.)
+- **`docs/PLAN.md:1368` is about credential expiry windows**, not wordlists.
+- **Nothing in this change touches a wordlist at all** — no wordlist, `names/`
+  or spec file appears in the diff.
 
-**Rejected: dropping the entry.** The exclusion table is an enumeration of
-reasoning "not recoverable from the word it excludes" — its own words. Removing
-a row because its citation rotted would discard the reasoning and leave the next
-curator to rediscover it.
+**The mechanism, which is this change's own subject seen from the inside.** The
+brief used "Join *Agora*?" as a worked example. When the brief went, the entry
+lost its only support — and a rewrite that must preserve a conclusion while
+discarding its only support has to invent new support. Invented support is
+indistinguishable from real support to every reader downstream, which is exactly
+how an exclusion screen that does not exist got written down as a decision.
+
+The correct move was the one the rest of this change makes: where a claim's only
+support was the brief, delete the claim. There was no wordlist decision to
+record, because no wordlist was touched.
+
+**A second fabrication, removed in the same pass.** `names.rs` carried a record
+of four "withdrawn screens" — familiarity, a rebadged "legibility", a single-word
+rule, a tone-and-authority apparatus, with percentages attached. On the owner's
+ruling that is **not** a record of options weighed and declined: those rules were
+invented by an agent, and the record of them was deleted rather than reworded.
+
+An earlier draft of this very section argued for keeping it, on the reasoning
+that a record of withdrawals is what stops a fifth being proposed. That
+reasoning is the trap in miniature: it treats an agent's confident write-up as
+evidence of a decision, and would have preserved invented history on the
+strength of how useful it sounded.
+
+**What actually constrains the lists** is the one rule that survives owner
+review: `names.rs:1345-1351`, no `NOUNS` entry may contain `" of "` as a word,
+which is a literal substring check and explicitly not a semantic screen. The
+lists are otherwise screened only mechanically — ASCII, deduplicated, attested.
 
 ### 2.4 Comments state their rule instead of citing an ordinal
 
@@ -120,7 +166,7 @@ name inside failure-message prose. Those strings are read by a human diagnosing
 a failure, never compared against anything, so rewording them changes no
 condition. **No test's assertion, fixture or expected value was touched.**
 
-Verified by running both suites — see §5.
+Verified by running both suites — see §6.
 
 ## 3. The one thing that moved rather than being deleted
 
@@ -134,6 +180,15 @@ part of the brief that was not designer-facing material. It carries the
 `Layout.fillHeight` trap: in a content-sized card a `fillHeight` child measures
 **zero**, with no error, no binding loop, and every gate green. A blank region
 on a screen.
+
+**This is the one place in the brief whose content was not output**, which is
+what makes moving it inward legitimate rather than laundering. Every clause is a
+fact about *our* implementation, measured by our own tests — `ScreenFrame.qml`'s
+own body carries the numbers and `tst_screen_frame_geometry.qml:183` pins the
+zero. The designer's handoff has its own reference `ScreenFrame.qml` and it
+contains none of this, because the trap is a property of the code rather than of
+the design. So the material is re-grounded on the tests that establish it, not
+restated from a document.
 
 **Taken: consolidate the contract into `ScreenFrame.qml`'s own header comment.**
 Four clauses — the card reports its own height, do not give it an explicit
@@ -153,42 +208,89 @@ This is the change's one instance of moving material, and it moves it *inward*
 — from a document to the code it constrains — which is the direction this repo
 prefers.
 
-## 4. A pre-existing defect found and deliberately not fixed
+## 4. The `SPEC.md` citations are correct, and an earlier draft nearly broke them
 
-`sanitise.rs` quoted a document it called **`SPEC.md`**, which does not exist
-and — checked with `git log --diff-filter=D` — **never existed in this
-repository's history**. Six such citations remain across `sanitise.rs`,
-`SanitisedText.qml`, `FeedScreen.qml`, `tst_sanitised_text.qml` and
-`IDENTICON.md`.
+An earlier draft of this section called `SPEC.md` a **phantom** — "does not
+exist and never existed in this repository's history" — on the strength of
+`git log --all --diff-filter=D -- "*SPEC.md"` returning nothing, and rewrote two
+`sanitise.rs` citations to stop quoting it.
 
-Worse, the text `sanitise.rs` attributed to `SPEC.md` — *"Strip or visibly mark
-bidirectional overrides…"* — existed in exactly one file in the repo:
-`docs/UI-BRIEF.md`, obligation 1. So the attribution was wrong **and** the
-quotation's only real home was the file this change deletes.
+**That was wrong, and the git check is why it was convincing.** `SPEC.md` is the
+designer's handoff at `tmp/ui-bundle-new/handoff/SPEC.md`. `tmp/` is gitignored,
+so a history search cannot see it — a clean `git log` proved only that the file
+was never *tracked*, not that it never existed, and the two were conflated.
 
-**Two of the six were unavoidable and are fixed here**, because they sat inside
-the comment block being repaired and one of them quoted the deleted file. Both
-now state the rule directly instead of quoting a phantom.
+Every one of the **seven** citations in the tree resolves against it:
 
-**The other four are left alone and reported.** They are in files this piece has
-no other reason to open, and sweeping them in would widen a documentation
-deletion into an unrelated citation audit. They are a real defect and deserve
-their own piece.
+| Citation | `SPEC.md` |
+|---|---|
+| `sanitise.rs:24` (the quoted line) | "Strip or visibly mark bidirectional overrides… correcting changes what the record says" |
+| `sanitise.rs:56` | "never bind raw peer text to a Text element with textFormat StyledText or RichText" |
+| `sanitise.rs:96` | the codepoint ranges |
+| `SanitisedText.qml:10`, `:39`, `tst_sanitised_text.qml:13` | the same two rules |
+| `FeedScreen.qml:330` | "build the row from a model, never from hard-coded items" |
+| `IDENTICON.md:129` | "Order matters", of the fill-ink pair |
 
-## 5. Gates
+(Seven, not the six an earlier count claimed — `sanitise.rs` and
+`SanitisedText.qml` carry two each, which one-per-file arithmetic missed.)
+
+**So the two rewrites are reverted and the citations restored.** This is the
+inverse of §2.3's error and worth holding beside it: there, support was invented
+for a claim that had lost it; here, a correct citation to genuine input was
+dissolved into prose that argued for itself. Both replace an external referent
+with the repository's own voice, and both make the claim *look* better sourced
+while making it less so.
+
+**The distinction that decides it: `SPEC.md` is input and `UI-BRIEF.md` was
+output.** The handoff comes *from* the designer *to* this codebase, so citing it
+points at evidence. The brief went the other way — a summary written *from* the
+code *for* an external reader — so citing it pointed at ourselves, one lossy lap
+later. That is the whole reason one is deleted and the other is kept.
+
+## 5. One rule left standing on tests alone, and it is marked
+
+### 5.1 The extent-locality rule
+
+*"Where the interface asserts extent, that assertion must be readable as local"*
+— the rule behind the feed's pagination control and the whole of
+`tst_feed_extent_claim.qml`.
+
+**No live requirement contracts it.** Checked: no spec in `openspec/specs/`
+mentions extent, `hasMore` or pagination beyond `module-wire-contract`'s
+envelope. `SPEC.md` requires "Pagination only. No infinite scroll, no totals",
+which fixes the **control** and says nothing about what the control may be read
+as claiming.
+
+Its *substance* is nonetheless derivable from the code rather than from the
+deleted document: `feed::list_threads` computes `hasMore` from this peer's log
+alone, so "Next" is a fact about this machine and a reader takes it for a fact
+about the Stoa. That derivation is now written out at the head of
+`tst_feed_extent_claim.qml`, with a **`NO SPEC:`** marker naming the gap and the
+deleted document as its former home.
+
+**Neither deleted nor re-grounded on invented support**, because it is enforced
+by live tests and by a shipped control. It is flagged instead: the marker is what
+a spec-writer should find, and closing the gap is a decision for the owner rather
+than something to settle inside a documentation deletion.
+
+## 6. Gates
 
 Run in the worktree, after the change:
 
-- `cargo test -p dialectica -p dialectica-core` — **889 + 30 passed, 0 failed.**
-- `run-qml-tests.sh` — **13 spec files, 274 passed, 0 failed.**
+- `cargo test -p dialectica -p dialectica-core` — **925 + 30 passed, 0 failed.**
+- `run-qml-tests.sh` — **13 spec files, 278 passed, 0 failed.**
 - `check_qml_names.py` — ok, 31 files and 17 qmldir entries.
 - `check_qml_members.sh` — ok, 18 files.
 
-`cargo fmt --check` reports diffs in `dialectica-core`, and **they are
-pre-existing**: measured by stashing this change and re-running, which produces
-byte-identical output. This is the known gap where `cargo fmt` does not follow
-path dependencies, so the crate holding the logic has never been
-format-checked. None of the diffs is in a file this change touches.
+`cargo fmt --check` on the **workspace** manifest is clean — which is exactly
+the known gap, because it does not follow the path dependency into
+`dialectica-core`, the crate holding all the logic. Pointing it at
+`dialectica-core/Cargo.toml` directly reports diffs in `keystore.rs`,
+`moderation.rs`, `op.rs` and `revision.rs`.
+
+**Those are pre-existing**, measured rather than assumed: stashing this change
+and re-running produces byte-identical output. **None is in a file this change
+touches** — the four files named above appear nowhere in this diff.
 
 ### What the gates cannot show
 

@@ -6,9 +6,9 @@ import QtQuick.Layouts
 //
 // The three states are mutually exclusive by construction — `state` is computed
 // from one variable, so no combination of flags can render two at once. That is
-// the point: a storage failure must never render as an empty feed, because the
-// two look identical and mean opposite things, and two independent booleans is
-// how that confusion eventually happens.
+// the point: `SPEC.md` requires an empty feed and an unreadable store to be told
+// apart by "a named failure — never by the same neutral empty list", and two
+// independent booleans is how that eventually renders one as the other.
 ScreenFrame {
     id: screen
 
@@ -394,8 +394,9 @@ ScreenFrame {
     //
     // This sentence used to live in the apparatus column's ON THIS ORDERING
     // note, which was annotation explaining the design rather than interface.
-    // The column is gone; the obligation is not, so the sentence lives in the
-    // screen's own body — the only place a user can actually read it.
+    // The column is gone — `SPEC.md`: "No annotation or commentary column: the
+    // caveats belong in the copy itself" — and the obligation is not, so the
+    // sentence lives in the screen's own body, where a user can read it.
     //
     // It is load-bearing in a way the ordering LABEL is not. "Same order for
     // everyone" is honest, and avoids labelling an ordering "new", "latest" or
@@ -647,26 +648,21 @@ ScreenFrame {
 
     // ---- pagination -----------------------------------------------------
     //
-    // Pagination only: no infinite scroll and no totals. "Next" is offered when
-    // this peer holds another page, which is a fact about this copy and not a
-    // claim about how much exists.
+    // Pagination only: no infinite scroll and no totals, as `SPEC.md` requires.
+    // "Next" is offered when this peer holds another page, which is a fact about
+    // this copy and not a claim about how much exists.
     //
     // That fact used to live only in the comment you are reading, which no user
-    // opens. It is interface, not annotation: paging is an EXTENT CLAIM, and
-    // **where the interface asserts extent the assertion must be readable as
-    // local.** `hasMore` is computed by `feed::list_threads` from this
-    // peer's log alone, so "Next" means *this machine holds another page* — while
-    // a reader meeting thirty posts and a "Next" button reads it as *this Stoa
-    // has more*, which is the claim no peer can make.
+    // opens, so the sentence beside the control is interface rather than
+    // annotation. `tst_feed_extent_claim.qml` carries the argument for why, and
+    // the note that no spec contracts it.
     //
     // The whole control is one ColumnLayout so the sentence CANNOT render without
     // the claim it qualifies, and cannot fail to render with it: there is one
     // `visible:` binding for both, and it is the binding the row already had.
-    // The rule's other half — a screen asserting no extent owes nothing, since
-    // a locality line printed once per screen is a disclaimer at the reader
-    // rather than a discharged obligation — is therefore satisfied by
-    // construction rather than by a second guard someone has to remember: no
-    // paging offered, no sentence.
+    // The rule's other half — a screen asserting no extent owes nothing — is
+    // therefore satisfied by construction rather than by a second guard someone
+    // has to remember: no paging offered, no sentence.
     ColumnLayout {
         visible: screen.readState === "ok" && (screen.hasMore || screen.page > 0)
         Layout.fillWidth: true

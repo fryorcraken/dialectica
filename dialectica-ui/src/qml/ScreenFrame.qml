@@ -23,8 +23,9 @@ import QtQuick.Layouts
 //     not, and nothing warns you: no error, no binding loop, every gate green,
 //     and a blank region on the screen.
 //
-// `git log` and `design.md` §4 carry how this shape was arrived at; the numbers
-// behind each clause are in the comments below.
+// `git log` carries how this shape was arrived at; the numbers behind each
+// clause are in the comments below, and `tst_screen_frame_geometry.qml` pins
+// them.
 Rectangle {
     id: root
 

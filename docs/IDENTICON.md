@@ -12,13 +12,15 @@ encoding here is very much smaller than 32 bytes. Two identities *will*
 eventually share a mark, and an attacker who can regenerate keys freely
 can search for one that resembles a target's.
 
-This is the same argument the `generated-names` spec makes about generated
-names — *a name is never unique, never an identifier* — and it applies with
-equal force here. **The public key is the identity. The mark is a recognition
-aid.** Wherever recognition carries weight — above all wherever a moderator is
-named — the key must be on screen, not one click away. A better mark does not
-relax that requirement; it is a second forgeable channel, and a second forgeable
-channel is still forgeable.
+The same holds of the generated name, which is a short derivation of the same
+key material; `generated-names`' requirement *"A name is never unique, never an
+identifier, and never numbered"* contracts that half.
+
+**The public key is the identity. The mark is a recognition aid.** Wherever
+recognition carries weight — above all wherever a moderator is named — the
+identifying value must be on screen, not one click away; `SPEC.md` requires
+exactly that of the address. A better mark does not relax it; it is a second
+forgeable channel, and a second forgeable channel is still forgeable.
 
 What the mark buys is real and worth stating precisely: it raises the cost of
 *casual* impersonation, and it puts bytes of the key on screen that nothing
