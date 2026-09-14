@@ -10,7 +10,7 @@ at `tmp/ui-bundle-new/handoff/` as the authority. Baseline before mutating:
 
 ## Findings
 
-- [ ] **`dev-writer`** — `FlatButton.qml:46` — the `kinds` lookup reaches
+- [x] **`dev-writer`** — `FlatButton.qml:46` — the `kinds` lookup reaches
       `Object.prototype`, so the unknown-kind fallback does not fire for a
       prototype member name
       **Scenario:** `FlatButton { kind: "constructor" }` (likewise `"toString"`,
@@ -44,6 +44,25 @@ at `tmp/ui-bundle-new/handoff/` as the authority. Baseline before mutating:
       **Note for `tester`:** adding prototype names to the corpus at
       `tst_flat_button.qml:182` is the regression test, and it fails before the
       fix — measured above.
+
+      **Fixed.** This findings file was not on `piece/ui-shell-components` — it
+      was committed on `review/ui-shell-components/correctness` (`ebd848d`) and
+      never reached the piece branch, so the box was unanswerable until it was
+      brought across. Worth recording, because a finding that exists only on a
+      review branch reads afterwards exactly like a finding nobody filed.
+
+      The regression test went in first and failed on the unfixed code, at
+      `'constructor' does not fall back to secondary's fill / Actual #ffffff /
+      Expected #00000000`, with the four `Unable to assign [undefined]` warnings
+      this box predicts. All seven prototype names are in the corpus beside the
+      seven original typo strings, and the loop now also asserts no NaN
+      dimension — the field the Function `spec` yields first.
+
+      The fix is `kinds.hasOwnProperty(kind)` rather than a denylist, as the
+      box recommends. `Object.create(null)` was the other option offered and was
+      not taken: a QML object literal cannot be given a null prototype without
+      building it in an initialiser, which trades a clear one-liner for a block
+      doing the same job less legibly. Recorded as `design.md` D5d.
 
 ## What I verified and found correct
 

@@ -8,7 +8,7 @@ at `d9fe78f`. Baseline before any mutation: **18 spec files, 0 failures**.
 
 ---
 
-- [ ] **`dev-writer`** — `dialectica-ui/src/qml/DStatusBar.qml:120` —
+- [x] **`dev-writer`** — `dialectica-ui/src/qml/DStatusBar.qml:120` —
       `ToolTip.text: lamp.explanation` renders peer-influenced text as **markup**.
       A `ToolTip`'s content item is a `Text` whose `textFormat` defaults to
       `Text.StyledText` (2), **not** `PlainText` — so the project's standing rule
@@ -36,7 +36,28 @@ at `d9fe78f`. Baseline before any mutation: **18 spec files, 0 failures**.
       actionable): give the lamp's `ToolTip` an explicit content item with
       `textFormat: Text.PlainText`, the same way every `Text` in this piece does.
 
-- [ ] **`tester`** — `dialectica-ui/tests/tst_status_bar.qml:227-250` — the
+      **Fixed** in `4ab8c84`. Every measurement above reproduced independently
+      before anything was changed: `contentItem.textFormat = 2`, and
+      `contentWidth` 56.66 against a PlainText element's 102.02 for
+      `"<b>OWNED</b> x"` — the tags consumed, not drawn.
+
+      The fix is a `DTip` component rather than a content item per site, because
+      the attached form cannot take one: `ToolTip.text` routes through a
+      **shared** tooltip instance owned by the attached type, so there is no
+      per-site content item to give a format to. `DTip` declares the tooltip and
+      pins `Text.PlainText` once. Measured after: `contentItem.textFormat = 0`
+      and `contentWidth` 102.02, identical to the PlainText reference.
+
+      `DVouchStamp` is converted too, though both its strings are literals and
+      it rendered no markup — the ban is total rather than case-by-case, for the
+      reason the `textFormat` gate's own comment already gives about `Text`.
+
+      Named `DTip`, not `DToolTip`: `check_qml_names.py` bans a bare `X` for
+      every declared `DX`, which would have banned the word `ToolTip` tree-wide
+      including in the file deriving from Qt's type. Four errors under
+      `DToolTip`, none under `DTip`. Recorded as `design.md` D8.
+
+- [x] **`tester`** — `dialectica-ui/tests/tst_status_bar.qml:227-250` — the
       `nonPlainTextElements` walker **cannot reach a ToolTip** and so reports the
       bar clean while the defect above is live. The walker descends
       `node.children`; a `ToolTip` is a popup whose content item is not a child of
@@ -54,7 +75,29 @@ at `d9fe78f`. Baseline before any mutation: **18 spec files, 0 failures**.
       assert the tooltip's content item's `textFormat`, driven by actually showing
       the tooltip.
 
-- [ ] **`dev-writer`** — `.github/workflows/ci.yml:306-318` — the
+      **Fixed** in `4ab8c84`, in both halves.
+
+      The walkers in `tst_status_bar.qml` and `tst_vouch_stamp.qml` now descend
+      `node.data` and `node.contentItem` as well as `node.children`. `data`
+      carries every child, visual or not, so a declared popup is reachable.
+      Proved able to fail: with `DTip`'s content item set to `StyledText`,
+      `test_every_text_the_bar_renders_is_plain_text` reports **three** findings
+      where the old walker reported none.
+
+      One correction, which changes the shape of the fix rather than the verdict:
+      **showing the tooltip is not required.** `contentItem.textFormat` is
+      already 2 before the popup is ever opened — measured. Showing it only
+      populates `contentItem.text`, which is the value that cannot tell the two
+      cases apart anyway.
+
+      New tests `test_every_tooltip_the_bar_opens_is_plain_text` and
+      `test_the_stamps_tooltip_is_plain_text` assert the **count** of tooltips
+      found before asserting any format, so a walker narrowed back to `children`
+      fails with "found 0" rather than passing quietly. Without that, the repair
+      and its own undoing would be the same green — which is the defect family
+      this box names.
+
+- [x] **`dev-writer`** — `.github/workflows/ci.yml:306-318` — the
       `every QML Text declares an explicit textFormat` gate is structurally blind
       to `ToolTip.text`, and reports green over the defect above. It counts
       `\bText \{` openings against `textFormat:` assignments per file; a
@@ -67,6 +110,23 @@ at `d9fe78f`. Baseline before any mutation: **18 spec files, 0 failures**.
       require that a file containing `ToolTip.text` declares a `textFormat` for
       it (or that the repo forbids bare `ToolTip.text` in favour of a
       `DToolTip` wrapper that pins PlainText once).
+
+      **Fixed** in `4ab8c84`, taking the second of the two options offered —
+      the ban, not the count. The count cannot be made to work: the attached
+      form routes through a shared tooltip instance, so there is no per-site
+      content item a `textFormat:` could be added to even if the gate demanded
+      one.
+
+      A new step, `no bare ToolTip.text — tooltips render markup by default`,
+      fails any file in `src/qml` with an attached `ToolTip.<prop>:` binding.
+      Measured both directions: **2 hits** on `DStatusBar.qml` with the defect
+      reintroduced, **0** on the tree as it stands. The old gate's blindness is
+      confirmed on the same defective file — `opens=1 formats=2`, so
+      `opens > formats` is false and it passes.
+
+      It strips `//` comments before matching, because `DTip.qml` and both its
+      callers discuss `ToolTip.text` in prose and a gate that fires on its own
+      documentation gets deleted.
 
 ---
 

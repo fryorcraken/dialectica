@@ -283,10 +283,26 @@ TestCase {
     // neither colour branch so had no fill, took no border, and drew
     // paper-coloured text: an INVISIBLE button that still accepted clicks. A
     // typo should look wrong, not look absent.
+    //
+    // THE CORPUS INCLUDES SEVEN `Object.prototype` MEMBER NAMES, and they are
+    // the half that was missing. `kinds[kind] !== undefined` is a lookup that
+    // reaches the prototype chain, so `kind: "constructor"` resolves to
+    // `Object.prototype.constructor` — a Function, not `undefined` — and the
+    // guard passes. `spec` is then that Function, every field read off it is
+    // `undefined`, and the button renders white-on-black at NaN size: the same
+    // invisible-clickable-control class this fallback exists to close, through
+    // a different door.
+    //
+    // Seven plain typo strings could not see it. They are all still here,
+    // because the ordinary typo is the ordinary case; the prototype names are
+    // added beside them rather than instead.
     function test_an_unrecognised_kind_falls_back_to_secondary() {
         var secondary = button("secondary");
         var unknown = ["", "Primary", "destuctive", "micro", "ghost",
-                       "secondary micro", "undefined"];
+                       "secondary micro", "undefined",
+                       // Object.prototype members — see above.
+                       "constructor", "toString", "valueOf", "hasOwnProperty",
+                       "__proto__", "isPrototypeOf", "propertyIsEnumerable"];
         for (var i = 0; i < unknown.length; i++) {
             var b = button(unknown[i]);
             compare(String(b.color), String(secondary.color),
@@ -297,6 +313,11 @@ TestCase {
                     "'" + unknown[i] + "' does not fall back to secondary's ink");
             verify(b.border.width > 0 || String(b.color) !== "#00000000",
                    "'" + unknown[i] + "' renders invisibly");
+            // The prototype-name case fails here first: a Function `spec`
+            // yields `undefined` padding and so a NaN dimension.
+            verify(!isNaN(b.implicitHeight) && !isNaN(b.implicitWidth),
+                   "'" + unknown[i] + "' has a NaN dimension — the fallback "
+                   + "did not fire and `spec` is not a kind");
             b.destroy();
         }
         secondary.destroy();

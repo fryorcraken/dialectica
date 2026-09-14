@@ -11,7 +11,7 @@ wrong seam is paid for five or six times.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `dialectica-ui/src/qml/DIdentityChip.qml:24` — the chip
+- [x] **`dev-writer`** — `dialectica-ui/src/qml/DIdentityChip.qml:24` — the chip
       takes a raw `hasIdentity: bool` where this tree already has a
       `capability` data shape for exactly that question, so the screens will
       carry two parallel answers to "can this machine act"
@@ -41,7 +41,34 @@ wrong seam is paid for five or six times.
       in the brief would also close it, but it must be closed somewhere the
       screen author will look.
 
-- [ ] **`dev-writer`** — `dialectica-ui/src/qml/DIdentityChip.qml:36,46-73` —
+      **Fixed by the second of the two routes this box offers**, not the first.
+      `docs/UI-BRIEF.md` gains a section, *The three shared components, and what
+      each asks of you*, stating the rule in the box's own terms — bind
+      `capability.canPost === true`, never a raw probe field, with the reason
+      the `=== true` is not cosmetic (`"true"`, `1`, `null` and `undefined` are
+      all not-`true`, and the chip given any of them renders the identity-present
+      arm with every gate green).
+
+      It sits beside *What `ScreenFrame` gives you*, addressed to the same
+      reader, because that section's closing paragraph is the argument for why
+      this one exists: "a contract that can only be found by someone who already
+      knows to look for it is a contract the next screen will not meet."
+
+      **Not turned into a `capability` property**, and the judgement is worth
+      stating rather than leaving as an omission. Changing the seam means
+      changing the chip, `FeedScreen`'s existing binding, and the shape every
+      later screen binds — a piece whose diff is mostly in files this piece
+      declares out of scope, and it would land with no second consumer to
+      validate the shape against. The chip's two arms are already mutually
+      exclusive on one boolean and tested in both directions plus the
+      transition, so what is at risk is the *binding site*, which is where the
+      brief now speaks.
+
+      Recorded in `design.md` D9 alongside the gate that **was** moved into a
+      component (`DVouchStamp.hasIdentity`), so the two decisions are visible as
+      a pair and the difference between them is legible.
+
+- [x] **`dev-writer`** — `dialectica-ui/src/qml/DIdentityChip.qml:36,46-73` —
       `hasIdentity` and `identityAddress` are two independent properties with
       no relation enforced, so `hasIdentity: true` with an empty address
       renders a confident all-zero mark labelled `CURRENT IDENTITY`
@@ -64,7 +91,31 @@ wrong seam is paid for five or six times.
       (an address, empty meaning no identity) would make the invariant hold by
       construction for all six consumers at once. **Severity: medium.**
 
-- [ ] **`dev-writer`** — `dialectica-ui/src/qml/FlatButton.qml:21-33,52-53` — the
+      **Fixed**, though not by collapsing the three properties into one.
+
+      The mark is now gated on `hasIdentity && identityAddress !== ""`, so the
+      arrangement this box describes — a confident zero-address mark labelled
+      `CURRENT IDENTITY` beside an empty `AddressLabel` — cannot be produced.
+      Two tests pin it and both failed first: `expected 0 marks, got 1` against
+      exactly the instantiation named here.
+
+      The label and the name are deliberately **not** gated on the address. They
+      claim nothing forgeable, and hiding them would make the chip flicker
+      through a third layout on the way to being filled. What the gate protects
+      is the specific inversion of this component's own rule — the mark is a
+      recognition aid, the address is the identifier, so a mark with no address
+      to read beside it is the one arrangement the chip must not draw.
+
+      **Collapsing to one value was considered and not taken.** "An address,
+      empty meaning no identity" is the right shape and it is the wrong piece
+      for it: `hasIdentity` must remain separately bindable because the two
+      questions genuinely come apart — a machine can hold a key while the
+      address call has not returned, which is the very state this box is about.
+      Merging them would make that state unrepresentable rather than handled,
+      and it would silently re-point `FeedScreen`'s existing binding. Recorded
+      in `design.md` D9.
+
+- [x] **`dev-writer`** — `dialectica-ui/src/qml/FlatButton.qml:21-33,52-53` — the
       `kinds` table makes a missing *colour* field visible but a missing
       *padding* field silent, reproducing the invisible-button failure the
       reshape was written to eliminate
@@ -91,7 +142,28 @@ wrong seam is paid for five or six times.
       field assertion where the table is read, or a test that derives its kind
       list from the table (see the next box, which makes that free).
 
-- [ ] **`tester`** — `dialectica-ui/tests/tst_flat_button.qml:22-24` — the test
+      **Fixed** in `648b462`, taking both of the options offered rather than
+      one, because they catch different things.
+
+      `test_every_kind_declares_every_field` sweeps all six required keys over
+      every kind, and `test_no_kind_renders_with_a_nan_dimension` asserts the
+      geometry each kind actually produces — the second catches what a typo'd
+      key name produces, which the first would pass.
+
+      Both sweep the list derived in the next box, so this holds for a sixth
+      kind automatically. Proved by re-running this box's own mutation: the
+      `probe-incomplete` entry, which previously passed the entire file, now
+      fails both tests, and the `padY` half fails on `implicitHeight NaN` —
+      the silent one, which raises no warning and which `check_bindings` cannot
+      see.
+
+      `FlatButton.qml`'s comment no longer claims a missing field is
+      self-announcing. It now says which half is true (colour fields, because
+      QML type-checks a QColor assignment), which half is not (numeric fields,
+      because `NaN` is a valid `real`), and that the guarantee is therefore an
+      assertion rather than a type.
+
+- [x] **`tester`** — `dialectica-ui/tests/tst_flat_button.qml:22-24` — the test
       sweeps a hand-maintained `declaredKinds` array rather than the table it
       is testing, so the reshape's main benefit (a new kind is one edit) is not
       realised
@@ -117,7 +189,25 @@ wrong seam is paid for five or six times.
       outlined` over a derived list would have caught the `NaN` height.
       **Severity: medium.**
 
-- [ ] **`dev-writer`** — `docs/UI-BRIEF.md` (no section for these three
+      **Fixed** in `648b462`. `declaredKinds` is now `Object.keys(b.kinds)` read
+      off an instance, exactly as this box measured available, so the array is
+      no longer a fifth place that must agree and D5's stated benefit is real.
+
+      One addition the box does not ask for, because deriving a sweep list
+      creates a new way to pass vacuously:
+      `test_the_kind_sweep_has_a_corpus_to_sweep` asserts the derived list holds
+      at least five kinds and names three of them. Without it, a `kinds` table
+      that went missing — or an `Object.keys` returning nothing — would turn
+      every sweep in the file into a green over zero kinds, which is the same
+      shape as the walker that reaches no tooltip.
+
+      The box's prediction that this makes the previous one free is confirmed,
+      with a correction: `test_every_kind_is_either_filled_or_outlined` over a
+      derived list does **not** catch the NaN height — a NaN-sized button still
+      has a border, so `filled || outlined` holds. The NaN needed its own
+      assertion, and it has one.
+
+- [x] **`dev-writer`** — `docs/UI-BRIEF.md` (no section for these three
       components) — five or six screen pieces will be written against a brief
       that does not mention the components this piece exists to give them
       **Scenario:** the brief carries `## What ScreenFrame gives you, and the
@@ -147,7 +237,28 @@ wrong seam is paid for five or six times.
       next five authors cannot discover by reading the code they are told to
       use.
 
-- [ ] **`dev-writer`** — `dialectica-ui/src/qml/FlatButton.qml:21` — `readonly
+      **Fixed.** `docs/UI-BRIEF.md` gains *The three shared components, and what
+      each asks of you*, placed immediately after *What `ScreenFrame` gives
+      you* — the section whose closing paragraph is the argument for this one.
+
+      All three obligations this box names are stated: the fixed positional lamp
+      order, the capability-derived `hasIdentity` binding with the reason the
+      `=== true` matters, and that an unrecognised lamp state renders degraded
+      so a screen must not read the absence of orange as health.
+
+      Four more that a screen author cannot deduce from the property names and
+      would otherwise meet as a surprise: the `copy.json status.tooltips`
+      strings travel with the screen that computes the states and must be
+      verbatim; the DELIVERY lamp has no honest source and no heuristic should
+      be invented for it; `generatedName` cannot be filled by any caller until
+      issue #81; and `DVouchStamp.hasIdentity` defaults closed, which is the
+      component holding a rule for the caller rather than a property to work
+      around.
+
+      Plus one that is enforced rather than advisory: tooltips use `DTip`,
+      never `ToolTip.text:`, because CI now fails on the attached form.
+
+- [x] **`dev-writer`** — `dialectica-ui/src/qml/FlatButton.qml:21` — `readonly
       property var kinds` exposes a per-instance, mutable copy of the table on
       the public seam, which is neither shared nor read-only despite reading as
       both
@@ -171,6 +282,30 @@ wrong seam is paid for five or six times.
       answer is "leave it, the test enumerates it" (see the `tester` box, which
       wants `Object.keys(kinds)`), then say so in the file — an intentionally
       public table is a different thing from an incidentally public one.
+
+      **Deferred, with the table left public and now documented as such** —
+      the option this box offers in its closing sentence, taken deliberately
+      rather than by default.
+
+      The `tester` box above was fixed by deriving the sweep from
+      `Object.keys(button.kinds)`, so the table is now **load-bearing on the
+      public seam** rather than incidentally exposed. `FlatButton.qml` says so
+      and names the tests that read it, so a later reader does not "tidy" it
+      into a file-scoped object and silently turn four sweeps into passes over
+      nothing.
+
+      What is **not** fixed is either half of what this box reports:
+      `readonly` on a `var` still freezes only the reference, and the literal is
+      still re-created per instance. Both stand as measured, and neither is
+      rejected.
+
+      They are deferred because the fix — a singleton or file-scoped `QtObject`
+      — must also keep the table reachable for the derived sweep, which makes it
+      a small design question rather than a mechanical change, and because its
+      only cost today is allocation in a list this piece does not build.
+      **Where it lives now:** `design.md` D5's table discussion, which outlives
+      this findings file. It becomes worth measuring when the moderated-author
+      list with a per-row `UNMODERATE` is built — the piece that would feel it.
 
 ## What was clean
 

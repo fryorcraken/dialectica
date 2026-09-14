@@ -43,8 +43,28 @@ Rectangle {
         // ---- identity present -------------------------------------------
         // A RowLayout omits a `visible: false` child from its layout entirely,
         // so the two sets below never reserve space for each other.
+        // GATED ON THE ADDRESS, not only on `hasIdentity`, and that extra
+        // conjunct is load-bearing.
+        //
+        // `Identicon` pads a short or malformed address to 64 hex characters so
+        // it renders something stable rather than throwing — correct for the
+        // component, and wrong here: an empty address pads to 64 zeros and
+        // draws a perfectly valid, deterministic, RECOGNISABLE mark. The mark
+        // of the zero address, which belongs to nobody, under the label
+        // CURRENT IDENTITY, beside an AddressLabel rendering nothing.
+        //
+        // That is the state every screen holds between appearing and core
+        // answering the identity call, so it is not a corner case — and it
+        // inverts this component's own rule, stated in the header above: the
+        // mark is a recognition aid and the address is the identifier, so a
+        // mark with no address to read beside it is the one arrangement the
+        // chip must not produce.
+        //
+        // The label and the name below are NOT gated on the address: they claim
+        // nothing forgeable, and hiding them would make the chip flicker
+        // through a third layout on the way to being filled.
         Identicon {
-            visible: root.hasIdentity
+            visible: root.hasIdentity && root.identityAddress !== ""
             address: root.identityAddress
             size: 17
         }
