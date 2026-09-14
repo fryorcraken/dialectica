@@ -231,8 +231,17 @@ TestCase {
         return out;
     }
 
-    // A generated name is peer-supplied text, and QML's default `Text.AutoText`
-    // sniffs its input and renders markup found there.
+    // QML's default `Text.AutoText` sniffs its input and renders markup found
+    // there, so every Text here declares a format.
+    //
+    // THE FIXTURE FEEDS A VALUE THE CONTRACT SAYS CANNOT EXIST, deliberately.
+    // `generated-names/spec.md` requires that a name never travels and that
+    // every wordlist entry is ASCII and lowercase, so `"<b>bold</b>&amp;"` is
+    // not a name any conforming caller can produce. The assertion is still
+    // worth having — it pins the format against a name arriving from somewhere
+    // the contract did not anticipate — but it is defence in depth rather than
+    // a wire-facing guard, and calling this string "peer-supplied" (as this
+    // comment once did) describes a larger hole than the code has.
     //
     // ASSERTED ON `textFormat`, NOT ON THE RENDERED STRING, and the difference
     // was measured here rather than assumed. The obvious version — feed the
@@ -252,7 +261,7 @@ TestCase {
             var c = chip(states[i]);
             var bad = nonPlainTextElements(c);
             compare(bad.length, 0,
-                    "peer-supplied text may reach a non-plain Text: "
+                    "a markup-shaped name may reach a non-plain Text: "
                     + bad.join(" | "));
             c.destroy();
         }

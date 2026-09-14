@@ -59,6 +59,35 @@ TestCase {
         b.destroy();
     }
 
+    // NO SPEC: the bundle defaults all three state properties to "ok" and says
+    // nothing about what an unbound lamp should claim. This asserts the choice
+    // recorded in design.md D2a — a bar nobody has bound yet renders degraded.
+    //
+    // IT IS THE SAME RULE AS THE TEST ABOVE, applied to the case that reaches
+    // the screen first. An unrecognised state degrades because the UI cannot
+    // back a green; a bar with NO state bound has even less to back one with,
+    // and it is the state every screen passes through between appearing and
+    // core answering. Three green lamps on no data at all is the strongest
+    // version of the claim D2 exists to refuse.
+    //
+    // Asserted on the rendered dot and not only on the property, because a
+    // default the constructor sets and the binding ignores would pass a
+    // property-only check.
+    function test_a_bar_nobody_has_bound_yet_claims_nothing() {
+        var b = bar();
+        compare(b.deliveryState, "degraded", "deliveryState defaults to ok");
+        compare(b.storageState, "degraded", "storageState defaults to ok");
+        compare(b.zoneState, "degraded", "zoneState defaults to ok");
+
+        var dots = dotsOf(b);
+        compare(dots.length, 3);
+        for (var i = 0; i < dots.length; i++)
+            compare(String(dots[i].color), String(DTheme.statusDegraded),
+                    "lamp " + i + " renders green on no data — the interface is "
+                    + "asserting this machine works on the strength of nothing");
+        b.destroy();
+    }
+
     // Case matters, and it is asserted separately because "OK" is the single
     // most likely value to arrive from a core that formats differently. A
     // case-insensitive comparison would be a reasonable design; it is not the

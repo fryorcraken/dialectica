@@ -6,9 +6,25 @@ import QtQuick
 // EACH KIND IS ONE ENTRY IN A TABLE, not a row of parallel ternary chains.
 // Colour, border, text ink and padding were three separate chains keyed on the
 // same string, so a kind was described in three places that had to agree and a
-// new one meant editing each. The table makes a kind one object: a missing
-// field is visible where the kind is defined, rather than surfacing as a chain
+// new one meant editing each. The table makes a kind one object, so a missing
+// field is visible where the kind is defined rather than surfacing as a chain
 // that silently falls through to `secondary`.
+//
+// A MISSING FIELD IS NOT SELF-ANNOUNCING, which this comment used to imply and
+// which is only half true — measured, and the half that fails is the dangerous
+// one. A kind missing a COLOUR field raises `Unable to assign [undefined] to
+// QColor`, which `run-qml-tests.sh`'s `check_bindings` turns into a failure. A
+// kind missing `padX` or `padY` raises NOTHING: `implicitHeight` becomes `NaN`
+// in silence, and a NaN-height button in a RowLayout is a control nobody can
+// see that still accepts clicks — the exact failure the `secondary` fallback
+// below was chosen to prevent. `NaN` is a valid `real`, so QML type-checks
+// nothing; only a QColor assignment is checked.
+//
+// So the guarantee is an assertion rather than a type.
+// `tst_flat_button.qml`'s `test_every_kind_declares_every_field` and
+// `test_no_kind_renders_with_a_nan_dimension` sweep every key of this table,
+// derived with `Object.keys` rather than restated, so a sixth entry is covered
+// the moment it is added.
 Rectangle {
     id: root
 

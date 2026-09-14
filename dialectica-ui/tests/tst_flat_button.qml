@@ -19,9 +19,93 @@ TestCase {
         return b;
     }
 
-    readonly property var declaredKinds:
-        ["primary", "secondary", "destructive",
-         "destructive-outline", "secondary-micro"]
+    // DERIVED FROM THE TABLE, not restated beside it. This was a hand-written
+    // array of the five keys, which is the `hand-maintained sweep lists go stale
+    // silently` trap this repo has already paid for: a sixth kind added to
+    // `FlatButton.kinds` and not to the array was swept by NOTHING, and the
+    // suite stayed green. Measured — a deliberately incomplete sixth entry
+    // passed this whole file.
+    //
+    // It also defeated the stated reason for the table. D5 says a sixth kind is
+    // "one entry, not four edits in four places that must agree"; the array was
+    // a fifth place that had to agree.
+    //
+    // `Object.keys` on the component's own table means a kind that exists is a
+    // kind that is swept, by construction. The assertion below that the derived
+    // list is non-empty is what stops a `kinds` that went missing from turning
+    // every sweep into a vacuous pass over zero kinds.
+    function kindsOf() {
+        var b = buttonFactory.createObject(null, { text: "ACT" });
+        verify(b !== null, "FlatButton failed to instantiate");
+        var keys = Object.keys(b.kinds);
+        b.destroy();
+        return keys;
+    }
+
+    readonly property var declaredKinds: kindsOf()
+
+    // The sweeps above and below are only worth their green if the list they
+    // sweep is real. A `kinds` table that went missing, or an `Object.keys` that
+    // stopped returning anything, would make every one of them pass over zero
+    // kinds — the vacuous-sweep shape this suite is told to watch for.
+    function test_the_kind_sweep_has_a_corpus_to_sweep() {
+        verify(declaredKinds.length >= 5,
+               "the derived kind list holds " + declaredKinds.length
+               + " kinds — every sweep in this file is vacuous below five");
+        verify(declaredKinds.indexOf("primary") !== -1, "primary is missing");
+        verify(declaredKinds.indexOf("secondary") !== -1, "secondary is missing");
+        verify(declaredKinds.indexOf("destructive") !== -1,
+               "destructive is missing");
+    }
+
+    // EVERY FIELD OF EVERY KIND IS PRESENT, and this exists because the table's
+    // stated guarantee was only half true.
+    //
+    // `FlatButton`'s comment claims "a missing field is visible where the kind
+    // is defined". Measured, and it holds for the COLOUR fields only: a kind
+    // missing `textInk` raises `Unable to assign [undefined] to QColor`, which
+    // `run-qml-tests.sh`'s `check_bindings` turns into a failure. A kind missing
+    // `padY` raises NOTHING — `implicitHeight` becomes `NaN` in total silence,
+    // no warning, no binding loop, and `check_bindings` reports clean. A
+    // NaN-height button in a RowLayout is a control nobody can see that still
+    // accepts clicks, which is the exact failure the fallback to `secondary` was
+    // chosen to prevent.
+    //
+    // The numeric fields do not fail loudly because `NaN` is a valid `real`;
+    // the colour ones do because QML type-checks a QColor assignment. So the
+    // guarantee needs an assertion rather than a type.
+    function test_every_kind_declares_every_field() {
+        var required = ["fill", "stroke", "textInk", "font", "padX", "padY"];
+        var b = buttonFactory.createObject(null, { text: "ACT" });
+        for (var i = 0; i < declaredKinds.length; i++) {
+            var spec = b.kinds[declaredKinds[i]];
+            for (var f = 0; f < required.length; f++)
+                verify(spec[required[f]] !== undefined,
+                       declaredKinds[i] + " has no `" + required[f] + "` — a "
+                       + "missing colour field raises a binding error, but a "
+                       + "missing padX/padY yields implicitHeight NaN in "
+                       + "silence: an invisible control that accepts clicks");
+        }
+        b.destroy();
+    }
+
+    // And the geometry each kind actually produces is a number. The field-
+    // presence check above would pass a `padY: undefined` spelled as a typo'd
+    // key; this catches what that produces, which is the thing a user meets.
+    function test_no_kind_renders_with_a_nan_dimension() {
+        for (var i = 0; i < declaredKinds.length; i++) {
+            var b = button(declaredKinds[i]);
+            verify(!isNaN(b.implicitHeight),
+                   declaredKinds[i] + " has implicitHeight NaN — it lays out as "
+                   + "an invisible control that still accepts clicks");
+            verify(!isNaN(b.implicitWidth),
+                   declaredKinds[i] + " has implicitWidth NaN");
+            verify(b.implicitHeight > 0,
+                   declaredKinds[i] + " has implicitHeight "
+                   + b.implicitHeight);
+            b.destroy();
+        }
+    }
 
     function labelOf(item) {
         var found = null;
@@ -122,6 +206,28 @@ TestCase {
         verify(micro.implicitWidth < full.implicitWidth,
                "secondary-micro is not narrower than secondary ("
                + micro.implicitWidth + " vs " + full.implicitWidth + ")");
+
+        // AND IT IS SET AT LABEL TYPE, which the two size assertions above
+        // cannot see. Both shrink from `padX`/`padY` alone, so changing this
+        // kind's `font` from `DTheme.label` to `DTheme.body` left this test —
+        // and the whole suite — green, measured. `font` was the one field of
+        // the six with no assertion anywhere, which made
+        // `test_every_kind_is_either_filled_or_outlined`'s promise that "a
+        // sixth entry with a field missing fails here" true of five fields and
+        // false of the sixth.
+        //
+        // Asserted as a RELATION to `secondary` as well as against the token:
+        // the token comparison alone passes when both read `undefined`, which
+        // is the mechanism that let a renamed colour token through elsewhere in
+        // this piece.
+        var microLabel = labelOf(micro);
+        var fullLabel = labelOf(full);
+        compare(microLabel.font.pixelSize, DTheme.label.pixelSize,
+                "secondary-micro is not set at label type");
+        verify(microLabel.font.pixelSize < fullLabel.font.pixelSize,
+               "secondary-micro's type is not smaller than secondary's ("
+               + microLabel.font.pixelSize + " vs "
+               + fullLabel.font.pixelSize + ")");
 
         micro.destroy(); full.destroy();
     }
