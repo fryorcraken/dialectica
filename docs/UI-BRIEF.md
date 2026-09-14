@@ -141,18 +141,22 @@ why the words look the way they do:
 
 > The noun and the place are ancient Greek; the adjective is English.
 
-**Core also serves a gloss for each individual noun and place**, and this is
-worth designing an affordance for. A user shown *pensive aporia of lampsakos*
-has no way to learn what `aporia` means or where `lampsakos` was — the view
-cannot look anything up, so if core does not supply it the user cannot find out.
-Two things about how it arrives shape the design:
+**Core does not serve a gloss for the individual words, and nothing should be
+designed as though it did.** A user shown *pensive aporia of lampsakos* has no
+way to learn what `aporia` means or where `lampsakos` was: the view cannot look
+anything up, and core has nothing to answer with. The line above is the whole of
+what can be said about the words — it explains why they look the way they do, and
+it is fixed copy rather than a lookup.
 
-- **It is fetched per word, on request** — not carried with the name. So it
-  suits a tap, a hover or a detail view, and it is not free to render 50 rows'
-  worth of glosses in a feed.
-- **Only the noun and the place have one.** The adjective is English and carries
-  no gloss, so an affordance that implies all three words are explainable will
-  come up empty on the first one.
+**Per-word glosses are intended and unbuilt**, tracked as issue #82. Design for
+the words being opaque; do not design a tap, a hover or a detail view whose
+content core cannot supply, because it would come up empty on every word. If and
+when #82 lands, two things about it will shape the affordance and are worth
+knowing now: it is **fetched per word, on request** rather than carried with the
+name, so it would suit a tap or a hover and would not be free to render 50 rows'
+worth in a feed; and **only the noun and the place would ever have one**, the
+adjective being English, so an affordance implying all three words are
+explainable would come up empty on the first one regardless.
 
 **Three content words, and they all matter — but the `of` is free.** The
 adjective, the noun and the place are each an independent draw and each is part of
@@ -943,16 +947,19 @@ wrong twice. The name is **not** derived from the address: it is derived from th
 inputs. So a view holding only an address **cannot** compute the name.*
 
 *The correction to the previous version: core does **not** hand you a rendered
-name, and should not — a name is a pure function of the key, so sending both
-would put a derived value on the wire beside the material it comes from, where
-the two could disagree. **Core gives you the address and the public key**, and
-deriving the name from the key is the interface's job, as deriving the mark from
-the address already is.*
+name on a reply, and should not — a name is a pure function of the key, so
+sending both would put a derived value on the wire beside the material it comes
+from, where the two could disagree. **Core gives you the address and the public
+key**, and the name is obtained from that key.*
 
-*The thread read does this (the `thread-read` spec). **The feed read does not
-yet** — it returns an address per row and drops the key, which is why the feed
-screen renders an empty name today. That is a known gap with an owner, not a
-design decision to build around.)*
+*Two gaps stand between that and a name on screen, and both are known gaps with
+owners rather than design decisions to build around.* **Core has no call that
+turns a key into a name yet** *(issue #81) — the derivation exists in core but
+nothing reaches it, and the view cannot do it itself: the sandbox gives it no
+filesystem and no network, so it holds none of the 10,240 wordlist entries. And*
+**the feed read returns an address per row and drops the key** *(the thread read
+does ship it, per the `thread-read` spec). Between them, the feed screen renders
+an empty name today.)*
 
 **Uniqueness is not merely unbuilt — it is unavailable.** A uniqueness check
 needs agreement about who holds which name, and there is no authority to hold

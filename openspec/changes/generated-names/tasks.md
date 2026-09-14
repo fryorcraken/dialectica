@@ -10,10 +10,21 @@
       cross-capability contradiction with `thread-read` dissolves rather than being
       narrowed — `thread-read` carries no name and now nothing does. What core
       exposes is the **derivation**, which matters more under the ruling, not less.
-      The gloss stays, decided explicitly: it is not a name and is not derived, but
-      it is data on a wordlist entry and this is the only capability that
-      enumerates the entries. `docs/PLAN.md` and `docs/UI-BRIEF.md` need no
-      correction — obligation 6 already states the position the ruling adopts.
+
+      **Third pass: two unimplemented requirements moved out of the delta**, so
+      archiving promotes only what is built. The **gloss** requirement and its five
+      scenarios are gone entirely (issue **#82**); nothing implements them. The
+      requirement that **core expose the derivation** keeps its prohibition half —
+      no reply carries a name, which is implemented and pinned by an exact key set
+      and two exhaustive destructures — and loses only the positive obligation and
+      the scenario asserting a caller can obtain a name (issue **#81**). It is
+      renamed *The name SHALL NOT travel* to match what it now says. The second
+      pass's claim that the gloss stays, and that `docs/UI-BRIEF.md` needs no
+      correction, are both superseded: the brief's gloss paragraphs asked a
+      designer to build an affordance around an unbuilt feature and are corrected
+      here, along with a paragraph that called deriving the name "the interface's
+      job" when the sandbox makes that impossible. `docs/PLAN.md` still needs no
+      correction — it carries neither claim. Obligation 6's own position stands.
 - [x] design + code — `dev-writer` — **Second pass: both rulings applied, the
       rebase landed, and every `dev-writer` finding answered.** Sizes are
       8,192 / 1,024 / 1,024 from yields of 11,467 / 1,892 / 1,131 — every list cut
@@ -172,19 +183,24 @@ the QML sandbox forbids a view looking anything up, so the gloss can only come
 from core. **Scoped to noun and place only** — an English adjective needs no
 translation for an English-speaking reader. ~2,048 glosses, not 10,240.
 
-**Fetched per word.** The spec requires core to answer a gloss request for any
-entry of either Greek list. Under the owner's second ruling there is no bundling
-question left to answer — no reply carries a name, so there is no reply for a
-gloss to ride beside. A gloss does not participate in the derivation, and
-changing one is **not** a scheme version bump — which is the opposite of every
+**Fetched per word**, in the shape the spec had given it: core answers a gloss
+request for any entry of either Greek list. Under the owner's second ruling there
+is no bundling question left to answer — no reply carries a name, so there is no
+reply for a gloss to ride beside. A gloss does not participate in the derivation,
+and changing one is **not** a scheme version bump — which is the opposite of every
 other change to an entry.
 
-**Kept in this capability, decided explicitly rather than left ambiguous.** A
-gloss is not a name and is not derived from a key, so it is not one of the three
-words the ruling scopes this to. It stays because it is data attached to a
+**It belongs in this capability, decided explicitly rather than left ambiguous.**
+A gloss is not a name and is not derived from a key, so it is not one of the three
+words the ruling scopes this to. It belongs here because it is data attached to a
 wordlist entry, this capability is the only place the entries are enumerated, and
 the sandbox argument that puts the derivation in core puts the gloss there for
 the same reason.
+
+**None of this is in the spec delta any more**, and the paragraphs above are the
+record of the shape rather than a live requirement: nothing implements a gloss, so
+the requirement was moved out before archive and is tracked as issue **#82**. The
+reasoning holds and is why #82 keeps this capability as its destination.
 
 **2. PLAN.md's section on what an identity is called has been SHED.** It ran
 1,039 lines (956–1994, about a fifth of the document) and now runs 135. The
@@ -363,9 +379,17 @@ merged specs.
 
 ## 5b. The glosses, and deriving a name from a key
 
-> **Not started, and not attempted in this pass.** Recorded by the `dev-writer`
-> rather than left as bare unticked boxes, because the runner should know this is
-> a body of work rather than a tail.
+> **Not started, and now out of this change entirely.** Every row below is struck
+> through: the requirements they implement were moved out of the spec delta by the
+> `spec-writer`'s third pass, so archiving this change promotes only behaviour the
+> code has. They are **not** ticked, because nothing was done — a strike-through
+> with a reason is how this repo marks a row that stopped being this change's to
+> do. The work is tracked as issues **#82** (the glosses) and **#81** (exposing
+> the derivation), and each will need its requirement restored to a delta by the
+> change that builds it.
+>
+> The rest of this note is the `dev-writer`'s, kept because it is the shape of the
+> work rather than a status claim.
 >
 > **5b.1 is ~2,048 sourced glosses**, and the attestation argument applies to a
 > gloss exactly as it does to a word: a fabricated gloss is invisible to a
@@ -387,25 +411,33 @@ merged specs.
 > Non-Goals exclude. Narrowing before the public entry point exists would be two
 > churns in opposite directions.
 
-- [ ] 5b.1 Every noun and every place carries a gloss. The wordlist shape changes
+- [ ] ~~5b.1 Every noun and every place carries a gloss. The wordlist shape changes
       from `&[&str]` to a pair; **the adjective list does not change** and carries
       no glosses. ~2,048 glosses, sourced rather than recalled — the attestation
       argument applies to a gloss exactly as it does to a word, and a fabricated
-      gloss is likewise invisible to a reviewer and uncatchable by a test
-- [ ] 5b.2 A gloss lookup by word, answering for any entry of either Greek list
+      gloss is likewise invisible to a reviewer and uncatchable by a test~~ —
+      **moved to issue #82**; the requirement is out of this change's spec delta
+- [ ] ~~5b.2 A gloss lookup by word, answering for any entry of either Greek list
       and **refusing** anything else — including an adjective, which is the case
-      that distinguishes a real check from one that returns empty for a miss
-- [ ] 5b.3 Glosses are ASCII, asserted over every entry, for the same bidi reason
-      the word lists are
-- [ ] 5b.4 No reply gains a gloss field. This is satisfied by construction once
+      that distinguishes a real check from one that returns empty for a miss~~ —
+      **moved to issue #82**
+- [ ] ~~5b.3 Glosses are ASCII, asserted over every entry, for the same bidi reason
+      the word lists are~~ — **moved to issue #82**
+- [ ] ~~5b.4 No reply gains a gloss field. This is satisfied by construction once
       5.4 lands — with no name on any reply there is nothing for a gloss to ride
-      beside — so assert it rather than arrange it
-- [ ] 5b.5 **A way to derive a name from a public key, reachable by a caller.**
+      beside — so assert it rather than arrange it~~ — **moved to issue #82.** Note
+      for whoever takes it: 5.4 did land, so with no name on any reply there is
+      already nothing for a gloss to ride beside
+- [ ] ~~5b.5 **A way to derive a name from a public key, reachable by a caller.**
       Under the ruling this is the **only** way a name is obtained, so it is the
       load-bearing surface of the change rather than a convenience beside a
       returned name. The QML sandbox holds none of the wordlists; without this
       call a second implementation of a consensus-critical derivation gets written
-      in QML, which is the silent divergence the pins exist to prevent
+      in QML, which is the silent divergence the pins exist to prevent~~ —
+      **moved to issue #81.** The reasoning is unchanged and is why #81 is filed as
+      blocking the name feature being usable at all; only the positive obligation
+      left this change's spec, and the prohibition that no reply carries a name
+      stays and is implemented
 
 ## 6. The identicon window
 

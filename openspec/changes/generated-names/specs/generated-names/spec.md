@@ -54,17 +54,11 @@ no device identifier, no Stoa address, and no value carried by an op.
 - **WHEN** names are derived for many distinct public keys
 - **THEN** the names are not all equal, so the derivation depends on its input
 
-### Requirement: Core SHALL expose the derivation, and the name SHALL NOT travel
+### Requirement: The name SHALL NOT travel
 
-Core SHALL expose a way to derive a display name from a public key, answering for
-any well-formed key supplied by a caller.
-
-**This is the only way a name is obtained, and that is what makes exposing it
-matter.** No reply SHALL carry a display name: not a feed row, not a thread item,
-not an onboarding slate candidate, not any other reply in which core reports an
-author. A name is derived by whoever holds the key, at the point of rendering.
-
-Two things follow, and the second is the reason for the first.
+No reply SHALL carry a display name: not a feed row, not a thread item, not an
+onboarding slate candidate, not any other reply in which core reports an author.
+A name is derived by whoever holds the key, at the point of rendering.
 
 **A derived value beside the material it derives from is two values that must
 agree and could disagree**, where the recipient has no way to tell which is
@@ -72,22 +66,16 @@ wrong. A name on the wire is also a name a relay could strip or forge, which
 determinism exists to make impossible. So the name does not travel, in either
 direction, under any reply shape.
 
-**A caller therefore needs an answer from core, or it will write its own.** The
-view cannot reimplement this: the QML sandbox denies it the network and the
-filesystem outside its plugin directory, so it holds none of the wordlists — and
-a second implementation of a consensus-critical derivation is exactly the silent
-divergence the pinning requirements below exist to prevent. One normative
-implementation, reachable by every caller, is the property that matters.
-
 What a reply owes is therefore the derivation's **input**, and that obligation
 belongs to each reply's own capability rather than to this one. This capability
 says only that a name is never the thing carried.
 
-#### Scenario: A name is derived on request from a supplied key
-
-- **WHEN** core is asked for the name of a public key
-- **THEN** a name is returned
-- **AND** it is the name this capability's derivation produces for that key
+**How a caller reaches the derivation is not settled here**, and no requirement
+of this capability obliges core to expose one. The gap is real rather than
+overlooked: the QML sandbox denies the view the network and the filesystem
+outside its plugin directory, so it holds none of the wordlists and cannot derive
+a name for itself — which leaves the derivation reachable by no caller until an
+entry point exists. Tracked as issue #81, and out of scope here.
 
 #### Scenario: No reply carries a display name
 
@@ -593,81 +581,6 @@ is in: the bare form of a qualified entry — `zenon` where a source offered
 - **WHEN** names are derived for many distinct public keys
 - **THEN** no name's second word group contains the connector, so no name reads as
   carrying two places
-
-### Requirement: Every noun and every place carries a one-sentence gloss, served on request
-
-Every entry of the **noun** list and every entry of the **place** list SHALL
-carry a short gloss in English saying what the word means or where the place is.
-Core SHALL expose a way to ask for the gloss of a given word, and SHALL answer
-for any entry of either list.
-
-**The gloss is core's for the same reason the derivation is, and it is stated
-here because the wordlists are stated here.** It is deliberately **not** part of
-a name and not part of the derivation: a gloss is data attached to a list entry,
-asked for by word rather than produced from a key. It lives in this capability
-because this capability is what defines the lists, and there is nowhere else the
-entries are enumerated.
-
-**A name the reader cannot interpret is doing half its job.** A reader shown
-*pensive aporia of lampsakos* can tell that identity from another, which is the
-recognition job, but has no way to learn what `aporia` is or where `lampsakos`
-was — and the view cannot look it up. The QML sandbox denies the view both the
-network and the filesystem outside its plugin directory, so a gloss is not
-something a view could fetch, bundle or infer. If it does not come from core it
-does not exist.
-
-**The adjective list SHALL NOT carry glosses.** An English adjective needs no
-translation for an English-speaking reader, where a Greek noun does. Glossing all
-three lists would be five times the work for a reader who already knows the word,
-and a gloss on `pensive` that says what `pensive` means is noise that teaches a
-reader to stop reading the ones that are not.
-
-**The gloss SHALL be requested per word.** A caller asks for the one word a
-reader paused on. Nothing bundles glosses beside anything, which follows from a
-name never travelling at all: there is no reply for a gloss to ride on.
-
-**A gloss SHALL NOT participate in the derivation**, SHALL NOT be drawn, and
-SHALL NOT change which word an index selects. It is display material attached to
-an entry, so changing a gloss is not a change to the lists and does not mint a
-new scheme version — which is the opposite of every other change to an entry, and
-is stated because the freezing requirement below would otherwise be read as
-covering it. What SHALL NOT change without a version bump is the word a gloss is
-attached to.
-
-**A gloss SHALL be ASCII**, for the reason the ASCII screen above gives: it is
-rendered text this project composes, so keeping it ASCII keeps a bidi override
-and a homoglyph off the surface entirely rather than mitigating them.
-
-#### Scenario: Every noun and every place has a gloss
-
-- **WHEN** every entry of the noun list and of the place list is examined
-- **THEN** each carries a gloss
-- **AND** each gloss is non-empty
-
-#### Scenario: A gloss is returned for a word of either Greek list
-
-- **WHEN** a gloss is asked for by naming an entry of the noun list, and
-  separately an entry of the place list
-- **THEN** a gloss is returned for each
-
-#### Scenario: A word outside the two glossed lists is refused rather than guessed
-
-- **WHEN** a gloss is asked for by naming a word that is in neither the noun list
-  nor the place list
-- **THEN** the reply is a refusal
-- **AND** it is not an empty gloss or an invented one
-
-#### Scenario: An adjective carries no gloss
-
-- **WHEN** a gloss is asked for by naming an entry of the adjective list that is
-  in neither Greek list
-- **THEN** the reply is the same refusal, so the adjective list is not glossed by
-  omission of a check
-
-#### Scenario: Every gloss is ASCII
-
-- **WHEN** every gloss of every glossed entry is examined
-- **THEN** each contains only ASCII characters
 
 ### Requirement: A name is never unique, never an identifier, and never numbered
 

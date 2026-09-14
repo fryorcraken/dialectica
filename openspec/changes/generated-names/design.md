@@ -247,10 +247,12 @@ spec's permitted relaxation without core deciding for it.
 deferred to the piece that adds the wire method.** Right now `names` has **zero**
 non-test consumers: nothing in `feed.rs`, `wire.rs` or `thread.rs` reaches
 `ADJECTIVES`, `NOUNS`, `PLACES`, `CONNECTOR`, `words()`, `name_digest`,
-`name_from_digest` or `display_name_from_bytes`. The spec now requires core to
-expose the derivation — it is the only way a name is obtained — so the public
-entry point is about to be decided by that piece, and narrowing one task before
-it needs widening would be two churns in opposite directions.
+`name_from_digest` or `display_name_from_bytes`. Exposing the derivation is the
+only way a name is ever obtained, and it is filed as issue **#81** rather than
+required by this change's spec — the requirement was moved out of the delta
+because nothing implements it. The public entry point is therefore about to be
+decided by that piece, and narrowing one task before it needs widening would be
+two churns in opposite directions.
 
 What that piece should settle, recorded so it is not re-derived:
 

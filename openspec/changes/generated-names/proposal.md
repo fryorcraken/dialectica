@@ -81,15 +81,6 @@ not go over the wire.**
   anything out**, and the bare form — `zenon` — stays in the list and draws
   normally.
 
-- **Every noun and every place carries a one-sentence gloss, asked for by word.**
-  Kept in this change and in this capability after the ruling, deliberately: a
-  gloss is **not** a name and is not derived, so it is not part of the three
-  words. It is data attached to a wordlist entry, and this capability is the only
-  place the entries are enumerated. It must come from core for the same sandbox
-  reason the derivation must — a view shown `aporia` cannot look it up. Adjectives
-  carry no gloss: an English word needs no translation for an English-speaking
-  reader.
-
 - **The false comment in `feed.rs` is corrected**, because a spec that contradicts
   a doc comment loses to the comment for the next reader of the code.
 
@@ -108,14 +99,42 @@ not go over the wire.**
   and closing that is filed as its own issue rather than smuggled in here — see
   *The address, and the issue this raised*.
 
+**Moved out of this change's spec delta, because nothing implements them:**
+
+Both were written into the spec during this change and neither was reached by the
+implementing pass. They are out of the delta rather than struck through, so that
+archiving this change promotes only behaviour the code actually has — a
+requirement in the live contract that no implementation answers is a contract
+nobody can trust, and a spec-test reviewer reading it finds a gap that is really
+a bookkeeping error.
+
+- **Every noun and every place carries a one-sentence gloss** — the requirement
+  and all five of its scenarios. `grep -rn "gloss"` across `dialectica/rust-lib/`
+  and `dialectica-ui/` returns only the wordlist entries `glossa` and `glossless`.
+  It is ~2,048 sourced glosses, a curation pass on the scale of the wordlists
+  themselves. Tracked as issue **#82**, which records the shape the spec had given
+  it so the requirement can be restored to a delta by the change that builds it.
+
+- **Core exposing the derivation to a caller** — the sentence *"Core SHALL expose
+  a way to derive a display name from a public key"* and the scenario that a name
+  is returned on request. Core has `display_name(&PublicKey) -> DisplayName`, but
+  no wire method reaches it. Tracked as issue **#81**.
+
+  **Only the positive half moved.** The prohibition that requirement also carried
+  — that no reply carries a display name, in any shape — **is implemented and
+  tested**, and stays, renamed to *The name SHALL NOT travel*. The feed reply's
+  key set is asserted exactly, so a restored `displayName` fails on an added key
+  rather than passing quietly, and `FeedRow` is destructured exhaustively in
+  `feed.rs` and the e2e test, so re-adding the field stops them compiling.
+
 ## Capabilities
 
 **New Capabilities**
 
 - `generated-names` — the derivation from a public key to a display name: the
-  domain separation, the byte budget, the list sizes, the screens, the glosses,
-  the determinism contract, and what a name may never be used for. Named for what
-  it defines rather than for any surface: nothing here is about a reply.
+  domain separation, the byte budget, the list sizes, the screens, the determinism
+  contract, and what a name may never be used for. Named for what it defines
+  rather than for any surface: nothing here is about a reply.
 
 **Modified Capabilities**
 
@@ -128,20 +147,22 @@ the whole difference from its previous shape.
   `dialectica/rust-lib/dialectica-core/src/`.
 - `feed.rs` loses a false doc comment. **It gains no field**, which is the change
   from the previous shape of this proposal.
-- **10,240 curated words plus ~2,048 glosses are the bulk of the work**, and they
-  are curation rather than design. The sources and the three screens are fixed.
-  The job is looking words up — tedious and checkable rather than a judgement per
-  entry.
+- **10,240 curated words are the bulk of the work**, and they are curation rather
+  than design. The sources and the three screens are fixed. The job is looking
+  words up — tedious and checkable rather than a judgement per entry. The ~2,048
+  glosses are a comparable pass and are **not** in this change; see issue #82.
 - `docs/PLAN.md`'s section on what an identity is called sheds its derivation,
   byte budget, arithmetic and list sizes here, and its reasoning to `design.md`.
   What stays there is what is not built, plus the threat-model conclusion about
   grinding and the rendering obligations, which are about the product rather than
   about this derivation.
-- `docs/UI-BRIEF.md` needs no correction by this change. Obligation 6 already
-  states the position the ruling adopts — core hands the view an address and a
-  public key and the view derives — and already records the feed read as a known
-  gap rather than a design decision. Its gloss paragraphs also hold: a gloss is
-  still fetched per word and still exists for the noun and the place only.
+- `docs/UI-BRIEF.md`: Obligation 6 needs no correction — it already states the
+  position the ruling adopts, that core hands the view an address and a public key
+  and the view derives, and already records the feed read as a known gap rather
+  than a design decision. **Its gloss paragraphs do need correcting**, and this
+  change makes it: they asked a designer to design an affordance around a per-word
+  gloss that no longer ships here, and a brief is designed against rather than
+  merely read, so a stale one costs work that has to be thrown away.
 
 ## The word count: third recorded position, and why this one
 
