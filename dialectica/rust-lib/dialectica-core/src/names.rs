@@ -834,18 +834,60 @@ mod tests {
     ///
     /// Varying one byte at a time and watching the output, rather than reading
     /// `name_key_bytes()` — which would make every test below a restatement of the
-    /// constant they exist to check. Several probe values per byte, because one
-    /// flip can coincide: a reduction can map two different bytes to the same
-    /// index, and a single-value probe would then report the byte as unread.
+    /// constant they exist to check.
+    ///
+    /// # Why every value, and not a list of interesting ones
+    ///
+    /// This probe used to try seven hand-picked values per byte. That was chosen
+    /// to defeat a coincidence — a reduction can map two different byte values to
+    /// the same index, and `0x00 % 3 == 0xff % 3` had already made a one-value
+    /// probe report the mark as not reading byte 11 — and for *unconditional*
+    /// reads seven spread values are enough.
+    ///
+    /// **They are not enough for a conditional one, and that is a different
+    /// failure.** A derivation that reads an unallocated byte only when it holds
+    /// one particular value is invisible to any probe whose value list omits that
+    /// value, and the tests below then certify the allocation clean. Measured:
+    /// adding `^ if key_bytes[12] == 0x42 { 1 } else { 0 }` to the adjective
+    /// reduction left all 38 tests in this module green under the seven-value
+    /// probe, `the_name_reads_no_unallocated_byte` among them.
+    ///
+    /// **The fix is not a longer list.** Appending `0x42` to the seven reproduces
+    /// the defect at `0x43`; a probe that enumerates values will always miss the
+    /// value it does not enumerate, which is this repo's `hand-maintained sweep
+    /// lists go stale silently` trap wearing a different hat. Every value is the
+    /// only list that cannot be one short. It costs 32 × 256 = 8,192 derivations,
+    /// which is nothing.
+    ///
+    /// # What this now proves, stated exactly
+    ///
+    /// For each byte `b`, the sweep decides "is the name a constant function of
+    /// `b`, with every other byte held at zero?" — over the byte's **entire**
+    /// domain, so no value of `b` alone can hide a read. What it still cannot see
+    /// is a read gated on **two or more** bytes at once (`key[12] == 0x42 &&
+    /// key[13] == 0x99`), which is invisible to any one-byte-at-a-time sweep from
+    /// a fixed base regardless of how many values it tries. Closing that would
+    /// need 256^2 pairs per pair of bytes and is not what is done here.
+    ///
+    /// What bounds that residue is **structural rather than another test**, and
+    /// the distinction is worth being exact about because the neighbouring
+    /// `the_derivation_reads_no_byte_outside_its_window` looks like it closes the
+    /// gap and does not: it compares one `0x00`-outside fixture against one
+    /// `0xff`-outside fixture, so a `key[12] == 0x42` carve-out passes it too.
+    ///
+    /// The real guarantee is that [`name_from_key_bytes`] binds
+    /// `key_bytes[name_key_bytes()]` once and every draw reads that slice, so an
+    /// expression reading byte 12 has to be *written in*, and writing it in is the
+    /// single-line diff a reviewer sees. A sweep cannot make that unexpressible;
+    /// what it does is measure, independently of the constant, that the slice is
+    /// where the reading actually happens — which is what stops these tests from
+    /// being a restatement of `name_key_bytes()`.
     fn measured_name_bytes() -> Vec<usize> {
-        // Spread across the range so no modulus can collide on all of them.
-        const PROBES: [u8; 7] = [0xff, 0x01, 0x02, 0x05, 0x07, 0x3b, 0x91];
-
         let base = [0u8; 32];
         let reference = name_from_key_bytes(&base);
         let mut read = Vec::new();
         for b in 0..32 {
-            for probe in PROBES {
+            for probe in 0..=u8::MAX {
                 let mut varied = base;
                 varied[b] = probe;
                 if name_from_key_bytes(&varied) != reference {

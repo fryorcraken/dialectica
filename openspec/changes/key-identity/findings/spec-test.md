@@ -8,7 +8,7 @@ Both mutations the `tester` stage reported as closed were re-run and are now
 genuinely caught — see *Mutations run* at the foot. A third of the same family
 survives, in both languages at once, and is the first box below.
 
-- [ ] **`tester`** — `names.rs:842` (`PROBES`) and `tst_identicon.qml:225`
+- [x] **`tester`** — `names.rs:842` (`PROBES`) and `tst_identicon.qml:225`
       (`probeValues`) — **the byte-allocation gate is blind to a byte the
       derivation reads only for values outside a fixed 7-value probe set.**
       Every "which bytes does this channel read" assertion in both languages
@@ -38,6 +38,53 @@ survives, in both languages at once, and is the first box below.
       out; the probe needs to be exhaustive over the 256 values (32 bytes x 256 is
       8,192 derivations, trivial in both languages) or driven from a seeded sweep
       wide enough that a single-value carve-out cannot hide.
+
+      **Fixed.** Both probe sets are now the byte's **entire domain**, `0..=255`,
+      and the value list is gone from both languages: `PROBES` is deleted and the
+      Rust loop is `for probe in 0..=u8::MAX`; `probeValues` is replaced by
+      `probeCount: 256` with a `_probeHex(v)` helper, used by all four probe sites
+      in `tst_identicon.qml`.
+
+      **Not a longer list, deliberately** — your warning that appending `0x42`
+      reproduces the defect one value out is the reason. A probe enumerating
+      values is always one value short of something; the whole domain is the one
+      list that cannot be extended and cannot go stale. The seeded-sweep
+      alternative was considered and rejected: to be confident of catching a
+      one-value carve-out it needs samples on the order of the domain anyway, and
+      it buys a seed to record and a flake mode in exchange for trading a
+      certainty for a probability. Recorded in `design.md` under *The byte probes
+      try every value of the byte, not a list of good ones*, with the residue the
+      sweep still cannot see stated explicitly (a read gated on two bytes at once)
+      and why that is answered structurally rather than by a wider sweep.
+
+      **The tests that fail without it**, each run in both directions:
+      - your exact mutation, `^ if key_bytes[12] == 0x42 {1} else {0}` on the
+        adjective reduction — was 38/38 green under `PROBES`, now fails
+        `the_name_reads_exactly_the_bytes_the_spec_allocates_to_it`
+        (`left: [12, 18, 19, 20, 21, 22, 23]`) and
+        `the_name_reads_no_unallocated_byte` ("key byte 12 is unallocated but the
+        name reads it").
+      - a *different* byte and value, `key_bytes[27] == 0xa7`, chosen because no
+        hand-picked list would contain either — also caught, naming byte 27. This
+        is the measurement that distinguishes the fix from appending `0x42`.
+      - the QML twin, `(_draw(18) ^ (_byte(12) === 0x42 ? 1 : 0)) % 8192` — was
+        17/17 green, now fails `test_no_channel_reads_an_unallocated_byte` ("key
+        byte 12 is unallocated but the generated name reads it") and
+        `test_the_byte_probes_find_the_windows_they_should`
+        (`Actual: 12,18,19,20,21,22,23`).
+
+      Both mutations reverted; baselines restored green (Rust `names::` 38/38 in
+      0.06s, `tst_identicon.qml` 17/17). **Cost measured:** Rust unchanged at
+      0.06s; the QML spec goes 68ms → ~1.1s.
+
+      **One further defect found while fixing this**, reported rather than
+      quietly folded in: `test_a_byte_one_channel_reads_moves_only_that_channel`
+      looped `for (... && !moved; ...)`, stopping at the first value that moved
+      the target channel — which made its own comment ("the other two must be
+      untouched for EVERY probe value, not merely for the one that moved the
+      target") false for every value after the first, so a cross-channel leak
+      gated on a later value passed unseen. The loop now runs to the end of the
+      domain and the comment says why it must.
 
 - [ ] **`spec-writer`** — delta spec, *A name is not a credential* /
       live spec, *Malformed key material is refused rather than crashed on* —

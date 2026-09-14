@@ -49,14 +49,18 @@ six bytes it draws are taken as a slice at a named offset rather than from index
 function still called `…_from_digest` invites a caller to hand it a digest, which
 is exactly the mistake the change exists to remove.
 
-The window is expressed as one `Range<usize>` constant, `NAME_KEY_BYTES`, and the
+The window is expressed as one range rather than as a start and a length, and the
 derivation slices with it:
 
 ```rust
-let drawn: &[u8; NAME_BYTE_COUNT] = key_bytes[NAME_KEY_BYTES]
+let drawn: &[u8; NAME_BYTE_COUNT] = key_bytes[name_key_bytes()]
     .try_into()
     .expect(...);
 ```
+
+It began as a `const NAME_KEY_BYTES` and ended as a `const fn name_key_bytes()`;
+the last paragraph of this entry is why, and the shipped code has no constant of
+that name.
 
 **Alternative considered: two constants, a start and a length.** Rejected because
 two constants can disagree — a start moved without the length is a silent window
@@ -152,6 +156,70 @@ closes it by pinning the three draw indices for one key, against the figures
 `examples/pin_name.rs` produced. So the two implementations agree with a third
 party rather than with each other, and a modulus drift fails that test alone —
 measured, by changing `% 1024` to `% 1000` and watching exactly one test go red.
+
+### The byte probes try every value of the byte, not a list of good ones
+
+Both languages measure "which bytes does this channel read?" by varying one byte
+and watching the output. The question is which values to try, and the answer
+changed twice under measurement.
+
+**One value is wrong, and shipped once.** `Identicon._weave()` is `_byte(11) % 3`,
+and `0x00 % 3 == 0xff % 3`, so a probe that flipped a byte to `ff` concluded the
+mark does not read byte 11 — a false all-clear on a real disjointness break.
+
+**Seven spread values fixed that, and are still wrong.** They fix a *coincidence*
+in an unconditional read, which was the failure in hand. They do nothing about a
+**conditional** read: a derivation that touches an unallocated byte only when it
+holds one particular value is invisible to any probe whose list omits that value,
+and every disjointness and unallocated-byte assertion then reports clean. This was
+measured, not reasoned about. Adding
+`^ if key_bytes[12] == 0x42 { 1 } else { 0 }` to the adjective reduction left all
+38 `names::` tests green — `the_name_reads_no_unallocated_byte` and
+`the_name_reads_exactly_the_bytes_the_spec_allocates_to_it` among them; the same mutation in
+`DKeyNameWindow.adjectiveIndex()` left all 17 `Identicon` tests green and the
+whole QML run exiting 0.
+
+**The fix is not a longer list, and that is the whole point.** Appending `0x42`
+makes those two mutations fail and reproduces the defect at `0x43`. A probe that
+enumerates values is always one value short of something — this repo's
+`hand-maintained sweep lists go stale silently` trap, arriving as a literal array
+rather than as a list of method names. The list is now the byte's entire domain,
+`0..=255`, which is the one list that cannot be extended and cannot go stale.
+
+**Alternative considered: a seeded random sweep, wide enough that a single-value
+carve-out cannot hide.** Rejected because it trades a certainty for a probability
+and buys nothing with it. To be confident of catching a one-value carve-out a
+seeded sweep needs samples on the order of the domain anyway, and it adds a seed
+to record on failure and a flake mode where the gate's verdict depends on which
+seed ran. Exhausting 256 values costs the same and always answers the same.
+
+**Alternative considered: making a byte-conditional read unexpressible instead of
+detectable.** This is the better shape where it is reachable, and in Rust it is
+partly reached already — `name_from_key_bytes` binds `key_bytes[name_key_bytes()]`
+once and every draw reads that slice, so reaching byte 12 has to be written in.
+But "has to be written in" is a reviewing argument, not a gate, and QML has no
+equivalent at all. Detection is the reachable ceiling, so the detection is made
+total over the thing it can be total over.
+
+**What this does not cover, stated so it is not read as more.** A read gated on
+**two** bytes at once (`key[12] == 0x42 && key[13] == 0x99`) is invisible to any
+one-byte-at-a-time sweep from a fixed base, however many values it tries; closing
+it would need 256² pairs per byte pair. The sweep's claim is exactly: for each
+byte, holding every other byte at zero, the channel's output is constant over that
+byte's whole domain. That is stated in `measured_name_bytes`'s doc comment rather
+than left for a reader to infer, because the neighbouring
+`the_derivation_reads_no_byte_outside_its_window` looks like it closes the residue
+and does not — it is a two-value fixture and passes the `0x42` carve-out too.
+
+**Cost, measured.** Rust: 32 × 256 = 8,192 derivations, and the `names::` suite
+still runs in 0.06s. QML: `tst_identicon.qml` goes from 68ms to ~1.1s, which is
+the right trade for the one gate standing behind this piece's central property.
+
+One related defect was found while making this change rather than reported:
+`test_a_byte_one_channel_reads_moves_only_that_channel` looped `&& !moved`, so it
+stopped at the first value that moved the target channel — making its own comment
+("the other two must be untouched for EVERY probe value") false for every value
+after the first. It now runs to the end of the domain.
 
 ### The pinned cases have a precondition, and it is asserted rather than assumed
 

@@ -214,15 +214,38 @@ TestCase {
         DKeyNameWindow {}
     }
 
-    // Several probe values per byte, NOT one.
+    // EVERY value of the byte, not a list of interesting ones.
     //
     // A single flip to `ff` gives false negatives, and that is not hypothetical:
     // `_weave()` is `_byte(11) % 3`, and `0x00 % 3` and `0xff % 3` are both 0, so
     // a one-value probe concludes the mark does not read byte 11. The first
     // version of these tests did exactly that and passed under a mutation that
-    // genuinely broke disjointness. Coprime-ish spread across the byte range, so
-    // no modulus in either component can collide on all of them.
-    readonly property var probeValues: ["ff", "01", "02", "05", "07", "3b", "91"]
+    // genuinely broke disjointness.
+    //
+    // The fix for that was seven spread values, and seven is enough for an
+    // UNCONDITIONAL read. **It is not enough for a conditional one.** A channel
+    // that reads an unallocated byte only when it holds one particular value is
+    // invisible to any probe whose list omits that value, and every disjointness
+    // and unallocated-byte test below then reports clean. Measured: with
+    // `adjectiveIndex()` returning `(_draw(18) ^ (_byte(12) === 0x42 ? 1 : 0)) % 8192`,
+    // all 17 tests in this file passed and the whole QML run exited 0.
+    //
+    // Appending `42` to the list reproduces the defect at `43`. A probe that
+    // enumerates values is always one value short of something — this repo's
+    // `hand-maintained sweep lists go stale silently` trap — so the list is the
+    // byte's whole domain, which cannot be extended and cannot go stale. It costs
+    // 256 rather than 7 evaluations per byte; the spec file runs in a few seconds
+    // instead of 68ms, which is the right trade for the one gate standing behind
+    // this piece's central property.
+    //
+    // What this does NOT cover, stated so nobody reads it as more: a read gated on
+    // two bytes at once is invisible to any one-byte-at-a-time sweep from a fixed
+    // base, however many values it tries. See `names.rs`'s `measured_name_bytes`
+    // for why that residue is answered structurally rather than by a wider sweep.
+    readonly property int probeCount: 256
+
+    // One byte value as the two lowercase hex characters the body is made of.
+    function _probeHex(v) { return ("0" + v.toString(16)).slice(-2); }
 
     // The byte indices the abbreviation puts on screen, discovered by varying
     // one byte at a time and watching the rendered text. This is a MEASUREMENT
@@ -235,8 +258,8 @@ TestCase {
         var reference = label.text;
         var shown = [];
         for (var b = 0; b < 32; b++) {
-            for (var v = 0; v < probeValues.length; v++) {
-                var hex = base.substr(0, b * 2) + probeValues[v]
+            for (var v = 0; v < probeCount; v++) {
+                var hex = base.substr(0, b * 2) + _probeHex(v)
                         + base.substr(b * 2 + 2);
                 label.address = "k:" + hex;
                 if (label.text !== reference) { shown.push(b); break; }
@@ -262,8 +285,8 @@ TestCase {
         var reference = selectors("k:" + base);
         var read = [];
         for (var b = 0; b < 32; b++) {
-            for (var v = 0; v < probeValues.length; v++) {
-                var hex = base.substr(0, b * 2) + probeValues[v]
+            for (var v = 0; v < probeCount; v++) {
+                var hex = base.substr(0, b * 2) + _probeHex(v)
                         + base.substr(b * 2 + 2);
                 if (selectors("k:" + hex) !== reference) { read.push(b); break; }
             }
@@ -298,8 +321,8 @@ TestCase {
         var reference = draws();
         var read = [];
         for (var b = 0; b < 32; b++) {
-            for (var v = 0; v < probeValues.length; v++) {
-                var hex = base.substr(0, b * 2) + probeValues[v]
+            for (var v = 0; v < probeCount; v++) {
+                var hex = base.substr(0, b * 2) + _probeHex(v)
                         + base.substr(b * 2 + 2);
                 win.key = "k:" + hex;
                 if (draws() !== reference) { read.push(b); break; }
@@ -579,9 +602,10 @@ TestCase {
 
         // One byte from each channel's own window: 0 is the abbreviation's
         // head, 4 the mark's first dimension, 18 the name's adjective slot.
-        // `probeValues` rather than a single flip, for the reason given above
-        // it: `0x00 % 3` and `0xff % 3` are both 0, so one value can look like
-        // no change at all.
+        // Every value of the byte rather than a single flip: `0x00 % 3` and
+        // `0xff % 3` are both 0, so one value can look like no change at all —
+        // and the leak this test forbids is exactly the kind that can be gated on
+        // a value a shorter list omits. Three bytes, so 768 evaluations.
         var cases = [
             { byte: 0,  moves: "shown" },
             { byte: 4,  moves: "mark" },
@@ -592,15 +616,19 @@ TestCase {
         for (var c = 0; c < cases.length; c++) {
             var b = cases[c].byte;
             var moved = false;
-            for (var v = 0; v < probeValues.length && !moved; v++) {
-                var hex = base.substr(0, b * 2) + probeValues[v]
+            for (var v = 0; v < probeCount; v++) {
+                var hex = base.substr(0, b * 2) + _probeHex(v)
                         + base.substr(b * 2 + 2);
                 var got = outputs(hex);
 
                 // The other two must be untouched for EVERY probe value, not
                 // merely for the one that moved the target channel — a channel
                 // that leaked on some values and not others would otherwise pass
-                // as soon as one clean value was found.
+                // as soon as one clean value was found. The loop therefore runs
+                // to the end of the domain rather than stopping at the first
+                // value that moves the target: it used to break on `!moved`,
+                // which made the sentence above false for every value after the
+                // first, and a leak gated on a later value passed unseen.
                 for (var f = 0; f < fields.length; f++) {
                     if (fields[f] === cases[c].moves) continue;
                     compare(got[fields[f]], reference[fields[f]],
