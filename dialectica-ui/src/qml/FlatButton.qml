@@ -1,30 +1,63 @@
 import QtQuick
 
-// No radius, no gradient, no shadow. Three kinds only.
+// No radius, no gradient, no shadow.
 // destructive is reserved for publishing something irreversible.
+//
+// EACH KIND IS ONE ENTRY IN A TABLE, not a row of parallel ternary chains.
+// Colour, border, text ink and padding were three separate chains keyed on the
+// same string, so a kind was described in three places that had to agree and a
+// new one meant editing each. The table makes a kind one object: a missing
+// field is visible where the kind is defined, rather than surfacing as a chain
+// that silently falls through to `secondary`.
 Rectangle {
     id: root
 
     property string text: ""
-    property string kind: "secondary"   // "primary" | "secondary" | "destructive"
+    property string kind: "secondary"
     signal clicked()
 
-    readonly property bool filled: kind !== "secondary"
+    // `fill` "" means no fill — the Rectangle stays transparent and the border
+    // carries the shape. `stroke` "" means no border.
+    readonly property var kinds: ({
+        "primary":             { fill: DTheme.ink,    stroke: "",           textInk: DTheme.paper,  font: DTheme.body,  padX: 36, padY: 16 },
+        "secondary":           { fill: "",            stroke: DTheme.ink,   textInk: DTheme.ink,    font: DTheme.body,  padX: 32, padY: 14 },
+        "destructive":         { fill: DTheme.accent, stroke: "",           textInk: DTheme.paper,  font: DTheme.body,  padX: 36, padY: 16 },
+        // Beside a filled `destructive`, on the moderation confirmation. Two
+        // filled reds side by side read as one decision offered twice; the
+        // outline says "also destructive, and the second of the two".
+        "destructive-outline": { fill: "",            stroke: DTheme.accent, textInk: DTheme.accent, font: DTheme.body,  padX: 32, padY: 14 },
+        // The per-row UNMODERATE in a moderated list. A full-size secondary in
+        // a 19px list row out-weighs the row it acts on, so this is `secondary`
+        // at label type with the padding pulled in.
+        "secondary-micro":     { fill: "",            stroke: DTheme.ink,   textInk: DTheme.ink,    font: DTheme.label, padX: 16, padY: 8 }
+    })
 
-    color: kind === "primary" ? DTheme.ink
-         : kind === "destructive" ? DTheme.accent
-         : "transparent"
-    border.width: filled ? 0 : DTheme.hairline
-    border.color: DTheme.ink
-    implicitWidth: label.implicitWidth + (filled ? 36 : 32)
-    implicitHeight: label.implicitHeight + (filled ? 16 : 14)
+    // An unrecognised kind renders as `secondary`. THIS IS A BEHAVIOUR CHANGE
+    // and the reason to make it is what the previous form did instead, which
+    // was traced rather than assumed: with three chains keyed on `kind`,
+    // `filled` was `kind !== "secondary"`, so an unknown kind was `filled` —
+    // no border (`filled ? 0 : hairline`), no fill (neither the primary nor
+    // the destructive branch matched, so `"transparent"`), and paper-coloured
+    // text. A typo'd kind rendered as PAPER TEXT ON NOTHING: an invisible
+    // button that still accepted clicks.
+    //
+    // A control nobody can see is the worst of the available failures. Falling
+    // back to `secondary` makes a typo look wrong rather than look absent.
+    readonly property var spec: kinds[kind] !== undefined ? kinds[kind] : kinds["secondary"]
+
+    color:        spec.fill !== "" ? spec.fill : "transparent"
+    border.width: spec.stroke !== "" ? DTheme.hairline : 0
+    border.color: spec.stroke !== "" ? spec.stroke : DTheme.ink
+
+    implicitWidth:  label.implicitWidth + spec.padX
+    implicitHeight: label.implicitHeight + spec.padY
 
     Text {
         id: label
         anchors.centerIn: parent
         text: root.text
-        font: DTheme.body
-        color: root.filled ? DTheme.paper : DTheme.ink
+        font: root.spec.font
+        color: root.spec.textInk
         textFormat: Text.PlainText
     }
 
