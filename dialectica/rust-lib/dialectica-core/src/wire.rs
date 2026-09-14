@@ -12827,16 +12827,226 @@ mod tests {
         // elements, which is what makes the split unsound rather than merely
         // discouraged. Without this, the fixture could silently stop being a
         // two-word case and the assertions above would still pass.
+        //
+        // Asserted as a RELATION — more render tokens than `words` elements —
+        // rather than by pinning the whole rendered name. An earlier version
+        // pinned `intaxable eidos of thermai himeraiai` here, which did hold the
+        // fixture to its two-word case but made this a SECOND full pin on the
+        // derivation beside `PINNED_NAME_ON_THE_WIRE`: a change to seed 166's
+        // adjective or noun — neither of which this test is about — would fail
+        // it, and the failure would read as a `words` defect.
+        //
+        // The two-word property survives the removal because it is pinned
+        // directly: `words[2]` above is asserted to be the two-word literal, so
+        // a fixture that stopped drawing a multi-word place fails there. This
+        // relation is the independent second statement, and it is what a split
+        // cannot satisfy — a split yields exactly as many elements as the render
+        // has tokens, so `5 > 3` is false for it by construction.
         let rendered = v["name"].as_str().expect("a name");
-        assert_eq!(
-            rendered, "intaxable eidos of thermai himeraiai",
-            "the pinned fixture must still be the two-word-place case, got {v}"
-        );
         assert_eq!(
             rendered.split(' ').count(),
             5,
             "the render must have more tokens than `words` has elements, or \
              this fixture cannot tell a split from the drawn words, got {v}"
+        );
+        assert!(
+            rendered.split(' ').count() > words.len(),
+            "the render's token count must exceed `words`' element count, which \
+             is the whole of why splitting `name` is unsound, got {v}"
+        );
+    }
+
+    #[test]
+    fn every_element_of_words_is_an_entry_of_its_own_wordlist() {
+        // The guard beside this one pins ONE key's three words as literals, so
+        // it sees a wrong word only for that key. This states the property for
+        // every key swept: each element of `words` is an entry of ITS OWN list,
+        // slot by slot. A handler that returned the right words in the wrong
+        // slots, or returned rendered text that merely looks like words, fails
+        // here on the first seed rather than only on the pinned one.
+        //
+        // Asserted against the WORDLISTS, which the handler does not produce and
+        // cannot influence — not against a second rendering of the same name,
+        // which would move with the implementation.
+        //
+        // WHAT THIS CANNOT SEE TODAY, recorded because the obvious wider claim
+        // is false and the boundary was measured rather than reasoned.
+        // Splitting the rendered name on the CONNECTOR —
+        // `rendered.split_once(" of ")`, then the head on spaces — passes this
+        // test, passes the space-split guard beside it, and passes all 976
+        // tests. That is not a weakness in either test: no entry of any list
+        // contains ` of `, so the reconstruction is EXTENSIONALLY EQUAL to
+        // `words()` over all 2^33 names and no black-box fixture can separate
+        // them.
+        //
+        // What makes them diverge is a NOUN entry carrying the connector, not a
+        // place entry — measured both ways. With a place entry `thermai of
+        // himeraiai` the split still returns the place whole, because the place
+        // is last and `split_once` takes the FIRST ` of `, which is the
+        // connector. With a noun entry `zenon of kition` the split takes the
+        // noun's connector instead and the "place" becomes
+        // `kition of oresthasion` — caught here at seed 54 by the membership
+        // assertion above.
+        //
+        // `generated-names` already forbids the connector in noun entries, so
+        // the divergent case is spec-forbidden rather than merely absent. The
+        // trip-wire is `no_wordlist_entry_contains_the_connector` below, which
+        // fails on such an entry in ANY list before it can reach a caller.
+        for seed in 1u8..60 {
+            let key = feed_key(seed).public_key();
+            let v = name_request(&key.to_hex());
+            let words = v["words"].as_array().expect("words must be an array");
+            assert_eq!(words.len(), 3, "seed {seed}: got {v}");
+
+            let adjective = words[0].as_str().expect("a string");
+            let noun = words[1].as_str().expect("a string");
+            let place = words[2].as_str().expect("a string");
+
+            // Slot by slot, so a permutation fails here too rather than passing
+            // on "all three are in some list".
+            assert!(
+                crate::names::ADJECTIVES.contains(&adjective),
+                "seed {seed}: `{adjective}` is not an adjective list entry, got {v}"
+            );
+            assert!(
+                crate::names::NOUNS.contains(&noun),
+                "seed {seed}: `{noun}` is not a noun list entry, got {v}"
+            );
+            assert!(
+                crate::names::PLACES.contains(&place),
+                "seed {seed}: `{place}` is not a place list entry, got {v}"
+            );
+        }
+
+        // And the sweep must actually reach the internal-space case, or the
+        // membership assertions above cannot tell a TRUNCATING split from the
+        // drawn words: a space split truncates seed 166's place to `thermai`,
+        // which is not a PLACES entry and so fails membership. Without a
+        // two-word fixture in the sweep, every single-word name survives a
+        // space split with all three elements still list members.
+        let v = name_request(&feed_key(166).public_key().to_hex());
+        let place = v["words"][2].as_str().expect("a string");
+        assert!(
+            place.contains(' '),
+            "the fixture must still be the internal-space case, or membership \
+             above cannot tell a truncating split from the drawn words, got {v}"
+        );
+        assert!(
+            crate::names::PLACES.contains(&place),
+            "seed 166: `{place}` is not a place list entry, got {v}"
+        );
+    }
+
+    #[test]
+    fn no_wordlist_entry_contains_the_connector() {
+        // The invariant that keeps `words` observably different from a
+        // reconstruction of `name`, and the ONLY place that difference can be
+        // guarded — see the note in
+        // `every_element_of_words_is_an_entry_of_its_own_wordlist`.
+        //
+        // While no entry contains ` of `, splitting the rendered name on the
+        // connector returns exactly `words()`, so the two are indistinguishable
+        // from outside and a caller doing that split is correct by accident. A
+        // NOUN entry carrying the connector breaks it: the split then takes the
+        // noun's connector rather than the name's and reports a place that runs
+        // `kition of oresthasion` together — silently, because the rendered
+        // name still reads correctly.
+        //
+        // `generated-names` forbids the substring in noun entries and has its
+        // own test for that. This one is not a duplicate of it: it sweeps all
+        // THREE lists, because the property protected here is what a caller can
+        // reconstruct from `name`, and an entry landing in any slot bears on
+        // that. For the place list the capability deliberately leaves the
+        // question open ("Whether a place entry may carry the connector is
+        // therefore left open rather than ruled on"), so this test is STRICTER
+        // than the capability requires — and deliberately so, at this boundary,
+        // because `words` exists to spare a caller the split.
+        //
+        // If a place entry carrying the connector is ever wanted, this test is
+        // the place that decision surfaces. It is not a reason to keep the entry
+        // out: a place is last, so it renders unambiguously and the split still
+        // returns it whole (measured). Relaxing this to the noun list alone
+        // would be a defensible change — made deliberately, with the callers
+        // reconstructing from `name` in view, rather than discovered in a view
+        // that has started truncating.
+        let connector = format!(" {} ", crate::names::CONNECTOR);
+        for (list, which) in [
+            (crate::names::ADJECTIVES, "adjectives"),
+            (crate::names::NOUNS, "nouns"),
+            (crate::names::PLACES, "places"),
+        ] {
+            for entry in list {
+                assert!(
+                    !entry.contains(&connector),
+                    "the {which} entry `{entry}` carries `{connector}`, which \
+                     makes `words` indistinguishable from a connector split of \
+                     `name` no longer true — see this test's note"
+                );
+            }
+        }
+
+        // The sweep must actually look at entries, or a list that arrived empty
+        // would pass it silently.
+        assert_eq!(crate::names::ADJECTIVES.len(), 8_192);
+        assert_eq!(crate::names::NOUNS.len(), 1_024);
+        assert_eq!(crate::names::PLACES.len(), 1_024);
+    }
+
+    #[test]
+    fn the_identity_layers_own_verdict_is_carried_through_rather_than_one_message_for_every_refusal(
+    ) {
+        // Design §4 rests the "admits exactly what the identity layer admits"
+        // property on deferring to `NameError`'s Display: "there is no second
+        // list of shapes in this file that could drift from
+        // `PublicKey::from_bytes`". A hardcoded message IS such a list, and
+        // nothing could see one — replacing the whole `Err(e)` arm with a
+        // hardcoded "cannot derive a display name: low-order public key, which
+        // can never verify a signature" was measured passing all 976 tests.
+        //
+        // It survived because the low-order test feeds ONLY a low-order point,
+        // so the hardcoded text is right for its single fixture, and
+        // `not a valid public key` appeared in this file only as a NEGATIVE
+        // assertion — asserted never to appear for the low-order case, and
+        // asserted to appear for nothing. One of the two refusals the identity
+        // layer distinguishes was never required to come back at all.
+        //
+        // So both directions are pinned here against hardcoded text.
+        let low_order = error_message(&display_name(&format!(
+            r#"{{"publicKey":"{}"}}"#,
+            "00".repeat(32)
+        )));
+        // Right length, and not a decodable point — the OTHER verdict.
+        let not_a_point_bytes = [&[2u8][..], &[0u8; 31][..]].concat();
+        let not_a_point = error_message(&display_name(&format!(
+            r#"{{"publicKey":"{}"}}"#,
+            hex::encode(&not_a_point_bytes)
+        )));
+
+        // The fixture must actually reach the verdict this test is named for,
+        // rather than being a second low-order point wearing a different byte
+        // pattern — in which case the assertions below would hold for a handler
+        // that hardcodes one message, which is the defect.
+        assert_eq!(
+            crate::identity::PublicKey::from_bytes(&not_a_point_bytes).unwrap_err(),
+            crate::identity::KeyError::NotAValidPublicKey,
+            "the fixture must be the not-a-key verdict, or this test cannot \
+             tell a carried-through message from a hardcoded one"
+        );
+
+        assert_eq!(
+            low_order,
+            "cannot derive a display name: low-order public key, which can never verify a signature",
+            "the low-order verdict must arrive in the identity layer's words"
+        );
+        assert_eq!(
+            not_a_point, "cannot derive a display name: not a valid public key",
+            "the not-a-key verdict must arrive in the identity layer's words, \
+             rather than every refusal reading as the other one"
+        );
+        assert_ne!(
+            low_order, not_a_point,
+            "two verdicts the identity layer tells apart collapsed into one \
+             message on the wire"
         );
     }
 

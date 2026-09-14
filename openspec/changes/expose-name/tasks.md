@@ -4,7 +4,7 @@
 
 - [x] spec — `spec-writer`
 - [x] design + code — `dev-writer`
-- [ ] tests — `tester`
+- [x] tests — `tester`
 - [x] review: correctness — `code-reviewer`
 - [x] review: security — `code-reviewer`
 - [x] review: readability — `code-reviewer`
@@ -89,6 +89,51 @@ three sites and missed at the fourth.
 - [x] Arbitrary byte strings do not abort the process, and a later well-formed
       call still answers.
 - [x] Many distinct well-formed keys all succeed — no second failure condition.
+
+### Added by the `tester` stage, each proved red against a surviving mutation
+
+Two more instances of "a fixture where two explanations give the same answer"
+were found by mutation after the findings were answered. Both mutations passed
+all 976 tests before these were written.
+
+- [x] `the_identity_layers_own_verdict_is_carried_through_rather_than_one_message_for_every_refusal`
+      — replacing the whole `Err(e)` arm with a **hardcoded** refusal message
+      passed the entire suite. The low-order test feeds only a low-order point,
+      so the hardcoded text was right for its one fixture, and
+      `not a valid public key` appeared in the file only as a *negative*
+      assertion — required to appear for nothing. Design §4 rests the "admits
+      exactly what the identity layer admits" property on there being "no second
+      list of shapes in this file"; a hardcoded string is one. Now pinned in
+      both directions against hardcoded text, with the not-a-point fixture's
+      verdict asserted so it cannot be a second low-order point in disguise.
+- [x] `every_element_of_words_is_an_entry_of_its_own_wordlist` — states slot by
+      slot, over 59 keys, that each element of `words` is an entry of its own
+      list. Asserted against the wordlists, which the handler cannot influence.
+      Catches the space split and a slot permutation at the first seed rather
+      than only at the pinned one.
+- [x] `no_wordlist_entry_contains_the_connector` — the trip-wire for the one
+      reconstruction no black-box test can see. Splitting the rendered name on
+      the **connector** passes every test, because no entry of any list contains
+      ` of `, which makes it extensionally equal to `words()` over all 2^33
+      names. A **noun** entry carrying the connector breaks that equality
+      (measured: the split then reports `kition of oresthasion` as the place);
+      a *place* entry does not, since the place is last. Sweeps all three lists,
+      which is stricter than `generated-names` requires for places — recorded in
+      the test as a deliberate choice at this boundary, with the relaxation that
+      would be defensible if a connector-carrying place is ever wanted.
+
+### Reduced, with the coverage measured before and after
+
+- [x] `words_is_the_three_drawn_words_and_not_the_rendered_name_split_on_spaces`
+      no longer pins seed 166's **whole rendered name**. That pin was a second
+      full pin on the derivation beside `PINNED_NAME_ON_THE_WIRE`: a change to
+      that seed's adjective or noun — neither of which the test is about —
+      would fail it, and read as a `words` defect. It was there to stop the
+      fixture silently ceasing to be a two-word case, and that job is already
+      done by the `words[2] == "thermai himeraiai"` literal. Measured both ways:
+      with the pin removed the test still fails on the space split, and still
+      fails when the fixture's place is shortened to one word. The relation
+      (render tokens > `words` elements) is kept and strengthened.
 
 ### Not done, by owner instruction
 
