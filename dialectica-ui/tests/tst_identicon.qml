@@ -433,27 +433,92 @@ TestCase {
     // If this fails, do NOT adjust it to match. Either this file's arithmetic or
     // core's has moved, and the two are now deriving different names from the
     // same key on the same build.
+    // **BOTH of `names.rs`'s pinned cases, and the second one is not redundant.**
+    //
+    // A single case was measured insufficient. In the first key below, the noun
+    // slot's two bytes are BOTH 0xbe, so `be16` and `le16` give the same 16-bit
+    // value and that slot's index is identical under either byte order. Reading
+    // the noun slot's bytes in the WRONG ORDER — `_byte(21) * 256 + _byte(20)` —
+    // left this file's entire suite green, while QML and core would have derived
+    // different names for almost every other key on the same build. Two
+    // explanations, one answer: this repo's named test defect, found live here.
+    //
+    // The second key's three slots each hold two DIFFERENT bytes
+    // (0xef/0x1a, 0x06/0xad, 0xa6/0x6d), so every slot is byte-order sensitive
+    // and a per-slot endian flip cannot coincide in any of them.
+    //
+    // That precondition is asserted below rather than trusted, because it is a
+    // property of the FIXTURE and a fixture property nobody checks is one that
+    // decays: someone re-derives a pin against a new key, the pair of bytes
+    // happens to repeat, and the pin goes quietly green about a byte order that
+    // moved.
+    readonly property var pinnedCases: [
+        // key hex, adjective, noun, place. Produced by
+        // `dialectica-core/examples/pin_name.rs`, which reads the wordlists from
+        // the text files and does not link the derivation — so these agree with a
+        // third party rather than with either implementation. The same two keys
+        // are pinned by name in `names.rs`'s `PINNED_CASES`.
+        { key: "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c",
+          adjective: 5806, noun: 702, place: 914,
+          name: "quartzous paris of sypalettos" },
+        { key: "66be7e332c7a453332bd9d0a7f7db055f5c5ef1a06ada66d98b39fb6810c473a",
+          adjective: 3866, noun: 685, place: 621,
+          name: "inpardonable paidagogos of myriandros" }
+    ];
+
     function test_the_name_window_agrees_with_cores_pinned_case() {
-        // The public key for the secret-key seed of 32 bytes of 0x07, which is
-        // `names.rs`'s first pinned case.
-        var key = "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c";
-        var win = nameWindowFactory.createObject(null, { key: "k:" + key });
+        for (var c = 0; c < pinnedCases.length; c++) {
+            var p = pinnedCases[c];
+            var win = nameWindowFactory.createObject(null, { key: "k:" + p.key });
 
-        // Produced by pin_name.rs: `indices: adjective 5806 noun 702 place 914`.
-        // The corresponding name is `quartzous paris of sypalettos`, which core
-        // pins; this file holds no wordlists, so it pins the indices instead.
-        compare(win.adjectiveIndex(), 5806, "adjective index");
-        compare(win.nounIndex(), 702, "noun index");
-        compare(win.placeIndex(), 914, "place index");
+            compare(win.adjectiveIndex(), p.adjective, p.name + ": adjective index");
+            compare(win.nounIndex(), p.noun, p.name + ": noun index");
+            compare(win.placeIndex(), p.place, p.name + ": place index");
 
-        // The prefix must not shift the offsets, for the same reason it must
-        // not for the mark: a "k:" key and a bare one are one identity.
-        win.key = key;
-        compare(win.adjectiveIndex(), 5806, "adjective index without a prefix");
-        compare(win.nounIndex(), 702, "noun index without a prefix");
-        compare(win.placeIndex(), 914, "place index without a prefix");
+            // The prefix must not shift the offsets, for the same reason it must
+            // not for the mark: a "k:" key and a bare one are one identity.
+            win.key = p.key;
+            compare(win.adjectiveIndex(), p.adjective,
+                    p.name + ": adjective index without a prefix");
+            compare(win.nounIndex(), p.noun, p.name + ": noun index without a prefix");
+            compare(win.placeIndex(), p.place, p.name + ": place index without a prefix");
 
-        win.destroy();
+            win.destroy();
+        }
+    }
+
+    // The precondition the pins above rest on, asserted rather than assumed.
+    //
+    // A slot whose two key bytes are EQUAL reads the same 16-bit value
+    // big-endian or little-endian, so that slot's pin cannot fail on a byte-order
+    // change. The first pinned key has exactly that property in its noun slot
+    // (0xbe, 0xbe), which is how a wrong-order noun slot passed this whole file.
+    // At least one pinned case must therefore be sensitive in EVERY slot, or the
+    // cross-language pin has a blind spot in whichever slot coincides.
+    //
+    // Stated as "some case is sensitive everywhere" rather than "every case is",
+    // because the first case is kept deliberately: it is the one `names.rs`
+    // reproduces by hand, and its noun coincidence is a fact about that key
+    // rather than a defect in it.
+    function test_some_pinned_case_is_byte_order_sensitive_in_every_slot() {
+        function _b(hex, i) { return parseInt(hex.substr(i * 2, 2), 16); }
+
+        var anyFullySensitive = false;
+        for (var c = 0; c < pinnedCases.length; c++) {
+            var hex = pinnedCases[c].key;
+            var sensitive = true;
+            // The three slots start at key bytes 18, 20 and 22.
+            for (var s = 18; s <= 22; s += 2) {
+                if (_b(hex, s) === _b(hex, s + 1)) sensitive = false;
+            }
+            if (sensitive) anyFullySensitive = true;
+        }
+        verify(anyFullySensitive,
+               "no pinned case holds two DIFFERENT bytes in all three slots, so "
+               + "a slot reading its two bytes in the wrong order would reach the "
+               + "same index in every pinned case and the cross-language pin "
+               + "would stay green while QML and core derived different names "
+               + "from the same key");
     }
 
     // Peer-supplied strings reach this component too, so a short or malformed

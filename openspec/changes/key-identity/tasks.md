@@ -4,7 +4,7 @@
 
 - [x] spec — `spec-writer`
 - [x] design + code — `dev-writer`
-- [ ] tests — `tester`
+- [x] tests — `tester`
 - [ ] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
 - [ ] review: readability — `code-reviewer`
@@ -157,3 +157,38 @@ mutation naming the defect it is for.
 - [x] `DKeyNameWindow` noun modulus → 1000: only
       `test_the_name_window_agrees_with_cores_pinned_case` fails — a drift no
       disjointness test can see, which is why that pin exists.
+
+### Hardened by `tester`, with what each mutation proved
+
+- [x] The modulus-drift claim above **re-verified and widened**. `% 1024` → `%
+      1000` fails that pin alone, as reported; so do `% 8192` → `% 8000` and a
+      noun/place **slot swap**, which leaves the window at `18..23` and is
+      therefore invisible to every disjointness test. The pin is the sole gate
+      for a whole class of drift, not just the modulus.
+- [x] **A live instance of this repo's defect family, found and closed.** The
+      first pinned key's noun slot holds `0xbe, 0xbe` — two equal bytes — so it
+      reduces identically big-endian and little-endian. Reading only the noun
+      slot's bytes in the wrong order (`_byte(21) * 256 + _byte(20)`) left
+      **every one of `tst_identicon.qml`'s 16 tests green**, while QML and core
+      would have derived different names for almost every other key on the same
+      build. Two explanations, one answer.
+      `test_the_name_window_agrees_with_cores_pinned_case` now pins **both** of
+      `names.rs`'s cases; the second is byte-order sensitive in all three slots,
+      and the mutation now fails it. The Rust side already survived this (its
+      `PINNED_CASES` carries both) — measured: a `from_le_bytes` noun reduction
+      fails `the_name_scheme_is_pinned_to_known_answers` on **seed 11 alone**.
+- [x] `test_some_pinned_case_is_byte_order_sensitive_in_every_slot` (QML) and
+      `some_pinned_case_is_byte_order_sensitive_in_every_slot` (Rust) assert that
+      fixture precondition, so it cannot decay silently when a pin is re-derived.
+      Both watched failing with the pin set reduced to the endian-blind case.
+- [x] The author's least-confident test confirmed **weaker than its name
+      suggests, and hardened**. `the_spec_allocation_this_crate_restates_is_internally_consistent`
+      checks only that the restated ranges are disjoint and total 25 — a shape
+      wrong tables also have. Moving `SPEC_MARK_BYTES` from `4..12` to `6..14`
+      keeps both properties and left **all 36 Rust tests green**.
+      `the_restated_channels_are_the_spec_s_byte_sets_and_not_merely_disjoint_ones`
+      pins each set to the spec's table; both its branches watched failing.
+- [x] The QML gate **does** cover what the Rust crate cannot, as the author
+      claimed: `_form()` moved to byte 18 (onto the name) fails 5 QML tests
+      naming the overlap; moved to byte 26 (unallocated) fails 4. Neither is
+      visible to any Rust test.

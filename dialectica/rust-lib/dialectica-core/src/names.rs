@@ -599,6 +599,43 @@ mod tests {
     }
 
     #[test]
+    fn some_pinned_case_is_byte_order_sensitive_in_every_slot() {
+        // A second precondition on the pins, and it was found by mutation rather
+        // than reasoned about in advance.
+        //
+        // A slot whose two key bytes are EQUAL reads the same 16-bit value
+        // big-endian or little-endian, so no pin drawn from that key can fail on
+        // a byte-order change in that slot. `PINNED_CASES[0]` has exactly that
+        // property in its noun slot — key bytes 20 and 21 are both `0xbe` — and
+        // it is measurable: reducing the noun slot with `u16::from_le_bytes`
+        // leaves `the_name_scheme_is_pinned_to_known_answers` failing on seed 11
+        // ALONE, with seed 7 green. Had seed 11 not been here, a wrong byte order
+        // would have been a silent consensus change.
+        //
+        // (The same coincidence was live in the QML gate, which pinned only the
+        // first case: a wrong-order noun slot in `DKeyNameWindow` passed that
+        // whole file. `tst_identicon.qml` now pins both cases and asserts this
+        // same precondition.)
+        //
+        // Stated as "some case is sensitive in every slot" rather than "every
+        // case is": the first case earns its place by being the one
+        // `a_pinned_name_is_reproducible_from_its_key_by_hand` reproduces, and
+        // its noun coincidence is a fact about that key rather than a defect.
+        let any_fully_sensitive = PINNED_CASES.iter().any(|(_, key_hex, _)| {
+            let key = hex::decode(key_hex).expect("the pinned key is hex");
+            // The three slots start at key bytes 18, 20 and 22.
+            [18usize, 20, 22].iter().all(|&s| key[s] != key[s + 1])
+        });
+        assert!(
+            any_fully_sensitive,
+            "no pinned case holds two DIFFERENT bytes in all three slots, so a \
+             slot reducing its two bytes in the wrong order would reach the same \
+             index in every pinned case and every name pin would stay green \
+             while this peer's names stopped matching every other peer's"
+        );
+    }
+
+    #[test]
     fn the_pinned_cases_span_each_list_rather_than_clustering() {
         // The spec requires pinned cases to reach **a low and a high index in
         // each of the three slots**, so that a pin is evidence about the index
@@ -914,6 +951,68 @@ mod tests {
         assert!(
             allocated.iter().all(|b| *b < 32),
             "an allocation names a byte outside a 32-byte key"
+        );
+    }
+
+    #[test]
+    fn the_restated_channels_are_the_spec_s_byte_sets_and_not_merely_disjoint_ones() {
+        // **Internal consistency is not enough, and this was measured rather
+        // than reasoned about.** `the_spec_allocation_this_crate_restates_is_internally_consistent`
+        // above asks only that the five ranges are pairwise disjoint and total
+        // 25 — a shape many wrong tables also have. Moving the restated mark
+        // range from `4..12` to `6..14` keeps it disjoint from `0..4`, `14..18`,
+        // `18..24` and `29..32` and keeps the total at 25, and every test in
+        // this file stayed green under it. The disjointness assertions would
+        // then have been checking the name against a mark window the mark does
+        // not have: still green, and no longer about the shipped allocation.
+        //
+        // So the restatement is pinned to the spec's table ITSELF, byte set by
+        // byte set. The literals below are the `generated-names` requirement
+        // *The three channels read pairwise disjoint bytes of the public key*,
+        // transcribed — the spec's figures, not another implementation's, which
+        // is the distinction that keeps this from being a restatement of a
+        // restatement.
+        //
+        // This still cannot see `Identicon.qml`; nothing in this crate can. What
+        // it closes is the drift between this crate's copy of the table and the
+        // table, which is a different failure from the one the QML gate covers
+        // and was uncovered by either.
+        assert_eq!(
+            SPEC_MARK_BYTES.collect::<Vec<usize>>(),
+            vec![4, 5, 6, 7, 8, 9, 10, 11],
+            "the restated MARK window is not the spec's `4..11`, so the \
+             name-versus-mark disjointness assertion is checking the wrong range"
+        );
+        assert_eq!(
+            SPEC_ABBREVIATION_BYTES
+                .iter()
+                .flat_map(|g| g.clone())
+                .collect::<Vec<usize>>(),
+            vec![0, 1, 2, 3, 14, 15, 16, 17, 29, 30, 31],
+            "the restated ABBREVIATION groups are not the spec's `0..3`, \
+             `14..17` and `29..31`, so the displayed-byte assertion is checking \
+             the wrong bytes — and a displayed byte reaching the name is the \
+             severe case the spec singles out"
+        );
+        assert_eq!(
+            name_key_bytes().collect::<Vec<usize>>(),
+            vec![18, 19, 20, 21, 22, 23],
+            "the name's window is not the spec's `18..23`"
+        );
+
+        // The seven the spec leaves unallocated, as the complement rather than
+        // as a fourth literal — so this cannot agree with a table that named
+        // 25 bytes while leaving a different seven over.
+        let allocated: Vec<usize> = SPEC_MARK_BYTES
+            .chain(SPEC_ABBREVIATION_BYTES.iter().flat_map(|g| g.clone()))
+            .chain(name_key_bytes())
+            .collect();
+        let unallocated: Vec<usize> = (0..32usize).filter(|b| !allocated.contains(b)).collect();
+        assert_eq!(
+            unallocated,
+            vec![12, 13, 24, 25, 26, 27, 28],
+            "the bytes this table leaves over are not the spec's unallocated \
+             `12..13` and `24..28`"
         );
     }
 
