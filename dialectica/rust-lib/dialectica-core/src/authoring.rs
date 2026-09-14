@@ -545,7 +545,7 @@ mod tests {
     #[test]
     fn a_published_op_verifies_against_the_identity_derived_for_its_stoa() {
         // The author is derived from the Stoa and is never a parameter. The
-        // expected address is derived INDEPENDENTLY here rather than read back
+        // expected key is derived INDEPENDENTLY here rather than read back
         // from the op, so this cannot pass by the test agreeing with itself.
         let stoa = a_stoa("Agora");
         let key = a_key(A_ROOT, &stoa);
@@ -554,16 +554,16 @@ mod tests {
         let published = post(&mut log, &key, stoa, "mine".to_string()).unwrap();
         let op = stored(&log, &published.id);
 
-        let expected = derive_stoa_key(&A_ROOT, &stoa).public_key().address();
-        assert_eq!(op.op.author.address(), expected);
+        let expected = derive_stoa_key(&A_ROOT, &stoa).public_key();
+        assert_eq!(op.op.author.to_hex(), expected.to_hex());
         assert!(op.verify(), "the op must verify against its own author");
 
         // And a DIFFERENT Stoa's identity is not it, or the assertion above
         // would hold for any key at all.
         let elsewhere = a_stoa("Lyceum");
         assert_ne!(
-            op.op.author.address(),
-            derive_stoa_key(&A_ROOT, &elsewhere).public_key().address()
+            op.op.author.to_hex(),
+            derive_stoa_key(&A_ROOT, &elsewhere).public_key().to_hex()
         );
     }
 
@@ -574,16 +574,16 @@ mod tests {
         // and post under another — and nothing would error.
         //
         // What this does and does not reach: the closure below re-implements the
-        // composition `Keystore::stoa_address` performs (`stoa_public_key` then
-        // `.address()`), rather than calling it. So this pins that the PUBLISH
+        // composition `Keystore::stoa_public_key` performs (`stoa_key` then
+        // `.public_key()`), rather than calling it. So this pins that the PUBLISH
         // path agrees with that composition from the same root — it would catch a
         // publish signing with a different key — but it would not catch
-        // `Keystore::stoa_address` itself being changed to compose differently.
-        // Closing that would mean reaching a real `Keystore`, which this layer
-        // deliberately does not take.
+        // `Keystore::stoa_public_key` itself being changed to compose
+        // differently. Closing that would mean reaching a real `Keystore`, which
+        // this layer deliberately does not take.
         let stoa = a_stoa("Agora");
         let probe_reported = crate::wire::capability_for(&stoa, |s| {
-            Ok(derive_stoa_key(&A_ROOT, s).public_key().address().to_hex())
+            Ok(derive_stoa_key(&A_ROOT, s).public_key().to_hex())
         });
         let reported = match probe_reported {
             crate::wire::Capability::CanPost { identity } => identity,
@@ -599,7 +599,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            stored(&log, &published.id).op.author.address().to_hex(),
+            stored(&log, &published.id).op.author.to_hex(),
             reported
         );
     }
@@ -615,15 +615,15 @@ mod tests {
         //
         // This is the other half, on the same pattern as
         // `identity.rs::the_wire_constants_are_pinned_to_known_answers`: the
-        // expected author address comes from a HARDCODED seed, so nothing in the
+        // expected author key comes from a HARDCODED seed, so nothing in the
         // publish path contributes to the expectation.
         //
         // The seed is `identity.rs`'s pinned value for
         // `derive_stoa_key([7; 32], stoa_address(b"a genesis record"))`, and
-        // `keystore.rs::the_identity_survives_a_restart` reaches the same address
-        // by a third route. Every address and signature this peer produces stops
-        // matching everyone else's if it changes, with no error anywhere, because
-        // each peer stays internally consistent.
+        // `keystore.rs::the_identity_survives_a_restart` reaches the same identity
+        // by a third route. Every signature this peer produces stops matching
+        // everyone else's if it changes, with no error anywhere, because each peer
+        // stays internally consistent.
         //
         // **If this fails, do NOT update the expected value to match.** Work out
         // what changed in the derivation and whether the network survives it.
@@ -636,13 +636,10 @@ mod tests {
         let pinned_seed =
             hex::decode("b62b6b592aeb0779541bbe8beac60d8f505342c37c6a9bc990920d93e68026cf")
                 .unwrap();
-        let expected = SecretKey::from_bytes(&pinned_seed)
-            .unwrap()
-            .public_key()
-            .address();
+        let expected = SecretKey::from_bytes(&pinned_seed).unwrap().public_key();
         assert_eq!(
-            stored(&log, &published.id).op.author.address(),
-            expected,
+            stored(&log, &published.id).op.author.to_hex(),
+            expected.to_hex(),
             "a published op's author no longer matches the pinned per-Stoa derivation"
         );
         // The Stoa address is pinned too, because an author derived correctly

@@ -634,10 +634,10 @@ mod tests {
 
     #[test]
     fn a_forged_revision_is_dropped() {
-        // The attack the check ORDER exists to stop: the author field names the
-        // victim, so an authorship comparison made before verification passes.
-        // Only `verify()` — which re-derives the address from the key that
-        // actually signed — catches it.
+        // The attack the check ORDER exists to stop: the op's author field names
+        // the victim's key, so an authorship comparison made before verification
+        // passes. Only `verify()` catches it — the signature was made by the
+        // stranger's key and does not verify under the victim's.
         let post = a_post("mine");
         let id = post.op.id();
         let forged = a_forged_revision(&post.op.author, &stranger(), id, "forged");

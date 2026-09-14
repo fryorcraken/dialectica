@@ -77,7 +77,7 @@
 //! # Three derivations exist for one user, and this one follows the module
 //!
 //! `createStoa` names `identity_public_key` as the creator; the publish path signs
-//! with `stoa_key`; `getCapabilities` reports `stoa_address_at_path`. That is three
+//! with `stoa_key`; `getCapabilities` reports `stoa_public_key_at_path`. That is three
 //! derivations for one user, it is known — `ci.yml` carries a named exemption for
 //! it — and it is a spec question this example does not get to decide.
 //!
@@ -299,17 +299,17 @@ fn why<T, E: std::fmt::Display>(what: &str, r: Result<T, E>) -> Result<T, String
     r.map_err(|e| format!("{what}: {e}"))
 }
 
-/// How many ops in the store one address authored.
+/// How many ops in the store one public key authored.
 ///
 /// Counted from the store rather than from what this program believes it wrote, so
 /// the report's per-author figures are readings and not restatements of the code
 /// above them. That is the whole difference between this block and the summary
 /// sentence it replaced: a number read back can be wrong and be caught, whereas
 /// "every seeded op is by X" was a claim nothing in the program could contradict.
-fn seeded_ops_by<L: OpLog>(log: &L, address_hex: &str) -> Result<usize, String> {
+fn seeded_ops_by<L: OpLog>(log: &L, key_hex: &str) -> Result<usize, String> {
     Ok(why("counting one author's ops", log.iter())?
         .iter()
-        .filter(|e| e.op.op.author.address().to_hex() == address_hex)
+        .filter(|e| e.op.op.author.to_hex() == key_hex)
         .count())
 }
 
@@ -738,7 +738,7 @@ fn main() -> Result<(), String> {
     //
     // `wire::posting_identity` is what `get_capabilities` calls, it is `pub`, and it
     // takes exactly the three values already in scope. Re-spelling its body here —
-    // `keystore.stoa_address_at_path(&address, recorded)` — is what this used to do,
+    // `keystore.stoa_public_key_at_path(&address, recorded)` — is what this used to do,
     // and the two agreed, which is the problem rather than the reassurance:
     // `keystore.rs` records that "two call sites that agree is not the same thing as
     // one derivation", after a pair of them re-diverged with every gate green. This
@@ -747,12 +747,12 @@ fn main() -> Result<(), String> {
     //
     // It reads the recorded path itself, so a path that cannot be read fails here
     // rather than on screen — the property the hand derivation was reading it for.
-    let posting_address = wire::posting_identity(&address, &keystore, &paths)
+    let posting_identity = wire::posting_identity(&address, &keystore, &paths)
         .map_err(|e| format!("asking the probe which identity it reports: {e}"))?;
-    let signing_address = keystore.stoa_public_key(&address).address().to_hex();
-    let visitor_address = visitor.public_key().address().to_hex();
+    let signing_identity = keystore.stoa_public_key(&address).to_hex();
+    let visitor_identity = visitor.public_key().to_hex();
 
-    // The feed's `author` is the SIGNING address for the founder's row and the
+    // The feed's `author` is the SIGNING key for the founder's row and the
     // VISITOR's for the visitor's. Asserted rather than assumed, and asserted against
     // values this program did not compute for the occasion: the rows come back out of
     // the store.
@@ -764,11 +764,11 @@ fn main() -> Result<(), String> {
     // feed's ordering is not baked in either.
     let authors: Vec<&str> = feed.items.iter().map(|r| r.author.as_str()).collect();
     assert!(
-        authors.contains(&signing_address.as_str()),
+        authors.contains(&signing_identity.as_str()),
         "the founder's root must be attributed to the key it was signed with; got {authors:?}"
     );
     assert!(
-        authors.contains(&visitor_address.as_str()),
+        authors.contains(&visitor_identity.as_str()),
         "the visitor's root must be attributed to the visitor; got {authors:?}"
     );
 
@@ -776,7 +776,7 @@ fn main() -> Result<(), String> {
     //
     // The two `contains` assertions above are existential — each says "at least one
     // row has this author" — and the report's prose used to say "**every** seeded op
-    // is by" one address. No `contains` check can ever contradict an "every" claim,
+    // is by" one identity. No `contains` check can ever contradict an "every" claim,
     // so the false sentence and the green assertions were consistent by construction:
     // both hold whether the store has one author or two. That is this repo's recorded
     // defect family, and it is how `c2bf6f5` moved a root to the visitor and left the
@@ -789,33 +789,33 @@ fn main() -> Result<(), String> {
     // into one, whether or not anybody updates the prose.
     let mut seeded_authors: Vec<String> = why("reading the ops back", log.iter())?
         .iter()
-        .map(|e| e.op.op.author.address().to_hex())
+        .map(|e| e.op.op.author.to_hex())
         .collect();
     seeded_authors.sort();
     seeded_authors.dedup();
-    let mut expected_authors = vec![signing_address.clone(), visitor_address.clone()];
+    let mut expected_authors = vec![signing_identity.clone(), visitor_identity.clone()];
     expected_authors.sort();
     assert_eq!(
         seeded_authors, expected_authors,
         "the seeded store must carry exactly two distinct authors, the founder's \
-         signing address and the visitor's — the report names both and claims no \
+         signing key and the visitor's — the report names both and claims no \
          single author for the store"
     );
 
     // The self-invalidating half, and the operands are the MODULE's two positions.
     //
-    // This used to compare `stoa_address_at_path` against `stoa_public_key`, both
-    // called by this example on its own keystore — two HD derivations off one root,
+    // This used to compare the path-taking derivation against `stoa_public_key`,
+    // both called by this example on its own keystore — two HD derivations off one root,
     // which differ for the same reason any two do. Nothing the module did was on
     // either side, so it asserted a property of Ed25519 derivation rather than of
     // dialectica: review closed the real gap at `wire.rs:324` and this program exited
     // 0 with every assertion green, still printing MODERATION DOES NOT WORK about a
     // gap that no longer existed (`findings/spec-test.md` entry 1).
     //
-    // `posting_address` is now `wire::posting_identity`'s own answer, so closing the
+    // `posting_identity` is now `wire::posting_identity`'s own answer, so closing the
     // gap moves it and this fires.
     assert_ne!(
-        posting_address, signing_address,
+        posting_identity, signing_identity,
         "the probe and the publish path have stopped disagreeing — the \
          three-derivations gap is closed, so this assertion and the paragraph it \
          documents should both go"
@@ -852,7 +852,7 @@ fn main() -> Result<(), String> {
         }
     );
     println!();
-    // EVERY address this store has, because the three that disagree are the reason
+    // EVERY identity this store has, because the three that disagree are the reason
     // this program prints anything and the fourth is the one a reader meets in the
     // feed without warning. The module derives a posting identity at one position and
     // signs at another — the three-derivations gap `ci.yml` carries a named exemption
@@ -860,24 +860,21 @@ fn main() -> Result<(), String> {
     // question.
     //
     // **Every line here is a value an assertion above pinned, and none is a summary.**
-    // The predecessor of this block said "every seeded op is by <one address>", which
+    // The predecessor of this block said "every seeded op is by <one identity>", which
     // was a universal claim no assertion in the file could contradict, and it went
     // false the day a root moved to the visitor. The per-author counts below are
     // spelled out rather than summarised for the same reason: a breakdown is a claim
     // the distinct-author assertion can fail on, and prose about "every" op is not.
     // `design.md` records this as a rule rather than as a one-off fix.
-    let founder_ops = seeded_ops_by(&log, &signing_address)?;
-    let visitor_ops = seeded_ops_by(&log, &visitor_address)?;
-    println!("author addresses — the first three DISAGREE, which is the known gap:");
-    println!("  getCapabilities reports  {posting_address}");
-    println!("  founder signs ops with   {signing_address}  ({founder_ops} of {ops} ops)");
-    println!(
-        "  record names as creator  {}",
-        genesis.creator.address().to_hex()
-    );
+    let founder_ops = seeded_ops_by(&log, &signing_identity)?;
+    let visitor_ops = seeded_ops_by(&log, &visitor_identity)?;
+    println!("author public keys — the first three DISAGREE, which is the known gap:");
+    println!("  getCapabilities reports  {posting_identity}");
+    println!("  founder signs ops with   {signing_identity}  ({founder_ops} of {ops} ops)");
+    println!("  record names as creator  {}", genesis.creator.to_hex());
     println!("  and a second identity, so author attribution is visible rather than uniform:");
-    println!("  visitor's ops are by     {visitor_address}  ({visitor_ops} of {ops} ops)");
-    // THE CONSEQUENCE, because the three addresses above are only interesting for
+    println!("  visitor's ops are by     {visitor_identity}  ({visitor_ops} of {ops} ops)");
+    // THE CONSEQUENCE, because the three identities above are only interesting for
     // what they cause. `Moderators::authorises` gates on the signing author, the
     // record names a different key, so no moderation this peer publishes binds.
     // A UI developer whose hide button does nothing needs to read this line rather

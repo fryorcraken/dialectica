@@ -13,7 +13,7 @@ import "../src/qml"
 // test is the screen's own state machine rather than a re-implementation of it.
 //
 // **Every assertion is against a value the fixture chose**, not against
-// whatever the screen produced: the addresses, reasons and flags below are
+// whatever the screen produced: the public keys, reasons and flags below are
 // written into the fake replies and then compared to what the screen holds. A
 // test that asked the screen what it wrote and agreed would pass against any
 // implementation at all.
@@ -87,15 +87,15 @@ TestCase {
         DOnboardingScreen {}
     }
 
-    // Two candidates whose addresses differ in every character, so "the two
-    // rows show different address text" cannot pass by accident.
-    readonly property string addrA: "11".repeat(32)
-    readonly property string addrB: "22".repeat(32)
+    // Two candidates whose public keys differ in every character, so "the two
+    // rows show different key text" cannot pass by accident.
+    readonly property string keyA: "11".repeat(32)
+    readonly property string keyB: "22".repeat(32)
 
     readonly property string twoCandidateSlate:
         '{"slate":"feed01","count":2,"candidates":['
-        + '{"index":0,"path":0,"address":"' + "11".repeat(32) + '","publicKey":"aa"},'
-        + '{"index":1,"path":1,"address":"' + "22".repeat(32) + '","publicKey":"bb"}'
+        + '{"index":0,"path":0,"publicKey":"' + "11".repeat(32) + '"},'
+        + '{"index":1,"path":1,"publicKey":"' + "22".repeat(32) + '"}'
         + ']}'
 
     // ---- the opening state ----------------------------------------------
@@ -129,12 +129,13 @@ TestCase {
         screen.requestSlate()
 
         compare(screen.candidates.length, 2)
-        // Against the addresses THIS TEST wrote into the reply, in the order it
-        // wrote them — not against whatever order the screen happened to hold.
-        compare(screen.candidates[0].address, spec.addrA, "order must be the reply's")
-        compare(screen.candidates[1].address, spec.addrB)
-        verify(screen.candidates[0].address !== screen.candidates[1].address,
-               "two candidates must be distinguishable by their address text")
+        // Against the public keys THIS TEST wrote into the reply, in the order
+        // it wrote them — not against whatever order the screen happened to
+        // hold.
+        compare(screen.candidates[0].publicKey, spec.keyA, "order must be the reply's")
+        compare(screen.candidates[1].publicKey, spec.keyB)
+        verify(screen.candidates[0].publicKey !== screen.candidates[1].publicKey,
+               "two candidates must be distinguishable by their public key text")
         screen.destroy()
     }
 
@@ -145,9 +146,9 @@ TestCase {
         var screen = makeScreen({
             "generate_identity_slate":
                 '{"slate":"s3","count":3,"candidates":['
-                + '{"index":0,"path":0,"address":"aa","publicKey":"p0"},'
-                + '{"index":1,"path":1,"address":"bb","publicKey":"p1"},'
-                + '{"index":2,"path":2,"address":"cc","publicKey":"p2"}]}'
+                + '{"index":0,"path":0,"publicKey":"p0"},'
+                + '{"index":1,"path":1,"publicKey":"p1"},'
+                + '{"index":2,"path":2,"publicKey":"p2"}]}'
         })
         screen.requestSlate()
 
@@ -212,20 +213,20 @@ TestCase {
             "generate_identity_slate": [
                 spec.twoCandidateSlate,
                 '{"slate":"feed02","count":1,"candidates":['
-                + '{"index":0,"path":9,"address":"' + "33".repeat(32) + '","publicKey":"cc"}]}'
+                + '{"index":0,"path":9,"publicKey":"' + "33".repeat(32) + '"}]}'
             ]
         })
 
         screen.requestSlate()
-        compare(screen.candidates[0].address, spec.addrA)
+        compare(screen.candidates[0].publicKey, spec.keyA)
 
         screen.requestSlate()
         compare(screen.candidates.length, 1, "only the second set is held")
-        compare(screen.candidates[0].address, "33".repeat(32))
+        compare(screen.candidates[0].publicKey, "33".repeat(32))
         for (var i = 0; i < screen.candidates.length; i++) {
-            verify(screen.candidates[i].address !== spec.addrA,
+            verify(screen.candidates[i].publicKey !== spec.keyA,
                    "no candidate of the first set may still be on screen")
-            verify(screen.candidates[i].address !== spec.addrB)
+            verify(screen.candidates[i].publicKey !== spec.keyB)
         }
         compare(screen.slateId, "feed02", "the set identifier is the new set's")
         screen.destroy()
@@ -279,8 +280,8 @@ TestCase {
     // row.
     readonly property string slateWithNegativeIndex:
         '{"slate":"s1","count":2,"candidates":['
-        + '{"index":-1,"path":0,"address":"' + "11".repeat(32) + '","publicKey":"aa"},'
-        + '{"index":0,"path":1,"address":"' + "22".repeat(32) + '","publicKey":"bb"}'
+        + '{"index":-1,"path":0,"publicKey":"' + "11".repeat(32) + '"},'
+        + '{"index":0,"path":1,"publicKey":"' + "22".repeat(32) + '"}'
         + ']}'
 
     function test_no_row_reads_as_chosen_while_nothing_is_selected() {
@@ -325,7 +326,7 @@ TestCase {
         var screen = makeScreen({
             "generate_identity_slate":
                 '{"slate":"s1","count":3,"candidates":[null,"str",{"index":0,"path":0,'
-                + '"address":"' + "11".repeat(32) + '","publicKey":"aa"}]}'
+                + '"publicKey":"' + "11".repeat(32) + '"}]}'
         })
         screen.requestSlate()
 
@@ -336,26 +337,37 @@ TestCase {
         screen.destroy()
     }
 
-    function test_a_candidate_without_a_usable_address_is_a_failure() {
-        // The address is the only unforgeable way to tell two candidates apart,
-        // so a candidate with none is not a candidate the user can choose
-        // between.
+    function test_a_candidate_without_a_usable_public_key_is_a_failure() {
+        // The public key is the only unforgeable way to tell two candidates
+        // apart, so a candidate with none is not a candidate the user can
+        // choose between. It is also what the mark is derived from, so such a
+        // candidate can render nothing that distinguishes it.
         var missing = makeScreen({
             "generate_identity_slate":
-                '{"slate":"s1","count":1,"candidates":[{"index":0,"path":0,"publicKey":"aa"}]}'
+                '{"slate":"s1","count":1,"candidates":[{"index":0,"path":0}]}'
         })
         missing.requestSlate()
-        compare(missing.phase, "failed", "a candidate with no address cannot be chosen between")
+        compare(missing.phase, "failed",
+                "a candidate with no public key cannot be chosen between")
         missing.destroy()
 
         var notAString = makeScreen({
             "generate_identity_slate":
                 '{"slate":"s1","count":1,"candidates":[{"index":0,"path":0,'
-                + '"address":{"hex":"aa"},"publicKey":"aa"}]}'
+                + '"publicKey":{"hex":"aa"}}]}'
         })
         notAString.requestSlate()
-        compare(notAString.phase, "failed", "nor one whose address is not a string")
+        compare(notAString.phase, "failed", "nor one whose public key is not a string")
         notAString.destroy()
+
+        var empty = makeScreen({
+            "generate_identity_slate":
+                '{"slate":"s1","count":1,"candidates":[{"index":0,"path":0,"publicKey":""}]}'
+        })
+        empty.requestSlate()
+        compare(empty.phase, "failed",
+                "nor one whose public key is the empty string — present but naming nothing")
+        empty.destroy()
     }
 
     function test_the_keep_guard_refuses_at_the_sentinel_even_when_a_row_carries_it() {
@@ -376,7 +388,7 @@ TestCase {
         // not choose.
         var screen = makeScreen({
             "generate_identity_slate": spec.slateWithNegativeIndex,
-            "keep_identity": '{"kept":true,"address":"ff","publicKey":"gg","path":0,"encrypted":false}'
+            "keep_identity": '{"kept":true,"publicKey":"ff","path":0,"encrypted":false}'
         })
         screen.requestSlate()
         compare(screen.selectedIndex, -1, "the fixture's own precondition")
@@ -432,7 +444,7 @@ TestCase {
             var hostile = makeScreen({
                 "generate_identity_slate":
                     '{"slate":"s1","count":1,"candidates":[{"index":' + negatives[i]
-                    + ',"path":0,"address":"' + "11".repeat(32) + '","publicKey":"aa"}]}'
+                    + ',"path":0,"publicKey":"' + "11".repeat(32) + '"}]}'
             })
             hostile.requestSlate()
             compare(hostile.phase, "failed",
@@ -507,7 +519,7 @@ TestCase {
     function test_keeping_is_refused_by_the_view_while_nothing_is_selected() {
         var screen = makeScreen({
             "generate_identity_slate": spec.twoCandidateSlate,
-            "keep_identity": '{"kept":true,"address":"ff","publicKey":"gg","path":0,"encrypted":false}'
+            "keep_identity": '{"kept":true,"publicKey":"ff","path":0,"encrypted":false}'
         })
         screen.requestSlate()
         compare(screen.selectedIndex, -1)
@@ -525,7 +537,7 @@ TestCase {
     function test_keeping_names_the_set_and_the_position() {
         var screen = makeScreen({
             "generate_identity_slate": spec.twoCandidateSlate,
-            "keep_identity": '{"kept":true,"address":"ff","publicKey":"gg","path":1,"encrypted":false}'
+            "keep_identity": '{"kept":true,"publicKey":"ff","path":1,"encrypted":false}'
         })
         screen.requestSlate()
         screen.select(1)
@@ -566,9 +578,16 @@ TestCase {
     function test_no_request_names_an_identity() {
         // The identity follows from the Stoa and the selection; a request
         // naming one would ask the module to act as somebody it is not.
+        //
+        // `address` is still asserted even though issue #80 deleted the author
+        // address from every reply, and that is deliberate rather than
+        // leftover: the prohibition is on a request NAMING an identity, and an
+        // `address` field appearing in one of these requests would be exactly
+        // that whatever the replies now carry. `stoa` is the Stoa's address and
+        // travels under its own name, so this assertion does not touch it.
         var screen = makeScreen({
             "generate_identity_slate": spec.twoCandidateSlate,
-            "keep_identity": '{"kept":true,"address":"ff","publicKey":"gg","path":0,"encrypted":true}',
+            "keep_identity": '{"kept":true,"publicKey":"ff","path":0,"encrypted":true}',
             "who_am_i": '{"hasIdentity":false,"reason":"none"}'
         })
         screen.requestSlate()
@@ -593,7 +612,7 @@ TestCase {
     function test_each_call_reaches_the_bridge_under_its_own_method_name() {
         var screen = makeScreen({
             "generate_identity_slate": spec.twoCandidateSlate,
-            "keep_identity": '{"kept":true,"address":"ff","publicKey":"gg","path":0,"encrypted":true}'
+            "keep_identity": '{"kept":true,"publicKey":"ff","path":0,"encrypted":true}'
         })
         screen.requestSlate()
         screen.select(0)
@@ -645,7 +664,7 @@ TestCase {
         screen.keepSelected()
 
         compare(screen.candidates.length, 2, "the set that was on screen is still on screen")
-        compare(screen.candidates[0].address, spec.addrA)
+        compare(screen.candidates[0].publicKey, spec.keyA)
         compare(screen.selectedIndex, 1, "and the selection survives, so retrying is one press")
 
         screen.keepSelected()
@@ -686,7 +705,7 @@ TestCase {
         var screen = makeScreen({
             "generate_identity_slate":
                 '{"slate":{"nonce":"aa"},"count":1,"candidates":[{"index":0,"path":0,'
-                + '"address":"' + "11".repeat(32) + '","publicKey":"aa"}]}'
+                + '"publicKey":"' + "11".repeat(32) + '"}]}'
         })
         screen.requestSlate()
 
@@ -704,8 +723,8 @@ TestCase {
         // inherited a stale value for free.
         var screen = makeScreen({
             "generate_identity_slate": spec.twoCandidateSlate,
-            "keep_identity": '{"kept":true,"address":"' + "99".repeat(32)
-                           + '","publicKey":"pk","path":0,"encrypted":true}'
+            "keep_identity": '{"kept":true,"publicKey":"' + "99".repeat(32)
+                           + '","path":0,"encrypted":true}'
         })
         screen.requestSlate()
         screen.select(0)
@@ -723,11 +742,11 @@ TestCase {
         screen.destroy()
     }
 
-    function test_a_kept_reply_is_the_kept_state_and_shows_the_replys_address() {
+    function test_a_kept_reply_is_the_kept_state_and_shows_the_replys_public_key() {
         var screen = makeScreen({
             "generate_identity_slate": spec.twoCandidateSlate,
-            "keep_identity": '{"kept":true,"address":"' + "99".repeat(32)
-                           + '","publicKey":"pk","path":4,"encrypted":true}'
+            "keep_identity": '{"kept":true,"publicKey":"' + "99".repeat(32)
+                           + '","path":4,"encrypted":true}'
         })
         screen.requestSlate()
         screen.select(0)
@@ -735,27 +754,27 @@ TestCase {
         screen.keepSelected()
 
         compare(screen.phase, "kept")
-        compare(screen.keptIdentity.address, "99".repeat(32))
+        compare(screen.keptIdentity.publicKey, "99".repeat(32))
         screen.destroy()
     }
 
     function test_the_identity_shown_is_the_replys_not_the_rows() {
-        // The reply's address differs from the address of the row that was
+        // The reply's public key differs from the key of the row that was
         // selected. The screen must show the REPLY's: it is the one that is
         // true about the store.
         var screen = makeScreen({
             "generate_identity_slate": spec.twoCandidateSlate,
-            "keep_identity": '{"kept":true,"address":"' + "77".repeat(32)
-                           + '","publicKey":"pk","path":0,"encrypted":false}'
+            "keep_identity": '{"kept":true,"publicKey":"' + "77".repeat(32)
+                           + '","path":0,"encrypted":false}'
         })
         screen.requestSlate()
         screen.select(0)
-        compare(screen.candidates[0].address, spec.addrA, "the fixture's own precondition")
+        compare(screen.candidates[0].publicKey, spec.keyA, "the fixture's own precondition")
 
         screen.keepSelected()
 
-        compare(screen.keptIdentity.address, "77".repeat(32))
-        verify(screen.keptIdentity.address !== spec.addrA,
+        compare(screen.keptIdentity.publicKey, "77".repeat(32))
+        verify(screen.keptIdentity.publicKey !== spec.keyA,
                "the row that was sent must not be what is shown")
         screen.destroy()
     }
@@ -777,10 +796,13 @@ TestCase {
         screen.destroy()
     }
 
-    function test_a_kept_reply_with_no_address_is_a_failure_not_an_empty_identity() {
+    function test_a_kept_reply_with_no_public_key_is_a_failure_not_an_empty_identity() {
+        // The fixture reports `kept:true` and names nothing. Since issue #80 the
+        // public key is the ONLY identifier a kept identity has, so a reply
+        // omitting it says an identity was stored without saying which.
         var screen = makeScreen({
             "generate_identity_slate": spec.twoCandidateSlate,
-            "keep_identity": '{"kept":true,"publicKey":"pk","path":0,"encrypted":true}'
+            "keep_identity": '{"kept":true,"path":0,"encrypted":true}'
         })
         screen.requestSlate()
         screen.select(0)
@@ -788,17 +810,31 @@ TestCase {
         screen.keepSelected()
 
         compare(screen.phase, "failed",
-                "a kept identity with an empty address claims a success the reply "
-                + "did not describe")
+                "a kept identity with an empty public key claims a success the "
+                + "reply did not describe")
         compare(screen.keptIdentity, null)
         verify(screen.failure.length > 0, "the failure must name itself")
         screen.destroy()
+
+        // Present but empty is the same claim with a field in it, and the two
+        // fail for the same reason: nothing was named.
+        var blank = makeScreen({
+            "generate_identity_slate": spec.twoCandidateSlate,
+            "keep_identity": '{"kept":true,"publicKey":"","path":0,"encrypted":true}'
+        })
+        blank.requestSlate()
+        blank.select(0)
+        blank.keepSelected()
+        compare(blank.phase, "failed",
+                "an empty public key names no identity either")
+        compare(blank.keptIdentity, null)
+        blank.destroy()
     }
 
     function test_the_kept_signal_fires_only_on_a_reply_that_kept_something() {
         var kept = makeScreen({
             "generate_identity_slate": spec.twoCandidateSlate,
-            "keep_identity": '{"kept":true,"address":"ab","publicKey":"pk","path":0,"encrypted":false}'
+            "keep_identity": '{"kept":true,"publicKey":"pk","path":0,"encrypted":false}'
         })
         var fired = 0
         kept.identityKept.connect(function () { fired++ })
@@ -861,10 +897,10 @@ TestCase {
         // DIFFERENT strings and stayed green when one was reworded to actively
         // misinform. Different is necessary; correct is the requirement.
         var encrypted = spec.keptScreenShowing(
-            '{"kept":true,"address":"ab","publicKey":"pk","path":0,"encrypted":true}')
+            '{"kept":true,"publicKey":"pk","path":0,"encrypted":true}')
         var encryptedText = spec.visibleTextMatching(encrypted, "master key on this machine")
         var plain = spec.keptScreenShowing(
-            '{"kept":true,"address":"ab","publicKey":"pk","path":0,"encrypted":false}')
+            '{"kept":true,"publicKey":"pk","path":0,"encrypted":false}')
         var plainText = spec.visibleTextMatching(plain, "master key on this machine")
 
         // Each reply's own claim, hardcoded here rather than read back off the
@@ -903,7 +939,7 @@ TestCase {
         // the negative one. An absent `false` and a reported `false` mean
         // different things.
         var screen = spec.keptScreenShowing(
-            '{"kept":true,"address":"ab","publicKey":"pk","path":0}')
+            '{"kept":true,"publicKey":"pk","path":0}')
 
         var shown = spec.visibleTextsOn(screen)
         // Both bounds. The corpus must be non-trivial (or "nothing is shown"
@@ -946,7 +982,7 @@ TestCase {
         // A view normalising with `=== true` would report the second.
         var screen = makeScreen({
             "generate_identity_slate": spec.twoCandidateSlate,
-            "keep_identity": '{"kept":true,"address":"ab","publicKey":"pk","path":0}'
+            "keep_identity": '{"kept":true,"publicKey":"pk","path":0}'
         })
         screen.requestSlate()
         screen.select(0)
@@ -985,7 +1021,7 @@ TestCase {
         var gap = "recorded only on this machine"
         for (var i = 0; i < cases.length; i++) {
             var screen = spec.keptScreenShowing(
-                '{"kept":true,"address":"ab","publicKey":"pk","path":0,"encrypted":true}',
+                '{"kept":true,"publicKey":"pk","path":0,"encrypted":true}',
                 cases[i].reported)
 
             var shown = spec.visibleTextsOn(screen)
@@ -1036,16 +1072,16 @@ TestCase {
     // hurt a user.
     //
     // So this is an allowlist, the same instrument that caught "Key H" in
-    // `test_a_row_shows_its_address_and_its_mark_and_nothing_else`: the screen's
-    // copy is entirely AUTHORED — no string here is computed — so the set of
-    // sentences it can show is finite and writable down. Any new sentence,
-    // anywhere, in any phase, fails until someone adds it here deliberately.
-    // That is the point: adding a privacy claim then requires typing it into a
-    // list headed by the reason it must not be typed.
+    // `test_a_row_shows_its_public_key_and_its_mark_and_nothing_else`: the
+    // screen's copy is entirely AUTHORED — no string here is computed — so the
+    // set of sentences it can show is finite and writable down. Any new
+    // sentence, anywhere, in any phase, fails until someone adds it here
+    // deliberately. That is the point: adding a privacy claim then requires
+    // typing it into a list headed by the reason it must not be typed.
     //
     // Module-supplied strings (refusal reasons, failure messages) and
-    // candidate-derived strings (addresses) are excluded by the caller, because
-    // those are not authored here and are pinned by their own tests.
+    // candidate-derived strings (public keys) are excluded by the caller,
+    // because those are not authored here and are pinned by their own tests.
     readonly property var authoredCopy: [
         // heading, shown in every phase
         "Choose the identity you will keep here.",
@@ -1059,7 +1095,7 @@ TestCase {
         "Refresh as often as you like. Nothing is published until you keep one.",
         "Keep this identity",
         "There is no settings screen where this can be changed later, because the name is only the key written out. Choosing again means being someone else here.",
-        "Names are not unique and are not identifiers. Someone else in this Stoa may hold the same name. Your address is what tells you apart, so it is printed beside your name everywhere.",
+        "Names are not unique and are not identifiers. Someone else in this Stoa may hold the same name. Your public key is what tells you apart, so it is printed beside your name everywhere.",
         // refused
         "That identity was not kept.",
         "Nothing was stored. The keys above are still on offer.",
@@ -1087,7 +1123,7 @@ TestCase {
         var phases = [
             { keep: undefined },
             { keep: '{"kept":false,"reason":"REASON-FIXTURE"}' },
-            { keep: '{"kept":true,"address":"KEPT-ADDRESS-FIXTURE","publicKey":"pk",'
+            { keep: '{"kept":true,"publicKey":"KEPT-PUBLIC-KEY-FIXTURE",'
                     + '"path":0,"encrypted":true}' }
         ]
         for (var p = 0; p < phases.length; p++) {
@@ -1115,12 +1151,12 @@ TestCase {
                 // than a pattern, so this skips exactly what this test handed
                 // the screen and nothing else — a wildcard here would be a hole
                 // an unauthorised sentence could be written through.
-                if (t === spec.addrA || t === spec.addrB)
-                    continue                                   // candidate addresses
+                if (t === spec.keyA || t === spec.keyB)
+                    continue                                   // candidate public keys
                 if (t === "REASON-FIXTURE")
                     continue                                   // the refusal reason
-                if (t === "KEPT-ADDRESS-FIXTURE")
-                    continue                                   // the kept reply's address
+                if (t === "KEPT-PUBLIC-KEY-FIXTURE")
+                    continue                                   // the kept reply's public key
                 verify(spec.authoredCopy.indexOf(t) >= 0,
                        "this screen said something no test authorised:\n    \"" + t
                        + "\"\nEvery sentence the screen shows must be in "
@@ -1206,9 +1242,14 @@ TestCase {
         //
         // The sentence's obligation does not need a number. What it must say is
         // that names are not unique, are not identifiers, that someone else may
-        // hold the same name, and that the ADDRESS is what distinguishes two
+        // hold the same name, and that the PUBLIC KEY is what distinguishes two
         // participants — and that survives every future change to how many
         // words a name has.
+        //
+        // It said "address" until issue #80 deleted the author address. The
+        // value the copy names had to move with it: a sentence pointing at a
+        // value the user is never shown tells them to compare something that
+        // does not exist.
         var screen = makeScreen({ "generate_identity_slate": spec.twoCandidateSlate })
         screen.requestSlate()
         var joined = spec.everyTextOn(screen).join(" ")
@@ -1217,8 +1258,8 @@ TestCase {
                "the note must say names are not unique")
         verify(joined.indexOf("not identifiers") >= 0,
                "and that they are not identifiers")
-        verify(joined.indexOf("address") >= 0,
-               "and that the address is what tells participants apart")
+        verify(joined.indexOf("public key") >= 0,
+               "and that the public key is what tells participants apart")
 
         // And no count ships, whatever the count currently is. The SHAPE here —
         // assert no number at all rather than pin the current one — is right and
@@ -1426,15 +1467,20 @@ TestCase {
         screen.destroy()
     }
 
-    function test_every_row_carries_a_mark_drawn_from_its_own_address() {
+    function test_every_row_carries_a_mark_drawn_from_its_own_public_key() {
         // Spec/test review finding: the mark was pinned NOWHERE. Deleting the
         // `Identicon` from every candidate row passed 49/49, and feeding every
-        // row the same constant address passed 49/49. The requirement is titled
-        // "A candidate row shows the full address **and the mark**", and its
-        // scenario says "each mark is derived from THAT ROW's address rather
-        // than from a shared or fixed value" — both halves were unasserted.
+        // row the same constant value passed 49/49. The requirement is titled
+        // "A candidate row shows the full public key **and the mark**", and its
+        // scenario says "each mark is derived from THAT ROW's key rather than
+        // from a shared or fixed value" — both halves were unasserted.
         // `tst_identicon.qml` tests the component in isolation and says nothing
         // about the row.
+        //
+        // `Identicon`'s property is still called `address`: it is a generic
+        // component and also draws Stoa addresses, which issue #80 did not
+        // touch. What CHANGED is what flows into it here — the candidate's
+        // public key, since the author address it used to carry is gone.
         //
         // Two assertions, because the two mutations are different defects: a
         // missing mark removes the second recognition channel, and a shared
@@ -1442,20 +1488,20 @@ TestCase {
         // looking alike is worse than no mark, since a user told the shape
         // identifies a key sees five identical shapes and concludes they are
         // interchangeable.
-        var addrOne = "44".repeat(32)
-        var addrTwo = "55".repeat(32)
+        var keyOne = "44".repeat(32)
+        var keyTwo = "55".repeat(32)
         var screen = makeScreen({
             "generate_identity_slate":
                 '{"slate":"s1","count":2,"candidates":['
-                + '{"index":0,"path":7,"address":"' + addrOne + '","publicKey":"pk"},'
-                + '{"index":1,"path":8,"address":"' + addrTwo + '","publicKey":"qk"}]}'
+                + '{"index":0,"path":7,"publicKey":"' + keyOne + '"},'
+                + '{"index":1,"path":8,"publicKey":"' + keyTwo + '"}]}'
         })
         screen.requestSlate()
 
         var rows = spec.candidateRowsOn(screen)
         compare(rows.length, 2, "the fixture's own precondition: two rows")
 
-        var addresses = [addrOne, addrTwo]
+        var keys = [keyOne, keyTwo]
         var signatures = []
         for (var r = 0; r < rows.length; r++) {
             var marks = spec.marksOn(rows[r])
@@ -1466,28 +1512,28 @@ TestCase {
                     "row " + r + " must carry exactly one mark — deleting the "
                     + "Identicon from the row is invisible to every text sweep, "
                     + "because a mark is not a Text")
-            compare(String(marks[0].address), addresses[r],
-                    "row " + r + "'s mark must be drawn from THAT ROW's address, "
-                    + "not a shared or fixed value")
+            compare(String(marks[0].address), keys[r],
+                    "row " + r + "'s mark must be drawn from THAT ROW's public "
+                    + "key, not a shared or fixed value")
             signatures.push(spec.markSignature(marks[0]))
         }
 
-        // And the two marks actually DRAW differently. The address check above
-        // would pass on a mark bound to the right address that derived its form
-        // and inks from something else; this reads the eight selectors
-        // Identicon computes and requires the tuples to differ.
+        // And the two marks actually DRAW differently. The check above would
+        // pass on a mark bound to the right key that derived its form and inks
+        // from something else; this reads the eight selectors Identicon
+        // computes and requires the tuples to differ.
         verify(signatures[0] !== signatures[1],
-               "two candidates with different addresses must produce different "
+               "two candidates with different public keys must produce different "
                + "marks — a mark identical across every row is a recognition "
                + "channel that distinguishes nothing, got " + signatures[0]
                + " for both")
         screen.destroy()
     }
 
-    function test_a_row_shows_its_address_and_its_mark_and_nothing_else() {
+    function test_a_row_shows_its_public_key_and_its_mark_and_nothing_else() {
         // Review finding (correctness): this was a BLOCKLIST over "7", "0",
-        // "1", "#1" and the public key, and a blocklist cannot catch a
-        // name-shaped value nobody anticipated. The reviewer measured it: a
+        // "1", "#1" and a second key-shaped value, and a blocklist cannot catch
+        // a name-shaped value nobody anticipated. The reviewer measured it: a
         // `Text` reading "Key H", derived from the fixture's `path:7`, passed
         // all 38 tests including this one, because "Key H" is on no list. The
         // blunter `String(path)` mutation was caught only by the coincidence
@@ -1495,18 +1541,18 @@ TestCase {
         //
         // The spec states the property structurally — "The row SHALL leave the
         // name unshown rather than substituted" — and the row is built so its
-        // only text is the address, plus SELECTED on the chosen one. So assert
-        // the SET, not a list of exclusions: any value added in a name's
+        // only text is the public key, plus SELECTED on the chosen one. So
+        // assert the SET, not a list of exclusions: any value added in a name's
         // position then fails whether or not its spelling was anticipated, and
         // when the generated name lands, the expected set gains a member
         // deliberately rather than a blocklist silently admitting one.
-        var addrOne = "44".repeat(32)
-        var addrTwo = "55".repeat(32)
+        var keyOne = "44".repeat(32)
+        var keyTwo = "55".repeat(32)
         var screen = makeScreen({
             "generate_identity_slate":
                 '{"slate":"s1","count":2,"candidates":['
-                + '{"index":0,"path":7,"address":"' + addrOne + '","publicKey":"pk"},'
-                + '{"index":1,"path":8,"address":"' + addrTwo + '","publicKey":"qk"}]}'
+                + '{"index":0,"path":7,"publicKey":"' + keyOne + '"},'
+                + '{"index":1,"path":8,"publicKey":"' + keyTwo + '"}]}'
         })
         screen.requestSlate()
         screen.select(0)
@@ -1519,18 +1565,18 @@ TestCase {
         compare(rows.length, 2,
                 "the row walker must find exactly the rows the reply carried")
 
-        // The addresses THIS TEST wrote into the reply, in the order it wrote
+        // The public keys THIS TEST wrote into the reply, in the order it wrote
         // them — compared against what each row renders, so a row showing the
-        // wrong candidate's address fails here too.
-        var expected = [[addrOne, "SELECTED"], [addrTwo]]
+        // wrong candidate's key fails here too.
+        var expected = [[keyOne, "SELECTED"], [keyTwo]]
         for (var r = 0; r < rows.length; r++) {
             var shown = spec.visibleTextsOn(rows[r]).slice().sort()
             var want = expected[r].slice().sort()
             compare(shown.join(" | "), want.join(" | "),
-                    "row " + r + " may show its address and, when chosen, the word "
-                    + "SELECTED — and nothing else. Any further string is a value "
-                    + "standing where the generated name will go, which is read as "
-                    + "the thing being chosen and is not it.")
+                    "row " + r + " may show its public key and, when chosen, the "
+                    + "word SELECTED — and nothing else. Any further string is a "
+                    + "value standing where the generated name will go, which is "
+                    + "read as the thing being chosen and is not it.")
         }
         screen.destroy()
     }
@@ -1540,7 +1586,7 @@ TestCase {
         // three booleans. Drive the screen through each outcome and assert the
         // phase is exactly one recognised value each time.
         var outcomes = [
-            { keep: '{"kept":true,"address":"ab","publicKey":"pk","path":0,"encrypted":true}',
+            { keep: '{"kept":true,"publicKey":"pk","path":0,"encrypted":true}',
               expected: "kept" },
             { keep: '{"kept":false,"reason":"nope"}', expected: "refused" },
             { keep: '{"error":"boom"}', expected: "failed" }

@@ -1,8 +1,9 @@
-//! Identity: keys, addresses, and the signatures that bind an op to an author.
+//! Identity: keys, Stoa addresses, and the signatures that authenticate an op.
 //!
 //! # The scheme, and why it is this one
 //!
-//! **Ed25519 with SHA-256 addresses**, chosen on this forum's own criteria.
+//! **Ed25519, with SHA-256 for the Stoa address**, chosen on this forum's own
+//! criteria.
 //!
 //! The alternative considered and rejected was BIP-340 Schnorr over secp256k1,
 //! to match LEZ so that LEZ proof-of-holding (PLAN.md §7.2) would interoperate.
@@ -19,8 +20,19 @@
 //! *derived* per Stoa, never rolled over within one. That is not an omission —
 //! §5.3's argument is that a key which can be discarded at will is a key nothing
 //! can be attached to, so rotation waits until standing lives on a revocable
-//! credential (§5.5) rather than on a keypair. Hashing a record rather than a
-//! bare key (see [`PublicKey::address`]) is what keeps that door open.
+//! credential (§5.5) rather than on a keypair.
+//!
+//! **The affordance that was being held open has been given up, deliberately.**
+//! An author address used to hash a *record* containing the key rather than the
+//! key itself, so that the record could later grow into a key *log* and an
+//! identity could rotate while its identifier survived. Issue #80 made the public
+//! key the sole author identifier, so an identity *is* its key and there is no
+//! identifier that could outlive one. Rotation, if it ever arrives, arrives as a
+//! credential layer above the keypair rather than as a longer record beneath the
+//! same identifier. Nothing shipped depended on the affordance — §5.3 already
+//! forbids what it was reserved for — and it is recorded here so that a reader
+//! finding rotation unbuilt finds the reason it is now harder, rather than
+//! inferring that nobody considered it.
 //!
 //! **No key storage.** That is [`crate::keystore`]'s job — this module defines
 //! the key types it hands back, and deliberately knows nothing about files,
@@ -35,7 +47,7 @@
 use ed25519_dalek::Signer;
 use sha2::{Digest, Sha256};
 
-/// Domain separation for an author address.
+/// Domain separation for a Stoa address.
 ///
 /// A fixed 32 bytes, in LEZ's own style (`b"/LEE/v0.3/AccountId/Public/..."`,
 /// zero-padded to 32). The length is padded rather than natural so that the
@@ -44,12 +56,16 @@ use sha2::{Digest, Sha256};
 /// the same, and padding removes the question rather than arguing about it.
 ///
 /// The version is in the string on purpose. A future scheme change mints
-/// different addresses from identical keys, which is what we want: an address
+/// different addresses from identical records, which is what we want: an address
 /// says which rules produced it.
-const AUTHOR_ADDRESS_PREFIX: &[u8; 32] = b"/dialectica/1/Address/Author\0\0\0\0";
-
-/// Domain separation for a Stoa address. Distinct from the author prefix, so
-/// no byte string is ever both a valid author address and a valid Stoa address.
+///
+/// **There was a second, author-address prefix beside this one**, and the pair
+/// was what kept a byte string from being both a valid author address and a
+/// valid Stoa address. Issue #80 deleted the author address, so the separation
+/// is not preserved but **retired**: with one kind of address left there is no
+/// second kind to be separated from. What this prefix still separates a Stoa
+/// address from is an op id ([`crate::op::Op::id`]) and a signing digest, both
+/// 32 bytes and both prefixed with their own.
 const STOA_ADDRESS_PREFIX: &[u8; 32] = b"/dialectica/1/Address/Stoa\0\0\0\0\0\0";
 
 /// Domain separation for what a signature actually covers.
@@ -86,23 +102,26 @@ const STOA_KEY_SALT: &[u8] = b"/dialectica/1/Identity/Stoa";
 /// first keystore. It would not be zero later, which is why this comment exists.
 const STOA_KEY_SALT_WITH_PATH: &[u8] = b"/dialectica/2/Identity/Stoa";
 
-/// A 32-byte address: an author's, or a Stoa's.
+/// A 32-byte **Stoa** address: the domain-separated hash of a genesis record.
 ///
-/// One type for both because they are the same construction over different
-/// prefixes, and because a `String` here would invite a caller to compare an
-/// address to a display form. Comparison is on the bytes.
+/// **An address identifies a Stoa, and nothing else.** It used to identify an
+/// author too — one type for both, the same construction over two prefixes —
+/// and issue #80 deleted that half: the public key is the sole author
+/// identifier, and the generated name, the mark and the on-screen abbreviation
+/// all read the key's own bytes rather than a digest of it.
 ///
-/// **Half of that sentence is scheduled for deletion.** Issue #80 removes the
-/// *author* address — the public key becomes the identity, and the generated
-/// name and the mark now read the key's own bytes rather than a digest of it.
-/// The `key-identity` change states that allocation; the `key-identity-sweep`
-/// change performs the removal, and nothing in this file changes until it lands.
-/// So between the two, this doc comment still offers "an author's" and
-/// [`PublicKey::address`] still exists, deliberately: renaming here and rewiring
-/// the call sites there would split one rename across two pieces and leave the
-/// tree non-compiling in between.
+/// **Nothing in the type system enforces the narrowing, so it is stated here.**
+/// The name does not say "Stoa" and an infallible [`Address::from_bytes`] will
+/// accept any 32 bytes, so a reader meeting this type in `wire.rs` or `op.rs`
+/// has only this comment to tell them what it holds. Two consequences worth
+/// carrying:
 ///
-/// **Stoa addresses are untouched** and this type survives the sweep for them.
+/// - **[`derive_stoa_key`] takes an `Address` and must.** The Stoa address is an
+///   *input* to author-key derivation, and that it is a Stoa address is exactly
+///   what makes identities per-Stoa. It is not a leftover of the author address.
+/// - **A `String` here would invite a caller to compare an address to a display
+///   form.** Comparison is on the bytes; [`Address::to_hex`] is the display form
+///   and [`Address::from_hex`] is the only way back.
 ///
 /// `Ord` and `Hash` are here for the store (§3.3), which keys and indexes by
 /// address: they make an `Address` usable as a map key and give a deterministic
@@ -119,9 +138,9 @@ impl Address {
     /// hash output, so every 32-byte string is a syntactically valid one —
     /// there is nothing to check that would not be a lie about what this type
     /// guarantees. What an address means is settled by re-deriving it from the
-    /// record or key it names ([`PublicKey::address`], [`stoa_address`]), and a
-    /// `Result` here would suggest that a successful construction had said
-    /// something about that.
+    /// genesis record it names ([`stoa_address`],
+    /// [`crate::stoa::Genesis::address`]), and a `Result` here would suggest
+    /// that a successful construction had said something about that.
     ///
     /// Takes a fixed-size array rather than a slice deliberately: the length is
     /// a type constraint, so a caller holding wire bytes does its own checked
@@ -263,34 +282,18 @@ impl PublicKey {
         hex::encode(self.to_bytes())
     }
 
-    /// This key's author address.
-    ///
-    /// **Scheduled for deletion by `key-identity-sweep` (issue #80).** The
-    /// public key is the identity; nothing needs a second unforgeable name for
-    /// an author, and the generated name and the mark now read the key's bytes
-    /// directly. This survives only because the sweep owns the call-site
-    /// rewiring — see the note on [`Address`]. Do not add a caller.
-    ///
-    /// Everything below describes the scheme as it stands and is why it was
-    /// built this way, not an argument for keeping it.
-    ///
-    /// **A record is hashed, not the bare key** — §5.1 is explicit, and the
-    /// reason is forward compatibility: if rotation ever lands (§5.3), the
-    /// record can grow into a key *log* and the address survives instead of
-    /// every author having to migrate. It costs nothing today, and hashing the
-    /// raw key would foreclose it permanently.
-    ///
-    /// Today the record is exactly one key, so the preimage is
-    /// `prefix || 0x01 || key`. The `0x01` is the record's key count, and it is
-    /// present from the first commit precisely so that a two-key record is a
-    /// *different* preimage rather than an ambiguous one.
-    pub fn address(&self) -> Address {
-        let mut hasher = Sha256::new();
-        hasher.update(AUTHOR_ADDRESS_PREFIX);
-        hasher.update([1u8]);
-        hasher.update(self.to_bytes());
-        Address(hasher.finalize().into())
-    }
+    // There is deliberately **no `address()`**, and its absence is the point of
+    // issue #80. A key used to derive a 32-byte author address — `SHA256(prefix
+    // || 0x01 || key)`, hashing a one-key *record* so that the record could
+    // later grow into a key log — and that value is deleted. The public key is
+    // the author: it is what an op carries, what a signature is checked under,
+    // and what the display name, the mark and the abbreviation all read their
+    // bytes from.
+    //
+    // Do not add one back. A second identifier beside the key is one the two
+    // could disagree about, with no way for a recipient to tell which is wrong
+    // — and it is not derivable back to the key, so a caller holding only the
+    // address cannot arrive at the right name.
 }
 
 impl std::fmt::Debug for PublicKey {
@@ -618,10 +621,11 @@ impl std::fmt::Debug for Signature {
 /// maintain, which is what this comment previously said was owed.
 /// `pub(crate)`, deliberately. This is the raw value a signature is made over,
 /// and exporting it is an invitation to hand-roll a verification path — which
-/// is exactly the split [`verify_authored_op`] exists to prevent, since the
-/// step that goes missing is always the address binding. Callers outside this
-/// crate get [`sign_op_bytes`] and [`verify_authored_op`]; §2.5 says widening
-/// the surface is a deliberate act, and this does not need widening.
+/// is exactly the split [`verify_authored_op`] exists to prevent, since a
+/// hand-rolled path is where `verify_strict` quietly becomes `verify`. Callers
+/// outside this crate get [`sign_op_bytes`] and [`verify_authored_op`]; §2.5
+/// says widening the surface is a deliberate act, and this does not need
+/// widening.
 pub(crate) fn signing_digest(bytes: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(OP_SIGNING_PREFIX);
@@ -638,11 +642,13 @@ pub fn sign_op_bytes(key: &SecretKey, bytes: &[u8]) -> Signature {
 ///
 /// # This proves possession of a key, not identity
 ///
-/// A `true` here means "whoever holds this key's secret signed these bytes" and
-/// says **nothing about who they are**. An inbound op arrives with a claimed
-/// author, and binding the key to that claim is a separate step —
-/// [`verify_authored_op`] is the ingest path's entry point and does both. Reach
-/// for this one only when the key is already known to be the right key.
+/// A `true` here means "whoever holds this key's secret signed these bytes".
+/// Since issue #80 that **is** the identity question — an op names its author by
+/// carrying that author's public key and by nothing else — so there is no second
+/// step to forget. [`verify_authored_op`] is still the ingest path's entry point,
+/// because it takes the raw bytes a caller actually holds and parses them
+/// safely; this one takes parsed types and is for a caller that already has
+/// them.
 ///
 /// Returns a plain `bool`. There is exactly one thing a caller may do with a
 /// bad signature — drop the op (§3.3: "the store may hold junk; the reader
@@ -675,46 +681,45 @@ pub fn verify_op_bytes(key: &PublicKey, bytes: &[u8], signature: &Signature) -> 
         .is_ok()
 }
 
-/// Verify an op that arrived over the wire, as bytes, claiming an author.
+/// Verify an op that arrived over the wire, as bytes.
 ///
-/// **This is the function the ingest path should call, and the reason it exists
-/// is the address check.** Verifying a signature under a key proves that
-/// whoever holds that key's secret signed the bytes — and *nothing about who
-/// they are*. An attacker can generate a key, sign anything with it, and attach
-/// any author address they like; only re-deriving the address from the key
-/// catches that. §5.1's record-hashed address is what makes the check possible,
-/// and this is where it gets made.
+/// **What a `true` establishes: the key this op carries signed these bytes.**
+/// The author *is* that key — an op names its author by carrying the author's
+/// public key and by nothing else — so there is no separate claimed identifier
+/// for a key to be checked against, and no step that could bind one to the
+/// other.
 ///
-/// Splitting the steps across a caller is how that check goes missing: parse
-/// key, parse signature, verify, and the one line that binds the key to the
-/// claimed identity is the easiest of the four to forget, because the other
-/// three are visibly load-bearing and this one looks like bookkeeping. CLAUDE.md
-/// puts it as "a guard is a job — keep it separate, so 'is it called
-/// everywhere?' stays a question with an answer." One function is that answer.
+/// # The parameter that used to be here, and why its guard was vacuous
+///
+/// This took an `author: &Address` and opened by refusing
+/// `key.address() != *author`. The forgery it described — sign with your own
+/// key, attach somebody else's author address — **is not expressible** once the
+/// author is the key that signs: naming a different author means carrying a
+/// different key, and the signature then fails under it.
+///
+/// It was worse than merely redundant on the path that mattered. `SignedOp::verify`
+/// computed the claimed author as `.address()` on the op's **own** key and passed
+/// both, so the comparison was a value against itself and could not fail for any
+/// input, hostile or malformed. On the probe and keystore round-trips it degraded
+/// to comparing two derivations of one key. Nothing is lost by its deletion
+/// because nothing was ever caught by it.
+///
+/// So three values are consulted and there are exactly three parameters: the
+/// op's signed bytes, the public key the op carries, and the signature.
 ///
 /// Takes raw bytes rather than parsed types because raw bytes are what a caller
 /// has: every one of these fields arrives inside an inbound op, all of them
 /// attacker-controlled. Malformed input of any shape is a `false`, never a
-/// panic.
+/// panic — which is what this function is still for, and why it stays a named
+/// function rather than collapsing into [`verify_op_bytes`]: parse key, parse
+/// signature, verify, with every parse failure a refusal.
 ///
 /// Returns a plain `bool`, for the same reason [`verify_op_bytes`] does — the
 /// only thing to do with a bad op is drop it (§3.3).
-pub fn verify_authored_op(
-    author: &Address,
-    key_bytes: &[u8],
-    op_bytes: &[u8],
-    signature_bytes: &[u8],
-) -> bool {
+pub fn verify_authored_op(key_bytes: &[u8], op_bytes: &[u8], signature_bytes: &[u8]) -> bool {
     let Ok(key) = PublicKey::from_bytes(key_bytes) else {
         return false;
     };
-    // Before checking the signature at all: does this key even belong to the
-    // author being claimed? A valid signature by the wrong key is exactly the
-    // forgery this rejects, and doing it first means an attacker cannot spend
-    // our verification time on a key that was never going to be accepted.
-    if key.address() != *author {
-        return false;
-    }
     let Ok(signature) = Signature::from_bytes(signature_bytes) else {
         return false;
     };
@@ -843,9 +848,9 @@ mod tests {
     #[test]
     fn the_wire_constants_are_pinned_to_known_answers() {
         // EVERY constant in this file is consensus-critical: change one byte of
-        // a prefix, the record count, or the HKDF salt, and every address and
-        // signature this peer produces stops matching everyone else's — with no
-        // error anywhere, because each peer is internally consistent.
+        // a prefix or of the HKDF salt, and every Stoa address and signature this
+        // peer produces stops matching everyone else's — with no error anywhere,
+        // because each peer is internally consistent.
         //
         // Every other test here is self-consistent and would pass unchanged if
         // someone edited a prefix string. This one would not. That is its whole
@@ -854,12 +859,14 @@ mod tests {
         //
         // If this fails, do NOT update the expected values to match. Work out
         // what changed and whether the network can survive it.
-        let sk = SecretKey::from_bytes(&[7u8; 32]).unwrap();
-        assert_eq!(
-            sk.public_key().address().to_hex(),
-            "f875158a79d255a6dd83307d5918298cd819eafb8218ef14cd34ebf2bc385ef4",
-            "author address derivation changed"
-        );
+        //
+        // **THREE pins, where there were four.** The fourth guarded the author
+        // address, `SHA256(AUTHOR_ADDRESS_PREFIX || 0x01 || key)`, and it is
+        // RETIRED rather than relaxed: issue #80 deleted the derivation, taking
+        // the prefix and the record's key count with it. Its absence is asserted
+        // in `no_derivation_turns_a_public_key_into_an_address`, so that a reader
+        // adding an author-side derivation finds evidence one was removed on
+        // purpose rather than finding nothing at all.
         assert_eq!(
             stoa_address(b"a genesis record").to_hex(),
             "6b1f1c28061e99c72e3340fb4fd07e8192b394e1327012e140f240a990d89cd8",
@@ -909,48 +916,65 @@ mod tests {
     }
 
     #[test]
-    fn different_keys_get_different_addresses() {
+    fn different_keys_are_different_identifiers() {
+        // What "different_keys_get_different_addresses" checked, over the value
+        // that is now the identifier. Two identities are told apart by the key
+        // itself, so this is the property that survived the address's deletion
+        // rather than a test that went with it.
         let a = a_fresh_key();
         let b = a_fresh_key();
-        assert_ne!(a.public_key().address(), b.public_key().address());
+        assert_ne!(a.public_key().to_bytes(), b.public_key().to_bytes());
+        assert_ne!(a.public_key().to_hex(), b.public_key().to_hex());
     }
 
     #[test]
-    fn an_author_address_is_not_a_bare_hash_of_the_key() {
-        // §5.1 is explicit that a RECORD is hashed, not the raw key, so that a
-        // key log can be added later without changing anybody's address. This
-        // is the test that stops someone "simplifying" that away — it is the
-        // only thing distinguishing the two, since both produce 32 plausible
-        // bytes.
-        let sk = a_fresh_key();
-        let bare = {
-            let mut h = Sha256::new();
-            h.update(sk.public_key().to_bytes());
-            let out: [u8; 32] = h.finalize().into();
-            out
-        };
-        assert_ne!(sk.public_key().address().as_bytes(), &bare);
-    }
-
-    #[test]
-    fn an_author_address_and_a_stoa_address_never_collide() {
-        // The prefixes are what separate the two derivations, so the test has
-        // to hold everything else equal: feed `stoa_address` the EXACT preimage
-        // that `address()` hashes internally (`0x01 || key`), and the only
-        // remaining difference is the prefix. Comparing two hashes of unrelated
-        // inputs would pass whether or not the prefixes differed, which is the
-        // trap here — it looks like a test and proves nothing.
+    fn no_derivation_turns_a_public_key_into_an_address() {
+        // **The retired author-address pin's replacement**, and the scenario
+        // `identity` states as "no address derivation over a public key is among
+        // them, there being no author address to pin".
         //
-        // Without this, one byte string could be valid as both an author and a
-        // Stoa address, and either could be presented as the other.
-        let sk = a_fresh_key();
-        let mut author_preimage = vec![1u8];
-        author_preimage.extend_from_slice(&sk.public_key().to_bytes());
+        // The deleted derivation was `SHA256(AUTHOR_ADDRESS_PREFIX || 0x01 ||
+        // key)`. That exact value is reconstructed here from the hardcoded prefix
+        // bytes — NOT from a constant this file still holds, because the constant
+        // is gone and a test recomputing an expectation from the thing it guards
+        // proves nothing anyway — and the assertion is that no surviving
+        // Stoa-address entry point produces it.
+        //
+        // The pinned hex is the value the deleted derivation produced for
+        // `SecretKey::from_bytes(&[7; 32])`, carried over verbatim from the
+        // retired pin. Keeping it is what makes this a witness rather than a
+        // tautology: an author address reintroduced under the old prefix would
+        // reproduce this string, and this test is where a reader learns that a
+        // derivation used to live here.
+        //
+        // **MEASURED, not asserted.** A probe reinstating the deleted derivation
+        // inline — `SHA256(b"/dialectica/1/Address/Author\0\0\0\0" || 0x01 ||
+        // key)` — reproduces this hex exactly, which was run and watched fail on
+        // an `assert_ne!`. So the string below is the retired value and not an
+        // arbitrary 32 bytes that no derivation could ever hit.
+        let sk = SecretKey::from_bytes(&[7u8; 32]).unwrap();
+        let retired_author_address =
+            "f875158a79d255a6dd83307d5918298cd819eafb8218ef14cd34ebf2bc385ef4";
+
+        // The one surviving address derivation, handed the key's own bytes and
+        // then the deleted preimage exactly (`0x01 || key`). Neither reproduces
+        // the retired value, because `stoa_address` carries a different prefix.
         assert_ne!(
-            sk.public_key().address(),
-            stoa_address(&author_preimage),
-            "author and Stoa derivations must be domain-separated"
+            stoa_address(&sk.public_key().to_bytes()).to_hex(),
+            retired_author_address
         );
+        let mut retired_preimage = vec![1u8];
+        retired_preimage.extend_from_slice(&sk.public_key().to_bytes());
+        assert_ne!(
+            stoa_address(&retired_preimage).to_hex(),
+            retired_author_address,
+            "a Stoa address must not reproduce the retired author-address derivation"
+        );
+
+        // And the key's own hex — the value that IS the author identifier now —
+        // is not that address either, which is what makes the deletion a change
+        // of identifier rather than a rename of one.
+        assert_ne!(sk.public_key().to_hex(), retired_author_address);
     }
 
     #[test]
@@ -962,8 +986,7 @@ mod tests {
 
     #[test]
     fn an_address_survives_a_hex_round_trip() {
-        let sk = a_fresh_key();
-        let addr = sk.public_key().address();
+        let addr = stoa_address(b"a genesis record");
         assert_eq!(Address::from_hex(&addr.to_hex()).unwrap(), addr);
     }
 
@@ -1037,12 +1060,7 @@ mod tests {
         // rather than a panic.
         let sk = a_fresh_key();
         let sig = sign_op_bytes(&sk, b"a post");
-        assert!(!verify_authored_op(
-            &sk.public_key().address(),
-            &not_a_point,
-            b"a post",
-            &sig.to_bytes()
-        ));
+        assert!(!verify_authored_op(&not_a_point, b"a post", &sig.to_bytes()));
     }
 
     #[test]
@@ -1249,11 +1267,13 @@ mod tests {
 
     #[test]
     fn an_authored_op_verifies_when_the_key_matches_the_claimed_author() {
+        // The carried key IS the author it claims, so "matches" holds by
+        // construction rather than by a comparison. What this checks is that an
+        // honestly signed op verifies.
         let sk = a_fresh_key();
         let pk = sk.public_key();
         let sig = sign_op_bytes(&sk, b"a post");
         assert!(verify_authored_op(
-            &pk.address(),
             &pk.to_bytes(),
             b"a post",
             &sig.to_bytes()
@@ -1262,25 +1282,50 @@ mod tests {
 
     #[test]
     fn a_validly_signed_op_under_the_wrong_key_is_still_rejected() {
-        // THE forgery this function exists to stop, and the one a caller doing
-        // the steps by hand would miss: the signature is perfectly valid, the
-        // bytes are untampered, and the op is still not from the author it
-        // claims. Only re-deriving the address from the key catches it.
-        let victim = a_fresh_key();
+        // Substituting the carried key IS claiming a different author, so this
+        // is the forgery case — and the **signature check** is what refuses it.
+        //
+        // That is the mechanism, stated correctly. Before issue #80 this test's
+        // comment credited an address re-derivation; it never could have been
+        // that on any real path, because the only caller computed the claimed
+        // author by calling `.address()` on the op's own key and so compared a
+        // value to itself.
         let attacker = a_fresh_key();
+        let victim = a_fresh_key();
         let sig = sign_op_bytes(&attacker, b"a post");
 
-        // The attacker signs with their own key but claims the victim's address.
+        // The op presents the victim's key over the attacker's signature.
         assert!(!verify_authored_op(
-            &victim.public_key().address(),
-            &attacker.public_key().to_bytes(),
+            &victim.public_key().to_bytes(),
             b"a post",
             &sig.to_bytes()
         ));
 
-        // And the signature itself is genuinely valid — so a caller who checked
-        // only the signature would have accepted this.
+        // And the signature itself is genuinely valid under the key that made
+        // it — which is what keeps this honest. Without this clause a build that
+        // refused every op would pass.
         assert!(verify_op_bytes(&attacker.public_key(), b"a post", &sig));
+    }
+
+    #[test]
+    fn verification_consults_the_key_the_op_carries_and_nothing_beside_it() {
+        // The `identity` scenario "Verification takes no author identifier
+        // beside the key". What a test can check is the arity: the three values
+        // consulted are the signed bytes, the carried key and the signature, and
+        // there is no fourth parameter for an author identifier to arrive in.
+        //
+        // Asserted as a typed function pointer rather than by calling it, so
+        // this fails to COMPILE if a parameter is reintroduced — which is the
+        // failure a runtime assertion could not produce.
+        let takes_exactly_three: fn(&[u8], &[u8], &[u8]) -> bool = verify_authored_op;
+
+        let sk = a_fresh_key();
+        let sig = sign_op_bytes(&sk, b"a post");
+        assert!(takes_exactly_three(
+            &sk.public_key().to_bytes(),
+            b"a post",
+            &sig.to_bytes()
+        ));
     }
 
     #[test]
@@ -1289,7 +1334,6 @@ mod tests {
         let pk = sk.public_key();
         let sig = sign_op_bytes(&sk, b"a post");
         assert!(!verify_authored_op(
-            &pk.address(),
             &pk.to_bytes(),
             b"a different post",
             &sig.to_bytes()
@@ -1305,23 +1349,12 @@ mod tests {
         let sk = a_fresh_key();
         let pk = sk.public_key();
         let sig = sign_op_bytes(&sk, b"a post");
-        let addr = pk.address();
 
         for bad_key in [vec![], vec![0u8; 31], vec![0u8; 33], vec![9u8; 64]] {
-            assert!(!verify_authored_op(
-                &addr,
-                &bad_key,
-                b"a post",
-                &sig.to_bytes()
-            ));
+            assert!(!verify_authored_op(&bad_key, b"a post", &sig.to_bytes()));
         }
         for bad_sig in [vec![], vec![0u8; 63], vec![0u8; 65], vec![9u8; 32]] {
-            assert!(!verify_authored_op(
-                &addr,
-                &pk.to_bytes(),
-                b"a post",
-                &bad_sig
-            ));
+            assert!(!verify_authored_op(&pk.to_bytes(), b"a post", &bad_sig));
         }
     }
 
@@ -1399,11 +1432,9 @@ mod tests {
         let key = derive_stoa_key_at_path(&[7u8; 32], &stoa_address(b"a genesis record"), 3);
         let sig = sign_op_bytes(&key, b"a post");
         assert!(verify_op_bytes(&key.public_key(), b"a post", &sig));
-        // Through the wire-level entry point too, which is where the address
-        // binding lives: a path-derived key must be attributable to its own
-        // address like any other.
+        // Through the wire-level entry point too, which is what the ingest path
+        // calls: a path-derived key must authenticate its own op like any other.
         assert!(verify_authored_op(
-            &key.public_key().address(),
             &key.public_key().to_bytes(),
             b"a post",
             &sig.to_bytes()
