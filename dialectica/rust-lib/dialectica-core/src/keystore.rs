@@ -576,10 +576,7 @@ impl std::fmt::Display for KeystoreError {
     /// else would mean maintaining it twice and watching the two drift.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            KeystoreError::NotFound => write!(
-                f,
-                "no keystore found; create one before posting"
-            ),
+            KeystoreError::NotFound => write!(f, "no keystore found; create one before posting"),
             KeystoreError::PermissionsTooOpen { mode } => write!(
                 f,
                 "keystore permissions are too open (mode {mode:04o}); \
@@ -597,10 +594,9 @@ impl std::fmt::Display for KeystoreError {
                 "keystore could not be read: {e}; check the path and its \
                  containing directory"
             ),
-            KeystoreError::NotAKeystore => write!(
-                f,
-                "that file is not a dialectica keystore; check the path"
-            ),
+            KeystoreError::NotAKeystore => {
+                write!(f, "that file is not a dialectica keystore; check the path")
+            }
             KeystoreError::UnknownVersion(v) => write!(
                 f,
                 "keystore format version {v} is newer than this build understands; \
@@ -611,10 +607,9 @@ impl std::fmt::Display for KeystoreError {
                 "keystore uses protection scheme {p}, which this build does not \
                  understand; upgrade dialectica"
             ),
-            KeystoreError::Truncated => write!(
-                f,
-                "keystore file is truncated; restore it from a backup"
-            ),
+            KeystoreError::Truncated => {
+                write!(f, "keystore file is truncated; restore it from a backup")
+            }
             KeystoreError::TrailingBytes => write!(
                 f,
                 "keystore file has trailing bytes; restore it from a backup"
@@ -970,7 +965,12 @@ impl Keystore {
                 // tag. Without this an attacker could swap the recorded salt or
                 // downgrade the protection byte and the tag would still verify
                 // over the ciphertext alone.
-                let aad = aad_bytes(VERSION_1, Protection::Argon2idXChaCha20Poly1305, &salt, &nonce);
+                let aad = aad_bytes(
+                    VERSION_1,
+                    Protection::Argon2idXChaCha20Poly1305,
+                    &salt,
+                    &nonce,
+                );
                 let sealed = cipher
                     .encrypt(
                         &XNonce::from(nonce),
@@ -1234,7 +1234,9 @@ fn read_checked(path: &Path) -> Result<Vec<u8>, KeystoreError> {
     };
 
     // On the HANDLE, not the path. This is the whole point of the function.
-    let meta = file.metadata().map_err(|e| KeystoreError::Io(e.to_string()))?;
+    let meta = file
+        .metadata()
+        .map_err(|e| KeystoreError::Io(e.to_string()))?;
     check_mode(&meta)?;
     // And the directory around it. A group-writable parent means anyone in
     // that group can replace the keystore wholesale, or plant a symlink for
@@ -1607,9 +1609,7 @@ mod tests {
         let dir = TempDir::new("restart");
         let stoa = crate::identity::stoa_address(b"a genesis record");
         let before = a_keystore(7).stoa_public_key(&stoa).to_hex();
-        a_keystore(7)
-            .create(&dir.path(), &a_pass("pw"))
-            .unwrap();
+        a_keystore(7).create(&dir.path(), &a_pass("pw")).unwrap();
         let after = Keystore::open(&dir.path(), &a_pass("pw"))
             .unwrap()
             .stoa_public_key(&stoa)
@@ -1665,7 +1665,9 @@ mod tests {
         // Pinned anyway because obfuscation here would be the worse outcome:
         // it reads as protection and is none, which is exactly the LEZ failure
         // this change is measured against.
-        let bytes = a_keystore(0xAB).to_file_bytes(&Unlock::Unencrypted).unwrap();
+        let bytes = a_keystore(0xAB)
+            .to_file_bytes(&Unlock::Unencrypted)
+            .unwrap();
         assert!(bytes.windows(32).any(|w| w == [0xABu8; 32]));
     }
 
@@ -1767,7 +1769,12 @@ mod tests {
         // Hardcoded bytes, not a comparison against a recomputation.
         let salt = [0xAAu8; SALT_LEN];
         let nonce = [0xBBu8; NONCE_LEN];
-        let aad = aad_bytes(VERSION_1, Protection::Argon2idXChaCha20Poly1305, &salt, &nonce);
+        let aad = aad_bytes(
+            VERSION_1,
+            Protection::Argon2idXChaCha20Poly1305,
+            &salt,
+            &nonce,
+        );
         assert_eq!(aad.len(), 2 + SALT_LEN + NONCE_LEN, "the AAD is not empty");
         assert_eq!(aad[0], 1, "the version must be authenticated");
         assert_eq!(aad[1], 1, "the protection scheme must be authenticated");
@@ -1873,7 +1880,9 @@ mod tests {
         // implementation what it wrote and agreeing is the defect this
         // project has shipped three times. If this fails, the format changed
         // and the version discriminant must change with it.
-        let plain = a_keystore(0x11).to_file_bytes(&Unlock::Unencrypted).unwrap();
+        let plain = a_keystore(0x11)
+            .to_file_bytes(&Unlock::Unencrypted)
+            .unwrap();
         assert_eq!(plain[0], 0xD4, "magic");
         assert_eq!(plain[1], 1, "version");
         assert_eq!(plain[2], 0, "protection: none");
@@ -1900,7 +1909,10 @@ mod tests {
     #[test]
     fn a_file_that_is_not_a_keystore_says_so_rather_than_reporting_corruption() {
         assert_eq!(
-            err_of(Keystore::from_file_bytes(b"\x00\x01\x00", &Unlock::Unencrypted)),
+            err_of(Keystore::from_file_bytes(
+                b"\x00\x01\x00",
+                &Unlock::Unencrypted
+            )),
             KeystoreError::NotAKeystore
         );
         // The commonest real corruption: a zero-filled block. It must fail on
@@ -2031,7 +2043,7 @@ mod tests {
             // is INSIDE every individual ceiling and outside the work bound —
             // the corner that cost 302 seconds when only the knobs were
             // bounded.
-            (262_144, 4, 4), // 4x memory and 4/3x iterations = 5.3x work
+            (262_144, 4, 4),  // 4x memory and 4/3x iterations = 5.3x work
             (131_072, 12, 4), // 2x memory, 4x iterations = 8x work
             (262_144, 12, 8), // every knob at its ceiling = 16x work
         ] {
@@ -2069,7 +2081,11 @@ mod tests {
         let started = std::time::Instant::now();
         for (m, t, p) in [
             (u32::MAX, u32::MAX, u32::MAX),
-            (MAX_ACCEPTED_M_COST_KIB, MAX_ACCEPTED_T_COST, MAX_ACCEPTED_P_COST),
+            (
+                MAX_ACCEPTED_M_COST_KIB,
+                MAX_ACCEPTED_T_COST,
+                MAX_ACCEPTED_P_COST,
+            ),
             (262_144, 12, 8),
         ] {
             assert_eq!(
@@ -2365,7 +2381,11 @@ mod tests {
         let a = a_keystore(7).to_file_bytes(&a_pass("pw")).unwrap();
         let b = a_keystore(7).to_file_bytes(&a_pass("pw")).unwrap();
         // The header is fixed by design; everything after it must differ.
-        assert_eq!(&a[..3 + 12], &b[..3 + 12], "header and parameters are fixed");
+        assert_eq!(
+            &a[..3 + 12],
+            &b[..3 + 12],
+            "header and parameters are fixed"
+        );
         assert_ne!(
             &a[3 + 12..],
             &b[3 + 12..],
@@ -2451,12 +2471,23 @@ mod tests {
     fn a_keystore_readable_by_others_is_refused_before_it_is_read() {
         use std::os::unix::fs::PermissionsExt;
         let dir = TempDir::new("perms");
-        a_keystore(7).create(&dir.path(), &Unlock::Unencrypted).unwrap();
+        a_keystore(7)
+            .create(&dir.path(), &Unlock::Unencrypted)
+            .unwrap();
 
         // Every mode that grants any access beyond the owner. A check written
         // as `mode == 0o600` would pass this; one written as `mode & 0o044`
         // would miss the execute and the group-write bits.
-        for mode in [0o604, 0o640, 0o644, 0o660, 0o666, 0o700 | 0o007, 0o601, 0o610] {
+        for mode in [
+            0o604,
+            0o640,
+            0o644,
+            0o660,
+            0o666,
+            0o700 | 0o007,
+            0o601,
+            0o610,
+        ] {
             std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(mode)).unwrap();
             assert_eq!(
                 err_of(Keystore::open(&dir.path(), &Unlock::Unencrypted)),
@@ -2471,7 +2502,9 @@ mod tests {
     fn an_owner_only_keystore_passes_the_permission_check() {
         use std::os::unix::fs::PermissionsExt;
         let dir = TempDir::new("perms-ok");
-        a_keystore(7).create(&dir.path(), &Unlock::Unencrypted).unwrap();
+        a_keystore(7)
+            .create(&dir.path(), &Unlock::Unencrypted)
+            .unwrap();
         for mode in [0o600, 0o400, 0o700] {
             std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(mode)).unwrap();
             assert!(
@@ -2494,11 +2527,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let dir = TempDir::new("write-mode");
         a_keystore(7).create(&dir.path(), &a_pass("pw")).unwrap();
-        let mode = std::fs::metadata(dir.path())
-            .unwrap()
-            .permissions()
-            .mode()
-            & 0o777;
+        let mode = std::fs::metadata(dir.path()).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600, "a fresh keystore must be owner-only");
     }
 
@@ -2596,7 +2625,9 @@ mod tests {
         // The root secret is not recoverable from anywhere else, so a silent
         // replacement destroys every identity the user has and says nothing.
         let dir = TempDir::new("no-clobber");
-        a_keystore(7).create(&dir.path(), &Unlock::Unencrypted).unwrap();
+        a_keystore(7)
+            .create(&dir.path(), &Unlock::Unencrypted)
+            .unwrap();
         assert_eq!(
             a_keystore(9)
                 .create(&dir.path(), &Unlock::Unencrypted)
@@ -2984,10 +3015,7 @@ mod tests {
         // opening with that passphrase spelled out by hand. A helper that returned
         // the right VARIANT with the wrong bytes would pass a `matches!` alone.
         unsafe { std::env::set_var(PASSPHRASE_ENV, "from-the-environment") };
-        assert!(matches!(
-            protection_from_env(),
-            Unlock::Passphrase(_)
-        ));
+        assert!(matches!(protection_from_env(), Unlock::Passphrase(_)));
         let created = TempDir::new("env-protection");
         a_keystore(7)
             .create(created.path().as_path(), &protection_from_env())
@@ -2997,11 +3025,7 @@ mod tests {
             "the file must record itself as encrypted"
         );
         assert!(
-            Keystore::open(
-                created.path().as_path(),
-                &a_pass("from-the-environment")
-            )
-            .is_ok(),
+            Keystore::open(created.path().as_path(), &a_pass("from-the-environment")).is_ok(),
             "the passphrase that reached the file is not the one that was set"
         );
         // And a different one does not open it, or the assertion above would hold

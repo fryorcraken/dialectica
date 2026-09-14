@@ -457,11 +457,7 @@ mod tests {
         // bytes before the title spell its length.
         let bytes = g.canonical_bytes().unwrap();
         assert_eq!(
-            u32::from_be_bytes(
-                bytes[TITLE_LEN_AT..TITLE_LEN_AT + 4]
-                    .try_into()
-                    .unwrap()
-            ),
+            u32::from_be_bytes(bytes[TITLE_LEN_AT..TITLE_LEN_AT + 4].try_into().unwrap()),
             2,
             "the title's length must be encoded ahead of it"
         );
@@ -487,10 +483,7 @@ mod tests {
         for n in 0..bytes.len() {
             let err = Genesis::decode(&bytes[..n]).unwrap_err();
             assert!(
-                matches!(
-                    err,
-                    GenesisError::Truncated | GenesisError::LengthMismatch
-                ),
+                matches!(err, GenesisError::Truncated | GenesisError::LengthMismatch),
                 "truncating to {n} bytes gave {err:?}"
             );
         }
@@ -772,7 +765,10 @@ mod tests {
         // is how a token-gated Stoa becomes world-postable on an old client.
         let mut bytes = a_record().canonical_bytes().unwrap();
         bytes[POLICY_AT] = 99;
-        assert_eq!(Genesis::decode(&bytes), Err(GenesisError::UnknownPolicy(99)));
+        assert_eq!(
+            Genesis::decode(&bytes),
+            Err(GenesisError::UnknownPolicy(99))
+        );
     }
 
     #[test]
@@ -782,7 +778,10 @@ mod tests {
         // "this data is corrupt".
         let mut bytes = a_record().canonical_bytes().unwrap();
         bytes[0] = 99;
-        assert_eq!(Genesis::decode(&bytes), Err(GenesisError::UnknownVersion(99)));
+        assert_eq!(
+            Genesis::decode(&bytes),
+            Err(GenesisError::UnknownVersion(99))
+        );
     }
 
     #[test]
@@ -1089,4 +1088,3 @@ mod tests {
         }
     }
 }
-
