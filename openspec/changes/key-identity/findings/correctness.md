@@ -11,7 +11,7 @@ against those baselines.
 
 ## Findings
 
-- [ ] **`tester`** — `dialectica/rust-lib/dialectica-core/src/names.rs:230-234` —
+- [x] **`tester`** — `dialectica/rust-lib/dialectica-core/src/names.rs:230-234` —
       `Display for DisplayName` can be replaced by a no-op and nothing fails
       **Scenario:** replace the body of `fmt` with `Ok(())`, so that
       `format!("{name}")` and `name.to_string()` both yield the empty string
@@ -30,6 +30,32 @@ against those baselines.
       it becomes live the moment the `key-identity-sweep` piece wires a renderer
       that uses `{}`. One assertion that `name.to_string() == name.render()`
       closes it.
+
+      **Fixed.** `displaying_a_name_gives_the_same_text_as_rendering_it`, over 29
+      seeds, asserting both routes rather than the one you name: `to_string()`
+      **and** `format!("{name}")`. They are separate assertions because an impl
+      could in principle satisfy one and not the other, and `{}` is the one a
+      renderer is likelier to write — which is the call site your severity
+      argument is about.
+
+      It also asserts the fixture renders something non-empty first. Without that,
+      your exact mutation would be caught, but a hypothetical one that emptied
+      *both* `render()` and `fmt` would satisfy `to_string() == render()` with two
+      empty strings — the two-explanations-one-answer shape this repo keeps
+      finding, and the reason I did not write the single equality on its own.
+
+      **Proven to fail before the fix**, in your mutation rather than a proxy for
+      it: with `fmt`'s body replaced by `Ok(())` (and the parameter renamed to
+      `_f`), it fails at the first seed —
+      `left: "", right: "expandible hymnos of limyra"`. Restored; the suite goes
+      962 → **963 passing, 0 failed**.
+
+      Your latency point is recorded in the test's comment rather than only here:
+      it is latent because no production caller reaches the derivation at all, it
+      goes live with `key-identity-sweep`, and that is exactly the wrong moment to
+      discover it. The comment also names `cargo mutants`' result (1 missed of 26)
+      as the provenance, so the next reader knows this test exists because a
+      mutation found a hole rather than because someone liked the symmetry.
 
 ## What was measured and found clean
 

@@ -10,7 +10,7 @@ claim, and one asymmetry the #80 split leaves in the tree.
 
 ## Findings
 
-- [ ] **`spec-writer`** — `openspec/changes/key-identity/specs/generated-names/spec.md:378-475` —
+- [x] **`spec-writer`** — `openspec/changes/key-identity/specs/generated-names/spec.md:378-475` —
       the requirement that forces the QML duplicate exists in no spec
       **What is wrong:** the disjointness requirement is written
       implementation-neutral (correct spec hygiene), so nothing in `openspec/specs/`
@@ -35,7 +35,43 @@ claim, and one asymmetry the #80 split leaves in the tree.
       that the name's window is reachable there, so deleting the third probe fails
       a requirement rather than only shrinking a test file.
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/names.rs:349` (and
+      **Fixed, in the shape you suggested** — and kept implementation-neutral, so
+      the spec hygiene you credited is not traded away to close this. The
+      requirement now carries a normative paragraph obliging all three channels to
+      be **measurable together**, each **by varying key bytes and observing its
+      output rather than by restating its arithmetic**, which names no component,
+      no language and no file; and the scenario *All three channels are measurable
+      in one place*, whose THEN is that the name's window is reachable there "so
+      removing whatever makes it reachable fails this requirement rather than only
+      shrinking a test file". It says why it is a requirement and not an
+      implementation note: it is the only thing making the accepted duplication
+      safe rather than merely accepted.
+
+      **The test that fails without it.**
+      `test_all_three_channels_are_reachable_from_this_file` pins the channel
+      count at three, over a single shared `_allChannels()` definition the pairwise
+      sweep and the unallocated-byte test now both draw from — so the three cannot
+      drift into checking different channel sets from each other.
+
+      Your deletion scenario, run: dropping the name channel from `_allChannels()`
+      leaves **17 of 18 tests green**, including the pairwise sweep, the
+      unallocated-byte test and every probe test. Only the count test fails
+      (`Actual: 2, Expected: 3`). That reproduces your finding exactly — the
+      collapse is silent to everything that was there before — and is the
+      measurement for why the count is asserted separately rather than trusted to
+      the sweep. Restored; 18/18 green.
+
+      The count is deliberately **not** a restatement of *which* channels they
+      are: `test_the_byte_probes_find_the_windows_they_should` already establishes
+      that by measurement, and duplicating it here would be the restatement trap
+      one level out. This asserts only that the gate still reaches as many
+      channels as the requirement names.
+
+      `design.md` records the same thing, with your point about it archiving as
+      the stated reason the obligation was moved into the spec rather than left
+      there.
+
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/names.rs:349` (and
       the same claim at `:162-163`) — the doc claims a compile error where the
       mechanism is a runtime panic
       **What is wrong:** "widening a draw past it does not compile" and "moving the
@@ -55,7 +91,36 @@ claim, and one asymmetry the #80 split leaves in the tree.
       this will not notice if those two tests are ever weakened. State what actually
       holds it.
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/identity.rs:89-101,
+      **Fixed**, and I re-ran both mutations rather than taking them — this repo's
+      `run the claim, don't read it` note cuts both ways, and a review claim is a
+      claim. Both of yours reproduce exactly:
+      - `word(4)` → `word(5)` **compiles**, and panics at `names.rs:362`:
+        `index out of bounds: the len is 6 but the index is 6`. Caught by
+        `the_name_scheme_is_pinned_to_known_answers`, not by rustc.
+      - `name_key_bytes()` `18..24` → `18..25` **compiles**, and fails 2 of 38
+        `names::` tests at runtime —
+        `the_spec_allocation_this_crate_restates_is_internally_consistent`
+        (`left: 26, right: 25`) and
+        `the_restated_channels_are_the_spec_s_byte_sets_and_not_merely_disjoint_ones`
+        (`left: [18,…,23,24]`).
+
+      Both sites now separate the two claims rather than dropping the first, which
+      is your point about it being architectural rather than a typo: the
+      *structural* half is real and is stated as such — `NAME_BYTE_COUNT` is
+      derived from the range so the two constants cannot disagree, and the
+      derivation reads one slice so there is no second copy of the window — while
+      the *enforcement* is named as test-caught, with the two tests listed by name
+      and the note that weakening them weakens this.
+
+      One further thing the second mutation turned up, recorded because it is
+      counter-intuitive: widening to `18..25` does **not** fail
+      `the_name_reads_exactly_the_bytes_the_spec_allocates_to_it`. Three draws of
+      two bytes read 18..23 whatever the range says, so byte 24 is inside the
+      window and genuinely unread, and the probe correctly reports it so. The
+      window and what is read are two different facts, and only the restatement
+      tests see the first.
+
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/identity.rs:89-101,
       254-272` — the only file the sweep must change carries no forward pointer
       **What is wrong:** every other file touched by this piece marks the
       intermediate state explicitly — `Identicon.qml:90-101` has a paragraph on why
@@ -75,6 +140,31 @@ claim, and one asymmetry the #80 split leaves in the tree.
       is scheduled for deletion.
       **Severity:** medium — no behaviour is wrong today; it is the one place the
       split's intermediate state is invisible at the code that embodies it.
+
+      **Fixed**, at both sites you named, and **comment-only** — `identity.rs`'s
+      executable body is unchanged, so it stays byte-identical to `origin/main`
+      except for doc comments. That was deliberate: the address removal belongs to
+      the sweep, and `address()` still exists.
+
+      - `Address`'s doc comment ("an author's, or a Stoa's") now says that half of
+        that sentence is scheduled for deletion, names `key-identity` as the
+        change that states the allocation and `key-identity-sweep` as the one that
+        performs the removal, and gives the reason nothing changes here yet —
+        renaming here and rewiring call sites there would split one rename across
+        two pieces and leave the tree non-compiling in between, which is the
+        argument `Identicon.qml`'s `address` property already carries. It closes
+        on **Stoa addresses are untouched**, so a reader does not over-read the
+        deletion.
+      - `PublicKey::address()` now opens with the deletion notice and **"Do not
+        add a caller"**, before the existing prose — which is left intact but
+        prefaced with "Everything below describes the scheme as it stands and is
+        why it was built this way, not an argument for keeping it", since that
+        prose reads as a defence of the design otherwise.
+
+      No test covers a doc comment. What is verifiable is the measurement that
+      motivated the box: `grep -rn "key-identity-sweep\|#80"` over
+      `dialectica-core/src/` and `dialectica-ui/src/` now returns `identity.rs`
+      alongside the five files you found, which is what the box asked for.
 
 ## What was measured
 

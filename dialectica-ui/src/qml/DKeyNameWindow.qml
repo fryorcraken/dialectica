@@ -48,29 +48,34 @@ QtObject {
     // strings reach this, so it must not assume a well-formed key. Identical in
     // shape to Identicon's `_body` for the same reason.
     //
-    // NO SPEC: core REFUSES malformed key material where this pads it, and
-    // nothing in `openspec/specs/` says which is right for a component that
-    // computes indices rather than a name. The `generated-names` requirement
-    // *Malformed key material is refused rather than crashed on* governs the
-    // derivation — `names.rs` returns `NameError::NotAValidPublicKey` for the
-    // same inputs this accepts (`""`, `"k:"`, `"k:0"`, `"not-a-key"`) — and it
-    // is silent about this component, which the spec does not describe at all.
+    // **THIS DIVERGES FROM CORE DELIBERATELY, and the spec says which way.**
     //
-    // Pad-and-derive was chosen over the alternatives because this type has no
-    // way to express a refusal: `adjectiveIndex()` returns a number, and the
-    // options were `NaN` (which renders nothing and would make the probe's
-    // measurement meaningless rather than failing loudly), `-1` (a sentinel
-    // every caller must remember to check), or a separate validity flag (a
-    // second thing for a probe to get wrong). Padding keeps the one job — three
-    // in-range indices, always — and `test_a_malformed_key_still_yields_indices
-    // _in_range` pins it.
+    // Core REFUSES malformed key material where this pads it: `names.rs` returns
+    // `NameError::NotAValidPublicKey` for `""`, `"k:"`, `"k:0"` and `"not-a-key"`,
+    // where this returns three in-range indices. That looks like one of the two
+    // being wrong, and it was unrecorded until review asked which.
     //
-    // The divergence is safe only while this component has no production
-    // consumer, which is by design: it exists to be probed and must never become
-    // a renderer. **If that changes, this is the decision to revisit** — a peer
-    // -supplied malformed key would then yield three in-range indices, which is
-    // a name attributable to nobody rendered as one attributable to somebody,
-    // the failure the live requirement names in as many words.
+    // The answer is that the two rules apply to different things. *Malformed key
+    // material is refused rather than crashed on* forbids a name derived from
+    // truncated or padded input because such a name "would render as an ordinary
+    // participant" — a hazard that exists only where a name is RENDERED. This
+    // component renders nothing; it reports which bytes are read. So *The three
+    // channels read pairwise disjoint bytes of the public key* requires the
+    // opposite of it: accept any input and report in-range values, because a
+    // measurement returning a non-value would report the channel as reading no
+    // byte, and "disjoint" is satisfied by a measurement that found nothing.
+    //
+    // Anything that renders a name refuses malformed input; the thing that only
+    // measures accepts it. **Giving this component a rendering consumer moves it
+    // under the first rule and obliges it to refuse** — which is one more reason
+    // it must never become a renderer.
+    //
+    // The alternatives, since a refusal has no representation in a function
+    // returning a number: `NaN` (renders nothing and makes the measurement
+    // meaningless rather than failing loudly), `-1` (a sentinel every caller must
+    // remember to check), a separate validity flag (a second thing for a probe to
+    // get wrong). Padding keeps the one job: three in-range indices, always.
+    // `test_a_malformed_key_still_yields_indices_in_range` pins it.
     readonly property string _body: {
         var a = key.replace(/^[a-z]+:/i, "").replace(/[^0-9a-f]/gi, "").toLowerCase();
         return (a + "00000000000000000000000000000000000000000000000000000000000000000").slice(0, 64);

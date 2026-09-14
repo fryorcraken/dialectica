@@ -86,7 +86,7 @@ survives, in both languages at once, and is the first box below.
       gated on a later value passed unseen. The loop now runs to the end of the
       domain and the comment says why it must.
 
-- [ ] **`spec-writer`** — delta spec, *A name is not a credential* /
+- [x] **`spec-writer`** — delta spec, *A name is not a credential* /
       live spec, *Malformed key material is refused rather than crashed on* —
       **the two channels contradict each other on malformed key material, and a
       test pins the contradiction.** The live requirement, which the delta does
@@ -110,7 +110,68 @@ survives, in both languages at once, and is the first box below.
       the spec must say whether the index-only component is exempt from the
       no-padding rule, and say why, or the component must refuse.
 
-- [ ] **`spec-writer`** — delta spec, *The three channels read pairwise disjoint
+      **Fixed by the spec saying, and saying why** — the first of your two
+      options. The behaviour does not change; what changes is that it is now
+      required rather than merely unopposed.
+
+      The distinction the spec now draws is that **the two rules apply to
+      different things**, which is why this is an exemption with a reason rather
+      than a carve-out. *Malformed key material is refused rather than crashed on*
+      gives its own reason for forbidding a padded derivation: such a name "would
+      render as an ordinary participant, which is a name attributable to nobody
+      presented as one attributable to somebody". That hazard exists **only where
+      a name is rendered**. So the requirement is scoped by its own stated
+      rationale, not narrowed to suit the code.
+
+      The measurement apparatus is then obliged the *opposite* way, and for a
+      reason internal to this change rather than for convenience: a measurement
+      that returned a non-value for malformed input would report that channel as
+      reading no byte, and "disjoint" is satisfied by a measurement that found
+      nothing — which is the failure the non-emptiness scenario already exists to
+      forbid. Refusing would make the gate weaker, not safer.
+
+      Added to *The three channels read pairwise disjoint bytes of the public
+      key* (which is where the apparatus is described):
+      - normative text that whatever makes the name's window reachable **SHALL
+        NOT render a name and SHALL have no consumer other than the
+        measurement**, then the scoping argument above, closing on the rule in
+        one line: *"anything that renders a name refuses malformed input; the
+        thing that only measures accepts it"*;
+      - the explicit transition, which is the part that protects your scenario:
+        **a change that gives the apparatus a rendering consumer moves it under
+        the first rule and SHALL make it refuse**;
+      - two scenarios, *The measurement apparatus renders no name* and *The
+        measurement apparatus accepts malformed input*.
+
+      **The test that fails without it**, and this is the one that answers your
+      scenario directly rather than the current behaviour:
+      `test_the_name_window_exposes_no_name_only_draws` asserts the component's
+      surface is three numeric draws and that eleven rendering-shaped members
+      (`render`, `name`, `text`, `words`, `adjective`, the three wordlists, …)
+      are all `undefined`. Measured: adding a one-line
+      `function render() { return "adjective noun of place"; }` to
+      `DKeyNameWindow.qml` fails it, naming `render`; everything else in the file
+      stays green. Reverted; 19/19.
+
+      That test is deliberate about what it cannot do, and says so in its comment
+      rather than letting the name imply coverage: **nothing inside
+      `qmltestrunner` can see the rest of the tree**, so the "no consumer other
+      than the measurement" half is held by the spec requirement and the
+      component's header, not by this test. Measured separately and recorded in
+      the comment: `grep -rl DKeyNameWindow dialectica-ui/` returns `qmldir` and
+      `tst_identicon.qml`, nothing else.
+
+      `test_a_malformed_key_still_yields_indices_in_range` keeps its behaviour and
+      gains the reasoning in its comment, so a reader meeting the two languages
+      disagreeing finds the answer at the test that pins the disagreement. The
+      `DKeyNameWindow.qml` comment carries the same, opening on **"this diverges
+      from core deliberately, and the spec says which way"** — it was drafted as a
+      `// NO SPEC:` marker (which is what the design reviewer asked for) and
+      became a spec citation once the spec answered; leaving a `NO SPEC:` on
+      behaviour a requirement now mandates would have been the more misleading of
+      the two.
+
+- [x] **`spec-writer`** — delta spec, *The three channels read pairwise disjoint
       bytes*, scenario "An overlap is detected rather than passed over" —
       **this scenario asserts a property of the test suite, not of the system,
       and no test can hold it.** Its THEN is "the disjointness check fails and
@@ -134,7 +195,59 @@ survives, in both languages at once, and is the first box below.
       `dialectica-ui/tests/tst_check_qml_names.py`, which pins a gate in both
       directions and is the precedent this repo already has for exactly this.
 
-- [ ] **`spec-writer`** — delta spec, *The scheme and its wordlists are frozen*,
+      **Fixed for the scenario you name; the other two are a partial rejection,
+      argued below.**
+
+      **"An overlap is detected rather than passed over" is deleted**, and you are
+      right about why: its THEN was *"the disjointness check fails and names the
+      overlapping byte"*, a statement about what a **check** does under a
+      mutation, and a suite cannot assert that one of its own tests fails. Worse,
+      as you say, it read as covered while the class of overlap it described had
+      already escaped — which the first box in this file measures.
+
+      Replacing it is *A channel reading an unallocated byte is detected at every
+      value*, whose THEN is a statement about **the system**: "the measured byte
+      set for that channel includes the unallocated byte", explicitly "including
+      when it depends on that byte only for a single one of the byte's 256
+      values". That is testable, and it is the obligation the old scenario was
+      reaching for — the measurement must be *complete*, which is a property of
+      the measurement rather than of the suite's reaction to a mutation. It is
+      what makes the first box's fix a requirement rather than a good idea.
+
+      Also added, from the architecture reviewer's box: *All three channels are
+      measurable in one place*, which likewise states a property of the system
+      (all three sets obtained in one place, the name's window reachable there)
+      rather than of a check, and is pinned by
+      `test_all_three_channels_are_reachable_from_this_file`.
+
+      **On "A shifted byte window is visible" and "Changing which bytes a slot
+      reads renames every identity": I disagree that they share the shape, and I
+      checked rather than assumed.** Their THENs are *"at least one pinned case no
+      longer matches its written-down name"* and *"the names differ from those the
+      same keys had before"* — both statements about **derived output**, not about
+      what a check does. Both are testable without asserting a test fails, and
+      both have tests:
+      - `removing_a_word_renames_identities_that_drew_past_it` (`names.rs:2038`)
+        builds the shortened list as a `Vec` and does the reindexing by hand, so
+        it *exhibits* the renaming rather than asserting a removal happened. Its
+        own comment draws exactly this distinction.
+      - The shifted-window scenario is held by its two preconditions, which is the
+        subtler case: `the_pinned_cases_differ_outside_the_name_window` checks the
+        pinned keys differ at bytes 16, 17, 24 and 25 — the values a one-byte slip
+        in either direction would actually read — and
+        `some_pinned_case_is_byte_order_sensitive_in_every_slot` closes the
+        equal-bytes hole. Together those make "a slip is visible in at least one
+        pin" a property of the fixtures, established by construction rather than
+        by running a mutation. Your own *Mutations run* table confirms the
+        mechanism: the `SPEC_MARK_BYTES 4..12 → 6..14` and little-endian
+        mutations were each caught by a named test.
+
+      So I have not reshaped those two. If you think the preconditions do not
+      amount to the scenario's THEN, that is worth another look — but it is a
+      different argument from the one about the deleted scenario, and conflating
+      them would have cost two real tests their spec anchor.
+
+- [x] **`spec-writer`** — delta spec, *The scheme and its wordlists are frozen*,
       scenario "A different scheme version gives a different name for one key" —
       **the scenario's WHEN is inert: nothing in either THEN depends on it.**
       The WHEN changes a wordlist entry and re-derives; the two THENs assert that
@@ -151,6 +264,32 @@ survives, in both languages at once, and is the first box below.
       **Severity: low** — drop the WHEN's wordlist clause, or move the scenario's
       real content into the requirement prose, where the spec already says
       plainly that this is a one-way door rather than a property under test.
+
+      **Fixed by dropping the clause**, your first option. The WHEN is now simply
+      *"a name is derived for one public key"*, and both THENs are unchanged
+      because, as you established, neither ever depended on the clause. The two
+      tests you name go on passing without modification, which is the evidence
+      the clause was inert rather than load-bearing.
+
+      A note is attached saying the omission is deliberate and why — that the
+      absence of a version input and the absence of a scheme marker are **standing
+      properties of the derivation, not consequences of a change**, so varying a
+      wordlist made the WHEN inert and invited a reader to take this scenario as
+      covering what a wordlist change does, which is the next scenario's job. That
+      also answers your forward-looking scenario: a later change adding a marker
+      that appears only when two wordlists are in play would be read against
+      *Removing a word renames identities that drew past it*, which does vary a
+      list, rather than against this one.
+
+      **The scenario keeps its title**, and that was not a style choice. Renaming
+      it to match the new WHEN made `openspec validate --strict` **fail**:
+      *"MODIFIED … omits scenario(s) the current spec still has … a MODIFIED
+      requirement replaces the whole block, so archive refuses to drop them"*. A
+      rename inside a MODIFIED block is a silent scenario drop as far as archive
+      is concerned. Worth recording alongside your box, because the natural fix to
+      the finding is the one that loses the requirement at archive time — the
+      `docs/OPENSPEC-ARCHIVE.md` trap, met live. `openspec validate key-identity
+      --strict` passes with the title preserved.
 
 ## What was clean
 

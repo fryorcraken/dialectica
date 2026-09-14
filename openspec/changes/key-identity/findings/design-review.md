@@ -52,7 +52,7 @@ Four boxes. One is a PLAN.md contradiction this change introduced, one is a
 dangling pointer this change wrote into PLAN.md, and two are decisions taken
 without being recorded.
 
-- [ ] **`dev-writer`** — `docs/PLAN.md:1061` still says *"The address — the only
+- [x] **`dev-writer`** — `docs/PLAN.md:1061` still says *"The address — the only
       thing that settles identity"* — the rule this change inverted, applied at
       three sites and missed at a fourth
       The change rewrote §5.2.1's *Rendering obligations* bullets (PLAN.md:1065-1078
@@ -81,7 +81,32 @@ without being recorded.
       survives, but its stated reason (independent channels) now rests on byte
       disjointness rather than on separate digests, and §5.2.1 does not say so.
 
-- [ ] **`dev-writer`** — `docs/PLAN.md:986-987` points at a `design.md` entry that
+      **Fixed, both halves** — and the second half was the more valuable catch,
+      because nothing in the diff pointed at it.
+
+      Layer 4 now reads *"~~**The address**~~ **The public key — the only thing
+      that settles identity**"*, in the same strikethrough-plus-authority shape
+      the bullets below use rather than a silent rewrite, and carries the same
+      three things they do: that #80 deletes the author address so a layer
+      pointing at it would point at a value no longer carried, the
+      `generated-names` requirement that is the authority, and **Stoa addresses
+      are untouched**. The closing sentence follows it: *"a name and a glyph and
+      no ~~address~~ public key"*.
+
+      Layer 2 now states that the conclusion survives #80 **but its reason
+      changed**, and says which: independence used to come from domain separation
+      — two digests, so whatever bytes each read they could not overlap — and now
+      rests on the byte allocation being pairwise disjoint, which makes it a
+      property to gate rather than one for free. It cites *The three channels read
+      pairwise disjoint bytes of the public key*, which I checked exists verbatim
+      in the delta (`spec.md:378`) rather than citing from memory.
+
+      No test covers PLAN.md prose. What is verifiable is that your grep
+      (`grep -n "The address — the only thing that settles identity"`) now returns
+      nothing, and that the subsection no longer answers its own question both
+      ways.
+
+- [x] **`dev-writer`** — `docs/PLAN.md:986-987` points at a `design.md` entry that
       does not exist
       The paragraph this change added to PLAN.md ends: *"the change's `design.md`
       carries why the alternative (a per-channel hash under its own separator)
@@ -105,7 +130,33 @@ without being recorded.
       is already recorded as accepted, and an accepted cost with no visible
       rejected alternative reads as though there was no choice.
 
-- [ ] **`dev-writer`** — `design.md` — the byte allocation itself is not a
+      **Fixed by writing the entry**, for the reason you give — an accepted cost
+      with no visible rejected alternative reads as though there was no choice,
+      and PLAN.md's sentence is then true rather than needing to be weakened.
+
+      `design.md`'s *`NAME_PREFIX` and `name_digest()` are deleted rather than
+      deprecated* now carries **Alternative considered: keep a hash, but one per
+      channel, each under its own separator**, with the four parts:
+      - *what was chosen:* no hash anywhere, per the owner's ruling on #80.
+      - *what the alternative was:* `H(NAME_V1 || key)`, `H(MARK_V1 || key)` —
+        which, as you note, is exactly the shape that would have preserved the
+        versioning seam, so it is the thing the next reader reaches for once the
+        accepted cost is stated.
+      - *what ruled it out:* the ruling, plus what the ruling buys — a name
+        verifiable by hand (three 16-bit big-endian draws off bytes a holder can
+        read on screen, so a second implementation is a page of arithmetic rather
+        than a SHA-256 and a separator that must match byte for byte), and
+        independence that lives in a table anyone can check and a gate can measure
+        rather than in two separator strings a reader cannot eyeball.
+      - *what it costs:* the seam, and **only** the seam. That last point is the
+        one worth having written down: independence is not among the costs. It
+        moved from domain separation to the byte allocation rather than being
+        given up, and this change is what turns that allocation into a stated
+        requirement with a gate on both sides of it.
+
+      PLAN.md:986-987 is left as written, because it is now true.
+
+- [x] **`dev-writer`** — `design.md` — the byte allocation itself is not a
       recorded decision, and it is the decision this piece exists to make
       `design.md`'s first Decisions entry is titled *"The name reads
       `key.to_bytes()[18..23]`, and the type carries the window"*, but every word
@@ -138,7 +189,46 @@ without being recorded.
       change) is present but as prose in the Risks section rather than attached to
       the decision.
 
-- [ ] **`dev-writer`** — `DKeyNameWindow.qml:50-53` pads a malformed key and
+      **Fixed** with a new first Decisions entry, *Why the name's six bytes are
+      `18..23`: contiguous, and the gaps left empty* — placed **before** the
+      existing entry rather than folded into it, because your diagnosis is right
+      that the two are different decisions sharing one title. The old entry keeps
+      its title and is now honestly about how the window is *expressed*.
+
+      Both alternatives you named are recorded with what ruled each out:
+
+      **(a) Split across the gaps.** Ruled out because a split window stops being
+      one fact: the whole argument in the entry below (one range cannot be
+      half-moved) depends on there being one range, and a split needs a list of
+      ranges plus a slot-to-range mapping, each a place two implementations can
+      disagree about how far to read. Your `NAME_FIRST_BYTE + 2` observation is
+      recorded as one of the concrete costs. Added beyond your list: a contiguous
+      window is the half a *human* can check — six consecutive hex pairs a holder
+      reads off the screen, where bytes 12, 13, 24, 25, 26, 27 cannot be
+      hand-verified without a diagram, and hand-verifiability is what the no-hash
+      ruling buys. And the gain is speculative, for a fourth channel nobody has
+      specified.
+
+      **(b) Unallocated rather than reserved.** Ruled out with the wording named
+      as load-bearing: "reserved" claims something is coming and nothing is. I
+      grounded this in the repo's own history rather than in the abstract warning
+      — `docs/IDENTICON.md:707-711` (*"First version, wrong when written"*)
+      records that an earlier version of that very document called bytes 0..11
+      "reserved for the generated-name scheme" (the phrase wraps a line, so grep
+      it as `"reserved for the"`) and
+      derived the two channels' independence from it when no such mechanism
+      existed, and that **two documents invented the same false reservation
+      independently**. The word is what did that. The cost is attached to the
+      decision rather than left in Risks: no channel can be widened without
+      changing the spec's table, and a fourth channel must be specified into the
+      gaps rather than helping itself to them — which is the intended direction,
+      not an oversight.
+
+      The gate is named where the reader is standing:
+      `the_name_reads_no_unallocated_byte`, which (as of the spec-test box in the
+      sibling file) now measures over every value of every byte rather than seven.
+
+- [x] **`dev-writer`** — `DKeyNameWindow.qml:50-53` pads a malformed key and
       derives from it, where core refuses — an unrecorded divergence, and the one
       place a `// NO SPEC:` marker was owed
       The spec is explicit that *"malformed key material is the only failure this
@@ -169,6 +259,59 @@ without being recorded.
       record it in `design.md` as a decision with the alternative (return `-1`, or
       expose a validity flag the probe checks) and what ruled it out. The marker is
       cheaper and is where the next reader will be standing.
+
+      **Fixed at the code, where you say the next reader is standing — but as a
+      spec citation rather than a `// NO SPEC:` marker, and you should know why
+      the answer differs from what you asked for.**
+
+      I drafted exactly the marker you specified. Then the `spec-test` reviewer's
+      second box raised the same divergence from the other side and asked the spec
+      to *decide* whether the index-only component is exempt, which I did: *The
+      three channels read pairwise disjoint bytes of the public key* now requires
+      the measurement apparatus to render no name and to accept malformed input,
+      with the reason — a measurement that refused would report the channel as
+      reading no byte, and "disjoint" is satisfied by a measurement that found
+      nothing.
+
+      Once a requirement mandates the behaviour, a `NO SPEC:` marker on it is
+      false, and a false marker is worse than a missing one: it tells the next
+      reader nobody decided, when someone did. So the block says the same things
+      your marker would have, and cites the requirement instead of announcing its
+      absence. If you disagree that the spec change was in scope for this piece,
+      that is the thing to push back on — not the marker's absence.
+
+      What the comment carries, all of which your marker asked for:
+      - the divergence concretely: core **refuses** where this **pads**,
+        `NameError::NotAValidPublicKey` against three in-range indices, for the
+        same four inputs (`""`, `"k:"`, `"k:0"`, `"not-a-key"`), and an opening
+        line saying it is deliberate — so a reader meeting it does not conclude
+        core's refusal is the bug, which is the second half of your scenario;
+      - which rule governs which, and why: *Malformed key material is refused
+        rather than crashed on* forbids a padded derivation because such a name
+        "would render as an ordinary participant" — a hazard that exists only
+        where a name is **rendered**, so the requirement is scoped by its own
+        stated reason rather than narrowed to suit the code;
+      - all three alternatives you listed with what ruled each out — `NaN` renders
+        nothing and would make the measurement meaningless rather than failing
+        loudly, `-1` is a sentinel every caller must remember to check, a validity
+        flag is a second thing for a probe to get wrong — and that padding keeps
+        the one-job rule (three in-range indices, always);
+      - the transition, in bold: **giving this component a rendering consumer
+        moves it under the first rule and obliges it to refuse.** That is the
+        first half of your scenario, and it is now a spec obligation rather than
+        a hope.
+
+      **The test that fails without it**, which is what your box could not have
+      had: `test_the_name_window_exposes_no_name_only_draws` asserts the surface
+      is three numeric draws and that eleven rendering-shaped members are
+      `undefined`. Measured — adding a one-line `function render()` to
+      `DKeyNameWindow.qml` fails it, naming `render`, with everything else in the
+      file green. Reverted; 19/19. So the divergence is no longer merely recorded
+      as accepted: the condition that makes it safe is gated.
+
+      The behaviour is unchanged, as you asked, and
+      `test_a_malformed_key_still_yields_indices_in_range` still pins it with the
+      reasoning now in its comment.
 
 ## Checked and clean, recorded so it is not re-checked
 

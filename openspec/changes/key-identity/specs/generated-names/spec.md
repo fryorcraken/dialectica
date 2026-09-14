@@ -246,13 +246,17 @@ name changes at once, with no version to tell the two schemes apart.
 
 #### Scenario: A different scheme version gives a different name for one key
 
-- **WHEN** a name is derived for one public key, a wordlist entry is then changed,
-  and a name is derived for that same key again
+- **WHEN** a name is derived for one public key
 - **THEN** the derivation takes no version input that could be varied to
-  distinguish the two schemes, so its whole input is the same six key bytes in
-  both cases
-- **AND** the two names are reported identically, carrying no marker of which
-  wordlist produced them
+  distinguish two schemes, so its whole input is the same six key bytes
+- **AND** the name carries no marker of which wordlists produced it
+
+  **There is deliberately no wordlist change in this WHEN**, and an earlier
+  version of this scenario had one. Both THENs hold without it — the absence of a
+  version input and the absence of a scheme marker are standing properties of the
+  derivation, not consequences of a change — so varying a wordlist here made the
+  WHEN inert and invited a reader to take this scenario as covering what a
+  wordlist change does. That is the next scenario's job.
 
 #### Scenario: Removing a word renames identities that drew past it
 
@@ -423,6 +427,59 @@ expensive. Preserving that shape is why the mark and the name are placed around
 the abbreviation's groups rather than the abbreviation being narrowed to make
 room.
 
+**All three channels SHALL be measurable together, and each SHALL be measured by
+varying key bytes and observing its output rather than by restating its
+arithmetic.** Disjointness is a property *between* channels, so a check that can
+only reach two of them checks something weaker than this requirement states. Two
+of the three are rendered by the view and one is derived in the core, so
+satisfying this obliges the name's byte window to be reachable from wherever the
+other two are measured — and a channel's window that is read from a constant
+rather than measured follows that constant wherever it moves and can never report
+an overlap.
+
+This is a requirement rather than an implementation note because it is the only
+thing making the accepted cost — the derivation arithmetic existing in two
+languages — safe rather than merely accepted. Without it, deleting whichever
+component makes the name reachable leaves every requirement above still reading
+as satisfied, `openspec validate --strict` still passing, and the pairwise check
+silently reduced to the two-channel check it was before this change.
+
+**Whatever makes the name's window reachable for this measurement SHALL NOT
+render a name, and SHALL have no consumer other than the measurement.** It
+reports which key bytes are read — as draw indices or equivalent — and nothing a
+reader ever sees.
+
+That restriction is what settles its obligations under *Malformed key material is
+refused rather than crashed on*. That requirement forbids a name derived from
+truncated or padded input, because such a name "would render as an ordinary
+participant, which is a name attributable to nobody presented as one attributable
+to somebody" — a hazard that exists only where a name is rendered. A measurement
+apparatus renders nothing, so it SHALL instead accept any input and report
+in-range values for all of it, including malformed input: it has no way to
+express a refusal, and a measurement that returned a non-value for some input
+would report that channel as reading no byte, satisfying disjointness with a
+measurement that found nothing — the failure the non-emptiness scenario above
+exists to forbid.
+
+The two rules are therefore not in conflict: **anything that renders a name
+refuses malformed input; the thing that only measures accepts it.** A change that
+gives the measurement apparatus a rendering consumer moves it under the first
+rule and SHALL make it refuse.
+
+#### Scenario: The measurement apparatus renders no name
+
+- **WHEN** whatever makes the name's window reachable for the measurement is
+  examined
+- **THEN** it exposes which key bytes are read, and no name
+- **AND** nothing outside the measurement consumes it
+
+#### Scenario: The measurement apparatus accepts malformed input
+
+- **WHEN** malformed or truncated key material is given to the measurement
+  apparatus
+- **THEN** it reports in-range values rather than refusing
+- **AND** no name is rendered from them anywhere
+
 #### Scenario: No two channels read one byte
 
 - **WHEN** the set of key bytes the name reads, the set the mark reads and the
@@ -452,10 +509,25 @@ room.
 - **WHEN** two public keys differ only in bytes the name reads
 - **THEN** their abbreviated forms are identical
 
-#### Scenario: An overlap is detected rather than passed over
+#### Scenario: All three channels are measurable in one place
 
-- **WHEN** any channel is altered to read a byte another channel reads
-- **THEN** the disjointness check fails and names the overlapping byte
+- **WHEN** the byte sets of the name, the mark and the abbreviation are compared
+- **THEN** all three sets are obtained in one place, each by varying key bytes and
+  observing that channel's output
+- **AND** the name's byte window is reachable there, so removing whatever makes it
+  reachable fails this requirement rather than only shrinking a test file
+
+#### Scenario: A channel reading an unallocated byte is detected at every value
+
+- **WHEN** a channel's output depends on an unallocated key byte, including when
+  it depends on that byte only for a single one of the byte's 256 values
+- **THEN** the measured byte set for that channel includes the unallocated byte
+
+  A conditional read is the case this scenario exists for. A measurement that
+  tries a fixed list of byte values reports a channel as not reading a byte it
+  reads only at some value the list omits, and the disjointness and unallocated
+  -byte scenarios above then hold about a set that is missing a member. The set
+  each channel reads is therefore determined over the byte's whole domain.
 
 #### Scenario: The abbreviation keeps a middle group
 

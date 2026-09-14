@@ -215,6 +215,24 @@ restates both sides instead of measuring either.
 The duplication this accepts is real and is the trade-off: the reduction
 arithmetic now exists twice.
 
+**The obligation this creates is in the spec, not only here.** That matters
+because this document archives when the change closes, into a folder no reader of
+`DKeyNameWindow.qml` will think to open — and `DKeyNameWindow` has zero
+production consumers by design, so it reads as dead code to anyone who has not
+read this entry. The requirement *The three channels read pairwise disjoint bytes
+of the public key* therefore obliges all three channels to be measurable in one
+place, with the name's window reachable there, and carries the scenario *All
+three channels are measurable in one place*. Deleting the component now fails a
+live requirement rather than only shrinking a test file.
+
+`tst_identicon.qml` carries the matching assertion,
+`test_all_three_channels_are_reachable_from_this_file`, which pins the channel
+**count** at three. Measured: dropping the name channel from the shared
+`_allChannels()` list leaves the pairwise sweep, the unallocated-byte test and
+every other test in the file green — only the count test fails. That is precisely
+the silent collapse the requirement exists to prevent, and it is why the count is
+asserted separately rather than trusted to the sweep.
+
 **What keeps it honest is a pin, and writing the gate showed that the window
 alone was not enough.** The disjointness tests only ever ask *which bytes* a
 channel reads, so a `DKeyNameWindow` that read the right bytes and reduced them

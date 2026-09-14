@@ -347,6 +347,50 @@ TestCase {
                 "the name probe does not see the name's documented window");
     }
 
+    // **THREE channels are measured here, and that count is itself asserted.**
+    //
+    // The `generated-names` requirement *The three channels read pairwise
+    // disjoint bytes of the public key* obliges all three to be measurable in one
+    // place, and this file is that place. Disjointness is a property BETWEEN
+    // channels, so a gate reaching only two of them checks something weaker than
+    // the requirement says — and the failure is silent. `DKeyNameWindow` has no
+    // production consumer by design (it exists to be probed and must never become
+    // a renderer), so a later change can reasonably judge it dead, delete it, and
+    // delete the probe that used it. The pairwise sweep below would then loop over
+    // two channels instead of three, pass, and report nothing: every requirement
+    // would still read as satisfied and `openspec validate --strict` would still
+    // pass, with the piece's central property silently down to the two-channel
+    // check it was before.
+    //
+    // Asserting the count is what makes that deletion fail here rather than
+    // succeed quietly. It is deliberately not a restatement of which channels
+    // they are — `test_the_byte_probes_find_the_windows_they_should` above does
+    // that, by measurement — only that the gate still reaches as many as the
+    // requirement names.
+    function test_all_three_channels_are_reachable_from_this_file() {
+        var channels = _allChannels();
+        compare(channels.length, 3,
+                "the disjointness gate must measure THREE channels; measuring "
+                + "fewer passes the sweep below while checking something weaker "
+                + "than the spec requires");
+        for (var c = 0; c < channels.length; c++) {
+            verify(channels[c].bytes.length > 0,
+                   channels[c].name + " is reachable but measures no byte, so "
+                   + "the gate counts a channel it is not actually checking");
+        }
+    }
+
+    // The three channels, measured. One definition, so the pairwise sweep, the
+    // unallocated-byte test and the reachability count above cannot drift into
+    // checking different sets of channels from each other.
+    function _allChannels() {
+        return [
+            { name: "the abbreviation",   bytes: _displayedBytes() },
+            { name: "the mark",           bytes: _markBytes() },
+            { name: "the generated name", bytes: _nameBytes() }
+        ];
+    }
+
     // The security property itself: grinding for a lookalike mark and grinding
     // for a lookalike abbreviated address must be independent searches, whose
     // costs multiply rather than add. A byte in both sets is worse than merely
@@ -365,11 +409,7 @@ TestCase {
     // that restates the production arithmetic can only see its inputs move, not
     // the arithmetic; these measure the component.
     function test_the_three_channels_read_pairwise_disjoint_bytes() {
-        var channels = [
-            { name: "the abbreviation", bytes: _displayedBytes() },
-            { name: "the mark",         bytes: _markBytes() },
-            { name: "the generated name", bytes: _nameBytes() }
-        ];
+        var channels = _allChannels();
 
         // Every set must be non-empty, or "disjoint" would be satisfied by a
         // measurement that found nothing — the two-explanations-one-answer
@@ -549,6 +589,18 @@ TestCase {
     // obligation `test_a_malformed_address_still_selects_valid_values` places on
     // the mark. An index of NaN would index a wordlist with `undefined` in core's
     // place and render nothing, which is a name attributable to nobody.
+    //
+    // **This is the OPPOSITE of what core does with the same inputs, and the spec
+    // says which applies where.** `names.rs` REFUSES these four strings
+    // (`NameError::NotAValidPublicKey`). The requirement *Malformed key material
+    // is refused rather than crashed on* forbids a name derived from padded input
+    // because it "would render as an ordinary participant" — a hazard only where a
+    // name is rendered. This component renders nothing, and *The three channels
+    // read pairwise disjoint bytes of the public key* requires a measurement
+    // apparatus to accept any input and report in-range values: a measurement
+    // returning a non-value would report the channel as reading no byte, and
+    // "disjoint" is then satisfied by a measurement that found nothing. Anything
+    // that renders a name refuses; the thing that only measures accepts.
     function test_a_malformed_key_still_yields_indices_in_range() {
         var cases = ["", "k:", "stoa:zzzz", "k:0", "not-a-key"];
         for (var i = 0; i < cases.length; i++) {
@@ -562,6 +614,52 @@ TestCase {
                    "place index out of range for " + cases[i] + ": " + p);
             win.destroy();
         }
+    }
+
+    // **The measurement apparatus must not become a renderer**, which the spec
+    // requires in as many words: whatever makes the name's window reachable
+    // "SHALL NOT render a name, and SHALL have no consumer other than the
+    // measurement".
+    //
+    // That is what makes the test above's accept-malformed-input behaviour
+    // correct rather than a divergence from core. The moment this component can
+    // produce something a reader sees, it moves under *Malformed key material is
+    // refused rather than crashed on* and padding becomes the defect that
+    // requirement names — a name attributable to nobody rendered as one
+    // attributable to somebody.
+    //
+    // What this CAN check is the component's surface: three numeric draws and no
+    // word, no rendered string, no wordlist. What it cannot check from inside
+    // `qmltestrunner` is the "no consumer" half — nothing here can see the rest of
+    // the tree. That half is held by the spec requirement and by the component's
+    // own header, and is stated here rather than left to look covered: measured
+    // separately, `grep -rl DKeyNameWindow dialectica-ui/` returns `qmldir` and
+    // this file, and nothing else.
+    function test_the_name_window_exposes_no_name_only_draws() {
+        var win = nameWindowFactory.createObject(
+            null, { key: "k:" + pinnedCases[0].key });
+
+        // The three draws are numbers, which is the whole of what a probe needs.
+        verify(typeof win.adjectiveIndex() === "number", "adjective draw");
+        verify(typeof win.nounIndex() === "number", "noun draw");
+        verify(typeof win.placeIndex() === "number", "place draw");
+
+        // And nothing on it renders. A wordlist or a render function appearing
+        // here is the change this test exists to fail on — it would mean the
+        // component had grown the ability to produce something a reader sees,
+        // which is what flips its malformed-input obligation.
+        var renderers = ["render", "name", "displayName", "text", "words",
+                         "adjective", "noun", "place",
+                         "ADJECTIVES", "NOUNS", "PLACES"];
+        for (var i = 0; i < renderers.length; i++) {
+            verify(win[renderers[i]] === undefined,
+                   "DKeyNameWindow exposes `" + renderers[i] + "`, so it can "
+                   + "produce something a reader sees. It is the disjointness "
+                   + "gate's measurement apparatus and must stay one: a renderer "
+                   + "falls under `Malformed key material is refused rather than "
+                   + "crashed on`, which its zero-padding violates");
+        }
+        win.destroy();
     }
 
     // Disjointness stated as the CONSEQUENCE a reader can check, rather than as
@@ -654,11 +752,7 @@ TestCase {
     // disjoint and would still have spent the budget the allocation left spare.
     function test_no_channel_reads_an_unallocated_byte() {
         var unallocated = [12, 13, 24, 25, 26, 27, 28];
-        var channels = [
-            { name: "the abbreviation", bytes: _displayedBytes() },
-            { name: "the mark",         bytes: _markBytes() },
-            { name: "the generated name", bytes: _nameBytes() }
-        ];
+        var channels = _allChannels();
         for (var c = 0; c < channels.length; c++) {
             for (var u = 0; u < unallocated.length; u++) {
                 verify(channels[c].bytes.indexOf(unallocated[u]) === -1,
