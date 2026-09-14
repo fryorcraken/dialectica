@@ -3914,12 +3914,29 @@ thing (§2.3).
   ops encoded before the counter existed**, so it is a rule about legacy content
   rather than about the running system. Reversal works.
 - ~~**§5.7's ordering rule has no input at the contract we have.**~~
-  **Answered: the rule stands unchanged; its input is missing upstream, and the
-  gap is a layer below the LIDL contract.** `dialectica-core`'s `arrival::Arrival`
-  records what the transport supplied alongside an op, and `arrival::cmp_ops`
-  applies §5.7's rule to it. No application-level ordering was designed, because
-  SDS's rule — insert by Lamport timestamp, ties by ascending message id — is
-  already §5.7's.
+  **Answered, and then answered again differently — the second answer is the
+  live one.**
+
+  The first answer was: the rule stands unchanged, its input is missing
+  upstream, and the gap is a layer below the LIDL contract. `arrival::cmp_ops`
+  applied §5.7's rule to whatever the transport supplied, and **no
+  application-level ordering was designed**, on the reasoning that SDS's rule —
+  insert by Lamport timestamp, ties by ascending message id — was already
+  §5.7's.
+
+  **That reasoning held only while the value was expected to arrive.** It never
+  did, and the gap below is not dialectica's to close, so the practical effect
+  of deferring was not "the transport's order" but **no order at all**, with
+  every resolver falling back to a hash. The `op-clock` change closes it at the
+  application layer: the counter is inside the signed preimage, `cmp_ops` reads
+  the op's own value and **cannot reach an `Arrival` at all**, and the message-id
+  tiebreak is replaced by the op id — a function of the op's own bytes, where a
+  message id is absent on every op.
+
+  `Arrival` survives and still records what a peer was told about a delivery. It
+  orders nothing. The two subsections below are retained because the upstream
+  gap is still real and still worth filing; what has changed is that dialectica
+  no longer waits on it.
 
   The gap is **two layers**, both documented with quoted source in
   `openspec/changes/archive/2026-09-11-op-ordering/design.md`:

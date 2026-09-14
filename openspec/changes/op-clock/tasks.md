@@ -10,7 +10,15 @@
       us), and `composer-view` (which must now prevent a double-tapped submit,
       because core stops absorbing it). See `proposal.md` for the six answers and
       the "most recent first" verdict.
-- [ ] design + code — `dev-writer`
+- [x] design + code — `dev-writer` — the counter and wall-clock enter the
+      preimage at `VERSION_2`; `cmp_ops` stops being handed an `Arrival` at all,
+      so "ordering does not consult the transport" holds by the comparator's
+      type rather than by its body. The clock is a fold over the held ops,
+      sorted ascending, which is what makes the advance bound a function of the
+      op set rather than of arrival order. `LAYOUT_VERSION` 1 → 2. The composer
+      disables its control while a publish is outstanding. `design.md` carries
+      the six decisions and the constants' reasoning; the **NO SPEC** markers
+      and one unimplementable-as-written finding are in the report.
 - [ ] tests — `tester`
 - [ ] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
@@ -24,7 +32,40 @@
 
 ## Implementation
 
-<!-- The dev-writer's. Left empty by the spec-writer. -->
+- [x] **`op-format`** — `Op` gains `clock: Option<OpClock>`; `VERSION_2` carries
+      sixteen fixed bytes at a fixed offset with no presence tag; `VERSION_1`
+      encodes exactly as before, so **a pre-existing op's id is unchanged** and
+      the pinned `the_op_id_constant_is_pinned_to_a_known_answer` still passes
+      against its independently-derived literal.
+- [x] **`op-ordering` — the comparator.** `OpEntry` carries `Option<u64>` and an
+      `OpId` and **cannot name an `Arrival`**; `cmp_tiebreak` and the message-id
+      tiebreak are deleted. `ADVANCE_BOUND = 1_000_000`, pinned.
+- [x] **`op-ordering` — the clock.** `clock_from_counters` folds the held ops'
+      counters **in ascending order**, so the bound is measured against a value
+      computed from the op set. `OpLog::clock(stoa)` is a default method over
+      `iter_stoa`, derived on demand and never stored.
+- [x] **`op-ordering` — the wall-clock.** `asserted_time::format_asserted`
+      returns `{ text: String, clamped: bool }` and no number.
+      `FUTURE_ALLOWANCE_MS` = 24h, `FLOOR_MS` = 2010-01-01, both pinned.
+- [x] **Storage.** `LAYOUT_VERSION` 1 → 2; `sort_has_counter` / `sort_counter`
+      replace four columns; `score_epoch` comes from the op's counter. The
+      `check_layout` column list moved with them — missing that would have made
+      every store this build wrote permanently unopenable.
+- [x] **`content-authoring`.** `publish` stamps `next_counter(log.clock(stoa))`
+      and the caller's `now_ms`. Authoring one body twice publishes two ops;
+      re-publishing an op the peer holds publishes one.
+- [x] **`thread-read`.** `ThreadItem` gains `position` (an opaque index string)
+      and `asserted_time` (`Option<AssertedTime>`, absent for a pre-clock op).
+      `Placed::at` makes "every item has a real position" structural.
+- [x] **`moderation-resolution`.** The `Hide` preference keys on whether the
+      leading candidate carries a counter. The falsified two-op premise is
+      rewritten, and the unbounded candidate set is tested at 50 ops.
+- [x] **`post-revision`.** The module doc asserted no Lamport value reaches us;
+      corrected.
+- [x] **`composer-view`.** `DComposer` disables its submit control from
+      submission until an outcome, on every outcome including a refusal.
+- [ ] **`docs/PLAN.md` and `docs/UI-BRIEF.md`** — carried by the spec commit
+      already on this branch; re-checked against the implemented behaviour.
 
 ## Notes for the `dev-writer`, which are not tasks
 

@@ -525,8 +525,9 @@ no page control is offered.
 
 **Orderings, and an honesty problem worth designing around.**
 
-The intended orderings are **new** (most recent first), **active** (threads by
-their most recent reply), and **top** (vote-ordered, weighted).
+The intended orderings are **new** (newest first, in the forum's own order),
+**active** (threads by their most recent reply), and **top** (vote-ordered,
+weighted).
 
 **`top` does not ship in the first UI.** Phase 3 refuses it outright rather
 than shipping it provisionally: with no sybil resistance there is no score

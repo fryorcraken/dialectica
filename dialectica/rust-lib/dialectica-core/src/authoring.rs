@@ -41,10 +41,10 @@
 //! Nothing in this module may be relied upon by any reader, and no function here
 //! asserts a property of an op this peer received rather than created.
 
-use crate::arrival::Arrival;
+use crate::arrival::{next_counter, Arrival};
 use crate::identity::{Address, SecretKey};
 use crate::log::{Appended, OpLog, OpLogError};
-use crate::op::{Op, OpId, OpKind, VoteDirection};
+use crate::op::{Op, OpClock, OpId, OpKind, VoteDirection};
 
 /// What a publish did, and what to tell the caller.
 ///
@@ -173,6 +173,37 @@ impl From<OpLogError> for Refusal {
     }
 }
 
+/// What a publish needs from outside this crate: the signing key and the clock.
+///
+/// # Why the wall-clock is a parameter and not a `SystemTime::now()`
+///
+/// **`dialectica-core` reads no clock anywhere, and must not start.** A pure
+/// crate that sampled the system clock would put a nondeterministic input into a
+/// publish, so an op's bytes — and therefore its id — would depend on when a
+/// test happened to run. The host's environment enters at `wire.rs`, which is
+/// where every other ambient value already enters.
+///
+/// # Why they travel together
+///
+/// A key and a clock are both things this module is *given* rather than things
+/// it finds, and pairing them in one argument keeps the three public builders'
+/// signatures from growing a second loose `u64` that a caller could transpose
+/// with a page number.
+pub struct Authorship<'a> {
+    /// The author's per-Stoa key ([`crate::identity::derive_stoa_key`]).
+    ///
+    /// Taking it rather than deriving one is what makes the identity
+    /// un-parameterisable at the wire: there is no field a caller could set that
+    /// reaches it.
+    pub key: &'a SecretKey,
+    /// This peer's wall-clock, in milliseconds since the Unix epoch, to be
+    /// signed into the op as the author's assertion.
+    ///
+    /// It decides nothing — not here and not on any reader. It is carried
+    /// because a reader is shown a time and expects one.
+    pub now_ms: u64,
+}
+
 /// Sign, append, and report what the append did.
 ///
 /// **The order is the contract**, and it is one function so it is asserted once
@@ -181,16 +212,37 @@ impl From<OpLogError> for Refusal {
 /// nothing here knows what delivery is, so no code path in this function can
 /// wait on a delivery outcome.
 ///
-/// The key must be the author's per-Stoa key. Taking it rather than deriving one
-/// is what makes the identity un-parameterisable at the wire: there is no field
-/// a caller could set that reaches this argument.
-fn publish<L: OpLog>(log: &mut L, key: &SecretKey, op: Op) -> Result<Published, Refusal> {
-    let signed = op.sign(key);
+/// # The counter is stamped HERE, from the log, and not by the caller
+///
+/// The op reaches this function with `clock: None` and leaves it signed, because
+/// the counter is a function of what this peer holds and the three builders
+/// above have no business computing it. That is also what makes "every published
+/// op carries a counter" true by construction rather than by three call sites
+/// each remembering to do it.
+///
+/// The counter is one above this peer's clock for the op's Stoa, which states
+/// "this op was written knowing of something at N". A peer publishing at one
+/// above its own clock is within [`crate::arrival::ADVANCE_BOUND`] by
+/// construction, so a published op never needs a bound check of its own.
+fn publish<L: OpLog>(log: &mut L, who: &Authorship<'_>, op: Op) -> Result<Published, Refusal> {
+    // Read BEFORE the op is signed: the counter is inside the preimage, so it
+    // has to be known before there are bytes to sign.
+    let clock = log.clock(&op.stoa)?;
+
+    let op = Op {
+        clock: Some(OpClock {
+            counter: next_counter(clock),
+            asserted_ms: who.now_ms,
+        }),
+        ..op
+    };
+
+    let signed = op.sign(who.key);
     let id = signed.op.id();
-    // `Arrival::unordered()`: this op did not arrive, so no transport ordered
-    // it. Claiming a Lamport value here would be this peer inventing ordering
-    // metadata for its own content, which is precisely the forgeable
-    // self-assertion `op.rs` refuses to put in the signed bytes.
+    // `Arrival::unordered()`: this op did not arrive, so the transport said
+    // nothing about it. The arrival is a record of a delivery and orders
+    // nothing, so what it holds for a locally-published op is simply "nothing
+    // was received".
     let appended = log.append(signed, Arrival::unordered())?;
     Ok(Published { id, appended })
 }
@@ -238,17 +290,21 @@ fn body_within_cap(body: &str) -> Result<(), Refusal> {
 /// publishing one would cost.
 pub fn post<L: OpLog>(
     log: &mut L,
-    key: &SecretKey,
+    who: &Authorship<'_>,
     stoa: Address,
     body: String,
 ) -> Result<Published, Refusal> {
     body_within_cap(&body)?;
     publish(
         log,
-        key,
+        who,
         Op {
             stoa,
-            author: key.public_key(),
+            author: who.key.public_key(),
+            // Stamped by `publish` from the log's clock. `None` here is not a
+            // published op's clock — it is the absence of one on an op that has
+            // not been through the one function that assigns them.
+            clock: None,
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -330,7 +386,7 @@ fn thread_of(op: &Op, id: OpId) -> OpId {
 /// the module documentation.
 pub fn reply<L: OpLog>(
     log: &mut L,
-    key: &SecretKey,
+    who: &Authorship<'_>,
     stoa: Address,
     parent: OpId,
     body: String,
@@ -363,10 +419,11 @@ pub fn reply<L: OpLog>(
     let thread = thread_of(parent_op, parent);
     publish(
         log,
-        key,
+        who,
         Op {
             stoa,
-            author: key.public_key(),
+            author: who.key.public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: Some(thread),
                 parent: Some(parent),
@@ -399,7 +456,7 @@ pub fn reply<L: OpLog>(
 /// Reporting one would be a caller inferring an effect that does not exist.
 pub fn vote<L: OpLog>(
     log: &mut L,
-    key: &SecretKey,
+    who: &Authorship<'_>,
     stoa: Address,
     target: OpId,
     direction: VoteDirection,
@@ -418,10 +475,11 @@ pub fn vote<L: OpLog>(
 
     publish(
         log,
-        key,
+        who,
         Op {
             stoa,
-            author: key.public_key(),
+            author: who.key.public_key(),
+            clock: None,
             kind: OpKind::Vote { target, direction },
         },
     )
@@ -454,6 +512,23 @@ mod tests {
     /// The per-Stoa signing key, derived exactly as the keystore derives it.
     fn a_key(root: [u8; 32], stoa: &Address) -> SecretKey {
         derive_stoa_key(&root, stoa)
+    }
+
+    /// A fixed asserted time for tests that are not about the clock.
+    ///
+    /// **A constant, not `SystemTime::now()`.** It is inside the preimage, so a
+    /// sampled value would make every op id in this suite depend on when the
+    /// test ran — and two ops published in one test would differ by whether the
+    /// millisecond ticked between them, which is a flake nobody could reproduce.
+    /// 2026-09-14T11:01:44Z.
+    const A_TIME: u64 = 1_789_729_304_000;
+
+    /// Authorship with a fixed clock, for the tests that only need to publish.
+    fn by(key: &SecretKey) -> Authorship<'_> {
+        Authorship {
+            key,
+            now_ms: A_TIME,
+        }
     }
 
     fn a_log() -> MemoryOpLog {
@@ -500,7 +575,7 @@ mod tests {
         let key = a_key(A_ROOT, &stoa);
         let mut log = a_log();
 
-        let published = post(&mut log, &key, stoa, "First".to_string()).unwrap();
+        let published = post(&mut log, &by(&key), stoa, "First".to_string()).unwrap();
         assert_eq!(
             stored(&log, &published.id).op.id(),
             published.id,
@@ -518,7 +593,7 @@ mod tests {
         let key = a_key(A_ROOT, &stoa);
         let mut log = a_log();
 
-        let published = post(&mut log, &key, stoa, "the head".to_string()).unwrap();
+        let published = post(&mut log, &by(&key), stoa, "the head".to_string()).unwrap();
         let op = stored(&log, &published.id);
         assert_eq!(parent_of(&op), None, "a post names no parent");
         assert_eq!(
@@ -538,7 +613,7 @@ mod tests {
         let key = a_key(A_ROOT, &stoa);
         let mut log = a_log();
 
-        let published = post(&mut log, &key, stoa, String::new()).unwrap();
+        let published = post(&mut log, &by(&key), stoa, String::new()).unwrap();
         assert_eq!(body_of(&stored(&log, &published.id)), "");
     }
 
@@ -551,7 +626,7 @@ mod tests {
         let key = a_key(A_ROOT, &stoa);
         let mut log = a_log();
 
-        let published = post(&mut log, &key, stoa, "mine".to_string()).unwrap();
+        let published = post(&mut log, &by(&key), stoa, "mine".to_string()).unwrap();
         let op = stored(&log, &published.id);
 
         let expected = derive_stoa_key(&A_ROOT, &stoa).public_key().address();
@@ -593,7 +668,7 @@ mod tests {
         let mut log = a_log();
         let published = post(
             &mut log,
-            &a_key(A_ROOT, &stoa),
+            &by(&a_key(A_ROOT, &stoa)),
             stoa,
             "under which name?".to_string(),
         )
@@ -631,7 +706,7 @@ mod tests {
         let key = derive_stoa_key(&A_ROOT, &stoa);
         let mut log = a_log();
 
-        let published = post(&mut log, &key, stoa, "a pinned body".to_string()).unwrap();
+        let published = post(&mut log, &by(&key), stoa, "a pinned body".to_string()).unwrap();
 
         let pinned_seed =
             hex::decode("b62b6b592aeb0779541bbe8beac60d8f505342c37c6a9bc990920d93e68026cf")
@@ -657,45 +732,109 @@ mod tests {
         assert_eq!(stored(&log, &published.id).op.stoa, stoa);
     }
 
-    // ─── The same content twice is one op ─────────────────────────────────
+    // ─── Authoring twice is two ops; re-publishing one is one ─────────────
+    //
+    // **THIS IS A REVERSAL, and the reversal is the point.** The previous
+    // behaviour published one op for the same body twice, and the prior contract
+    // recorded that it was "correct for one case and wrong for another": a
+    // double-submitted form was deduplicated, which was wanted, and a person
+    // deliberately posting the same short reply twice published once, which was
+    // not.
+    //
+    // The rule underneath is UNCHANGED and is the single rule it always was:
+    // identical bytes are one op. What changed is its input — the bytes now
+    // carry a counter that advances between two publishes, so "the same content"
+    // is no longer enough to make two publishes byte-identical.
+    //
+    // The case the old behaviour served is now unserved, and that is a real cost
+    // rather than a neutral trade: a double-submitted form publishes twice.
+    // Suppressing it belongs to whatever handles the submission, where the two
+    // cases are distinguishable — `DComposer.qml` disables its control while a
+    // publish is outstanding, and `composer-view` contracts it.
 
     #[test]
-    fn the_same_content_published_twice_is_one_op_and_the_caller_is_told() {
-        // The contracted consequence of an op id being a function of content
-        // alone. Both publishes succeed, both name one id, and `appended` is
-        // what tells a wire caller a deduplicated publish from a first one —
-        // there is no other signal.
+    fn the_same_body_authored_twice_yields_two_ops() {
+        // The counter advances between the two publishes, so the bytes differ,
+        // so the ids differ. The log holds both and a reader renders both.
         let stoa = a_stoa("Agora");
         let key = a_key(A_ROOT, &stoa);
         let mut log = a_log();
 
-        let first = post(&mut log, &key, stoa, "twice".to_string()).unwrap();
-        let second = post(&mut log, &key, stoa, "twice".to_string()).unwrap();
+        let first = post(&mut log, &by(&key), stoa, "twice".to_string()).unwrap();
+        let second = post(&mut log, &by(&key), stoa, "twice".to_string()).unwrap();
 
-        assert_eq!(first.id, second.id);
-        assert_eq!(first.appended, Appended::Stored);
-        assert_eq!(
-            second.appended,
-            Appended::AlreadyPresent,
-            "the newly-stored-or-already-present answer must be passed on, not discarded"
+        assert_ne!(
+            first.id, second.id,
+            "authoring one body twice must produce two ops"
         );
-        assert!(first.was_new() && !second.was_new());
-        assert_eq!(log.len().unwrap(), 1, "one op, not two");
+        assert_eq!(log.len().unwrap(), 2, "two ops, not one");
+        // BOTH are reported as newly stored. Neither is "already present" —
+        // which is what a caller branches on, and reporting the second as a
+        // duplicate would tell a user their post was not saved when it was.
+        assert_eq!(first.appended, Appended::Stored);
+        assert_eq!(second.appended, Appended::Stored);
+        assert!(first.was_new() && second.was_new());
     }
 
     #[test]
-    fn a_repeated_publish_does_not_disturb_the_stored_op() {
-        // Byte-identical, not merely equal by field: the op is signed, so a
-        // second publish that rewrote the entry would be a signature that no
-        // longer verifies on the peer that received the first.
+    fn the_second_authoring_carries_the_higher_counter() {
+        // And therefore leads in the order. Asserted on the stored ops rather
+        // than inferred, so this says WHY the ids differ — a test that only
+        // checked `assert_ne!` on the ids would pass for a nonce.
         let stoa = a_stoa("Agora");
         let key = a_key(A_ROOT, &stoa);
         let mut log = a_log();
 
-        let first = post(&mut log, &key, stoa, "stable".to_string()).unwrap();
-        let before = stored(&log, &first.id).to_bytes();
-        post(&mut log, &key, stoa, "stable".to_string()).unwrap();
-        assert_eq!(stored(&log, &first.id).to_bytes(), before);
+        let first = post(&mut log, &by(&key), stoa, "twice".to_string()).unwrap();
+        let second = post(&mut log, &by(&key), stoa, "twice".to_string()).unwrap();
+
+        let counter_of = |id: &OpId| {
+            stored(&log, id)
+                .op
+                .clock
+                .expect("a published op carries a clock")
+                .counter
+        };
+        assert!(
+            counter_of(&second.id) > counter_of(&first.id),
+            "two successive publishes take successive counters"
+        );
+
+        // And the ordering rule places the second ahead of the first. Read
+        // through the log rather than by re-deriving the comparison, so this
+        // asserts the ORDER a reader sees rather than a property of two numbers.
+        let ids: Vec<OpId> = log.iter().unwrap().iter().map(|e| e.id()).collect();
+        assert_eq!(ids, vec![second.id, first.id], "newest first, by counter");
+    }
+
+    #[test]
+    fn re_publishing_an_op_the_peer_already_holds_yields_one_op() {
+        // The case that still deduplicates, and the reason `Appended` is
+        // retained rather than dropped: an op received from the network before
+        // this peer publishes an identical one is still one op, because the two
+        // are the same op only if EVERY field matches, counter included.
+        //
+        // Reached by publishing once and appending the SAME SIGNED OP again,
+        // which is what a re-publish is. Calling `post` twice would author
+        // twice, which is the different act the test above covers.
+        let stoa = a_stoa("Agora");
+        let key = a_key(A_ROOT, &stoa);
+        let mut log = a_log();
+
+        let first = post(&mut log, &by(&key), stoa, "once".to_string()).unwrap();
+        let held = stored(&log, &first.id);
+
+        let again = log.append(held.clone(), Arrival::unordered()).unwrap();
+        assert_eq!(
+            again,
+            Appended::AlreadyPresent,
+            "every field matching, counter included, is one op"
+        );
+        assert_eq!(log.len().unwrap(), 1, "one op, not two");
+        // Byte-identical: the op is signed, so a second append that rewrote the
+        // entry would be a signature that no longer verifies on the peer that
+        // received the first.
+        assert_eq!(stored(&log, &first.id).to_bytes(), held.to_bytes());
     }
 
     #[test]
@@ -710,8 +849,8 @@ mod tests {
 
         // One character of body.
         let mut log = a_log();
-        let a = post(&mut log, &key, agora, "hello".to_string()).unwrap();
-        let b = post(&mut log, &key, agora, "hellp".to_string()).unwrap();
+        let a = post(&mut log, &by(&key), agora, "hello".to_string()).unwrap();
+        let b = post(&mut log, &by(&key), agora, "hellp".to_string()).unwrap();
         assert_ne!(a.id, b.id, "bodies differing by one character");
         assert_eq!(log.len().unwrap(), 2);
 
@@ -719,10 +858,10 @@ mod tests {
         // which is how a real publish would do it, so this varies the Stoa AND
         // the identity exactly as production does.
         let mut log = a_log();
-        let here = post(&mut log, &key, agora, "same words".to_string()).unwrap();
+        let here = post(&mut log, &by(&key), agora, "same words".to_string()).unwrap();
         let there = post(
             &mut log,
-            &a_key(A_ROOT, &lyceum),
+            &by(&a_key(A_ROOT, &lyceum)),
             lyceum,
             "same words".to_string(),
         )
@@ -732,10 +871,10 @@ mod tests {
 
         // The identity, holding the Stoa fixed. Two roots, one Stoa.
         let mut log = a_log();
-        let mine = post(&mut log, &key, agora, "shared thought".to_string()).unwrap();
+        let mine = post(&mut log, &by(&key), agora, "shared thought".to_string()).unwrap();
         let yours = post(
             &mut log,
-            &a_key([9u8; 32], &agora),
+            &by(&a_key([9u8; 32], &agora)),
             agora,
             "shared thought".to_string(),
         )
@@ -765,8 +904,8 @@ mod tests {
         let one_key = a_key(A_ROOT, &agora);
 
         let mut log = a_log();
-        let here = post(&mut log, &one_key, agora, "same words".to_string()).unwrap();
-        let there = post(&mut log, &one_key, lyceum, "same words".to_string()).unwrap();
+        let here = post(&mut log, &by(&one_key), agora, "same words".to_string()).unwrap();
+        let there = post(&mut log, &by(&one_key), lyceum, "same words".to_string()).unwrap();
 
         assert_ne!(
             here.id, there.id,
@@ -798,13 +937,27 @@ mod tests {
         let key = a_key(A_ROOT, &stoa);
         let mut log = a_log();
 
-        let root = post(&mut log, &key, stoa, "the head".to_string()).unwrap();
-        let sibling_one = reply(&mut log, &key, stoa, root.id, "first".to_string()).unwrap();
-        let sibling_two = reply(&mut log, &key, stoa, root.id, "second".to_string()).unwrap();
+        let root = post(&mut log, &by(&key), stoa, "the head".to_string()).unwrap();
+        let sibling_one = reply(&mut log, &by(&key), stoa, root.id, "first".to_string()).unwrap();
+        let sibling_two = reply(&mut log, &by(&key), stoa, root.id, "second".to_string()).unwrap();
         assert_ne!(sibling_one.id, sibling_two.id, "the fixture needs two");
 
-        let to_one = reply(&mut log, &key, stoa, sibling_one.id, "agreed".to_string()).unwrap();
-        let to_two = reply(&mut log, &key, stoa, sibling_two.id, "agreed".to_string()).unwrap();
+        let to_one = reply(
+            &mut log,
+            &by(&key),
+            stoa,
+            sibling_one.id,
+            "agreed".to_string(),
+        )
+        .unwrap();
+        let to_two = reply(
+            &mut log,
+            &by(&key),
+            stoa,
+            sibling_two.id,
+            "agreed".to_string(),
+        )
+        .unwrap();
 
         // The thread is the same for both, which is what removes it as an
         // explanation for the ids differing.
@@ -828,12 +981,12 @@ mod tests {
         let key = a_key(A_ROOT, &stoa);
         let mut log = a_log();
 
-        let one = post(&mut log, &key, stoa, "parent one".to_string()).unwrap();
-        let two = post(&mut log, &key, stoa, "parent two".to_string()).unwrap();
+        let one = post(&mut log, &by(&key), stoa, "parent one".to_string()).unwrap();
+        let two = post(&mut log, &by(&key), stoa, "parent two".to_string()).unwrap();
         assert_ne!(one.id, two.id);
 
-        let to_one = reply(&mut log, &key, stoa, one.id, "agreed".to_string()).unwrap();
-        let to_two = reply(&mut log, &key, stoa, two.id, "agreed".to_string()).unwrap();
+        let to_one = reply(&mut log, &by(&key), stoa, one.id, "agreed".to_string()).unwrap();
+        let to_two = reply(&mut log, &by(&key), stoa, two.id, "agreed".to_string()).unwrap();
         assert_ne!(to_one.id, to_two.id);
         assert_eq!(log.len().unwrap(), 4);
     }
@@ -850,8 +1003,8 @@ mod tests {
         let key = a_key(A_ROOT, &stoa);
         let mut log = a_log();
 
-        let root = post(&mut log, &key, stoa, "the head".to_string()).unwrap();
-        let child = reply(&mut log, &key, stoa, root.id, "a reply".to_string()).unwrap();
+        let root = post(&mut log, &by(&key), stoa, "the head".to_string()).unwrap();
+        let child = reply(&mut log, &by(&key), stoa, root.id, "a reply".to_string()).unwrap();
 
         let op = stored(&log, &child.id);
         assert!(
@@ -879,9 +1032,16 @@ mod tests {
         let key = a_key(A_ROOT, &stoa);
         let mut log = a_log();
 
-        let root = post(&mut log, &key, stoa, "the head".to_string()).unwrap();
-        let middle = reply(&mut log, &key, stoa, root.id, "a reply".to_string()).unwrap();
-        let leaf = reply(&mut log, &key, stoa, middle.id, "a reply to it".to_string()).unwrap();
+        let root = post(&mut log, &by(&key), stoa, "the head".to_string()).unwrap();
+        let middle = reply(&mut log, &by(&key), stoa, root.id, "a reply".to_string()).unwrap();
+        let leaf = reply(
+            &mut log,
+            &by(&key),
+            stoa,
+            middle.id,
+            "a reply to it".to_string(),
+        )
+        .unwrap();
 
         assert_ne!(root.id, middle.id, "the fixture needs three distinct ops");
         let op = stored(&log, &leaf.id);
@@ -903,9 +1063,9 @@ mod tests {
         let author = a_key(A_ROOT, &stoa);
         let other = a_key([11u8; 32], &stoa);
 
-        let root = post(&mut log, &author, stoa, "the head".to_string()).unwrap();
-        let one = reply(&mut log, &author, stoa, root.id, "first".to_string()).unwrap();
-        let two = reply(&mut log, &other, stoa, root.id, "second".to_string()).unwrap();
+        let root = post(&mut log, &by(&author), stoa, "the head".to_string()).unwrap();
+        let one = reply(&mut log, &by(&author), stoa, root.id, "first".to_string()).unwrap();
+        let two = reply(&mut log, &by(&other), stoa, root.id, "second".to_string()).unwrap();
         assert_ne!(one.id, two.id, "the fixture needs two distinct replies");
 
         assert_eq!(thread_field_of(&stored(&log, &one.id)), Some(root.id));
@@ -924,6 +1084,7 @@ mod tests {
         let absent = Op {
             stoa,
             author: key.public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -933,8 +1094,14 @@ mod tests {
         }
         .id();
 
-        let refused = reply(&mut log, &key, stoa, absent, "into the void".to_string())
-            .expect_err("a reply to an absent parent must be refused");
+        let refused = reply(
+            &mut log,
+            &by(&key),
+            stoa,
+            absent,
+            "into the void".to_string(),
+        )
+        .expect_err("a reply to an absent parent must be refused");
         assert_eq!(
             refused,
             Refusal::NotHeld {
@@ -954,12 +1121,12 @@ mod tests {
         let key = a_key(A_ROOT, &stoa);
         let mut log = a_log();
 
-        let target = post(&mut log, &key, stoa, "the subject".to_string()).unwrap();
-        let a_vote = vote(&mut log, &key, stoa, target.id, VoteDirection::Up).unwrap();
+        let target = post(&mut log, &by(&key), stoa, "the subject".to_string()).unwrap();
+        let a_vote = vote(&mut log, &by(&key), stoa, target.id, VoteDirection::Up).unwrap();
 
         let refused = reply(
             &mut log,
-            &key,
+            &by(&key),
             stoa,
             a_vote.id,
             "replying to a vote".to_string(),
@@ -988,14 +1155,14 @@ mod tests {
         // Build the parent in one log so its id is known, then publish the
         // reply against a log that does not hold it.
         let mut origin = a_log();
-        let parent = post(&mut origin, &key, stoa, "arrives late".to_string()).unwrap();
+        let parent = post(&mut origin, &by(&key), stoa, "arrives late".to_string()).unwrap();
         let parent_op = stored(&origin, &parent.id);
 
         let mut log = a_log();
-        assert!(reply(&mut log, &key, stoa, parent.id, "eager".to_string()).is_err());
+        assert!(reply(&mut log, &by(&key), stoa, parent.id, "eager".to_string()).is_err());
 
         log.append(parent_op, Arrival::unordered()).unwrap();
-        let published = reply(&mut log, &key, stoa, parent.id, "eager".to_string())
+        let published = reply(&mut log, &by(&key), stoa, parent.id, "eager".to_string())
             .expect("the same reply must publish once its parent is held");
         assert_eq!(
             thread_field_of(&stored(&log, &published.id)),
@@ -1013,11 +1180,11 @@ mod tests {
         let here = a_key(A_ROOT, &agora);
         let there = a_key(A_ROOT, &lyceum);
 
-        let parent = post(&mut log, &here, agora, "in the agora".to_string()).unwrap();
+        let parent = post(&mut log, &by(&here), agora, "in the agora".to_string()).unwrap();
 
         let refused = reply(
             &mut log,
-            &there,
+            &by(&there),
             lyceum,
             parent.id,
             "from elsewhere".to_string(),
@@ -1033,8 +1200,14 @@ mod tests {
         );
         assert_eq!(log.len().unwrap(), 1, "nothing was appended");
 
-        reply(&mut log, &here, agora, parent.id, "from here".to_string())
-            .expect("a reply within one Stoa must publish");
+        reply(
+            &mut log,
+            &by(&here),
+            agora,
+            parent.id,
+            "from here".to_string(),
+        )
+        .expect("a reply within one Stoa must publish");
         assert_eq!(log.len().unwrap(), 2);
     }
 
@@ -1049,9 +1222,9 @@ mod tests {
         let key = a_key(A_ROOT, &stoa);
         let mut log = a_log();
 
-        let target = post(&mut log, &key, stoa, "the subject".to_string()).unwrap();
-        let up = vote(&mut log, &key, stoa, target.id, VoteDirection::Up).unwrap();
-        let down = vote(&mut log, &key, stoa, target.id, VoteDirection::Down).unwrap();
+        let target = post(&mut log, &by(&key), stoa, "the subject".to_string()).unwrap();
+        let up = vote(&mut log, &by(&key), stoa, target.id, VoteDirection::Up).unwrap();
+        let down = vote(&mut log, &by(&key), stoa, target.id, VoteDirection::Down).unwrap();
 
         assert_ne!(up.id, down.id, "the two directions are two ops");
         for (published, expected) in [(&up, VoteDirection::Up), (&down, VoteDirection::Down)] {
@@ -1078,10 +1251,10 @@ mod tests {
         let key = a_key(A_ROOT, &stoa);
         let mut log = a_log();
 
-        let target = post(&mut log, &key, stoa, "the subject".to_string()).unwrap();
-        let up = vote(&mut log, &key, stoa, target.id, VoteDirection::Up)
+        let target = post(&mut log, &by(&key), stoa, "the subject".to_string()).unwrap();
+        let up = vote(&mut log, &by(&key), stoa, target.id, VoteDirection::Up)
             .expect("the first vote publishes");
-        let down = vote(&mut log, &key, stoa, target.id, VoteDirection::Down)
+        let down = vote(&mut log, &by(&key), stoa, target.id, VoteDirection::Down)
             .expect("the second vote is not refused on the strength of the first");
         assert!(log.get(&up.id).unwrap().is_some());
         assert!(log.get(&down.id).unwrap().is_some());
@@ -1095,14 +1268,15 @@ mod tests {
         let key = a_key(A_ROOT, &stoa);
         let mut log = a_log();
 
-        let mine = post(&mut log, &key, stoa, "my own post".to_string()).unwrap();
-        vote(&mut log, &key, stoa, mine.id, VoteDirection::Up)
+        let mine = post(&mut log, &by(&key), stoa, "my own post".to_string()).unwrap();
+        vote(&mut log, &by(&key), stoa, mine.id, VoteDirection::Up)
             .expect("an identity may vote on its own post");
 
         // A moderation op, appended directly — this path does not publish one.
         let moderation = Op {
             stoa,
             author: key.public_key(),
+            clock: None,
             kind: OpKind::Moderate {
                 target: mine.id,
                 action: ModerationAction::Hide,
@@ -1112,8 +1286,14 @@ mod tests {
         let moderation_id = moderation.op.id();
         log.append(moderation, Arrival::unordered()).unwrap();
 
-        vote(&mut log, &key, stoa, moderation_id, VoteDirection::Down)
-            .expect("a vote is not refused on the grounds of the target's kind");
+        vote(
+            &mut log,
+            &by(&key),
+            stoa,
+            moderation_id,
+            VoteDirection::Down,
+        )
+        .expect("a vote is not refused on the grounds of the target's kind");
     }
 
     #[test]
@@ -1123,7 +1303,7 @@ mod tests {
         let mut log = a_log();
 
         let absent = OpId::from_hex(&"5c".repeat(32)).unwrap();
-        let refused = vote(&mut log, &key, stoa, absent, VoteDirection::Up)
+        let refused = vote(&mut log, &by(&key), stoa, absent, VoteDirection::Up)
             .expect_err("a vote on nothing must be refused");
         assert_eq!(
             refused,
@@ -1143,14 +1323,14 @@ mod tests {
 
         let target = post(
             &mut log,
-            &a_key(A_ROOT, &agora),
+            &by(&a_key(A_ROOT, &agora)),
             agora,
             "in the agora".to_string(),
         )
         .unwrap();
         let refused = vote(
             &mut log,
-            &a_key(A_ROOT, &lyceum),
+            &by(&a_key(A_ROOT, &lyceum)),
             lyceum,
             target.id,
             VoteDirection::Up,
@@ -1176,8 +1356,8 @@ mod tests {
         let key = a_key(A_ROOT, &stoa);
         let mut log = a_log();
 
-        let target = post(&mut log, &key, stoa, "the subject".to_string()).unwrap();
-        let published = vote(&mut log, &key, stoa, target.id, VoteDirection::Up).unwrap();
+        let target = post(&mut log, &by(&key), stoa, "the subject".to_string()).unwrap();
+        let published = vote(&mut log, &by(&key), stoa, target.id, VoteDirection::Up).unwrap();
 
         assert_eq!(stored(&log, &published.id).op.id(), published.id);
         let by_target: Vec<OpId> = log
@@ -1220,13 +1400,13 @@ mod tests {
         let key = a_key(A_ROOT, &stoa);
         let mut log = a_log();
 
-        let published = post(&mut log, &key, stoa, "unaffected".to_string()).unwrap();
+        let published = post(&mut log, &by(&key), stoa, "unaffected".to_string()).unwrap();
         let before_bytes = stored(&log, &published.id).to_bytes();
         let moderators = crate::moderation::Moderators::of(&genesis).unwrap();
         let before_row = crate::feed::list_threads(&log, &moderators, &stoa, 0, 20, false).unwrap();
 
-        vote(&mut log, &key, stoa, published.id, VoteDirection::Up).unwrap();
-        vote(&mut log, &key, stoa, published.id, VoteDirection::Down).unwrap();
+        vote(&mut log, &by(&key), stoa, published.id, VoteDirection::Up).unwrap();
+        vote(&mut log, &by(&key), stoa, published.id, VoteDirection::Down).unwrap();
 
         assert_eq!(stored(&log, &published.id).to_bytes(), before_bytes);
         let after_row = crate::feed::list_threads(&log, &moderators, &stoa, 0, 20, false).unwrap();
@@ -1306,6 +1486,7 @@ mod tests {
         let orphan = Op {
             stoa: agora,
             author: key.public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: Some(absent_parent),
                 parent: Some(absent_parent),
@@ -1316,10 +1497,11 @@ mod tests {
         .sign(&key);
         // A reply whose Stoa differs from its parent's: publish the parent in
         // one Stoa and hand-build a reply naming the other.
-        let parent = post(&mut log, &key, agora, "the parent".to_string()).unwrap();
+        let parent = post(&mut log, &by(&key), agora, "the parent".to_string()).unwrap();
         let cross = Op {
             stoa: lyceum,
             author: a_key(A_ROOT, &lyceum).public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: Some(parent.id),
                 parent: Some(parent.id),
@@ -1330,10 +1512,10 @@ mod tests {
         .sign(&a_key(A_ROOT, &lyceum));
 
         // Each really is refused by this module, or the test proves nothing.
-        assert!(reply(&mut log, &key, agora, absent_parent, "x".to_string()).is_err());
+        assert!(reply(&mut log, &by(&key), agora, absent_parent, "x".to_string()).is_err());
         assert!(reply(
             &mut log,
-            &a_key(A_ROOT, &lyceum),
+            &by(&a_key(A_ROOT, &lyceum)),
             lyceum,
             parent.id,
             "x".to_string()
@@ -1372,14 +1554,25 @@ mod tests {
         let mut log = a_log();
 
         // One op this peer published, through the publish path.
-        let published = post(&mut log, &key, stoa, "mine".to_string()).unwrap();
+        let published = post(&mut log, &by(&key), stoa, "mine".to_string()).unwrap();
         let ours = stored(&log, &published.id);
 
         // The same op built and signed by hand, as an arriving one would be —
         // never through `post`, and appended the way an inbound op is.
+        //
+        // **The clock is spelled out rather than copied from `ours`.** Copying
+        // would make the byte comparison below tautological: two ops built from
+        // one op's fields are equal whatever the publish path did. Counter 1
+        // because this was the first op into an empty Stoa, and `A_TIME`
+        // because that is what `by()` hands the publish path — so this asserts
+        // that the publish path stamps the values the contract says it does.
         let theirs = Op {
             stoa,
             author: key.public_key(),
+            clock: Some(OpClock {
+                counter: 1,
+                asserted_ms: A_TIME,
+            }),
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -1403,6 +1596,208 @@ mod tests {
         );
     }
 
+    // ─── The counter a publish stamps ─────────────────────────────────────
+
+    #[test]
+    fn a_first_op_in_a_stoa_carries_a_counter_of_one() {
+        // One above a clock of zero, which is what a peer holding no ops of that
+        // Stoa has. Asserted on the STORED op, so this is about what was signed
+        // rather than about what a helper returned.
+        let stoa = a_stoa("Agora");
+        let key = a_key(A_ROOT, &stoa);
+        let mut log = a_log();
+
+        let published = post(&mut log, &by(&key), stoa, "first".to_string()).unwrap();
+        assert_eq!(
+            stored(&log, &published.id).op.clock.unwrap().counter,
+            1,
+            "a first op into an empty Stoa carries one"
+        );
+    }
+
+    #[test]
+    fn publishing_after_receiving_advances_past_what_was_received() {
+        // The causality property: a peer that has seen an op at N publishes at
+        // above N, which states "this op was written knowing of something at N".
+        let stoa = a_stoa("Agora");
+        let key = a_key(A_ROOT, &stoa);
+        let mut log = a_log();
+
+        // An op from somebody else, carrying a counter well above anything this
+        // peer would have reached on its own.
+        let received = Op {
+            stoa,
+            author: key.public_key(),
+            clock: Some(OpClock {
+                counter: 500,
+                asserted_ms: A_TIME,
+            }),
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: "from a peer".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&key);
+        log.append(received, Arrival::unordered()).unwrap();
+
+        let published = post(&mut log, &by(&key), stoa, "mine".to_string()).unwrap();
+        assert_eq!(
+            stored(&log, &published.id).op.clock.unwrap().counter,
+            501,
+            "a publish takes one above the highest counter held"
+        );
+    }
+
+    #[test]
+    fn a_peer_can_still_publish_after_receiving_a_maximal_counter() {
+        // **THE attack the advance bound exists to stop, from the publish side.**
+        // An author signs `u64::MAX`. If that raised this peer's clock, its next
+        // op would need a counter above the maximum and the Stoa would be
+        // silenced permanently for everyone who received the op.
+        //
+        // Instead the hostile op is stored, orders by its counter, and costs
+        // this peer nothing: the publish succeeds and takes one above the
+        // peer's own unchanged clock.
+        let stoa = a_stoa("Agora");
+        let key = a_key(A_ROOT, &stoa);
+        let mut log = a_log();
+
+        let honest = Op {
+            stoa,
+            author: key.public_key(),
+            clock: Some(OpClock {
+                counter: 5,
+                asserted_ms: A_TIME,
+            }),
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: "honest".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&key);
+        let hostile = Op {
+            stoa,
+            author: key.public_key(),
+            clock: Some(OpClock {
+                counter: u64::MAX,
+                asserted_ms: A_TIME,
+            }),
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: "u64::MAX".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&key);
+        let hostile_id = hostile.op.id();
+        log.append(honest, Arrival::unordered()).unwrap();
+        log.append(hostile, Arrival::unordered()).unwrap();
+
+        let published = post(&mut log, &by(&key), stoa, "still posting".to_string()).unwrap();
+        assert_eq!(
+            stored(&log, &published.id).op.clock.unwrap().counter,
+            6,
+            "the maximal op did not raise this peer's clock, so the publish is 5+1"
+        );
+
+        // The hostile op is STORED and it DOES order ahead — the bound decides
+        // the clock, never what is held or how anything sorts. Refusing it
+        // outright would be refusing content for a field, which is the
+        // censorship vector this deliberately does not open.
+        assert!(log.get(&hostile_id).unwrap().is_some(), "it is stored");
+        let ids: Vec<OpId> = log.iter().unwrap().iter().map(|e| e.id()).collect();
+        assert_eq!(ids[0], hostile_id, "and it takes its place at the head");
+    }
+
+    #[test]
+    fn one_stoas_ops_do_not_advance_another_stoas_clock() {
+        // The clock is per Stoa. A shared one would leak activity across Stoas —
+        // a reader in a quiet Stoa could infer the peer is busy elsewhere — and
+        // would order ops that never contend.
+        let agora = a_stoa("Agora");
+        let lyceum = a_stoa("Lyceum");
+        assert_ne!(agora, lyceum, "the fixture needs two Stoas");
+        let mut log = a_log();
+
+        // Several ops in one Stoa, so its clock is well above zero.
+        let agora_key = a_key(A_ROOT, &agora);
+        for _ in 0..5 {
+            post(&mut log, &by(&agora_key), agora, "busy".to_string()).unwrap();
+        }
+
+        // A first op in the OTHER Stoa still carries one.
+        let lyceum_key = a_key(A_ROOT, &lyceum);
+        let published = post(&mut log, &by(&lyceum_key), lyceum, "quiet".to_string()).unwrap();
+        assert_eq!(
+            stored(&log, &published.id).op.clock.unwrap().counter,
+            1,
+            "the busy Stoa's counters must not reach the quiet one"
+        );
+    }
+
+    #[test]
+    fn the_asserted_time_is_the_one_the_caller_supplied() {
+        // The publish path signs the caller's clock verbatim and neither samples
+        // one nor adjusts what it is given. A core that read the system clock
+        // here would make an op's bytes depend on when a test ran.
+        let stoa = a_stoa("Agora");
+        let key = a_key(A_ROOT, &stoa);
+        let mut log = a_log();
+
+        // A deliberately implausible value, to show nothing clamps on the way
+        // in — clamping is a read-time presentation rule, and the wall-clock is
+        // inside the signed preimage so the boundary could not clamp it anyway.
+        let absurd = u64::MAX;
+        let who = Authorship {
+            key: &key,
+            now_ms: absurd,
+        };
+        let published = post(&mut log, &who, stoa, "from 584 million AD".to_string()).unwrap();
+
+        let op = stored(&log, &published.id);
+        assert_eq!(op.op.clock.unwrap().asserted_ms, absurd);
+        assert!(op.verify(), "and it is signed over that value");
+    }
+
+    #[test]
+    fn every_publish_path_stamps_a_counter() {
+        // THE SWEEP. `post`, `reply` and `vote` each build an `Op` literal, and
+        // a fourth that forgot the clock would publish an op no ordering could
+        // place. The compiler catches a MISSING field; it does not catch a field
+        // set to `None`, which is what this covers.
+        let stoa = a_stoa("Agora");
+        let key = a_key(A_ROOT, &stoa);
+        let mut log = a_log();
+
+        let root = post(&mut log, &by(&key), stoa, "root".to_string()).unwrap();
+        let child = reply(&mut log, &by(&key), stoa, root.id, "reply".to_string()).unwrap();
+        let ballot = vote(
+            &mut log,
+            &by(&key),
+            stoa,
+            root.id,
+            crate::op::VoteDirection::Up,
+        )
+        .unwrap();
+
+        for (what, id) in [("post", root.id), ("reply", child.id), ("vote", ballot.id)] {
+            assert!(
+                stored(&log, &id).op.clock.is_some(),
+                "a published {what} must carry a clock"
+            );
+        }
+        // And the three counters ascend, because each read the clock the one
+        // before it advanced.
+        let counter_of = |id: &OpId| stored(&log, id).op.clock.unwrap().counter;
+        assert!(counter_of(&root.id) < counter_of(&child.id));
+        assert!(counter_of(&child.id) < counter_of(&ballot.id));
+    }
+
     // ─── Hostile text reaches the op unchanged ────────────────────────────
 
     #[test]
@@ -1424,7 +1819,7 @@ mod tests {
             "🏛",
         ] {
             let mut log = a_log();
-            let published = post(&mut log, &key, stoa, body.to_string()).unwrap();
+            let published = post(&mut log, &by(&key), stoa, body.to_string()).unwrap();
             assert_eq!(
                 body_of(&stored(&log, &published.id)).as_bytes(),
                 body.as_bytes(),
@@ -1450,8 +1845,8 @@ mod tests {
             "the fixture needs two byte strings"
         );
 
-        let a = post(&mut log, &key, stoa, composed.to_string()).unwrap();
-        let b = post(&mut log, &key, stoa, decomposed.to_string()).unwrap();
+        let a = post(&mut log, &by(&key), stoa, composed.to_string()).unwrap();
+        let b = post(&mut log, &by(&key), stoa, decomposed.to_string()).unwrap();
         assert_ne!(a.id, b.id, "normalisation forms must publish as two ops");
         assert_eq!(log.len().unwrap(), 2);
         assert_eq!(body_of(&stored(&log, &a.id)), composed);
@@ -1473,7 +1868,7 @@ mod tests {
         let mut log = a_log();
 
         let body = "x".repeat(MAX_BODY_LEN);
-        let published = post(&mut log, &key, stoa, body.clone()).unwrap();
+        let published = post(&mut log, &by(&key), stoa, body.clone()).unwrap();
         assert_eq!(body_of(&stored(&log, &published.id)).len(), body.len());
     }
 
@@ -1506,7 +1901,7 @@ mod tests {
 
         let over = "x".repeat(MAX_BODY_LEN + 1);
         assert_eq!(
-            post(&mut log, &key, stoa, over.clone()),
+            post(&mut log, &by(&key), stoa, over.clone()),
             Err(Refusal::BodyTooLong {
                 len: MAX_BODY_LEN + 1,
                 cap: MAX_BODY_LEN,
@@ -1517,9 +1912,9 @@ mod tests {
 
         // A reply too, and before the parent is even looked up: the body is
         // refusable without a store read.
-        let seed = post(&mut log, &key, stoa, "the subject".to_string()).unwrap();
+        let seed = post(&mut log, &by(&key), stoa, "the subject".to_string()).unwrap();
         assert_eq!(
-            reply(&mut log, &key, stoa, seed.id, over),
+            reply(&mut log, &by(&key), stoa, seed.id, over),
             Err(Refusal::BodyTooLong {
                 len: MAX_BODY_LEN + 1,
                 cap: MAX_BODY_LEN,
@@ -1550,7 +1945,7 @@ mod tests {
 
         let bodies = ["", "short", &"x".repeat(MAX_BODY_LEN)];
         for body in bodies {
-            let published = post(&mut log, &key, stoa, body.to_string()).unwrap();
+            let published = post(&mut log, &by(&key), stoa, body.to_string()).unwrap();
             let signed = stored(&log, &published.id);
             let bytes = signed.to_bytes();
             let decoded = crate::op::SignedOp::from_bytes(&bytes)
@@ -1602,9 +1997,9 @@ mod tests {
         let id = OpId::from_hex(&"11".repeat(32)).unwrap();
 
         for refusal in [
-            post(&mut BrokenLog, &key, stoa, "x".to_string()).unwrap_err(),
-            reply(&mut BrokenLog, &key, stoa, id, "x".to_string()).unwrap_err(),
-            vote(&mut BrokenLog, &key, stoa, id, VoteDirection::Up).unwrap_err(),
+            post(&mut BrokenLog, &by(&key), stoa, "x".to_string()).unwrap_err(),
+            reply(&mut BrokenLog, &by(&key), stoa, id, "x".to_string()).unwrap_err(),
+            vote(&mut BrokenLog, &by(&key), stoa, id, VoteDirection::Up).unwrap_err(),
         ] {
             assert!(
                 matches!(refusal, Refusal::Storage(_)),

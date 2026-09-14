@@ -182,6 +182,50 @@ ColumnLayout {
         return n
     }
 
+    // ---- an outstanding publish ------------------------------------------
+    //
+    // **True from the moment a submission is made until an outcome is reported.**
+    // The submit control reads it, and while it is true there is no control to
+    // activate.
+    //
+    // # Why this exists, and what it is actually defending against
+    //
+    // An op's signed bytes now carry a Lamport counter that advances between two
+    // publishes, so **two submissions of one draft are two distinct ops**. The
+    // deduplication that used to absorb a double-tapped submit no longer does,
+    // and core cannot restore it: at that layer a double tap and a person
+    // deliberately posting the same line twice are identical acts producing
+    // correctly-signed, correctly-ordered ops. The view is the only layer at
+    // which the two are distinguishable, because only the view knows that one
+    // gesture occurred.
+    //
+    // The cost of getting it wrong is permanent. This system has no delete, and
+    // a revision replaces a post's content rather than withdrawing it — so a
+    // duplicate is visible to every peer forever, and the author's only remedy
+    // is to edit one into an apology.
+    //
+    // # BE PRECISE ABOUT WHAT THIS BUYS ON TODAY'S TRANSPORT
+    //
+    // `Core.call` reaches the host through `bridge.callModule`, which is
+    // **synchronous**, and QML's JavaScript is single-threaded. So `submit()`
+    // runs from its first line to its last within one event-handler turn, and no
+    // second activation can be delivered in between: today the duplicate this
+    // guards against is **already unreachable**, by the transport's shape rather
+    // than by anything in this file.
+    //
+    // That is a reason to write the guard, not a reason to skip it. The property
+    // being defended is "one gesture, one op", and it currently holds for a
+    // reason this component neither chose nor controls — the day `callModule`
+    // gains an asynchronous form, or a publish acquires a confirmation step, the
+    // window opens and nothing would report that it had. A guard that is correct
+    // before and after that change costs two bindings.
+    //
+    // **So the test that this disables the control is a real test, and a test
+    // that "a double tap publishes once" would be measuring the single-threaded
+    // event loop.** Say which is which rather than claiming coverage the shape
+    // of the runtime is providing.
+    property bool publishing: false
+
     // ---- submitting -----------------------------------------------------
     //
     // One function, and every exit from it sets `outcome` to exactly one of
@@ -191,10 +235,26 @@ ColumnLayout {
     function submit() {
         if (!root.submittable)
             return
+        // A submission while one is outstanding submits NOTHING. Unreachable
+        // through the button, which is not rendered while `publishing` — this is
+        // the guard for a caller reaching `submit()` directly, and for the day
+        // the call stops being synchronous.
+        if (root.publishing)
+            return
+
+        root.publishing = true
 
         var reply = root.kind === "reply"
             ? Core.publishReply(root.stoaAddress, root.replyParent, root.draft)
             : Core.publishPost(root.stoaAddress, root.draft)
+
+        // **Cleared before the outcome is applied, and on EVERY path.** A
+        // refusal stored nothing, so the user must be able to retry; leaving
+        // this true on the refusal path would be a composer that locks itself
+        // out permanently the first time core says no. `applyReply` has five
+        // exits and this sits above all of them rather than being spelled at
+        // each — which is the shape that survives a sixth being added.
+        root.publishing = false
 
         root.applyReply(reply)
     }
@@ -351,7 +411,14 @@ ColumnLayout {
             // anything, and the success message says so too.
             text: root.kind === "reply" ? "Publish the reply" : "Publish the post"
             kind: "primary"
-            visible: root.submittable
+            // **Not rendered while a publish is outstanding**, which is the same
+            // answer this component already gives an unsubmittable draft: the
+            // affordance is absent rather than present-and-inert.
+            //
+            // Disabling is a property of the CONTROL and not a message asking
+            // the user to wait — a prompt not to double-tap relies on the person
+            // reading it in the moment they are least likely to.
+            visible: root.submittable && !root.publishing
             onClicked: root.submit()
         }
 

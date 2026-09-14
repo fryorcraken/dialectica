@@ -17,6 +17,7 @@
 mod cursor;
 
 pub mod arrival;
+pub mod asserted_time;
 pub mod authoring;
 pub mod feed;
 pub mod identity;
