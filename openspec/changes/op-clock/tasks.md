@@ -37,7 +37,17 @@
       names, `sqlite.rs`'s sentinel-regression loop is inert under the new
       two-column shape while instructing the reader to preserve it, and a
       `moderation.rs` test calls its fixtures forged while asserting they verify.
-- [ ] review: architecture — `code-reviewer`
+- [x] review: architecture — `code-reviewer` — six findings in
+      `findings/architecture.md`. Two structural claims that measurement
+      contradicts (`Placed`'s position guarantee survives being bypassed with
+      1002/1002 green; `every_publish_path_stamps_a_counter` is a three-name
+      sweep list with three more builders implied), three stale contracts in
+      modules the change reached without revisiting (`feed.rs`'s ordering name
+      rests on the removed premise, `log/mod.rs`'s `iter_target` and sort-key
+      docs), and one unrecorded `FeedRow`/`ThreadItem` shape asymmetry for the
+      `spec-writer`. The central devices — `OpEntry` unable to name an
+      `Arrival`, `OpClock` behind one `Option`, the wall clock reachable only as
+      text, the migration as a sort key — all hold under attack.
 - [ ] review: spec-test — `spec-test-reviewer`
 - [x] review: design — `design-reviewer` — six findings, all gaps rather than
       contradictions: the code takes every decision `design.md` records, and both
