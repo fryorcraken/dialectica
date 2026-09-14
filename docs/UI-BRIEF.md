@@ -847,6 +847,59 @@ shipped because an obligation lived in a document nobody implementing a screen
 had a reason to open. A contract that can only be found by someone who already
 knows to look for it is a contract the next screen will not meet.
 
+## The three shared components, and what each asks of you
+
+**For whoever implements a screen in QML.** `DStatusBar` and `DIdentityChip` are
+the footer on every feed; `DVouchStamp` sits in every post's attribution row. The
+obligations below are **not deducible from the property names**, and getting one
+wrong is silent in the same way `Layout.fillHeight` is — so they are stated here
+for the same reason that section is.
+
+**`DStatusBar` — three lamps, and what a colour is allowed to claim.**
+
+- **The order DELIVERY, STORAGE, ZONE is fixed and positional.** A reader learns
+  the position, so a lamp is identified by where it is before its label is read.
+  Do not reorder, do not omit one, and do not turn the three into a model.
+- **An unrecognised state renders `degraded`, and so does an unbound one.** So a
+  screen may pass core's string through without pre-checking it — but must not
+  read the *absence* of orange as health. **Green means a state string this
+  component recognised as `"ok"`; it never means "probably fine".**
+- **The tooltip is the sentence; the lamp is the signal.** A lamp given no
+  explanation shows none, and the component invents nothing. The six strings
+  live in the bundle's `copy.json` under `status.tooltips` and travel with the
+  screen that computes the states — **verbatim**, because the distinction
+  between "no peers" and "you have joined nothing yet" is the one that tells an
+  empty feed apart from an unreadable store.
+- **The DELIVERY lamp has no honest source today.** `docs/PLAN.md` records that
+  no call produces the signal one would wait on, and names the work still owed
+  as "Still not built". Do not invent a heuristic to fill it.
+
+**`DIdentityChip` — who you are acting as.**
+
+- **Bind `hasIdentity: <capability>.canPost === true`, never a raw probe
+  field.** The `=== true` is not cosmetic: `"true"`, `1`, `null` and `undefined`
+  are all not-`true`, and a chip given any of them renders the *identity
+  present* arm — claiming an identity the machine does not have, with every gate
+  green. `FeedScreen` establishes the `capability` shape this binds to.
+- **`generatedName` cannot be filled by any caller yet** (no entry point exists;
+  tracked as issue #81). Passing `""` is correct until it does.
+
+**`DVouchStamp` — the viewer's own record, and nobody else's.**
+
+- **Pass `hasIdentity`.** It defaults **closed**, so a stamp you forget to tell
+  about the identity renders nothing rather than offering a vouch the machine
+  cannot make. This is the component holding the rule for you; do not work
+  around it.
+- **Thread `revealed` from the post row's hover**, not from the stamp's own
+  bounds — at `opacity: 0` the stamp has none to hover.
+- **There is no count, and there is no property that could hold one.** A vouch
+  is never published and never counted.
+
+**Tooltips anywhere: use `DTip`, never `ToolTip.text:`.** A `ToolTip`'s default
+content item renders its text as **markup** (`Text.StyledText`), and the attached
+form routes through a shared instance you cannot give a format to. CI fails on an
+attached binding, so this is enforced rather than advisory.
+
 ## The obligations themselves
 
 **1. Sanitise display text, because the core deliberately does not — and this
