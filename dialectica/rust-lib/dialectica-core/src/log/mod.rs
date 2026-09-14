@@ -71,7 +71,7 @@ pub mod sqlite;
 
 pub use sqlite::SqliteOpLog;
 
-use crate::arrival::{cmp_ops, Arrival, OpEntry};
+use crate::arrival::{clock_from_counters, cmp_ops, Arrival, OpEntry};
 use crate::identity::Address;
 use crate::op::{OpId, OpKind, SignedOp};
 use std::collections::HashMap;
@@ -379,6 +379,32 @@ pub trait OpLog {
     /// not `target` itself.
     fn iter_target(&self, target: &OpId) -> Result<Vec<Entry>, OpLogError>;
 
+    /// This peer's Lamport clock for one Stoa.
+    ///
+    /// **Derived from the ops held, never stored.** There is no column, no
+    /// pragma and no in-memory counter behind this: it is a fold over the
+    /// counters of that Stoa's ops, so a restart or a rebuild-by-replay
+    /// recomputes the value the peer had. A stored counter would be a second
+    /// source of truth that disagrees with the log in exactly the cases that
+    /// matter — a store restored from a backup, a replay reaching further back
+    /// than the counter, a crash between appending an op and updating it.
+    ///
+    /// Zero where the peer holds no ops of that Stoa, which is the same fold
+    /// over an empty input rather than a special case.
+    ///
+    /// **The default implementation is the definition**, and an implementor
+    /// overriding it for speed is answering the same question a faster way. It
+    /// reads every op of the Stoa and takes the counters; the ordering the read
+    /// returns them in does not matter, because
+    /// [`clock_from_counters`](crate::arrival::clock_from_counters) sorts.
+    fn clock(&self, stoa: &Address) -> Result<u64, OpLogError> {
+        Ok(clock_from_counters(
+            self.iter_stoa(stoa)?
+                .into_iter()
+                .filter_map(|e| e.op.op.clock.map(|c| c.counter)),
+        ))
+    }
+
     /// How many distinct ops the log holds.
     fn len(&self) -> Result<usize, OpLogError>;
 
@@ -446,9 +472,12 @@ impl MemoryOpLog {
         // costs nothing and removes a way for a future non-total comparison to
         // produce a peer-dependent result.
         out.sort_by(|a, b| {
+            // `OpEntry::of` reads the OP's counter. The entry's `arrival` is not
+            // reachable from here and is not consulted: it records what the
+            // transport said about a delivery, which orders nothing.
             cmp_ops(
-                OpEntry::new(&a.arrival, &a.id()),
-                OpEntry::new(&b.arrival, &b.id()),
+                OpEntry::of(&a.op.op, &a.id()),
+                OpEntry::of(&b.op.op, &b.id()),
             )
         });
         out
@@ -610,6 +639,7 @@ mod tests {
                 op: Op {
                     stoa,
                     author: author.public_key(),
+                    clock: None,
                     kind,
                 }
                 .sign(&author),

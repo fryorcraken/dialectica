@@ -284,16 +284,16 @@ is honest and worth designing to rather than around.
 **Design implications:**
 - The default feed **omits** hidden posts rather than showing them greyed out.
 - A "show hidden" view is explicitly wanted.
-- **A hide is currently irreversible** (see the warning below), and that must be
-  said at the moment of action.
+- ~~**A hide is currently irreversible**, and that must be said at the moment of
+  action.~~ **No longer true — a hide is reversible.** An unhide published after
+  a hide now takes effect, so the warning this brief previously required is
+  withdrawn along with it. **Do not design one in.**
 
 **Split by release, because the two halves separate cleanly.** The first release
 ships **no way to publish a hide** — no moderation screen, no hide control (see
 *Moderation*). What it can still do is the read half: the core already answers
 whether a post is hidden, so omitting hidden posts, and a "show hidden" view, are
 available and correct from day one, and they need no key and no moderator status.
-The irreversibility warning attaches to the *control*, so it arrives when the
-control does.
 
 ### 5. Attacker-supplied content is everywhere
 
@@ -525,26 +525,45 @@ no page control is offered.
 
 **Orderings, and an honesty problem worth designing around.**
 
-The intended orderings are **new** (most recent first), **active** (threads by
-their most recent reply), and **top** (vote-ordered, weighted).
+The intended orderings are **new** (newest first, in the forum's own order),
+**active** (threads by their most recent reply), and **top** (vote-ordered,
+weighted).
 
 **`top` does not ship in the first UI.** Phase 3 refuses it outright rather
 than shipping it provisionally: with no sybil resistance there is no score
 worth ordering by. **Design the ordering control so it can carry fewer options
 than three**, and so an option can appear later without the layout changing.
 
-**"Most recent" is not available *yet*, and the reason is worth knowing because
-it is about to change.** Both `new` and `active` were defined against a
-timestamp the transport layer does not deliver, so today both fall back to an
-order derived from op ids — *convergent*, in that every peer computes the same
-sequence, but carrying **no recency information at all.**
+**A real ordering has arrived, and it is causal rather than chronological. That
+distinction is the whole of what this section now asks you to design around.**
 
-**That is a gap dialectica can close by itself**, by putting an author-asserted
-timestamp inside the signed post, and the plan now says so. So treat a genuine
-"new" as **coming, not impossible** — design the ordering control as though a
-real recency option will arrive, rather than around its permanent absence. What
-does not change is the rule below: do not label an ordering "new" **until it
-is one**.
+Every post carries a counter inside its signed bytes that advances as the forum
+does. A reply written after its author saw another post carries a higher counter,
+so it sorts after it, and **every peer computes the same sequence.** That is a
+genuine ordering and a large improvement on what preceded it, which was a sort by
+hash.
+
+**What it is not is a clock.** It guarantees that a reply comes after what its
+author had seen. It says nothing about wall-clock time, and two people posting
+simultaneously in different places are separated by a hash, exactly as before. A
+person returning after a week away posts at one above what *they* last saw, which
+may sit below where the conversation has moved.
+
+So:
+
+- **"Newest first" and "latest first" are honest**, read as *latest in this
+  forum's order*. That is what the control should offer.
+- **"Most recent first" is not honest**, because it reads as a claim about time
+  and the ordering does not carry one.
+
+**Posts also carry a time, and it is the author's word and nothing more.** It
+arrives already formatted for display, marked as the author's claim, and it is
+deliberately not a number you could sort by — because anyone can write any value
+into it, and a feed sorted on it is a feed that any peer can pin itself to the
+top of permanently. **Render it; never rank by it.** Where the claimed time is
+implausible the core clamps it and tells you it did, and a post old enough to
+predate the field carries no time at all rather than a substituted one — so the
+design needs a state for *no time shown*.
 
 **Do not generalise that convergence to the feed as a whole.** It is a property
 of *this fallback*, not of Dialectica. Once vote-weighting exists, two readers
@@ -556,25 +575,25 @@ must not become the interface's general promise — and nothing in the design
 should read as though divergence between two peers' feeds is a fault to be
 repaired.
 
-So a feed labelled "new" would currently be ordered by hash. It is temporary
-and it resolves when an upstream gap closes, but until then:
+~~So a feed labelled "new" would currently be ordered by hash.~~ **No longer
+true.** What remains:
 
-- **Do not label an ordering "new", "latest" or "recent"** unless it is one.
-- A neutral label is honest and available now. Consider what the control should
-  say when the thing it names is not yet true.
-- **A neutral label is not by itself enough, and this is the part that is easy to
-  miss.** A reader meeting a forum feed assumes newest-first unless told
-  otherwise, and a label that merely declines to claim recency does not correct
-  that assumption — it leaves the interface relying on the reader not to make the
-  ordinary one. So the screen must **say plainly that this is not newest first**,
-  somewhere the reader actually reads. That sentence is currently in the feed's
-  own body, under the heading rule.
-- Whatever you design, **the labels must be able to change** when the real
-  ordering arrives, without the layout changing around them.
+- **Do not label an ordering "most recent"** or otherwise phrase it as a claim
+  about time. "Newest" and "latest" are available and are what to use.
+- **The screen no longer needs to say "this is not newest first"**, because it
+  now is, in the only sense the forum has. That sentence was in the feed's body
+  under the heading rule and should come out with this change.
+- **A post's displayed time must not read as the reason for its position.**
+  Placing a timestamp where a reader takes it as the sort key re-creates the
+  problem the contract removed — the two genuinely disagree whenever an author's
+  clock is wrong, and a reader who has inferred "sorted by this" will read that
+  as a bug. Design the time as attribution, not as rank.
+- Whatever you design, **the labels must be able to change**, without the layout
+  changing around them.
 
-This is the clearest instance of the project's tone problem in miniature: the
-convergent order is genuinely useful and genuinely not chronological, and the
-interface has to say which without being tedious about it.
+This remains the clearest instance of the project's tone problem in miniature:
+the order is genuinely useful, genuinely convergent, and genuinely not a clock,
+and the interface has to say which without being tedious about it.
 
 ### Thread — a post and its replies
 
@@ -703,32 +722,30 @@ delivered one look identical from the author's side.** The interface is the only
 place that can be admitted, and an obligation phrased only as "do not claim
 delivery" is discharged by a screen that says nothing at all.
 
-**1. Posting the same thing twice posts once, and the interface has to handle
-it.** A post is named by a hash of its own content, and nothing in that content
-varies between two submissions — so one person posting the same body into the same
-Stoa twice produces **one post**. The second submission succeeds and tells you it
-stored nothing new.
+**1. ~~Posting the same thing twice posts once~~ — REVERSED. Posting the same
+thing twice now posts twice, and preventing a double submission has become the
+interface's job.**
 
-That is exactly right for a double-tapped submit button, and it is wrong for
-someone deliberately writing "agreed" twice in one thread, which is ordinary
-forum behaviour. The core reports which of the two happened; **the interface
-decides what the person sees**, and the failing design is the one that reports
-success and shows nothing new, because the person concludes their post vanished.
-**Do not** show a spinner that resolves to nothing, and do not show a generic
-error — nothing failed.
+A post is named by a hash of its own content, and that content now includes a
+counter that advances between two submissions. So **one person posting the same
+body into the same Stoa twice produces two posts**, both of which appear. Writing
+"agreed" twice in one thread works, which is the case the old behaviour got
+wrong.
 
-**What `composer-view` settled, and why the other option was dropped.** This
-section used to offer two reasonable answers: say so plainly, or scroll to and
-highlight the existing post. Only the first ships. The second is a behaviour the
-view can perform for a post and **not** for a reply — the feed lists thread
-heads, so a deduplicated reply has no row to scroll to — and requiring a
-behaviour half the surface cannot meet is how a spec acquires a requirement no
-test can satisfy honestly. So the spec requires a third message, distinguishable
-from both the fresh-success and the refusal messages, saying the content was
-already published.
+**The case it got right is now yours.** A double-tapped submit button publishes
+twice, and the core cannot tell that apart from someone meaning it — at that
+layer the two are identical, correctly signed, correctly ordered posts. **The
+composer must not let one tap become two**: disable the control while a
+submission is outstanding, and do not re-enable it until the reply arrives. This
+is a real obligation, not a nicety; without it the ordinary failure is a person
+seeing their post twice and no way to remove either.
 
-This is a known gap with a known fix (a timestamp or nonce inside the post), and
-it is deliberately not fixed yet. Design for the behaviour that exists.
+**The already-published message is still specified and still arrives**, because
+the case it reports has not become impossible — re-publishing a post this peer
+already holds is still one post. It is just no longer the common path.
+
+~~This is a known gap with a known fix (a timestamp or nonce inside the post).~~
+**Fixed.** The timestamp landed; the residue is the double-tap obligation above.
 
 **2. A reply needs its parent, and a peer does not always have it.** A reply names
 the post it answers, and the core works out which thread that is by reading the
@@ -758,11 +775,14 @@ core change nobody has made.
 > built and merged, and the first release ships **no moderation screen and no way
 > to publish a moderation action**. It is scope, not a change of design — what
 > follows, and every moderation obligation in this brief, is what a later release
-> must do. The irreversibility warning below is part of why the sequencing is
-> comfortable: a hide control shipped today would have to warn that its action
-> cannot be undone.
+> must do. ~~The irreversibility warning below is part of why the sequencing is
+> comfortable.~~ **That reason is gone — a hide is reversible now** — so the
+> sequencing is plain scope with no safety argument behind it. Worth knowing
+> before citing this note as a reason to keep waiting.
 
-Moderators see a hide control on any post. **See the irreversibility warning.**
+Moderators see a hide control on any post. An unhide reverses it, and the two may
+be designed as the symmetric pair they are — see obligation 2, which withdrew the
+warning that previously said otherwise.
 
 ---
 
@@ -861,19 +881,25 @@ The obvious case is a Stoa title impersonating another. **The larger case is
 post bodies**, which are the longest and least constrained strings you will
 render. Strip or visibly mark. **Never treat displayed text as an identifier.**
 
-**2. Warn that a hide cannot currently be undone, and do not present the pair
-as symmetric.**
-For reasons deep in the transport layer, an "unhide" cannot currently reverse a
-"hide". A moderator pressing hide is taking an action the core will not tell
-them is irreversible. **Say so at the point of action.**
+**2. ~~Warn that a hide cannot currently be undone, and do not present the pair
+as symmetric.~~ WITHDRAWN — hide and unhide are symmetric, and a warning would
+now be false.**
 
-And the subtler half: **an unhide control placed as the mirror of hide asserts
-a symmetry that does not exist.** Two buttons side by side, or one toggle, both
-claim the operation reverses. It does not, yet. Whatever you design, the
-asymmetry should be visible rather than implied away.
+This obligation required a warning at the point of action, and required that an
+unhide control not be presented as hide's mirror, because an unhide could not
+reverse a hide. **Every peer now orders moderation ops by a counter inside the
+signed op, so a later unhide leads and decides.** The operation reverses.
 
-Temporary — it resolves when an upstream gap closes, and the warning and the
-asymmetry go together when it does.
+The number is kept and struck rather than removed so that the list does not
+renumber under anything already citing it, and so that a designer who read the
+earlier brief meets the withdrawal rather than a silent gap.
+
+**What to design instead:** hide and unhide *are* a symmetric pair, and a toggle
+or two mirrored controls are now correct. Carry no irreversibility language.
+
+**One residue that is not about reversal:** hiding changes what conforming peers
+render and cannot unpublish anything. That ceiling is real, is unchanged by this,
+and is stated under *Moderation is real and it binds* above.
 
 **2b. A join confirmation showing only a title has shown the forgeable half.**
 A Stoa's title — the founding one the core returns today, and the moderator-signed

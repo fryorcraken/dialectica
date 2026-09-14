@@ -328,6 +328,7 @@ mod tests {
         Op {
             stoa: a_stoa(),
             author: key.public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -343,6 +344,7 @@ mod tests {
         Op {
             stoa: a_stoa(),
             author: key.public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: Some(parent),
                 parent: Some(parent),
@@ -401,6 +403,7 @@ mod tests {
         let op = Op {
             stoa: a_stoa(),
             author: victim.public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -436,6 +439,7 @@ mod tests {
         let hide = Op {
             stoa: a_stoa(),
             author: creator.public_key(),
+            clock: None,
             kind: OpKind::Moderate {
                 target: head.op.id(),
                 action: ModerationAction::Hide,
@@ -476,6 +480,7 @@ mod tests {
         let hide = Op {
             stoa: a_stoa(),
             author: impostor.public_key(),
+            clock: None,
             kind: OpKind::Moderate {
                 target: head.op.id(),
                 action: ModerationAction::Hide,
@@ -507,6 +512,7 @@ mod tests {
         let revision = Op {
             stoa: a_stoa(),
             author: author.public_key(),
+            clock: None,
             kind: OpKind::Revise {
                 target: head.op.id(),
                 body: "the replacement words".to_string(),
@@ -580,6 +586,7 @@ mod tests {
         let head = Op {
             stoa: a_stoa(),
             author: key.public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -611,6 +618,7 @@ mod tests {
         let foreign = Op {
             stoa: elsewhere,
             author: key.public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -700,6 +708,7 @@ mod tests {
             Op {
                 stoa: a_stoa(),
                 author: key.public_key(),
+                clock: None,
                 kind: OpKind::Post {
                     thread: None,
                     parent: None,
@@ -733,6 +742,7 @@ mod tests {
         let second = Op {
             stoa: a_stoa(),
             author: key.public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -949,6 +959,7 @@ mod tests {
                 Op {
                     stoa: a_stoa(),
                     author: creator.public_key(),
+                    clock: None,
                     kind: OpKind::Moderate {
                         target: OpId::from_hex(hex).unwrap(),
                         action: ModerationAction::Hide,

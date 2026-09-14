@@ -339,55 +339,87 @@ impl Moderation {
 /// The converse holds and is also correct: a peer missing the newest `Unhide`
 /// reports `Hidden`. §3.3's different-op-sets case is the normal one.
 ///
-/// # Where the transport ordered nothing, `Hide` wins the tie
+/// # Reversibility works, and the `Hide` preference is now for legacy ops only
+///
+/// An `unhide` published after a `hide` carries a **higher counter**, so it
+/// leads, so it decides. That is the ordinary path from this version onward, and
+/// the preference below is **unreachable for any target whose moderations all
+/// carry counters**. It is retained for the ops that already exist, and for
+/// those only.
+///
+/// # Where the leading binding op carries no counter, `Hide` wins the tie
 ///
 /// Found by security review, and it is the one place this resolver departs from
 /// "first entry wins".
 ///
-/// A `Moderate` op is fully determined by `{stoa, author, target, action}` —
-/// there is no nonce, no timestamp and no free byte. So for one Stoa, one
-/// moderator and one target **exactly two ops can ever exist**, with two fixed
-/// op ids. Every arrival today is unordered, so `cmp_ops` sorts by ascending op
-/// id, and taking the first entry would mean *whichever id is lower wins
-/// forever* — no matter who published first, no matter how often the other is
-/// republished.
+/// Among ops carrying no counter, `cmp_ops` sorts by ascending op id, so taking
+/// the first entry would mean *whichever id is lower wins forever* — no matter
+/// who published first, no matter how often the other is republished. That is
+/// not last-write-wins degrading gracefully. It is a **pre-emptive veto**:
+/// publish a bare `Unhide` naming an unmoderated target, discard the key, and if
+/// that pair hashes the wrong way the target can never be hidden by anyone. It
+/// was also grindable — the creator picks the Stoa title, the title fixes the
+/// address, and the address is inside both ids.
 ///
-/// That is not last-write-wins degrading gracefully. It is a **pre-emptive
-/// veto**: publish a bare `Unhide` naming an unmoderated target, discard the
-/// key, and if that pair hashes the wrong way the target can never be hidden by
-/// anyone. It is also grindable — the creator picks the Stoa title, the title
-/// fixes the address, and the address is inside both ids.
-///
-/// So when **neither** candidate was ordered by the transport, a `Hide` beats an
+/// So when the leading binding candidate carries no counter, a `Hide` beats an
 /// `Unhide` regardless of op id. The asymmetry is deliberate and is the
 /// fail-safe direction: an `Unhide` wrongly winning silently un-moderates
 /// content with no recourse, where a `Hide` wrongly winning leaves something
-/// hidden that a moderator can lift the moment real ordering arrives.
+/// hidden that a moderator can lift by publishing an op that carries a counter.
+///
+/// # THE PREMISE THIS PREFERENCE WAS ARGUED FROM IS NOW FALSE
+///
+/// It was introduced on the reasoning that a `Moderate` op is fully determined
+/// by `{stoa, author, target, action}` — *"no nonce, no timestamp and no free
+/// byte"* — so that for one Stoa, one moderator and one target **exactly two ops
+/// could ever exist**, with two fixed op ids.
+///
+/// **That is no longer true and must not be relied on anywhere.** A moderation
+/// op carries a counter and a wall-clock, both author-chosen, so a moderator can
+/// mint arbitrarily many distinct `hide` ops and arbitrarily many distinct
+/// `unhide` ops for one target. Two consequences, and they are worth separating
+/// because one is a fix and one is a new fact to hold:
+///
+/// - **The pre-emptive veto is closed for ops carrying counters.** A later
+///   `hide` carries a higher counter and leads, whatever any earlier op's id.
+///   Grinding an op id buys nothing against an op that outranks it on the
+///   counter.
+/// - **An unbounded number of moderation ops can name one target.** Nothing
+///   downstream may assume the candidate set is small or bounded, and any
+///   implementation reasoning about "the hide" and "the unhide" as unique is
+///   incorrect. This function is already written that way — it scans a `Vec` of
+///   any length with `position` — but the reasoning is recorded because the
+///   prose it replaces said the opposite.
 ///
 /// **Only candidates that already bind are eligible**, which is the point at
 /// which this preference could silently undo the authority check above it. A
 /// search over every op naming the target — rather than over the filtered
 /// candidates — would let any peer publish a forged `Hide` and have every reader
 /// report it, restoring §6.2's defect on the only path in use.
-/// `the_hide_bias_searches_only_ops_that_already_bind` pins it, and is the one
-/// fixture in this module combining unordered arrivals, a binding op and a
-/// non-binding `Hide`.
+/// `the_hide_bias_searches_only_ops_that_already_bind` pins it.
+///
+/// **The minting freedom above makes that failure cheaper than it was**, which
+/// is the one place the falsified premise makes something *worse* rather than
+/// better: an attacker can now produce unlimited distinct forged `hide` ops for
+/// one target rather than exactly one, so a preference that searched unfiltered
+/// would find one with certainty rather than by chance. The filter is what stops
+/// it, and it runs before this preference ever sees a candidate.
 ///
 /// **Confined to the degraded branch, keyed on the LEADING candidate.** Where
-/// the transport ordered the leading op, §5.7's rule is real and last-write-wins
-/// stands untouched — biasing there would make every hide permanent, which is a
-/// worse bug than the one this closes.
-/// `a_transport_ordered_unhide_still_reverses_a_hide` pins that.
+/// the leading op carries a counter, last-write-wins is real and stands
+/// untouched — biasing there would make every hide permanent, which is a worse
+/// bug than the one this closes.
 ///
 /// The condition asks about `first` rather than about every candidate, and the
-/// two differ on mixed arrivals — the normal state during a transport upgrade.
-/// `first` being ordered means the leading position was won by a genuine
-/// last-write-wins comparison, which is the entire reason not to second-guess
-/// it; and since [`cmp_ops`](crate::arrival::cmp_ops) places every ordered op
-/// ahead of every unordered one, an ordered leader means the ordered ops decided
-/// among themselves. `the_ordered_branch_is_chosen_by_the_leading_op_not_by_all_of_them`
-/// pins the distinction, which was previously a place the spec and the code
-/// disagreed with no test able to tell.
+/// two differ whenever one target's binding moderations are a **mix** of ops
+/// that carry a counter and ops that do not — the normal state for a target
+/// moderated both before and after the clock fields arrived. A leading op
+/// carrying a counter occupies its position by a genuine last-write-wins
+/// comparison, which is the whole reason not to second-guess it; a candidate
+/// further down carrying none says nothing about that. Since
+/// [`cmp_ops`](crate::arrival::cmp_ops) places every op carrying a counter ahead
+/// of every op that carries none, a leading op with a counter means those ops
+/// won on their own terms.
 ///
 /// **Convergence is preserved**, which is the property that would have made this
 /// unacceptable. The bias is a pure function of the two ops' actions and their
@@ -417,14 +449,14 @@ pub fn resolve<L: OpLog>(
         return Ok(Moderation::Unmoderated);
     };
 
-    // Where the transport ordered the leading op, its position is a real
+    // Where the LEADING op carries a counter, its position is a real
     // last-write-wins answer and nothing here second-guesses it.
     //
     // An INDEX rather than a reference, so that the chosen entry can be moved
     // out of `binding` at the end. Selecting by index changes nothing about
     // WHICH entry is selected — the two branches are the same two branches —
     // and it keeps the fail-closed `Hide` preference below identical in shape.
-    let deciding_index = if first.arrival.is_ordered_by_transport() {
+    let deciding_index = if first.op.op.clock.is_some() {
         0
     } else {
         // Otherwise every candidate is in the degraded order, where position
@@ -619,6 +651,7 @@ mod tests {
         Op {
             stoa,
             author: author.public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -639,6 +672,38 @@ mod tests {
         Op {
             stoa,
             author: signer.public_key(),
+            clock: None,
+            kind: OpKind::Moderate { target, action },
+        }
+        .sign(signer)
+    }
+
+    /// A moderation op **carrying a counter** — the shape published from this
+    /// version onward.
+    ///
+    /// Its own fixture rather than a parameter on [`a_moderation`], because most
+    /// tests in this module are about the DEGRADED path — the `Hide` preference,
+    /// the authority checks — and those need ops carrying none. Two named
+    /// fixtures make which population a test is about visible at the call site,
+    /// where a `None` argument threaded through thirty calls would not.
+    ///
+    /// The wall-clock is the same on every op this builds, so no ordering test
+    /// drawing from it can pass because two ops differed in a field the order is
+    /// required not to read.
+    fn a_moderation_at(
+        stoa: Address,
+        signer: &SecretKey,
+        target: OpId,
+        action: ModerationAction,
+        counter: u64,
+    ) -> SignedOp {
+        Op {
+            stoa,
+            author: signer.public_key(),
+            clock: Some(crate::op::OpClock {
+                counter,
+                asserted_ms: 1_789_729_304_000,
+            }),
             kind: OpKind::Moderate { target, action },
         }
         .sign(signer)
@@ -659,6 +724,7 @@ mod tests {
         let op = Op {
             stoa,
             author: claimed_author.clone(),
+            clock: None,
             kind: OpKind::Moderate { target, action },
         };
         let forged = SignedOp {
@@ -676,7 +742,8 @@ mod tests {
         let post = a_post(address_of(&agora()), &a_key(2), "the subject");
         let id = post.op.id();
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(post, Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
         (log, id)
     }
 
@@ -707,7 +774,8 @@ mod tests {
             hide.verify(),
             "the fixture must be an AUTHENTIC op with no authority"
         );
-        log.append(hide, Arrival::ordered(2, a_message_id(1))).unwrap();
+        log.append(hide, Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
 
         let moderators = moderators_of(&agora());
         assert_eq!(
@@ -738,7 +806,8 @@ mod tests {
         // The authority check alone would accept this: the claimed author IS the
         // moderator.
         assert!(moderators.contains(&forged.op.author));
-        log.append(forged, Arrival::ordered(2, a_message_id(1))).unwrap();
+        log.append(forged, Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
 
         assert_eq!(
             resolve(&log, &moderators, &target).unwrap(),
@@ -758,7 +827,8 @@ mod tests {
             ModerationAction::Hide,
         );
         let hide_id = hide.op.id();
-        log.append(hide, Arrival::ordered(2, a_message_id(1))).unwrap();
+        log.append(hide, Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
 
         let resolved = resolve(&log, &moderators_of(&agora()), &target).unwrap();
         assert!(resolved.is_hidden());
@@ -793,7 +863,8 @@ mod tests {
             target,
             ModerationAction::Unhide,
         );
-        log.append(hide, Arrival::ordered(2, a_message_id(1))).unwrap();
+        log.append(hide, Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
         log.append(bogus_unhide, Arrival::ordered(3, a_message_id(1)))
             .unwrap();
 
@@ -1009,32 +1080,208 @@ mod tests {
 
     #[test]
     fn a_later_unhide_reverses_an_earlier_hide() {
-        // §5.7: "last-write-wins by Lamport order". §13 asked whether a hide is
-        // reversible and `op.rs` answered by naming `Unhide`; this is the
-        // behaviour that makes the answer real.
+        // **THE behaviour the op clock exists to make real.** A recorded project
+        // memory said plainly: *no Lamport value reaches us, so an Unhide cannot
+        // reverse a Hide*. It does now — the unhide carries the higher counter,
+        // so the ordering rule places it first, so it decides.
+        //
+        // The counters are in the OPS, not in the arrivals. An earlier version
+        // of this test set them through `Arrival::ordered`, which was the only
+        // place a Lamport value could go and which no production path ever
+        // populated — so it exercised a branch nothing reached.
         let (mut log, target) = a_log_with_a_post();
-        let hide = a_moderation(
+        let hide = a_moderation_at(
             address_of(&agora()),
             &creator(),
             target,
             ModerationAction::Hide,
+            2,
         );
-        let unhide = a_moderation(
+        let unhide = a_moderation_at(
             address_of(&agora()),
             &creator(),
             target,
             ModerationAction::Unhide,
+            3,
         );
         let unhide_id = unhide.op.id();
-        log.append(hide, Arrival::ordered(2, a_message_id(1))).unwrap();
-        log.append(unhide, Arrival::ordered(3, a_message_id(1)))
-            .unwrap();
+        // The arrivals say NOTHING, which is what production supplies — so the
+        // counter in the op is the only thing that can be deciding this.
+        log.append(hide, Arrival::unordered()).unwrap();
+        log.append(unhide, Arrival::unordered()).unwrap();
 
         let resolved = resolve(&log, &moderators_of(&agora()), &target).unwrap();
         assert!(!resolved.is_hidden());
         assert_eq!(resolved.deciding_op().map(|e| e.id()), Some(unhide_id));
         // And it is distinguishable from a target nobody moderated.
         assert_ne!(resolved, Moderation::Unmoderated);
+    }
+
+    #[test]
+    fn an_unhide_reverses_a_hide_whatever_the_two_op_ids_are() {
+        // The `Hide` preference is what would otherwise make this fail, so this
+        // is the test that proves the preference is confined to the degraded
+        // branch. Run BOTH ways round: with the unhide's op id higher, and with
+        // it lower. A resolver falling back to op id gets one of the two wrong.
+        for prefer_higher_id in [true, false] {
+            let (mut log, target) = a_log_with_a_post();
+            // Vary the counters, which vary the ids, until the pair ranks the
+            // way this iteration wants. The counters keep their relation — the
+            // unhide always carries the higher one — so only the ids move.
+            let (hide, unhide) = (0u64..1000)
+                .find_map(|n| {
+                    let hide = a_moderation_at(
+                        address_of(&agora()),
+                        &creator(),
+                        target,
+                        ModerationAction::Hide,
+                        n * 2 + 1,
+                    );
+                    let unhide = a_moderation_at(
+                        address_of(&agora()),
+                        &creator(),
+                        target,
+                        ModerationAction::Unhide,
+                        n * 2 + 2,
+                    );
+                    let higher = unhide.op.id() > hide.op.id();
+                    (higher == prefer_higher_id).then_some((hide, unhide))
+                })
+                .expect("a pair ranking either way exists within 1000 candidates");
+
+            let unhide_id = unhide.op.id();
+            log.append(hide, Arrival::unordered()).unwrap();
+            log.append(unhide, Arrival::unordered()).unwrap();
+
+            let resolved = resolve(&log, &moderators_of(&agora()), &target).unwrap();
+            assert!(
+                !resolved.is_hidden(),
+                "the unhide must decide whether its op id is higher ({prefer_higher_id}) or lower"
+            );
+            assert_eq!(resolved.deciding_op().map(|e| e.id()), Some(unhide_id));
+        }
+    }
+
+    #[test]
+    fn a_pre_emptive_unhide_does_not_veto_a_later_hide() {
+        // The attack the `Hide` preference was introduced to close, shown closed
+        // on its own terms for ops carrying counters: publish a bare `unhide` of
+        // an unmoderated target, then hide it. The hide carries the higher
+        // counter and leads, whatever the ids.
+        //
+        // Both directions of the id relation again, because "the outcome does
+        // not depend on which op's identifier sorts first" is the claim.
+        for prefer_higher_id in [true, false] {
+            let (mut log, target) = a_log_with_a_post();
+            let (unhide, hide) = (0u64..1000)
+                .find_map(|n| {
+                    let unhide = a_moderation_at(
+                        address_of(&agora()),
+                        &creator(),
+                        target,
+                        ModerationAction::Unhide,
+                        n * 2 + 1,
+                    );
+                    let hide = a_moderation_at(
+                        address_of(&agora()),
+                        &creator(),
+                        target,
+                        ModerationAction::Hide,
+                        n * 2 + 2,
+                    );
+                    let higher = hide.op.id() > unhide.op.id();
+                    (higher == prefer_higher_id).then_some((unhide, hide))
+                })
+                .expect("a pair ranking either way exists within 1000 candidates");
+
+            let hide_id = hide.op.id();
+            log.append(unhide, Arrival::unordered()).unwrap();
+            log.append(hide, Arrival::unordered()).unwrap();
+
+            let resolved = resolve(&log, &moderators_of(&agora()), &target).unwrap();
+            assert!(resolved.is_hidden(), "the later hide must decide");
+            assert_eq!(resolved.deciding_op().map(|e| e.id()), Some(hide_id));
+        }
+    }
+
+    #[test]
+    fn many_minted_moderations_of_one_target_resolve_to_the_leading_binding_one() {
+        // **The premise this change falsifies, tested directly.** The `Hide`
+        // preference was argued from "exactly two ops can ever exist" for one
+        // Stoa, moderator and target — no nonce, no timestamp, no free byte.
+        // Free preimage bytes dissolve that: a moderator can mint arbitrarily
+        // many distinct ops for one target.
+        //
+        // So this publishes FIFTY, alternating actions, and asserts the resolver
+        // answers rather than assuming a bounded candidate set. The op carrying
+        // the highest counter is an `Unhide`, so a resolver that had quietly
+        // kept a two-op assumption — or that preferred `Hide` outside the
+        // degraded branch — reports the wrong answer rather than failing.
+        let (mut log, target) = a_log_with_a_post();
+        let mut highest = None;
+        for counter in 1..=50u64 {
+            let action = if counter % 2 == 0 {
+                ModerationAction::Unhide
+            } else {
+                ModerationAction::Hide
+            };
+            let op = a_moderation_at(address_of(&agora()), &creator(), target, action, counter);
+            if counter == 50 {
+                highest = Some(op.op.id());
+            }
+            log.append(op, Arrival::unordered()).unwrap();
+        }
+        // Fifty distinct ops, which is the fact the old premise denied.
+        assert_eq!(log.iter_target(&target).unwrap().len(), 50);
+
+        let resolved = resolve(&log, &moderators_of(&agora()), &target).unwrap();
+        assert_eq!(
+            resolved.deciding_op().map(|e| e.id()),
+            highest,
+            "the op the ordering rule places first decides, whatever the count"
+        );
+        assert!(!resolved.is_hidden(), "and it is the Unhide at counter 50");
+    }
+
+    #[test]
+    fn a_forged_hide_does_not_win_against_a_binding_unhide_however_many_are_minted() {
+        // The minting freedom makes the unfiltered-search failure CHEAPER: an
+        // attacker can now produce unlimited distinct forged `hide` ops for one
+        // target rather than exactly one, so a preference that searched every op
+        // naming the target would find one with certainty rather than by chance.
+        //
+        // Twenty forgeries, every one authentic-looking and none binding, around
+        // one genuine unhide.
+        let (mut log, target) = a_log_with_a_post();
+        let unhide = a_moderation_at(
+            address_of(&agora()),
+            &creator(),
+            target,
+            ModerationAction::Unhide,
+            1,
+        );
+        let unhide_id = unhide.op.id();
+        log.append(unhide, Arrival::unordered()).unwrap();
+
+        for counter in 2..=21u64 {
+            // Signed by an outsider: authentic, and carrying no authority.
+            let forged = a_moderation_at(
+                address_of(&agora()),
+                &outsider(),
+                target,
+                ModerationAction::Hide,
+                counter,
+            );
+            assert!(forged.verify(), "the fixture must be authentic");
+            log.append(forged, Arrival::unordered()).unwrap();
+        }
+
+        let resolved = resolve(&log, &moderators_of(&agora()), &target).unwrap();
+        assert!(
+            !resolved.is_hidden(),
+            "no number of non-binding hides may hide a target"
+        );
+        assert_eq!(resolved.deciding_op().map(|e| e.id()), Some(unhide_id));
     }
 
     #[test]
@@ -1058,7 +1305,8 @@ mod tests {
         let hide_id = hide.op.id();
         log.append(unhide, Arrival::ordered(2, a_message_id(1)))
             .unwrap();
-        log.append(hide, Arrival::ordered(3, a_message_id(1))).unwrap();
+        log.append(hide, Arrival::ordered(3, a_message_id(1)))
+            .unwrap();
 
         let resolved = resolve(&log, &moderators_of(&agora()), &target).unwrap();
         assert!(resolved.is_hidden());
@@ -1106,8 +1354,10 @@ mod tests {
 
         // The HIGH op id gets the HIGH Lamport value, so it decides under §5.7
         // and would NOT decide under the op-id fallback.
-        log.append(low, Arrival::ordered(2, a_message_id(1))).unwrap();
-        log.append(high, Arrival::ordered(9, a_message_id(1))).unwrap();
+        log.append(low, Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
+        log.append(high, Arrival::ordered(9, a_message_id(1)))
+            .unwrap();
 
         let resolved = resolve(&log, &moderators_of(&agora()), &target).unwrap();
         assert_eq!(
@@ -1426,100 +1676,107 @@ mod tests {
 
     #[test]
     fn the_ordered_branch_is_chosen_by_the_leading_op_not_by_all_of_them() {
-        // NO SPEC — now specified; this pins the reading.
+        // The condition asks about the LEADING candidate, not about all of them,
+        // and the two disagree exactly on a MIXED set — a target moderated both
+        // before and after the clock fields arrived, which is the normal state
+        // during this migration.
         //
-        // The spec said "where no competing moderation was ordered by the
-        // transport", a predicate over ALL candidates; the code asks only
-        // whether the LEADING one was ordered. Blind review found the two
-        // disagree on mixed arrivals — reachable today through
-        // `Arrival::from_parts` and the normal state during a transport upgrade
-        // — and that swapping the code to the spec's `any(...)` form broke no
-        // test.
+        // The code is right: a leading op CARRYING A COUNTER occupies its
+        // position by a genuine last-write-wins comparison, which is the entire
+        // reason not to second-guess it. A candidate further down carrying none
+        // says nothing about the leading one, and `cmp_ops` already places every
+        // op carrying a counter ahead of every op that does not — so a leading
+        // op with a counter means those ops won on their own terms.
         //
-        // The code is right: `first` being transport-ordered means the leading
-        // position IS a genuine last-write-wins answer, which is the entire
-        // rationale for not second-guessing it. A candidate further down being
-        // unordered says nothing about the leading one, and `cmp_ops` already
-        // places every ordered op ahead of every unordered one — so an ordered
-        // leader means the ordered ops won on their own terms. The spec has
-        // been tightened to say this.
+        // **"Ordered" now means the op carries a counter, not that the transport
+        // supplied one.** The test's claim is unchanged; its fixture has moved
+        // from the arrival to the op, which is where every ordering input now
+        // lives.
         //
-        // The fixture: an ordered `Unhide` leading, an unordered `Hide` behind
-        // it. Under the code the ordered leader decides and the target is NOT
-        // hidden; under the spec's old `any(...)` reading the mixed set would
-        // take the degraded branch and the `Hide` would win.
+        // The fixture: an `Unhide` carrying a counter leading, a `Hide` carrying
+        // none behind it. Under the code the leader decides and the target is
+        // NOT hidden; under an `any(...)` reading the mixed set would take the
+        // degraded branch and the `Hide` would win.
         let (mut log, target) = a_log_with_a_post();
-        let ordered_unhide = a_moderation(
+        let counted_unhide = a_moderation_at(
             address_of(&agora()),
             &creator(),
             target,
             ModerationAction::Unhide,
+            5,
         );
-        let unhide_id = ordered_unhide.op.id();
-        let unordered_hide = a_moderation(
+        let unhide_id = counted_unhide.op.id();
+        let uncounted_hide = a_moderation(
             address_of(&agora()),
             &creator(),
             target,
             ModerationAction::Hide,
         );
 
-        log.append(ordered_unhide, Arrival::ordered(5, a_message_id(1)))
-            .unwrap();
-        log.append(unordered_hide, Arrival::unordered()).unwrap();
+        log.append(counted_unhide, Arrival::unordered()).unwrap();
+        log.append(uncounted_hide, Arrival::unordered()).unwrap();
 
         // The fixture must really be mixed, or it exercises neither reading.
         let entries = log.iter_target(&target).unwrap();
         assert!(
-            entries.iter().any(|e| e.arrival.is_ordered_by_transport())
-                && entries.iter().any(|e| !e.arrival.is_ordered_by_transport()),
-            "the fixture must carry BOTH arrival kinds"
+            entries.iter().any(|e| e.op.op.clock.is_some())
+                && entries.iter().any(|e| e.op.op.clock.is_none()),
+            "the fixture must carry BOTH populations"
         );
 
         let resolved = resolve(&log, &moderators_of(&agora()), &target).unwrap();
         assert!(
             !resolved.is_hidden(),
-            "an ordered leading op must decide on its own terms, rather than \
-             being demoted to the degraded branch by an unordered straggler"
+            "a leading op carrying a counter must decide on its own terms, \
+             rather than being demoted to the degraded branch by a straggler \
+             that carries none"
         );
         assert_eq!(resolved.deciding_op().map(|e| e.id()), Some(unhide_id));
     }
 
     #[test]
-    fn a_transport_ordered_unhide_still_reverses_a_hide() {
-        // The bias must be confined to the DEGRADED branch. Where the transport
-        // did order the ops, §5.7's rule is real and last-write-wins must stand
-        // — otherwise this "fix" would make every hide permanent the moment
-        // ordering arrives, which is a worse bug than the one it closes.
+    fn a_counter_carrying_unhide_still_reverses_a_hide() {
+        // The bias must be confined to the DEGRADED branch. Where the ops carry
+        // counters, last-write-wins is real and must stand — otherwise this
+        // "fix" would make every hide permanent, which is a worse bug than the
+        // one it closes.
         //
-        // The unhide carries the higher Lamport value AND hashes lower, so a
-        // resolver that applied the bias unconditionally would report Hidden.
+        // **The fixture must be one the bias WOULD have caught**, or the test
+        // passes whether or not the branch is confined: the unhide hashes LOWER,
+        // so `position(Hide)` would find the hide and report Hidden. That is the
+        // recorded defect family — two explanations giving the same answer —
+        // closed by searching for the pair rather than hoping for it.
         let (mut log, target) = a_log_with_a_post();
-        let hide = a_moderation(
-            address_of(&agora()),
-            &creator(),
-            target,
-            ModerationAction::Hide,
-        );
-        let unhide = a_moderation(
-            address_of(&agora()),
-            &creator(),
-            target,
-            ModerationAction::Unhide,
-        );
-        assert!(
-            unhide.op.id() < hide.op.id(),
-            "the fixture must be one the bias WOULD have caught"
-        );
+        let (hide, unhide) = (0u64..1000)
+            .find_map(|n| {
+                let hide = a_moderation_at(
+                    address_of(&agora()),
+                    &creator(),
+                    target,
+                    ModerationAction::Hide,
+                    n * 2 + 1,
+                );
+                let unhide = a_moderation_at(
+                    address_of(&agora()),
+                    &creator(),
+                    target,
+                    ModerationAction::Unhide,
+                    n * 2 + 2,
+                );
+                (unhide.op.id() < hide.op.id()).then_some((hide, unhide))
+            })
+            .expect("a pair the bias would have caught exists within 1000 candidates");
         let unhide_id = unhide.op.id();
 
-        log.append(hide, Arrival::ordered(2, a_message_id(1))).unwrap();
-        log.append(unhide, Arrival::ordered(3, a_message_id(1)))
-            .unwrap();
+        // The arrivals say nothing, as production supplies. The counters in the
+        // ops are the only ordering input.
+        log.append(hide, Arrival::unordered()).unwrap();
+        log.append(unhide, Arrival::unordered()).unwrap();
 
         let resolved = resolve(&log, &moderators_of(&agora()), &target).unwrap();
         assert!(
             !resolved.is_hidden(),
-            "a real Lamport order must still let an unhide reverse a hide"
+            "a real counter order must still let an unhide reverse a hide"
         );
         assert_eq!(resolved.deciding_op().map(|e| e.id()), Some(unhide_id));
     }
@@ -1586,7 +1843,8 @@ mod tests {
         let post = a_post(address_of(&agora()), &a_key(2), "the subject");
         let target = post.op.id();
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(post, Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
 
         let hide = a_moderation(
             address_of(&agora()),
@@ -1599,6 +1857,7 @@ mod tests {
         let revision = Op {
             stoa: address_of(&agora()),
             author: author.public_key(),
+            clock: None,
             kind: OpKind::Revise {
                 target,
                 body: "edited after being hidden".to_string(),
@@ -1606,7 +1865,8 @@ mod tests {
             },
         }
         .sign(&author);
-        log.append(hide, Arrival::ordered(2, a_message_id(1))).unwrap();
+        log.append(hide, Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
         log.append(revision, Arrival::ordered(3, a_message_id(1)))
             .unwrap();
 
@@ -1624,11 +1884,13 @@ mod tests {
         let post = a_post(address_of(&agora()), &creator(), "the subject");
         let target = post.op.id();
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(post, Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
 
         let revision = Op {
             stoa: address_of(&agora()),
             author: creator().public_key(),
+            clock: None,
             kind: OpKind::Revise {
                 target,
                 body: "the creator edits their own post".to_string(),
@@ -1662,6 +1924,7 @@ mod tests {
         let vote = Op {
             stoa: address_of(&agora()),
             author: creator().public_key(),
+            clock: None,
             kind: OpKind::Vote {
                 target,
                 direction: VoteDirection::Down,
@@ -1669,7 +1932,8 @@ mod tests {
         }
         .sign(&creator());
         assert!(vote.verify());
-        log.append(vote, Arrival::ordered(2, a_message_id(1))).unwrap();
+        log.append(vote, Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
 
         assert_eq!(
             resolve(&log, &moderators_of(&agora()), &target).unwrap(),
@@ -1715,7 +1979,8 @@ mod tests {
             ModerationAction::Hide,
         );
         let mut log = MemoryOpLog::new();
-        log.append(hide, Arrival::ordered(2, a_message_id(1))).unwrap();
+        log.append(hide, Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
 
         assert_eq!(
             log.get(&missing_target).unwrap(),
@@ -1735,37 +2000,32 @@ mod tests {
         // rather than either half alone.
         let post = a_post(address_of(&agora()), &a_key(2), "the subject");
         let target = post.op.id();
-        let hide = a_moderation(
+        // The counters are in the OPS. The unhide carries the higher one, so the
+        // peer holding it reports not-hidden and the peer that has not received
+        // it reports hidden — and both are correct answers for what they hold.
+        let hide = a_moderation_at(
             address_of(&agora()),
             &creator(),
             target,
             ModerationAction::Hide,
+            2,
         );
-        let unhide = a_moderation(
+        let unhide = a_moderation_at(
             address_of(&agora()),
             &creator(),
             target,
             ModerationAction::Unhide,
+            3,
         );
 
         let mut behind = MemoryOpLog::new();
-        behind
-            .append(post.clone(), Arrival::ordered(1, a_message_id(1)))
-            .unwrap();
-        behind
-            .append(hide.clone(), Arrival::ordered(2, a_message_id(1)))
-            .unwrap();
+        behind.append(post.clone(), Arrival::unordered()).unwrap();
+        behind.append(hide.clone(), Arrival::unordered()).unwrap();
 
         let mut current = MemoryOpLog::new();
-        current
-            .append(post, Arrival::ordered(1, a_message_id(1)))
-            .unwrap();
-        current
-            .append(hide, Arrival::ordered(2, a_message_id(1)))
-            .unwrap();
-        current
-            .append(unhide, Arrival::ordered(3, a_message_id(1)))
-            .unwrap();
+        current.append(post, Arrival::unordered()).unwrap();
+        current.append(hide, Arrival::unordered()).unwrap();
+        current.append(unhide, Arrival::unordered()).unwrap();
 
         let moderators = moderators_of(&agora());
         assert!(resolve(&behind, &moderators, &target).unwrap().is_hidden());
@@ -1787,7 +2047,8 @@ mod tests {
             ModerationAction::Hide,
         );
         let hide_id = hide.op.id();
-        log.append(hide, Arrival::ordered(2, a_message_id(1))).unwrap();
+        log.append(hide, Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
 
         // The resolution is bound rather than chained, because `deciding_op`
         // now borrows from the `Moderation` value instead of from the log.
@@ -1850,7 +2111,8 @@ mod tests {
             target,
             ModerationAction::Unhide,
         );
-        log.append(unhide, Arrival::ordered(2, a_message_id(1))).unwrap();
+        log.append(unhide, Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
         let untouched = a_post(address_of(&agora()), &a_key(2), "untouched").op.id();
 
         let moderators = moderators_of(&agora());
@@ -1917,6 +2179,7 @@ mod tests {
             Op {
                 stoa: address_of(&agora()),
                 author: creator().public_key(),
+                clock: None,
                 kind: OpKind::Vote {
                     target,
                     direction: VoteDirection::Down,
@@ -1927,6 +2190,7 @@ mod tests {
             Op {
                 stoa: address_of(&agora()),
                 author: creator().public_key(),
+                clock: None,
                 kind: OpKind::Revise {
                     target,
                     body: String::new(),
@@ -1944,7 +2208,8 @@ mod tests {
             Arrival::from_parts(Some(u64::MAX), None),
         ];
         for (n, op) in junk.into_iter().enumerate() {
-            log.append(op, arrivals[n % arrivals.len()].clone()).unwrap();
+            log.append(op, arrivals[n % arrivals.len()].clone())
+                .unwrap();
         }
 
         let moderators = moderators_of(&agora());

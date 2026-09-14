@@ -1572,16 +1572,16 @@ merge strategy. Two versions of a post do not *conflict* — they are ordered:
   post's original author is invalid and dropped on read (§3.3). There is no
   case where two authors contend for one post.
 - **The ordering rule decides currency.** Among an author's own versions, the
-  highest Lamport timestamp is current, ties broken by ascending message id —
-  the same rule SDS already applies (§4.4), so nothing new is invented.
+  highest Lamport counter is current, ties broken by ascending op id.
 
-  **But no Lamport value reaches us today** (§13), so in the running system
-  every version falls to the degraded order: ascending op id, which is a hash
-  and carries no recency. What currency means right now is therefore
-  *convergent* rather than *temporal* — two peers holding the same versions
-  agree on which is current, though neither can say which was written last.
-  The rule above is what the same code yields unchanged once the upstream gap
-  closes.
+  ~~**But no Lamport value reaches us today** (§13), so in the running system
+  every version falls to the degraded order.~~ **The op carries its own counter
+  now** (the `op-clock` spec), so currency among versions published from that
+  change onward is **temporal in the sense that matters here**: an author has
+  necessarily seen their own earlier version, so their later one carries a higher
+  counter and leads. Versions predating the field still fall to ascending op id
+  and are still convergent-but-arbitrary, and the two populations are separated
+  with the older below.
 - **History is kept.** Superseded versions stay in the op log. The UI can show
   that a post was edited, and a moderator acting on a post is acting on a
   version they can name.
@@ -1638,12 +1638,16 @@ own answer:
 > MVP ships **no moderation UI and no moderation op-publishing path**. Nothing
 > here is withdrawn and nothing is deleted: `moderation::resolve` and its spec
 > are built, tested and merged, and they stay. The read-time authority check
-> below **remains the design** whenever the publishing half lands, and the
-> limitation two paragraphs down — that an `Unhide` cannot currently win — is
-> the reason the sequencing is comfortable rather than merely convenient: a
-> moderation UI shipped today would have to carry an irreversibility warning at
-> the point of action. Read the rest of this section as the design that is
-> waiting, not as behaviour the MVP has.
+> below **remains the design** whenever the publishing half lands.
+>
+> ~~The limitation two paragraphs down — that an `Unhide` cannot currently win —
+> is the reason the sequencing is comfortable.~~ **That limitation is lifted**
+> (the `op-clock` spec): an `Unhide` published after a `Hide` carries a higher
+> counter and decides, so a moderation UI would no longer need an
+> irreversibility warning at the point of action. **The sequencing is now a plain
+> scope decision with no safety argument behind it**, which is worth knowing
+> before anyone cites this paragraph as a reason to keep waiting. Read the rest
+> of this section as the design that is waiting, not as behaviour the MVP has.
 
 **Signed ops with a Stoa moderator set.** Every op is signed by its author.
 Moderation ops are valid only when signed by a current moderator, and every peer
@@ -1662,38 +1666,35 @@ the op that decided. `Moderate` carries `Hide` or `Unhide`, ordered by §5.7's
 rule. Not built: applying it in a materialised view, and everything below that
 depends on a mutable moderator set.
 
-**"A hide binds" is conditional on an ordering we have not built yet, and that
-is the sharpest limitation in this section.** §5.7 orders competing moderations
-by Lamport timestamp; no Lamport value reaches us and — per §13 — **none is
-coming, because ordering at forum scope was never the transport's to supply.**
-So every op is currently unordered and the fallback is ascending op id. A
-`Moderate` op carries no nonce and no timestamp, so for one Stoa, one moderator
-and one target there are **exactly two possible ops** — and an unordered
-comparison between them resolves the same way forever. Last-write-wins has no
-"last" to consult.
+~~**"A hide binds" is conditional on an ordering we have not built yet, and that
+is the sharpest limitation in this section.**~~ **Closed by the `op-clock` spec,
+which puts a Lamport counter in the signed op.** §5.7 orders competing
+moderations by that counter, and an `Unhide` published after a `Hide` carries a
+higher one, so it leads and it decides. **Reversal works.**
 
-The resolver closes the dangerous half by preferring `Hide` when neither
-candidate was transport-ordered, so a pre-emptive `Unhide` cannot veto future
-moderation. What that does **not** restore is the ability to *reverse* a hide:
-until Lamport values arrive, an `Unhide` competing with a `Hide` of the same
-target loses regardless of when it was published. A moderator who hides
-something by mistake cannot currently un-hide it by publishing an `Unhide`
-alone. That is deliberate — the alternative was the veto.
+Two things from the closed state are worth carrying, because both are traps
+rather than history:
 
-**What closes it is dialectica's own Lamport counter (§13), not an upstream
-fix.** This is a change of owner rather than of mechanism: the resolver code
-needs no change either way, but the work is ours and schedulable rather than
-somebody else's and indefinite. **Nobody should be waiting for it.**
+- **The `Hide`-wins preference still exists and now governs only legacy ops.**
+  The resolver prefers `Hide` where neither candidate carries a counter, which
+  is exactly the ops encoded before the field existed. Read a `Hide` winning
+  against a later `Unhide` as a statement about the ops' encoding version, never
+  as the live rule.
+- ~~A `Moderate` op carries no nonce and no timestamp, so for one Stoa, one
+  moderator and one target there are **exactly two possible ops**.~~ **False
+  since the counter landed, and it was load-bearing.** That premise is why the
+  preference was safe to make permanent — an unordered comparison between two
+  fixed ops resolves the same way forever, so nothing was being deferred. With
+  free bytes in the preimage a moderator can mint arbitrarily many distinct
+  `Hide` and `Unhide` ops for one target, so **nothing may assume the candidate
+  set is small or that "the hide" and "the unhide" name unique ops.**
 
-**This becomes a UI requirement the moment a hide button exists**, and there is
-no user-facing surface yet to carry it, so it is recorded here for whoever
-builds one. A moderator pressing "hide" is currently taking an action that
-cannot be undone on the peers that matter, and nothing in the core will warn
-them — `moderation::resolve` answers what is hidden, not what a future reversal
-would do. The honest interface says so at the point of action rather than
-offering an "unhide" that silently fails to bind. **When dialectica's Lamport
-counter lands, the warning is removed along with the tie-break, and the two
-should be removed together.**
+~~**This becomes a UI requirement the moment a hide button exists.**~~ **The
+warning is no longer owed.** It was recorded here for whoever built a moderation
+UI: a moderator pressing "hide" was taking an action that could not be undone,
+and the honest interface had to say so at the point of action. That obligation is
+discharged by the mechanism rather than by the interface, and the two were always
+meant to be removed together.
 
 The record carries **no per-peer value** — no epoch, no session counter. Every
 peer hashes it to obtain the Stoa's address, so a value varying with one peer's
@@ -3169,13 +3170,27 @@ being asked for rather than discovering it from a stalled view.
   The reasoning — including that the design bundle's screen 05 nests by an
   indent over a linear sequence, which this shape serves — is in that change's
   `proposal.md`.
-- **What a feed ordering is allowed to be called while no Lamport value
-  arrives.** This is the sharpest unresolved thing in the section, and the first
-  draft of it was wrong in a way worth recording. §7.2 defines `new` as "Lamport
-  order descending" and `active` by the Lamport timestamp of the most recent
-  non-hidden reply — so **both** of v1's two orderings are defined in terms of a
-  value §13 says does not reach us. Today each would fall back to ascending op
-  id, which is a hash and carries no recency whatever.
+- **What a feed ordering is allowed to be called.** ~~While no Lamport value
+  arrives.~~ **A Lamport value now arrives — the op carries its own** (see the
+  `op-clock` spec) — so the premise of this bullet is gone and the question is
+  narrowed rather than closed. What it is narrowed to: **a Lamport order is
+  causal, not chronological.** It guarantees that a reply written after seeing
+  another orders after it; it says nothing about wall-clock time, and two ops
+  whose authors had not seen one another's are separated by op-id hash. So
+  "newest first" is honest read as *latest in the forum's own order*, and "most
+  recent first" is not honest read as a claim about time.
+
+  **The wall-clock field does not rescue the stronger label**, and that is the
+  trap: it is exactly the field that looks like it does, and it is forgeable by
+  every author. The spec removes it from every ordering for that reason. **The
+  label is still the owner's to choose**; what has changed is that both options
+  are now defensible and neither is a hash.
+
+  The first draft of this bullet was wrong in a way worth recording. §7.2 defines
+  `new` as "Lamport order descending" and `active` by the Lamport timestamp of
+  the most recent non-hidden reply — so **both** of v1's two orderings were
+  defined in terms of a value that did not reach us, and each fell back to
+  ascending op id.
 
   The first draft of this bullet proposed "ship `new` only until Lamport values
   arrive", on the assumption that only `active` was affected. It is not: `new`
@@ -3874,8 +3889,17 @@ thing (§2.3).
   asking what votes do today. **An answered question is not a finished
   question** — when the section it summarises changes, the summary is part of
   that change.
-- ~~**Is a hide reversible?**~~ **Answered: yes — the inverse is named. But it
-  cannot currently win, and that half is not settled.**
+- ~~**Is a hide reversible?**~~ **Answered: yes, and both halves are now
+  settled.** The inverse is named, and since the `op-clock` spec it can also
+  win — an `Unhide` published after a `Hide` carries a higher counter, so it
+  leads and it decides. The degraded `Hide`-wins preference below survives only
+  for ops encoded before the counter existed. **One premise it rested on is now
+  false and is recorded in that spec:** a `Moderate` op is no longer fully
+  determined by `{stoa, author, target, action}`, so "exactly two ops can ever
+  exist" for one target is not something anything may rely on.
+
+  The rest of this entry is the history of how it stood before, kept because the
+  reasoning for the inverse being a field rather than a kind is still live:
   `op.rs` carries one `Moderate` kind with an `action` of `Hide` or `Unhide`,
   rather than two kinds, because §6.2's threshold certificate signs "the same
   `(target, action, epoch)` tuple" and a tuple needs `action` to be a field.
@@ -3883,18 +3907,36 @@ thing (§2.3).
   system with no correction path makes every mistake permanent.
 
   **In the degraded order, an `Unhide` loses to a `Hide` of the same target
-  regardless of when it was published** — the resolver prefers `Hide` where the
-  transport ordered neither, because otherwise a pre-emptive `Unhide` would veto
-  every future `Hide` permanently. So reversibility exists in the format and is
-  suspended in practice until the Lamport gap above closes. §6 has the full
-  statement; do not read this entry as "reversal works today".
+  regardless of when it was published** — the resolver prefers `Hide` where
+  neither op carries a counter, because otherwise a pre-emptive `Unhide` would
+  veto every future `Hide` permanently. ~~So reversibility is suspended in
+  practice until the Lamport gap closes.~~ **That preference now applies only to
+  ops encoded before the counter existed**, so it is a rule about legacy content
+  rather than about the running system. Reversal works.
 - ~~**§5.7's ordering rule has no input at the contract we have.**~~
-  **Answered: the rule stands unchanged; its input is missing upstream, and the
-  gap is a layer below the LIDL contract.** `dialectica-core`'s `arrival::Arrival`
-  records what the transport supplied alongside an op, and `arrival::cmp_ops`
-  applies §5.7's rule to it. No application-level ordering was designed, because
-  SDS's rule — insert by Lamport timestamp, ties by ascending message id — is
-  already §5.7's.
+  **Answered, and then answered again differently — the second answer is the
+  live one.**
+
+  The first answer was: the rule stands unchanged, its input is missing
+  upstream, and the gap is a layer below the LIDL contract. `arrival::cmp_ops`
+  applied §5.7's rule to whatever the transport supplied, and **no
+  application-level ordering was designed**, on the reasoning that SDS's rule —
+  insert by Lamport timestamp, ties by ascending message id — was already
+  §5.7's.
+
+  **That reasoning held only while the value was expected to arrive.** It never
+  did, and the gap below is not dialectica's to close, so the practical effect
+  of deferring was not "the transport's order" but **no order at all**, with
+  every resolver falling back to a hash. The `op-clock` change closes it at the
+  application layer: the counter is inside the signed preimage, `cmp_ops` reads
+  the op's own value and **cannot reach an `Arrival` at all**, and the message-id
+  tiebreak is replaced by the op id — a function of the op's own bytes, where a
+  message id is absent on every op.
+
+  `Arrival` survives and still records what a peer was told about a delivery. It
+  orders nothing. The two subsections below are retained because the upstream
+  gap is still real and still worth filing; what has changed is that dialectica
+  no longer waits on it.
 
   The gap is **two layers**, both documented with quoted source in
   `openspec/changes/archive/2026-09-11-op-ordering/design.md`:
@@ -3961,19 +4003,15 @@ thing (§2.3).
   disappears. The mistake was letting "we cannot match SDS" stand in for "we
   cannot order".
 
-  **The withdrawal has not reached the spec, and that is an open contradiction
-  rather than a loose end.** `op-ordering`'s leading requirement still states
-  that "A peer SHALL NOT compute a Lamport timestamp of its own, and SHALL NOT
-  maintain a second logical clock alongside the transport's". The plan withdrew
-  that above; the spec has not been changed, so the two disagree today.
-  **Resolving it needs its own change**, because withdrawing the prohibition
-  without the replacement leaves a requirement that forbids nothing and requires
-  nothing in its place — and the replacement is the design this entry says is
-  not done here: an author-set counter is not an ordering until it has a bound,
-  and both adversarial cases below are unaddressed. The `op-transport` spec was
-  written deliberately neutral to how this resolves: it contracts what the
-  transport supplies, which is nothing, and says so without depending on the
-  prohibition being either live or withdrawn.
+  ~~**The withdrawal has not reached the spec, and that is an open contradiction
+  rather than a loose end.**~~ **Closed — the withdrawal is in the spec.** The
+  `op-clock` change modifies `op-ordering`'s leading requirement to withdraw "A
+  peer SHALL NOT compute a Lamport timestamp of its own", and modifies
+  `op-format`'s "An op carries no ordering field and no per-peer state" to admit
+  exactly two fields. Both adversarial cases below are answered there; **read the
+  spec rather than this entry** for what binds. The `op-transport` spec was
+  written deliberately neutral to how this resolved — it contracts what the
+  transport supplies, which is nothing — and needed no change.
 
   ### The layering rule, which everything above is a consequence of
 
@@ -4053,28 +4091,33 @@ thing (§2.3).
 
   Not designed here; §5.7 keeps its rule and `Arrival` its shape until one is.
 
-  **Two adversarial cases the design must answer, named now so they are not
-  discovered later.** Both fields sit in a signed op, so a *relay* cannot
-  forge them — but the **author** controls both completely, and an author is
-  not trusted:
+  ~~**Two adversarial cases the design must answer, named now so they are not
+  discovered later.**~~ **Both answered in the `op-clock` spec**; the reasoning
+  for each answer is in that change's `design.md` and is not restated here. In
+  one line each, so the shape is findable: a far-future wall-clock is defeated by
+  the field ordering nothing at all rather than by a clamp, with clamping kept as
+  a display rule on top; an inflated Lamport counter is bounded by a rule that a
+  received counter raises this peer's clock only within a fixed distance, so the
+  attack costs its author one position and costs every honest peer nothing.
 
-  - **A far-future `createdAt`** pins a post to the top of a recency ordering
-    permanently. Appendix A measures exactly this failure in the nearest kin
-    project. The clamp is the whole defence and it is not specified here.
-  - **An arbitrarily high Lamport counter** does the same to the total order,
-    and is the attack the `createdAt` clamp does not cover. A counter is only
-    meaningful relative to ops a peer has seen, so the bound is different in
-    kind from a wall-clock clamp.
+  **A field a malicious peer sets freely is not an ordering until it has a
+  bound** — the sentence that drove both answers, kept because it is the test to
+  apply to the next such field.
 
-  Neither is hard, and neither is optional. **A field a malicious peer sets
-  freely is not an ordering until it has a bound.**
+  ~~Until the fields arrive, ops are recorded as unordered and fall back to a
+  defined degraded order.~~ **The fields have arrived.** The degraded order
+  survives, re-aimed: it now governs ops encoded before the fields existed, which
+  is what keeps existing content from being reordered or dropped.
 
-  Until the fields arrive, ops are recorded as unordered and fall back to a
-  defined degraded order (ascending op id, always below any op the transport did
-  order) that is identical on every peer and reports itself as degraded. **The op
-  log and the resolvers are unblocked**: they have a defined thing to key on.
+- ~~**Should an op carry an author-asserted `createdAt`, and what clamps it?**~~
+  **Answered: yes, and the clamp is not what makes it safe.** The `op-clock`
+  change adds it alongside a Lamport counter, and the division of authority is
+  the part to carry forward: **the counter is authoritative for every ordering,
+  and the wall-clock decides nothing at all.** It is display-only, surfaced as
+  formatted text rather than a number so that sorting on it is not a plausible
+  field access, and clamped at read time as defence in depth rather than as the
+  defence. Both symptoms below are closed; the spec is what binds.
 
-- **Should an op carry an author-asserted `createdAt`, and what clamps it?**
   **Raised by the authoring change, which declined to add it and contracted the
   consequence instead.** One gap, two symptoms, and the second was not previously
   written down:
@@ -4098,15 +4141,18 @@ thing (§2.3).
   `MODIFIED` to `op-format`'s "An op carries no ordering field and no per-peer
   state", and the clamp that would make it safe is unspecified.
 
-  **A nonce is the narrower alternative** — it separates two identical posts and
-  does nothing for ordering. Worth naming so the two are not conflated: if only
-  symptom 2 needs fixing, a nonce is cheaper and needs no clamp; if ordering is
-  wanted, `createdAt` covers both and the clamp is the work.
+  ~~**A nonce is the narrower alternative.**~~ Not taken — the counter separates
+  two identical posts as a side effect of ordering them, so a nonce would have
+  been a second free field doing half of one job.
 
-  **What would decide it:** whoever takes the ordering question in §9.1 §8, since
-  it is the same field. Whichever change adds it must modify the
-  `content-authoring` requirement above, which is the correct place for the
-  pressure to land.
+  ~~**What would decide it:** whoever takes the ordering question in §9.1 §8.~~
+  **Decided there, in the same change, because it was the same field.** The
+  `content-authoring` requirement was duly modified, which is where the pressure
+  was predicted to land. **The cost that prediction did not name:** a
+  double-submitted form now publishes twice, and suppressing that belongs to
+  whatever handles the submission rather than to core, where the two cases are
+  indistinguishable. That is a live obligation on the composer, not a closed
+  question.
 
 - **Does an expiring credential want a grace period?** §5.5 settles that proofs
   expire and the holder re-proves on a cadence, and records the cost: a user
