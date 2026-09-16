@@ -3250,9 +3250,10 @@ being asked for rather than discovering it from a stalled view.
 
   **The wall-clock field does not rescue the stronger label**, and that is the
   trap: it is exactly the field that looks like it does, and it is forgeable by
-  every author. The spec removes it from every ordering for that reason. **The
-  label is still the owner's to choose**; what has changed is that both options
-  are now defensible and neither is a hash.
+  every author. The spec removes it from every ordering for that reason. ~~**The
+  label is still the owner's to choose**~~ — it was chosen: **"newest first"**,
+  contracted in `openspec/specs/feed-view/spec.md`, with "most recent first"
+  forbidden by name because it claims instants the order does not carry.
 
   The first draft of this bullet was wrong in a way worth recording. §7.2 defines
   `new` as "Lamport order descending" and `active` by the Lamport timestamp of
@@ -3267,22 +3268,28 @@ being asked for rather than discovering it from a stalled view.
   mistake is the one this whole degraded-ordering situation invites — reading
   "convergent" as "roughly chronological".
 
-  The honest options are therefore: ship one ordering and name it for what it
+  ~~The honest options are therefore: ship one ordering and name it for what it
   actually is rather than for what §7.2 intends it to become; or ship §7.2's
   two names and have the interface state that ordering is currently degraded.
   **This plan does not choose**, and it is a genuine open question rather than a
-  deferred detail — a first-run forum whose ordering is arbitrary is a different
-  product from one whose ordering is chronological.
+  deferred detail.~~ **Decided, and no longer open.** The op clock gave the feed
+  a real order — descending Lamport counter from each op's own signed bytes —
+  and the label is **"newest first"**, read as latest in the forum's own order.
+  The contract is `openspec/specs/feed-view/spec.md`, which also forbids "most
+  recent first" by name and requires the interface to deny ordering by the time
+  it displays. The reasoning that chose between the two phrasings is in the
+  `op-clock` change's `proposal.md` and `design.md`, not here.
 
-  **What would decide it has changed, and the earlier answer was wrong.** This
+  ~~**What would decide it has changed, and the earlier answer was wrong.** This
   bullet used to say the question was removed by §13's upstream gap closing,
   and that nobody should build machinery around it meanwhile. §13 now
   establishes that recency is **ours** — an author-asserted `createdAt` in the
   signed preimage, cheap and needing nothing from upstream. So the question is
-  not waiting on anyone: **it is decided by whether we add that field**, and
-  the advice to sit still was advice to wait for something that was never
-  coming. The scope of "elaborate machinery" is narrower than it looked — a
-  timestamp field is not elaborate.
+  not waiting on anyone: **it is decided by whether we add that field**.~~ The
+  field was added, and it deliberately does **not** order anything: it is the
+  author's own claim, so a feed sorted on it is one any peer reaches the top of
+  by lying. Recency at forum scope is the Lamport counter; the wall clock is
+  display-only.
 
 - **Whether `listThreads`'s `replyCount` is worth its cost before then.** It is
   a fold over moderation-resolved replies per row, and under the degraded order

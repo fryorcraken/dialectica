@@ -1,6 +1,6 @@
 ## Stages
 
-- [x] spec — `spec-writer` — seven deltas, two of them withdrawing merged
+- [x] spec — `spec-writer` — eight deltas, two of them withdrawing merged
       prohibitions (`op-ordering`'s own-clock ban, `op-format`'s
       no-ordering-field rule). Four were **not** in the original scope and are
       here because the change makes text they already carry false rather than
@@ -10,6 +10,15 @@
       us), and `composer-view` (which must now prevent a double-tapped submit,
       because core stops absorbing it). See `proposal.md` for the six answers and
       the "most recent first" verdict.
+
+      **Second pass, after the code existed**, on the owner's ruling that the
+      feed's ordering copy gets specified in this piece: a new `feed-view`
+      capability now owns the ordering label, the author-assertion marking on a
+      displayed time, and the out-of-chronological-order consequence. It closes
+      the `NO SPEC:` marker at `FeedScreen.qml`'s ordering sentence. The label is
+      **"newest first"**, and `feed-view` forbids "most recent first" by name;
+      the design bundle's `copy.json` carries the forbidden phrase and is
+      overruled, which `proposal.md` records.
 - [x] design + code — `dev-writer` — the counter and wall-clock enter the
       preimage at `VERSION_2`; `cmp_ops` stops being handed an `Arrival` at all,
       so "ordering does not consult the transport" holds by the comparator's

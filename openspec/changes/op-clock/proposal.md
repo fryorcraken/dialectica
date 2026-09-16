@@ -128,8 +128,12 @@ It does not touch `op-transport`, which was written deliberately neutral on this
 
 ## Is "most recent first" honest under this contract?
 
-**The owner asked and this proposal does not decide the label. The answer is: not
-as stated, and there is one reading under which a near neighbour is honest.**
+**The owner asked, and has since decided: the feed is labelled "newest first",
+ordered by the Lamport counter, and the time displayed is the author's. The
+analysis below is what that decision rests on, and it is now contracted in
+`feed-view` rather than left to the interface.** The answer to the question as
+asked is: "most recent first" is not honest, and the near neighbour "newest
+first" is.
 
 A Lamport order is a **causal** order, not a temporal one. It guarantees that if
 Alice wrote B after seeing A, then B orders after A. It guarantees nothing
@@ -153,17 +157,56 @@ exact failure in the nearest kin project**, where decay read an unclamped author
 timestamp and the validator's future-timestamp warning was never called on the
 ingest path.
 
-So: the label is the owner's to choose between "newest first, by the forum's
-order" and a clock claim this contract deliberately does not support.
+So the label is "newest first, by the forum's order", and the clock claim this
+contract deliberately does not support is forbidden by name. **The denial is
+contracted in both directions**, because half of it is the half that rots: a
+label that merely declines to claim recency is neutral, and a reader meeting a
+forum feed supplies the chronological assumption themselves. `feed-view`
+therefore requires the denial to be rendered, requires its stated reason to be
+the author-assertion rather than a missing field, and forbids any other string on
+the screen from undoing it.
+
+**The design bundle's `copy.json` disagrees, and this is the one place it is
+overruled.** Its `feed.orderings` array reads `["by relevance", "most recent
+first"]` verbatim, and "most recent first" is precisely the phrase this contract
+forbids. The bundle's own `SPEC.md` anticipates the override — *"Orderings may be
+added or withdrawn [...] Labels must be able to change without the layout
+changing"* — so the row stays a model-driven row, as it requires, and carries a
+label the core can actually support. The second entry, `by relevance`, is not an
+ordering core implements at all, which is a separate and already-recorded gap.
 
 ## Capabilities
 
 ### New Capabilities
 
-None. Every behaviour this change adds belongs to a capability that already
-exists and already owns the question — which is the answer to "should the clock
-be its own capability?": a clock nothing reads is not a capability, and
-everything that reads it is `op-ordering`.
+- `feed-view` — what the feed screen may and may not claim about the order it
+  shows posts in and the time it shows against each one: the ordering label, the
+  author-assertion marking on a displayed time, and the fact that rows will
+  legitimately appear out of chronological order.
+
+**The clock itself is still not a capability**, and that answer has not changed:
+a clock nothing reads is not a capability, and everything that reads it is
+`op-ordering`. What `feed-view` owns is different — it is the *rendering
+obligation* the clock creates, and it is new because no existing capability will
+take it:
+
+- **`stoa-navigation-view` disclaims it in its Purpose**, in terms: *"The feed
+  itself — the ordering row, the posting gate, the empty-versus-unreadable pair
+  over a Stoa's posts — is the existing feed screen's, and this capability
+  constrains only what is handed to it."* Adding the ordering row to the one
+  capability that names it as out of scope would make the spec contradict its own
+  boundary statement.
+- **`composer-view` is scoped to publishing** — *"what the view does around
+  publishing a post, a reply or a vote"*. An ordering label and a timestamp on a
+  row are neither. It has already drifted (it carries the vote control and the
+  row-shape degradation), and widening it again for an unrelated area would leave
+  the view with one capability that means "whatever the feed screen happens to
+  do".
+
+Two capabilities disclaiming the same area is the evidence that it wants an
+owner, rather than a reason to force it into the nearer of the two. `feed-view`
+is deliberately narrow: it contracts what may be **claimed** on that screen, and
+does not restate the feed's states, its pagination, or its posting gate.
 
 ### Modified Capabilities
 
@@ -189,7 +232,7 @@ everything that reads it is `op-ordering`.
 
 ## Impact
 
-- **Seven spec deltas**, as above. Three of them — `moderation-resolution`,
+- **Eight spec deltas**, as above. Three of them — `moderation-resolution`,
   `post-revision`, `thread-read` — were not in this piece's original scope and are
   here because the change makes text they already carry **false** rather than
   merely incomplete. Each asserts, in a justification or a scenario name, that no
@@ -207,10 +250,22 @@ everything that reads it is `op-ordering`.
   `docs/UI-BRIEF.md`. That file was deleted by #83 under an owner ruling that it
   was our own output being read back as input, so this change edits no such
   document. The four obligations it would have carried are not lost: the
-  ordering-honesty and duplicate-post ones are contracted in `composer-view`'s
-  delta, and the clamped-time and moderation-sequencing ones in `thread-read`'s
-  and `moderation-resolution`'s — which is where a rendering obligation belongs
-  now that it has a spec to live in.
+  duplicate-post one is contracted in `composer-view`'s delta, the clamped-time
+  and moderation-sequencing ones in `thread-read`'s and `moderation-resolution`'s,
+  and the **ordering-honesty one in `feed-view`** — which is where a rendering
+  obligation belongs now that it has a spec to live in. The last of those was
+  initially left to the interface, and the `dev-writer` found the consequence: the
+  sentence the feed renders about its own ordering was owned by no requirement,
+  and the test pinning it was defending a claim that this change had made false.
+- **A gap `feed-view` names rather than closes: the feed's rows carry no time.**
+  `thread-read`'s delta puts the asserted time and the ordering position on a
+  **thread's** items; the feed lists threads through a separate reply shape that
+  this change did not widen, so a feed row carries neither. `feed-view`'s
+  time-marking requirement is therefore written to bind conditionally — today its
+  force is the prohibition on rendering a time the view was not given, and its
+  positive half binds unconditionally the moment a feed row carries one. Widening
+  that reply is a separate piece; the requirement exists now so the field cannot
+  arrive unmarked.
 - **Storage** — the SQLite projection derives its sort-key columns from the
   arrival at write time, so they must come from the op instead. That is a
   `LAYOUT_VERSION` bump, and the existing check refuses a layout a build does not
