@@ -20,9 +20,30 @@
       the design bundle's `copy.json` carries the forbidden phrase and is
       overruled, which `proposal.md` records.
 
-      > **Routed back to the `spec-writer` by the `tester`: the new capability
-      > and the shipped screen disagree, and reconciling them is a wording
-      > decision rather than a test fix.**
+      > **Third pass, settling the wording the `tester` routed back.** The
+      > `tester`'s two findings were both re-verified against the files rather
+      > than taken on report, and **both held**. The reason clause at
+      > `FeedScreen.qml:433` discharges the author-assertion requirement
+      > verbatim, and `tst_feed_copy.qml:197-204` pins it in both directions
+      > including the `yet` prohibition — so only the label and the denial's
+      > opening clause are in conflict, exactly as reported.
+      >
+      > **The label is "newest first"; the denial opens "Newest first means
+      > latest in this forum's order, not latest by the clock."** and keeps its
+      > remaining two sentences unchanged. `feed-view` gains a third direction
+      > on the denial — it must deny the temporal *reading* and must not negate
+      > the label — because the first two directions were jointly satisfiable by
+      > a screen that contradicts itself, which is what shipped. `proposal.md`
+      > carries the reasoning and records that neither label is in `copy.json`.
+      >
+      > **Routes on to a `dev-writer` then a `tester`**: `FeedScreen.qml` (the
+      > label at 122, the denial at 433, and the three comment blocks at 108-120,
+      > 402-408 and 412-431 that argue for the superseded wording — 412-417 is
+      > the `NO SPEC:` marker this closes) and `tst_feed_copy.qml` (the
+      > `"Not newest first"` anchors at 150, 181 and 210, and the `newest first`
+      > prohibition at 213 which the label now legitimately trips).
+      >
+      > *Original routing note follows.*
       >
       > `feed-view` makes **"newest first"** the label this interface uses. The
       > screen renders the ordering label **"same order for everyone"**

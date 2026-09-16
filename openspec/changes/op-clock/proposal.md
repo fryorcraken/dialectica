@@ -166,6 +166,43 @@ therefore requires the denial to be rendered, requires its stated reason to be
 the author-assertion rather than a missing field, and forbids any other string on
 the screen from undoing it.
 
+**A third direction was added after the code existed, because the first two
+turned out to be satisfiable together by a screen that contradicts itself.** The
+shipped screen labelled its ordering *"same order for everyone"* and denied
+beneath it *"Not newest first. …"*. Both strings are individually honest under
+the two rules above — and the moment the label becomes "newest first", the denial
+is negating the label, leaving a reader no way to tell which string is live. The
+trap is specific to this requirement's own framing: the permitted reading and the
+forbidden one are readings of the **same** superlative, so a denial that names
+the superlative rather than the reading denies the honest half along with the
+dishonest one. `feed-view` now requires the denial to name what is actually
+forbidden — ordering by the displayed time — and, where it reaches for the
+label's words, to distinguish the two readings rather than reject the label.
+
+**The wording that settles it**, replacing both strings on the screen:
+
+- the ordering label becomes **"newest first"** (from *"same order for
+  everyone"*);
+- the denial becomes **"Newest first means latest in this forum's order, not
+  latest by the clock. Posts carry a time their author claimed, which anyone
+  could set, so the feed is not ordered by it. The order used instead is one
+  every peer computes identically from the posts they hold."**
+
+Only the label and the denial's opening clause change. **The denial's reason
+clause is kept verbatim**, because it already discharges this capability's
+hardest requirement: it states that a time exists and is the author's own claim,
+rather than that none is available. That is the distinction a "not yet" phrasing
+destroys, and the existing test already pins it in both directions — including
+that the word *yet* never returns. Rewording it would have put the load-bearing
+half at risk to fix the half that was actually wrong.
+
+**What the old label gave up, recorded because it was a real property.** *"Same
+order for everyone"* asserted convergence — every peer holding the same ops
+computes the same sequence — which "newest first" does not say. It is not lost:
+the denial's third sentence carries it, which is why that sentence stays.
+**Neither label is in `copy.json`**; the bundle's `feed.orderings` entry is the
+overruled one above, so this label is the core contract's, not the bundle's.
+
 **The design bundle's `copy.json` disagrees, and this is the one place it is
 overruled.** Its `feed.orderings` array reads `["by relevance", "most recent
 first"]` verbatim, and "most recent first" is precisely the phrase this contract
