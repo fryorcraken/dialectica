@@ -37,7 +37,24 @@
       half too. Both `// NO SPEC:` markers confirmed genuinely unspecified.
 - [ ] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
-- [ ] review: readability — `code-reviewer`
+- [x] review: readability — `code-reviewer`. 10 findings in
+      `findings/readability.md` — 8 defects, 2 stylistic. **Two false claims
+      survived both earlier sweeps**, both in `tests/end_to_end.rs`, the one file
+      neither reached: its module doc still teaches "an author address is a hash
+      of a key" as a live derivation technique, and the rival-explanation comment
+      on the keystore-to-feed test names an address three times for a body the
+      piece repointed to a key. **One fabricated numeric pair**: "THREE pins,
+      where there were four" against a test holding five (six on `origin/main`),
+      copied from the `identity` spec's own "three pins … three derivations",
+      so both need correcting or the tally returns. Tasks 5.2 and 5.3 are ticked
+      over statements the tester disproved — 5.2 still says "the two test
+      comments" and names neither of the two that were missed, and 5.3 still
+      records `grep -i "author address"` as its verification. Otherwise the
+      sweep is very good: every other spelling of the deleted claim across
+      `dialectica/`, `dialectica-ui/` and `docs/` is either a Stoa address or a
+      past-tense correction, every other numeric claim checked out against the
+      code, and the retired pin's "MEASURED" claim was confirmed by reinstating
+      the deleted derivation inline.
 - [x] review: architecture — `code-reviewer`. 3 findings, none blocking on
       shape: 2 for `spec-writer` (the proposal promises two bare "The address is
       the identity" sentences are scoped to say Stoa and neither delta makes the
