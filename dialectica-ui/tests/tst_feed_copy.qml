@@ -183,9 +183,25 @@ TestCase {
         // The denial is the load-bearing half, and it is asserted as a RELATION
         // rather than as the sentence: what must not happen is the screen
         // claiming, or failing to deny, an ordering by time.
-        verify(sentence.indexOf("Timestamps do not reach this machine") >= 0,
-               "the sentence must say WHY the order is not by time, or it reads "
-               + "as a preference rather than as a limit; got: " + sentence)
+        //
+        // **The reason this pins changed with the op clock, and the change is
+        // the point.** It used to require "Timestamps do not reach this
+        // machine" — a statement that no time was available, which promised a
+        // newest-first feed once one was. A time is available now, inside the
+        // signed op, and the feed is still not ordered by it: it is the
+        // author's own claim, so ordering by it would reward lying. So the
+        // sentence must now say the time EXISTS and is not trusted, and a
+        // sentence reverting to "not yet" fails here — which is the direction
+        // this assertion exists to block, because "not yet" is the softer and
+        // more tempting wording.
+        verify(sentence.indexOf("their author claimed") >= 0
+               && sentence.indexOf("anyone could set") >= 0,
+               "the sentence must say WHY the order is not by time, and the why "
+               + "is now that the time is self-asserted rather than that none "
+               + "exists; got: " + sentence)
+        verify(sentence.indexOf("yet") < 0,
+               "the denial is a design limit, not a missing feature -- 'yet' "
+               + "promises a newest-first feed that is not coming; got: " + sentence)
 
         // And no OTHER string may undo it. A second element claiming recency
         // would leave this test green while the screen contradicted itself.

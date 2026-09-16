@@ -107,9 +107,10 @@ ScreenFrame {
     //
     // There is exactly ONE entry, because core implements exactly one ordering.
     // Its label is "same order for everyone", and that label is true OF THIS
-    // ORDERING specifically: with no Lamport timestamp reaching this machine,
-    // the order falls back to ascending op id, which every peer computes
-    // identically from ops they all hold.
+    // ORDERING specifically: the order is computed from the ops themselves —
+    // each op's own Lamport counter, carried in its signed bytes, and its op id
+    // among ops carrying none — so every peer holding the same ops computes the
+    // same sequence. Nothing per-peer enters it.
     //
     // It would NOT be true of the feed in general, and that distinction is why
     // the label lives in the model rather than in the layout. Vouching is
@@ -407,11 +408,29 @@ ScreenFrame {
     // assumption.
     //
     // copy.json `feed.orderingNote` — the key the deleted MarginNote carried.
-    // It is kept because what changed is the presentation and not the string:
-    // the wording is the bundle's, verbatim, and a later reader reconciling the
-    // QML against the bundle needs to find it under the name the bundle uses.
+    //
+    // NO SPEC: **the exact wording of this sentence is not required by any
+    // spec**, and this revision of it was chosen by the `op-clock` change
+    // rather than contracted. `grep -rn "newest first"` over `openspec/specs/`
+    // returns nothing, and `stoa-navigation-view` explicitly puts the feed's
+    // ordering row outside its scope. The DENIAL is load-bearing and must stay
+    // (see below); the reason given for it is what changed and is unowned.
+    //
+    // What changed, and why the old wording had to go: it read "Timestamps do
+    // not reach this machine yet [...] When real times arrive this label changes
+    // and nothing else does." Both halves are now false. An op's signed bytes
+    // carry a Lamport counter AND an author-asserted wall-clock, and the feed is
+    // ordered by that counter today. The old sentence promised the reader a
+    // future in which the feed becomes newest-first, and that future is one core
+    // has now decided against rather than merely not reached: a counter is
+    // CAUSAL, not temporal — it says its author had seen something, never when —
+    // and the wall-clock is the author's own claim, so ordering by it would let
+    // anyone reach the top of a feed by lying. The denial therefore stops being
+    // a statement about a missing field and becomes a statement about a
+    // deliberate design limit, which is a stronger thing to tell a reader and
+    // must not be softened back into "not yet".
     Text {
-        text: "Not newest first. Timestamps do not reach this machine yet, so posts are ordered by a rule every peer computes identically. When real times arrive this label changes and nothing else does."
+        text: "Not newest first. Posts carry a time their author claimed, which anyone could set, so the feed is not ordered by it. The order used instead is one every peer computes identically from the posts they hold."
         font: DTheme.note
         color: DTheme.inkSoft
         wrapMode: Text.WordWrap
