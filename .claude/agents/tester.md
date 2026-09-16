@@ -21,6 +21,15 @@ Hold them to the invariant below more firmly than your own, not less: they were
 written by whoever wrote the code, so they are the most likely to pin what was
 built rather than what was asked for.
 
+**Two kinds you do not remove**, however redundant they look:
+
+- **A regression test watched failing before its fix.** A replacement you write
+  now has never failed, so it proves nothing about the bug.
+- **Anything carrying `NO SPEC:`.** It is the only record that the behaviour was
+  chosen rather than specified.
+
+If either looks wrong, that is a finding to report, not a test to drop.
+
 Read the dev's handover: which of their tests they were least confident in, and
 every `NO SPEC:` marker they left. Keep the markers and report each one — that
 is behaviour chosen because the spec was silent, and the spec-writer decides

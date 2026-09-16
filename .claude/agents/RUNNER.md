@@ -53,6 +53,8 @@ grep -rn "^- \[ \]" openspec/changes/<name>/tasks.md    # what is left
 
 `tasks.md`'s `## Stages` block is the state. **An unticked row with no agent
 running is a stage nobody is doing** — that is the whole tracking mechanism.
+**A struck-through row keeps its empty box** — read the strike, not the box, and
+expect `openspec archive` to warn for the same reason.
 
 **A change with no stage block is invisible to it.** The grep returns nothing,
 which reads exactly like every row ticked. Confirm the block exists before
@@ -142,6 +144,10 @@ The last two are not smaller `code-reviewer`s:
 two becomes whichever it started with. A small change can take one covering all
 four — but the other two are still separate dispatches, because what
 distinguishes them is what they may read.
+
+**A change with no source diff still gets all six.** Agent files, config and prose
+are reviewable material; the exemption is how a flow's own adopting change ships
+with `code-reviewer` skipped.
 
 **Two concurrent authors across pieces is the ceiling.** Fanning agents across
 sequential work moves dependency discovery to collision time.

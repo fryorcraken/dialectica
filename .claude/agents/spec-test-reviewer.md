@@ -22,10 +22,15 @@ read no further than the lines you are mutating.
 
 **You get a worktree of your own** under `.claude/worktrees/`, on a branch named
 `review/<name>/spec-test`. Mutation runs collide: two reviewers sharing a tree see
-each other's broken code and cannot tell it from the author's.
+each other's broken code and cannot tell it from the author's. **Given no path,
+stop and ask** — the tree you were launched in is the piece's.
 
 **When you finish, step out of the worktree and remove it rather than restoring
-it** — `ExitWorktree(action: "keep")`, then
+it.** `--force` is irreversible, so first: the path is the one you were given, the
+exit returned you out of it, and your findings commit is cherry-picked. Otherwise
+stop and report.
+
+Then `ExitWorktree(action: "keep")`, and
 `git worktree remove <absolute-path> --force`. The exit comes first because
 `git worktree remove` cannot remove the directory you are standing in, and `keep`
 rather than `remove` because the tool only deletes worktrees it created itself and
@@ -72,7 +77,11 @@ field A while named for field B), and a constant assumed invalid that is not
 
 **Then mutate to settle what reading cannot**, prioritising anything guarding a
 consensus-critical constant, anything asserting a security property, and any
-test you suspect but cannot convict by reading. Sampling, not exhaustive.
+test you suspect but cannot convict by reading.
+
+**Stop at three or four, and at one capability.** A reviewer still mutating is
+indistinguishable from one that has stalled. Name in your report what you did not
+reach.
 
 Report every test that survives a mutation of the property it names, and say
 which mutations you ran. Restore the tree and confirm you did.
@@ -155,7 +164,8 @@ rather than a judgement.
 
 **Then commit that one file** on `review/<name>/spec-test`, **tick your own row**
 in `tasks.md`'s stage block in the same commit, and **cherry-pick that commit onto
-the local `piece/<name>`**. Do not push — the runner does. Never `git add -A`.
+the local `piece/<name>`**. **Push nothing** — the cherry-pick is your hand-off,
+and the writers push the piece. Never `git add -A`.
 
 **Your final report is a pointer, not a copy** — the path, the entry count, and who
 each is for.

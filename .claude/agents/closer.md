@@ -19,7 +19,8 @@ goes back to the runner with the evidence attached.
 
 1. **Confirm the piece is actually finished** — the findings gate, and the
    stage block.
-2. **Check the branch is not stale** against current `main`.
+2. **Check the branch is not stale** against current `main`, and **rebase it
+   yourself** if it is.
 3. **Archive**, as one more commit on the piece branch.
 4. **Watch CI to green.**
 5. **Ensure the PR's title and body are up to date** and matches content, update them if needed.
@@ -70,13 +71,24 @@ lives nowhere else disappears with the directory.
 A branch cut before a large change landed and never updated carries "the file
 without that change" as an intentional-looking deletion, and a squash merge
 applies it. There is no conflict, because nobody edited the same lines twice.
-Three PRs here each carried ~690-705 deletions of files they never touched —
-seven agent files, `docs/OPENSPEC-ARCHIVE.md`, and three `## Purpose` sections
-without which `openspec archive` aborts and writes nothing.
 
-**`mergeStateStatus` reported `UNKNOWN` for all three.** Not `BEHIND`, not
-`DIRTY`. Nothing in the PR view showed it. So do not read a merge-state field
-as a staleness check — run the diff:
+**Two checks. Run both — `mergeStateStatus` first, because it is one call and
+decides whether the CI watch is worth starting:**
+
+```
+gh pr view <n> --json mergeStateStatus
+```
+
+`BEHIND` means **rebase now, do not wait for the run.** The rebase rewrites the
+head commit and CI restarts, so a run on a behind branch measured a tree that will
+not be merged.
+
+**But a clean field is not a clean branch.** Three PRs here each carried ~690-705
+deletions of files they never touched — seven agent files,
+`docs/OPENSPEC-ARCHIVE.md`, and three `## Purpose` sections without which
+`openspec archive` aborts and writes nothing — and `mergeStateStatus` said
+`UNKNOWN` for all three. Believe it when it says `BEHIND`; it proves nothing when
+it does not. So also run the diff:
 
 ```
 git fetch origin
@@ -91,14 +103,7 @@ diff, which is what a conflict needs to resolve.
 `main`'s protection has `strict: true` on its required checks, so GitHub will
 refuse a merge from a branch that is behind — but that refusal is about the
 *head commit*, not about what the diff contains, and it arrives at merge time
-rather than before you have spent a CI run. Check the diff first.
-
-**Rebase the moment you see `BEHIND` — do not wait for the run to finish.**
-`gh pr view <n> --json mergeStateStatus` says so before CI does. A run on a
-branch that is behind is a run whose result cannot be merged: the rebase
-rewrites the head commit and CI starts again from the top, so everything after
-the rebase point was measured against a tree that will not be the one merged.
-Waiting it out spends a full run to learn what one field already said.
+rather than before you have spent a CI run. Check both signals first.
 
 From inside the piece's worktree:
 
@@ -121,7 +126,10 @@ the signal the branch has picked up something that is not yours. `git rebase
 --abort` returns the branch exactly as it was, and costs nothing.
 
 After the rebase, go back to Step 2's diff check — the tree changed, so the
-answer can have changed with it — then to Step 4 against the new run.
+answer can have changed with it. **Then resume where you left off: Step 3 on the
+forward pass, or Step 4 if that is where you came from.** Never skip the archive
+on the way out of a rebase — merging without it puts code on `main` whose contract
+was never promoted.
 
 **After the merge the same command gives a false alarm, and it is the loud
 one.** `git diff origin/main HEAD --stat` on a correctly merged branch showed
@@ -152,9 +160,14 @@ Three things to get right in the closing context specifically:
 - **Take the delta-merge prompt.** Declining it archives without promoting the
   spec, which leaves `main` carrying code whose contract never landed — the
   exact split that one-piece-one-PR exists to prevent, arriving one step later.
+  **Unless the change declared `skip_specs: true`**: no delta to promote, and it
+  archives with `--skip-specs` rather than waiting for a prompt that never comes.
 - **Diff the promoted file against the delta.** The CLI does not report what it
-  changed. For a capability the live specs do not yet hold, exactly two hunks
-  are expected. A merge nobody diffed is a merge nobody verified, and
+  changed. **Count the edits and account for each, not the hunks** — how many
+  hunks git prints depends on how far apart the edits fall, and which edits there
+  are depends on what the delta already had (one opening on a title line gets it
+  *rewritten*, not a new one prepended). A merge nobody diffed is a merge nobody
+  verified, and
   `validate --strict` will not save you — it checks heading structure, not
   consistency, and has twice passed a spec that contradicted itself.
 - **Archive in merge order, oldest first**, if more than one change is waiting.
@@ -171,9 +184,8 @@ though it is removing review evidence.
 ## Step 4 — watching CI
 
 **First, confirm the branch is not behind** — `gh pr view <n> --json
-mergeStateStatus`. `BEHIND` means stop and report now rather than watch a run
-whose result cannot be merged; see Step 2. Watching comes after that field is
-clean.
+mergeStateStatus`. `BEHIND` means go back and rebase (Step 2), not watch a run
+whose result cannot be merged. Watching comes after that field is clean.
 
 Then get the run for **your commit**, not for the branch:
 

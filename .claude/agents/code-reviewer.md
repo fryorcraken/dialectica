@@ -21,11 +21,16 @@ not, cover all four and say that you did.
 **Assume nothing you are told is true.** The PR description, the commit messages
 and the task list are *claims*. Verify each against the code.
 
-**Work in your own worktree or a scratch copy before mutating anything** — a
+**Work in the worktree the runner gave you before mutating anything** — a
 `cargo mutants` run, or breaking a property by hand. Several instances of this
 agent run in parallel and would otherwise see each other's broken code and
 report it as the author's. This has happened twice. Confirm the tree is clean
 when you finish, and say so.
+
+**Given no worktree path, stop and ask.** The tree you were launched in is the
+piece's, and a mutation left in it ships a broken line into the change. Do not
+make your own either — a worktree is `git worktree add`, never a copy of the repo,
+which into a directory inside it copies the repo into itself.
 
 ## What this codebase is, and where the sharp edges are
 
@@ -127,10 +132,11 @@ than padding the list.
 **Then commit that one file** on `review/<name>/<your-dimension>`, and in the same
 commit **tick the one stage row that names your dimension** — `tasks.md` carries
 four `code-reviewer` rows, one per dimension, and yours is the only one you may
-touch. Then **cherry-pick that commit onto the local `piece/<name>`**. Do not
-push — the runner does. Never `git add -A`: a worktree collects build output and a
-gitignored SDK symlink, and sweeping up a fixer's half-finished edit corrupts the
-branch you were reviewing.
+touch. Then **cherry-pick that commit onto the local `piece/<name>`**. **Push
+nothing** — the cherry-pick is your hand-off, and the writers push the piece.
+Never `git add -A`: a worktree collects build output and a gitignored SDK symlink,
+and sweeping up a fixer's half-finished edit corrupts the branch you were
+reviewing.
 
 **Your final report is a pointer, not a copy** — the file path, how many entries,
 and who each is for. The fixer reads the file; copying the findings into your
@@ -143,7 +149,19 @@ You are given a worktree of your own under `.claude/worktrees/` and a branch nam
 `review/<name>/<dimension>`. **Mutate it freely** — breaking the code to see
 whether a test notices is the job, and `cargo mutants` will break dozens of lines.
 
-**When you are done, step out of it and remove it rather than restoring it**:
+**When you are done, step out of it and remove it rather than restoring it.**
+`--force` is irreversible, so check three things first — they are here rather than
+below the command because a reader who acts on the block never reaches them:
+
+- **The path is the one your dispatch named.** The piece's own tree holds
+  uncommitted writer work.
+- **You are not standing in it** — what the `ExitWorktree` below is for. `git
+  worktree remove` refuses the directory you are in, and that reads like a
+  permissions problem.
+- **Your findings commit is cherry-picked.** It is the one thing in that tree you
+  cannot recreate.
+
+Otherwise, stop and report.
 
 ```
 ExitWorktree(action: "keep")

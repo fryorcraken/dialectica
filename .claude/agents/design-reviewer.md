@@ -99,12 +99,20 @@ the code had — and a `design.md` atomicity claim has been found with no test
 behind it. A decision that is only pinned by a test added afterwards was made by
 accident, which is the thing you exist to catch.
 
-**Then commit that one file** on `review/<name>/design`, **tick your own row** in
+**Then commit that one file** on `review/<name>/design-review` — the branch suffix
+matches your findings filename, so neither has to be remembered separately —
+**tick your own row** in
 `tasks.md`'s stage block in the same commit, and **cherry-pick that commit onto the
-local `piece/<name>`**. Do not push — the runner does. Never `git add -A`.
+local `piece/<name>`**. **Push nothing** — the cherry-pick is your hand-off, and
+the writers push the piece. Never `git add -A`.
 
-**Step out of your worktree and remove it when you finish** —
-`ExitWorktree(action: "keep")`, then `git worktree remove <absolute-path>
+**Step out of your worktree and remove it when you finish.** `--force` is
+irreversible, so first: the path is the one you were given, the exit returned you
+out of it, and your findings commit is cherry-picked. Otherwise stop and report.
+**Given no path at all, stop and ask** — the tree you were launched in is the
+piece's.
+
+Then `ExitWorktree(action: "keep")`, and `git worktree remove <absolute-path>
 --force`. The exit comes first because `git worktree remove` cannot remove the
 directory you are standing in, and `keep` rather than `remove` because the tool
 only deletes worktrees it created itself and the runner made this one. Your

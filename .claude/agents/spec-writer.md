@@ -73,9 +73,10 @@ implements should stop reading as forthcoming:
 - **Behaviour** the spec now states — strike it through, point at the spec, and
   leave at most a one-line summary that it exists.
 - **Reasoning** the change acted on — rejected alternatives, spike results, the
-  why — moves to `design.md`'s Decisions section and stays there. Do not leave a
-  second copy in PLAN.md. The archive is in git and greppable; someone
-  investigating a past decision reads it there.
+  why — belongs in `design.md`'s Decisions section, but **moving it is not
+  yours**: you run before `design.md` exists, so moving it now deletes it from
+  PLAN.md and lands it nowhere. **List the passages in your handover** and leave
+  them in place; `dev-writer` moves each as it writes the entry it belongs to.
 
 Strike through and point rather than deleting, so a question's history stays
 legible. PLAN.md should shrink toward what is still ahead.

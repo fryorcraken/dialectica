@@ -44,6 +44,13 @@ route by kind:
   `design.md` under Decisions: what you chose, what else you considered, and
   what ruled the alternatives out.
 
+**You own the PLAN.md reasoning migration**, because `spec-writer` runs before
+`design.md` exists. It hands you a list of the reasoning passages this change
+acted on; move each into the Decisions entry it belongs to as you write that
+entry, and delete it from PLAN.md — two copies drift. `design-reviewer` checks
+this happened, because a passage struck from PLAN.md that never landed in
+`design.md` survives only in a commit message.
+
 **Make the unspecified behaviour visible in the code**, not only in your report.
 Write a test for it, marked so it cannot be missed:
 
