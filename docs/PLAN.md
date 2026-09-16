@@ -2072,14 +2072,28 @@ the current clock on every read cannot be indexed. Store a decay-free score plus
 a timestamp and apply decay in the `ORDER BY` expression.
 
 **The reason decay ships disabled is not that it was not got to.** No value in
-the system expresses a post's age: `op-format` forbids an op from carrying a
-wall-clock timestamp ("a wall clock is a field the adversary sets" — exactly the
-failure Appendix A measured, where a post claiming a future time got an unbounded
-multiplier), `op-ordering` forbids substituting a local clock for missing
-metadata, and a Lamport timestamp is **a counter, not a duration** — it orders
-two ops without saying whether an hour or a year separated them. The only clock
-available is the receiving peer's own, recorded per peer. So decay is blocked on
-the transport supplying an authorship time, which nothing currently plans to.
+the system expresses a post's age *that may be ranked on*, and the three
+candidates each fail for their own reason:
+
+- **The op's Lamport counter** is **a counter, not a duration** — it orders two
+  ops without saying whether an hour or a year separated them. It is the one
+  value the epoch below is stored from, because ordering is exactly what it can
+  do; decaying by it would be decaying by causal distance and calling it time.
+- **The op's wall-clock**, added by the `op-clock` change, is **explicitly not
+  the new age input**, and the withdrawal of `op-format`'s prohibition is not
+  permission to rank on it. It is the author's own assertion, chosen freely, and
+  ranking on it is precisely the failure Appendix A measured: a post claiming a
+  future time got an unbounded multiplier. That is why it is display-only and
+  reaches a caller only as formatted text. An adversary who can set your ranking
+  input sets your ranking.
+- **The receiving peer's own clock** is per-peer, and `op-ordering` forbids
+  substituting a local clock for missing metadata — see the epoch paragraph
+  below for why that divergence is the kind rule 1 does not bless.
+
+So decay is blocked on an authorship time that is *both* attested and
+unforgeable, which no value in the system is. This is a narrower statement than
+the one that stood here before the wall-clock arrived, and deliberately so: what
+changed is that an age-shaped field now exists, not that it became rankable.
 
 The epoch stored against a decay-free score is therefore the op's **Lamport
 timestamp**, never a receive-clock reading: a per-peer `CLOCK_REALTIME` value

@@ -1187,9 +1187,12 @@ pub fn whoami_for(
 ///
 /// # There is no `order` parameter, and that is the decision
 ///
-/// §9.1 proposes `order` with `new` and `active`, and then records that both are
-/// defined by a Lamport timestamp that does not reach us, so both would today be
-/// served as ascending op id. **An accepted-but-degraded parameter is a method
+/// §9.1 proposes `order` with `new` and `active`. A Lamport counter now reaches
+/// us, inside the signed op, and the feed leads with it — but a counter is
+/// **causal, not temporal**, so it still cannot answer `new`, and `active` needs
+/// a reply fold nothing computes. Serving either name would mean serving the
+/// convergent order under a label it does not earn.
+/// **An accepted-but-degraded parameter is a method
 /// telling its caller a falsehood** — §9.1's own words are that "a view asking
 /// for `top` and silently getting `new` has been told a falsehood no test will
 /// catch", and the same objection applies with equal force to `new` itself.

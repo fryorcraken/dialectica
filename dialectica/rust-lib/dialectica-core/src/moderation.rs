@@ -73,31 +73,38 @@
 //! what the author of a fourth resolver reads to learn the house discipline.
 //!
 //! What [`resolve`] actually does: filter [`OpLog::iter_target`] down to the
-//! candidates that bind, then read **the leading candidate's**
-//! [`Arrival`](crate::arrival::Arrival) — one `Arrival`, exactly once — and
-//! branch on it. Where the transport ordered that op, its position is a real
-//! last-write-wins answer and stands. Where it did not, the degraded order
-//! carries no recency, and a `Hide` among the candidates decides instead. The
-//! full statement is on [`resolve`]; the reasoning is in the change's
-//! `design.md`.
+//! candidates that bind, then read **whether the leading candidate carries a
+//! counter** — `first.op.op.clock.is_some()`, read once — and branch on it.
+//! Where it does, its position is a real last-write-wins answer and stands.
+//! Where it does not, the op predates the clock fields and sits in the degraded
+//! order, which carries no recency, so a `Hide` among the candidates decides
+//! instead. The full statement is on [`resolve`]; the reasoning is in the
+//! change's `design.md`.
+//!
+//! **Nothing here reads an [`Arrival`], and it structurally cannot.** An earlier
+//! version of this section said the branch read the leading candidate's arrival,
+//! which was true of the pre-clock design and is now false twice over: `resolve`
+//! reads the op's own clock, and [`cmp_ops`](crate::arrival::cmp_ops) takes an
+//! `OpEntry` that has no `Arrival` to name. That matters beyond tidiness — a
+//! recorded arrival is per-peer, so a convergence argument resting on one would
+//! be resting on the single input that destroys convergence.
 //!
 //! **Why the leader's, and not the read's.** The tempting alternative is to ask
-//! whether the *sequence* was ordered — a property of what `iter_target`
+//! whether the *sequence* is counter-carrying — a property of what `iter_target`
 //! returned. That is a different set of ops from the one whose leader decides,
-//! because filtering happens in between: a read can contain unordered ops that
-//! all fail authority, and the binding candidates left behind can be entirely
-//! transport-ordered. Asking about the read would demote that case to the
-//! degraded branch for no reason. The question this module needs is about the op
-//! that is *about to decide*, so that is the op whose arrival it reads.
+//! because filtering happens in between: a read can contain counter-less ops that
+//! all fail authority, and the binding candidates left behind can every one carry
+//! a counter. Asking about the read would demote that case to the degraded branch
+//! for no reason. The question this module needs is about the op that is *about
+//! to decide*, so that is the op whose clock it reads.
 //!
 //! **What survived from the old paragraph, because it is still true.** The
 //! leading entry is taken because that is the position the ordering rule defines
-//! as current — **not because it is the most recent**. `cmp_ops` leads with the
-//! highest Lamport timestamp only where the transport supplied one; otherwise,
-//! which is every op today, it falls back to *ascending op id*, an order
-//! carrying no recency whatever. `log.rs`'s [`OpLog::iter_target`] and
-//! [`cmp_ops`](crate::arrival::cmp_ops) both state this; it is not restated
-//! here.
+//! as current — **not because it is the most recent**. A Lamport counter is
+//! causal rather than temporal, and among ops carrying none `cmp_ops` falls back
+//! to *ascending op id*, an order carrying no recency whatever. `log/mod.rs`'s
+//! [`OpLog::iter_target`] and [`cmp_ops`](crate::arrival::cmp_ops) both state
+//! this; it is not restated here.
 //!
 //! The old paragraph then concluded that the same code is therefore correct
 //! under both orders with no branch. That is the step that was wrong, and
@@ -422,9 +429,12 @@ impl Moderation {
 /// won on their own terms.
 ///
 /// **Convergence is preserved**, which is the property that would have made this
-/// unacceptable. The bias is a pure function of the two ops' actions and their
-/// recorded arrivals, so every peer holding the same ops computes the same
-/// answer. It lives here rather than in [`cmp_ops`](crate::arrival::cmp_ops)
+/// unacceptable. The bias is a pure function of the candidates' **actions and
+/// their own signed clocks** — every input is inside the ops themselves, so every
+/// peer holding the same ops computes the same answer. Note what is deliberately
+/// *not* an input: a recorded arrival is per-peer, so citing one here would argue
+/// for convergence from the one value that would destroy it.
+/// It lives here rather than in [`cmp_ops`](crate::arrival::cmp_ops)
 /// because it is moderation semantics: a general comparator has no business
 /// knowing that one op kind's payload is safer to prefer.
 pub fn resolve<L: OpLog>(

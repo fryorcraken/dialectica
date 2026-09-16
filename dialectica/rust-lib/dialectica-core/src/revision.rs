@@ -179,9 +179,10 @@ pub struct CurrentVersion {
     /// The version to render: the valid revision the ordering rule places
     /// first, or `original` itself when there is none.
     ///
-    /// "First" is not "newest" — see this module's documentation. Under the
-    /// order production actually runs today it is a convergent arbitrary choice
-    /// rather than a temporal one.
+    /// "First" is not "newest" — see this module's documentation. Where the
+    /// competing revisions carry counters it is a genuine last-write-wins answer
+    /// in the **causal** sense; where they do not, it is a convergent arbitrary
+    /// choice. Neither is a temporal one.
     pub current: Entry,
 }
 
@@ -1062,10 +1063,12 @@ mod tests {
 
     #[test]
     fn under_the_degraded_order_the_lower_op_id_is_current() {
-        // The ONLY order production uses today: nothing supplies a Lamport
-        // value, so every arrival is `unordered()` and `cmp_ops` falls back to
-        // ascending op id. Appended in the reverse of the answer, so insertion
-        // order fails.
+        // The DEGRADED order: both revisions carry no counter, which is the
+        // population predating the clock fields, so `cmp_ops` falls back to
+        // ascending op id. Production now publishes counters, so this is the
+        // order for received legacy ops rather than for everything — which is
+        // what makes it worth a test of its own. Appended in the reverse of the
+        // answer, so insertion order fails.
         //
         // Asserted against the op ids themselves rather than a hardcoded body:
         // which of two bodies hashes lower is not something to guess.
