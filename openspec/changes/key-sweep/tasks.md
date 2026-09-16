@@ -51,7 +51,16 @@
       the absence pin leaves a runtime witness. `verify_authored_op` still earns
       its name and is not a pass-through — it owns the three parse refusals on
       the attacker path and its arity is compile-gated. 987 Rust tests green.
-- [ ] review: spec-test — `spec-test-reviewer`
+- [x] review: spec-test — `spec-test-reviewer`. Every delta requirement across
+      all six capabilities has a test; no delta scenario is untestable as
+      written. Both `// NO SPEC:` markers confirmed genuine against the LIVE spec
+      tree. Three mutations run and restored: repointing `STOA_ADDRESS_PREFIX` to
+      the retired author prefix fails `no_derivation_turns_a_public_key_into_an_
+      address` with both sides printing the identical pinned hex — the pin is a
+      witness, not a tautology; repointing `FeedRow::author` to the Stoa address
+      is caught by four tests. No surviving mutation. 987 green (957 + 30). One
+      finding, low severity: the test-list shape is a 2-for-1 collapse plus 1 new
+      test, not "2 deletions, 2 additions" — same net count, so no gate sees it.
 - [x] review: design — `design-reviewer`. 3 findings, all for `dev-writer`, all
       gaps in the record rather than code contradicting it. Every one of the
       seven Decisions is taken as recorded, and Decision 7's six `origin/main`
