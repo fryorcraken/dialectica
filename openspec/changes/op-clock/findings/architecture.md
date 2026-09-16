@@ -10,7 +10,7 @@ integration).
 
 ---
 
-- [ ] **`dev-writer`** — `thread.rs:235` — `Placed`'s claimed structural
+- [x] **`dev-writer`** — `thread.rs:235` — `Placed`'s claimed structural
       guarantee is not structural; bypassing it is invisible to the compiler and
       to every test
       **What is claimed:** the doc says "A type that **cannot express a
@@ -43,7 +43,29 @@ integration).
       is unable to name it, which is the same move `OpEntry` makes correctly for
       `Arrival` (`arrival.rs:314`).
 
-- [ ] **`dev-writer`** — `authoring.rs:1768` —
+      **Fixed** in `05a6faf`, taking the second of the two shapes suggested —
+      `ThreadItem` is now constructible only through `Placed::at`, in the sense
+      that `Placed::at` is the only code in the module that names the
+      `ThreadItem { .. }` literal. `Placed` holds the fields rather than a built
+      item, so `resolve_item` has no `position` to set and no inner item to
+      reach for; the measured bypass (`placed.item`) is now a compile error
+      rather than a `dead_code` warning.
+
+      Making `position` private was the alternative and was not taken:
+      `ThreadItem` is the wire-facing struct with every other field `pub`, so
+      one private field would have needed an accessor and a constructor, which
+      is more surface for the same guarantee. The cost of the shape chosen is
+      that a new `ThreadItem` field must be added in two places — the compiler
+      names both, which is the trade CLAUDE.md asks for.
+
+      The finding's second half — that the tests could not see it — is fixed
+      separately in the same commit. `every_item_carries_its_index_in_the_whole_thread_as_its_position`
+      is the module's first assertion on a `position` **value**; it reads across
+      three pages, so a per-page index (indistinguishable on page 0) fails too.
+      Proven to fail by restoring `String::new()` inside `at`, which reports
+      `["", "", "", "", ""]` — the exact defect measured here.
+
+- [x] **`dev-writer`** — `authoring.rs:1768` —
       `every_publish_path_stamps_a_counter` is a hand-maintained sweep list over
       three named builders, and three more builders are already implied by the
       op kinds
@@ -76,7 +98,26 @@ integration).
       fails **11 of 1002** tests, so the *current* three paths are well covered.
       The gap is only in what happens to a fourth.
 
-- [ ] **`dev-writer`** — `feed.rs:6` and `feed.rs:67` — the feed's ordering
+      **Fixed** in `e8b1535`, in the `op.rs:1110` shape this finding names. The
+      test is now `publish_stamps_a_counter_onto_an_op_of_any_kind` and derives
+      its fixtures from `every_op_kind()` — the same list two other sweeps
+      already count — rather than naming builders. `publish` overwrites `clock`
+      with `..op` regardless of what the builder set, so the property really is
+      total over kinds rather than over builders, which is what makes it
+      assertable this way.
+
+      Proven to fail with the finding's own scenario: making `publish` stamp
+      only `Post` and `Vote` — a new kind whose path forgets the clock — fails
+      this test and **only** this test, 1 of 44 in the module. The three-name
+      version passed that mutation, which is the gap measured directly rather
+      than argued.
+
+      The ascending-counters half of the old test is kept as
+      `the_counters_ascend_across_successive_publishes`, because it is a
+      different claim: the first says a counter is stamped, the second says the
+      value moves.
+
+- [x] **`dev-writer`** — `feed.rs:6` and `feed.rs:67` — the feed's ordering
       changed behaviour and its module doc still describes the removed one,
       including the premise its ordering *name* was chosen on
       **What changed without being revisited:** `list_threads` reads
@@ -105,7 +146,26 @@ integration).
       **Severity: defect** — a live document describing behaviour the module no
       longer has, on the point the module exists to be careful about.
 
-- [ ] **`dev-writer`** — `log/mod.rs:371` — `iter_target`'s contract still
+      **Fixed** in `8825ddc`, and this finding's reading is the one taken: the
+      decision survives and the recorded reason did not, so the header now
+      states the withdrawal explicitly rather than quietly editing the premise.
+      The name is still `convergent`, re-argued from the narrower and still-true
+      ground the finding itself identifies — a counter is **causal, not
+      temporal**, so `new` remains a claim this order cannot support — plus an
+      explicit note that the op's wall-clock is not the substitute either,
+      because that is the reach a reader who learns "a time now exists" would
+      make. The §8 reply-count bullet is separated the same way: the cost
+      question is unchanged by a counter, and it now says so rather than
+      resting on "before Lamport values arrive".
+
+      This finding was one of three, each naming a *different* fifth site, so
+      the list was rebuilt by grepping the claim's several phrasings rather than
+      from any of them. That found sites in `wire.rs`, `revision.rs`,
+      `thread.rs`, `authoring.rs`, plus more in `log/mod.rs` and `moderation.rs`
+      than were reported — and one in `FeedScreen.qml` that is **rendered on
+      screen**, with a test pinning it, fixed in `9ec147a`.
+
+- [x] **`dev-writer`** — `log/mod.rs:371` — `iter_target`'s contract still
       describes the pre-change ordering rule, and it is the doc every resolver
       author reads to learn what "first entry" means
       **The stale text:** "*`cmp_ops` leads with the highest Lamport timestamp
@@ -127,7 +187,20 @@ integration).
       **Severity: defect.** Same family as the `feed.rs` entry but a separate
       fix in a separate file, so a separate box.
 
-- [ ] **`dev-writer`** — `log/mod.rs:436` and `log/mod.rs:46-52` — `MemoryOpLog`
+      **Fixed** in `8825ddc`. The doc now says the rule leads with the op's own
+      counter, that a counter is causal rather than temporal, and that the
+      op-id fallback applies among ops carrying none — so "first is not most
+      recent" survives on accurate grounds rather than on a false premise.
+
+      The scenario this finding describes is answered directly rather than only
+      implied: the doc now tells that resolver author **not to re-sort or add a
+      tiebreak**, and says why — a second implementation of the ordering rule is
+      the one thing every module reading this log may not do, and two orders
+      that disagree produce no error anywhere. The old text invited exactly that
+      compensation, so removing the false premise without replacing the
+      instruction would have left the trap open.
+
+- [x] **`dev-writer`** — `log/mod.rs:436` and `log/mod.rs:46-52` — `MemoryOpLog`
       documents a sort key and a tie case that no longer exist
       **Line 436:** "*the sort key is `(Arrival, OpId)`, and `Arrival` is what
       the transport supplies*". It is now `(Option<u64> counter, OpId)`, taken
@@ -145,6 +218,26 @@ integration).
       is out of date. Worth fixing in the same pass because a reader comparing
       `arrival.rs` and `log/mod.rs` currently gets two different accounts of the
       same property and no way to tell which is current.
+
+      **Fixed** in `8825ddc`, both halves, and the finding's framing is right:
+      the dedup-by-map defence is kept and only the reason is replaced.
+
+      Lines 46-52 now state the tie from what is still true — the op id is the
+      last resort in every branch, so two entries sharing one compare `Equal` —
+      and then name the withdrawal explicitly, pointing at the stronger position
+      `arrival.rs` holds: both clock fields are in the preimage, so one op
+      cannot arrive with two counters. That removes the two-accounts problem by
+      making `log/mod.rs` cite `arrival.rs` rather than paraphrase it.
+
+      Line 436's sort key is now `(Option<u64> counter, OpId)`, and the
+      map-not-sorted-structure argument is re-grounded: the order is not an
+      insert-time fact, because an op carrying no counter sorts relative to a
+      population that grows. The old argument ("would need re-keying if the
+      metadata changed") was about a transport value that no longer enters.
+
+      A third site in the same file was found while fixing these and is included:
+      the module header's "`arrival::Arrival` says what orders it", which is the
+      same claim one paragraph up from where anyone would look.
 
 - [ ] **`spec-writer`** — `feed.rs:106` vs `thread.rs:191`,`202` — `FeedRow` and
       `ThreadItem` now answer the same question with two different contracts, and

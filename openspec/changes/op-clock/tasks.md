@@ -17,8 +17,9 @@
       sorted ascending, which is what makes the advance bound a function of the
       op set rather than of arrival order. `LAYOUT_VERSION` 1 → 2. The composer
       disables its control while a publish is outstanding. `design.md` carries
-      the six decisions and the constants' reasoning; the **NO SPEC** markers
-      and one unimplementable-as-written finding are in the report.
+      the decisions (`grep -n "^### " design.md` counts them) and the constants'
+      reasoning; the **NO SPEC** markers and one unimplementable-as-written
+      finding are in the report.
 - [ ] tests — `tester`
 - [x] review: correctness — `code-reviewer` — four findings, all for `tester`.
       The implementation is sound: the wall clock reaches no comparison (traced
@@ -152,8 +153,16 @@
       corrected.
 - [x] **`composer-view`.** `DComposer` disables its submit control from
       submission until an outcome, on every outcome including a refusal.
-- [ ] **`docs/PLAN.md` and `docs/UI-BRIEF.md`** — carried by the spec commit
-      already on this branch; re-checked against the implemented behaviour.
+- [x] **`docs/PLAN.md`** — carried by the spec commit already on this branch,
+      re-checked against the implemented behaviour, and §7.2 rule 5 re-aimed in
+      the findings pass: its conclusion (the stored epoch is the op's counter)
+      survives and is what decision 8 implements, so only the premise changed,
+      with the wall clock named as explicitly **not** the new age input.
+      ~~and `docs/UI-BRIEF.md`~~ — **struck.** That file was deleted by #83
+      under an owner ruling that it was this codebase's own output being read
+      back as input. There is no brief to correct, and the obligations it would
+      have carried live in the `composer-view`, `thread-read` and
+      `moderation-resolution` deltas instead. See `proposal.md`'s Impact.
 
 ## Notes for the `dev-writer`, which are not tasks
 
@@ -169,6 +178,27 @@ wrong. They are `op.rs`'s module header ("No wall-clock timestamp [...] a forum
 that ordered by it would be ordering by a field its adversary sets"),
 `arrival.rs`'s header ("Why a second Lamport clock is the one thing not to
 build"), `transport.rs`, and `log/sqlite.rs`'s `score_epoch` comment.
+
+> **`dev-writer`, findings pass: the count was four and the answer is at least
+> twelve.** Three reviewers each found a *different* fifth site and each
+> believed it was the one the list missed, which is what prompted rebuilding
+> the list by grepping the claim's several phrasings instead of working from
+> any of them. Beyond the four above: `feed.rs` (the header and the §8 bullet),
+> `log/mod.rs` (three — `iter_target`'s contract, the `(Arrival, OpId)` sort
+> key, and the dedup rationale), `moderation.rs` (three — `resolve`'s
+> convergence claim and two in the module header), `authoring.rs`'s `Published`
+> doc, `wire.rs`'s feed method, `revision.rs` (two), `thread.rs`'s header, and
+> **`FeedScreen.qml`**, where the claim is *rendered on screen* with a test
+> pinning it in place. `transport.rs`, on the list, turned out **not** to need
+> a retraction: its claim is scoped to "this layer" and is still true, since
+> the counter arrives inside the op rather than from the transport.
+>
+> The durable lesson is about the shape of the note rather than its arithmetic:
+> an enumeration of sites is the hand-maintained-sweep trap applied to prose. A
+> grep for the *claim* is the thing to hand the next `dev-writer`, and the
+> phrasings are several — "does not reach us", "the transport supplied one",
+> "which is every op today", "carries no recency", "no timestamp and no nonce",
+> "before Lamport values arrive".
 
 **`moderation.rs`'s `Hide`-wins preference rests on a premise this change
 falsifies.** Its doc states that a `Moderate` op has "no nonce, no timestamp and

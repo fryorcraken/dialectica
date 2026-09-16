@@ -46,7 +46,7 @@ accurate (lines 272, 281, 302, 312, 316).
 
 ## Findings
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/feed.rs:5-8`
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/feed.rs:5-8`
       and `:67-69` — the feed's module header still argues the case this change
       overturns, and was missed by the retraction sweep
       **Scenario:** `tasks.md:76-83` lists four files carrying "written arguments
@@ -72,7 +72,23 @@ accurate (lines 272, 281, 302, 312, 316).
       "four files argue against this change" trap the piece's own task list
       opened — with a fifth file the list missed.
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/moderation.rs:425-426`
+      **Fixed** in `8825ddc`. See the architecture reviewer's box on the same
+      file for the substance; in short the `convergent` name survives and is
+      re-argued from "a counter is causal, not temporal", with the wall-clock
+      named as explicitly not the substitute.
+
+      Worth recording that this finding, the architecture reviewer's and the
+      design reviewer's each named a *different* fifth site, each believing it
+      was the one the sweep missed. The list was therefore rebuilt by grepping
+      the claim's several phrasings rather than from any of the three, which
+      found sites in `wire.rs`, `revision.rs`, `thread.rs`, `authoring.rs`, two
+      more in `log/mod.rs` and `moderation.rs` than were reported, and one in
+      `FeedScreen.qml` that is **rendered on screen** with a test pinning it
+      (`9ec147a`). The note about the `docs/UI-BRIEF.md` line in this file's
+      "what is clean" section is moot: that file was deleted by #83 before this
+      branch rebased onto it.
+
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/moderation.rs:425-426`
       — `resolve`'s convergence argument still cites "recorded arrivals", which
       this change removed from every ordering decision
       **Scenario:** the paragraph reads *"The bias is a pure function of the two
@@ -91,7 +107,23 @@ accurate (lines 272, 281, 302, 312, 316).
       carefully updated in the change, which makes the one stale clause more
       misleading, not less.
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/thread.rs:225-238`
+      **Fixed** in `8825ddc`, and the sentence is rewritten around this
+      finding's sharpest observation rather than merely corrected. It now says
+      the bias is a function of the candidates' actions and **their own signed
+      clocks**, then states what is deliberately *not* an input and why: a
+      recorded arrival is per-peer, so citing one would argue for convergence
+      from the one value that would destroy it. Naming the excluded input is
+      what stops the next author restoring it.
+
+      Two further sites in the same file, not reported and equally stale, are
+      included: the module header at 78-80 and 95-98 described `resolve` as
+      reading the leading candidate's `Arrival` and branching on it, which is
+      the pre-clock mechanism — `resolve` reads `first.op.op.clock.is_some()`
+      and `cmp_ops` has no `Arrival` to name. That section is the one this file
+      says "the author of a fourth resolver reads to learn the house
+      discipline", so it mattered more than the `resolve` doc itself.
+
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/thread.rs:225-238`
       — `Placed`'s doc claims a compiler-enforced property the type does not have
       **Scenario:** the doc says the obvious shape *"is to build a `ThreadItem`
       with an empty `position` and fill it in afterwards, and that shape has a
@@ -112,7 +144,22 @@ accurate (lines 272, 281, 302, 312, 316).
       comment can make (CLAUDE.md's "complexity in the data structure") and the
       code earns a weaker one.
 
-- [ ] **`dev-writer`** — `openspec/changes/op-clock/design.md:86` — a citation
+      **Fixed** in `05a6faf` — and by changing the code to earn the claim
+      rather than by weakening the comment, because the claim was the one worth
+      having. `Placed` now holds the fields instead of a built `ThreadItem`, so
+      `Placed::at` is the only code naming the `ThreadItem { .. }` literal and
+      `resolve_item` has no `position` to set.
+
+      This finding's diagnosis of the *mechanism* — privacy, not
+      expressiveness — is what made the fix obvious, and the doc now says so in
+      those terms, including that wrapping a built item would have required
+      constructing the `""` placeholder the type exists to rule out. The
+      finding's observation that `ThreadItem`'s fields are `pub` so any consumer
+      crate can construct one with any position it likes remains true and is
+      **not** claimed against: the doc's scope is this module's construction
+      path, which is where the hole was.
+
+- [x] **`dev-writer`** — `openspec/changes/op-clock/design.md:86` — a citation
       attributed to the spec that the spec does not contain
       **Scenario:** decision 3 reads *"Ascending order is what makes this a
       function of the op set rather than of arrival order, and it is the subtlety
@@ -131,7 +178,28 @@ accurate (lines 272, 281, 302, 312, 316).
       `proposal.md:94-95` on `openspec validate --strict` passing a suite that
       contradicts itself; decision 3 should point there or drop the attribution.
 
-- [ ] **`dev-writer`** — `openspec/changes/op-clock/tasks.md:20` — the stage row
+      **Fixed.** The attribution is replaced with what the spec does say,
+      quoted and line-cited: `op-ordering/spec.md:83`'s "The excess SHALL be
+      measured against a value computed from the ops the peer holds, and SHALL
+      NOT be measured against whatever the peer's clock happened to be at the
+      instant the op arrived", plus `:85`'s reason that the arrival-order
+      version "is the one that falls out of writing the check on the receive
+      path".
+
+      That is a stronger sentence than the one it replaces — it cites a
+      requirement rather than a drafting anecdote — so the fix is neither of the
+      two this finding offers. The `proposal.md:94-95` pointer is not added,
+      because that admission is about `validate --strict`'s blind spot and not
+      about the fold, and attaching it here would be a second loose citation in
+      the place the first one was.
+
+      Recorded because this is the project's "persuasive citations get
+      fabricated" family and the propagation is visible: the correctness
+      reviewer repeated the same phrase ("the subtlety the spec records as a
+      mid-draft fix") in their own clean-findings prose, having read it here
+      rather than in the spec.
+
+- [x] **`dev-writer`** — `openspec/changes/op-clock/tasks.md:20` — the stage row
       undercounts `design.md`'s decisions, and the three it hides include the
       store-layout trap
       **Scenario:** the row says *"`design.md` carries **the six decisions** and
@@ -145,7 +213,17 @@ accurate (lines 272, 281, 302, 312, 316).
       six answers" at line 11. Severity: genuine defect — a pointer that
       undercounts is worse than no pointer, because it reads as complete.
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/log/sqlite.rs:265-296`
+      **Fixed**, by removing the number rather than correcting it: the row now
+      says "the decisions (`grep -n "^### " design.md` counts them)". The repo's
+      own rule decides this — do not write down what a command can answer — and
+      it is not pedantry here, because three more decisions landed in this same
+      findings pass, so "nine" would have been wrong again within the hour.
+
+      Line 11's "the six answers" is left as it stands: it counts the owner's
+      six *questions* in `proposal.md`, a different and still-correct number.
+      This finding reads the two as one claim; they are not.
+
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/log/sqlite.rs:265-296`
       — `check_layout`'s own doc never says that its column list must be updated
       when a column is dropped, which is the defect the author hit
       **Scenario:** `design.md:193-206` records that `check_layout` still named
@@ -171,7 +249,23 @@ accurate (lines 272, 281, 302, 312, 316).
       standard that a comment records what a command cannot tell you; the piece
       paid for this lesson and did not bank it at the point of use.
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/authoring.rs:204`
+      **Fixed** in `6156082`, in the `create_schema` shape this finding names as
+      the model. `check_layout` now carries a heading stating the converse
+      obligation directly — this list is part of the layout, a column dropped
+      from `CREATE TABLE` must be dropped here in the same edit — addressed to
+      the next schema editor, with the consequence at full strength
+      ("permanently unopenable, with no migration path by design") rather than
+      the test comment's weaker "would refuse every real store", and with the
+      reason it recurs: the two sites are hundreds of lines apart and nothing
+      ties them together.
+
+      The observation that the test comment is the wrong home is why the warning
+      went to the function rather than being strengthened where it was — a
+      reader editing the schema is not reading the tests. The test is named in
+      the new text as what catches it, with the caveat that a test catches it
+      only after someone has written it.
+
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/authoring.rs:204`
       — `now_ms` names two different clocks across the crate, which is the one
       naming collision this change's own rules forbid
       **Scenario:** `Authorship::now_ms` is the **author's** wall clock, signed
@@ -196,6 +290,24 @@ accurate (lines 272, 281, 302, 312, 316).
       `authoring.rs:235`). Recorded because this change's entire thesis is that
       the two clocks must never be confusable, and this is the one place in the
       crate where their names are identical.
+
+      **Fixed** in `6156082`, taking the rename this finding proposes:
+      `Authorship::now_ms` is now `asserted_ms`, matching
+      `OpClock::asserted_ms`, which it is assigned to verbatim. The compiler
+      named all six call sites, including two — `examples/seed_store.rs` and
+      `tests/end_to_end.rs` — outside the set this finding enumerates, which is
+      the rename doing what a doc comment could not.
+
+      The field's doc now says *why* it is not `now_ms`, in this finding's own
+      terms: every other such value in the crate is the reading peer's clock,
+      this one enters the signed preimage, and on every peer but the writer it
+      is attacker-chosen data. That belongs on the field because the next person
+      to add one reads it there.
+
+      **Not done here:** the `A_TIME` fixtures spelling both roles the same way.
+      That is a test-fixture change and the `tester` holds this change's fixture
+      findings, so it is left rather than edited underneath them — recorded so
+      it is not read as overlooked.
 
 - [ ] **`tester`** — `dialectica/rust-lib/dialectica-core/src/arrival.rs:827-841`
       — two tests with different names carry a byte-identical assertion, and the

@@ -83,7 +83,13 @@ for each counter c held, in ASCENDING counter order:
 ```
 
 **Ascending order is what makes this a function of the op set** rather than of
-arrival order, and it is the subtlety the spec says it had to fix mid-draft.
+arrival order, which `op-ordering`'s spec requires in its own words: *"The excess
+SHALL be measured against a value computed from the ops the peer holds, and SHALL
+NOT be measured against whatever the peer's clock happened to be at the instant
+the op arrived"* (`specs/op-ordering/spec.md:83`), with the reason at `:85` — the
+arrival-order version *"is the one that falls out of writing the check on the
+receive path"*.
+
 Folding in arbitrary order, a run of ordinary ops followed by `u64::MAX` accepts
 the jump on one peer and refuses it on another. Folding ascending, every peer
 walks the same ladder from 0 and stops at the same rung, whatever sequence the
@@ -205,6 +211,92 @@ every store permanently unopenable, with no migration path by design. Recorded
 because the failure mode is invisible in the schema diff — the `CREATE TABLE`
 and the check are forty lines apart and nothing ties them together.
 
+### 10. Equal counters tiebreak on the op id, ascending
+
+Two ops can carry one counter — two authors who had each seen the same thing
+publish at the same N — so the order needs a second key or it is not total, and
+a `LIMIT` page over a non-total order silently repeats and skips rows.
+
+**Chosen: the op id, ascending.** It is already `cmp_ops`'s last resort, and it
+is the only candidate that is a **pure function of the op's own bytes**: every
+peer holding the op computes the same one without consulting anything it
+received, so the tiebreak converges for the same structural reason the counter
+does.
+
+**Considered: the transport message id**, which is what `cmp_tiebreak`
+implemented before this change deleted it. Rejected because it does not reach
+us — a tiebreak absent on every op is not a tiebreak — and because it is a
+per-peer value, so two peers would break the same tie two ways.
+
+**The cost, stated:** a hash carries no recency whatever, so which of two
+equal-counter ops leads is arbitrary. That is the honest answer rather than a
+defect: the ops are genuinely concurrent, and any rule that made one "later"
+would be inventing an order the ops do not carry. It is recorded here because
+tiebreaking on a hash looks arbitrary at a call site, and a reader who does not
+find the reasoning will reach for something that looks more temporal.
+
+### 11. An implausible wall-clock is accepted and clamped, never refused
+
+**Chosen: accept every clock value at the boundary, clamp at read time for
+display, and report that the clamp happened.** `Op::decode` validates no clock
+value; `format_asserted` bounds what is rendered and returns `clamped: bool`
+beside the text.
+
+**Considered — and it is the intuitive one: refuse at the boundary.** CLAUDE.md's
+security posture says to validate untrusted input before it reaches a state
+machine, and a far-future timestamp is exactly the shape that rule is about. It
+is rejected here because **refusing an op for its clock is a censorship vector**:
+a peer whose system clock is skewed would be silently dropped by every honest
+peer, and from that peer's side the result is indistinguishable from moderation
+nobody performed. In a censorship-resistant forum that is the failure mode the
+whole design exists to avoid, and it would be reachable by an accident rather
+than by an attack.
+
+This is also why **the whole clamp lives at read time** rather than at the
+boundary, which decision 6 takes as given rather than as chosen. A boundary
+clamp would rewrite a signed field — the op would no longer verify — so the only
+place a clamp can live is where the value is rendered.
+
+**The cost, stated:** a reader may be shown a time that is not when the post was
+written. That is why the clamp is *reported* rather than silently applied: a
+view can say the time is not to be trusted, which a silently substituted value
+could not.
+
+Note the refusal this does *not* buy back: the clock decides nothing, so an
+absurd value costs its author nothing and gains them nothing. Accepting it is
+cheap precisely because the field is display-only.
+
+### 12. Content-dedup ends, and there is no delete behind it
+
+**This is the change's one irreversible user-visible consequence**, and it is a
+decision rather than a side effect.
+
+An op id is a function of the preimage; the preimage gained a counter and a wall
+clock; so the same body authored twice now produces **two ops with two ids**,
+where `content-authoring` previously *guaranteed* one. A byte-identical replay
+still dedups — that is what keeps a re-delivered op idempotent — but two separate
+authorings are no longer byte-identical.
+
+**Considered: a nonce**, recorded in `PLAN.md` as struck-through history. It was
+rejected long before this change for separating two identical posts while doing
+nothing for ordering; the counter does both, which is why it is the field that
+landed. Worth restating because a reader may reach for a nonce to *restore* the
+old dedup and find only the old rejection.
+
+**Considered: refusing the duplicate in `authoring`.** Rejected — two identical
+posts minutes apart are a legitimate thing to write, and core cannot tell that
+from a double tap. At the core layer a double tap and a deliberate repeat are
+the same act.
+
+**The cost this forecloses, stated plainly because it is stated nowhere else in
+core:** there is no delete in this system, and a revision replaces content rather
+than withdrawing an op. So an accidental duplicate is **permanent, for every peer
+that received it**, and the author's only remedy is editing one of the two into
+an apology. That sentence previously existed only in `DComposer.qml`, as
+motivation for a QML guard — which is not where a core-contract consequence is
+discoverable. The guard is the right response and it is the *view's* response:
+the affordance belongs where the two acts are still distinguishable.
+
 ## The four capabilities beyond the original scope
 
 - **`composer-view`** — the urgent one, and it lands here. `DComposer.qml` now
@@ -228,12 +320,25 @@ and the check are forty lines apart and nothing ties them together.
 
   It is also the reason `tst_composer.qml` does **not** contain a
   "tap twice, assert one publish" test. That test would pass with the guard
-  deleted. What is asserted instead is what the component does — the flag is
-  raised *during* the call (observed from inside the fake bridge, the only
-  instant at which it is true), the control is absent while it is raised, the
-  flag is lowered on all three outcomes, and a re-entrant `submit()` sends
-  nothing. Each of those fails when the guard is removed; all three mutations
-  were run.
+  deleted. What is asserted instead is what the component does.
+
+  **The guard is two independent pieces, and each is pinned by exactly one
+  test.** An earlier version of this entry said "each of those fails when the
+  guard is removed", which review found overstated; both mutations were re-run
+  and counted:
+
+  | Mutation | Tests failing |
+  |---|---|
+  | remove `submit()`'s `if (publishing) return` | **1** — `test_a_submit_while_one_is_outstanding_sends_nothing` |
+  | remove the button's `&& !root.publishing` | **1** — `test_the_control_is_absent_while_a_publish_is_outstanding` |
+
+  One test per piece is the right number rather than a shortfall — they defend
+  different things, and the second is the one that survives `callModule`
+  becoming asynchronous. What the count does correct is the implication that
+  the three `test_the_control_returns_*` tests cover the guard: they fail under
+  **neither** mutation, because they assert the flag is *lowered* on each
+  outcome, which is a separate property (a composer that locked itself out
+  after a refusal). They are worth keeping and they are not guard coverage.
 - **`moderation-resolution`** — the `Hide`-wins preference is keyed on the
   leading candidate and stays correct. Its *justification* rested on "exactly
   two ops can ever exist", which free preimage bytes falsify; the doc comment is

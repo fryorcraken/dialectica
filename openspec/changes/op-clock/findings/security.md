@@ -15,7 +15,7 @@ recorded trade-off.
 
 ---
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/log/mod.rs:400`
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/log/mod.rs:400`
       — `OpLog::clock` decodes every op in the Stoa on every publish, turning a
       peer-controlled row count into publish latency
 
@@ -73,6 +73,45 @@ recorded trade-off.
       It is a defect rather than a preference: the spec requires the clock be
       *derived* (`op-ordering` spec lines 7-9), and a `score_epoch` read satisfies
       that derivation requirement identically while not reading bodies.
+
+      **Fixed** in `d350809`, taking the `score_epoch` route this finding
+      measured. `SqliteOpLog::clock` is now an override reading
+      `SELECT score_epoch FROM ops WHERE stoa = ?1 AND score_epoch IS NOT NULL`
+      and folding it through `clock_from_counters`; no body is decoded.
+
+      Two tests, each proven to fail before being kept:
+
+      - `the_clock_override_agrees_with_the_trait_default_it_replaces` — the
+        hard part was that the override *shadows* the default on
+        `SqliteOpLog`, so a test comparing the two would have been comparing
+        the override against itself. It reaches the default through a
+        `DefaultClock` wrapper that delegates every required method and
+        deliberately does **not** override `clock`, so both answers come off
+        one store rather than off two stores believed to hold the same thing.
+        The fixture carries the shapes where the two routes could diverge: a
+        counter-less op (`score_epoch` NULL, which both must filter),
+        `u64::MAX` (stored as `-1` by the `as i64` cast), and a gap wide enough
+        that the advance bound rather than the maximum decides. Fails on
+        dropping the `IS NOT NULL` filter.
+      - `the_clock_override_counts_only_the_stoa_it_is_asked_about` — the
+        `WHERE stoa = ?1` predicate is the whole of the per-Stoa scoping and
+        would be invisible in a single-Stoa store. The higher counters are put
+        in the Stoa *not* asked about, so a fold ignoring the predicate returns
+        the other Stoa's answer rather than a merely larger one. Fails on
+        weakening the predicate.
+
+      The derivation requirement this finding cites still holds, and the
+      argument for it is now recorded at the `score_epoch` column as well as on
+      the override: the column is a per-row projection of the op written at
+      append, not a running total, so a restore or a replay recomputes it and
+      therefore recomputes the fold. That comment previously said no read
+      consulted the column, which this change makes false, so it had to move
+      either way.
+
+      **Not taken:** the `(stoa, score_epoch)` index this finding suggests
+      would make it an index-only walk. It is a further optimisation of a path
+      now off the hot profile, and adding an index is a storage-layout decision
+      carrying a `LAYOUT_VERSION` cost — left for whoever profiles next.
 
 ---
 

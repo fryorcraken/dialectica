@@ -47,7 +47,7 @@ decision; see the last finding about it not being recorded.
 
 ## Findings
 
-- [ ] **`dev-writer`** — `authoring.rs:51-58` states as live a premise this
+- [x] **`dev-writer`** — `authoring.rs:51-58` states as live a premise this
       change falsifies. The `Published` doc comment reads: *"An op id is a
       function of the op's bytes and those bytes carry no timestamp and no nonce,
       so one identity publishing the same content twice produces one op."* Both
@@ -65,7 +65,21 @@ decision; see the last finding about it not being recorded.
       on the return type of the publish path and explains a field (`appended`)
       whose meaning genuinely did change.
 
-- [ ] **`dev-writer`** — `docs/PLAN.md:2025-2033` (§7.2 rule 5) still argues from
+      **Fixed** in `e8b1535`. The doc now states that both halves are false,
+      that the same body authored twice produces two ops with two ids, and —
+      because this finding is right that the field's meaning changed — what
+      `appended` still reports: whether *these exact bytes* were already held,
+      which is what keeps a re-delivered op idempotent. What changed is that two
+      separate authorings are no longer byte-identical, not that dedup stopped
+      working.
+
+      It also carries the consequence that has nowhere else in core to live:
+      content-dedup no longer protects an author from a double publish, there is
+      no delete, and refusing the duplicate here is not the answer because core
+      cannot tell a double tap from a deliberate repeat. The same reasoning is
+      now decision 12 in `design.md`, per the box below.
+
+- [x] **`dev-writer`** — `docs/PLAN.md:2025-2033` (§7.2 rule 5) still argues from
       a prohibition this change withdrew, and is the **only** surviving instance.
       It reads: *"No value in the system expresses a post's age: `op-format`
       forbids an op from carrying a wall-clock timestamp ('a wall clock is a
@@ -86,7 +100,29 @@ decision; see the last finding about it not being recorded.
       has to be re-aimed — and the wall-clock must be explicitly named as **not**
       the new age input, or the next reader takes the withdrawal as permission.
 
-- [ ] **`dev-writer`** — the tiebreak choice is **not a recorded decision**,
+      **Fixed** in `8825ddc`, exactly as prescribed: the conclusion paragraph
+      (the epoch is the op's counter, never a receive-clock reading) is
+      untouched, and only the premise above it is rewritten. It is now three
+      named candidates with a reason each — the counter is a duration-less
+      ordering value, the receiving peer's clock is per-peer, and **the op's
+      wall-clock is explicitly not the new age input**, with the reason stated
+      as the Appendix A failure this finding names: a post claiming a future
+      time got an unbounded multiplier, and an adversary who sets your ranking
+      input sets your ranking. The closing sentence says what changed is that an
+      age-shaped field now exists, not that it became rankable, which is the
+      misreading the box warns about.
+
+      **One correction to this finding, offered rather than argued:** it says
+      this is the *only* surviving instance, measured by `grep -n "op-format
+      forbids"`. That grep is narrower than the claim family. Sweeping the
+      several phrasings found live sites in `feed.rs`, `wire.rs`, `revision.rs`,
+      `thread.rs`, `authoring.rs`, `moderation.rs`, `log/mod.rs` and
+      `FeedScreen.qml`. The PLAN.md finding itself is correct in every
+      particular; only its uniqueness claim is not, which is worth recording
+      because two other reviewers reached the same "this is the one that was
+      missed" conclusion about three different files.
+
+- [x] **`dev-writer`** — the tiebreak choice is **not a recorded decision**,
       though it is a real one with a rejected alternative. `design.md:53` mentions
       only that `cmp_tiebreak` "is deleted with the transport message-id tiebreak
       it implemented" — as a consequence of decision 2, not as a choice. The
@@ -101,7 +137,18 @@ decision; see the last finding about it not being recorded.
       Decisions. Missing part: **the alternative and what ruled it out**, which
       the guidance names as the part that rots first.
 
-- [ ] **`dev-writer`** — accept-and-clamp over reject-at-the-boundary is not
+      **Fixed** in a following commit as `design.md` **decision 10**, carrying
+      the part this finding says was missing: the transport message id as the
+      alternative, ruled out because it does not reach us (a tiebreak absent on
+      every op is not a tiebreak) and because it is per-peer, so two peers would
+      break one tie two ways. It also states the cost the proposal did not —
+      that which of two equal-counter ops leads is arbitrary, and that this is
+      honest rather than defective, because the ops are genuinely concurrent and
+      any rule making one "later" would invent an order they do not carry. That
+      last sentence is the one a reader reaching for "something more temporal"
+      needs.
+
+- [x] **`dev-writer`** — accept-and-clamp over reject-at-the-boundary is not
       recorded as a decision, and the censorship argument for it appears in
       `design.md` **nowhere**. **Verified:** `grep -n "censorship\|reject"` over
       `design.md` returns three hits, none of them this — line 88 is about the
@@ -120,7 +167,24 @@ decision; see the last finding about it not being recorded.
       and the cost (a reader may be shown a time that is not when the post was
       written, so the clamp must be reported).
 
-- [ ] **`dev-writer`** — that **content-dedup ends** is not recorded in
+      **Fixed** as `design.md` **decision 11**, with all three parts this
+      finding specifies. The constraint: a peer with a skewed clock would be
+      silently dropped by every honest peer, indistinguishable from moderation
+      nobody performed — and reachable by accident rather than by attack, which
+      is what makes it worse than an attack. The alternative: refuse at the
+      boundary, named as the *intuitive* one and as what CLAUDE.md's "validate
+      at the boundary" security posture would suggest, because a reader who does
+      not see that tension recorded will assume the rule was simply overlooked.
+      The cost: a reader may be shown a time that is not when the post was
+      written, which is why the clamp is reported rather than silently applied.
+
+      It also closes the gap this finding identifies in decision 6 — that
+      read-time clamping was taken as given rather than chosen. Decision 11
+      states the forcing reason: a boundary clamp would rewrite a signed field,
+      so the op would no longer verify, and the only place a clamp can live is
+      where the value is rendered.
+
+- [x] **`dev-writer`** — that **content-dedup ends** is not recorded in
       Decisions, and it is the change's one irreversible user-visible
       consequence. `design.md:214` mentions it only inside the composer bullet
       ("There is no delete in this system, so an accidental duplicate is
@@ -137,12 +201,36 @@ decision; see the last finding about it not being recorded.
       apology. That sentence exists — in `DComposer.qml:200-203`, a QML file,
       which is not where a core-contract consequence is discoverable.
 
-- [ ] **`dev-writer`** — `tasks.md:20` says `design.md` "carries the six
+      **Fixed** as `design.md` **decision 12**, and in `e8b1535` at
+      `Published`'s doc, which is the core-side place a caller actually reads.
+      Both carry the sentence this finding says exists only in QML.
+
+      The decision records the nonce as the rejected alternative and why a
+      reader will meet it (they may reach for one to *restore* the old dedup and
+      find only the old rejection), plus a second alternative the finding does
+      not name but that a reader will propose — refusing the duplicate in
+      `authoring` — rejected because two identical posts minutes apart are
+      legitimate and core cannot tell that from a double tap. That is also what
+      makes the QML guard the right response rather than a workaround: the view
+      is the only layer where the two acts are still distinguishable.
+
+- [x] **`dev-writer`** — `tasks.md:20` says `design.md` "carries the six
       decisions". It carries nine. Small, but it is a count in a document the
       repo's own rule says should not carry counts a command can answer, and a
       reader who stops at six stops before decisions 7-9 — which include the
       `score_epoch` reasoning and the `check_layout` near-miss, the two most
       consequential entries in the piece.
+
+      **Fixed**, and the number is removed rather than corrected to twelve. This
+      finding names the rule that decides it — the repo's own "do not write down
+      anything a command can answer" — so the row now says "the decisions
+      (`grep -n "^### " design.md` counts them)". Correcting six to twelve would
+      have reproduced the defect one commit later, since the three boxes above
+      were about to add three more.
+
+      Line 11's "the six answers" is left alone: it refers to the owner's six
+      *questions* in `proposal.md`, which is a different and still-accurate
+      count.
 
 ## Two things I checked that are NOT findings
 
