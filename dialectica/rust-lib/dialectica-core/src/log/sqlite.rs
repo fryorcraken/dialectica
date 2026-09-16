@@ -474,8 +474,8 @@ impl SqliteOpLog {
                  -- append from the op's clock and never updated; there is no
                  -- running total here to drift from the log. A restore or a
                  -- replay recomputes each row and therefore recomputes the
-                 -- fold, which is what `OpLog::clock`'s "derived, never stored"
-                 -- requires.
+                 -- fold, which is what the derived-never-stored requirement on
+                 -- `OpLog::clock` asks for.
                  --
                  -- It came from the recorded arrival before the op clock, and
                  -- now comes from the op, which is a strict improvement for
@@ -829,9 +829,7 @@ impl OpLog for SqliteOpLog {
             .prepare("SELECT score_epoch FROM ops WHERE stoa = ?1 AND score_epoch IS NOT NULL")
             .map_err(storage)?;
         let rows = stmt
-            .query_map([&stoa.as_bytes().as_slice()], |row| {
-                row.get::<_, i64>(0)
-            })
+            .query_map([&stoa.as_bytes().as_slice()], |row| row.get::<_, i64>(0))
             .map_err(storage)?;
 
         let mut counters = Vec::new();
@@ -865,6 +863,7 @@ mod tests {
     use super::super::fixtures::*;
     use super::*;
     use crate::log::Appended;
+    use crate::op::Op;
     use std::cmp::Ordering;
 
     /// A path in a fresh temporary directory, and the directory's guard.
@@ -1408,9 +1407,10 @@ mod tests {
 
     /// Read the `score_epoch` column for one op, as it is actually stored.
     ///
-    /// The column is reserved and no read consults it, so there is no API path
-    /// to it. Reaching in directly is the only way to test a reserved column —
-    /// and NOT testing it is how the `-1` collision below survived review.
+    /// [`SqliteOpLog::clock`] folds this column, but it returns the fold rather
+    /// than the per-row value, so there is no API path to one row's epoch.
+    /// Reaching in directly is the only way to test the stored value — and NOT
+    /// testing it is how the `-1` collision below survived review.
     fn stored_score_epoch(log: &SqliteOpLog, id: &OpId) -> Option<i64> {
         log.conn
             .query_row(
@@ -1525,6 +1525,115 @@ mod tests {
             stored_score_epoch(&log, &arrival_only.op.id()),
             None,
             "an op carrying no counter has no epoch, whatever the transport recorded"
+        );
+    }
+
+    // ─── The clock override ───────────────────────────────────────────────
+
+    /// A log that reaches the SAME rows through the SAME reads, but inherits
+    /// [`OpLog::clock`]'s default body instead of `SqliteOpLog`'s override.
+    ///
+    /// **This exists because the override shadows the default, and a test
+    /// comparing an override against itself measures nothing.** Every method
+    /// here delegates, and `clock` is deliberately absent — so calling it runs
+    /// the trait's own definition over a `SqliteOpLog`'s rows. That makes the
+    /// two answers comparable on one store rather than on two stores that are
+    /// merely believed to hold the same thing.
+    struct DefaultClock<'a>(&'a SqliteOpLog);
+
+    impl OpLog for DefaultClock<'_> {
+        fn append(&mut self, _op: SignedOp, _arrival: Arrival) -> Result<Appended, OpLogError> {
+            unreachable!("this wrapper reads; the store under it is appended to directly")
+        }
+        fn get(&self, id: &OpId) -> Result<Option<Entry>, OpLogError> {
+            self.0.get(id)
+        }
+        fn iter(&self) -> Result<Vec<Entry>, OpLogError> {
+            self.0.iter()
+        }
+        fn iter_stoa(&self, stoa: &Address) -> Result<Vec<Entry>, OpLogError> {
+            self.0.iter_stoa(stoa)
+        }
+        fn iter_target(&self, target: &OpId) -> Result<Vec<Entry>, OpLogError> {
+            self.0.iter_target(target)
+        }
+        fn len(&self) -> Result<usize, OpLogError> {
+            self.0.len()
+        }
+    }
+
+    #[test]
+    fn the_clock_override_agrees_with_the_trait_default_it_replaces() {
+        // The override reads `score_epoch`; the default decodes every op body
+        // and reads `op.clock.counter`. Those are two different routes to one
+        // number, and the override is only legitimate while they agree.
+        //
+        // The shapes below are the ones where they could diverge: a counter-less
+        // op (must be filtered by BOTH, and is the row whose stored epoch is
+        // NULL), `u64::MAX` (stored as `-1` by the `as i64` cast, so a naive
+        // read-back would make it a small negative rather than the maximum),
+        // and a gap large enough that the advance bound decides — which makes
+        // the answer depend on the fold rather than on the maximum.
+        let mut log = SqliteOpLog::in_memory().unwrap();
+        let counters = [3u64, 1, u64::MAX, 2, 9];
+        for (n, counter) in counters.iter().enumerate() {
+            log.append(
+                signed(a_post_at(&format!("op {n}"), *counter)),
+                Arrival::unordered(),
+            )
+            .unwrap();
+        }
+        log.append(signed(a_post("no counter at all")), Arrival::unordered())
+            .unwrap();
+
+        let stoa = a_stoa("Agora");
+        let by_default = DefaultClock(&log).clock(&stoa).unwrap();
+        let by_override = log.clock(&stoa).unwrap();
+
+        assert_eq!(
+            by_override, by_default,
+            "the column read and the body decode must fold to one clock"
+        );
+        // Pinned independently, so that two agreeing wrong answers still fail.
+        // Sorted, the counters are 1, 2, 3, 9, MAX: the fold climbs 1 → 2 → 3,
+        // then 9 is within ADVANCE_BOUND of 3 so it climbs to 9, and `u64::MAX`
+        // is not, so it is refused.
+        assert_eq!(by_override, 9, "the fold, computed by hand");
+    }
+
+    #[test]
+    fn the_clock_override_counts_only_the_stoa_it_is_asked_about() {
+        // `WHERE stoa = ?1` is the whole of the per-Stoa scoping, and a missing
+        // predicate would be invisible in a single-Stoa store. Two Stoas, with
+        // the HIGHER counters in the one not asked about, so a fold that ignored
+        // the predicate would return the other Stoa's answer rather than a
+        // merely larger one.
+        let mut log = SqliteOpLog::in_memory().unwrap();
+        let quiet = a_stoa("Agora");
+        let busy = a_stoa("Elsewhere");
+        assert_ne!(quiet, busy, "the fixture needs two distinct Stoas");
+
+        for counter in [1u64, 2] {
+            let op = Op {
+                stoa: quiet,
+                ..a_post_at("quiet", counter)
+            };
+            log.append(signed(op), Arrival::unordered()).unwrap();
+        }
+        for counter in [1u64, 2, 3, 4] {
+            let op = Op {
+                stoa: busy,
+                ..a_post_at("busy", counter)
+            };
+            log.append(signed(op), Arrival::unordered()).unwrap();
+        }
+
+        assert_eq!(log.clock(&quiet).unwrap(), 2, "the quiet Stoa's own fold");
+        assert_eq!(log.clock(&busy).unwrap(), 4, "the busy Stoa's own fold");
+        assert_eq!(
+            log.clock(&a_stoa("Never posted in")).unwrap(),
+            0,
+            "a Stoa this peer holds no ops of folds to zero, not to the store's maximum"
         );
     }
 
