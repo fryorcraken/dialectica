@@ -52,7 +52,18 @@
       its name and is not a pass-through — it owns the three parse refusals on
       the attacker path and its arity is compile-gated. 987 Rust tests green.
 - [ ] review: spec-test — `spec-test-reviewer`
-- [ ] review: design — `design-reviewer`
+- [x] review: design — `design-reviewer`. 3 findings, all for `dev-writer`, all
+      gaps in the record rather than code contradicting it. Every one of the
+      seven Decisions is taken as recorded, and Decision 7's six `origin/main`
+      line citations were each read and are accurate. Both `// NO SPEC:` markers
+      exist (`feed.rs:657`, `wire.rs:6696`) and both cite a design entry that
+      exists. `docs/PLAN.md` is consistent — the one surviving "The address is
+      the identity" (`:3060`) is Stoa-scoped by its own paragraph. The gaps: the
+      rotation affordance is given up with no Decisions entry (it migrated to the
+      `identity` spec and `identity.rs` but not here); the slate distinctness
+      clause was *replaced* with derivation-path rather than dropped, unrecorded;
+      and `design.md:128` cites an `op-transport` "verification step" the spec
+      does not contain — measured, zero grep matches either side.
 - [ ] findings all ticked, `findings/` deleted — `closer`
 - [ ] `openspec validate --strict`, then `archive` — `closer`
 - [ ] CI green, PR merged — `closer`
