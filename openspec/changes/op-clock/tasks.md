@@ -115,11 +115,33 @@
       guards added to two `revision.rs` tests and two `authoring.rs` ones; three
       misleading names or comments corrected.
 
-      **Two things left open, reported rather than closed.** `wasNew: false` has
-      no wire test (the `readability` box says why). And **`tst_feed_copy.qml`
-      now contradicts the new `feed-view` spec** — see the note under the spec
-      row above; that is a wording question and is routed back, not resolved
-      here.
+      **One thing left open, reported rather than closed.** `wasNew: false` has
+      no wire test (the `readability` box says why).
+
+      **`tst_feed_copy.qml` is now re-aimed at the settled copy** (second pass,
+      after the spec-writer chose the wording and the `dev-writer` applied it).
+      The file went from 5 passed / 2 failed to 9 passed / 0 failed, and the two
+      previously-failing tests were replaced rather than repointed: pinning the
+      new copy needs different assertions, not the old ones with a new needle.
+
+      **The ordering coverage is now three functions where it was one**, and the
+      split is the finding rather than tidying. `oneStringContaining` uses
+      `compare`, which ABORTS its caller — so the cross-screen recency sweep that
+      sat below it had never executed against the current copy in any run, and
+      neither had the `yet` prohibition. Both are now proved able to fail
+      (mutations: `"…not ordered by it yet"`, and `"…ordered by date"` added to a
+      second string). The sweep is its own function, so no anchor failure can
+      hide it again.
+
+      **A defect in my own first draft, caught by mutation and worth recording**:
+      the sweep exempted the denial by its anchor BEFORE checking the
+      negates-the-label prohibition, so a denial opening `"Not newest first"` —
+      the exact defect `feed-view` gained a direction to stop — passed the sweep.
+      The exemption is now scoped to the temporal list alone; with it misordered
+      that mutation failed 1 test, with it correct it fails 2.
+
+      Nine mutations run in all, each restored; `git diff --stat` shows
+      `tst_feed_copy.qml` alone, `FeedScreen.qml` byte-identical.
 - [x] review: correctness — `code-reviewer` — four findings, all for `tester`.
       The implementation is sound: the wall clock reaches no comparison (traced
       every sort and resolver; `OpEntry` cannot name an `Arrival` or an
