@@ -59,11 +59,20 @@
 //! could disagree with the first, and two orders that disagree produce no error
 //! anywhere.
 //!
-//! **What that order guarantees is convergence, not recency.** Nothing supplies
-//! a Lamport value today, so `cmp_ops` falls back to ascending op id — a hash,
-//! carrying no temporal meaning. Two peers holding the same ops return the same
-//! sequence; neither can say which reply was written first. Nothing in this
-//! module should ever be reported to a caller as chronological.
+//! **What that order guarantees is convergence, not recency** — and a Lamport
+//! counter reaching every op this build publishes does not change that. The
+//! counter is **causal, not temporal**: it says its author had seen something at
+//! N, never *when*, so two counters five apart are not five of anything apart.
+//! Among ops carrying none — the population predating the clock fields —
+//! `cmp_ops` falls back to ascending op id, a hash carrying no temporal meaning
+//! at all. Two peers holding the same ops return the same sequence; neither can
+//! say which reply was written first. Nothing in this module may be reported to a
+//! caller as chronological.
+//!
+//! The op's wall-clock does not rescue that and must not be reached for: it is
+//! the author's own assertion, display-only, and it reaches a caller only as
+//! formatted text through [`ThreadItem::asserted_time`]. See
+//! [`crate::asserted_time`].
 //!
 //! # The items are flat, and each names its parent
 //!
@@ -238,19 +247,55 @@ impl ThreadItem {
 /// shape has a hole: an item that escaped the fill-in would carry `""`, which is
 /// a position a caller would read and act on, and nothing would report it.
 ///
-/// A type that **cannot express a position** removes the possibility. The only
-/// way to get a `ThreadItem` is [`Placed::at`], which takes one — so "every item
-/// has a real position" is the compiler's to enforce rather than a loop's to
-/// remember. CLAUDE.md's "put the complexity in the data structure".
+/// A type that **cannot express a position** removes the possibility: this holds
+/// every field of a [`ThreadItem`] *except* `position`, and the only code that
+/// names the struct literal `ThreadItem { .. }` is [`Placed::at`], which takes an
+/// index. So "every item has a real position" is the compiler's to enforce
+/// rather than a loop's to remember. CLAUDE.md's "put the complexity in the data
+/// structure".
+///
+/// **It holds the fields rather than a built `ThreadItem`, and that is the whole
+/// point.** Wrapping an already-constructed item would mean constructing one with
+/// `position: ""` first — the exact placeholder this type exists to rule out —
+/// and `at` would then be an overwrite a caller could skip by reaching for the
+/// inner field. A review measured that shape: replacing `placed.at(index)` with
+/// `placed.item` compiled, shipped `"position":""` on every item of every thread,
+/// and passed the whole suite. There is now no inner item to reach for.
+///
+/// The cost is that adding a field to `ThreadItem` means adding it here too, and
+/// the compiler says so at both sites — which is the trade this project asks for:
+/// a shape that is right everywhere at once over a guard checked at each call.
 struct Placed {
-    item: ThreadItem,
+    thread: String,
+    id: String,
+    current_version: String,
+    parent: Option<String>,
+    author: String,
+    author_key: String,
+    body: Option<Sanitised>,
+    attachments: Option<Vec<Sanitised>>,
+    is_revised: bool,
+    asserted_time: Option<AssertedTime>,
+    moderation: Moderation,
 }
 
 impl Placed {
     /// The resolved item, at the index the sequence gives it.
-    fn at(mut self, index: usize) -> ThreadItem {
-        self.item.position = index.to_string();
-        self.item
+    fn at(self, index: usize) -> ThreadItem {
+        ThreadItem {
+            thread: self.thread,
+            id: self.id,
+            current_version: self.current_version,
+            parent: self.parent,
+            author: self.author,
+            author_key: self.author_key,
+            body: self.body,
+            attachments: self.attachments,
+            is_revised: self.is_revised,
+            asserted_time: self.asserted_time,
+            moderation: self.moderation,
+            position: index.to_string(),
+        }
     }
 }
 
@@ -753,48 +798,46 @@ fn resolve_item<L: OpLog>(
         _ => None,
     };
 
+    // No `position` here, and none is expressible: `Placed` has no such field.
+    // The position is a property of the sequence, which this function does not
+    // see, and `Placed::at` is the only code that builds a `ThreadItem`.
     Ok(Some(Placed {
-        item: ThreadItem {
-            thread: root.to_hex(),
-            id: id.to_hex(),
-            current_version: version.current.id().to_hex(),
-            parent,
-            // From the op verification has already established the signature of.
-            author: entry.op.op.author.to_hex(),
-            body: if withhold {
-                None
-            } else {
-                Some(sanitise(version.body()))
-            },
-            attachments: if withhold {
-                None
-            } else {
-                Some(version.attachments().iter().map(|a| sanitise(a)).collect())
-            },
-            is_revised: version.is_revised(),
-            // THE VERSION BEING RENDERED asserts the time, not the original post.
-            //
-            // The body, the attachments and `current_version` all come from
-            // `version.current`, so a time taken from the original would be the one
-            // field of this item describing a different op from the rest of it — and
-            // a reader shown an edited post would see when it was first written with
-            // no indication that is what they were looking at. `is_revised` is the
-            // field that says an edit happened.
-            //
-            // `None` where that op predates the clock fields. Nothing is
-            // substituted: a substitute is indistinguishable from an assertion once
-            // rendered.
-            asserted_time: version
-                .current
-                .op
-                .op
-                .clock
-                .map(|c| format_asserted(c.asserted_ms, now_ms)),
-            moderation,
-            // Not set here, and not settable here: the position is a property of
-            // the sequence. `Placed::at` is the only way one is supplied.
-            position: String::new(),
+        thread: root.to_hex(),
+        id: id.to_hex(),
+        current_version: version.current.id().to_hex(),
+        parent,
+        // From the op verification has already established the signature of.
+        author: entry.op.op.author.to_hex(),
+        body: if withhold {
+            None
+        } else {
+            Some(sanitise(version.body()))
         },
+        attachments: if withhold {
+            None
+        } else {
+            Some(version.attachments().iter().map(|a| sanitise(a)).collect())
+        },
+        is_revised: version.is_revised(),
+        // THE VERSION BEING RENDERED asserts the time, not the original post.
+        //
+        // The body, the attachments and `current_version` all come from
+        // `version.current`, so a time taken from the original would be the one
+        // field of this item describing a different op from the rest of it — and
+        // a reader shown an edited post would see when it was first written with
+        // no indication that is what they were looking at. `is_revised` is the
+        // field that says an edit happened.
+        //
+        // `None` where that op predates the clock fields. Nothing is
+        // substituted: a substitute is indistinguishable from an assertion once
+        // rendered.
+        asserted_time: version
+            .current
+            .op
+            .op
+            .clock
+            .map(|c| format_asserted(c.asserted_ms, now_ms)),
+        moderation,
     }))
 }
 
@@ -2914,6 +2957,51 @@ mod tests {
             seen.extend(ids_of(&p));
         }
         assert_eq!(seen, whole, "pages must partition the thread in order");
+    }
+
+    #[test]
+    fn every_item_carries_its_index_in_the_whole_thread_as_its_position() {
+        // **No test in this module asserted a position VALUE.** A review
+        // measured what that cost: replacing `placed.at(index)` with the
+        // wrapped item shipped `position: ""` on every item of every thread and
+        // passed all 1002 tests, because the wire tests pin the key set and
+        // nothing pinned the value. `Placed` no longer holds a `ThreadItem`, so
+        // that particular bypass is now a compile error — but the reachable
+        // mistake left is passing the wrong index, which only a value assertion
+        // can see.
+        //
+        // The second page is the discriminating half: positions are indices in
+        // the WHOLE thread, so they must continue at 2, not restart at 0. A
+        // per-page index would be indistinguishable on page 0.
+        let root = a_root(2, "root");
+        let mut ops = vec![root.clone()];
+        ops.extend((0..4).map(|i| a_reply(3 + i, &root, &format!("reply {i}"))));
+        let log = a_log(ops);
+
+        let mut positions = Vec::new();
+        for page in 0..3 {
+            let p = read_thread(
+                &log,
+                &moderators(),
+                &a_stoa(),
+                &root.op.id(),
+                ReadOptions {
+                    page,
+                    per_page: 2,
+                    include_hidden: false,
+                    now_ms: A_TIME,
+                },
+            )
+            .unwrap()
+            .unwrap();
+            positions.extend(p.items.iter().map(|i| i.position.clone()));
+        }
+
+        assert_eq!(
+            positions,
+            vec!["0", "1", "2", "3", "4"],
+            "positions index the whole thread and do not restart per page"
+        );
     }
 
     #[test]
