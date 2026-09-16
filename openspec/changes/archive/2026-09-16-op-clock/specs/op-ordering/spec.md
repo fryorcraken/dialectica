@@ -1,164 +1,4 @@
-# op-ordering Specification
-
-## Purpose
-
-Defines what orders two ops in a Stoa, what a receiving peer records alongside an op in order to answer that, and what order it produces when the transport supplies no ordering metadata.
-
-The complementary half of this contract lives in the `op-format` capability, whose requirement "An op carries no ordering field and no per-peer state" states that an op SHALL NOT carry a Lamport timestamp or a transport message id, and that the omission is enforced by the encoding's length. That requirement is not restated here: this capability governs what a peer records *alongside* an op, and `op-format` governs what an op may contain. Two specs asserting one rule is how two copies drift and the wrong one gets read.
-
-## Requirements
-
-### Requirement: Ops are ordered by the counter they carry, not by anything the transport says
-
-Ops SHALL be ordered by **descending Lamport counter as carried in the op's own signed bytes**, with ties broken by **ascending op id**.
-
-**This requirement previously forbade exactly what it now requires, and the reversal is deliberate.** Its prior text read: *"A peer SHALL NOT compute a Lamport timestamp of its own, and SHALL NOT maintain a second logical clock alongside the transport's."* That prohibition is **withdrawn**.
-
-The reasoning that produced it is preserved, because it is still the thing to defend against: *two orders over the same messages can disagree, and the disagreement produces no error — each peer stays internally consistent while rendering a thread differently from its neighbour.* That failure is exactly as bad as it was. What has changed is the answer to which single order is authoritative.
-
-The prohibition assumed the transport's order was available to defer to. It is not, and the transport does not supply one: `op-transport` contracts that every arrival over the live transport carries no Lamport timestamp and no message id. So the prohibition's practical effect was never "use the transport's order instead of ours" — it was **no order at all**, with every consumer falling to the degraded path and resolving on a hash. A rule that forbids the only available order in favour of one that never arrives protects nothing.
-
-The property the prohibition was defending is preserved **by construction and more strongly than before**: the counter is inside the signed preimage and the op id is a function of the op's own bytes, so **every input to this comparison travels with the op**. Two peers holding the same two ops compute the same order from the ops alone, consulting no local state, no arrival record, and nothing either peer received separately. The prior design could not say that — it depended on recorded arrival metadata, which is per-peer by construction and which the "seeing one op twice" problem exists because of.
-
-**Ordering SHALL NOT consult the transport's Lamport timestamp or message id, where either is ever supplied.** A second order would be precisely the disagreement the original reasoning names, arrived at from the other side: the transport's clock advances on traffic no application sees and is initialised from epoch-milliseconds, so it can never agree with a counter advanced on ops. Recorded arrival metadata MAY still be retained as a record of what a peer received; it SHALL NOT order.
-
-**The tiebreak is the op id and not the transport's message id.** The op id is a function of the op's own bytes, so every peer holding the op computes the same one without consulting anything it received; a message id is assigned by the transport, does not reach this system at all, and would be a tiebreak absent on every op — which is not a tiebreak.
-
-#### Scenario: A higher Lamport timestamp is more recent
-
-- **WHEN** two ops carry different Lamport counters in their own signed bytes
-- **THEN** the op with the higher counter orders first
-- **AND** the op ids do not affect the result
-- **AND** the counter read is the op's own, not one recorded against its arrival
-
-#### Scenario: Equal Lamport timestamps are broken by message id
-
-- **WHEN** two ops carry equal Lamport counters and different op ids
-- **THEN** the op with the lower op id orders first
-- **AND** no transport message id is consulted, whether or not one was recorded
-
-**This scenario keeps its original name and its tiebreak has changed.** It previously broke a tie by the transport's message id. That value does not reach this system on any op, so a tiebreak on it was a tiebreak that never fired; the op id replaces it and is strictly better for the purpose, being a function of the op's own bytes that every peer computes identically.
-
-#### Scenario: The order is total
-
-- **WHEN** any two ops with distinct op ids are compared
-- **THEN** exactly one of the two orders first
-- **AND** the comparison is consistent however the two are presented
-
-#### Scenario: The order is transitive
-
-- **WHEN** one op orders before a second, and that second orders before a third
-- **THEN** the first orders before the third
-
-#### Scenario: Every peer computes the same order
-
-- **WHEN** two peers hold the same ops
-- **THEN** both produce the same order
-- **AND** neither consults its own clock, its arrival sequence, its recorded arrival metadata, or any other local state
-
-#### Scenario: Transport metadata does not change the order
-
-- **WHEN** two ops are ordered, then ordered again with differing transport Lamport timestamps and message ids recorded against them
-- **THEN** the order is the same in both cases
-
-#### Scenario: The order is derived from the ops alone
-
-- **WHEN** the inputs the comparison reads are examined
-- **THEN** every one of them is carried inside the ops being compared
-
-### Requirement: Ops are deduplicated by op id before they are ordered
-
-A caller SHALL deduplicate ops by op id before ordering them. The order is total over distinct op ids; two records of the same op id MAY compare as equal.
-
-This is a contract on callers rather than an implementation detail, which is why it is stated here. Ops are idempotent by op id, so a store holding one record per op id satisfies it by construction — but a caller ordering a list assembled before deduplication would not, and the consequence is the failure this capability exists to prevent: a tie leaves the relative order of two records to the sort's stability and the order they were assembled in, which is arrival order, which differs from peer to peer.
-
-**The same op received twice is the same op, and the clock fields do not change that.** Both fields are inside the preimage, so two arrivals of one op carry identical values for them — a peer cannot receive one op with two different counters, because that would be two ops with two ids. This is a stronger position than the prior design, where the recorded arrival could genuinely differ between two receipts of one op and a store had to choose between them.
-
-#### Scenario: Two records of the same op may tie
-
-- **WHEN** two records carrying the same op id are compared
-- **THEN** the comparison may report neither as ordering first
-
-#### Scenario: Distinct op ids never tie
-
-- **WHEN** two ops with distinct op ids are compared, with any combination of counters and wall-clocks
-- **THEN** exactly one of the two orders first
-
-#### Scenario: One op received twice carries one counter
-
-- **WHEN** the same op is received twice
-- **THEN** both yield the same op id
-- **AND** both carry the same counter
-
-### Requirement: Absent transport metadata is represented, never fabricated
-
-A peer SHALL be able to record that the transport supplied no Lamport timestamp or no message id for an op. It SHALL NOT substitute a local clock reading, an arrival counter, or a default value for a metadata value it did not receive.
-
-A substituted value is indistinguishable from a received one once recorded, so a peer that substitutes cannot later tell which of its ops are genuinely ordered. Two peers substituting different local values also order the same pair of ops differently, with nothing to detect it.
-
-Recorded metadata SHALL NOT affect the op it is recorded against: the same op received twice with differing metadata SHALL yield the same op id both times. This is what makes metadata safe to accept from an untrusted transport, and it is the boundary between this capability and `op-format`, which owns the op's own contents.
-
-#### Scenario: Two arrivals of the same op are the same op
-
-- **WHEN** the same op is received twice with different ordering metadata
-- **THEN** both yield the same op id
-
-#### Scenario: A missing Lamport timestamp is recorded as missing
-
-- **WHEN** an op arrives with no Lamport timestamp
-- **THEN** the recorded metadata reports the timestamp as absent
-- **AND** no local clock reading is recorded in its place
-
-#### Scenario: A missing message id is recorded as missing
-
-- **WHEN** an op arrives with no message id
-- **THEN** the recorded metadata reports the message id as absent
-
-#### Scenario: Absence is distinguishable from a real value
-
-- **WHEN** metadata with an absent Lamport timestamp is compared against metadata carrying one
-- **THEN** the two are not equal
-- **AND** the absent one is reported as unordered by the transport
-
-### Requirement: An op carrying no counter sorts below every op that carries one
-
-An op **carrying no Lamport counter** SHALL order after every op that carries one, whatever the values involved. Two such ops SHALL be ordered relative to each other by ascending op id.
-
-**This requirement is retained and re-aimed, and that re-aiming is the whole of this change's migration answer.** Its prior condition was whether *the transport* had ordered an op; its condition is now whether *the op itself* carries a counter. An op carries no counter exactly when it was encoded under the version predating the clock fields, so the population this rule governs is the ops that already exist.
-
-The consequence is that **already-stored content is neither reordered among itself nor dropped**. Ops predating this change continue to order against one another by ascending op id, exactly as they do today and with the same result; ops carrying a counter order among themselves by it; and the two populations are separated with the older one below. Nothing needs rewriting, no stored op changes, and no op is discarded for lacking a field its author's build could not have written.
-
-**Why the older ops sort below rather than above.** An op carrying a counter is better evidence than one about which nothing is known, and the alternative would place every pre-existing op ahead of everything published afterwards — so a Stoa's feed would be permanently headed by its oldest content, and a post's current version could never advance past a revision predating the change.
-
-This remains a defined degraded order rather than the ordering rule. Its purpose is that the comparison is total and identical on every peer even for ops that carry nothing to order by, so that two peers holding the same ops never disagree. Its purpose is not to approximate any temporal order, which it cannot do: an op id is a hash and carries no recency whatever.
-
-#### Scenario: An unordered op sorts below an ordered one
-
-- **WHEN** an op carrying no counter is compared against an op that carries one
-- **THEN** the op carrying a counter orders first
-- **AND** this holds regardless of how low that counter is
-
-#### Scenario: Two unordered ops are ordered by op id
-
-- **WHEN** two ops both carrying no counter are compared
-- **THEN** the op with the lower op id orders first
-
-#### Scenario: A caller can tell a degraded order from an ordered one
-
-- **WHEN** an op is inspected
-- **THEN** whether it carries a counter is reported
-- **AND** a caller can act on that without inferring it from the ordering result
-- **AND** the answer is a property of the op rather than of any arrival recorded against it
-
-#### Scenario: Existing ops keep the relative order they already had
-
-- **WHEN** a set of ops predating the clock fields is ordered before and after ops carrying counters are added alongside them
-- **THEN** the relative order within the predating set is unchanged
-
-#### Scenario: The degraded order is still total and peer-independent
-
-- **WHEN** two peers hold the same ops, none of which carries a counter
-- **THEN** both produce the same order
+## ADDED Requirements
 
 ### Requirement: A peer's Lamport clock is a function of the ops it holds
 
@@ -379,3 +219,148 @@ Because the clamp is computed against a local clock, two peers MAY present the s
 - **WHEN** ops whose wall-clocks are clamped are ordered against ops whose wall-clocks are not
 - **THEN** the order is the one their counters and op ids give
 - **AND** it is unchanged by whether any value was clamped
+
+## RENAMED Requirements
+
+- FROM: `### Requirement: Ops are ordered by the transport's order, not an order of our own`
+- TO: `### Requirement: Ops are ordered by the counter they carry, not by anything the transport says`
+- FROM: `### Requirement: An op the transport did not order sorts below every op it did`
+- TO: `### Requirement: An op carrying no counter sorts below every op that carries one`
+
+## MODIFIED Requirements
+
+### Requirement: Ops are ordered by the counter they carry, not by anything the transport says
+
+Ops SHALL be ordered by **descending Lamport counter as carried in the op's own signed bytes**, with ties broken by **ascending op id**.
+
+**This requirement previously forbade exactly what it now requires, and the reversal is deliberate.** Its prior text read: *"A peer SHALL NOT compute a Lamport timestamp of its own, and SHALL NOT maintain a second logical clock alongside the transport's."* That prohibition is **withdrawn**.
+
+The reasoning that produced it is preserved, because it is still the thing to defend against: *two orders over the same messages can disagree, and the disagreement produces no error — each peer stays internally consistent while rendering a thread differently from its neighbour.* That failure is exactly as bad as it was. What has changed is the answer to which single order is authoritative.
+
+The prohibition assumed the transport's order was available to defer to. It is not, and the transport does not supply one: `op-transport` contracts that every arrival over the live transport carries no Lamport timestamp and no message id. So the prohibition's practical effect was never "use the transport's order instead of ours" — it was **no order at all**, with every consumer falling to the degraded path and resolving on a hash. A rule that forbids the only available order in favour of one that never arrives protects nothing.
+
+The property the prohibition was defending is preserved **by construction and more strongly than before**: the counter is inside the signed preimage and the op id is a function of the op's own bytes, so **every input to this comparison travels with the op**. Two peers holding the same two ops compute the same order from the ops alone, consulting no local state, no arrival record, and nothing either peer received separately. The prior design could not say that — it depended on recorded arrival metadata, which is per-peer by construction and which the "seeing one op twice" problem exists because of.
+
+**Ordering SHALL NOT consult the transport's Lamport timestamp or message id, where either is ever supplied.** A second order would be precisely the disagreement the original reasoning names, arrived at from the other side: the transport's clock advances on traffic no application sees and is initialised from epoch-milliseconds, so it can never agree with a counter advanced on ops. Recorded arrival metadata MAY still be retained as a record of what a peer received; it SHALL NOT order.
+
+**The tiebreak is the op id and not the transport's message id.** The op id is a function of the op's own bytes, so every peer holding the op computes the same one without consulting anything it received; a message id is assigned by the transport, does not reach this system at all, and would be a tiebreak absent on every op — which is not a tiebreak.
+
+#### Scenario: A higher Lamport timestamp is more recent
+
+- **WHEN** two ops carry different Lamport counters in their own signed bytes
+- **THEN** the op with the higher counter orders first
+- **AND** the op ids do not affect the result
+- **AND** the counter read is the op's own, not one recorded against its arrival
+
+#### Scenario: Equal Lamport timestamps are broken by message id
+
+- **WHEN** two ops carry equal Lamport counters and different op ids
+- **THEN** the op with the lower op id orders first
+- **AND** no transport message id is consulted, whether or not one was recorded
+
+**This scenario keeps its original name and its tiebreak has changed.** It previously broke a tie by the transport's message id. That value does not reach this system on any op, so a tiebreak on it was a tiebreak that never fired; the op id replaces it and is strictly better for the purpose, being a function of the op's own bytes that every peer computes identically.
+
+#### Scenario: The order is total
+
+- **WHEN** any two ops with distinct op ids are compared
+- **THEN** exactly one of the two orders first
+- **AND** the comparison is consistent however the two are presented
+
+#### Scenario: The order is transitive
+
+- **WHEN** one op orders before a second, and that second orders before a third
+- **THEN** the first orders before the third
+
+#### Scenario: Every peer computes the same order
+
+- **WHEN** two peers hold the same ops
+- **THEN** both produce the same order
+- **AND** neither consults its own clock, its arrival sequence, its recorded arrival metadata, or any other local state
+
+#### Scenario: Transport metadata does not change the order
+
+- **WHEN** two ops are ordered, then ordered again with differing transport Lamport timestamps and message ids recorded against them
+- **THEN** the order is the same in both cases
+
+#### Scenario: The order is derived from the ops alone
+
+- **WHEN** the inputs the comparison reads are examined
+- **THEN** every one of them is carried inside the ops being compared
+
+### Requirement: An op carrying no counter sorts below every op that carries one
+
+An op **carrying no Lamport counter** SHALL order after every op that carries one, whatever the values involved. Two such ops SHALL be ordered relative to each other by ascending op id.
+
+**This requirement is retained and re-aimed, and that re-aiming is the whole of this change's migration answer.** Its prior condition was whether *the transport* had ordered an op; its condition is now whether *the op itself* carries a counter. An op carries no counter exactly when it was encoded under the version predating the clock fields, so the population this rule governs is the ops that already exist.
+
+The consequence is that **already-stored content is neither reordered among itself nor dropped**. Ops predating this change continue to order against one another by ascending op id, exactly as they do today and with the same result; ops carrying a counter order among themselves by it; and the two populations are separated with the older one below. Nothing needs rewriting, no stored op changes, and no op is discarded for lacking a field its author's build could not have written.
+
+**Why the older ops sort below rather than above.** An op carrying a counter is better evidence than one about which nothing is known, and the alternative would place every pre-existing op ahead of everything published afterwards — so a Stoa's feed would be permanently headed by its oldest content, and a post's current version could never advance past a revision predating the change.
+
+This remains a defined degraded order rather than the ordering rule. Its purpose is that the comparison is total and identical on every peer even for ops that carry nothing to order by, so that two peers holding the same ops never disagree. Its purpose is not to approximate any temporal order, which it cannot do: an op id is a hash and carries no recency whatever.
+
+#### Scenario: An unordered op sorts below an ordered one
+
+- **WHEN** an op carrying no counter is compared against an op that carries one
+- **THEN** the op carrying a counter orders first
+- **AND** this holds regardless of how low that counter is
+
+#### Scenario: Two unordered ops are ordered by op id
+
+- **WHEN** two ops both carrying no counter are compared
+- **THEN** the op with the lower op id orders first
+
+#### Scenario: A caller can tell a degraded order from an ordered one
+
+- **WHEN** an op is inspected
+- **THEN** whether it carries a counter is reported
+- **AND** a caller can act on that without inferring it from the ordering result
+- **AND** the answer is a property of the op rather than of any arrival recorded against it
+
+#### Scenario: Existing ops keep the relative order they already had
+
+- **WHEN** a set of ops predating the clock fields is ordered before and after ops carrying counters are added alongside them
+- **THEN** the relative order within the predating set is unchanged
+
+#### Scenario: The degraded order is still total and peer-independent
+
+- **WHEN** two peers hold the same ops, none of which carries a counter
+- **THEN** both produce the same order
+
+### Requirement: Ops are deduplicated by op id before they are ordered
+
+A caller SHALL deduplicate ops by op id before ordering them. The order is total over distinct op ids; two records of the same op id MAY compare as equal.
+
+This is a contract on callers rather than an implementation detail, which is why it is stated here. Ops are idempotent by op id, so a store holding one record per op id satisfies it by construction — but a caller ordering a list assembled before deduplication would not, and the consequence is the failure this capability exists to prevent: a tie leaves the relative order of two records to the sort's stability and the order they were assembled in, which is arrival order, which differs from peer to peer.
+
+**The same op received twice is the same op, and the clock fields do not change that.** Both fields are inside the preimage, so two arrivals of one op carry identical values for them — a peer cannot receive one op with two different counters, because that would be two ops with two ids. This is a stronger position than the prior design, where the recorded arrival could genuinely differ between two receipts of one op and a store had to choose between them.
+
+#### Scenario: Two records of the same op may tie
+
+- **WHEN** two records carrying the same op id are compared
+- **THEN** the comparison may report neither as ordering first
+
+#### Scenario: Distinct op ids never tie
+
+- **WHEN** two ops with distinct op ids are compared, with any combination of counters and wall-clocks
+- **THEN** exactly one of the two orders first
+
+#### Scenario: One op received twice carries one counter
+
+- **WHEN** the same op is received twice
+- **THEN** both yield the same op id
+- **AND** both carry the same counter
+
+## REMOVED Requirements
+
+### Requirement: The Lamport timestamp alone decides whether an op is ordered
+
+**Reason**: This requirement governed the four combinations of a transport-supplied Lamport timestamp and a transport-supplied message id, specifying what orders an op carrying one but not the other. Ordering no longer reads either value. The counter is inside the op and is not optional within its encoding version, so the partial combinations this requirement existed to give defined answers to are no longer representable: an op of the current version carries a counter, and an op of the prior version carries none. Retaining it would leave a requirement whose inputs no comparison reads, which reads to a later maintainer as a live rule about the ordering path.
+
+**Migration**: The one question it answered that still arises — what orders an op carrying no counter — is answered by "An op the transport did not order sorts below every op it did", which is retained and re-aimed at exactly that population. Transport metadata a peer received MAY still be recorded as a record of the arrival; it no longer orders, so no combination of it needs a defined ordering answer. Callers that branched on `is_ordered_by_transport` to decide whether an op had a usable position SHALL branch on whether the op carries a counter instead.
+
+### Requirement: A message id present without a Lamport timestamp does not order
+
+**Reason**: This requirement prevented a peer from reading a transport message id as an order in its own right, on the grounds that message ids are assigned by hashing and carry no temporal meaning. Ordering no longer consults the transport's message id in any combination, so the rule is subsumed: the modified ordering requirement states that ordering SHALL NOT consult the transport's Lamport timestamp or message id at all, which is strictly broader than this requirement and covers the ephemeral-message case this one was written for.
+
+**Migration**: No behaviour changes. A peer that recorded a message id and no Lamport timestamp treated the op as unordered; it now orders that op by whether the op itself carries a counter, which is a property of the op rather than of the arrival. Any caller reading a recorded message id to make an ordering decision was already prohibited and remains so under the broader rule.

@@ -2,18 +2,38 @@
 //!
 //! # One ordering, and it is named for what it is
 //!
-//! §9.1 proposes `new` and `active` as the accepted orderings and then records,
-//! at length, that **both are defined in terms of a Lamport timestamp that does
-//! not reach us** — so both would today fall back to ascending op id, "a hash
-//! [that] carries no recency whatever". §9.1 leaves the choice open between
-//! shipping §7.2's two names with a degradation notice, and shipping one
-//! ordering "named for what it actually is rather than for what §7.2 intends it
-//! to become".
+//! §9.1 proposes `new` and `active` as the accepted orderings, and leaves the
+//! choice open between shipping §7.2's two names with a degradation notice, and
+//! shipping one ordering "named for what it actually is rather than for what
+//! §7.2 intends it to become".
 //!
 //! **This takes the second option, and implements exactly one ordering.** The
 //! name is `convergent`, because that is the property the order actually has:
 //! every peer holding the same ops computes the same sequence. It is not `new`,
 //! it is not `active`, and it is not `top`.
+//!
+//! # The reason for that name survived the arrival of a Lamport counter, and the
+//! premise it was first argued from did not
+//!
+//! This header used to argue the name from "no Lamport timestamp reaches us, so
+//! any ordering falls back to ascending op id, a hash carrying no recency". A
+//! counter now reaches us — inside the signed op preimage rather than from the
+//! transport — and [`cmp_ops`](crate::arrival::cmp_ops) leads with it, so this
+//! feed **is** counter-ordered. The old premise is withdrawn.
+//!
+//! **The name is still `convergent`, on a different and narrower argument.** A
+//! Lamport counter is **causal, not temporal**: it says its author had seen
+//! something at N, never *when*. Two ops at counters five apart were not written
+//! five of anything apart, and an author who has seen nothing publishes at one
+//! however long they waited. So `new` remains a claim this ordering cannot
+//! support, and `convergent` remains what it can: every peer holding the same
+//! ops computes the same sequence, which is now true *because* the counter is in
+//! the preimage rather than despite there being nothing to order on.
+//!
+//! The op's wall-clock is **not** the answer either, and must not be read as
+//! one. It is display-only, reachable only as formatted text
+//! (see [`crate::asserted_time`]), and ordering on a value its author chooses
+//! freely is the censorship vector `op-ordering` refuses.
 //!
 //! There is no ordering parameter, no comparator to select, and no enum with
 //! variants nothing implements. A second ordering is a change to this module
@@ -64,11 +84,14 @@
 //! §7 names them as a gap: "There is no reply count and no most-recent-reply
 //! [...] Both must also be of non-hidden replies, which makes them folds over
 //! moderation-resolved state rather than over raw ops." §8 then asks whether the
-//! count is worth its cost before Lamport values arrive, and leaves it open. A
-//! fold over every reply's moderation state, per row, for a number sitting beside
-//! an ordering that carries no recency, is not the smallest thing that works — so
-//! it is not here. The view renders no reply count, which is honest, rather than
-//! a wrong one, which would not be.
+//! count is worth its cost, and leaves it open. A fold over every reply's
+//! moderation state, per row, for a number no caller has asked for, is not the
+//! smallest thing that works — so it is not here. The view renders no reply
+//! count, which is honest, rather than a wrong one, which would not be.
+//!
+//! (§8 framed that question as "before Lamport values arrive". They have now
+//! arrived, inside the op, and the cost question is unchanged by it: the fold is
+//! over moderation state, which no counter makes cheaper.)
 //!
 //! **No vote score.** §9.1 is explicit that votes are not staged: "a vote button
 //! would publish an op that changes nothing a reader can see". Nothing reads
@@ -333,6 +356,7 @@ mod tests {
         Op {
             stoa: a_stoa(),
             author: key.public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -348,6 +372,7 @@ mod tests {
         Op {
             stoa: a_stoa(),
             author: key.public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: Some(parent),
                 parent: Some(parent),
@@ -406,6 +431,7 @@ mod tests {
         let op = Op {
             stoa: a_stoa(),
             author: victim.public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -456,6 +482,7 @@ mod tests {
         let hide = Op {
             stoa: a_stoa(),
             author: creator.public_key(),
+            clock: None,
             kind: OpKind::Moderate {
                 target: head.op.id(),
                 action: ModerationAction::Hide,
@@ -496,6 +523,7 @@ mod tests {
         let hide = Op {
             stoa: a_stoa(),
             author: impostor.public_key(),
+            clock: None,
             kind: OpKind::Moderate {
                 target: head.op.id(),
                 action: ModerationAction::Hide,
@@ -527,6 +555,7 @@ mod tests {
         let revision = Op {
             stoa: a_stoa(),
             author: author.public_key(),
+            clock: None,
             kind: OpKind::Revise {
                 target: head.op.id(),
                 body: "the replacement words".to_string(),
@@ -600,6 +629,7 @@ mod tests {
         let head = Op {
             stoa: a_stoa(),
             author: key.public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -631,6 +661,7 @@ mod tests {
         let foreign = Op {
             stoa: elsewhere,
             author: key.public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -727,6 +758,7 @@ mod tests {
             Op {
                 stoa: a_stoa(),
                 author: key.public_key(),
+                clock: None,
                 kind: OpKind::Post {
                     thread: None,
                     parent: None,
@@ -760,6 +792,7 @@ mod tests {
         let second = Op {
             stoa: a_stoa(),
             author: key.public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -976,6 +1009,7 @@ mod tests {
                 Op {
                     stoa: a_stoa(),
                     author: creator.public_key(),
+                    clock: None,
                     kind: OpKind::Moderate {
                         target: OpId::from_hex(hex).unwrap(),
                         action: ModerationAction::Hide,

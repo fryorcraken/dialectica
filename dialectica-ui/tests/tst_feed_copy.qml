@@ -147,8 +147,11 @@ TestCase {
         var emptyText = everyStringOn(empty).join("\n")
         verify(emptyText.indexOf("You have not received anything") >= 0,
                "the walk must reach the empty state's heading")
-        verify(emptyText.indexOf("Not newest first") >= 0,
+        verify(emptyText.indexOf(spec.denialAnchor) >= 0,
                "and the body-level ordering sentence")
+        verify(emptyText.indexOf(spec.orderingLabel) >= 0,
+               "and the ordering label itself, which is a Repeater delegate and "
+               + "so is reached by a different path than the body Text above")
         verify(emptyText.indexOf("Pages are what this machine holds") >= 0,
                "and the paging locality sentence, which is built even when the "
                + "control is not shown — a `visible: false` layout child is "
@@ -161,46 +164,224 @@ TestCase {
         failed.destroy()
     }
 
-    // ---- the ordering sentence: the one line this change creates ----------
+    // ---- the ordering label and its denial --------------------------------
 
-    // `tasks.md` leaves the `tests` row's question open: is the ordering
-    // sentence worth pinning, given it was invisible to the suite in its
-    // previous location too? It is, and this is why.
+    // **The whole of this section turns on one distinction, and stating it is
+    // what keeps these tests from forbidding the screen's own label.**
+    // `feed-view` permits *newest first* and forbids *most recent first*, which
+    // are not two vocabularies but two READINGS of one superlative: the
+    // positional reading (latest in the forum's order, which the descending
+    // Lamport sort really does give) and the temporal one (latest by the clock,
+    // which nothing here can give). So no assertion below may key on the word
+    // "newest" — the label is allowed to say it and the denial is required to
+    // say it.
     //
-    // The sentence is the whole reason the apparatus note could be deleted
-    // rather than merely moved. `tasks.md` 2.3 records that `ON THIS ORDERING`
-    // was the one obligation that did NOT survive the column's removal: the
-    // ordering label "same order for everyone" is honest but NEUTRAL — it
-    // declines to claim recency without denying it, and a reader meeting a forum
-    // feed assumes newest-first unless told otherwise. Delete this sentence and
-    // the screen is back to relying on the reader not to make the ordinary
-    // assumption, with the label still there and every gate green.
-    function test_the_feed_denies_being_newest_first_rather_than_being_silent() {
+    // **The anchors are hardcoded and must not be updated to match a reword.**
+    // If one stops matching, read the new copy and decide whether it still
+    // discharges `feed-view` before touching this file. They are chosen to be
+    // the parts of each string that carry its obligation: the label is what it
+    // claims, and `denialAnchor` is the clause naming the FORBIDDEN reading,
+    // which is the clause that cannot be dropped without the denial ceasing to
+    // deny anything.
+    readonly property string orderingLabel: "newest first"
+    readonly property string denialAnchor: "not latest by the clock"
+
+    // The old anchor, kept as a PROHIBITION rather than deleted. `feed-view`
+    // gained a whole direction because the spec was once jointly satisfiable by
+    // a screen labelling itself "newest first" while denying "Not newest first"
+    // — an honest label and an honest denial that contradict each other, with
+    // no way for a reader to tell which is live. This is the string that
+    // reintroduces that defect, so it is named here and forbidden by name.
+    readonly property string negatingDenial: "not newest first"
+
+    // The denial must be present, must give the author-assertion as its reason,
+    // and must NOT negate the label. `feed-view`'s scenarios "The denial is
+    // present and gives the author-assertion as its reason" and "The denial does
+    // not negate the ordering label", which are two halves of one string and so
+    // are asserted together on it.
+    //
+    // **`oneStringContaining` uses `compare`, which ABORTS this function, so
+    // everything below it is unreachable when the denial is missing — and that
+    // is deliberate here rather than overlooked.** The previous version of this
+    // file had the same shape and it cost real coverage: a cross-screen sweep
+    // sat below this call, and while the anchor was stale the sweep never ran in
+    // any invocation. The sweep is now `test_no_string_in_any_state_...`, its
+    // own function, so no failure here can hide it. What remains below is five
+    // assertions ABOUT THE STRING THIS CALL RETURNED; when that string does not
+    // exist they have nothing to assert on, and the `compare` reports exactly
+    // that. An assertion that must hold whether or not the denial is present
+    // does not belong in this function.
+    function test_the_denial_names_the_forbidden_reading_without_negating_the_label() {
         var screen = screenFor(30, false)
 
-        var sentence = oneStringContaining(screen, "Not newest first")
+        var sentence = oneStringContaining(screen, spec.denialAnchor)
 
-        // The denial is the load-bearing half, and it is asserted as a RELATION
-        // rather than as the sentence: what must not happen is the screen
-        // claiming, or failing to deny, an ordering by time.
-        verify(sentence.indexOf("Timestamps do not reach this machine") >= 0,
-               "the sentence must say WHY the order is not by time, or it reads "
-               + "as a preference rather than as a limit; got: " + sentence)
+        // -- it denies the temporal reading, and denies the right thing --
+        //
+        // What must be denied is ordering BY THE DISPLAYED TIME. A sentence
+        // that merely mentioned the clock without saying the feed is not
+        // ordered by the time would satisfy an anchor and discharge nothing.
+        verify(sentence.indexOf("not ordered by it") >= 0,
+               "the denial must state that the feed is NOT ORDERED by the time "
+               + "it displays, which is the temporal reading `feed-view` "
+               + "forbids; got: " + sentence)
 
-        // And no OTHER string may undo it. A second element claiming recency
-        // would leave this test green while the screen contradicted itself.
-        var all = everyStringOn(screen)
-        for (var i = 0; i < all.length; ++i) {
-            if (all[i].indexOf("Not newest first") >= 0)
-                continue
-            var lower = all[i].toLowerCase()
-            verify(lower.indexOf("newest first") < 0
-                   && lower.indexOf("most recent first") < 0
-                   && lower.indexOf("latest first") < 0,
-                   "nothing else on the screen may claim a recency ordering the "
-                   + "core cannot provide; found: \"" + all[i] + "\"")
-        }
+        // -- and it does not negate the label --
+        //
+        // Asserted on the lowercased sentence so a capitalised opening cannot
+        // slip past: "Not newest first" is exactly the shape this blocks.
+        verify(sentence.toLowerCase().indexOf(spec.negatingDenial) < 0,
+               "the denial must name the forbidden READING, not the label's own "
+               + "superlative -- \"" + spec.negatingDenial + "\" asserts the feed "
+               + "is not the thing its label says it is; got: " + sentence)
+
+        // -- the reason is the author's claim, not a missing field --
+        //
+        // **The reason this pins changed with the op clock, and the change is
+        // the point.** It used to require "Timestamps do not reach this
+        // machine" — a statement that no time was available, which promised a
+        // newest-first feed once one was. A time is available now, inside the
+        // signed op, and the feed is still not ordered by it: it is the
+        // author's own claim, so ordering by it would reward lying. So the
+        // sentence must now say the time EXISTS and is not trusted, and a
+        // sentence reverting to "not yet" fails here — which is the direction
+        // this assertion exists to block, because "not yet" is the softer and
+        // more tempting wording.
+        verify(sentence.indexOf("their author claimed") >= 0
+               && sentence.indexOf("anyone could set") >= 0,
+               "the sentence must say WHY the order is not by time, and the why "
+               + "is now that the time is self-asserted rather than that none "
+               + "exists; got: " + sentence)
+        verify(sentence.indexOf("yet") < 0,
+               "the denial is a design limit, not a missing feature -- 'yet' "
+               + "promises a newest-first feed that is not coming; got: " + sentence)
+
+        // -- and the property the old label asserted is still asserted --
+        //
+        // "Same order for everyone" claimed CONVERGENCE; "newest first" does
+        // not. The property did not change, so something must still carry it,
+        // and the denial's third sentence is where it went. Without this the
+        // label swap silently drops a claim no other string makes.
+        verify(sentence.indexOf("every peer computes identically") >= 0,
+               "the convergence the old label asserted must survive the label "
+               + "change -- the third sentence is where it now lives; got: "
+               + sentence)
+
         screen.destroy()
+    }
+
+    // `feed-view`: "The ordering label names the order rather than a time".
+    // Separate from the denial because they are two different strings reached by
+    // two different paths — the label is a Repeater delegate over `orderings`,
+    // the denial a plain body `Text` — and a test asserting both at once would
+    // report the first failure and hide the second.
+    function test_the_ordering_label_is_rendered_and_names_a_position_not_a_time() {
+        var screen = screenFor(30, false)
+
+        // The model is the source, and what reaches the screen is what matters:
+        // a label correct in `orderings` but never rendered discharges nothing.
+        compare(screen.orderings.length, 1,
+                "core implements exactly one ordering")
+        compare(screen.orderings[0].label, spec.orderingLabel,
+                "`feed-view` makes \"" + spec.orderingLabel + "\" the label this "
+                + "interface uses")
+
+        var rendered = everyStringOn(screen)
+        var seen = false
+        for (var i = 0; i < rendered.length; ++i) {
+            if (rendered[i] === spec.orderingLabel)
+                seen = true
+        }
+        verify(seen, "the label must reach the screen, not merely the model; "
+                     + "rendered strings: " + JSON.stringify(rendered))
+
+        screen.destroy()
+    }
+
+    // `feed-view`: "The phrase asserting a clock order does not appear" and "No
+    // second string undoes the denial" — swept across the populated, empty and
+    // failed states, because the requirement is about every state and a sweep of
+    // one state is a sweep that a second state's copy can walk straight past.
+    //
+    // **The forbidden set is the TEMPORAL reading, never the superlative.** It
+    // cannot contain bare "newest first": the label says that and `feed-view`
+    // permits it. "Most recent first" is forbidden by name in the spec, and it
+    // is here for that reason rather than as one entry in a growing list of
+    // phrasings — the two shapes below are *a superlative applied to the clock*
+    // and *an explicit claim of chronology*, which is the grammatical form the
+    // requirement is about.
+    //
+    // The denial is exempted BY ITS OWN ANCHOR, and that matters: it is the one
+    // string on the screen that must talk about the clock, and an exemption
+    // keyed on anything looser would exempt a second string that made the claim.
+    function test_no_string_in_any_state_asserts_a_chronological_ordering() {
+        var forbidden = [
+            { needle: "most recent first",
+              why: "forbidden by name -- a claim about instants, which the "
+                   + "ordering carries none of" },
+            { needle: "latest first",
+              why: "the bare temporal superlative, with no 'in this forum's "
+                   + "order' to make it positional" },
+            { needle: "ordered by time", why: "an explicit claim of chronology" },
+            { needle: "in time order", why: "an explicit claim of chronology" },
+            { needle: "by date", why: "an explicit claim of chronology" },
+            { needle: "when posts were written",
+              why: "the reading `feed-view` names as forbidden: the ordering "
+                   + "says an author had SEEN something, never when either was "
+                   + "written" }
+        ]
+
+        var cases = [
+            { make: function () { return screenFor(30, true) },
+              what: "the populated state" },
+            { make: function () { return screenFor(0, false) },
+              what: "the empty state" },
+            { make: function () { return failedScreen() },
+              what: "the failed state" }
+        ]
+
+        for (var c = 0; c < cases.length; ++c) {
+            var screen = cases[c].make()
+            var all = everyStringOn(screen)
+
+            // The sweep is only worth its name if it saw something. A corpus
+            // that came back empty would pass every assertion below.
+            verify(all.length > 0,
+                   cases[c].what + " yielded no strings at all, so the sweep "
+                   + "below would pass vacuously")
+
+            for (var i = 0; i < all.length; ++i) {
+                var lower = all[i].toLowerCase()
+
+                // **The negation check runs on EVERY string, the denial
+                // included, and the ordering of these two blocks is the whole
+                // reason to say so.** The first version of this sweep put the
+                // `continue` above both, and a mutation opening the denial with
+                // "Not newest first" — the exact defect `feed-view` gained a
+                // direction to stop — passed it: the exemption that lets the
+                // denial talk about the clock also excused it from the one
+                // check aimed at the denial. So the exemption is scoped to the
+                // temporal list below and reaches nothing else.
+                verify(lower.indexOf(spec.negatingDenial) < 0,
+                       cases[c].what + " must not assert the feed is not newest "
+                       + "first -- that negates the label rather than the "
+                       + "temporal reading; found: \"" + all[i] + "\"")
+
+                // The denial is the one string that must name the clock, so it
+                // alone is exempt from the temporal list. Exempted by its own
+                // anchor rather than by anything looser, so a SECOND string
+                // making the claim is not exempted with it.
+                if (lower.indexOf(spec.denialAnchor) >= 0)
+                    continue
+                for (var f = 0; f < forbidden.length; ++f) {
+                    verify(lower.indexOf(forbidden[f].needle) < 0,
+                           cases[c].what + " must not contain \""
+                           + forbidden[f].needle + "\" -- " + forbidden[f].why
+                           + "; found: \"" + all[i] + "\"")
+                }
+            }
+            screen.destroy()
+        }
     }
 
     // ---- the empty state: a fact about this copy, never about the Stoa ----

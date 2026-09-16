@@ -817,6 +817,145 @@ TestCase {
         badSpy.destroy(); bad.destroy()
     }
 
+    // ---- the submit control while a publish is outstanding ---------------
+    //
+    // The obligation the op clock moved to this layer. Core stops absorbing a
+    // double-tapped submit — an op's bytes carry a counter that advances between
+    // publishes, so two submissions of one draft are two ops, and this system
+    // has no delete.
+    //
+    // # WHAT THESE TESTS CAN AND CANNOT SHOW, STATED BEFORE THEY ARE READ
+    //
+    // `bridge.callModule` is synchronous and QML's JavaScript is
+    // single-threaded, so `submit()` runs start to finish inside one
+    // event-handler turn and **no second activation can be delivered while a
+    // publish is outstanding**. On today's transport the duplicate is already
+    // unreachable, by the runtime's shape rather than by anything in
+    // `DComposer.qml`.
+    //
+    // So a test that tapped twice and counted one call would pass with the guard
+    // deleted — it would be measuring the event loop. That test is not written
+    // here, and its absence is deliberate rather than an oversight.
+    //
+    // What IS asserted is what the component does, which is what the day-after
+    // change depends on: the flag is raised during the call, the control is
+    // absent while it is raised, the flag is lowered on every outcome, and a
+    // re-entrant `submit()` sends nothing. Each fails if the guard is removed.
+
+    function test_the_control_is_absent_while_a_publish_is_outstanding() {
+        // The observation is made FROM INSIDE the call, which is the only
+        // instant at which `publishing` is true — a test asserting it before or
+        // after would assert on `false` and pass with the property deleted.
+        var seenPublishing = null
+        var seenVisible = null
+        var c = composerComponent.createObject(null, { stoaAddress: "ab".repeat(32) })
+        Core.bridge = {
+            callModule: function (module, method, args) {
+                seenPublishing = c.publishing
+                seenVisible = spec.submitButtonVisible(c)
+                return '{"opId":"aa","wasNew":true}'
+            }
+        }
+
+        c.draft = "a post"
+        c.submit()
+
+        compare(seenPublishing, true,
+                "the flag must be raised before the call, not after it returns")
+        compare(seenVisible, false,
+                "the submit control must not be on screen while a publish is outstanding")
+        c.destroy()
+    }
+
+    function test_the_control_returns_when_the_publish_succeeds() {
+        var c = makeComposer({ "publish_post": '{"opId":"aa","wasNew":true}' })
+        c.draft = "a post"
+        c.submit()
+        compare(c.publishing, false, "a reported outcome ends the outstanding publish")
+        // The draft was cleared by the success, so the control is absent for
+        // THAT reason. Type again and it must come back — which is what
+        // distinguishes "the flag was lowered" from "the flag is stuck".
+        c.draft = "another post"
+        compare(spec.submitButtonVisible(c), true)
+        c.destroy()
+    }
+
+    function test_the_control_returns_when_the_publish_is_refused() {
+        // The path a stuck flag would break worst: a refusal stored nothing, so
+        // a composer that stayed locked would be permanently unusable after the
+        // first time core said no.
+        var c = makeComposer({ "publish_post": '{"error":"the store could not be reached"}' })
+        c.draft = "a post"
+        c.submit()
+
+        compare(c.outcome, "refused")
+        compare(c.publishing, false, "a refusal must end the outstanding publish")
+        compare(c.draft, "a post", "a refusal keeps the draft, so a retry is possible")
+        compare(spec.submitButtonVisible(c), true,
+                "the user must be able to retry a refused publish")
+        c.destroy()
+    }
+
+    function test_the_control_returns_when_the_op_was_already_present() {
+        // The third outcome. It reaches a different branch of `applyReply` from
+        // the other two, and the flag is cleared above all of them rather than
+        // at each — this is what pins that.
+        var c = makeComposer({ "publish_post": '{"opId":"aa","wasNew":false}' })
+        c.draft = "a post"
+        c.submit()
+
+        compare(c.outcome, "existing")
+        compare(c.publishing, false)
+        compare(spec.submitButtonVisible(c), true)
+        c.destroy()
+    }
+
+    function test_a_submit_while_one_is_outstanding_sends_nothing() {
+        // Re-entrancy, reached the only way it can be reached today: from inside
+        // the call itself. This is the guard `submit()` carries above and beyond
+        // the invisible button, and it is the one that survives the call
+        // becoming asynchronous.
+        var calls = 0
+        var c = composerComponent.createObject(null, { stoaAddress: "ab".repeat(32) })
+        Core.bridge = {
+            callModule: function (module, method, args) {
+                calls += 1
+                // The re-entrant tap. Under the guard this returns immediately;
+                // without it, this recurses.
+                if (calls < 5)
+                    c.submit()
+                return '{"opId":"aa","wasNew":true}'
+            }
+        }
+
+        c.draft = "a post"
+        c.submit()
+
+        compare(calls, 1, "a submit while one is outstanding must reach core once")
+        c.destroy()
+    }
+
+    // The submit button's visibility, found by walking the component rather than
+    // by re-deriving the condition here. A test that recomputed
+    // `submittable && !publishing` would pass whatever the QML said.
+    function submitButtonVisible(composer) {
+        var button = spec.findSubmitButton(composer)
+        return button === null ? false : button.visible
+    }
+
+    function findSubmitButton(item) {
+        for (var i = 0; i < item.children.length; i++) {
+            var child = item.children[i]
+            if (child.text !== undefined
+                    && String(child.text).indexOf("Publish the ") === 0)
+                return child
+            var found = spec.findSubmitButton(child)
+            if (found !== null)
+                return found
+        }
+        return null
+    }
+
     Component {
         id: signalSpy
         SignalSpy {}

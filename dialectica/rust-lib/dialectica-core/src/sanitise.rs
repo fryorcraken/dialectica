@@ -257,7 +257,10 @@ pub fn sanitise(input: &str) -> Sanitised {
     // nothing is marked. `count == max` is how the tie is detected without a
     // separate branch: with two scripts at the top, both match and the marked
     // count comes out as the remainder of neither.
-    let dominant_count = [latin, cyrillic, greek].iter().filter(|&&n| n == max).count();
+    let dominant_count = [latin, cyrillic, greek]
+        .iter()
+        .filter(|&&n| n == max)
+        .count();
     let marked = if max == 0 || dominant_count > 1 {
         0
     } else {
@@ -434,13 +437,12 @@ mod tests {
             '\u{061D}', // just above 061C
             '\u{FFF8}', // just below FFF9
             '\u{FFFC}', // just above FFFB — OBJECT REPLACEMENT CHARACTER,
-            // which DOES have a visible rendering and is content
+                        // which DOES have a visible rendering and is content
         ] {
             let input = format!("a{c}b");
             let out = sanitise(&input);
             assert_eq!(
-                out.removed,
-                0,
+                out.removed, 0,
                 "U+{:04X} is outside every removed range and was removed anyway",
                 c as u32
             );

@@ -504,6 +504,16 @@ fn main() -> Result<(), String> {
     let founder = keystore.stoa_key(&address);
     let visitor = why("minting the visitor's key", SecretKey::generate())?;
 
+    // A fixed wall-clock reading for every op this seeder publishes, so the store
+    // it writes is byte-identical from one run to the next.
+    const SEED_TIME: u64 = 1_789_729_304_000;
+    fn by(key: &SecretKey) -> dialectica_core::authoring::Authorship<'_> {
+        dialectica_core::authoring::Authorship {
+            key,
+            asserted_ms: SEED_TIME,
+        }
+    }
+
     // Through `ops_log_path`, the same function `store_files` uses, so the file
     // this opens is by construction the file the refusal check saw and `--fresh`
     // would have deleted.
@@ -517,7 +527,7 @@ fn main() -> Result<(), String> {
         "publishing the first root",
         authoring::post(
             &mut log,
-            &founder,
+            &by(&founder),
             address,
             "What does it mean for a forum to be decentralized?".to_string(),
         ),
@@ -534,7 +544,7 @@ fn main() -> Result<(), String> {
         "publishing the second root",
         authoring::post(
             &mut log,
-            &visitor,
+            &by(&visitor),
             address,
             "On the difference between moderation and censorship".to_string(),
         ),
@@ -549,7 +559,7 @@ fn main() -> Result<(), String> {
         "replying to the first root",
         authoring::reply(
             &mut log,
-            &visitor,
+            &by(&visitor),
             address,
             first_root.id,
             "That it has no single party who can switch it off.".to_string(),
@@ -559,7 +569,7 @@ fn main() -> Result<(), String> {
         "replying to that reply",
         authoring::reply(
             &mut log,
-            &founder,
+            &by(&founder),
             address,
             reply.id,
             "Agreed — though that is a floor rather than the whole of it.".to_string(),
@@ -569,7 +579,7 @@ fn main() -> Result<(), String> {
         "replying to the second root",
         authoring::reply(
             &mut log,
-            &visitor,
+            &by(&visitor),
             address,
             second_root.id,
             "One is a Stoa deciding what it is; the other is deciding for everyone else."
@@ -598,7 +608,7 @@ fn main() -> Result<(), String> {
     ] {
         why(
             "publishing a vote",
-            authoring::vote(&mut log, voter, address, target, direction),
+            authoring::vote(&mut log, &by(voter), address, target, direction),
         )?;
     }
 

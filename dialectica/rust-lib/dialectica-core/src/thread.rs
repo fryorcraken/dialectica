@@ -59,11 +59,20 @@
 //! could disagree with the first, and two orders that disagree produce no error
 //! anywhere.
 //!
-//! **What that order guarantees is convergence, not recency.** Nothing supplies
-//! a Lamport value today, so `cmp_ops` falls back to ascending op id — a hash,
-//! carrying no temporal meaning. Two peers holding the same ops return the same
-//! sequence; neither can say which reply was written first. Nothing in this
-//! module should ever be reported to a caller as chronological.
+//! **What that order guarantees is convergence, not recency** — and a Lamport
+//! counter reaching every op this build publishes does not change that. The
+//! counter is **causal, not temporal**: it says its author had seen something at
+//! N, never *when*, so two counters five apart are not five of anything apart.
+//! Among ops carrying none — the population predating the clock fields —
+//! `cmp_ops` falls back to ascending op id, a hash carrying no temporal meaning
+//! at all. Two peers holding the same ops return the same sequence; neither can
+//! say which reply was written first. Nothing in this module may be reported to a
+//! caller as chronological.
+//!
+//! The op's wall-clock does not rescue that and must not be reached for: it is
+//! the author's own assertion, display-only, and it reaches a caller only as
+//! formatted text through [`ThreadItem::asserted_time`]. See
+//! [`crate::asserted_time`].
 //!
 //! # The items are flat, and each names its parent
 //!
@@ -71,6 +80,7 @@
 //! Reporting a depth from here would be a second answer to a question the parent
 //! field already settles, and the two could disagree on a partial set of ops.
 
+use crate::asserted_time::{format_asserted, AssertedTime};
 use crate::identity::Address;
 use crate::log::{Entry, OpLog, OpLogError};
 use crate::moderation::{Moderation, Moderators};
@@ -171,6 +181,40 @@ pub struct ThreadItem {
     /// content: an author may revise a post to text identical to the original,
     /// and a post never revised is not distinguishable from one revised back.
     pub is_revised: bool,
+    /// This item's position in the sequence the read returned.
+    ///
+    /// **The field a caller uses to place items in order**, and the only one
+    /// that is correct for it. It is the index within the whole thread's
+    /// sequence, so placing items in order is reading this and nothing else, and
+    /// an item's position does not change when the page size does.
+    ///
+    /// # Why an index and not the op's counter
+    ///
+    /// The counter is a number that means an order, and handing it out would
+    /// invite arithmetic on it — differences, gaps, "how far apart were these".
+    /// None of those mean anything: a counter says "the author had seen
+    /// something at N", never *which*, and two counters five apart are not five
+    /// of anything. An index says "this is where it goes" and supports exactly
+    /// the one operation a view needs.
+    ///
+    /// # Why a string
+    ///
+    /// **It is an opaque ordering token**, not a quantity, and the type says so.
+    /// A caller compares two of these for sequence; a caller that wanted to do
+    /// arithmetic would have to parse first, which is the same deliberate
+    /// friction [`asserted_time`](Self::asserted_time) applies to the clock.
+    pub position: String,
+    /// The author's asserted time, as display text — or `None` where the op
+    /// carries none.
+    ///
+    /// **`None` means the op predates the clock fields**, and nothing is
+    /// substituted in its place. A substituted value is indistinguishable from
+    /// an asserted one once rendered, and there is nothing to substitute that
+    /// would be true.
+    ///
+    /// Carries no number. See [`crate::asserted_time`] for why the instant never
+    /// leaves core, and why the clamp lives on the read path.
+    pub asserted_time: Option<AssertedTime>,
     /// What the ops this peer holds say about this post's moderation.
     ///
     /// **The resolver's own three-valued answer, carried whole.** Not a `bool`:
@@ -190,6 +234,66 @@ impl ThreadItem {
     /// derived from.
     pub fn is_hidden(&self) -> bool {
         self.moderation.is_hidden()
+    }
+}
+
+/// A resolved item that does not yet know where it sits.
+///
+/// # Why this type exists rather than a placeholder position
+///
+/// The position is a property of the **sequence**, so [`resolve_item`] — which
+/// sees one item — structurally cannot know it. The obvious shape is to build a
+/// [`ThreadItem`] with an empty `position` and fill it in afterwards, and that
+/// shape has a hole: an item that escaped the fill-in would carry `""`, which is
+/// a position a caller would read and act on, and nothing would report it.
+///
+/// A type that **cannot express a position** removes the possibility: this holds
+/// every field of a [`ThreadItem`] *except* `position`, and the only code that
+/// names the struct literal `ThreadItem { .. }` is [`Placed::at`], which takes an
+/// index. So "every item has a real position" is the compiler's to enforce
+/// rather than a loop's to remember. CLAUDE.md's "put the complexity in the data
+/// structure".
+///
+/// **It holds the fields rather than a built `ThreadItem`, and that is the whole
+/// point.** Wrapping an already-constructed item would mean constructing one with
+/// `position: ""` first — the exact placeholder this type exists to rule out —
+/// and `at` would then be an overwrite a caller could skip by reaching for the
+/// inner field. A review measured that shape: replacing `placed.at(index)` with
+/// `placed.item` compiled, shipped `"position":""` on every item of every thread,
+/// and passed the whole suite. There is now no inner item to reach for.
+///
+/// The cost is that adding a field to `ThreadItem` means adding it here too, and
+/// the compiler says so at both sites — which is the trade this project asks for:
+/// a shape that is right everywhere at once over a guard checked at each call.
+struct Placed {
+    thread: String,
+    id: String,
+    current_version: String,
+    parent: Option<String>,
+    author: String,
+    body: Option<Sanitised>,
+    attachments: Option<Vec<Sanitised>>,
+    is_revised: bool,
+    asserted_time: Option<AssertedTime>,
+    moderation: Moderation,
+}
+
+impl Placed {
+    /// The resolved item, at the index the sequence gives it.
+    fn at(self, index: usize) -> ThreadItem {
+        ThreadItem {
+            thread: self.thread,
+            id: self.id,
+            current_version: self.current_version,
+            parent: self.parent,
+            author: self.author,
+            body: self.body,
+            attachments: self.attachments,
+            is_revised: self.is_revised,
+            asserted_time: self.asserted_time,
+            moderation: self.moderation,
+            position: index.to_string(),
+        }
     }
 }
 
@@ -381,6 +485,43 @@ pub fn thread_of<L: OpLog>(log: &L, id: &OpId) -> Result<Option<OpId>, OpLogErro
     }
 }
 
+/// How a caller wants a thread page rendered.
+///
+/// # Why these four travel together
+///
+/// [`read_thread`] takes five arguments rather than eight, and the split is not
+/// arithmetic. The first four say **which thread** — the log, the moderator set,
+/// the Stoa and the root. These four say **how to present it**, and every one of
+/// them changes what a reader sees without changing which thread they are
+/// looking at.
+///
+/// The grouping arrived with `now_ms`, which pushed the argument list past
+/// clippy's limit — but the limit was the prompt rather than the reason. Four
+/// bare values of which two are `usize`, one is `bool` and one is `u64` is a
+/// call site where `page` and `per_page` can be transposed silently, and naming
+/// them at the call site is what stops that.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReadOptions {
+    /// Which page, zero-based.
+    pub page: usize,
+    /// How many items, before [`clamp_per_page`] has its say. A zero clamps UP
+    /// to the default rather than down to an empty page.
+    pub per_page: usize,
+    /// Whether to return content a moderation hid.
+    pub include_hidden: bool,
+    /// The reading peer's own clock, in milliseconds since the epoch, for
+    /// clamping an implausible asserted time.
+    ///
+    /// **Supplied rather than sampled.** `dialectica-core` reads no clock, so a
+    /// read is a pure function of the ops held and the arguments given — which
+    /// is what lets a test pin a clamp boundary rather than approximate one.
+    ///
+    /// It affects the rendered TEXT of a time and nothing else: not which items
+    /// are returned, not their order, not their positions. A reader handed a
+    /// wrong clock sees times clamped oddly and a correct thread.
+    pub now_ms: u64,
+}
+
 /// One page of a thread: its root, then the replies whose chains reach it.
 ///
 /// # What is filtered, and in what order
@@ -456,10 +597,14 @@ pub fn read_thread<L: OpLog>(
     moderators: &Moderators,
     stoa: &Address,
     root: &OpId,
-    page: usize,
-    per_page: usize,
-    include_hidden: bool,
+    how: ReadOptions,
 ) -> Result<Result<ThreadPage, NotAThread>, OpLogError> {
+    let ReadOptions {
+        page,
+        per_page,
+        include_hidden,
+        now_ms,
+    } = how;
     // The guard runs HERE rather than only at the wire, so it cannot be skipped
     // by reaching this function directly — see this function's documentation for
     // what a zero did before. Idempotent, so the wire path clamping first costs
@@ -544,7 +689,15 @@ pub fn read_thread<L: OpLog>(
 
         let is_root = id == *root;
 
-        let Some(item) = resolve_item(log, moderators, &entry, root, is_root, include_hidden)?
+        let Some(item) = resolve_item(
+            log,
+            moderators,
+            &entry,
+            root,
+            is_root,
+            include_hidden,
+            now_ms,
+        )?
         else {
             continue;
         };
@@ -558,6 +711,23 @@ pub fn read_thread<L: OpLog>(
             items.push(item);
         }
     }
+
+    // THE POSITION IS ASSIGNED HERE, over the whole thread and before paging.
+    //
+    // After the root insert, so it reflects the sequence a caller actually
+    // receives — the root leads, whatever position the log's order gave it.
+    // Over the whole thread rather than per page, so an item's position does not
+    // change when the page size does, and two items on different pages still
+    // compare correctly.
+    //
+    // `resolve_item` cannot do this — it sees one item, and the position is a
+    // property of the sequence. `Placed::at` is what turns the one into the
+    // other, and is the only way a `ThreadItem` comes to have a position.
+    let items: Vec<ThreadItem> = items
+        .into_iter()
+        .enumerate()
+        .map(|(index, placed)| placed.at(index))
+        .collect();
 
     // Page by slicing what survived. The `min` calls are what make a page past
     // the end an empty page rather than a panic on the slice, and
@@ -590,7 +760,8 @@ fn resolve_item<L: OpLog>(
     root: &OpId,
     is_root: bool,
     include_hidden: bool,
-) -> Result<Option<ThreadItem>, OpLogError> {
+    now_ms: u64,
+) -> Result<Option<Placed>, OpLogError> {
     let id = entry.id();
 
     // `Ok(None)` cannot happen for an entry this reached — it is a `Post` the log
@@ -625,7 +796,10 @@ fn resolve_item<L: OpLog>(
         _ => None,
     };
 
-    Ok(Some(ThreadItem {
+    // No `position` here, and none is expressible: `Placed` has no such field.
+    // The position is a property of the sequence, which this function does not
+    // see, and `Placed::at` is the only code that builds a `ThreadItem`.
+    Ok(Some(Placed {
         thread: root.to_hex(),
         id: id.to_hex(),
         current_version: version.current.id().to_hex(),
@@ -643,6 +817,24 @@ fn resolve_item<L: OpLog>(
             Some(version.attachments().iter().map(|a| sanitise(a)).collect())
         },
         is_revised: version.is_revised(),
+        // THE VERSION BEING RENDERED asserts the time, not the original post.
+        //
+        // The body, the attachments and `current_version` all come from
+        // `version.current`, so a time taken from the original would be the one
+        // field of this item describing a different op from the rest of it — and
+        // a reader shown an edited post would see when it was first written with
+        // no indication that is what they were looking at. `is_revised` is the
+        // field that says an edit happened.
+        //
+        // `None` where that op predates the clock fields. Nothing is
+        // substituted: a substitute is indistinguishable from an assertion once
+        // rendered.
+        asserted_time: version
+            .current
+            .op
+            .op
+            .clock
+            .map(|c| format_asserted(c.asserted_ms, now_ms)),
         moderation,
     }))
 }
@@ -650,11 +842,15 @@ fn resolve_item<L: OpLog>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::arrival::{Arrival, MessageId};
+    use crate::arrival::Arrival;
     use crate::identity::{sign_op_bytes, PublicKey, SecretKey};
     use crate::log::MemoryOpLog;
     use crate::op::{ModerationAction, Op, SignedOp, VoteDirection};
     use crate::stoa::{Genesis, Policy};
+
+    /// The reading peer's clock, for every `read_thread` call in this module.
+    /// A fixed value, so a rendered time is a function of the ops alone.
+    const A_TIME: u64 = 1_789_729_304_000;
 
     fn a_key(seed: u8) -> SecretKey {
         SecretKey::from_bytes(&[seed; 32]).unwrap()
@@ -677,8 +873,17 @@ mod tests {
         Moderators::of(&a_genesis()).unwrap()
     }
 
-    fn a_message_id(seed: u8) -> MessageId {
-        MessageId::new(vec![seed; 32])
+    /// The options for a read that is not about paging: the whole thread, at
+    /// this module's fixed clock. Every test that asserts on a REFUSAL or on
+    /// content uses it, so a paging literal at a call site is a signal that
+    /// paging is what that test is about.
+    fn whole_thread(include_hidden: bool) -> ReadOptions {
+        ReadOptions {
+            page: 0,
+            per_page: MAX_PER_PAGE,
+            include_hidden,
+            now_ms: A_TIME,
+        }
     }
 
     /// A thread-opening post: no parent, and therefore no thread field either.
@@ -719,6 +924,7 @@ mod tests {
         Op {
             stoa,
             author: key.public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread,
                 parent,
@@ -743,6 +949,7 @@ mod tests {
         let op = Op {
             stoa: a_stoa(),
             author: claimed.clone(),
+            clock: None,
             kind: OpKind::Post {
                 thread,
                 parent,
@@ -776,6 +983,31 @@ mod tests {
         Op {
             stoa: a_stoa(),
             author: signer.public_key(),
+            clock: None,
+            kind: OpKind::Moderate { target, action },
+        }
+        .sign(signer)
+    }
+
+    /// A moderation op carrying a counter — the shape published from this
+    /// version onward, and the one where last-write-wins is real.
+    ///
+    /// Its own fixture rather than a parameter, because most tests here are
+    /// about the authority checks and need neither counter; the ones that are
+    /// about ORDER say so by reaching for this name.
+    fn a_moderation_at(
+        signer: &SecretKey,
+        target: OpId,
+        action: ModerationAction,
+        counter: u64,
+    ) -> SignedOp {
+        Op {
+            stoa: a_stoa(),
+            author: signer.public_key(),
+            clock: Some(crate::op::OpClock {
+                counter,
+                asserted_ms: A_TIME,
+            }),
             kind: OpKind::Moderate { target, action },
         }
         .sign(signer)
@@ -785,6 +1017,7 @@ mod tests {
         Op {
             stoa: a_stoa(),
             author: signer.public_key(),
+            clock: None,
             kind: OpKind::Revise {
                 target,
                 body: body.to_string(),
@@ -798,6 +1031,7 @@ mod tests {
         Op {
             stoa: a_stoa(),
             author: signer.public_key(),
+            clock: None,
             kind: OpKind::Vote {
                 target,
                 direction: VoteDirection::Up,
@@ -810,6 +1044,7 @@ mod tests {
         Op {
             stoa: a_stoa(),
             author: signer.public_key(),
+            clock: None,
             kind: OpKind::StoaMetadata {
                 title: "Agora, renamed".to_string(),
                 description: "what the Stoa is called today".to_string(),
@@ -853,9 +1088,7 @@ mod tests {
             &moderators(),
             &a_stoa(),
             &root.op.id(),
-            0,
-            MAX_PER_PAGE,
-            include_hidden,
+            whole_thread(include_hidden),
         )
         .expect("the store must answer")
         .expect("the root must be readable")
@@ -977,9 +1210,7 @@ mod tests {
                 &moderators(),
                 &a_stoa(),
                 &mid.op.id(),
-                0,
-                MAX_PER_PAGE,
-                false
+                whole_thread(false)
             )
             .unwrap(),
             Err(NotAThread::IsAReply(mid.op.id()))
@@ -1014,9 +1245,7 @@ mod tests {
             &moderators(),
             &a_stoa(),
             &root.op.id(),
-            0,
-            MAX_PER_PAGE,
-            false
+            whole_thread(false)
         )
         .unwrap()
         .is_ok());
@@ -1119,9 +1348,7 @@ mod tests {
                 &moderators(),
                 &a_stoa(),
                 &dangling.op.id(),
-                0,
-                MAX_PER_PAGE,
-                false
+                whole_thread(false)
             )
             .unwrap(),
             Err(NotAThread::IsAReply(dangling.op.id()))
@@ -1255,9 +1482,7 @@ mod tests {
             &moderators(),
             &a_stoa(),
             &filed_under,
-            0,
-            MAX_PER_PAGE,
-            false,
+            whole_thread(false),
         )
         .expect("the store answered, so this is not an Err");
 
@@ -1486,7 +1711,7 @@ mod tests {
         let never_arrived = a_root(5, "never received").op.id();
 
         let blanked = |id: OpId| {
-            read_thread(&log, &moderators(), &a_stoa(), &id, 0, MAX_PER_PAGE, false)
+            read_thread(&log, &moderators(), &a_stoa(), &id, whole_thread(false))
                 .unwrap()
                 .expect_err("both must be refused")
                 .to_string()
@@ -1508,9 +1733,7 @@ mod tests {
                 &moderators(),
                 &a_stoa(),
                 &forged.op.id(),
-                0,
-                MAX_PER_PAGE,
-                false
+                whole_thread(false)
             )
             .unwrap(),
             Err(NotAThread::NotHeld(forged.op.id())),
@@ -1658,9 +1881,7 @@ mod tests {
                 &moderators(),
                 &elsewhere,
                 &root.op.id(),
-                0,
-                MAX_PER_PAGE,
-                false
+                whole_thread(false)
             )
             .unwrap(),
             Err(NotAThread::NotHeld(root.op.id())),
@@ -1720,6 +1941,12 @@ mod tests {
             attachments: _,
             is_revised: _,
             moderation: _,
+            // Neither describes an author: `position` is the item's index in the
+            // sequence and `asserted_time` is the author's claimed wall-clock.
+            // They are named rather than swept under a `..`, because a `..` is
+            // what would let a future author field in without this test noticing.
+            position: _,
+            asserted_time: _,
         } = root_item;
     }
 
@@ -1823,6 +2050,7 @@ mod tests {
         let elsewhere = Op {
             stoa: another_stoa(),
             author: author.public_key(),
+            clock: None,
             kind: OpKind::Revise {
                 target: reply.op.id(),
                 body: "REWRITTEN FROM ANOTHER STOA".to_string(),
@@ -1982,9 +2210,7 @@ mod tests {
                 &moderators(),
                 &a_stoa(),
                 &revision.op.id(),
-                0,
-                MAX_PER_PAGE,
-                false
+                whole_thread(false)
             )
             .unwrap(),
             Err(NotAThread::NotAPost(revision.op.id()))
@@ -2030,23 +2256,25 @@ mod tests {
         // read identically under a flag and mean different things.
         //
         // The unhide must WIN, which under the degraded order it does not do by
-        // hashing lower — `moderation.rs` biases toward `Hide` where nothing is
-        // transport-ordered. So the arrivals are ordered, which is the branch
-        // where last-write-wins is real.
+        // hashing lower — `moderation.rs` biases toward `Hide` among ops that
+        // carry no counter. So the MODERATIONS carry counters, which is the
+        // branch where last-write-wins is real.
+        //
+        // The root and the reply deliberately do NOT, because nothing about this
+        // test turns on their order and giving them counters would suggest it
+        // did.
         let root = a_root(2, "root");
         let reply = a_reply(3, &root, "reply");
-        let hide = a_moderation(&a_key(1), reply.op.id(), ModerationAction::Hide);
-        let unhide = a_moderation(&a_key(1), reply.op.id(), ModerationAction::Unhide);
+        let hide = a_moderation_at(&a_key(1), reply.op.id(), ModerationAction::Hide, 3);
+        let unhide = a_moderation_at(&a_key(1), reply.op.id(), ModerationAction::Unhide, 4);
 
+        // The arrivals say nothing, which is what production supplies — so the
+        // counters in the ops are the only thing that can be deciding this.
         let mut log = MemoryOpLog::new();
-        log.append(root.clone(), Arrival::ordered(1, a_message_id(1)))
-            .unwrap();
-        log.append(reply.clone(), Arrival::ordered(2, a_message_id(1)))
-            .unwrap();
-        log.append(hide, Arrival::ordered(3, a_message_id(1)))
-            .unwrap();
-        log.append(unhide.clone(), Arrival::ordered(4, a_message_id(1)))
-            .unwrap();
+        log.append(root.clone(), Arrival::unordered()).unwrap();
+        log.append(reply.clone(), Arrival::unordered()).unwrap();
+        log.append(hide, Arrival::unordered()).unwrap();
+        log.append(unhide.clone(), Arrival::unordered()).unwrap();
 
         let item = read(&log, &root, false)
             .items
@@ -2148,9 +2376,7 @@ mod tests {
             &moderators(),
             &a_stoa(),
             &root.op.id(),
-            0,
-            MAX_PER_PAGE,
-            false,
+            whole_thread(false),
         )
         .unwrap();
         let absent = read_thread(
@@ -2158,9 +2384,7 @@ mod tests {
             &moderators(),
             &a_stoa(),
             &never_seen,
-            0,
-            MAX_PER_PAGE,
-            false,
+            whole_thread(false),
         )
         .unwrap();
 
@@ -2249,6 +2473,7 @@ mod tests {
         let op = Op {
             stoa: a_stoa(),
             author: moderator.public_key(),
+            clock: None,
             kind: OpKind::Moderate {
                 target: reply.op.id(),
                 action: ModerationAction::Hide,
@@ -2304,6 +2529,7 @@ mod tests {
         let vote = Op {
             stoa: a_stoa(),
             author: voter.public_key(),
+            clock: None,
             kind: OpKind::Vote {
                 target: root.op.id(),
                 direction: VoteDirection::Up,
@@ -2314,7 +2540,7 @@ mod tests {
         let log = a_log(vec![root, reply.clone(), vote.clone()]);
 
         let refuse = |id: &OpId| {
-            read_thread(&log, &moderators(), &a_stoa(), id, 0, MAX_PER_PAGE, false)
+            read_thread(&log, &moderators(), &a_stoa(), id, whole_thread(false))
                 .unwrap()
                 .expect_err("must be refused")
         };
@@ -2410,7 +2636,7 @@ mod tests {
             assert!(op.verify(), "{name} must be authentic");
 
             assert_eq!(
-                read_thread(&log, &moderators(), &a_stoa(), &id, 0, MAX_PER_PAGE, false).unwrap(),
+                read_thread(&log, &moderators(), &a_stoa(), &id, whole_thread(false)).unwrap(),
                 Err(NotAThread::NotAPost(id)),
                 "{name} must take the not-a-post refusal"
             );
@@ -2437,7 +2663,7 @@ mod tests {
 
         for (name, op) in &table {
             let id = op.op.id();
-            let refusal = read_thread(&log, &moderators(), &a_stoa(), &id, 0, MAX_PER_PAGE, false)
+            let refusal = read_thread(&log, &moderators(), &a_stoa(), &id, whole_thread(false))
                 .unwrap()
                 .expect_err("a non-post must be refused");
             let the_false_answer = NotAThread::NotHeld(id).to_string();
@@ -2466,9 +2692,7 @@ mod tests {
                 &moderators(),
                 &a_stoa(),
                 &never_seen,
-                0,
-                MAX_PER_PAGE,
-                false
+                whole_thread(false)
             )
             .unwrap(),
             Err(NotAThread::NotHeld(never_seen))
@@ -2499,7 +2723,7 @@ mod tests {
         let log = a_log(vec![root, reply.clone(), vote.clone()]);
 
         let refuse = |id: &OpId| {
-            read_thread(&log, &moderators(), &a_stoa(), id, 0, MAX_PER_PAGE, false)
+            read_thread(&log, &moderators(), &a_stoa(), id, whole_thread(false))
                 .unwrap()
                 .expect_err("must be refused")
                 .to_string()
@@ -2581,9 +2805,7 @@ mod tests {
             &moderators(),
             &a_stoa(),
             &a_root(2, "x").op.id(),
-            0,
-            MAX_PER_PAGE,
-            false,
+            whole_thread(false),
         )
         .expect_err("a store failure must not be flattened into a page");
         assert!(
@@ -2692,6 +2914,131 @@ mod tests {
         assert_eq!(a.len(), 5, "the fixture must exercise all five");
     }
 
+    /// A reply carrying BOTH clock fields, chosen independently.
+    ///
+    /// **Two parameters, because one value cannot distinguish two rules.** Every
+    /// other fixture in this module spells its asserted time `A_TIME`, so a
+    /// sequence ordered by asserted time and a sequence ordered by counter give
+    /// the same answer on all of them — the recorded defect family, applied to
+    /// this field. A test about which of the two decides has to be able to set
+    /// them against each other.
+    fn a_reply_at(
+        author_seed: u8,
+        parent: &SignedOp,
+        body: &str,
+        counter: u64,
+        asserted_ms: u64,
+    ) -> SignedOp {
+        let key = a_key(author_seed);
+        let thread = match &parent.op.kind {
+            OpKind::Post { thread, .. } => thread.unwrap_or(parent.op.id()),
+            _ => parent.op.id(),
+        };
+        Op {
+            stoa: a_stoa(),
+            author: key.public_key(),
+            clock: Some(crate::op::OpClock {
+                counter,
+                asserted_ms,
+            }),
+            kind: OpKind::Post {
+                thread: Some(thread),
+                parent: Some(parent.op.id()),
+                body: body.to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&key)
+    }
+
+    #[test]
+    fn the_sequence_follows_the_counters_and_not_the_asserted_times() {
+        // `thread-read`: "WHEN a thread's replies carry asserted times that
+        // disagree with the order their counters give THEN the returned sequence
+        // is the one the counters give AND the asserted times did not affect it."
+        //
+        // **The fixture is built so the two rules give OPPOSITE answers**, which
+        // is the whole of it. Counters run 3/2/1 and the order is descending, so
+        // the counter rule yields `late`, `middle`, `early`. The asserted times
+        // run the other way: the counter-3 reply claims the EARLIEST instant and
+        // the counter-1 reply the latest, so a sequence ordered by asserted time
+        // — ascending or descending — is a sequence this assertion rejects.
+        //
+        // Ascending by time would be `late`(2024), `middle`(2025), `early`(2026)
+        // reversed — i.e. `early`, `middle`, `late`; descending by time gives
+        // `early`, `middle`, `late` reversed. Either way the counter answer
+        // `late, middle, early` distinguishes it, because the names deliberately
+        // describe the CLAIMED time rather than the position.
+        //
+        // Three distinct instants, each verified against `date -u`:
+        //   1_735_689_600_000 ms = 2025-01-01T00:00:00Z
+        //   1_704_067_200_000 ms = 2024-01-01T00:00:00Z
+        //   1_767_225_600_000 ms = 2026-01-01T00:00:00Z
+        let root = a_root(2, "root");
+        // counter 3, but claims 2024 — the earliest time on the highest counter.
+        let claims_earliest = a_reply_at(3, &root, "reply A", 3, 1_704_067_200_000);
+        let claims_middle = a_reply_at(4, &root, "reply B", 2, 1_735_689_600_000);
+        // counter 1, but claims 2026 — the latest time on the lowest counter.
+        let claims_latest = a_reply_at(5, &root, "reply C", 1, 1_767_225_600_000);
+
+        // The fixture must really disagree, or this test passes for the reason
+        // every fixture in this file used to: both rules agreeing.
+        assert!(
+            claims_earliest.op.clock.unwrap().counter > claims_latest.op.clock.unwrap().counter,
+            "the highest counter must belong to the earliest claimed time"
+        );
+        assert!(
+            claims_earliest.op.clock.unwrap().asserted_ms
+                < claims_latest.op.clock.unwrap().asserted_ms,
+            "and its claimed time must be the earliest, or the two rules agree \
+             and this test measures nothing"
+        );
+
+        let log = a_log(vec![
+            root.clone(),
+            claims_latest.clone(),
+            claims_earliest.clone(),
+            claims_middle.clone(),
+        ]);
+        let page = read(&log, &root, false);
+
+        assert_eq!(
+            ids_of(&page),
+            vec![
+                root.op.id().to_hex(),
+                claims_earliest.op.id().to_hex(),
+                claims_middle.op.id().to_hex(),
+                claims_latest.op.id().to_hex(),
+            ],
+            "descending counter decides, so the reply claiming the EARLIEST time \
+             leads and the one claiming the latest is last"
+        );
+
+        // And the times really did reach the surface, so the assertion above is
+        // about a value that is present rather than one that was dropped. A read
+        // that emitted no time at all would satisfy the sequence assertion alone.
+        let times: Vec<String> = page.items[1..]
+            .iter()
+            .map(|i| {
+                i.asserted_time
+                    .as_ref()
+                    .expect("a timed reply")
+                    .text
+                    .clone()
+            })
+            .collect();
+        assert_eq!(
+            times,
+            vec![
+                "2024-01-01T00:00:00Z",
+                "2025-01-01T00:00:00Z",
+                "2026-01-01T00:00:00Z"
+            ],
+            "the rendered times run FORWARD down the page while the sequence runs \
+             by counter — the visible consequence the spec calls correct"
+        );
+    }
+
     #[test]
     fn a_deep_chain_comes_back_flat() {
         let root = a_root(2, "root");
@@ -2726,9 +3073,12 @@ mod tests {
                 &moderators(),
                 &a_stoa(),
                 &root.op.id(),
-                page,
-                2,
-                false,
+                ReadOptions {
+                    page,
+                    per_page: 2,
+                    include_hidden: false,
+                    now_ms: A_TIME,
+                },
             )
             .unwrap()
             .unwrap();
@@ -2739,15 +3089,71 @@ mod tests {
     }
 
     #[test]
+    fn every_item_carries_its_index_in_the_whole_thread_as_its_position() {
+        // **No test in this module asserted a position VALUE.** A review
+        // measured what that cost: replacing `placed.at(index)` with the
+        // wrapped item shipped `position: ""` on every item of every thread and
+        // passed all 1002 tests, because the wire tests pin the key set and
+        // nothing pinned the value. `Placed` no longer holds a `ThreadItem`, so
+        // that particular bypass is now a compile error — but the reachable
+        // mistake left is passing the wrong index, which only a value assertion
+        // can see.
+        //
+        // The second page is the discriminating half: positions are indices in
+        // the WHOLE thread, so they must continue at 2, not restart at 0. A
+        // per-page index would be indistinguishable on page 0.
+        let root = a_root(2, "root");
+        let mut ops = vec![root.clone()];
+        ops.extend((0..4).map(|i| a_reply(3 + i, &root, &format!("reply {i}"))));
+        let log = a_log(ops);
+
+        let mut positions = Vec::new();
+        for page in 0..3 {
+            let p = read_thread(
+                &log,
+                &moderators(),
+                &a_stoa(),
+                &root.op.id(),
+                ReadOptions {
+                    page,
+                    per_page: 2,
+                    include_hidden: false,
+                    now_ms: A_TIME,
+                },
+            )
+            .unwrap()
+            .unwrap();
+            positions.extend(p.items.iter().map(|i| i.position.clone()));
+        }
+
+        assert_eq!(
+            positions,
+            vec!["0", "1", "2", "3", "4"],
+            "positions index the whole thread and do not restart per page"
+        );
+    }
+
+    #[test]
     fn the_root_occupies_a_slot_and_is_not_repeated_on_a_later_page() {
         let root = a_root(2, "root");
         let mut ops = vec![root.clone()];
         ops.extend((0..3).map(|i| a_reply(3 + i, &root, &format!("reply {i}"))));
         let log = a_log(ops);
 
-        let first = read_thread(&log, &moderators(), &a_stoa(), &root.op.id(), 0, 2, false)
-            .unwrap()
-            .unwrap();
+        let first = read_thread(
+            &log,
+            &moderators(),
+            &a_stoa(),
+            &root.op.id(),
+            ReadOptions {
+                page: 0,
+                per_page: 2,
+                include_hidden: false,
+                now_ms: A_TIME,
+            },
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(
             first.items.len(),
             2,
@@ -2755,9 +3161,20 @@ mod tests {
         );
         assert_eq!(first.items[0].id, root.op.id().to_hex());
 
-        let second = read_thread(&log, &moderators(), &a_stoa(), &root.op.id(), 1, 2, false)
-            .unwrap()
-            .unwrap();
+        let second = read_thread(
+            &log,
+            &moderators(),
+            &a_stoa(),
+            &root.op.id(),
+            ReadOptions {
+                page: 1,
+                per_page: 2,
+                include_hidden: false,
+                now_ms: A_TIME,
+            },
+        )
+        .unwrap()
+        .unwrap();
         assert!(
             !ids_of(&second).contains(&root.op.id().to_hex()),
             "the root must not be repeated on a later page"
@@ -2773,13 +3190,35 @@ mod tests {
         ops.extend((0..3).map(|i| a_reply(3 + i, &root, &format!("reply {i}"))));
         let log = a_log(ops);
 
-        let first = read_thread(&log, &moderators(), &a_stoa(), &root.op.id(), 0, 2, false)
-            .unwrap()
-            .unwrap();
+        let first = read_thread(
+            &log,
+            &moderators(),
+            &a_stoa(),
+            &root.op.id(),
+            ReadOptions {
+                page: 0,
+                per_page: 2,
+                include_hidden: false,
+                now_ms: A_TIME,
+            },
+        )
+        .unwrap()
+        .unwrap();
         assert!(first.has_more);
-        let last = read_thread(&log, &moderators(), &a_stoa(), &root.op.id(), 1, 2, false)
-            .unwrap()
-            .unwrap();
+        let last = read_thread(
+            &log,
+            &moderators(),
+            &a_stoa(),
+            &root.op.id(),
+            ReadOptions {
+                page: 1,
+                per_page: 2,
+                include_hidden: false,
+                now_ms: A_TIME,
+            },
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(last.items.len(), 2);
         assert!(
             !last.has_more,
@@ -2818,9 +3257,20 @@ mod tests {
         }
         let log = a_log(ops);
 
-        let page = read_thread(&log, &moderators(), &a_stoa(), &root.op.id(), 0, 3, false)
-            .unwrap()
-            .unwrap();
+        let page = read_thread(
+            &log,
+            &moderators(),
+            &a_stoa(),
+            &root.op.id(),
+            ReadOptions {
+                page: 0,
+                per_page: 3,
+                include_hidden: false,
+                now_ms: A_TIME,
+            },
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(
             page.items.len(),
             3,
@@ -2882,9 +3332,12 @@ mod tests {
             &moderators(),
             &a_stoa(),
             &root.op.id(),
-            1,
-            per_page,
-            false,
+            ReadOptions {
+                page: 1,
+                per_page,
+                include_hidden: false,
+                now_ms: A_TIME,
+            },
         )
         .unwrap()
         .expect("a later page of a held thread is served");
@@ -2917,9 +3370,20 @@ mod tests {
     fn a_page_past_the_end_is_empty_rather_than_an_error() {
         let root = a_root(2, "root");
         let log = a_log(vec![root.clone()]);
-        let p = read_thread(&log, &moderators(), &a_stoa(), &root.op.id(), 99, 20, false)
-            .unwrap()
-            .unwrap();
+        let p = read_thread(
+            &log,
+            &moderators(),
+            &a_stoa(),
+            &root.op.id(),
+            ReadOptions {
+                page: 99,
+                per_page: 20,
+                include_hidden: false,
+                now_ms: A_TIME,
+            },
+        )
+        .unwrap()
+        .unwrap();
         assert!(p.items.is_empty());
         assert!(!p.has_more);
         assert_eq!(p.page, 99);
@@ -2962,9 +3426,12 @@ mod tests {
                 &moderators(),
                 &a_stoa(),
                 &root.op.id(),
-                page,
-                per_page,
-                false,
+                ReadOptions {
+                    page,
+                    per_page,
+                    include_hidden: false,
+                    now_ms: A_TIME,
+                },
             )
             .unwrap()
             .unwrap();
@@ -3005,9 +3472,12 @@ mod tests {
                 &moderators(),
                 &a_stoa(),
                 &root.op.id(),
-                page,
-                0,
-                false,
+                ReadOptions {
+                    page,
+                    per_page: 0,
+                    include_hidden: false,
+                    now_ms: A_TIME,
+                },
             )
             .unwrap()
             .unwrap();
@@ -3095,6 +3565,7 @@ mod tests {
         let root = Op {
             stoa: a_stoa(),
             author: key.public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -3152,6 +3623,7 @@ mod tests {
         let vote = Op {
             stoa: a_stoa(),
             author: voter.public_key(),
+            clock: None,
             kind: OpKind::Vote {
                 target: root.op.id(),
                 direction: VoteDirection::Down,

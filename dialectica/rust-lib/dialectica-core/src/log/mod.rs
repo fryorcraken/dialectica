@@ -4,8 +4,10 @@
 //!
 //! PLAN.md §3.3: "the forum's whole state is a function of the ops a peer has
 //! seen [...] Ops are the authority; the view is a cache that can be rebuilt by
-//! replay." [`op::SignedOp`] says what is stored and [`arrival::Arrival`] says
-//! what orders it; neither says where it goes. This is where it goes.
+//! replay." [`op::SignedOp`] says what is stored — including, in its signed
+//! preimage, the counter that orders it — and [`arrival::Arrival`] records what
+//! the transport said on delivery, which orders nothing. Neither says where the
+//! op goes. This is where it goes.
 //!
 //! # The store decides nothing, and that is the whole design
 //!
@@ -44,12 +46,21 @@
 //! # Dedup happens before the sort, and that ordering is load-bearing
 //!
 //! [`cmp_ops`] has a precondition its signature cannot express: it is total over
-//! **distinct ops**, and two entries sharing an [`OpId`] but carrying different
-//! [`Arrival`] metadata compare `Equal`. That is correct — the pair really is
-//! tied under §5.7's rule, which has nothing to say about one op against itself
-//! — but a sort over such a pair leaves their relative order to the sort's
-//! stability, which is not a defined order and differs with the sequence a peer
-//! happened to receive in.
+//! **distinct ops**. Two entries sharing an [`OpId`] compare `Equal`, because the
+//! op id is the last resort in every branch and once it ties there is nothing
+//! left to separate them. That is correct — the pair really is tied under §5.7's
+//! rule, which has nothing to say about one op against itself — but a sort over
+//! such a pair leaves their relative order to the sort's stability, which is not
+//! a defined order and differs with the sequence a peer happened to receive in.
+//!
+//! **This module used to argue the hazard from two receipts of one op carrying
+//! different [`Arrival`] metadata.** That is no longer the reason, and the reason
+//! it replaced it with is stronger: both clock fields are inside the signed
+//! preimage, so one op cannot arrive with two different counters — that would be
+//! two ops with two ids. `cmp_ops` cannot name an `Arrival` at all, so a duplicate
+//! entry is a duplicate of one op rather than two accounts of it.
+//! [`crate::arrival::cmp_ops`] states this at length; the defence below is
+//! unchanged by it, because a duplicate op id is still a tie however it arose.
 //!
 //! This log cannot present that pair, and not by remembering not to: entries are
 //! held in a map keyed by [`OpId`], so one op id is one entry and `sorted`
@@ -71,7 +82,7 @@ pub mod sqlite;
 
 pub use sqlite::SqliteOpLog;
 
-use crate::arrival::{cmp_ops, Arrival, OpEntry};
+use crate::arrival::{clock_from_counters, cmp_ops, Arrival, OpEntry};
 use crate::identity::Address;
 use crate::op::{OpId, OpKind, SignedOp};
 use std::collections::HashMap;
@@ -367,17 +378,51 @@ pub trait OpLog {
     /// [`iter`]: OpLog::iter
     /// [`iter_stoa`]: OpLog::iter_stoa
     ///
-    /// **Taking the first entry is not the same as taking the most recent.**
-    /// [`cmp_ops`] leads with the highest Lamport timestamp only when the
-    /// transport supplied one; otherwise — which is every op today — it falls
-    /// back to *ascending op id*, an order carrying no recency whatever. Take the
-    /// first entry because that is the position the ordering rule defines as
-    /// current, not because this promises recency it cannot currently deliver.
-    /// See [`crate::arrival::cmp_ops`], which states which way each branch runs.
+    /// **Taking the first entry is not the same as taking the most recent, and
+    /// that is still true now that a counter reaches every op this build
+    /// publishes.** [`cmp_ops`] leads with the op's own counter, which is
+    /// **causal, not temporal**: it says its author had seen something at N,
+    /// never *when*. Among ops carrying no counter — the population predating
+    /// the clock fields — it falls back to *ascending op id*, which carries no
+    /// recency whatever.
+    ///
+    /// So: take the first entry because that is the position the ordering rule
+    /// defines as current, and **do not re-sort or add a tiebreak of your own.**
+    /// A resolver that decided first-entry carried no recency and compensated
+    /// would be a second implementation of the ordering rule, which is the one
+    /// thing every module reading this log may not do — two orders that disagree
+    /// produce no error anywhere. See [`crate::arrival::cmp_ops`], which states
+    /// which way each branch runs, and [`OpLog::clock`] for what a counter means.
     ///
     /// An op is never its own target: this returns the ops acting *on* `target`,
     /// not `target` itself.
     fn iter_target(&self, target: &OpId) -> Result<Vec<Entry>, OpLogError>;
+
+    /// This peer's Lamport clock for one Stoa.
+    ///
+    /// **Derived from the ops held, never stored.** There is no column, no
+    /// pragma and no in-memory counter behind this: it is a fold over the
+    /// counters of that Stoa's ops, so a restart or a rebuild-by-replay
+    /// recomputes the value the peer had. A stored counter would be a second
+    /// source of truth that disagrees with the log in exactly the cases that
+    /// matter — a store restored from a backup, a replay reaching further back
+    /// than the counter, a crash between appending an op and updating it.
+    ///
+    /// Zero where the peer holds no ops of that Stoa, which is the same fold
+    /// over an empty input rather than a special case.
+    ///
+    /// **The default implementation is the definition**, and an implementor
+    /// overriding it for speed is answering the same question a faster way. It
+    /// reads every op of the Stoa and takes the counters; the ordering the read
+    /// returns them in does not matter, because
+    /// [`clock_from_counters`](crate::arrival::clock_from_counters) sorts.
+    fn clock(&self, stoa: &Address) -> Result<u64, OpLogError> {
+        Ok(clock_from_counters(
+            self.iter_stoa(stoa)?
+                .into_iter()
+                .filter_map(|e| e.op.op.clock.map(|c| c.counter)),
+        ))
+    }
 
     /// How many distinct ops the log holds.
     fn len(&self) -> Result<usize, OpLogError>;
@@ -407,11 +452,14 @@ pub trait OpLog {
 ///
 /// Ops are held keyed by id and sorted on read. The alternative — an ordered
 /// structure maintained on insert — is worse here for a specific reason rather
-/// than on general principle: the sort key is `(Arrival, OpId)`, and `Arrival`
-/// is what the transport supplies. An ordered structure keyed on it would place
-/// an op by the metadata available at insert time and would need to be re-keyed
-/// if that ever changed. Sorting on read makes the order a pure function of the
-/// current contents, which is the property that has to hold whatever else moves.
+/// than on general principle: the sort key is `(Option<u64> counter, OpId)`,
+/// both taken from the op itself — which is what `sorted` below builds, via
+/// [`OpEntry::of`]. An ordered structure would fix each op's position at insert
+/// time, and this log's order is not an insert-time fact: an op carrying no
+/// counter sorts relative to a population that grows, and re-keying an ordered
+/// structure for that is work sorting-on-read does not have to do. Sorting on
+/// read makes the order a pure function of the current contents, which is the
+/// property that has to hold whatever else moves.
 ///
 /// A peer's log is bounded by what it has received and is read far less often
 /// than a rendered forum implies (§3.3 puts the read traffic on the materialised
@@ -446,9 +494,12 @@ impl MemoryOpLog {
         // costs nothing and removes a way for a future non-total comparison to
         // produce a peer-dependent result.
         out.sort_by(|a, b| {
+            // `OpEntry::of` reads the OP's counter. The entry's `arrival` is not
+            // reachable from here and is not consulted: it records what the
+            // transport said about a delivery, which orders nothing.
             cmp_ops(
-                OpEntry::new(&a.arrival, &a.id()),
-                OpEntry::new(&b.arrival, &b.id()),
+                OpEntry::of(&a.op.op, &a.id()),
+                OpEntry::of(&b.op.op, &b.id()),
             )
         });
         out
@@ -610,6 +661,7 @@ mod tests {
                 op: Op {
                     stoa,
                     author: author.public_key(),
+                    clock: None,
                     kind,
                 }
                 .sign(&author),

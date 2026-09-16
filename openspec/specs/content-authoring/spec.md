@@ -492,50 +492,102 @@ store.
   the target belongs to
 - **AND** no op is appended
 
-### Requirement: Publishing the same content twice publishes one op
+### Requirement: Authoring the same content twice publishes two ops, re-publishing one publishes one
 
-An op id is a function of the op's own bytes, and those bytes carry no timestamp
-and no value the publisher varies between calls. It follows that one identity
-publishing the same content into the same Stoa twice produces **one op**: the
-second publish SHALL succeed, SHALL report the same op id as the first, and the
-log SHALL hold one op.
+An op id is a function of the op's own bytes, and those bytes now carry a Lamport
+counter. Two consequences follow, and they are stated together because the
+difference between them is the whole of what this requirement settles:
 
-**This is contracted rather than left to be discovered, because it is correct for
-one case and wrong for another.** A double-submitted form is deduplicated, which
-is the behaviour wanted. A person deliberately posting the same short reply twice
-publishes once, which is not. No field distinguishes the two, and adding one is a
-change to what an op contains — `op-format` owns that, and its requirement "An op
-carries no ordering field and no per-peer state" is what currently forbids the
-obvious candidate.
+- **Authoring the same content twice produces two ops.** The counter advances
+  between the two publishes, so the bytes differ, so the ids differ. The log holds
+  both and a reader renders both.
+- **Re-publishing an op the peer already holds produces one op.** Every field
+  matches, counter included, so the bytes are identical and the id is the one the
+  log already has.
 
-Because both outcomes reach a caller as a success carrying one op id, the publish
-SHALL surface to its caller the newly-stored-or-already-present answer the append
-gives it. `op-log`'s "The caller is told whether the op was new" is what makes
-that answer available; what is required here is that a publish **passes it on**
-rather than discarding it, since a wire caller has no other way to tell a
-deduplicated publish from a first one.
+The rule underneath both is unchanged and is the same single rule it always was:
+**identical bytes are one op.** What this change alters is not the rule but its
+input — "the same content" used to be enough to make two publishes byte-identical
+and no longer is.
 
-The reply SHALL NOT report a refusal for a repeated publish. Refusing would make
-a retried submission an error, which is the case the behaviour is right for.
+**This reverses the prior behaviour for the authoring case**, which produced one
+op, and the reversal is the point rather than a side effect. The prior text
+recorded that the old behaviour was "correct for one case and wrong for another":
+a double-submitted form was deduplicated, which was wanted, and a person
+deliberately posting the same short reply twice published once, which was not. It
+named the missing field as the fix and named `op-format`'s "An op carries no
+ordering field and no per-peer state" as what forbade it. That prohibition is
+withdrawn by this change, so the fix is available and is taken.
+
+**The case the old behaviour served is now unserved, and that is a real cost
+rather than a neutral trade.** A double-submitted form publishes twice. Nothing
+in this capability prevents it, and nothing should: the two publishes are
+genuinely two ops, correctly signed, correctly ordered, and indistinguishable at
+this layer from a person posting "agreed" twice on purpose. **Suppressing a
+double submission belongs to whatever handles the submission**, where the two
+cases are distinguishable — a form that disables its own button, or a composer
+that will not re-send while a send is outstanding. It is named here so that it is
+a known gap with an owner rather than a regression discovered by a user seeing
+their post twice.
+
+The publish SHALL still surface to its caller the newly-stored-or-already-present
+answer the append gives it. That answer is now almost always "newly stored", and
+it is retained rather than dropped because the case it reports has not become
+impossible: **an op received from the network before this peer publishes an
+identical one is still deduplicated**, since the two are the same op only if
+every field matches, counter included.
+
+The reply SHALL NOT report a refusal for a repeated publish.
 
 #### Scenario: The same content published twice yields one op
 
-- **WHEN** one identity publishes a post with the same Stoa and the same body
-  twice
+- **WHEN** an op the peer already holds is published again, every field matching
+  including its counter
 - **THEN** both publishes succeed
 - **AND** both replies name the same op id
 - **AND** the log holds one op for it
 
+**This scenario keeps its name and its WHEN has gained the condition that was
+previously implicit.** The rule it tests is unchanged — an op id is a function of
+the op's bytes, so identical bytes are one op. What changed is that the bytes now
+include a counter, so publishing the same *body* twice is no longer sufficient to
+produce identical bytes. Every field matching is, and that is what re-publishing
+an op already held means.
+
+#### Scenario: The same body authored twice yields two ops
+
+- **WHEN** one identity authors and publishes a post with the same Stoa and the
+  same body twice, so that the counter advances between the two publishes
+- **THEN** both publishes succeed
+- **AND** the two replies name different op ids
+- **AND** the log holds both
+
+#### Scenario: The second authoring carries the higher counter
+
+- **WHEN** one identity authors and publishes the same body into one Stoa twice
+- **THEN** the second op's counter is greater than the first's
+- **AND** the ordering rule places the second ahead of the first
+
 #### Scenario: The caller is told the second publish was not new
 
-- **WHEN** a publish stores an op the log already held
+- **WHEN** a publish stores an op the log already held, every field matching
+  including the counter
 - **THEN** the reply states the op was already present
-- **AND** the first publish's reply stated it was newly stored
+- **AND** a publish that stored an op the log did not hold stated it was newly
+  stored
+
+#### Scenario: Two authorings of one body are both reported as newly stored
+
+- **WHEN** one identity authors and publishes the same body twice, so that the
+  counters differ
+- **THEN** each reply states its op was newly stored
+- **AND** neither is reported as already present
 
 #### Scenario: A repeated publish does not disturb the stored op
 
-- **WHEN** the same content is published twice
-- **THEN** the op read back is the one the first publish stored
+- **WHEN** an op the peer already holds is published again
+- **THEN** the op the first publish stored is readable unchanged
+- **AND** it is byte-identical to what was stored
 
 #### Scenario: Content differing in any way publishes a second op
 

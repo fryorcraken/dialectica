@@ -1187,9 +1187,12 @@ pub fn whoami_for(
 ///
 /// # There is no `order` parameter, and that is the decision
 ///
-/// §9.1 proposes `order` with `new` and `active`, and then records that both are
-/// defined by a Lamport timestamp that does not reach us, so both would today be
-/// served as ascending op id. **An accepted-but-degraded parameter is a method
+/// §9.1 proposes `order` with `new` and `active`. A Lamport counter now reaches
+/// us, inside the signed op, and the feed leads with it — but a counter is
+/// **causal, not temporal**, so it still cannot answer `new`, and `active` needs
+/// a reply fold nothing computes. Serving either name would mean serving the
+/// convergent order under a label it does not earn.
+/// **An accepted-but-degraded parameter is a method
 /// telling its caller a falsehood** — §9.1's own words are that "a view asking
 /// for `top` and silently getting `new` has been told a falsehood no test will
 /// catch", and the same objection applies with equal force to `new` itself.
@@ -1635,17 +1638,29 @@ fn parse_op_id(parsed: &Request, field: &str) -> Result<crate::op::OpId, String>
 /// inherits it: a caller with no genesis record cannot ask for a thread, rather
 /// than getting one with moderation silently not applied. See [`genesis_for`] for
 /// why a caller-supplied record is not a weakening.
+///
+/// # `now_ms` is the reading peer's clock, and it enters here
+///
+/// `dialectica-core` reads no clock anywhere — a pure crate that sampled
+/// `SystemTime` would make a read nondeterministic and untestable at the
+/// boundaries that matter. So the host's clock arrives as an argument, at the
+/// wire, which is where every other ambient value already enters.
+///
+/// **It affects the rendered text of an asserted time and nothing else.** Not
+/// which items come back, not their order, not their positions. A reader handed
+/// a wrong clock sees times clamped oddly and a correct thread.
 pub fn read_thread<L: crate::log::OpLog>(
     request: &str,
     log: &L,
     genesis: &crate::stoa::Genesis,
+    now_ms: u64,
 ) -> String {
     guarded("read_thread", || {
         let parsed = match Request::parse(request) {
             Ok(r) => r,
             Err(e) => return e,
         };
-        read_thread_inner(&parsed, log, genesis)
+        read_thread_inner(&parsed, log, genesis, now_ms)
     })
 }
 
@@ -1663,6 +1678,7 @@ fn read_thread_inner<L: crate::log::OpLog>(
     parsed: &Request,
     log: &L,
     genesis: &crate::stoa::Genesis,
+    now_ms: u64,
 ) -> String {
     let stoa = match parse_stoa(parsed) {
         Ok(s) => s,
@@ -1716,9 +1732,12 @@ fn read_thread_inner<L: crate::log::OpLog>(
         &moderators,
         &stoa,
         &thread,
-        page,
-        per_page,
-        include_hidden,
+        crate::thread::ReadOptions {
+            page,
+            per_page,
+            include_hidden,
+            now_ms,
+        },
     ) {
         Ok(Ok(page)) => thread_page_json(&page),
         // The three refusals reach the caller as three different messages, which
@@ -1740,6 +1759,7 @@ fn read_thread_inner<L: crate::log::OpLog>(
 pub fn read_thread_from_request<L: crate::log::OpLog>(
     request: &str,
     store: impl FnOnce() -> Result<L, crate::log::OpLogError>,
+    now_ms: u64,
 ) -> String {
     guarded("read_thread", || {
         let parsed = match Request::parse(request) {
@@ -1760,7 +1780,7 @@ pub fn read_thread_from_request<L: crate::log::OpLog>(
             Ok(l) => l,
             Err(e) => return error_json(&e.to_string()),
         };
-        read_thread_inner(&parsed, &log, &genesis)
+        read_thread_inner(&parsed, &log, &genesis, now_ms)
     })
 }
 
@@ -1827,6 +1847,14 @@ fn thread_page_json(page: &crate::thread::ThreadPage) -> String {
                 "author": item.author,
                 "isRevised": item.is_revised,
                 "moderation": { "state": state },
+                // THE ORDERING POSITION, as its own field and never merged with
+                // the time. A caller placing items in order reads this; a caller
+                // rendering a time reads `assertedTime`. The separation is the
+                // defence, and it is a shape rather than a rule anyone has to
+                // remember.
+                //
+                // NO SPEC: the field NAME is this change's choice.
+                "position": item.position,
             });
             // `as_object_mut` cannot fail on a value this function just built as
             // an object, but it is an `if let` rather than an `unwrap` because a
@@ -1846,6 +1874,34 @@ fn thread_page_json(page: &crate::thread::ThreadPage) -> String {
                             .iter()
                             .map(sanitised_json)
                             .collect::<Vec<_>>()),
+                    );
+                }
+                // OMITTED, never nulled, where the op predates the clock
+                // fields — the same rule `parent` and `body` follow above. A
+                // `null` would be a value a view could render; an absent key is
+                // a fact it has to handle.
+                //
+                // **`text` is a STRING and there is no number beside it.** A
+                // number that means a time invites a sort, and a view that
+                // sorted on it would produce a ranking every author can forge.
+                // Adding a millisecond field here would undo the whole device —
+                // see `crate::asserted_time`.
+                //
+                // NO SPEC: the field NAMES are this change's choice; the spec
+                // requires display text and an author-asserted marker and names
+                // no fields. `authorAsserted` is that marker, and it is a
+                // constant `true` rather than a derived value, because every
+                // time this system can carry IS the author's claim — a reader
+                // sees the fact at the point of rendering without having read
+                // the contract.
+                if let Some(asserted) = &item.asserted_time {
+                    map.insert(
+                        "assertedTime".to_string(),
+                        serde_json::json!({
+                            "text": asserted.text,
+                            "authorAsserted": true,
+                            "clamped": asserted.clamped,
+                        }),
                     );
                 }
                 if let Some(id) = decided_by {
@@ -2496,12 +2552,12 @@ fn refused(refusal: crate::authoring::Refusal) -> String {
 pub fn publish_post<L: crate::log::OpLog>(
     request: &str,
     log: &mut L,
-    key: &crate::identity::SecretKey,
+    who: &crate::authoring::Authorship<'_>,
     deliver: &mut dyn FnMut(&crate::op::OpId),
 ) -> String {
     publishing("publish_post", request, deliver, |parsed| {
         let body = required_string(&parsed.fields, "body")?.to_string();
-        crate::authoring::post(log, key, parsed.stoa, body).map_err(refused)
+        crate::authoring::post(log, who, parsed.stoa, body).map_err(refused)
     })
 }
 
@@ -2726,13 +2782,13 @@ fn membership_page_json(page: &crate::membership::MembershipPage) -> String {
 pub fn publish_reply<L: crate::log::OpLog>(
     request: &str,
     log: &mut L,
-    key: &crate::identity::SecretKey,
+    who: &crate::authoring::Authorship<'_>,
     deliver: &mut dyn FnMut(&crate::op::OpId),
 ) -> String {
     publishing("publish_reply", request, deliver, |parsed| {
         let parent = required_op_id(&parsed.fields, "parent")?;
         let body = required_string(&parsed.fields, "body")?.to_string();
-        crate::authoring::reply(log, key, parsed.stoa, parent, body).map_err(refused)
+        crate::authoring::reply(log, who, parsed.stoa, parent, body).map_err(refused)
     })
 }
 
@@ -2745,13 +2801,13 @@ pub fn publish_reply<L: crate::log::OpLog>(
 pub fn publish_vote<L: crate::log::OpLog>(
     request: &str,
     log: &mut L,
-    key: &crate::identity::SecretKey,
+    who: &crate::authoring::Authorship<'_>,
     deliver: &mut dyn FnMut(&crate::op::OpId),
 ) -> String {
     publishing("publish_vote", request, deliver, |parsed| {
         let target = required_op_id(&parsed.fields, "target")?;
         let direction = required_direction(&parsed.fields)?;
-        crate::authoring::vote(log, key, parsed.stoa, target, direction).map_err(refused)
+        crate::authoring::vote(log, who, parsed.stoa, target, direction).map_err(refused)
     })
 }
 
@@ -3006,6 +3062,19 @@ pub fn channel_exists_reply(reply: &serde_json::Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The one wall-clock reading every test in this module publishes and reads
+    /// against. Fixed, so an op id and a rendered time are functions of the
+    /// fixtures alone; and the same value on both sides, so an asserted time
+    /// never clamps against the reader's clock.
+    const A_TIME: u64 = 1_789_729_304_000;
+
+    fn by(key: &crate::identity::SecretKey) -> crate::authoring::Authorship<'_> {
+        crate::authoring::Authorship {
+            key,
+            asserted_ms: A_TIME,
+        }
+    }
 
     #[test]
     fn guard_converts_a_panic_into_the_error_shape() {
@@ -4042,10 +4111,9 @@ mod tests {
         let dir = OnboardingDir::new("keep-signs");
         let nonce = SlateNonce::generate().unwrap();
         let kept = keep_through_the_wire(&dir, nonce, Some(nonce), 0, &Unlock::Unencrypted);
-        let reported = PublicKey::from_bytes(
-            &hex::decode(kept["publicKey"].as_str().unwrap()).expect("hex"),
-        )
-        .expect("a parseable public key");
+        let reported =
+            PublicKey::from_bytes(&hex::decode(kept["publicKey"].as_str().unwrap()).expect("hex"))
+                .expect("a parseable public key");
         let path = kept["path"].as_u64().unwrap() as u32;
 
         // Reopened from disk, not the in-memory keystore the keep used — the
@@ -5551,8 +5619,8 @@ mod tests {
             .expect("a path is recorded");
         let signing = a_master_key().stoa_key_at_path(&a_stoa(), recorded);
         let sig = crate::identity::sign_op_bytes(&signing, b"a post");
-        let reported_key = hex::decode(probe["identity"].as_str().unwrap())
-            .expect("the probe reports hex");
+        let reported_key =
+            hex::decode(probe["identity"].as_str().unwrap()).expect("the probe reports hex");
         assert!(
             crate::identity::PublicKey::from_bytes(&reported_key).is_ok(),
             "the probe must report a parseable public key, got {probe}"
@@ -5638,7 +5706,7 @@ mod tests {
             r#"{{"stoa":"{}","body":"who signed this"}}"#,
             a_stoa().to_hex()
         );
-        let out = publish_post(&publish, &mut log, &signing, &mut ignored_delivery);
+        let out = publish_post(&publish, &mut log, &by(&signing), &mut ignored_delivery);
         let published = as_json(&out);
         assert!(published.get("error").is_none(), "got {out}");
 
@@ -5840,6 +5908,7 @@ mod tests {
         let op = Op {
             stoa: feed_genesis().address().unwrap(),
             author: key.public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -5870,6 +5939,7 @@ mod tests {
         let visible = Op {
             stoa,
             author: poster.public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -5881,6 +5951,7 @@ mod tests {
         let to_hide = Op {
             stoa,
             author: poster.public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -5893,6 +5964,7 @@ mod tests {
         let hide = Op {
             stoa,
             author: moderator.public_key(),
+            clock: None,
             kind: OpKind::Moderate {
                 target: to_hide.op.id(),
                 action: crate::op::ModerationAction::Hide,
@@ -6037,11 +6109,11 @@ mod tests {
 
             for (which, request) in cases {
                 let out = if which.starts_with("publish_vote") {
-                    publish_vote(&request, &mut log, &key, &mut ignored_delivery)
+                    publish_vote(&request, &mut log, &by(&key), &mut ignored_delivery)
                 } else if which.starts_with("publish_reply") {
-                    publish_reply(&request, &mut log, &key, &mut ignored_delivery)
+                    publish_reply(&request, &mut log, &by(&key), &mut ignored_delivery)
                 } else {
-                    publish_post(&request, &mut log, &key, &mut ignored_delivery)
+                    publish_post(&request, &mut log, &by(&key), &mut ignored_delivery)
                 };
                 let v = as_json(&out);
                 assert!(
@@ -6478,6 +6550,7 @@ mod tests {
         Op {
             stoa: feed_genesis().address().unwrap(),
             author: key.public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread,
                 parent,
@@ -6517,7 +6590,12 @@ mod tests {
     fn the_thread_reply_is_the_ecosystems_pagination_shape() {
         // Pinned by key name. A view is written against these exact names and
         // renaming one is a breaking change no type checker would catch.
-        let out = read_thread(&thread_request(""), &a_thread_log(), &feed_genesis());
+        let out = read_thread(
+            &thread_request(""),
+            &a_thread_log(),
+            &feed_genesis(),
+            A_TIME,
+        );
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v["items"].is_array(), "got {out}");
         assert_eq!(v["page"], 0);
@@ -6602,6 +6680,7 @@ mod tests {
         let hide_the_root = Op {
             stoa: feed_genesis().address().unwrap(),
             author: moderator.public_key(),
+            clock: None,
             kind: OpKind::Moderate {
                 target: root.op.id(),
                 action: crate::op::ModerationAction::Hide,
@@ -6611,7 +6690,12 @@ mod tests {
 
         // Case 1: an ordinary served thread — an unmoderated root with no parent,
         // and an unmoderated reply with one.
-        let plain = read_thread(&thread_request(""), &a_thread_log(), &feed_genesis());
+        let plain = read_thread(
+            &thread_request(""),
+            &a_thread_log(),
+            &feed_genesis(),
+            A_TIME,
+        );
         let (top, items) = thread_reply_key_sets(&plain);
         assert_eq!(
             top,
@@ -6631,6 +6715,12 @@ mod tests {
                 "id",
                 "isRevised",
                 "moderation",
+                // The ordering position. Its own field, never merged with a
+                // time — a caller placing items in order reads this and nothing
+                // else. `assertedTime` is ABSENT here because this fixture's ops
+                // predate the clock fields, which is the conditional case case 4
+                // below covers.
+                "position",
                 "thread",
             ],
             "the root's complete key set — no parent, ONE author field, and \
@@ -6648,6 +6738,7 @@ mod tests {
                 "isRevised",
                 "moderation",
                 "parent",
+                "position",
                 "thread",
             ],
             "a reply's complete key set is the root's plus `parent`: {plain}"
@@ -6659,7 +6750,7 @@ mod tests {
         for op in [root.clone(), reply.clone(), hide_the_root.clone()] {
             hidden_log.append(op, Arrival::unordered()).unwrap();
         }
-        let withheld = read_thread(&thread_request(""), &hidden_log, &feed_genesis());
+        let withheld = read_thread(&thread_request(""), &hidden_log, &feed_genesis(), A_TIME);
         let (_, withheld_items) = thread_reply_key_sets(&withheld);
         assert_eq!(
             withheld_items[0],
@@ -6669,6 +6760,7 @@ mod tests {
                 "id",
                 "isRevised",
                 "moderation",
+                "position",
                 "thread",
             ],
             "a withheld hidden root omits `body` and `attachments` and gains \
@@ -6702,6 +6794,243 @@ mod tests {
             "an unmoderated item carries `state` alone — `decidedBy` omitted, not \
              nulled: {withheld}"
         );
+
+        // Case 4: an item whose op CARRIES a clock. `assertedTime` is the fourth
+        // conditional key, present exactly when the op carries one — so the
+        // fixtures above, whose ops predate the clock fields, cannot pin it.
+        //
+        // The nested object is enumerated for the same reason the outer ones
+        // are, and this is the enumeration that matters most: **an
+        // `assertedTime` gaining a numeric field would undo the whole device.**
+        // A view that could reach the instant as a number could sort by it, and
+        // that ranking is forgeable by every author.
+        let stoa = feed_genesis().address().unwrap();
+        let author = feed_key(3);
+        let timed_root = Op {
+            stoa,
+            author: author.public_key(),
+            clock: Some(crate::op::OpClock {
+                counter: 1,
+                asserted_ms: A_TIME,
+            }),
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: "timed".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&author);
+        let timed_id = timed_root.op.id();
+        let mut timed_log = MemoryOpLog::new();
+        timed_log.append(timed_root, Arrival::unordered()).unwrap();
+
+        let timed = read_thread(
+            &format!(
+                r#"{{"stoa":"{}","thread":"{}"}}"#,
+                stoa.to_hex(),
+                timed_id.to_hex()
+            ),
+            &timed_log,
+            &feed_genesis(),
+            A_TIME,
+        );
+        let (_, timed_items) = thread_reply_key_sets(&timed);
+        assert_eq!(
+            timed_items[0],
+            vec![
+                "assertedTime",
+                "attachments",
+                "author",
+                "body",
+                "currentVersion",
+                "id",
+                "isRevised",
+                "moderation",
+                "position",
+                "thread",
+            ],
+            "an item whose op carries a clock gains `assertedTime` and nothing \
+             else: {timed}"
+        );
+
+        let timed_v: serde_json::Value = serde_json::from_str(&timed).unwrap();
+        let mut asserted: Vec<&String> = timed_v["items"][0]["assertedTime"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect();
+        asserted.sort();
+        assert_eq!(
+            asserted,
+            vec!["authorAsserted", "clamped", "text"],
+            "the asserted time carries display text, the author-asserted marker \
+             and the clamped flag — and NO NUMBER. A millisecond field here \
+             would be a value a view could sort by, which is a ranking every \
+             author can forge: {timed}"
+        );
+        assert!(
+            timed_v["items"][0]["assertedTime"]["text"].is_string(),
+            "the time must be text and not a number: {timed}"
+        );
+        assert_eq!(timed_v["items"][0]["assertedTime"]["authorAsserted"], true);
+    }
+
+    /// A one-op thread whose root asserts `asserted_ms`, read against `now_ms`.
+    ///
+    /// Two clocks, deliberately separate parameters: the author's claim and the
+    /// reading peer's own reading. Every other fixture in this module passes
+    /// `A_TIME` for both, which is exactly why no clamp was ever observable.
+    fn read_a_thread_asserting(asserted_ms: u64, now_ms: u64) -> serde_json::Value {
+        let stoa = feed_genesis().address().unwrap();
+        let author = feed_key(4);
+        let root = Op {
+            stoa,
+            author: author.public_key(),
+            clock: Some(crate::op::OpClock {
+                counter: 1,
+                asserted_ms,
+            }),
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: "a post claiming a time".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&author);
+        let id = root.op.id();
+        let mut log = MemoryOpLog::new();
+        log.append(root, Arrival::unordered()).unwrap();
+        let out = read_thread(
+            &format!(
+                r#"{{"stoa":"{}","thread":"{}"}}"#,
+                stoa.to_hex(),
+                id.to_hex()
+            ),
+            &log,
+            &feed_genesis(),
+            now_ms,
+        );
+        serde_json::from_str(&out).unwrap_or_else(|e| panic!("read_thread emitted {out}: {e}"))
+    }
+
+    #[test]
+    fn a_thread_read_clamps_an_implausible_asserted_time_and_reports_the_clamp() {
+        // **The clamp was unpinned end to end, and two review mutations proved
+        // it**: `"clamped": false` at the JSON emitter, and passing the op's own
+        // asserted time as the reader's clock in `thread.rs`, each left the whole
+        // suite green. `asserted_time.rs` pins `format_asserted` beautifully, but
+        // it calls the function directly; NOTHING pinned that a READ wires the
+        // reader's clock into it and carries the verdict out to the wire.
+        //
+        // **Every expectation below is hardcoded and derived independently of
+        // this crate** — `date -u -d @<seconds>` for each instant — so the
+        // assertions cannot agree with a broken implementation. Do not update
+        // them to match a changed output: read the new value and decide whether
+        // it is right first.
+        //
+        // The reader's clock is A_TIME = 1_789_729_304_000 ms = 2026-09-18T11:01:44Z.
+        // The allowance is 24h, so the upper clamp target is that plus 86_400_000 ms
+        // = 1_789_815_704_000 ms = 2026-09-19T11:01:44Z. The floor is 2010-01-01.
+        let cases: &[(&str, u64, bool, &str)] = &[
+            (
+                "an author's claim inside the allowance passes through as their own",
+                // A_TIME - 60_000: one minute before the reader's clock.
+                1_789_729_244_000,
+                false,
+                "2026-09-18T11:00:44Z",
+            ),
+            (
+                "a claim of the year 2387 is clamped to the allowance edge",
+                // 13_170_000_000_000 ms = 2387-05-05T13:20:00Z, comfortably past
+                // any allowance and the value the kin project's ranking defect
+                // (PLAN.md Appendix A) is measured against.
+                13_170_000_000_000,
+                true,
+                "2026-09-19T11:01:44Z",
+            ),
+            (
+                "a claim one millisecond past the allowance is clamped, so the \
+                 edge is where the code says it is",
+                1_789_815_704_001,
+                true,
+                "2026-09-19T11:01:44Z",
+            ),
+            (
+                "a claim exactly at the allowance edge is NOT clamped — the same \
+                 fixture one millisecond lower, so a test that clamped everything \
+                 could not pass both",
+                1_789_815_704_000,
+                false,
+                "2026-09-19T11:01:44Z",
+            ),
+            (
+                "an unset system clock's zero is clamped up to the floor rather \
+                 than rendered as 1970",
+                0,
+                true,
+                "2010-01-01T00:00:00Z",
+            ),
+        ];
+
+        for (what, asserted_ms, want_clamped, want_text) in cases {
+            let v = read_a_thread_asserting(*asserted_ms, A_TIME);
+            let at = &v["items"][0]["assertedTime"];
+            assert_eq!(
+                at["clamped"], *want_clamped,
+                "{what}: the wire must report the clamp verdict, got {v}"
+            );
+            assert_eq!(
+                at["text"], *want_text,
+                "{what}: the wire must carry the clamped text and not the \
+                 author's raw claim, got {v}"
+            );
+            // Unconditionally true, clamped or not: a clamped value is still
+            // presented under the author-assertion marking, because a view must
+            // never read a substituted instant as one this peer verified.
+            assert_eq!(at["authorAsserted"], true, "{what}: got {v}");
+        }
+    }
+
+    #[test]
+    fn a_thread_read_clamps_against_the_readers_clock_rather_than_the_ops_own() {
+        // The second surviving mutation, pinned directly. Feeding the op's own
+        // asserted time back in as `now_ms` — which is what `thread.rs:787`
+        // became — makes every value in range by construction, so clamping can
+        // never fire on any read.
+        //
+        // The SAME asserted instant is read twice against two different reader
+        // clocks and gets two different verdicts. That is the property a single
+        // fixture value cannot express, and it is why every `A_TIME`-on-both-
+        // sides read in this file is blind to the wiring.
+        //
+        // 1_900_000_000_000 ms = 2030-03-17T17:46:40Z, by `date -u -d @1900000000`.
+        let asserted_ms = 1_900_000_000_000;
+
+        // A reader in 2026 is far behind that claim, so it clamps.
+        let behind = read_a_thread_asserting(asserted_ms, A_TIME);
+        assert_eq!(
+            behind["items"][0]["assertedTime"]["clamped"], true,
+            "a 2030 claim read by a 2026 peer is implausible: {behind}"
+        );
+        assert_eq!(
+            behind["items"][0]["assertedTime"]["text"], "2026-09-19T11:01:44Z",
+            "and it clamps to the allowance edge, not to the reader's clock: {behind}"
+        );
+
+        // A reader whose own clock has reached 2030 sees the same op as ordinary,
+        // and sees the author's own value.
+        let caught_up = read_a_thread_asserting(asserted_ms, asserted_ms + 1000);
+        assert_eq!(
+            caught_up["items"][0]["assertedTime"]["clamped"], false,
+            "the same op read by a peer whose clock has caught up is in range: \
+             {caught_up}"
+        );
+        assert_eq!(
+            caught_up["items"][0]["assertedTime"]["text"], "2030-03-17T17:46:40Z",
+            "and it renders the author's own instant: {caught_up}"
+        );
     }
 
     #[test]
@@ -6716,11 +7045,20 @@ mod tests {
         // and names no field for it. `design.md` §4 carries the reasoning,
         // including that a caller still reading `authorKey` gets a missing field
         // rather than a wrong value.
-        let out = read_thread(&thread_request(""), &a_thread_log(), &feed_genesis());
+        let out = read_thread(
+            &thread_request(""),
+            &a_thread_log(),
+            &feed_genesis(),
+            A_TIME,
+        );
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         let root = &v["items"][0];
 
-        assert_eq!(root["author"], feed_key(2).public_key().to_hex(), "got {out}");
+        assert_eq!(
+            root["author"],
+            feed_key(2).public_key().to_hex(),
+            "got {out}"
+        );
         // And NO name of any kind travels, nor a second author identifier: a name
         // and a mark are pure functions of the key, so sending one would put a
         // derivable value on the wire beside the material it is derived from,
@@ -6752,6 +7090,7 @@ mod tests {
         let hide = Op {
             stoa: feed_genesis().address().unwrap(),
             author: moderator.public_key(),
+            clock: None,
             kind: OpKind::Moderate {
                 target: reply.op.id(),
                 action: crate::op::ModerationAction::Hide,
@@ -6767,6 +7106,7 @@ mod tests {
             &thread_request(r#""includeHidden":true"#),
             &log,
             &feed_genesis(),
+            A_TIME,
         );
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         let items = v["items"].as_array().unwrap();
@@ -6803,6 +7143,7 @@ mod tests {
         let hide = Op {
             stoa: feed_genesis().address().unwrap(),
             author: moderator.public_key(),
+            clock: None,
             kind: OpKind::Moderate {
                 target: root.op.id(),
                 action: crate::op::ModerationAction::Hide,
@@ -6818,6 +7159,7 @@ mod tests {
             &thread_request(""),
             &hidden_log,
             &feed_genesis(),
+            A_TIME,
         ))
         .unwrap();
         let withheld_root = &withheld["items"][0];
@@ -6833,6 +7175,7 @@ mod tests {
         let cleared = Op {
             stoa: feed_genesis().address().unwrap(),
             author: author.public_key(),
+            clock: None,
             kind: OpKind::Revise {
                 target: root.op.id(),
                 body: String::new(),
@@ -6848,6 +7191,7 @@ mod tests {
             &thread_request(""),
             &cleared_log,
             &feed_genesis(),
+            A_TIME,
         ))
         .unwrap();
         let emptied_root = &emptied["items"][0];
@@ -6872,7 +7216,7 @@ mod tests {
             log.append(op, Arrival::unordered()).unwrap();
         }
 
-        let out = read_thread(&thread_request(""), &log, &feed_genesis());
+        let out = read_thread(&thread_request(""), &log, &feed_genesis(), A_TIME);
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         let ids: Vec<&str> = v["items"]
             .as_array()
@@ -6897,6 +7241,7 @@ mod tests {
         let vote = Op {
             stoa: feed_genesis().address().unwrap(),
             author: voter.public_key(),
+            clock: None,
             kind: OpKind::Vote {
                 target: root.op.id(),
                 direction: crate::op::VoteDirection::Up,
@@ -6912,7 +7257,7 @@ mod tests {
         let stoa = feed_genesis().address().unwrap().to_hex();
         let ask = |id: crate::op::OpId| {
             let request = format!(r#"{{"stoa":"{stoa}","thread":"{}"}}"#, id.to_hex());
-            let out = read_thread(&request, &log, &feed_genesis());
+            let out = read_thread(&request, &log, &feed_genesis(), A_TIME);
             let v: serde_json::Value = serde_json::from_str(&out).unwrap();
             assert!(
                 v.get("items").is_none(),
@@ -6952,6 +7297,7 @@ mod tests {
                 Op {
                     stoa,
                     author: voter.public_key(),
+                    clock: None,
                     kind: OpKind::Vote {
                         target: root.op.id(),
                         direction: crate::op::VoteDirection::Up,
@@ -6964,6 +7310,7 @@ mod tests {
                 Op {
                     stoa,
                     author: moderator.public_key(),
+                    clock: None,
                     kind: OpKind::Moderate {
                         target: root.op.id(),
                         action: crate::op::ModerationAction::Hide,
@@ -6976,6 +7323,7 @@ mod tests {
                 Op {
                     stoa,
                     author: moderator.public_key(),
+                    clock: None,
                     kind: OpKind::StoaMetadata {
                         title: "Agora, renamed".to_string(),
                         description: "today's description".to_string(),
@@ -6988,6 +7336,7 @@ mod tests {
                 Op {
                     stoa,
                     author: author.public_key(),
+                    clock: None,
                     kind: OpKind::Revise {
                         target: root.op.id(),
                         body: "v2".to_string(),
@@ -7013,7 +7362,7 @@ mod tests {
                 "{name} must be HELD, or a refusal proves nothing about kinds"
             );
             let request = format!(r#"{{"stoa":"{stoa_hex}","thread":"{}"}}"#, id.to_hex());
-            let out = read_thread(&request, &log, &feed_genesis());
+            let out = read_thread(&request, &log, &feed_genesis(), A_TIME);
             let v: serde_json::Value = serde_json::from_str(&out).unwrap();
             assert!(
                 v.get("items").is_none(),
@@ -7056,11 +7405,13 @@ mod tests {
             &format!(r#"{{"stoa":"{stoa}"}}"#),
             &a_thread_log(),
             &feed_genesis(),
+            A_TIME,
         ));
         let wrong_type = error_message(&read_thread(
             &format!(r#"{{"stoa":"{stoa}","thread":7}}"#),
             &a_thread_log(),
             &feed_genesis(),
+            A_TIME,
         ));
         assert!(
             missing.contains("missing field"),
@@ -7084,6 +7435,7 @@ mod tests {
         let hide = Op {
             stoa: feed_genesis().address().unwrap(),
             author: moderator.public_key(),
+            clock: None,
             kind: OpKind::Moderate {
                 target: reply.op.id(),
                 action: crate::op::ModerationAction::Hide,
@@ -7095,11 +7447,12 @@ mod tests {
             log.append(op, Arrival::unordered()).unwrap();
         }
 
-        let omitted = read_thread(&thread_request(""), &log, &feed_genesis());
+        let omitted = read_thread(&thread_request(""), &log, &feed_genesis(), A_TIME);
         let nulled = read_thread(
             &thread_request(r#""includeHidden":null"#),
             &log,
             &feed_genesis(),
+            A_TIME,
         );
         assert_eq!(omitted, nulled, "a null must read as absent here");
 
@@ -7112,6 +7465,7 @@ mod tests {
             &thread_request(r#""includeHidden":true"#),
             &log,
             &feed_genesis(),
+            A_TIME,
         ))
         .unwrap();
         assert_eq!(asked["items"].as_array().unwrap().len(), 2);
@@ -7138,6 +7492,7 @@ mod tests {
         let hide = Op {
             stoa: feed_genesis().address().unwrap(),
             author: moderator.public_key(),
+            clock: None,
             kind: OpKind::Moderate {
                 target: reply.op.id(),
                 action: crate::op::ModerationAction::Hide,
@@ -7163,7 +7518,7 @@ mod tests {
             "the fixture must name a genuinely different Stoa"
         );
 
-        let out = read_thread(&thread_request(""), &log, &elsewhere);
+        let out = read_thread(&thread_request(""), &log, &elsewhere, A_TIME);
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(
             v.get("error").is_some(),
@@ -7178,7 +7533,7 @@ mod tests {
         // The other half: with the right pairing the same read succeeds AND the
         // moderation binds — so the refusal above is the check doing its job
         // rather than the read being broken for every genesis record.
-        let correct = read_thread(&thread_request(""), &log, &feed_genesis());
+        let correct = read_thread(&thread_request(""), &log, &feed_genesis(), A_TIME);
         let cv: serde_json::Value = serde_json::from_str(&correct).unwrap();
         assert!(cv.get("error").is_none(), "got {correct}");
         let ids: Vec<&str> = cv["items"]
@@ -7200,6 +7555,7 @@ mod tests {
         let out = read_thread_from_request(
             &thread_request(&format!(r#""genesis":"{}""#, genesis_hex())),
             || Ok::<_, crate::log::OpLogError>(a_thread_log()),
+            A_TIME,
         );
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("error").is_none(), "got {out}");
@@ -7223,6 +7579,7 @@ mod tests {
                 hex::encode(attacker.canonical_bytes().unwrap())
             )),
             || Ok::<_, crate::log::OpLogError>(a_thread_log()),
+            A_TIME,
         );
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("error").is_some(), "got {out}");
@@ -7241,6 +7598,7 @@ mod tests {
                     "unable to open database file".into(),
                 ))
             },
+            A_TIME,
         );
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("items").is_none(), "got {out}");
@@ -7289,7 +7647,7 @@ mod tests {
             }
         }
 
-        let out = read_thread(&thread_request(""), &PanickingLog, &feed_genesis());
+        let out = read_thread(&thread_request(""), &PanickingLog, &feed_genesis(), A_TIME);
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("error").is_some(), "got {out}");
         assert!(v.get("items").is_none());
@@ -7314,6 +7672,7 @@ mod tests {
             &thread_request(r#""perPage":100000"#),
             &log,
             &feed_genesis(),
+            A_TIME,
         ))
         .unwrap();
         assert!(huge.get("error").is_none(), "an oversized ask is served");
@@ -7323,6 +7682,7 @@ mod tests {
             &thread_request(r#""perPage":0"#),
             &log,
             &feed_genesis(),
+            A_TIME,
         ))
         .unwrap();
         assert_eq!(
@@ -7338,6 +7698,7 @@ mod tests {
             &thread_request(r#""page":18446744073709551615"#),
             &a_thread_log(),
             &feed_genesis(),
+            A_TIME,
         );
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("error").is_none(), "got {out}");
@@ -7394,7 +7755,7 @@ mod tests {
         let out = publish_post(
             &publish_request(r#""body":"First""#),
             &mut log,
-            &key,
+            &by(&key),
             &mut ignored_delivery,
         );
         let v = as_json(&out);
@@ -7416,9 +7777,15 @@ mod tests {
     }
 
     #[test]
-    fn a_second_publish_of_one_body_says_it_was_not_new_and_names_the_same_op() {
-        // The contracted duplication behaviour, at the wire, where a caller has
-        // no other way to tell the two apart.
+    fn a_second_authoring_of_one_body_is_a_second_op_and_says_so() {
+        // **THE REVERSAL, at the wire**, where a caller has no other way to tell
+        // what happened. The same request submitted twice used to produce one op
+        // and a `wasNew: false`; it now produces two ops and two `wasNew: true`s,
+        // because the op's bytes carry a counter that advances between them.
+        //
+        // Reporting the second as already-present would tell a user their post
+        // was not saved when it was — which is why `wasNew` is asserted here and
+        // not only the op ids.
         let mut log = MemoryOpLog::new();
         let key = publish_key();
         let request = publish_request(r#""body":"twice""#);
@@ -7426,26 +7793,70 @@ mod tests {
         let first = as_json(&publish_post(
             &request,
             &mut log,
-            &key,
+            &by(&key),
             &mut ignored_delivery,
         ));
         let second = as_json(&publish_post(
             &request,
             &mut log,
-            &key,
+            &by(&key),
             &mut ignored_delivery,
         ));
 
-        assert_eq!(first["opId"], second["opId"]);
-        assert_eq!(first["wasNew"], true, "the first publish stored it");
+        assert_ne!(
+            first["opId"], second["opId"],
+            "authoring one body twice publishes two ops"
+        );
+        assert_eq!(first["wasNew"], true);
         assert_eq!(
-            second["wasNew"], false,
-            "the second must report already-present rather than failing"
+            second["wasNew"], true,
+            "the second authoring stored something new and must say so"
         );
-        assert!(
-            second.get("error").is_none(),
-            "a repeated publish is not a refusal: it is the retried-submission case"
-        );
+        for reply in [&first, &second] {
+            assert!(
+                reply.get("error").is_none(),
+                "neither publish is a refusal: {reply}"
+            );
+        }
+        assert_eq!(log.len().unwrap(), 2, "two ops");
+    }
+
+    #[test]
+    fn appending_an_op_the_peer_already_holds_reports_already_present() {
+        // The outcome that still arrives, and the reason the view must keep
+        // handling it: an op received from the network before this peer
+        // publishes an identical one is still deduplicated, because two ops are
+        // the same op only if EVERY field matches, counter included.
+        //
+        // **This has become uncommon and is NOT dropped on that account.** A
+        // rarer branch is a branch that is harder to notice breaking.
+        //
+        // **Named for the LOG fact, because that is what it measures.** It was
+        // `re_publishing_an_op_the_peer_holds_says_it_was_not_new`, and in this
+        // file `wasNew` is the wire reply field and the only thing that reports
+        // newness to a caller — so the name read as a claim about the boundary's
+        // report. The second half calls `log.append` directly: it never calls
+        // `publish_post`, never produces a JSON reply, and never reads `wasNew`,
+        // so a change that dropped or inverted `wasNew` on the dedup path would
+        // leave it green. Its sibling above DOES assert `wasNew` on the wire,
+        // which is what made the pair read as two wire assertions.
+        let mut log = MemoryOpLog::new();
+        let key = publish_key();
+        let request = publish_request(r#""body":"once""#);
+
+        let first = as_json(&publish_post(
+            &request,
+            &mut log,
+            &by(&key),
+            &mut ignored_delivery,
+        ));
+        let id = crate::op::OpId::from_hex(first["opId"].as_str().unwrap()).unwrap();
+        let held = log.get(&id).unwrap().unwrap().op;
+
+        // The re-publish: the SAME SIGNED OP appended again, which is what
+        // receiving it from the network amounts to.
+        let again = log.append(held, Arrival::unordered()).unwrap();
+        assert_eq!(again, crate::log::Appended::AlreadyPresent);
         assert_eq!(log.len().unwrap(), 1, "one op");
     }
 
@@ -7460,7 +7871,7 @@ mod tests {
         let root = as_json(&publish_post(
             &publish_request(r#""body":"the head""#),
             &mut log,
-            &key,
+            &by(&key),
             &mut ignored_delivery,
         ));
         let root_id = root["opId"].as_str().unwrap().to_string();
@@ -7468,7 +7879,7 @@ mod tests {
         let middle = as_json(&publish_reply(
             &publish_request(&format!(r#""parent":"{root_id}","body":"a reply""#)),
             &mut log,
-            &key,
+            &by(&key),
             &mut ignored_delivery,
         ));
         let middle_id = middle["opId"].as_str().unwrap().to_string();
@@ -7477,7 +7888,7 @@ mod tests {
         let leaf = as_json(&publish_reply(
             &publish_request(&format!(r#""parent":"{middle_id}","body":"and again""#)),
             &mut log,
-            &key,
+            &by(&key),
             &mut ignored_delivery,
         ));
         assert!(leaf.get("error").is_none(), "got {leaf}");
@@ -7511,7 +7922,7 @@ mod tests {
         let root = as_json(&publish_post(
             &publish_request(r#""body":"the head""#),
             &mut log,
-            &key,
+            &by(&key),
             &mut ignored_delivery,
         ));
         let root_id = root["opId"].as_str().unwrap();
@@ -7522,7 +7933,7 @@ mod tests {
                 r#""parent":"{root_id}","thread":"{root_id}","body":"filed by hand""#
             )),
             &mut log,
-            &key,
+            &by(&key),
             &mut ignored_delivery,
         );
         let v = as_json(&out);
@@ -7557,7 +7968,7 @@ mod tests {
         let victim = as_json(&publish_post(
             &publish_request(r#""body":"the subject""#),
             &mut log,
-            &key,
+            &by(&key),
             &mut ignored_delivery,
         ));
         let target = victim["opId"].as_str().unwrap().to_string();
@@ -7571,9 +7982,9 @@ mod tests {
                 publish_request(&format!(r#""target":"{target}","direction":"up",{forged}"#)),
             ];
             let outs = [
-                publish_post(&requests[0], &mut log, &key, &mut ignored_delivery),
-                publish_reply(&requests[1], &mut log, &key, &mut ignored_delivery),
-                publish_vote(&requests[2], &mut log, &key, &mut ignored_delivery),
+                publish_post(&requests[0], &mut log, &by(&key), &mut ignored_delivery),
+                publish_reply(&requests[1], &mut log, &by(&key), &mut ignored_delivery),
+                publish_vote(&requests[2], &mut log, &by(&key), &mut ignored_delivery),
             ];
             for (out, request) in outs.iter().zip(requests.iter()) {
                 let v = as_json(out);
@@ -7601,7 +8012,7 @@ mod tests {
         let target = as_json(&publish_post(
             &publish_request(r#""body":"the subject""#),
             &mut log,
-            &key,
+            &by(&key),
             &mut ignored_delivery,
         ))["opId"]
             .as_str()
@@ -7636,9 +8047,9 @@ mod tests {
         ];
         for (op, request, field) in cases {
             let out = match op {
-                "post" => publish_post(&request, &mut log, &key, &mut ignored_delivery),
-                "reply" => publish_reply(&request, &mut log, &key, &mut ignored_delivery),
-                _ => publish_vote(&request, &mut log, &key, &mut ignored_delivery),
+                "post" => publish_post(&request, &mut log, &by(&key), &mut ignored_delivery),
+                "reply" => publish_reply(&request, &mut log, &by(&key), &mut ignored_delivery),
+                _ => publish_vote(&request, &mut log, &by(&key), &mut ignored_delivery),
             };
             let v = as_json(&out);
             assert!(v.get("error").is_some(), "for {request}, got {out}");
@@ -7684,7 +8095,7 @@ mod tests {
         let target = as_json(&publish_post(
             &publish_request(r#""body":"the subject""#),
             &mut log,
-            &key,
+            &by(&key),
             &mut ignored_delivery,
         ))["opId"]
             .as_str()
@@ -7725,7 +8136,7 @@ mod tests {
                 "stoa": stoa, "target": target, "direction": wrong
             })
             .to_string();
-            let out = publish_vote(&request, &mut log, &key, &mut ignored_delivery);
+            let out = publish_vote(&request, &mut log, &by(&key), &mut ignored_delivery);
             let v = as_json(&out);
             let message = v["error"]
                 .as_str()
@@ -7766,13 +8177,13 @@ mod tests {
         let missing = as_json(&publish_post(
             &format!(r#"{{"stoa":"{stoa}"}}"#),
             &mut log,
-            &key,
+            &by(&key),
             &mut ignored_delivery,
         ));
         let wrong_typed = as_json(&publish_post(
             &format!(r#"{{"stoa":"{stoa}","body":7}}"#),
             &mut log,
-            &key,
+            &by(&key),
             &mut ignored_delivery,
         ));
 
@@ -7790,13 +8201,13 @@ mod tests {
         let stoa_missing = as_json(&publish_post(
             r#"{"body":"x"}"#,
             &mut log,
-            &key,
+            &by(&key),
             &mut ignored_delivery,
         ));
         let stoa_wrong = as_json(&publish_post(
             r#"{"stoa":7,"body":"x"}"#,
             &mut log,
-            &key,
+            &by(&key),
             &mut ignored_delivery,
         ));
         assert!(stoa_missing["error"].as_str().unwrap().contains("missing"));
@@ -7815,7 +8226,7 @@ mod tests {
         let out = publish_post(
             &publish_request(r#""body":"""#),
             &mut log,
-            &publish_key(),
+            &by(&publish_key()),
             &mut ignored_delivery,
         );
         let v = as_json(&out);
@@ -7837,7 +8248,7 @@ mod tests {
         let target = as_json(&publish_post(
             &publish_request(r#""body":"the subject""#),
             &mut log,
-            &key,
+            &by(&key),
             &mut ignored_delivery,
         ))["opId"]
             .as_str()
@@ -7852,7 +8263,7 @@ mod tests {
             let out = publish_vote(
                 &publish_request(&format!(r#""target":"{target}","direction":"{name}""#)),
                 &mut log,
-                &key,
+                &by(&key),
                 &mut ignored_delivery,
             );
             let v = as_json(&out);
@@ -7873,7 +8284,7 @@ mod tests {
             let out = publish_vote(
                 &publish_request(&format!(r#""target":"{target}","direction":"{bad}""#)),
                 &mut log,
-                &key,
+                &by(&key),
                 &mut ignored_delivery,
             );
             let v = as_json(&out);
@@ -7902,7 +8313,7 @@ mod tests {
         let target = as_json(&publish_post(
             &publish_request(r#""body":"the subject""#),
             &mut log,
-            &key,
+            &by(&key),
             &mut ignored_delivery,
         ))["opId"]
             .as_str()
@@ -7912,7 +8323,7 @@ mod tests {
         let out = publish_vote(
             &publish_request(&format!(r#""target":"{target}","direction":"up""#)),
             &mut log,
-            &key,
+            &by(&key),
             &mut ignored_delivery,
         );
         let v = as_json(&out);
@@ -7944,7 +8355,7 @@ mod tests {
         let posted = as_json(&publish_post(
             &publish_request(r#""body":"unaffected""#),
             &mut log,
-            &key,
+            &by(&key),
             &mut ignored_delivery,
         ));
         let target = posted["opId"].as_str().unwrap().to_string();
@@ -7954,7 +8365,7 @@ mod tests {
             publish_vote(
                 &publish_request(&format!(r#""target":"{target}","direction":"{direction}""#)),
                 &mut log,
-                &key,
+                &by(&key),
                 &mut ignored_delivery,
             );
         }
@@ -7994,7 +8405,7 @@ mod tests {
         let out = publish_post(
             &publish_request(r#""body":"ordered""#),
             &mut log,
-            &key,
+            &by(&key),
             &mut |id: &crate::op::OpId| delivered.push(*id),
         );
         let v = as_json(&out);
@@ -8019,7 +8430,7 @@ mod tests {
         let out = publish_reply(
             &publish_request(&format!(r#""parent":"{absent}","body":"x""#)),
             &mut log,
-            &key,
+            &by(&key),
             &mut |_: &crate::op::OpId| panic!("delivery was invoked for a refused publish"),
         );
         let v = as_json(&out);
@@ -8129,7 +8540,7 @@ mod tests {
             let seed = as_json(&publish_post(
                 &publish_request(r#""body":"the subject""#),
                 &mut log,
-                &key,
+                &by(&key),
                 &mut ignored_delivery,
             ))["opId"]
                 .as_str()
@@ -8147,13 +8558,13 @@ mod tests {
                 };
             let sink_journal = std::rc::Rc::clone(&journal);
             let out = match which {
-                "post" => publish_post(&request, &mut log, &key, &mut |_| {
+                "post" => publish_post(&request, &mut log, &by(&key), &mut |_| {
                     sink_journal.borrow_mut().push("deliver")
                 }),
-                "reply" => publish_reply(&request, &mut log, &key, &mut |_| {
+                "reply" => publish_reply(&request, &mut log, &by(&key), &mut |_| {
                     sink_journal.borrow_mut().push("deliver")
                 }),
-                _ => publish_vote(&request, &mut log, &key, &mut |_| {
+                _ => publish_vote(&request, &mut log, &by(&key), &mut |_| {
                     sink_journal.borrow_mut().push("deliver")
                 }),
             };
@@ -8244,7 +8655,7 @@ mod tests {
                 let seed = publish_post(
                     &publish_request(r#""body":"the target""#),
                     &mut log,
-                    &key,
+                    &by(&key),
                     &mut ignored_delivery,
                 );
                 let target = as_json(&seed)["opId"].as_str().unwrap().to_string();
@@ -8256,13 +8667,13 @@ mod tests {
             };
             let sink_journal = std::rc::Rc::clone(&journal);
             let out = match which {
-                "post" => publish_post(&request, &mut log, &key, &mut |_| {
+                "post" => publish_post(&request, &mut log, &by(&key), &mut |_| {
                     sink_journal.borrow_mut().push("deliver")
                 }),
-                "reply" => publish_reply(&request, &mut log, &key, &mut |_| {
+                "reply" => publish_reply(&request, &mut log, &by(&key), &mut |_| {
                     sink_journal.borrow_mut().push("deliver")
                 }),
-                _ => publish_vote(&request, &mut log, &key, &mut |_| {
+                _ => publish_vote(&request, &mut log, &by(&key), &mut |_| {
                     sink_journal.borrow_mut().push("deliver")
                 }),
             };
@@ -8328,9 +8739,18 @@ mod tests {
 
         // The id the publish will produce, computed independently so the
         // assertion does not depend on a reply the panic prevented.
+        //
+        // The clock is spelled out because the publish path stamps one: counter
+        // 1 for a first op into an empty log, and `A_TIME` because that is what
+        // `by()` supplies. Leaving it `None` would compute the id of a DIFFERENT
+        // op and the lookup would find nothing — which is what this test caught.
         let expected = crate::op::Op {
             stoa: publish_stoa(),
             author: key.public_key(),
+            clock: Some(crate::op::OpClock {
+                counter: 1,
+                asserted_ms: A_TIME,
+            }),
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -8343,7 +8763,7 @@ mod tests {
         let out = publish_post(
             &publish_request(r#""body":"survives a broken delivery""#),
             &mut log,
-            &key,
+            &by(&key),
             &mut |_: &crate::op::OpId| panic!("delivery refused the handoff"),
         );
         // The handoff guard caught it, so this is a reply rather than an aborted
@@ -8390,7 +8810,7 @@ mod tests {
         let seed = as_json(&publish_post(
             &publish_request(r#""body":"the parent""#),
             &mut log,
-            &key,
+            &by(&key),
             &mut ignored_delivery,
         ));
         let parent = seed["opId"].as_str().unwrap().to_string();
@@ -8398,7 +8818,7 @@ mod tests {
         type Handler = fn(
             &str,
             &mut MemoryOpLog,
-            &crate::identity::SecretKey,
+            &crate::authoring::Authorship<'_>,
             &mut dyn FnMut(&crate::op::OpId),
         ) -> String;
 
@@ -8418,7 +8838,7 @@ mod tests {
         ];
 
         for (request, handler) in &cases {
-            let out = handler(request, &mut log, &key, &mut |_: &crate::op::OpId| {
+            let out = handler(request, &mut log, &by(&key), &mut |_: &crate::op::OpId| {
                 panic!("delivery refused the handoff")
             });
             let v = as_json(&out);
@@ -8473,7 +8893,7 @@ mod tests {
         let out = publish_post(
             &publish_request(r#""body":"whatever delivery does""#),
             &mut log,
-            &key,
+            &by(&key),
             &mut ignored_delivery,
         );
         let v = as_json(&out);
@@ -8530,7 +8950,7 @@ mod tests {
         let post_id = as_json(&publish_post(
             &publish_request(r#""body":"the subject""#),
             &mut log,
-            &key,
+            &by(&key),
             &mut ignored_delivery,
         ))["opId"]
             .as_str()
@@ -8539,7 +8959,7 @@ mod tests {
         let vote_id = as_json(&publish_vote(
             &publish_request(&format!(r#""target":"{post_id}","direction":"up""#)),
             &mut log,
-            &key,
+            &by(&key),
             &mut ignored_delivery,
         ))["opId"]
             .as_str()
@@ -8552,13 +8972,13 @@ mod tests {
         let not_held = as_json(&publish_reply(
             &publish_request(&format!(r#""parent":"{absent}","body":"x""#)),
             &mut log,
-            &key,
+            &by(&key),
             &mut ignored_delivery,
         ));
         let wrong_kind = as_json(&publish_reply(
             &publish_request(&format!(r#""parent":"{vote_id}","body":"x""#)),
             &mut log,
-            &key,
+            &by(&key),
             &mut ignored_delivery,
         ));
 
@@ -8665,9 +9085,9 @@ mod tests {
         ];
         for (op, request) in cases {
             let out = match op {
-                "post" => publish_post(&request, &mut log, &key, &mut ignored_delivery),
-                "reply" => publish_reply(&request, &mut log, &key, &mut ignored_delivery),
-                _ => publish_vote(&request, &mut log, &key, &mut ignored_delivery),
+                "post" => publish_post(&request, &mut log, &by(&key), &mut ignored_delivery),
+                "reply" => publish_reply(&request, &mut log, &by(&key), &mut ignored_delivery),
+                _ => publish_vote(&request, &mut log, &by(&key), &mut ignored_delivery),
             };
             let v = as_json(&out);
             assert!(v.get("error").is_some(), "for {request}, got {out}");
@@ -8848,9 +9268,9 @@ mod tests {
 
         for request in &requests {
             for out in [
-                publish_post(request, &mut log, &key, &mut ignored_delivery),
-                publish_reply(request, &mut log, &key, &mut ignored_delivery),
-                publish_vote(request, &mut log, &key, &mut ignored_delivery),
+                publish_post(request, &mut log, &by(&key), &mut ignored_delivery),
+                publish_reply(request, &mut log, &by(&key), &mut ignored_delivery),
+                publish_vote(request, &mut log, &by(&key), &mut ignored_delivery),
             ] {
                 let v = as_json(&out);
                 assert!(
@@ -8912,7 +9332,7 @@ mod tests {
             let mut log = MemoryOpLog::new();
             let request =
                 serde_json::json!({ "stoa": publish_stoa().to_hex(), "body": body }).to_string();
-            let out = publish_post(&request, &mut log, &key, &mut ignored_delivery);
+            let out = publish_post(&request, &mut log, &by(&key), &mut ignored_delivery);
             let v = as_json(&out);
             assert!(v.get("error").is_none(), "for {body:?}, got {out}");
             let id = crate::op::OpId::from_hex(v["opId"].as_str().unwrap()).unwrap();
@@ -8939,13 +9359,13 @@ mod tests {
         let composed = as_json(&publish_post(
             &serde_json::json!({"stoa": stoa, "body": "caf\u{00E9}"}).to_string(),
             &mut log,
-            &key,
+            &by(&key),
             &mut ignored_delivery,
         ));
         let decomposed = as_json(&publish_post(
             &serde_json::json!({"stoa": stoa, "body": "cafe\u{0301}"}).to_string(),
             &mut log,
-            &key,
+            &by(&key),
             &mut ignored_delivery,
         ));
         assert_ne!(composed["opId"], decomposed["opId"]);
@@ -8971,7 +9391,7 @@ mod tests {
         type Handler = fn(
             &str,
             &mut MemoryOpLog,
-            &crate::identity::SecretKey,
+            &crate::authoring::Authorship<'_>,
             &mut dyn FnMut(&crate::op::OpId),
         ) -> String;
 
@@ -8981,7 +9401,7 @@ mod tests {
         let seed = as_json(&publish_post(
             &publish_request(r#""body":"the subject""#),
             &mut log,
-            &key,
+            &by(&key),
             &mut ignored_delivery,
         ))["opId"]
             .as_str()
@@ -9004,7 +9424,7 @@ mod tests {
         ];
         let mut delivered = Vec::new();
         for (handler, request) in cases {
-            let out = handler(&request, &mut log, &key, &mut |id| delivered.push(*id));
+            let out = handler(&request, &mut log, &by(&key), &mut |id| delivered.push(*id));
             let v = as_json(&out);
             assert!(v.get("error").is_none(), "for {request}, got {out}");
             assert!(v["opId"].is_string(), "got {out}");
@@ -9157,7 +9577,7 @@ mod tests {
         let mut log = MemoryOpLog::new();
         crate::authoring::post(
             &mut log,
-            &publish_key(),
+            &by(&publish_key()),
             publish_stoa(),
             SWEPT_ROOT_BODY.to_string(),
         )
@@ -9175,7 +9595,7 @@ mod tests {
     fn a_seeded_root_id() -> String {
         crate::authoring::post(
             &mut MemoryOpLog::new(),
-            &publish_key(),
+            &by(&publish_key()),
             publish_stoa(),
             SWEPT_ROOT_BODY.to_string(),
         )
@@ -9300,10 +9720,14 @@ mod tests {
         // obligation above is an obligation rather than a courtesy: an unlisted
         // method is silently unswept and every sweep below goes green without it.
         fn thread_m(r: &str) -> String {
-            read_thread(r, &a_thread_log(), &feed_genesis())
+            read_thread(r, &a_thread_log(), &feed_genesis(), A_TIME)
         }
         fn thread_req_m(r: &str) -> String {
-            read_thread_from_request(r, || Ok::<_, crate::log::OpLogError>(a_thread_log()))
+            read_thread_from_request(
+                r,
+                || Ok::<_, crate::log::OpLogError>(a_thread_log()),
+                A_TIME,
+            )
         }
         fn channel_m(r: &str) -> String {
             // `parse_channel_id` returns the wire shape on both arms, so an
@@ -9398,17 +9822,17 @@ mod tests {
             publish_post(
                 r,
                 &mut MemoryOpLog::new(),
-                &publish_key(),
+                &by(&publish_key()),
                 &mut ignored_delivery,
             )
         }
         fn publish_reply_m(r: &str) -> String {
             let mut log = a_log_seeded_with_a_root();
-            publish_reply(r, &mut log, &publish_key(), &mut ignored_delivery)
+            publish_reply(r, &mut log, &by(&publish_key()), &mut ignored_delivery)
         }
         fn publish_vote_m(r: &str) -> String {
             let mut log = a_log_seeded_with_a_root();
-            publish_vote(r, &mut log, &publish_key(), &mut ignored_delivery)
+            publish_vote(r, &mut log, &by(&publish_key()), &mut ignored_delivery)
         }
         // `expose-name`'s one method. It reads `publicKey`, so it is inside the
         // envelope rule's first case.
@@ -10582,7 +11006,7 @@ mod tests {
                     publish_post(
                         r,
                         &mut MemoryOpLog::new(),
-                        &publish_key(),
+                        &by(&publish_key()),
                         &mut ignored_delivery,
                     )
                 }),
@@ -10594,7 +11018,7 @@ mod tests {
                     publish_reply(
                         r,
                         &mut a_log_seeded_with_a_root(),
-                        &publish_key(),
+                        &by(&publish_key()),
                         &mut ignored_delivery,
                     )
                 }),
@@ -10609,7 +11033,7 @@ mod tests {
                     publish_vote(
                         r,
                         &mut a_log_seeded_with_a_root(),
-                        &publish_key(),
+                        &by(&publish_key()),
                         &mut ignored_delivery,
                     )
                 }),
@@ -11172,12 +11596,27 @@ mod tests {
             publish_post(
                 &publish_request(r#""body":"x""#),
                 &mut publish_log,
-                &key,
+                &by(&key),
                 &mut ignored_delivery,
             ),
-            publish_post("garbage", &mut publish_log, &key, &mut ignored_delivery),
-            publish_reply("garbage", &mut publish_log, &key, &mut ignored_delivery),
-            publish_vote("garbage", &mut publish_log, &key, &mut ignored_delivery),
+            publish_post(
+                "garbage",
+                &mut publish_log,
+                &by(&key),
+                &mut ignored_delivery,
+            ),
+            publish_reply(
+                "garbage",
+                &mut publish_log,
+                &by(&key),
+                &mut ignored_delivery,
+            ),
+            publish_vote(
+                "garbage",
+                &mut publish_log,
+                &by(&key),
+                &mut ignored_delivery,
+            ),
         ] {
             let v: serde_json::Value = serde_json::from_str(&out)
                 .unwrap_or_else(|e| panic!("handler emitted invalid JSON ({e}): {out}"));
@@ -12228,6 +12667,7 @@ mod tests {
         Op {
             stoa,
             author: key.public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: None,
                 parent: None,

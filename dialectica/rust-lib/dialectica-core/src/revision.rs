@@ -59,39 +59,56 @@
 //! # No ordering rule of its own
 //!
 //! [`OpLog::iter_target`] already returns entries in
-//! [`cmp_ops`](crate::arrival::cmp_ops) order, so §5.7's "highest Lamport
-//! timestamp is current, ties broken by ascending message id" is a `find` over
-//! that sequence and **not a comparison written here**.
+//! [`cmp_ops`](crate::arrival::cmp_ops) order, so "the current version is the
+//! one the ordering rule places first" is a `find` over that sequence and **not
+//! a comparison written here**.
 //!
 //! That is a correctness property rather than a convenience. A second
 //! implementation of the ordering rule could disagree with the first, and two
 //! orders that disagree produce no error — each peer stays internally consistent
 //! and renders the post differently from its neighbour. There is no `sort`, no
-//! `max_by`, and no reference to `lamport()` in this module; the only ordering
-//! input is the position the log already put the entry in.
+//! `max_by`, and no comparison of counters, timestamps or arrival records in
+//! this module; the only ordering input is the position the log already put the
+//! entry in.
 //!
-//! ## The first entry is the current one, which is NOT the same as the newest
+//! ## Placing first IS being latest in the forum's order — for versions carrying
+//! a counter
 //!
-//! Worth stating plainly, because `iter_target`'s documentation once said
-//! "most recent first" and pointed two resolvers at the same error.
+//! `cmp_ops` leads with the **Lamport counter the op carries in its own signed
+//! bytes**, and an author's later revision carries a counter above their earlier
+//! one, because the author had necessarily seen the earlier one when they wrote
+//! it. So among an author's own versions the rule yields the genuinely latest,
+//! and "the current version" means what a reader expects it to mean.
 //!
-//! `cmp_ops` leads with the highest Lamport timestamp **only when the transport
-//! supplied one**. Nothing supplies one today, so every arrival is
-//! `Arrival::unordered()` and the comparison falls back to *ascending op id* —
-//! and an op id is a hash of the op's own bytes, carrying no recency whatever.
+//! **It is not the same as being latest by any clock, and the distinction is
+//! worth keeping.** A Lamport counter is a causal order: it guarantees that a
+//! revision written after seeing an earlier one orders after it. It says nothing
+//! about wall-clock time, and a reader must not be told the current version is
+//! the most recent by any measure of time. For one author revising their own
+//! post the two coincide in practice, which is why this module can promise what
+//! it promises.
 //!
-//! So under today's order, the current version is a **convergent arbitrary
-//! choice, not a temporal one**. That is still a real and valuable property, and
-//! it is the one §3.3 actually needs: two peers holding the same revisions agree
-//! on which is current, even though neither can say which was written last. What
-//! is bought is convergence; accuracy about time is not available at all until
-//! the upstream fix lands.
+//! **This section previously said the opposite**, and the correction is the
+//! whole of what the op clock bought here: it read *"`cmp_ops` leads with the
+//! highest Lamport timestamp only when the transport supplied one. Nothing
+//! supplies one today"*, and concluded that the current version was a convergent
+//! arbitrary choice rather than a temporal one. That was true and is no longer:
+//! the counter is in the op, so every version published from this change onward
+//! carries one.
+//!
+//! ## A version carrying NO counter was encoded before the fields existed
+//!
+//! The ordering rule places every such version below every version carrying one,
+//! so a revision published after this change supersedes every version predating
+//! it, and versions predating it order among themselves by ascending op id
+//! exactly as they always have. For those versions this module guarantees
+//! **convergence only** — two peers holding the same ones agree on which is
+//! current, though neither can say which was written last, because an op id is a
+//! hash and carries no recency whatever.
 //!
 //! This module takes the first entry because that is **the position the ordering
 //! rule defines as current**, never because the log promises recency. That is
-//! also why it is correct under both regimes: when Lamport values start
-//! arriving, the order under this `find` becomes temporal and this code does not
-//! change.
+//! why it is correct over both populations without a branch.
 //!
 //! # Every version names the original post
 //!
@@ -111,14 +128,22 @@
 //! fewer revisions than its neighbour resolves over the ones it has, which is
 //! the right answer for that peer rather than a defect.
 //!
-//! What holds in **both** regimes is that the answer is a pure function of the
-//! ops held: two peers with the same set agree, whatever sequence they arrived
-//! in. What does **not** hold under today's degraded order is that the answer
-//! only advances — a revision arriving late with a lower op id becomes current,
-//! because op id carries no recency. Under a transport-supplied order it would
-//! advance monotonically. Neither is a defect; they are the two regimes, and the
-//! flat model (every version naming the original) is what keeps a late arrival a
-//! *re-resolution* rather than a jump onto a different branch.
+//! What holds over **both** populations is that the answer is a pure function of
+//! the ops held: two peers with the same set agree, whatever sequence they
+//! arrived in.
+//!
+//! What does not hold everywhere is that the answer only **advances**, and the
+//! reason has changed rather than gone away. Among versions carrying counters it
+//! does advance: a late-arriving revision either carries a higher counter and
+//! becomes current, or carries a lower one and does not displace what is already
+//! there. Among versions carrying none the degraded order applies and a version
+//! arriving later may become current, because op id carries no recency.
+//!
+//! **The mixed case is where that assumption is least visible** — a peer holding
+//! versions of both kinds — so a reader must not rely on monotonicity as a
+//! property of this module. The flat model (every version naming the original)
+//! is what keeps a late arrival a *re-resolution* rather than a jump onto a
+//! different branch.
 
 use crate::log::{Entry, OpLog, OpLogError};
 use crate::op::{OpId, OpKind};
@@ -154,9 +179,10 @@ pub struct CurrentVersion {
     /// The version to render: the valid revision the ordering rule places
     /// first, or `original` itself when there is none.
     ///
-    /// "First" is not "newest" — see this module's documentation. Under the
-    /// order production actually runs today it is a convergent arbitrary choice
-    /// rather than a temporal one.
+    /// "First" is not "newest" — see this module's documentation. Where the
+    /// competing revisions carry counters it is a genuine last-write-wins answer
+    /// in the **causal** sense; where they do not, it is a convergent arbitrary
+    /// choice. Neither is a temporal one.
     pub current: Entry,
 }
 
@@ -280,10 +306,11 @@ pub fn current_version<L: OpLog>(
         // order, so the first match IS the one the ordering rule places first.
         // No ordering rule is written here.
         //
-        // NOT "the most recent". `cmp_ops` leads with the highest Lamport
-        // timestamp only on the transport-ordered branch, which production never
-        // reaches today; the degraded branch is ascending op id and carries no
-        // recency. See this module's documentation.
+        // Among versions carrying counters this IS the latest in the forum's
+        // order — an author's later revision carries the higher counter. It is
+        // NOT the latest by any clock: a Lamport order is causal, not temporal.
+        // Among versions carrying none the rule falls back to ascending op id,
+        // which carries no recency at all. See this module's documentation.
         .find(|entry| is_valid_revision(entry, &original))
         // `clone` rather than a move: `original` is still needed for the struct
         // below, and the branch that takes it is the ordinary case (most posts
@@ -393,6 +420,7 @@ mod tests {
         Op {
             stoa: a_stoa(),
             author: author().public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -413,6 +441,7 @@ mod tests {
         Op {
             stoa: a_stoa(),
             author: key.public_key(),
+            clock: None,
             kind: OpKind::Revise {
                 target,
                 body: body.to_string(),
@@ -453,6 +482,7 @@ mod tests {
         let op = Op {
             stoa: a_stoa(),
             author: claimed.clone(),
+            clock: None,
             kind: OpKind::Revise {
                 target,
                 body: body.to_string(),
@@ -493,6 +523,73 @@ mod tests {
         } else {
             (two, one)
         }
+    }
+
+    /// The wall-clock every clock-carrying fixture here asserts.
+    ///
+    /// The SAME value on every op, deliberately: `cmp_ops` is required not to
+    /// read it, so no ordering test below may be able to pass because two ops
+    /// differed in this field. Matches `arrival.rs`'s own fixture for the same
+    /// reason.
+    const ASSERTED_MS: u64 = 1_789_729_304_000;
+
+    /// A revision carrying a counter — the shape published from this version on.
+    ///
+    /// The counter lives inside the SIGNED bytes, so it is what `cmp_ops`
+    /// orders by. Every ordering test below builds its revisions here and
+    /// appends them with `Arrival::unordered()`, which is what production
+    /// supplies: the counter in the op is then demonstrably the only thing
+    /// deciding the order.
+    fn a_revision_at(target: OpId, body: &str, counter: u64) -> SignedOp {
+        Op {
+            clock: Some(crate::op::OpClock {
+                counter,
+                asserted_ms: ASSERTED_MS,
+            }),
+            ..a_revision(target, body).op
+        }
+        .sign(&author())
+    }
+
+    /// An op of `kind` by the post's own author, carrying `counter`.
+    ///
+    /// Used to put a moderation or a vote at the top of the order, which is
+    /// what the two kind-check tests need.
+    fn an_op_at(kind: OpKind, counter: u64) -> SignedOp {
+        Op {
+            stoa: a_stoa(),
+            author: author().public_key(),
+            clock: Some(crate::op::OpClock {
+                counter,
+                asserted_ms: ASSERTED_MS,
+            }),
+            kind,
+        }
+        .sign(&author())
+    }
+
+    /// Two revisions of `target` at the given counters, whose op ids rank the
+    /// OPPOSITE way to their counters: the one carrying `higher` has the HIGHER
+    /// op id.
+    ///
+    /// Returned as `(leader, trailer)` — the winner under the counter rule
+    /// first, the winner under a bare ascending-op-id fallback second. That is
+    /// the whole point: a fixture where the two rules agree passes for a
+    /// resolver that consults no counter at all, which is this repo's recorded
+    /// defect family.
+    ///
+    /// The disagreeing pair is SEARCHED for rather than guessed. An op id is a
+    /// hash over bytes that include the counter, so which of two bodies hashes
+    /// lower is not predictable and not something to hardcode.
+    fn two_revisions_disagreeing(target: OpId, higher: u64, lower: u64) -> (SignedOp, SignedOp) {
+        for n in 0..256u32 {
+            let leader = a_revision_at(target, &format!("leads {n}"), higher);
+            let trailer = a_revision_at(target, &format!("trails {n}"), lower);
+            if leader.op.id() > trailer.op.id() {
+                return (leader, trailer);
+            }
+        }
+        panic!("no body pair found whose op ids disagree with their counters");
     }
 
     // ─── The original stands when nothing supersedes it ───────────────────
@@ -587,7 +684,8 @@ mod tests {
         let theirs = a_revision_by(&stranger(), id, "hijacked");
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(post, Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
         log.append(mine.clone(), Arrival::ordered(2, a_message_id(1)))
             .unwrap();
         // The stranger's is strictly MORE recent, so it heads `iter_target`.
@@ -625,10 +723,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(
-            current_version(&log, &id).unwrap().unwrap().body(),
-            "mine"
-        );
+        assert_eq!(current_version(&log, &id).unwrap().unwrap().body(), "mine");
     }
 
     #[test]
@@ -638,7 +733,8 @@ mod tests {
         let post = a_post("mine");
         let id = post.op.id();
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(0, a_message_id(0))).unwrap();
+        log.append(post, Arrival::ordered(0, a_message_id(0)))
+            .unwrap();
 
         for seed in [3u8, 4, 5, 9, 200, 255] {
             let key = a_key(seed);
@@ -678,14 +774,12 @@ mod tests {
         assert_eq!(forged.op.author, post.op.author);
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(post, Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
         log.append(forged, Arrival::ordered(2, a_message_id(1)))
             .unwrap();
 
-        assert_eq!(
-            current_version(&log, &id).unwrap().unwrap().body(),
-            "mine"
-        );
+        assert_eq!(current_version(&log, &id).unwrap().unwrap().body(), "mine");
     }
 
     #[test]
@@ -699,7 +793,8 @@ mod tests {
         assert!(!forged.verify());
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(post, Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
         log.append(genuine.clone(), Arrival::ordered(2, a_message_id(1)))
             .unwrap();
         log.append(forged.clone(), Arrival::ordered(3, a_message_id(1)))
@@ -731,13 +826,12 @@ mod tests {
         assert_eq!(junk.op.author, post.op.author, "the author still matches");
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
-        log.append(junk, Arrival::ordered(2, a_message_id(1))).unwrap();
+        log.append(post, Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
+        log.append(junk, Arrival::ordered(2, a_message_id(1)))
+            .unwrap();
 
-        assert_eq!(
-            current_version(&log, &id).unwrap().unwrap().body(),
-            "mine"
-        );
+        assert_eq!(current_version(&log, &id).unwrap().unwrap().body(), "mine");
     }
 
     #[test]
@@ -771,14 +865,12 @@ mod tests {
         assert!(!lifted.verify());
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(post, Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
         log.append(lifted, Arrival::ordered(2, a_message_id(1)))
             .unwrap();
 
-        assert_eq!(
-            current_version(&log, &id).unwrap().unwrap().body(),
-            "mine"
-        );
+        assert_eq!(current_version(&log, &id).unwrap().unwrap().body(), "mine");
     }
 
     #[test]
@@ -800,6 +892,7 @@ mod tests {
         let elsewhere = Op {
             stoa: crate::identity::stoa_address(b"a different stoa"),
             author: author().public_key(),
+            clock: None,
             kind: OpKind::Revise {
                 target: id,
                 body: "REWRITTEN FROM ANOTHER STOA".to_string(),
@@ -859,23 +952,45 @@ mod tests {
     // ─── Lamport order decides currency ───────────────────────────────────
 
     #[test]
-    fn the_highest_lamport_revision_is_current() {
-        // §5.7: "the highest Lamport timestamp is current". Appended in an order
-        // that is neither the answer nor its reverse, so a resolver returning
-        // insertion order fails either way.
+    fn the_highest_counter_revision_is_current() {
+        // §5.7's "the highest Lamport timestamp is current", re-aimed at the op's
+        // own counter, which is where that timestamp now lives. Appended in an
+        // order that is neither the answer nor its reverse, so a resolver
+        // returning insertion order fails either way.
+        //
+        // Like its neighbour above, this test did not go red when the ordering
+        // rule moved — the four counterless revisions simply fell into the
+        // degraded arm, and `v4` happened to keep winning. The counters are
+        // what make it measure the rule it names again.
         let post = a_post("v1");
         let id = post.op.id();
-        let v2 = a_revision(id, "v2");
-        let v3 = a_revision(id, "v3");
-        let v4 = a_revision(id, "v4");
+        let v2 = a_revision_at(id, "v2", 2);
+        let v3 = a_revision_at(id, "v3", 3);
+        let v4 = a_revision_at(id, "v4", 4);
+
+        // **The fixture guard this test's own neighbours have and it did not.**
+        // Nothing here controlled or checked the op-id relation, so a future
+        // reword of a revision body — which re-rolls the hash — could silently
+        // restore the coincidence where ascending op id also names `v4`, with the
+        // suite green. Review measured that the counter rule genuinely decides
+        // TODAY (inverting the counters to 4/3/2 flips the winner to `v2`), which
+        // makes this a latent gap rather than a present vacuity — and a latent gap
+        // is what a guard is for.
+        //
+        // The condition: `v4` must not hold the LOWEST of the three ids, because
+        // that is exactly when ascending-op-id order would name it too.
+        assert!(
+            v4.op.id() > v2.op.id() || v4.op.id() > v3.op.id(),
+            "the fixture has drifted: v4 now holds the lowest op id of the three, \
+             so ascending-op-id order names it as well and the assertion below \
+             distinguishes neither rule. Re-roll a body until it does not."
+        );
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
-        log.append(v3.clone(), Arrival::ordered(3, a_message_id(1)))
-            .unwrap();
-        log.append(v2, Arrival::ordered(2, a_message_id(1))).unwrap();
-        log.append(v4.clone(), Arrival::ordered(4, a_message_id(1)))
-            .unwrap();
+        log.append(post, Arrival::unordered()).unwrap();
+        log.append(v3.clone(), Arrival::unordered()).unwrap();
+        log.append(v2, Arrival::unordered()).unwrap();
+        log.append(v4.clone(), Arrival::unordered()).unwrap();
 
         let resolved = current_version(&log, &id).unwrap().unwrap();
         assert_eq!(resolved.body(), "v4");
@@ -890,62 +1005,88 @@ mod tests {
     }
 
     #[test]
-    fn the_lamport_timestamp_decides_currency_against_op_id_order() {
-        // The fixture trap this repo has paid for: a test where op-id order
-        // happens to agree with Lamport order passes for a resolver that
-        // consults no metadata at all.
+    fn the_op_counter_decides_currency_against_op_id_order() {
+        // Re-aimed off the transport's Lamport timestamp and onto the op's own
+        // counter, because the transport's value orders nothing now. It was
+        // NOT among the tests this change turned red, and that is the point
+        // worth recording: with both revisions carrying no counter, every op
+        // fell into the degraded arm and the answer became ascending op id —
+        // which is the op this test already asserted. It went green while
+        // measuring nothing, the defect family this repo keeps paying for, and
+        // a red test would have been the kinder outcome.
         //
-        // Here the LOWER op id carries the HIGHER Lamport value, so the two
-        // rules DISAGREE and only the Lamport rule gives the asserted answer.
+        // The disagreement construction is what makes it measure again: the
+        // revision carrying the HIGHER counter is given the HIGHER op id, so
+        // the counter rule and an op-id fallback name DIFFERENT winners and
+        // only the counter rule gives the asserted answer.
         let post = a_post("v1");
         let id = post.op.id();
-        let (low_id, high_id) = two_revisions_by_ascending_id(id);
+        let (higher_counter, lower_counter) = two_revisions_disagreeing(id, 9, 8);
+        assert!(
+            higher_counter.op.id() > lower_counter.op.id(),
+            "the fixture must make the two rules disagree"
+        );
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
-        log.append(low_id.clone(), Arrival::ordered(9, a_message_id(1)))
+        log.append(post, Arrival::unordered()).unwrap();
+        log.append(higher_counter.clone(), Arrival::unordered())
             .unwrap();
-        log.append(high_id.clone(), Arrival::ordered(8, a_message_id(1)))
+        log.append(lower_counter.clone(), Arrival::unordered())
             .unwrap();
+
+        let resolved = current_version(&log, &id).unwrap().unwrap();
+        assert_eq!(
+            resolved.current.id(),
+            higher_counter.op.id(),
+            "the higher counter must win, against op-id order"
+        );
+    }
+
+    #[test]
+    fn a_counter_tie_is_broken_by_ascending_op_id() {
+        // §5.7's tiebreak, re-aimed: it used to be the transport's message id,
+        // and it is now the OP ID. The subject of the old test no longer exists
+        // — a message id never reaches this system, so it cannot break
+        // anything here — and the reason the op id replaces it is that an op id
+        // is a function of the op's own signed bytes. Every peer holding the op
+        // computes the same one, so every peer breaks the tie identically,
+        // which is the convergence property §3.3 needs. A transport-assigned
+        // message id offers no such guarantee: two peers may receive the same
+        // op in different messages, or never see one at all.
+        //
+        // Two revisions carrying the SAME counter, appended in the reverse of
+        // the answer so insertion order fails, and both `unordered()` so
+        // nothing about the delivery can be what decided it.
+        let post = a_post("v1");
+        let id = post.op.id();
+        let (high_id, low_id) = two_revisions_disagreeing(id, 7, 7);
+
+        let mut log = MemoryOpLog::new();
+        log.append(post, Arrival::unordered()).unwrap();
+        log.append(high_id.clone(), Arrival::unordered()).unwrap();
+        log.append(low_id.clone(), Arrival::unordered()).unwrap();
+        assert_eq!(
+            high_id.op.clock.as_ref().unwrap().counter,
+            low_id.op.clock.as_ref().unwrap().counter,
+            "the tie is the fixture's whole subject"
+        );
 
         let resolved = current_version(&log, &id).unwrap().unwrap();
         assert_eq!(
             resolved.current.id(),
             low_id.op.id(),
-            "the higher Lamport value must win, against op-id order"
-        );
-    }
-
-    #[test]
-    fn a_lamport_tie_is_broken_by_ascending_message_id_against_op_id_order() {
-        // §5.7's tiebreak, with the same disagreement construction: equal
-        // Lamport values, and the op with the LOWER op id carries the HIGHER
-        // message id. A resolver falling back to op id returns the other one.
-        let post = a_post("v1");
-        let id = post.op.id();
-        let (low_id, high_id) = two_revisions_by_ascending_id(id);
-
-        let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
-        log.append(low_id.clone(), Arrival::ordered(7, a_message_id(9)))
-            .unwrap();
-        log.append(high_id.clone(), Arrival::ordered(7, a_message_id(1)))
-            .unwrap();
-
-        let resolved = current_version(&log, &id).unwrap().unwrap();
-        assert_eq!(
-            resolved.current.id(),
-            high_id.op.id(),
-            "the lower message id must win, against op-id order"
+            "on an equal counter the LOWER op id must win"
         );
     }
 
     #[test]
     fn under_the_degraded_order_the_lower_op_id_is_current() {
-        // The ONLY order production uses today: nothing supplies a Lamport
-        // value, so every arrival is `unordered()` and `cmp_ops` falls back to
-        // ascending op id. Appended in the reverse of the answer, so insertion
-        // order fails.
+        // The DEGRADED order: both revisions carry no counter, which is the
+        // population predating the clock fields, so `cmp_ops` falls back to
+        // ascending op id. Production now publishes counters, so this is the
+        // order for received legacy ops rather than for everything — which is
+        // what makes it worth a test of its own. Appended in the reverse of the
+        // answer, so insertion order fails.
         //
         // Asserted against the op ids themselves rather than a hardcoded body:
         // which of two bodies hashes lower is not something to guess.
@@ -963,26 +1104,43 @@ mod tests {
     }
 
     #[test]
-    fn an_ordered_revision_beats_an_unordered_one_whatever_its_op_id() {
-        // The transition state the upstream fix produces: a peer's older ops are
-        // unordered and new ones carry Lamport values. Lamport 0 is the sharp
-        // case, and the ORDERED revision is given the HIGHER op id so a resolver
+    fn a_revision_carrying_a_counter_beats_one_carrying_none_whatever_its_op_id() {
+        // The transition state this change produces: a peer's older ops predate
+        // the clock fields and carry no counter, and new ones carry one.
+        // Counter ZERO is the sharp case — a design that reached for a sentinel
+        // would make a real counter of zero indistinguishable from absence —
+        // and the revision carrying it is given the HIGHER op id, so a resolver
         // falling back to op id would pick the other one.
         let post = a_post("v1");
         let id = post.op.id();
-        let (unordered, ordered_zero) = two_revisions_by_ascending_id(id);
+        let no_counter = a_revision(id, "no counter");
+        let at_zero = {
+            // Searched, not guessed: the clock-carrying op must be the one with
+            // the HIGHER op id, or the test passes under a bare op-id rule too.
+            let mut found = None;
+            for n in 0..256u32 {
+                let candidate = a_revision_at(id, &format!("at zero {n}"), 0);
+                if candidate.op.id() > no_counter.op.id() {
+                    found = Some(candidate);
+                    break;
+                }
+            }
+            found.expect("no body found whose op id exceeds the counterless revision's")
+        };
+        assert_eq!(no_counter.op.clock, None, "the fixture needs one of each");
+        assert_eq!(at_zero.op.clock.as_ref().unwrap().counter, 0);
 
         let mut log = MemoryOpLog::new();
         log.append(post, Arrival::unordered()).unwrap();
-        log.append(unordered.clone(), Arrival::unordered()).unwrap();
-        log.append(ordered_zero.clone(), Arrival::ordered(0, a_message_id(1)))
+        log.append(no_counter.clone(), Arrival::unordered())
             .unwrap();
+        log.append(at_zero.clone(), Arrival::unordered()).unwrap();
 
         let resolved = current_version(&log, &id).unwrap().unwrap();
         assert_eq!(
             resolved.current.id(),
-            ordered_zero.op.id(),
-            "even Lamport 0 beats a revision the transport did not order"
+            at_zero.op.id(),
+            "even a counter of 0 beats a revision that carries none"
         );
     }
 
@@ -1068,15 +1226,9 @@ mod tests {
             current_version(&complete, &id).unwrap().unwrap().body(),
             "v3"
         );
-        assert_eq!(
-            current_version(&behind, &id).unwrap().unwrap().body(),
-            "v2"
-        );
+        assert_eq!(current_version(&behind, &id).unwrap().unwrap().body(), "v2");
         // Both are revised, and neither is an error.
-        assert!(current_version(&behind, &id)
-            .unwrap()
-            .unwrap()
-            .is_revised());
+        assert!(current_version(&behind, &id).unwrap().unwrap().is_revised());
     }
 
     #[test]
@@ -1102,7 +1254,9 @@ mod tests {
 
         let mut complete = MemoryOpLog::new();
         complete.append(post.clone(), Arrival::unordered()).unwrap();
-        complete.append(low_id.clone(), Arrival::unordered()).unwrap();
+        complete
+            .append(low_id.clone(), Arrival::unordered())
+            .unwrap();
         complete
             .append(high_id.clone(), Arrival::unordered())
             .unwrap();
@@ -1136,42 +1290,47 @@ mod tests {
         reversed.append(low_id, Arrival::unordered()).unwrap();
         reversed.append(a_post("v1"), Arrival::unordered()).unwrap();
         assert_eq!(
-            current_version(&reversed, &id).unwrap().unwrap().current.id(),
+            current_version(&reversed, &id)
+                .unwrap()
+                .unwrap()
+                .current
+                .id(),
             ahead.current.id()
         );
     }
 
     #[test]
-    fn under_a_transport_order_the_answer_only_moves_forward() {
-        // Monotonicity holds on the TRANSPORT-ORDERED branch, which this
-        // fixture uses and which production does not reach today. Adding ops
-        // advances the current version and a late-arriving OLDER one does not
-        // retract it. Hardcoded expected sequence of bodies as each op lands.
+    fn under_a_counter_order_the_answer_only_moves_forward() {
+        // Monotonicity holds on the COUNTER-CARRYING branch, which this fixture
+        // uses. Adding ops advances the current version and a late-arriving
+        // OLDER one does not retract it. Hardcoded expected sequence of bodies
+        // as each op lands.
         //
-        // Its degraded-order counterpart is the next test, and the two
-        // deliberately give OPPOSITE answers — monotonicity is a property of the
-        // regime, not of this resolver.
+        // Every arrival is `unordered()`, which is what production supplies, so
+        // the counter inside each op is the only thing that can be ordering
+        // them.
+        //
+        // Its counterless counterpart is the next test, and the two
+        // deliberately give OPPOSITE answers — monotonicity is a property of
+        // the regime, not of this resolver.
         let post = a_post("v1");
         let id = post.op.id();
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
-        assert_eq!(current_version(&log, &id).unwrap().unwrap().body(),"v1");
+        log.append(post, Arrival::unordered()).unwrap();
+        assert_eq!(current_version(&log, &id).unwrap().unwrap().body(), "v1");
 
-        log.append(a_revision(id, "v2"), Arrival::ordered(2, a_message_id(1)))
+        log.append(a_revision_at(id, "v2", 2), Arrival::unordered())
             .unwrap();
-        assert_eq!(current_version(&log, &id).unwrap().unwrap().body(),"v2");
+        assert_eq!(current_version(&log, &id).unwrap().unwrap().body(), "v2");
 
-        log.append(a_revision(id, "v3"), Arrival::ordered(3, a_message_id(1)))
+        log.append(a_revision_at(id, "v3", 3), Arrival::unordered())
             .unwrap();
-        assert_eq!(current_version(&log, &id).unwrap().unwrap().body(),"v3");
+        assert_eq!(current_version(&log, &id).unwrap().unwrap().body(), "v3");
 
         // An OLDER revision arriving late does not move the answer backwards.
-        log.append(
-            a_revision(id, "late v0"),
-            Arrival::ordered(0, a_message_id(1)),
-        )
-        .unwrap();
-        assert_eq!(current_version(&log, &id).unwrap().unwrap().body(),"v3");
+        log.append(a_revision_at(id, "late v0", 0), Arrival::unordered())
+            .unwrap();
+        assert_eq!(current_version(&log, &id).unwrap().unwrap().body(), "v3");
     }
 
     #[test]
@@ -1237,13 +1396,15 @@ mod tests {
             let op = Op {
                 stoa,
                 author: key.public_key(),
+                clock: None,
                 kind,
             }
             .sign(&key);
             let id = op.op.id();
 
             let mut log = MemoryOpLog::new();
-            log.append(op, Arrival::ordered(1, a_message_id(1))).unwrap();
+            log.append(op, Arrival::ordered(1, a_message_id(1)))
+                .unwrap();
             // A perfectly valid revision naming it, by its own author.
             let tempting = a_revision(id, "should not be reachable");
             log.append(tempting.clone(), Arrival::ordered(2, a_message_id(1)))
@@ -1275,6 +1436,7 @@ mod tests {
         let metadata = Op {
             stoa: a_stoa(),
             author: key.public_key(),
+            clock: None,
             kind: OpKind::StoaMetadata {
                 title: "Renamed Agora".to_string(),
                 description: "not a post body".to_string(),
@@ -1289,8 +1451,11 @@ mod tests {
         let mut log = MemoryOpLog::new();
         log.append(post, Arrival::unordered()).unwrap();
         // Top of the order, so only the kind check can exclude it.
-        log.append(metadata.clone(), Arrival::ordered(u64::MAX, a_message_id(0)))
-            .unwrap();
+        log.append(
+            metadata.clone(),
+            Arrival::ordered(u64::MAX, a_message_id(0)),
+        )
+        .unwrap();
 
         // It names no op, so it never reaches a target-restricted read.
         assert_eq!(
@@ -1321,6 +1486,7 @@ mod tests {
         let reply = Op {
             stoa: a_stoa(),
             author: author().public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: Some(parent),
                 parent: Some(parent),
@@ -1332,7 +1498,8 @@ mod tests {
         let id = reply.op.id();
 
         let mut log = MemoryOpLog::new();
-        log.append(reply, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(reply, Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
         log.append(
             a_revision(id, "an edited reply"),
             Arrival::ordered(2, a_message_id(1)),
@@ -1366,7 +1533,8 @@ mod tests {
         let chained = a_revision(v2.op.id(), "v3 via chain");
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(post, Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
         log.append(v2.clone(), Arrival::ordered(2, a_message_id(1)))
             .unwrap();
         log.append(chained.clone(), Arrival::ordered(3, a_message_id(1)))
@@ -1387,24 +1555,37 @@ mod tests {
     #[test]
     fn versions_naming_the_original_all_compete_directly() {
         // The flat model's positive form: four versions, all naming the post,
-        // ordered against one another rather than through any chain.
+        // ordered against one another rather than through any chain. `v5` is
+        // current because it carries the highest COUNTER, which is what makes
+        // this a direct competition among four rather than a walk along a
+        // chain — none of them names another.
         let post = a_post("v1");
         let id = post.op.id();
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
-        for (n, lamport) in [("v2", 2u64), ("v3", 3), ("v4", 4), ("v5", 5)] {
-            log.append(
-                a_revision(id, n),
-                Arrival::ordered(lamport, a_message_id(1)),
-            )
-            .unwrap();
+        log.append(post, Arrival::unordered()).unwrap();
+        let versions: Vec<SignedOp> = [("v2", 2u64), ("v3", 3), ("v4", 4), ("v5", 5)]
+            .into_iter()
+            .map(|(n, counter)| a_revision_at(id, n, counter))
+            .collect();
+        // The same fixture guard as `the_highest_counter_revision_is_current`, and
+        // for the same reason: nothing here controlled the op-id relation, so a
+        // reword could silently make ascending op id name `v5` too.
+        let v5 = versions.last().unwrap();
+        assert!(
+            versions[..3].iter().any(|v| v5.op.id() > v.op.id()),
+            "the fixture has drifted: v5 now holds the lowest op id of the four, \
+             so ascending-op-id order names it as well and the assertion below \
+             distinguishes neither rule"
+        );
+        for version in versions {
+            log.append(version, Arrival::unordered()).unwrap();
         }
         assert_eq!(
             log.iter_target(&id).unwrap().len(),
             4,
             "all four name the post"
         );
-        assert_eq!(current_version(&log, &id).unwrap().unwrap().body(),"v5");
+        assert_eq!(current_version(&log, &id).unwrap().unwrap().body(), "v5");
     }
 
     // ─── History is kept ──────────────────────────────────────────────────
@@ -1429,15 +1610,29 @@ mod tests {
         )
         .unwrap();
 
-        let before: Vec<Vec<u8>> = log.iter().unwrap().iter().map(|e| e.op.to_bytes()).collect();
+        let before: Vec<Vec<u8>> = log
+            .iter()
+            .unwrap()
+            .iter()
+            .map(|e| e.op.to_bytes())
+            .collect();
         let count = log.len();
 
         let _ = current_version(&log, &id).unwrap();
 
-        let after: Vec<Vec<u8>> = log.iter().unwrap().iter().map(|e| e.op.to_bytes()).collect();
+        let after: Vec<Vec<u8>> = log
+            .iter()
+            .unwrap()
+            .iter()
+            .map(|e| e.op.to_bytes())
+            .collect();
         assert_eq!(before, after, "resolving altered the log");
         assert_eq!(log.len(), count);
-        assert_eq!(count.unwrap(), 4, "including the dropped stranger's revision");
+        assert_eq!(
+            count.unwrap(),
+            4,
+            "including the dropped stranger's revision"
+        );
         // Even the version that was dropped on read is still there and still
         // verifiable as the authentic op it is.
         assert!(log.iter().unwrap().iter().all(|e| e.op.verify()));
@@ -1453,7 +1648,8 @@ mod tests {
         let v3 = a_revision(id, "v3");
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(post, Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
         log.append(v2.clone(), Arrival::ordered(2, a_message_id(1)))
             .unwrap();
         log.append(v3.clone(), Arrival::ordered(3, a_message_id(1)))
@@ -1475,6 +1671,7 @@ mod tests {
         let post = Op {
             stoa: a_stoa(),
             author: author().public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -1487,6 +1684,7 @@ mod tests {
         let revised = Op {
             stoa: a_stoa(),
             author: author().public_key(),
+            clock: None,
             kind: OpKind::Revise {
                 target: id,
                 body: "v2".to_string(),
@@ -1496,7 +1694,8 @@ mod tests {
         .sign(&author());
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(post, Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
         log.append(revised, Arrival::ordered(2, a_message_id(1)))
             .unwrap();
 
@@ -1513,6 +1712,7 @@ mod tests {
         let post = Op {
             stoa: a_stoa(),
             author: author().public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -1541,7 +1741,8 @@ mod tests {
         let cleared = a_revision(id, "");
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(post, Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
         log.append(cleared.clone(), Arrival::ordered(2, a_message_id(1)))
             .unwrap();
 
@@ -1573,7 +1774,8 @@ mod tests {
         );
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(post, Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
         log.append(same_again.clone(), Arrival::ordered(2, a_message_id(1)))
             .unwrap();
 
@@ -1606,6 +1808,7 @@ mod tests {
             Op {
                 stoa: a_stoa(),
                 author: key.public_key(),
+                clock: None,
                 kind: OpKind::Moderate {
                     target: id,
                     action: ModerationAction::Hide,
@@ -1652,6 +1855,7 @@ mod tests {
         let post = Op {
             stoa: a_stoa(),
             author: author().public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: None,
                 parent: None,
@@ -1664,6 +1868,7 @@ mod tests {
         let stripped = Op {
             stoa: a_stoa(),
             author: author().public_key(),
+            clock: None,
             kind: OpKind::Revise {
                 target: id,
                 body: "picture removed".to_string(),
@@ -1673,7 +1878,8 @@ mod tests {
         .sign(&author());
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(post, Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
         log.append(stripped.clone(), Arrival::ordered(2, a_message_id(1)))
             .unwrap();
 
@@ -1699,39 +1905,33 @@ mod tests {
         // things and do not contend": a moderation must neither become the
         // current version nor displace one.
         //
-        // Both are given the HIGHEST Lamport values, so they head `iter_target`
-        // and a resolver without the kind check would return one of them.
+        // Both are given the HIGHEST COUNTERS, so they head `iter_target` and a
+        // resolver without the kind check would return one of them. That is the
+        // reason the fixture exists, and it survives the move off the
+        // transport's order unchanged: the counter is now what puts them there.
         let post = a_post("v1");
         let id = post.op.id();
-        let v2 = a_revision(id, "v2");
-        let key = author();
-        let hide = Op {
-            stoa: a_stoa(),
-            author: key.public_key(),
-            kind: OpKind::Moderate {
+        let v2 = a_revision_at(id, "v2", 2);
+        let hide = an_op_at(
+            OpKind::Moderate {
                 target: id,
                 action: ModerationAction::Hide,
             },
-        }
-        .sign(&key);
-        let vote = Op {
-            stoa: a_stoa(),
-            author: key.public_key(),
-            kind: OpKind::Vote {
+            8,
+        );
+        let vote = an_op_at(
+            OpKind::Vote {
                 target: id,
                 direction: VoteDirection::Up,
             },
-        }
-        .sign(&key);
+            9,
+        );
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
-        log.append(v2.clone(), Arrival::ordered(2, a_message_id(1)))
-            .unwrap();
-        log.append(hide.clone(), Arrival::ordered(8, a_message_id(1)))
-            .unwrap();
-        log.append(vote.clone(), Arrival::ordered(9, a_message_id(1)))
-            .unwrap();
+        log.append(post, Arrival::unordered()).unwrap();
+        log.append(v2.clone(), Arrival::unordered()).unwrap();
+        log.append(hide.clone(), Arrival::unordered()).unwrap();
+        log.append(vote.clone(), Arrival::unordered()).unwrap();
 
         // The fixture must genuinely put them first.
         let ordered: Vec<OpId> = log
@@ -1757,15 +1957,16 @@ mod tests {
         //
         // A moderation and a vote by the post's OWN author, at the very top of
         // the order: everything except the kind check says they should win.
+        // `u64::MAX` is the counter that puts them there, which is the same
+        // claim the test always made — only the field carrying it has moved
+        // from the transport's record into the op's own signed bytes.
         let post = a_post("the subject");
         let id = post.op.id();
-        let v2 = a_revision(id, "v2");
-        let key = author();
+        let v2 = a_revision_at(id, "v2", 1);
 
         let mut log = MemoryOpLog::new();
         log.append(post, Arrival::unordered()).unwrap();
-        log.append(v2.clone(), Arrival::ordered(1, a_message_id(9)))
-            .unwrap();
+        log.append(v2.clone(), Arrival::unordered()).unwrap();
         for kind in [
             OpKind::Moderate {
                 target: id,
@@ -1776,16 +1977,8 @@ mod tests {
                 direction: VoteDirection::Up,
             },
         ] {
-            log.append(
-                Op {
-                    stoa: a_stoa(),
-                    author: key.public_key(),
-                    kind,
-                }
-                .sign(&key),
-                Arrival::ordered(u64::MAX, MessageId::new(vec![0x00])),
-            )
-            .unwrap();
+            log.append(an_op_at(kind, u64::MAX), Arrival::unordered())
+                .unwrap();
         }
 
         // The fixture must genuinely place them ahead of the revision.
@@ -1817,6 +2010,7 @@ mod tests {
         let reply = Op {
             stoa: a_stoa(),
             author: author().public_key(),
+            clock: None,
             kind: OpKind::Post {
                 thread: Some(id),
                 parent: Some(id),
@@ -1827,8 +2021,10 @@ mod tests {
         .sign(&author());
 
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
-        log.append(reply, Arrival::ordered(9, a_message_id(1))).unwrap();
+        log.append(post, Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
+        log.append(reply, Arrival::ordered(9, a_message_id(1)))
+            .unwrap();
 
         let resolved = current_version(&log, &id).unwrap().unwrap();
         assert_eq!(resolved.body(), "the parent");
@@ -1928,6 +2124,7 @@ mod tests {
                 Op {
                     stoa,
                     author: key.public_key(),
+                    clock: None,
                     kind,
                 }
                 .sign(&key),
@@ -1979,6 +2176,7 @@ mod tests {
             let vote = Op {
                 stoa: a_stoa(),
                 author: key.public_key(),
+                clock: None,
                 kind: OpKind::Vote {
                     target: id,
                     direction: VoteDirection::Up,
@@ -1988,6 +2186,7 @@ mod tests {
             Op {
                 stoa: a_stoa(),
                 author: key.public_key(),
+                clock: None,
                 kind: OpKind::Vote {
                     target: self_id,
                     direction: VoteDirection::Up,
@@ -2002,9 +2201,7 @@ mod tests {
             v2.op.id()
         );
         assert!(current_version(&log, &v2.op.id()).unwrap().is_none());
-        assert!(current_version(&log, &self_vote.op.id())
-            .unwrap()
-            .is_none());
+        assert!(current_version(&log, &self_vote.op.id()).unwrap().is_none());
     }
 
     // ─── Written against the trait, not the implementation ────────────────
@@ -2027,7 +2224,8 @@ mod tests {
         let post = a_post("v1");
         let id = post.op.id();
         let mut log = MemoryOpLog::new();
-        log.append(post, Arrival::ordered(1, a_message_id(1))).unwrap();
+        log.append(post, Arrival::ordered(1, a_message_id(1)))
+            .unwrap();
         log.append(a_revision(id, "v2"), Arrival::ordered(2, a_message_id(1)))
             .unwrap();
 

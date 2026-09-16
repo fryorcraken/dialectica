@@ -380,6 +380,52 @@ include!(concat!(
     "/generated/provider_gen.rs"
 ));
 
+/// The host's wall-clock, in milliseconds since the Unix epoch.
+///
+/// # The ONLY clock read in this project, and it is here deliberately
+///
+/// `dialectica-core` reads no clock anywhere, so every decision it makes is a
+/// function of the ops held and the arguments given — which is what lets a test
+/// pin a boundary rather than approximate one, and what keeps an op's bytes from
+/// depending on when a test happened to run. The clock is a host value, and this
+/// file is where host values enter.
+///
+/// # NOT `cfg(logos_scaffold)`, and that is the point
+///
+/// Everything else the adapter does is behind that gate, which no `cargo test`
+/// and no clippy run compiles — so a wrong line there ships with every gate
+/// green, and one already has. This function is small enough to have no second
+/// behaviour and is compiled by every gate anyway, because a clock that silently
+/// returned zero is exactly the defect that would reach a user as "every post
+/// says 2010".
+///
+/// # A clock before the epoch is zero rather than a panic
+///
+/// `duration_since` fails when the system clock is set before 1970, which is a
+/// real state on a machine whose battery died. `unwrap_or_default` is zero, the
+/// op is published with an asserted time of zero, and every reader clamps it to
+/// the floor and says so. A panic here would abort the module process
+/// (PHASE0-FINDINGS §3) over a clock setting — turning a bad timestamp into a
+/// denial of service, on a field that decides nothing.
+///
+/// `as_millis` is a `u128`; a value past `u64` is ~584 million years away, and
+/// `try_into().unwrap_or(u64::MAX)` saturates rather than wrapping, so no
+/// arithmetic here can produce a small number from a huge one.
+///
+/// `allow(dead_code)` because every CALLER is behind `cfg(logos_scaffold)`,
+/// which no `cargo` invocation sets — so `cargo clippy` sees a function nobody
+/// calls. The alternative is gating this on the same cfg, which would put it
+/// back in the region no gate compiles and defeat the reason it is out here.
+#[allow(dead_code)]
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or_default()
+        .try_into()
+        .unwrap_or(u64::MAX)
+}
+
 /// The module instance.
 ///
 /// `Default`-constructed and a process-global singleton — the SDK gives no
@@ -579,7 +625,7 @@ impl Dialectica {
         F: FnOnce(
             &str,
             &mut core::log::SqliteOpLog,
-            &core::identity::SecretKey,
+            &core::authoring::Authorship<'_>,
             &mut dyn FnMut(&core::op::OpId),
         ) -> String,
     {
@@ -662,7 +708,18 @@ impl Dialectica {
                 Err(e) => return core::error_json(&e.to_string()),
             };
 
-            handler(request, &mut log, &key, &mut |id| {
+            // THE HOST'S CLOCK ENTERS HERE, and nowhere in `core`.
+            //
+            // `core` reads no clock at all, so that every decision it makes is a
+            // function of the ops held and the arguments given. This is an
+            // adapter deriving a host value and passing it in, which is what the
+            // rule below this function permits — not a decision.
+            let who = core::authoring::Authorship {
+                key: &key,
+                asserted_ms: now_ms(),
+            };
+
+            handler(request, &mut log, &who, &mut |id| {
                 // `op-transport` owns what happens here. Logged rather than
                 // silent, so "the op was published and went nowhere" is visible
                 // in a daemon log rather than inferred from a peer never seeing
@@ -795,9 +852,14 @@ impl DialecticaModule for Dialectica {
         // `list_threads` above: opening is cheap, and a handle held across calls
         // would have to answer what happens when the host hands the same path to
         // another instance.
-        core::read_thread_from_request(&request, || {
-            core::log::SqliteOpLog::open(&dir.join("ops.sqlite"))
-        })
+        core::read_thread_from_request(
+            &request,
+            || core::log::SqliteOpLog::open(&dir.join("ops.sqlite")),
+            // The reading peer's clock, for clamping an implausible asserted
+            // time. It changes rendered text and nothing else — not which items
+            // come back, not their order.
+            now_ms(),
+        )
     }
 
     fn create_stoa(&mut self, request: String) -> String {
