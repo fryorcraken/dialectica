@@ -13,7 +13,28 @@
       deleted, 2 added, 12 renamed — every one accounted for in the handover),
       286 QML assertions green, clippy clean, `nix build .#lgx` green so the
       `cfg(logos_scaffold)` adapter is known to compile.
-- [ ] tests — `tester`
+- [x] tests — `tester`. Test-list diff against `origin/main` verified name by
+      name: 13 gone, 13 new, 987 both sides — 11 renames, 2 deletions (both
+      properties OF the deleted derivation), 2 additions. The handover said "2
+      deleted, 2 added, 12 renamed"; the twelfth was a rename of a top-level
+      integration test, so the shape is right and the count of renames was one
+      over. Five mutations run and restored, each failing as predicted — the
+      retired author-address pin proved to be the deleted derivation's real
+      output (repointing `STOA_ADDRESS_PREFIX` makes
+      `no_derivation_turns_a_public_key_into_an_address` fail `left == right`).
+      **Three surviving comments credited the deleted address re-derivation for
+      a refusal the SIGNATURE check produces** — `op.rs`'s two test comments
+      (which task 5.2 claims to have corrected), `transport.rs`'s forged-op test
+      and `revision.rs`'s module doc; all corrected, the mechanism measured by
+      stubbing `verify_op_bytes`. `an_op_whose_key_does_not_bind_to_its_claimed_
+      author_is_refused` gained the control clause its own spec scenario names —
+      that the forged signature is VALID under the attacker's key — without
+      which a junk-signature fixture passed identically.
+      `verification_consults_the_key_..._and_nothing_beside_it` renamed to
+      `verification_takes_no_author_identifier_beside_the_key`: the arity check
+      discharges the scenario's first clause structurally and only the
+      `supplied` half of its second, and the old name claimed the `derived`
+      half too. Both `// NO SPEC:` markers confirmed genuinely unspecified.
 - [ ] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
 - [ ] review: readability — `code-reviewer`

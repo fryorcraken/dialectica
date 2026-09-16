@@ -1424,9 +1424,17 @@ mod tests {
     #[test]
     fn a_signed_op_verifies_against_its_own_author() {
         for op in one_of_each_kind() {
-            // The author must be the key that signs, or the address check in
-            // `verify_authored_op` rejects it — which is the point of that
-            // function.
+            // The author must be the key that signs, or `verify_authored_op`
+            // rejects it — because the **signature** is checked under the key
+            // the op carries, and no other key's signature verifies under it.
+            //
+            // This comment credited "the address check in `verify_authored_op`"
+            // until issue #80. That check never refused anything on this path:
+            // `SignedOp::verify` computed the claimed author by calling
+            // `.address()` on the op's own key, so the comparison was a value
+            // against itself. Measured: stubbing `verify_op_bytes` to return
+            // `true` makes `an_op_signed_by_someone_else_is_rejected` fail,
+            // which is what identifies the signature check as the mechanism.
             let key = a_key(2);
             let signed = op.sign(&key);
             assert!(signed.verify(), "a well-formed op must verify");
@@ -1436,8 +1444,15 @@ mod tests {
     #[test]
     fn an_op_signed_by_someone_else_is_rejected() {
         // THE forgery: a valid signature, untampered bytes, and still not from
-        // the author it claims. Only re-deriving the address from the key
-        // catches it, which is what `verify_authored_op` does.
+        // the author it claims. The **signature check** is what catches it —
+        // substituting the author substitutes the carried key, and the
+        // attacker's signature does not verify under the victim's key.
+        //
+        // Stated precisely because the comment here credited an address
+        // re-derivation until issue #80, and that was never the mechanism: the
+        // only caller derived the claimed author from the op's own key, so the
+        // comparison could not fail for any input. Measured — stubbing
+        // `verify_op_bytes` to return `true` fails this test.
         let victim = a_key(2);
         let attacker = a_key(3);
         let op = Op {

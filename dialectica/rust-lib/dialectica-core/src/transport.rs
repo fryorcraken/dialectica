@@ -1438,8 +1438,16 @@ mod tests {
     #[test]
     fn an_op_whose_key_does_not_bind_to_its_claimed_author_is_refused() {
         // THE forgery: a VALID signature over untampered bytes, from a key that
-        // is not the author the op names. Only re-deriving the address from the
-        // presented key catches it, which is what `verify_authored_op` does.
+        // is not the author the op names. The **signature check** is what
+        // catches it: the op carries the victim's key, and the attacker's
+        // signature does not verify under it.
+        //
+        // The comment here credited an address re-derivation until issue #80.
+        // That mechanism is deleted, and it never refused anything on this
+        // path anyway — `SignedOp::verify` derived the claimed author from the
+        // op's own key, comparing a value to itself. Measured: stubbing
+        // `verify_op_bytes` to return `true` makes this test fail, which is
+        // what identifies the signature check as the mechanism.
         //
         // Distinguishable from a malformed payload: the payload decodes.
         let stoa = a_stoa("Agora");
@@ -1458,6 +1466,26 @@ mod tests {
         assert!(
             SignedOp::from_bytes(&payload).is_ok(),
             "the fixture must decode, or this is the decode test"
+        );
+
+        // The clause the `op-transport` scenario names and this test did not
+        // assert: "the same signature still verifies under the original key, so
+        // the refusal is the signature not matching the carried key rather than
+        // a decode failure".
+        //
+        // Without it a fixture whose signature was simply junk would be refused
+        // identically, and the test could not tell the forgery it names from any
+        // other bad signature — two explanations, one answer. The signature here
+        // is genuinely valid; what makes the op a forgery is which key it is
+        // presented beside.
+        assert!(
+            crate::identity::verify_authored_op(
+                &attacker.public_key().to_bytes(),
+                &forged.op.canonical_bytes(),
+                &forged.signature.to_bytes(),
+            ),
+            "the forged op's signature must be VALID under the attacker's own \
+             key, or this test is refusing junk rather than a forgery"
         );
 
         let refusal = receive(

@@ -1308,15 +1308,30 @@ mod tests {
     }
 
     #[test]
-    fn verification_consults_the_key_the_op_carries_and_nothing_beside_it() {
+    fn verification_takes_no_author_identifier_beside_the_key() {
         // The `identity` scenario "Verification takes no author identifier
-        // beside the key". What a test can check is the arity: the three values
-        // consulted are the signed bytes, the carried key and the signature, and
-        // there is no fourth parameter for an author identifier to arrive in.
+        // beside the key", whose two clauses this covers to different depths —
+        // stated plainly, because the name previously claimed the stronger one.
         //
-        // Asserted as a typed function pointer rather than by calling it, so
-        // this fails to COMPILE if a parameter is reintroduced — which is the
-        // failure a runtime assertion could not produce.
+        // **Clause one, "the values consulted are the op's signed bytes, the
+        // public key the op carries, and the signature": covered
+        // STRUCTURALLY.** The typed function pointer below fails to COMPILE if a
+        // fourth parameter is reintroduced, which is a failure no runtime
+        // assertion could produce.
+        //
+        // **Clause two, "no separate author identifier is supplied OR
+        // derived": covered only in its `supplied` half.** Arity cannot see
+        // what a body derives internally; a `verify_authored_op` that hashed
+        // the key into some identifier and consulted it would satisfy every
+        // assertion here. What closes the `derived` half is not this test but
+        // `no_derivation_turns_a_public_key_into_an_address`, which asserts no
+        // surviving entry point reproduces the retired derivation, plus the
+        // absence of any address-returning method on `PublicKey` at all.
+        //
+        // This test was named `..._consults_the_key_the_op_carries_and_nothing_
+        // beside_it`, which claimed the whole of clause two. It is renamed
+        // rather than strengthened because the overclaiming name is the defect:
+        // a reader trusting it would believe the `derived` half was gated here.
         let takes_exactly_three: fn(&[u8], &[u8], &[u8]) -> bool = verify_authored_op;
 
         let sk = a_fresh_key();
@@ -1326,6 +1341,18 @@ mod tests {
             b"a post",
             &sig.to_bytes()
         ));
+
+        // The `supplied` half, made observable rather than left to the arity
+        // alone: verification's verdict is a function of these three values
+        // only, so two different keys sharing everything else must disagree.
+        // A build that consulted some ambient author identifier could return
+        // the same verdict for both.
+        let other = a_fresh_key();
+        assert!(
+            !takes_exactly_three(&other.public_key().to_bytes(), b"a post", &sig.to_bytes()),
+            "the verdict must follow the carried key, so a different key must \
+             not verify the same signature over the same bytes"
+        );
     }
 
     #[test]

@@ -39,8 +39,14 @@
 //! # Verify first, then compare authors — the order is load-bearing
 //!
 //! An op's `author` field is a **claim**. [`SignedOp::verify`] is what turns it
-//! into a fact, by re-deriving the address from the key that actually signed
+//! into a fact, by checking the signature under the very key the op carries
 //! (`identity::verify_authored_op`) rather than taking the field's word.
+//!
+//! This paragraph said "by re-deriving the address from the key that actually
+//! signed" until issue #80. There is no author address to re-derive, and that
+//! re-derivation was never what refused a forgery: the author *is* the carried
+//! key, so substituting the author substitutes the key and the signature fails
+//! under it.
 //!
 //! Compare authors before verifying and the check compares one attacker-supplied
 //! string against another: an attacker writes the victim's public key into
