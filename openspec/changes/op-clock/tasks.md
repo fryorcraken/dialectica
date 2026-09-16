@@ -43,6 +43,26 @@
       > `"Not newest first"` anchors at 150, 181 and 210, and the `newest first`
       > prohibition at 213 which the label now legitimately trips).
       >
+      > **Fourth pass, correcting my own false claim.** `proposal.md` said
+      > "neither label is in `copy.json`". False: **three** handoff bundles
+      > answer to that filename and they disagree. `tmp/ui-bundle-new/` has the
+      > `["by relevance", "most recent first"]` the proposal quotes (that quote
+      > stands) and no `orderingNote`; `tmp/ui-design/` **and**
+      > `tmp/ui-bundle-old/` both carry `"same order for everyone"` plus an
+      > `orderingNote` reading *"…Timestamps do not reach this machine yet…"*.
+      > So the old label came from a bundle and the new one comes from none.
+      > The proposal now names which bundle for every claim.
+      >
+      > **Dropping `FeedScreen.qml:410`'s `feed.orderingNote` citation was
+      > right, but not for the reason given.** The instruction was that the key
+      > does not exist; it exists in two bundles. It still goes, on grounds that
+      > survive: its text is the "not yet" phrasing `feed-view` forbids by name
+      > and `tst_feed_copy.qml:202` pins against, so citing it would aim the
+      > reader at the claim this change falsifies — and all three bundles are
+      > gitignored and absent from the tree, so the citation is unfollowable
+      > regardless. The screen's comment naming no bundle is correct as written
+      > and was left untouched.
+      >
       > *Original routing note follows.*
       >
       > `feed-view` makes **"newest first"** the label this interface uses. The

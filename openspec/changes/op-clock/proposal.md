@@ -200,8 +200,31 @@ half at risk to fix the half that was actually wrong.
 order for everyone"* asserted convergence — every peer holding the same ops
 computes the same sequence — which "newest first" does not say. It is not lost:
 the denial's third sentence carries it, which is why that sentence stays.
-**Neither label is in `copy.json`**; the bundle's `feed.orderings` entry is the
-overruled one above, so this label is the core contract's, not the bundle's.
+**"Newest first" is in no bundle's `copy.json`, and the old label is in two of
+them** — which is why this paragraph names bundles rather than "the bundle".
+Three handoff directories answer to that filename and they disagree:
+`tmp/ui-bundle-new/` carries the `["by relevance", "most recent first"]` quoted
+above and no `feed.orderingNote`; `tmp/ui-design/` and `tmp/ui-bundle-old/` both
+carry `"same order for everyone"` as their first ordering and an
+`orderingNote` reading *"Not newest first. Timestamps do not reach this machine
+yet…"*. So the label this change replaces came from a bundle, and the label it
+installs comes from no bundle at all: it is the core contract's.
+
+**The two older bundles are superseded on exactly the point this change
+decides.** Their `orderingNote` gives the denial's reason as *timestamps do not
+reach this machine yet*, and promises *"when real times arrive this label
+changes"*. Both halves are now false — a time arrives inside the signed op, and
+the feed still declines to order by it because it is the author's own claim, not
+because it is missing. That is the "not yet" phrasing this capability forbids by
+name, so the older bundles are overruled on the note for the same reason the
+newer one is overruled on the label, and the three cannot be reconciled into a
+single bundle citation.
+
+**None of the three is checkable from the tree**: all are gitignored and absent
+from the worktree, so a code comment citing a bundle key would be a citation its
+reader cannot follow. The screen therefore cites none, and records only that
+these strings are the core contract's and that this proposal carries the
+override.
 
 **The design bundle's `copy.json` disagrees, and this is the one place it is
 overruled.** Its `feed.orderings` array reads `["by relevance", "most recent
