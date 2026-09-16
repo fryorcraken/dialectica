@@ -48,14 +48,31 @@ use crate::op::{Op, OpClock, OpId, OpKind, VoteDirection};
 
 /// What a publish did, and what to tell the caller.
 ///
-/// Carries [`Appended`] through **unchanged** rather than recomputing it. An op
-/// id is a function of the op's bytes and those bytes carry no timestamp and no
-/// nonce, so one identity publishing the same content twice produces one op —
-/// and both calls reach a caller as a success naming one op id. The only thing
-/// that tells them apart is this field, and `op-log` is the layer that knows the
-/// answer. Asking the store with a `get` before the `append` would be two round
-/// trips computing a value the store is about to compute anyway, so the two
-/// could disagree.
+/// Carries [`Appended`] through **unchanged** rather than recomputing it.
+/// `op-log` is the layer that knows whether an append stored something new;
+/// asking the store with a `get` before the `append` would be two round trips
+/// computing a value the store is about to compute anyway, so the two could
+/// disagree.
+///
+/// # What this field no longer reports, and what replaced it
+///
+/// This doc used to say that an op's bytes "carry no timestamp and no nonce, so
+/// one identity publishing the same content twice produces one op". **Both
+/// halves are now false.** The preimage carries a counter and a wall-clock, and
+/// [`publish`] stamps both — so authoring the same body twice produces **two
+/// ops**, with two ids, and both are stored.
+///
+/// Content-dedup therefore no longer protects an author from an accidental
+/// double publish, and there is no delete in this system: a revision replaces
+/// content rather than withdrawing an op. Refusing the duplicate here is not the
+/// answer either — two identical posts minutes apart are a legitimate thing to
+/// write, and this module may not decide otherwise.
+///
+/// **`appended` still reports what it always did**, and it is now the narrower
+/// fact: whether *this exact op* — these bytes, this counter, this asserted time
+/// — was already held. A byte-identical replay still reports
+/// [`Appended::AlreadyPresent`], which is what makes a re-delivered op idempotent;
+/// what changed is that two separate authorings are no longer byte-identical.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Published {
     pub id: OpId,
@@ -1762,11 +1779,60 @@ mod tests {
     }
 
     #[test]
-    fn every_publish_path_stamps_a_counter() {
-        // THE SWEEP. `post`, `reply` and `vote` each build an `Op` literal, and
-        // a fourth that forgot the clock would publish an op no ordering could
-        // place. The compiler catches a MISSING field; it does not catch a field
-        // set to `None`, which is what this covers.
+    fn publish_stamps_a_counter_onto_an_op_of_any_kind() {
+        // **The property that is TOTAL, rather than the three builders that
+        // happen to exist today.** An earlier version of this test named
+        // `post`, `reply` and `vote` — which is the recorded hand-maintained-
+        // sweep shape. `OpKind` already has `Moderate`, `Revise` and
+        // `StoaMetadata` with no builder yet, so three more were coming, each
+        // absent from the list with the suite green.
+        //
+        // `publish` is the one function between a locally-built `Op` and
+        // `append`, and it overwrites `clock` with `..op` regardless of what
+        // the builder set — so "carries a counter" is a property of `publish`
+        // and of the kind, not of the builder. Derived from `every_op_kind`
+        // the way `op.rs`'s `one_of_each_kind` derives its version-2 half: a
+        // seventh variant enters this test for free, because `every_op_kind`
+        // is what the other sweeps already count.
+        //
+        // The input carries `clock: None` deliberately. The compiler demands
+        // the field and accepts `None`, which is exactly the mistake a new
+        // builder would make; this asserts `publish` corrects it rather than
+        // trusting it.
+        let stoa = a_stoa("Agora");
+        let key = a_key(A_ROOT, &stoa);
+        let author = key.public_key();
+
+        let kinds = crate::log::fixtures::every_op_kind();
+        assert!(kinds.len() >= 6, "the fixture must still cover every kind");
+
+        for kind in kinds {
+            let mut log = a_log();
+            let unstamped = Op {
+                stoa,
+                author: author.clone(),
+                clock: None,
+                kind,
+            };
+            let published = publish(&mut log, &by(&key), unstamped).unwrap();
+            let clock = stored(&log, &published.id)
+                .op
+                .clock
+                .expect("publish must stamp a clock onto an op of every kind");
+            assert_eq!(
+                clock.counter, 1,
+                "the first op into an empty log publishes at one above a clock of zero"
+            );
+            assert_eq!(clock.asserted_ms, A_TIME, "and carries the author's time");
+        }
+    }
+
+    #[test]
+    fn the_counters_ascend_across_successive_publishes() {
+        // The other half of the old sweep, kept because it is a different
+        // claim: each publish reads the clock the one before it advanced, so
+        // three ops into one Stoa come back strictly ascending. The test above
+        // covers "a counter is stamped"; this covers "the value moves".
         let stoa = a_stoa("Agora");
         let key = a_key(A_ROOT, &stoa);
         let mut log = a_log();
@@ -1782,14 +1848,6 @@ mod tests {
         )
         .unwrap();
 
-        for (what, id) in [("post", root.id), ("reply", child.id), ("vote", ballot.id)] {
-            assert!(
-                stored(&log, &id).op.clock.is_some(),
-                "a published {what} must carry a clock"
-            );
-        }
-        // And the three counters ascend, because each read the clock the one
-        // before it advanced.
         let counter_of = |id: &OpId| stored(&log, id).op.clock.unwrap().counter;
         assert!(counter_of(&root.id) < counter_of(&child.id));
         assert!(counter_of(&child.id) < counter_of(&ballot.id));
