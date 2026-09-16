@@ -251,9 +251,14 @@ mod tests {
     #[test]
     fn the_maximum_representable_instant_formats_rather_than_panicking() {
         // Reachable from a field an author chooses, and a panic aborts the
-        // module process. The value clamps, so what this really pins is that
-        // NOTHING on the path overflows — including the clamp arithmetic, where
+        // module process. The value does NOT clamp — `u64::MAX` against a
+        // `u64::MAX` reader is inside the saturated allowance, which is what the
+        // assertion below says — so what this pins is that nothing on the path
+        // overflows, including the clamp arithmetic, where
         // `now_ms + FUTURE_ALLOWANCE_MS` would wrap without `saturating_add`.
+        // (This comment used to say "the value clamps", contradicting the
+        // assertion three lines down and leaving a reader to re-derive which half
+        // to trust.)
         let out = format_asserted(u64::MAX, u64::MAX);
         assert!(
             !out.clamped,

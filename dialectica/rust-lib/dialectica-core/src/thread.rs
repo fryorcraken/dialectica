@@ -2910,6 +2910,131 @@ mod tests {
         assert_eq!(a.len(), 5, "the fixture must exercise all five");
     }
 
+    /// A reply carrying BOTH clock fields, chosen independently.
+    ///
+    /// **Two parameters, because one value cannot distinguish two rules.** Every
+    /// other fixture in this module spells its asserted time `A_TIME`, so a
+    /// sequence ordered by asserted time and a sequence ordered by counter give
+    /// the same answer on all of them — the recorded defect family, applied to
+    /// this field. A test about which of the two decides has to be able to set
+    /// them against each other.
+    fn a_reply_at(
+        author_seed: u8,
+        parent: &SignedOp,
+        body: &str,
+        counter: u64,
+        asserted_ms: u64,
+    ) -> SignedOp {
+        let key = a_key(author_seed);
+        let thread = match &parent.op.kind {
+            OpKind::Post { thread, .. } => thread.unwrap_or(parent.op.id()),
+            _ => parent.op.id(),
+        };
+        Op {
+            stoa: a_stoa(),
+            author: key.public_key(),
+            clock: Some(crate::op::OpClock {
+                counter,
+                asserted_ms,
+            }),
+            kind: OpKind::Post {
+                thread: Some(thread),
+                parent: Some(parent.op.id()),
+                body: body.to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&key)
+    }
+
+    #[test]
+    fn the_sequence_follows_the_counters_and_not_the_asserted_times() {
+        // `thread-read`: "WHEN a thread's replies carry asserted times that
+        // disagree with the order their counters give THEN the returned sequence
+        // is the one the counters give AND the asserted times did not affect it."
+        //
+        // **The fixture is built so the two rules give OPPOSITE answers**, which
+        // is the whole of it. Counters run 3/2/1 and the order is descending, so
+        // the counter rule yields `late`, `middle`, `early`. The asserted times
+        // run the other way: the counter-3 reply claims the EARLIEST instant and
+        // the counter-1 reply the latest, so a sequence ordered by asserted time
+        // — ascending or descending — is a sequence this assertion rejects.
+        //
+        // Ascending by time would be `late`(2024), `middle`(2025), `early`(2026)
+        // reversed — i.e. `early`, `middle`, `late`; descending by time gives
+        // `early`, `middle`, `late` reversed. Either way the counter answer
+        // `late, middle, early` distinguishes it, because the names deliberately
+        // describe the CLAIMED time rather than the position.
+        //
+        // Three distinct instants, each verified against `date -u`:
+        //   1_735_689_600_000 ms = 2025-01-01T00:00:00Z
+        //   1_704_067_200_000 ms = 2024-01-01T00:00:00Z
+        //   1_767_225_600_000 ms = 2026-01-01T00:00:00Z
+        let root = a_root(2, "root");
+        // counter 3, but claims 2024 — the earliest time on the highest counter.
+        let claims_earliest = a_reply_at(3, &root, "reply A", 3, 1_704_067_200_000);
+        let claims_middle = a_reply_at(4, &root, "reply B", 2, 1_735_689_600_000);
+        // counter 1, but claims 2026 — the latest time on the lowest counter.
+        let claims_latest = a_reply_at(5, &root, "reply C", 1, 1_767_225_600_000);
+
+        // The fixture must really disagree, or this test passes for the reason
+        // every fixture in this file used to: both rules agreeing.
+        assert!(
+            claims_earliest.op.clock.unwrap().counter > claims_latest.op.clock.unwrap().counter,
+            "the highest counter must belong to the earliest claimed time"
+        );
+        assert!(
+            claims_earliest.op.clock.unwrap().asserted_ms
+                < claims_latest.op.clock.unwrap().asserted_ms,
+            "and its claimed time must be the earliest, or the two rules agree \
+             and this test measures nothing"
+        );
+
+        let log = a_log(vec![
+            root.clone(),
+            claims_latest.clone(),
+            claims_earliest.clone(),
+            claims_middle.clone(),
+        ]);
+        let page = read(&log, &root, false);
+
+        assert_eq!(
+            ids_of(&page),
+            vec![
+                root.op.id().to_hex(),
+                claims_earliest.op.id().to_hex(),
+                claims_middle.op.id().to_hex(),
+                claims_latest.op.id().to_hex(),
+            ],
+            "descending counter decides, so the reply claiming the EARLIEST time \
+             leads and the one claiming the latest is last"
+        );
+
+        // And the times really did reach the surface, so the assertion above is
+        // about a value that is present rather than one that was dropped. A read
+        // that emitted no time at all would satisfy the sequence assertion alone.
+        let times: Vec<String> = page.items[1..]
+            .iter()
+            .map(|i| {
+                i.asserted_time
+                    .as_ref()
+                    .expect("a timed reply")
+                    .text
+                    .clone()
+            })
+            .collect();
+        assert_eq!(
+            times,
+            vec![
+                "2024-01-01T00:00:00Z",
+                "2025-01-01T00:00:00Z",
+                "2026-01-01T00:00:00Z"
+            ],
+            "the rendered times run FORWARD down the page while the sequence runs \
+             by counter — the visible consequence the spec calls correct"
+        );
+    }
+
     #[test]
     fn a_deep_chain_comes_back_flat() {
         let root = a_root(2, "root");

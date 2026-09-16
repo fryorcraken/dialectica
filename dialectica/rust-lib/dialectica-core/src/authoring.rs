@@ -525,6 +525,15 @@ mod tests {
     /// these tests is reproducible.
     const A_ROOT: [u8; 32] = [7u8; 32];
 
+    /// **A SECOND peer's root secret.** The causality requirements are about two
+    /// identities — `op-ordering`: *"Publishing after receiving advances past what
+    /// was received"*, *"Every peer that receives both computes the same
+    /// relation"* — and a fixture with one author cannot distinguish a clock that
+    /// folds over every op it holds from one scoped to the peer's own authorship.
+    /// Two tests here said "an op from somebody else" in a comment while signing
+    /// with the local key; this is the somebody else.
+    const ANOTHER_ROOT: [u8; 32] = [11u8; 32];
+
     fn a_stoa(title: &str) -> Address {
         Genesis {
             creator: crate::identity::SecretKey::from_bytes(&[1u8; 32])
@@ -548,7 +557,15 @@ mod tests {
     /// sampled value would make every op id in this suite depend on when the
     /// test ran — and two ops published in one test would differ by whether the
     /// millisecond ticked between them, which is a flake nobody could reproduce.
-    /// 2026-09-14T11:01:44Z.
+    /// 2026-09-18T11:01:44Z, by `date -u -d @1789729304`.
+    ///
+    /// **This is an ASSERTED time, not a reader's clock**, and `thread.rs` spells
+    /// a constant of the same value `A_TIME` for the opposite role — the reading
+    /// peer's own clock, passed as `now_ms`. The field was renamed
+    /// `now_ms` → `asserted_ms` in this change and these two fixtures were not;
+    /// the name is kept here only because renaming a fixture across two modules
+    /// is churn without a reader, and recorded so the next person comparing the
+    /// two files knows they name different things.
     const A_TIME: u64 = 1_789_729_304_000;
 
     /// Authorship with a fixed clock, for the tests that only need to publish.
@@ -828,6 +845,38 @@ mod tests {
         // And the ordering rule places the second ahead of the first. Read
         // through the log rather than by re-deriving the comparison, so this
         // asserts the ORDER a reader sees rather than a property of two numbers.
+        //
+        // **The coincidence is made a checked precondition.** These two ops differ
+        // only in their counter, so which op id sorts lower is a property of the
+        // digest — which means "ordered by counter" and "ordered by ascending op
+        // id" are both live explanations of the assertion below. The digests
+        // happen to fall the right way today, so the assertion is sound; what was
+        // missing is anything keeping it sound. A reword of the body, a different
+        // key, another Stoa title, or a change to the asserted time would re-roll
+        // both hashes and could silently make the two rules agree — and the
+        // `now_ms` → `asserted_ms` rename in this very change re-rolled them
+        // already, which is how much movement it takes.
+        //
+        // The disagreement required: `second.id > first.id`, so ascending op id
+        // would place the FIRST op ahead and the descending-counter answer below
+        // places the second. They are checked against each other rather than
+        // stated, because which of two SHA-256 outputs is larger is not a fact to
+        // take on trust — this repo has recorded the cost of doing so.
+        //
+        // Not searched, unlike `arrival.rs`'s disagreement fixture, because there
+        // is nothing here to search over: this test is about two publishes of one
+        // fixed body through the real `post` path, and varying the body would be
+        // testing a different thing. So the relation is asserted instead, and the
+        // failure message says what to do about it rather than what went wrong.
+        assert!(
+            second.id > first.id,
+            "the fixture has drifted: the second op's id no longer sorts ABOVE \
+             the first's, so ascending-op-id order and descending-counter order \
+             now agree and the assertion below distinguishes neither. Re-roll the \
+             fixture (a different body) until they disagree again — do not delete \
+             this guard."
+        );
+
         let ids: Vec<OpId> = log.iter().unwrap().iter().map(|e| e.id()).collect();
         assert_eq!(ids, vec![second.id, first.id], "newest first, by counter");
     }
@@ -1646,13 +1695,24 @@ mod tests {
         // above N, which states "this op was written knowing of something at N".
         let stoa = a_stoa("Agora");
         let key = a_key(A_ROOT, &stoa);
+        // **A genuinely different author**, which is the half this test used to
+        // only claim. Its comment said "an op from somebody else" while signing
+        // with the local key, so a clock that folded over only the peer's OWN
+        // prior ops passed it — and the requirement is about causality BETWEEN
+        // peers.
+        let peer = a_key(ANOTHER_ROOT, &stoa);
+        assert_ne!(
+            key.public_key().to_bytes(),
+            peer.public_key().to_bytes(),
+            "the fixture needs two identities, or 'received' means 'authored'"
+        );
         let mut log = a_log();
 
         // An op from somebody else, carrying a counter well above anything this
         // peer would have reached on its own.
         let received = Op {
             stoa,
-            author: key.public_key(),
+            author: peer.public_key(),
             clock: Some(OpClock {
                 counter: 500,
                 asserted_ms: A_TIME,
@@ -1664,7 +1724,7 @@ mod tests {
                 attachments: vec![],
             },
         }
-        .sign(&key);
+        .sign(&peer);
         log.append(received, Arrival::unordered()).unwrap();
 
         let published = post(&mut log, &by(&key), stoa, "mine".to_string()).unwrap();
@@ -1687,11 +1747,20 @@ mod tests {
         // peer's own unchanged clock.
         let stoa = a_stoa("Agora");
         let key = a_key(A_ROOT, &stoa);
+        // Both received ops are signed by the OTHER peer, for the reason spelled
+        // out on `ANOTHER_ROOT`: a clock scoped to this peer's own authorship
+        // would pass a single-author version of this test.
+        let peer = a_key(ANOTHER_ROOT, &stoa);
+        assert_ne!(
+            key.public_key().to_bytes(),
+            peer.public_key().to_bytes(),
+            "the hostile op must come from somebody else"
+        );
         let mut log = a_log();
 
         let honest = Op {
             stoa,
-            author: key.public_key(),
+            author: peer.public_key(),
             clock: Some(OpClock {
                 counter: 5,
                 asserted_ms: A_TIME,
@@ -1703,10 +1772,11 @@ mod tests {
                 attachments: vec![],
             },
         }
-        .sign(&key);
+        .sign(&peer);
+        let honest_id = honest.op.id();
         let hostile = Op {
             stoa,
-            author: key.public_key(),
+            author: peer.public_key(),
             clock: Some(OpClock {
                 counter: u64::MAX,
                 asserted_ms: A_TIME,
@@ -1718,7 +1788,7 @@ mod tests {
                 attachments: vec![],
             },
         }
-        .sign(&key);
+        .sign(&peer);
         let hostile_id = hostile.op.id();
         log.append(honest, Arrival::unordered()).unwrap();
         log.append(hostile, Arrival::unordered()).unwrap();
@@ -1735,8 +1805,34 @@ mod tests {
         // outright would be refusing content for a field, which is the
         // censorship vector this deliberately does not open.
         assert!(log.get(&hostile_id).unwrap().is_some(), "it is stored");
+
+        // **The WHOLE order, not just its head.** These three ops have unrelated
+        // digests, so `ids[0] == hostile_id` alone is satisfied by an id-ordered
+        // log with probability one in three and leaves the rest of the sequence
+        // unexamined — and this is the security-relevant half of the advance-bound
+        // requirement (`op-ordering`: "An over-bound op still takes its place in
+        // the order"), so what it must show is the whole placement.
+        //
+        // The counters are u64::MAX > 6 > 5, all distinct, so descending-counter
+        // order is total here and needs no op-id tiebreak: an id-ordered or
+        // insertion-ordered log gives a different vector unless the digests
+        // happen to agree, which the guard below refuses to assume.
         let ids: Vec<OpId> = log.iter().unwrap().iter().map(|e| e.id()).collect();
-        assert_eq!(ids[0], hostile_id, "and it takes its place at the head");
+        assert_eq!(
+            ids,
+            vec![hostile_id, published.id, honest_id],
+            "descending counter: the over-bound op leads, then this peer's own \
+             publish at 6, then the honest op at 5"
+        );
+        // And the fixture really does distinguish the counter rule from the op-id
+        // one, rather than the two happening to agree on this triple.
+        let mut by_id = ids.clone();
+        by_id.sort();
+        assert_ne!(
+            ids, by_id,
+            "the fixture has drifted: descending counter and ascending op id now \
+             give the same sequence, so the assertion above distinguishes neither"
+        );
     }
 
     #[test]

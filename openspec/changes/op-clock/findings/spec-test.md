@@ -10,7 +10,7 @@ empty there and the suite is back to **972 + 30 passing**.
 
 ## Findings
 
-- [ ] **`tester`** — `thread-read`'s clamping scenario is not pinned anywhere,
+- [x] **`tester`** — `thread-read`'s clamping scenario is not pinned anywhere,
       and two independent mutations prove it.
       **Where:** `dialectica/rust-lib/dialectica-core/src/wire.rs:1872` and
       `dialectica/rust-lib/dialectica-core/src/thread.rs:787`.
@@ -45,7 +45,38 @@ empty there and the suite is back to **972 + 30 passing**.
       value rather than the asserted one. **Severity: high** — two surviving
       mutations on a spec scenario stated twice.
 
-- [ ] **`tester`** — `thread-read`'s *"The sequence does not follow the asserted
+      **Fixed**, with two tests in `wire.rs` rather than one, because the two
+      mutations are two different defects and one test cannot be honest about
+      both:
+
+      - `a_thread_read_clamps_an_implausible_asserted_time_and_reports_the_clamp`
+        — a table over five asserted times read through `read_thread` at a fixed
+        reader clock: inside the allowance, the year 2387, one ms past the
+        allowance, exactly at the allowance, and zero. It asserts `clamped`, the
+        rendered `text`, and that `authorAsserted` stays true through a clamp.
+        The at-the-edge and one-past-the-edge rows differ by one millisecond, so
+        a build that clamped everything and a build that clamped nothing each
+        fail.
+      - `a_thread_read_clamps_against_the_readers_clock_rather_than_the_ops_own`
+        — the SAME asserted instant read against two different reader clocks,
+        getting two different verdicts. That is the property no single-value
+        fixture can express, and it is what mutation B disconnects.
+
+      **Every expected string is hardcoded and derived independently**, by
+      `date -u -d @<seconds>`, not read back out of the crate. Three of my four
+      first attempts at those constants were WRONG and the `date` check caught
+      them before the test ran — which is the argument for the independence rule
+      in one measurement.
+
+      **Mutation A** (`wire.rs`, `"clamped": asserted.clamped` → `"clamped":
+      false`): **both tests fail**, on `clamped` left `false` right `true`.
+      **Mutation B** (`thread.rs`, `format_asserted(c.asserted_ms, now_ms)` →
+      `format_asserted(c.asserted_ms, c.asserted_ms)`): **both tests fail**, and
+      the far-future row now renders `2387-05-05T13:20:00Z` unclamped — the
+      reader sees "posted in 2387", which is the failure this finding describes.
+      Both restored; `git diff` shows test files only.
+
+- [x] **`tester`** — `thread-read`'s *"The sequence does not follow the asserted
       times"* has no test, and cannot have a non-vacuous one with the present
       fixtures.
       **Where:** `openspec/changes/op-clock/specs/thread-read/spec.md:95` —
@@ -71,7 +102,35 @@ empty there and the suite is back to **972 + 30 passing**.
       `arrival.rs` tests recording that the property is type-enforced and that
       they are documenting it rather than measuring it. **Severity: medium.**
 
-- [ ] **`tester`** — `authoring.rs:807` asserts an order against a fixture that
+      **Fixed**, taking the first branch — the thread read — because it is the
+      one a regression could reach. `thread.rs` gains `a_reply_at`, a reply
+      fixture taking the counter and the asserted time as SEPARATE parameters
+      (the whole cause of this finding was one `A_TIME` standing for both), and
+      `the_sequence_follows_the_counters_and_not_the_asserted_times`.
+
+      The fixture makes the two rules give opposite answers: counters run 3/2/1
+      (descending order, so that sequence) while the asserted times run
+      2024/2025/2026 the other way, so the highest counter claims the EARLIEST
+      instant. The replies are named for the time they CLAIM rather than for
+      their position, so a sequence ordered by time in either direction fails.
+      The test also asserts the three rendered times, so a read that emitted no
+      time at all could not satisfy the sequence assertion alone. The three
+      instants are verified against `date -u`.
+
+      **Mutation:** `cmp_ops`'s counter arm inverted to ascending. It **fails**,
+      returning the exact reverse of the expected id vector. The same failure
+      output shows the three ids in an order that distinguishes ascending-op-id
+      ordering too, so no second mutation was needed. Restored.
+
+      **On the second half — the two `arrival.rs` near-tautologies — I take the
+      finding's own reading and open no change.** `the_wall_clock_confers_no_
+      position` and `a_far_future_wall_clock_does_not_reach_the_head_of_the_
+      order` vary a field `OpEntry` does not carry, so no comparator mutation can
+      make either fail; they document a type-enforced property. The new thread
+      test is what now measures the scenario end to end, which is the stronger of
+      the two fixes the finding offered.
+
+- [x] **`tester`** — `authoring.rs:807` asserts an order against a fixture that
       does not force the two explanations apart. It passes today by luck.
       **Where:**
       `dialectica/rust-lib/dialectica-core/src/authoring.rs:780-808`,
@@ -98,7 +157,28 @@ empty there and the suite is back to **972 + 30 passing**.
       **Severity: medium** — the assertion is sound now; what is missing is the
       guard that keeps it sound.
 
-- [ ] **`tester`** — `authoring.rs:1714` has the same unguarded shape, on the
+      **Fixed**, taking the `assert!` form rather than the search: this test is
+      about two publishes of one fixed body through the real `post` path, and
+      varying the body would make it a different test. The guard's message says
+      to re-roll the fixture rather than to delete the guard.
+
+      **The finding's cited digests are stale, and that is itself worth having
+      measured.** It says `second.id` begins `0e ff…` and `first.id` begins
+      `74 fb…` — i.e. `second.id < first.id`. I wrote the guard that way round
+      first and it **failed immediately**: in the current tree `second.id >
+      first.id`. The `now_ms` → `asserted_ms` rename in commit `6156082` re-rolled
+      the preimage between the review and this fix, which is exactly the drift
+      this guard exists to catch, arriving inside the same change. The guard is
+      now `second.id > first.id`, which is the relation under which ascending op
+      id names the FIRST op and the counter rule names the second — so they
+      genuinely disagree.
+
+      Since the review's cited values no longer describe this tree, the guard is
+      what any future reader should trust; the digest prefixes in the box above
+      are left as written rather than edited, per the rule about not rewriting a
+      reviewer's text.
+
+- [x] **`tester`** — `authoring.rs:1714` has the same unguarded shape, on the
       hostile-counter path.
       **Where:** `authoring.rs:1654-1715`,
       `a_peer_can_still_publish_after_receiving_a_maximal_counter`, at
@@ -115,7 +195,20 @@ empty there and the suite is back to **972 + 30 passing**.
       **Fix:** assert the id relation, or assert the whole `ids` vector rather
       than only its head. **Severity: medium.**
 
-- [ ] **`tester`** — two `authoring.rs` fixtures named for *receiving* an op
+      **Fixed**, taking both halves of the suggested fix. The assertion is now the
+      WHOLE three-element vector — `[hostile, this peer's own publish at 6, the
+      honest op at 5]`, which is descending counter over three distinct counters
+      so no tiebreak is involved — plus a guard asserting the sequence is NOT the
+      sorted-by-id one, so the fixture cannot drift into the two rules agreeing.
+
+      **Mutation:** `cmp_ops`'s counter arm led by `a.id.cmp(b.id)`. It **fails**,
+      returning the three ids in ascending-id order. Worth recording from the
+      failure output: the hostile op's id (`74 9b…`) is the HIGHEST of the three,
+      so the old `ids[0] == hostile_id` would have been satisfied by
+      descending-op-id order as well — it is only under ascending op id that the
+      hostile op lands last, and only the whole-vector form sees that. Restored.
+
+- [x] **`tester`** — two `authoring.rs` fixtures named for *receiving* an op
       have only one author, so a clock that ignored received ops would pass
       both.
       **Where:** `authoring.rs:1619`
@@ -134,7 +227,19 @@ empty there and the suite is back to **972 + 30 passing**.
       strong and would catch most breakages; what they cannot catch is a clock
       scoped to the peer's own authorship.
 
-- [ ] **`tester`** — `every_publish_path_stamps_a_counter` is a hand-maintained
+      **Fixed.** `ANOTHER_ROOT` is a second peer's root secret, documented with
+      this finding's own reasoning, and both fixtures now sign their received ops
+      with a key derived from it — with an `assert_ne!` on the two public keys, so
+      "the fixture needs two identities" is checked rather than assumed.
+
+      **Mutation, written to be exactly the implementation this finding
+      describes:** `publish` reading its clock from a fold filtered to the
+      publishing author's own ops, instead of `log.clock(&op.stoa)`. **Exactly
+      these two tests fail** out of the 44 in the file — `== 501` becomes `== 1`
+      and `== 6` becomes `== 1` — and no other test in the whole suite notices.
+      Before the second key, that mutation left both green. Restored.
+
+- [x] **`tester`** — `every_publish_path_stamps_a_counter` is a hand-maintained
       list that its own comment calls a sweep.
       **Where:** `authoring.rs:1768`, with the paths enumerated literally at
       `:1777-1786` (`post`, `reply`, `vote`).
@@ -149,6 +254,13 @@ empty there and the suite is back to **972 + 30 passing**.
       **Severity: low** — the claim is the defect, not the coverage.
       *(The `architecture` reviewer reports this independently; if their box is
       actioned, tick this one with it.)*
+
+      **Already fixed by the `dev-writer` in `e8b1535`**, taking the stronger of
+      the two options this box offered: the test is now
+      `publish_stamps_a_counter_onto_an_op_of_any_kind`, derived from
+      `log::fixtures::every_op_kind()` rather than naming three builders, with a
+      floor assertion on the kind count. Verified by reading the current body, not
+      inferred from the commit subject. Ticked here as that box instructs.
 
 - [ ] **`spec-writer`** — `op-ordering`'s scenario *"The clock survives a
       restart without a stored counter"* asserts something no test can check as

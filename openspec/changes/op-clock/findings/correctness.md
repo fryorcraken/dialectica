@@ -12,7 +12,7 @@ the tree was restored to clean afterwards and the worktree removed.
 
 ## Findings
 
-- [ ] **`tester`** — `moderation.rs:1317` — `the_order_is_by_lamport_and_not_by_op_id` measures nothing
+- [x] **`tester`** — `moderation.rs:1317` — `the_order_is_by_lamport_and_not_by_op_id` measures nothing
       **Scenario:** both ops come from `a_moderation` (`moderation.rs:666-679`),
       which builds `clock: None`. Position is expressed only through
       `Arrival::ordered(2, …)` / `Arrival::ordered(9, …)` — and after this change
@@ -29,7 +29,23 @@ the tree was restored to clean afterwards and the worktree removed.
       security-relevant resolver, and the test asserts coverage the suite does
       not have.
 
-- [ ] **`tester`** — `moderation.rs:1288` — `a_later_hide_reverses_an_earlier_unhide` does not establish "later"
+      **Fixed.** Renamed to `the_op_counter_decides_and_not_the_op_id` — the old
+      name was the false claim, and "Lamport" now means the counter in the op
+      rather than the transport's value, so the name had to move with the body.
+      The ops now come from `a_moderation_at` with real counters, the arrivals
+      say nothing, and the pair is **searched** (the shape
+      `an_unhide_reverses_a_hide_whatever_the_two_op_ids_are` already uses in this
+      file) so the unhide carries both the higher counter and the higher op id —
+      which puts the counter rule, ascending-op-id order and the degraded
+      branch's `Hide` preference in three-way disagreement. The search is guarded
+      at the point of use.
+      **Mutation proving it fails:** `moderation.rs`'s `deciding_index` changed to
+      `if false && first.op.op.clock.is_some()`, so a counter-carrying leader is
+      demoted to the degraded branch. It **fails** on
+      `deciding_op() == Some(unhide_id)`, left `Some(the hide)`, alongside six
+      other moderation tests. Restored.
+
+- [x] **`tester`** — `moderation.rs:1288` — `a_later_hide_reverses_an_earlier_unhide` does not establish "later"
       **Scenario:** same shape. Both ops are `a_moderation` (`clock: None`);
       "later" is expressed only as `Arrival::ordered(2, …)` vs
       `Arrival::ordered(3, …)`, which orders nothing. The assertion
@@ -43,7 +59,24 @@ the tree was restored to clean afterwards and the worktree removed.
       applied to the Unhide direction and not to the Hide direction, which is why
       this one survived. **Severity: high.**
 
-- [ ] **`tester`** — `log/contract.rs:1510` — `a_resolver_can_be_written_against_the_trait_alone` asserts a false ordering claim
+      **Fixed**, by the same re-aim its sibling got: `a_moderation_at` with
+      counters 2 and 3 in the ops, arrivals `unordered()`.
+      **Mutations, and they answer differently — recorded because the difference
+      is the finding underneath the finding:**
+      - `cmp_ops`'s both-carry-a-counter arm inverted to ascending —
+        `a_counter.cmp(&b_counter)` — makes the unhide lead, the counter branch
+        decides it, and this test **FAILS** on `assert!(resolved.is_hidden())`.
+        So the counter genuinely drives the answer now.
+      - Deleting the counter branch (`if false && …`) leaves it **PASSING**,
+        because the `Hide` preference the read then falls back to reaches the
+        same op.
+      That second explanation cannot be removed from any Hide/Unhide pair where
+      the hide wins, so it is stated in the test's own comment rather than
+      papered over, with a pointer to `a_later_unhide_reverses_an_earlier_hide`,
+      which the preference fails outright. A finding-fix that claimed the
+      preference had been excluded here would be the same defect one layer up.
+
+- [x] **`tester`** — `log/contract.rs:1510` — `a_resolver_can_be_written_against_the_trait_alone` asserts a false ordering claim
       **Scenario:** the hide and unhide are built inline with `clock: None`
       (`contract.rs:1541`, `contract.rs:1551`) and appended with
       `Arrival::ordered(2, …)` / `Arrival::ordered(3, …)`. Both fall into the
@@ -56,7 +89,25 @@ the tree was restored to clean afterwards and the worktree removed.
       above: the fix is to give the two ops counters (or to reword the assertion
       and comment as a degraded-order claim). **Severity: medium.**
 
-- [ ] **`tester`** — `revision.rs:925` — `the_highest_counter_revision_is_current` has no fixture guard
+      **Fixed**, and the fix found a second thing worth recording. The hide and
+      unhide now carry counters in the ops and arrive `unordered()`. The obvious
+      first attempt — counters 2 and 3 — **failed its own new fixture guard**: at
+      those values the unhide's op id sorts BELOW the hide's, so the counter rule
+      and ascending op id would have agreed and the assertion would still have
+      distinguished neither. So the pair is now **searched**, and guarded at the
+      point of use.
+      **Mutations proving both variants fail** — and they need two different ones,
+      which is itself the point of a contract suite run against both stores:
+      - `cmp_ops`'s counter arm led by `a.id.cmp(b.id)` — the `_in_memory`
+        variant **fails** (`Some(Hide)`, wanted `Some(Unhide)`); the `_in_sqlite`
+        variant **passes**, because SQLite orders by stored columns and never
+        calls `cmp_ops`.
+      - `sqlite.rs`'s `ORDER BY` reordered to `op_id ASC, sort_has_counter ASC,
+        sort_counter ASC` — the `_in_sqlite` variant **fails** the same way.
+      Both restored. A single mutation would have "proved" one variant and left
+      the other exactly as unmeasured as it was.
+
+- [x] **`tester`** — `revision.rs:925` — `the_highest_counter_revision_is_current` has no fixture guard
       **Scenario:** `v2`/`v3`/`v4` carry counters 2/3/4 via `a_revision_at`, but
       unlike every neighbouring counter test in the file the fixture never
       controls or checks the op-id relation. Its immediate neighbour
@@ -72,6 +123,20 @@ the tree was restored to clean afterwards and the worktree removed.
       coincidence with the suite green. `versions_naming_the_original_all_compete_directly`
       (`revision.rs:1506`) has the same gap with counters 2/3/4/5.
       **Severity: low** — a fixture-guard gap, by the file's own convention.
+
+      **Fixed in both**, and the sibling was checked precisely because this
+      finding named it — which is the "check the sibling you did not look at"
+      rule doing its job. Each now asserts that the winner does not hold the
+      LOWEST op id among its competitors, that being exactly the condition under
+      which ascending-op-id order would name it too, with a failure message
+      saying to re-roll a body rather than to delete the guard.
+      **Mutation proving the assertions they protect can fail:** `cmp_ops`'s
+      counter arm led by `a.id.cmp(b.id)`. `the_highest_counter_revision_is_
+      current` **fails** with `"v2"` where `"v4"` was wanted, and
+      `versions_naming_the_original_all_compete_directly` **fails** with `"v2"`
+      where `"v5"` was wanted — while the new guards pass, which is what confirms
+      the fixtures genuinely disagree today rather than the guards masking it.
+      Four other revision tests fail under the same mutation. Restored.
 
 ---
 

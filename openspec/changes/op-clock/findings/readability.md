@@ -309,7 +309,7 @@ accurate (lines 272, 281, 302, 312, 316).
       findings, so it is left rather than edited underneath them — recorded so
       it is not read as overlooked.
 
-- [ ] **`tester`** — `dialectica/rust-lib/dialectica-core/src/arrival.rs:827-841`
+- [x] **`tester`** — `dialectica/rust-lib/dialectica-core/src/arrival.rs:827-841`
       — two tests with different names carry a byte-identical assertion, and the
       comment claiming they bracket the boundary is false
       **Scenario:** `a_counter_within_the_bound_advances_the_clock` (828) and
@@ -329,7 +329,23 @@ accurate (lines 272, 281, 302, 312, 316).
       can't enforce distinguishability" shape, and the surrounding tests
       (`a_pair_whose_counter_and_id_disagree`) show the author knows the pattern.
 
-- [ ] **`tester`** — `dialectica/rust-lib/dialectica-core/src/log/sqlite.rs:1585-1601`
+      **Fixed.** The three functions collapse into one table,
+      `the_advance_bound_accepts_up_to_and_including_itself_and_nothing_past_it`,
+      with four rows: `ADVANCE_BOUND / 2` (strictly inside — the case that did not
+      exist), `ADVANCE_BOUND - 1`, `ADVANCE_BOUND`, `ADVANCE_BOUND + 1`. A table
+      rather than four functions for CLAUDE.md's reason, and because three
+      near-identical functions is what let two of them drift into one.
+
+      **Two mutations, chosen so the new row is proved to carry its own weight
+      rather than to ride along:**
+      - `counter - clock <= ADVANCE_BOUND` → `<`: **fails** on the edge row.
+      - `clock = counter` → `clock = counter.max(ADVANCE_BOUND)`: **fails on the
+        strictly-inside row FIRST** (got 1000000, wanted 500000), which is a
+        mutation the (at, one-past) pair alone could not see. That is the
+        measurement that makes the new row load-bearing rather than decorative.
+      Both restored.
+
+- [x] **`tester`** — `dialectica/rust-lib/dialectica-core/src/log/sqlite.rs:1585-1601`
       — the test the comment credits with catching the sentinel bug can no longer
       catch it, and its loop values are inert
       **Scenario:** `an_op_carrying_a_counter_sorts_ahead_of_one_carrying_none_at_
@@ -351,7 +367,24 @@ accurate (lines 272, 281, 302, 312, 316).
       `sqlite.rs:1540`. Severity: genuine defect — a comment instructing the next
       reader to preserve a value that does nothing is worse than silence.
 
-- [ ] **`tester`** — `dialectica/rust-lib/dialectica-core/src/moderation.rs:1247-1277`
+      **Fixed by making the loop values live, rather than by softening the
+      comment.** The test is now
+      `an_op_carrying_a_counter_reads_ahead_of_one_carrying_none_at_every_counter`
+      and goes through a real `log.iter()`, so each counter reaches
+      `counter_sort_key` and then the `ORDER BY` that compares both columns. Per
+      iteration it SEARCHES for a body pair giving the counter-LESS op the lower
+      op id, guards that relation, and appends counter-less first — so an id-
+      ordered read and an insertion-ordered read each give the wrong answer. Two
+      alternative explanations ruled out at once.
+
+      Counter 0 now earns the place the old comment claimed for it.
+      **Mutation, written as the exact historical defect:** `SortKey::of`'s
+      `has_counter: 0` → `i64::from(counter_sort_key(clock.counter) == i64::MAX)`,
+      which reintroduces the in-band sentinel. It **fails on the counter-0
+      iteration** — the two ops come back in the wrong order. Under the old form
+      the same mutation was invisible. Restored.
+
+- [x] **`tester`** — `dialectica/rust-lib/dialectica-core/src/moderation.rs:1247-1277`
       — a test names its fixtures "forged" and asserts on the adjacent line that
       they are not
       **Scenario:** `a_forged_hide_does_not_win_against_a_binding_unhide_however_
@@ -374,7 +407,28 @@ accurate (lines 272, 281, 302, 312, 316).
       (`a_stoa_where_a_forged_unhide_sorts_first`, line 635), but this is the
       instance where the contradiction sits on adjacent lines.
 
-- [ ] **`tester`** — `dialectica/rust-lib/dialectica-core/src/asserted_time.rs:252-263`
+      **Fixed as a rename, exactly as the finding prescribes** — the assertions
+      were correct and are untouched. It is now
+      `an_unauthorised_hide_does_not_win_against_a_binding_unhide_however_many_
+      are_minted`, the local binding is `unauthorised` rather than `forged`, and
+      the `verify()` assertion's message now says WHY authenticity is being
+      asserted in a test about authority (a signature failure would reject on the
+      other path, so the test would stop measuring the one it names).
+
+      **Mutation, on the path the new name claims:** `resolve`'s binding filter
+      with `&& moderators.authorises(e)` deleted. It **fails** on "no number of
+      non-binding hides may hide a target". So the test does measure the
+      authority path, which is what the rename asserts about it. Restored.
+
+      **A wrong guess, recorded rather than quietly dropped.** I first wrote here
+      that this test also fails under the `if false && first.op.op.clock.
+      is_some()` mutation used for the correctness boxes. I then ran it: it
+      **passes** under that mutation, because with one binding Unhide and twenty
+      non-binding Hides the degraded branch's `Hide` preference finds nothing
+      binding to prefer and falls back to the same op. The claim was plausible
+      and untrue, which is exactly why it had to be run rather than reasoned.
+
+- [x] **`tester`** — `dialectica/rust-lib/dialectica-core/src/asserted_time.rs:252-263`
       — the comment says the value clamps; the assertion says it does not
       **Scenario:** `the_maximum_representable_instant_formats_rather_than_
       panicking` comments *"**The value clamps**, so what this really pins is that
@@ -388,7 +442,18 @@ accurate (lines 272, 281, 302, 312, 316).
       out because `asserted_time.rs` is otherwise the best-documented file in the
       change and this is its one internal contradiction.
 
-- [ ] **`tester`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:7422`
+      **Fixed**, in the direction the finding identifies as correct: the comment
+      now says the value does NOT clamp and why (a `u64::MAX` claim against a
+      `u64::MAX` reader is inside the saturated allowance), with a parenthetical
+      recording what it used to say, so the next reader does not have to
+      re-derive which half was wrong. The assertion is untouched.
+
+      **No mutation, and no pretence of one**: a comment cannot fail a test. The
+      assertion it contradicted already has one —
+      `a_maximal_reader_clock_does_not_overflow_the_allowance` is the pair that
+      pins the `saturating_add`.
+
+- [x] **`tester`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:7422`
       — a test named for what the wire reports never reads the wire
       **Scenario:** `re_publishing_an_op_the_peer_holds_says_it_was_not_new`.
       In this file `wasNew` is the wire reply field (`wire.rs:1964`) and is the
@@ -403,6 +468,30 @@ accurate (lines 272, 281, 302, 312, 316).
       would leave this test green. Severity: genuine defect — either rename to
       name the log-level fact, or extend it to the wire, but the current name
       claims boundary coverage the body does not provide.
+
+      **Fixed by rename**, to
+      `appending_an_op_the_peer_already_holds_reports_already_present`, which is
+      what the body measures. The comment now records why the old name was a
+      false boundary claim.
+
+      The rename rather than the extension, and the reasoning is worth stating so
+      it can be overruled: the `wasNew: true` side of the wire IS asserted, by the
+      sibling immediately above
+      (`a_second_authoring_of_one_body_is_a_second_op_and_says_so`), so the gap is
+      one direction of one field.
+
+      **Recorded as a residual gap rather than closed, and the reason is a
+      fixture problem I could not solve within this box's scope.** `wasNew` is
+      `published.was_new()`, so reaching `false` through the wire needs a publish
+      whose op the log already holds — which after this change means the peer must
+      already hold an op with the SAME counter and the SAME asserted time as the
+      one `publish` is about to stamp. That is constructible (append a
+      hand-built op matching what the next publish will produce, then publish),
+      but it is a fixture that must predict `publish`'s own output, and getting it
+      wrong yields a test that passes for the ordinary `wasNew: true` reason. I
+      did not write it rather than write one I could not prove distinguishes the
+      two. **Open for whoever takes the `wasNew`-on-the-dedup-path question next:
+      that field has no wire test in the `false` direction.**
 
 ## Not findings, recorded so nobody re-opens them
 

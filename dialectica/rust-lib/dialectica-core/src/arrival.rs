@@ -825,28 +825,54 @@ mod tests {
     }
 
     #[test]
-    fn a_counter_within_the_bound_advances_the_clock() {
-        assert_eq!(clock_from_counters([ADVANCE_BOUND]), ADVANCE_BOUND);
-    }
+    fn the_advance_bound_accepts_up_to_and_including_itself_and_nothing_past_it() {
+        // **The boundary, from three sides, in one table.** This replaces two
+        // tests named `a_counter_within_the_bound_advances_the_clock` and
+        // `a_counter_exactly_at_the_bound_advances_the_clock` that carried a
+        // BYTE-IDENTICAL assertion — both `clock_from_counters([ADVANCE_BOUND])`
+        // — under a comment claiming they bracketed the edge "from below" and
+        // from above. They bracketed (at, one-past): nothing in the file ever
+        // exercised a counter strictly inside the accepting range, so the
+        // `within` name could not fail for the reason it gave.
+        //
+        // A table rather than three functions, because the only thing that
+        // differs between the cases is the input and the expectation, and three
+        // near-identical functions is what let two of them drift into one.
+        //
+        // Every expectation is a hardcoded relation to `ADVANCE_BOUND` rather
+        // than a value read back out of the function.
+        let cases: &[(&str, u64, u64)] = &[
+            (
+                "strictly inside the accepting range — the case neither of the \
+                 two replaced tests reached",
+                ADVANCE_BOUND / 2,
+                ADVANCE_BOUND / 2,
+            ),
+            (
+                "one below the edge, so the edge is not the only accepted value",
+                ADVANCE_BOUND - 1,
+                ADVANCE_BOUND - 1,
+            ),
+            (
+                "the edge itself: the bound is INCLUSIVE",
+                ADVANCE_BOUND,
+                ADVANCE_BOUND,
+            ),
+            (
+                "one past it is refused the advance, so the clock stays where it \
+                 started",
+                ADVANCE_BOUND + 1,
+                0,
+            ),
+        ];
 
-    #[test]
-    fn a_counter_exactly_at_the_bound_advances_the_clock() {
-        // The inclusive edge, from below. Together with the test after it this
-        // pins WHERE the boundary is, which a test at a far-away value cannot.
-        assert_eq!(
-            clock_from_counters([ADVANCE_BOUND]),
-            ADVANCE_BOUND,
-            "the bound is inclusive"
-        );
-    }
-
-    #[test]
-    fn a_counter_one_past_the_bound_does_not_advance_the_clock() {
-        assert_eq!(
-            clock_from_counters([ADVANCE_BOUND + 1]),
-            0,
-            "one past the bound is refused the advance, from a clock of zero"
-        );
+        for (what, counter, want) in cases {
+            assert_eq!(
+                clock_from_counters([*counter]),
+                *want,
+                "{what}: counter {counter} from a clock of zero"
+            );
+        }
     }
 
     #[test]

@@ -1776,21 +1776,62 @@ mod tests {
     }
 
     #[test]
-    fn an_op_carrying_a_counter_sorts_ahead_of_one_carrying_none_at_every_counter() {
+    fn an_op_carrying_a_counter_reads_ahead_of_one_carrying_none_at_every_counter() {
         // `cmp_ops` places every op carrying a counter before every op that does
-        // not, WHATEVER the counter, and the sort key has to express that.
+        // not, WHATEVER the counter, and the stored key has to express that.
         //
-        // THIS IS THE TEST THAT CAUGHT THE SENTINEL BUG. An earlier draft
-        // reserved `i64::MAX` in the counter column for "carries none" — and
-        // `counter_sort_key(0)` is exactly `i64::MAX`, so a counter-0 op
-        // interleaved with the others instead of preceding them. Counter 0 is in
-        // this list for that reason and must stay.
-        let without = SortKey::of(&signed(a_post("none")));
+        // **Asserted through a real read, and that is a repair rather than a
+        // flourish.** This test used to compare `SortKey::of(..).has_counter`
+        // against the counter-less op's — and `SortKey::of` sets `has_counter`
+        // from `clock.is_some()` **without reading `clock.counter` at all**, so
+        // the loop variable reached only the `.counter` field, which the
+        // assertion never touched. Deleting four of the five values, or replacing
+        // them all with `0`, weakened it by nothing. Its comment nonetheless
+        // instructed the next reader that "counter 0 is in this list for that
+        // reason and must stay", which made a dead test look load-bearing.
+        //
+        // Going through `iter()` puts the loop variable back in the path: the
+        // value reaches `counter_sort_key` and then the `ORDER BY` that compares
+        // both columns, which is the thing the property is actually about.
+        //
+        // **Counter 0 earns its place here for the original reason.** An earlier
+        // draft reserved `i64::MAX` in the counter column for "carries none", and
+        // `counter_sort_key(0)` is exactly `i64::MAX` — so a counter-0 op shared a
+        // key with every counter-less op and interleaved by op id. That is now a
+        // live case again rather than an inert one.
+        //
+        // The counter-less op is given the LOWER op id, so a read falling back to
+        // ascending op id would put it first and fail — which rules out the
+        // second explanation the ordering has.
         for counter in [0u64, 1, u64::MAX / 2, u64::MAX - 1, u64::MAX] {
-            let with = SortKey::of(&signed(a_post_at("some", counter)));
+            let (lower_body, higher_body) = (0..1000u32)
+                .find_map(|n| {
+                    let low = format!("no counter {n}");
+                    let high = format!("counter {counter} attempt {n}");
+                    (a_post(&low).id() < a_post_at(&high, counter).id()).then_some((low, high))
+                })
+                .expect("a pair giving the counter-less op the lower id exists");
+            let without = signed(a_post(&lower_body));
+            let with = signed(a_post_at(&higher_body, counter));
             assert!(
-                with.has_counter < without.has_counter,
-                "counter {counter} must still sort ahead of an op carrying none"
+                without.op.id() < with.op.id(),
+                "counter {counter}: the fixture must give the COUNTER-LESS op the \
+                 lower id, or op-id order and the partition agree and this \
+                 measures neither"
+            );
+
+            let mut log = SqliteOpLog::in_memory().unwrap();
+            // Appended counter-less first, so insertion order agrees with op-id
+            // order and disagrees with the answer required — a third explanation
+            // ruled out.
+            log.append(without.clone(), Arrival::unordered()).unwrap();
+            log.append(with.clone(), Arrival::unordered()).unwrap();
+
+            let ids: Vec<OpId> = log.iter().unwrap().iter().map(|e| e.id()).collect();
+            assert_eq!(
+                ids,
+                vec![with.op.id(), without.op.id()],
+                "counter {counter} must read ahead of an op carrying none"
             );
         }
     }

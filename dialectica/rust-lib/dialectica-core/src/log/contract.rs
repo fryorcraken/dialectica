@@ -1551,35 +1551,59 @@ fn a_resolver_can_be_written_against_the_trait_alone<L: OpLog>(log: &mut L) {
     let post = signed(a_post("the subject"));
     let target = post.op.id();
     let moderator = a_key(1);
-    let hide = Op {
-        stoa: a_stoa("Agora"),
-        author: moderator.public_key(),
-        clock: None,
-        kind: OpKind::Moderate {
-            target,
-            action: ModerationAction::Hide,
-        },
-    }
-    .sign(&moderator);
-    let unhide = Op {
-        stoa: a_stoa("Agora"),
-        author: moderator.public_key(),
-        clock: None,
-        kind: OpKind::Moderate {
-            target,
-            action: ModerationAction::Unhide,
-        },
-    }
-    .sign(&moderator);
+    // **The counters are in the OPS.** They used to be expressed as
+    // `Arrival::ordered(2)` / `Arrival::ordered(3)` with `clock: None`, and this
+    // change stopped anything reading an `Arrival` — so both ops fell into the
+    // degraded `(None, None)` arm and the assertion below actually rested on
+    // ascending op id, passing only because the unhide happened to hash lower.
+    // The comment claimed it rested on Lamport order, which is the coverage claim
+    // this repo treats as worse than a missing test.
+    //
+    // The test's own SUBJECT — that a resolver can be written against the trait
+    // alone — was and remains real; what needed fixing is the ordering claim it
+    // makes on the way past.
+    // **Searched, not hardcoded**, in the shape `arrival.rs`'s disagreement
+    // fixture uses. The two rules disagree only when the op with the higher
+    // COUNTER also has the higher OP ID, and which of two SHA-256 outputs is
+    // larger is not a fact to take on trust: the first pair tried here (counters
+    // 2 and 3) puts the unhide's id BELOW the hide's, so the two rules would have
+    // agreed and this assertion would have distinguished neither. The counters
+    // keep their relation throughout — the unhide always carries the higher —
+    // so only the ids move.
+    let a_moderation_at = |action, counter| {
+        Op {
+            stoa: a_stoa("Agora"),
+            author: moderator.public_key(),
+            clock: Some(crate::op::OpClock {
+                counter,
+                asserted_ms: 1_789_729_304_000,
+            }),
+            kind: OpKind::Moderate { target, action },
+        }
+        .sign(&moderator)
+    };
+    let (hide, unhide) = (0u64..1000)
+        .find_map(|n| {
+            let hide = a_moderation_at(ModerationAction::Hide, n * 2 + 1);
+            let unhide = a_moderation_at(ModerationAction::Unhide, n * 2 + 2);
+            (unhide.op.id() > hide.op.id()).then_some((hide, unhide))
+        })
+        .expect("a pair whose counter and op-id orders disagree exists within 1000 candidates");
 
-    log.append(post, Arrival::ordered(1, a_message_id(1)))
-        .unwrap();
-    log.append(hide, Arrival::ordered(2, a_message_id(1)))
-        .unwrap();
-    log.append(unhide, Arrival::ordered(3, a_message_id(1)))
-        .unwrap();
+    // Guarding the guard at the point of use: a broken search would otherwise
+    // hand back its first candidate silently.
+    assert!(
+        unhide.op.clock.unwrap().counter > hide.op.clock.unwrap().counter
+            && unhide.op.id() > hide.op.id(),
+        "the unhide must carry the higher counter AND the higher op id, or \
+         descending-counter and ascending-op-id order agree here"
+    );
 
-    // Last write wins by Lamport order (§5.7): the unhide is current.
+    log.append(post, Arrival::unordered()).unwrap();
+    log.append(hide, Arrival::unordered()).unwrap();
+    log.append(unhide, Arrival::unordered()).unwrap();
+
+    // Last write wins by the counter in the op: the unhide is current.
     assert_eq!(
         latest_moderation(log, &target).unwrap(),
         Some(ModerationAction::Unhide)

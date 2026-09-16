@@ -968,6 +968,24 @@ mod tests {
         let v3 = a_revision_at(id, "v3", 3);
         let v4 = a_revision_at(id, "v4", 4);
 
+        // **The fixture guard this test's own neighbours have and it did not.**
+        // Nothing here controlled or checked the op-id relation, so a future
+        // reword of a revision body — which re-rolls the hash — could silently
+        // restore the coincidence where ascending op id also names `v4`, with the
+        // suite green. Review measured that the counter rule genuinely decides
+        // TODAY (inverting the counters to 4/3/2 flips the winner to `v2`), which
+        // makes this a latent gap rather than a present vacuity — and a latent gap
+        // is what a guard is for.
+        //
+        // The condition: `v4` must not hold the LOWEST of the three ids, because
+        // that is exactly when ascending-op-id order would name it too.
+        assert!(
+            v4.op.id() > v2.op.id() || v4.op.id() > v3.op.id(),
+            "the fixture has drifted: v4 now holds the lowest op id of the three, \
+             so ascending-op-id order names it as well and the assertion below \
+             distinguishes neither rule. Re-roll a body until it does not."
+        );
+
         let mut log = MemoryOpLog::new();
         log.append(post, Arrival::unordered()).unwrap();
         log.append(v3.clone(), Arrival::unordered()).unwrap();
@@ -1545,9 +1563,22 @@ mod tests {
         let id = post.op.id();
         let mut log = MemoryOpLog::new();
         log.append(post, Arrival::unordered()).unwrap();
-        for (n, counter) in [("v2", 2u64), ("v3", 3), ("v4", 4), ("v5", 5)] {
-            log.append(a_revision_at(id, n, counter), Arrival::unordered())
-                .unwrap();
+        let versions: Vec<SignedOp> = [("v2", 2u64), ("v3", 3), ("v4", 4), ("v5", 5)]
+            .into_iter()
+            .map(|(n, counter)| a_revision_at(id, n, counter))
+            .collect();
+        // The same fixture guard as `the_highest_counter_revision_is_current`, and
+        // for the same reason: nothing here controlled the op-id relation, so a
+        // reword could silently make ascending op id name `v5` too.
+        let v5 = versions.last().unwrap();
+        assert!(
+            versions[..3].iter().any(|v| v5.op.id() > v.op.id()),
+            "the fixture has drifted: v5 now holds the lowest op id of the four, \
+             so ascending-op-id order names it as well and the assertion below \
+             distinguishes neither rule"
+        );
+        for version in versions {
+            log.append(version, Arrival::unordered()).unwrap();
         }
         assert_eq!(
             log.iter_target(&id).unwrap().len(),

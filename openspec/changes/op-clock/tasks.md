@@ -19,6 +19,41 @@
       **"newest first"**, and `feed-view` forbids "most recent first" by name;
       the design bundle's `copy.json` carries the forbidden phrase and is
       overruled, which `proposal.md` records.
+
+      > **Routed back to the `spec-writer` by the `tester`: the new capability
+      > and the shipped screen disagree, and reconciling them is a wording
+      > decision rather than a test fix.**
+      >
+      > `feed-view` makes **"newest first"** the label this interface uses. The
+      > screen renders the ordering label **"same order for everyone"**
+      > (`FeedScreen.qml:122`) and, beneath it, the denial **"Not newest first.
+      > Posts carry a time their author claimed, which anyone could set, so the
+      > feed is not ordered by it…"** (`FeedScreen.qml:433`). So the phrase the
+      > spec makes the label is the phrase the screen negates.
+      >
+      > **What the spec and the screen already agree on**, so it is not relitigated:
+      > the denial's *reason* clause discharges `feed-view`'s hardest requirement
+      > verbatim — the displayed time is the author's own claim, not "no time is
+      > available" — and `tst_feed_copy.qml:197-204` pins exactly that, including
+      > an assertion that the word "yet" never returns. That half needs no change
+      > in either document.
+      >
+      > **What conflicts is only the label and the first two words of the
+      > denial**, and every way out is a copy decision:
+      > - make the label "newest first" and reword the denial so it denies
+      >   ordering *by the displayed time* without negating the label (the spec's
+      >   own framing: the positional reading is permitted, the temporal one is
+      >   not);
+      > - or keep "same order for everyone" as the label, in which case
+      >   `feed-view`'s *"'Newest first' … is the label this interface uses"* is a
+      >   statement about a screen that does not say it.
+      >
+      > The `tester` does not choose between those: picking one writes the
+      > interface's copy, and the brief routes wording back here. **`tst_feed_copy.qml`
+      > is left exactly as it is** — it is green, and it is consistent with the
+      > code it tests; what it is inconsistent with is the spec written after it.
+      > Whoever settles the wording changes `FeedScreen.qml` and this test
+      > together, and the `tester` re-proves the test against the new copy.
 - [x] design + code — `dev-writer` — the counter and wall-clock enter the
       preimage at `VERSION_2`; `cmp_ops` stops being handed an `Arrival` at all,
       so "ordering does not consult the transport" holds by the comparator's
@@ -29,7 +64,41 @@
       the decisions (`grep -n "^### " design.md` counts them) and the constants'
       reasoning; the **NO SPEC** markers and one unimplementable-as-written
       finding are in the report.
-- [ ] tests — `tester`
+- [x] tests — `tester` — fifteen `tester` boxes across three review files, every
+      change proved able to fail by a mutation that was then restored. `git diff`
+      touches test code only, verified hunk by hunk against each file's
+      `#[cfg(test)]` boundary rather than from memory.
+
+      **The clamp is pinned end to end**, which is the box that mattered: both
+      surviving review mutations (`"clamped": false` at the emitter, and the
+      reader's clock disconnected in `thread.rs`) now fail two new `wire.rs`
+      tests. Expected times are hardcoded from `date -u`, never read back out of
+      the crate — and **three of my four first constants were wrong**, caught by
+      that check before the test ran, which is the independence rule paying for
+      itself in one measurement.
+
+      **The cause was the fixtures, and they are what changed.** `thread.rs`
+      gains `a_reply_at` (counter and asserted time as separate parameters, the
+      single `A_TIME` standing for both being the whole defect); `wire.rs` gains
+      `read_a_thread_asserting` (author's claim and reader's clock separate);
+      `authoring.rs` gains `ANOTHER_ROOT`, so the two tests named for *receiving*
+      an op have a second identity — a clock scoped to the peer's own authorship
+      now fails exactly those two out of 44 and nothing else in the suite.
+
+      Two vacuous `moderation.rs` tests re-aimed onto real counters, one renamed
+      (`the_op_counter_decides_and_not_the_op_id`) with a searched
+      three-way-disagreeing fixture; two `arrival.rs` bound tests merged into one
+      four-row table that now reaches strictly inside the range; `sqlite.rs`'s
+      inert loop driven through a real read so its five counters are live again;
+      `contract.rs`'s resolver given counters plus a searched fixture; fixture
+      guards added to two `revision.rs` tests and two `authoring.rs` ones; three
+      misleading names or comments corrected.
+
+      **Two things left open, reported rather than closed.** `wasNew: false` has
+      no wire test (the `readability` box says why). And **`tst_feed_copy.qml`
+      now contradicts the new `feed-view` spec** — see the note under the spec
+      row above; that is a wording question and is routed back, not resolved
+      here.
 - [x] review: correctness — `code-reviewer` — four findings, all for `tester`.
       The implementation is sound: the wall clock reaches no comparison (traced
       every sort and resolver; `OpEntry` cannot name an `Arrival` or an

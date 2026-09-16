@@ -6878,6 +6878,163 @@ mod tests {
         assert_eq!(timed_v["items"][0]["assertedTime"]["authorAsserted"], true);
     }
 
+    /// A one-op thread whose root asserts `asserted_ms`, read against `now_ms`.
+    ///
+    /// Two clocks, deliberately separate parameters: the author's claim and the
+    /// reading peer's own reading. Every other fixture in this module passes
+    /// `A_TIME` for both, which is exactly why no clamp was ever observable.
+    fn read_a_thread_asserting(asserted_ms: u64, now_ms: u64) -> serde_json::Value {
+        let stoa = feed_genesis().address().unwrap();
+        let author = feed_key(4);
+        let root = Op {
+            stoa,
+            author: author.public_key(),
+            clock: Some(crate::op::OpClock {
+                counter: 1,
+                asserted_ms,
+            }),
+            kind: OpKind::Post {
+                thread: None,
+                parent: None,
+                body: "a post claiming a time".to_string(),
+                attachments: vec![],
+            },
+        }
+        .sign(&author);
+        let id = root.op.id();
+        let mut log = MemoryOpLog::new();
+        log.append(root, Arrival::unordered()).unwrap();
+        let out = read_thread(
+            &format!(
+                r#"{{"stoa":"{}","thread":"{}"}}"#,
+                stoa.to_hex(),
+                id.to_hex()
+            ),
+            &log,
+            &feed_genesis(),
+            now_ms,
+        );
+        serde_json::from_str(&out).unwrap_or_else(|e| panic!("read_thread emitted {out}: {e}"))
+    }
+
+    #[test]
+    fn a_thread_read_clamps_an_implausible_asserted_time_and_reports_the_clamp() {
+        // **The clamp was unpinned end to end, and two review mutations proved
+        // it**: `"clamped": false` at the JSON emitter, and passing the op's own
+        // asserted time as the reader's clock in `thread.rs`, each left the whole
+        // suite green. `asserted_time.rs` pins `format_asserted` beautifully, but
+        // it calls the function directly; NOTHING pinned that a READ wires the
+        // reader's clock into it and carries the verdict out to the wire.
+        //
+        // **Every expectation below is hardcoded and derived independently of
+        // this crate** — `date -u -d @<seconds>` for each instant — so the
+        // assertions cannot agree with a broken implementation. Do not update
+        // them to match a changed output: read the new value and decide whether
+        // it is right first.
+        //
+        // The reader's clock is A_TIME = 1_789_729_304_000 ms = 2026-09-18T11:01:44Z.
+        // The allowance is 24h, so the upper clamp target is that plus 86_400_000 ms
+        // = 1_789_815_704_000 ms = 2026-09-19T11:01:44Z. The floor is 2010-01-01.
+        let cases: &[(&str, u64, bool, &str)] = &[
+            (
+                "an author's claim inside the allowance passes through as their own",
+                // A_TIME - 60_000: one minute before the reader's clock.
+                1_789_729_244_000,
+                false,
+                "2026-09-18T11:00:44Z",
+            ),
+            (
+                "a claim of the year 2387 is clamped to the allowance edge",
+                // 13_170_000_000_000 ms = 2387-05-05T13:20:00Z, comfortably past
+                // any allowance and the value the kin project's ranking defect
+                // (PLAN.md Appendix A) is measured against.
+                13_170_000_000_000,
+                true,
+                "2026-09-19T11:01:44Z",
+            ),
+            (
+                "a claim one millisecond past the allowance is clamped, so the \
+                 edge is where the code says it is",
+                1_789_815_704_001,
+                true,
+                "2026-09-19T11:01:44Z",
+            ),
+            (
+                "a claim exactly at the allowance edge is NOT clamped — the same \
+                 fixture one millisecond lower, so a test that clamped everything \
+                 could not pass both",
+                1_789_815_704_000,
+                false,
+                "2026-09-19T11:01:44Z",
+            ),
+            (
+                "an unset system clock's zero is clamped up to the floor rather \
+                 than rendered as 1970",
+                0,
+                true,
+                "2010-01-01T00:00:00Z",
+            ),
+        ];
+
+        for (what, asserted_ms, want_clamped, want_text) in cases {
+            let v = read_a_thread_asserting(*asserted_ms, A_TIME);
+            let at = &v["items"][0]["assertedTime"];
+            assert_eq!(
+                at["clamped"], *want_clamped,
+                "{what}: the wire must report the clamp verdict, got {v}"
+            );
+            assert_eq!(
+                at["text"], *want_text,
+                "{what}: the wire must carry the clamped text and not the \
+                 author's raw claim, got {v}"
+            );
+            // Unconditionally true, clamped or not: a clamped value is still
+            // presented under the author-assertion marking, because a view must
+            // never read a substituted instant as one this peer verified.
+            assert_eq!(at["authorAsserted"], true, "{what}: got {v}");
+        }
+    }
+
+    #[test]
+    fn a_thread_read_clamps_against_the_readers_clock_rather_than_the_ops_own() {
+        // The second surviving mutation, pinned directly. Feeding the op's own
+        // asserted time back in as `now_ms` — which is what `thread.rs:787`
+        // became — makes every value in range by construction, so clamping can
+        // never fire on any read.
+        //
+        // The SAME asserted instant is read twice against two different reader
+        // clocks and gets two different verdicts. That is the property a single
+        // fixture value cannot express, and it is why every `A_TIME`-on-both-
+        // sides read in this file is blind to the wiring.
+        //
+        // 1_900_000_000_000 ms = 2030-03-17T17:46:40Z, by `date -u -d @1900000000`.
+        let asserted_ms = 1_900_000_000_000;
+
+        // A reader in 2026 is far behind that claim, so it clamps.
+        let behind = read_a_thread_asserting(asserted_ms, A_TIME);
+        assert_eq!(
+            behind["items"][0]["assertedTime"]["clamped"], true,
+            "a 2030 claim read by a 2026 peer is implausible: {behind}"
+        );
+        assert_eq!(
+            behind["items"][0]["assertedTime"]["text"], "2026-09-19T11:01:44Z",
+            "and it clamps to the allowance edge, not to the reader's clock: {behind}"
+        );
+
+        // A reader whose own clock has reached 2030 sees the same op as ordinary,
+        // and sees the author's own value.
+        let caught_up = read_a_thread_asserting(asserted_ms, asserted_ms + 1000);
+        assert_eq!(
+            caught_up["items"][0]["assertedTime"]["clamped"], false,
+            "the same op read by a peer whose clock has caught up is in range: \
+             {caught_up}"
+        );
+        assert_eq!(
+            caught_up["items"][0]["assertedTime"]["text"], "2030-03-17T17:46:40Z",
+            "and it renders the author's own instant: {caught_up}"
+        );
+    }
+
     #[test]
     fn the_wire_reports_the_author_as_one_key_and_no_name() {
         // `thread-read`: an item carries its author's public key, and no item
@@ -7658,7 +7815,7 @@ mod tests {
     }
 
     #[test]
-    fn re_publishing_an_op_the_peer_holds_says_it_was_not_new() {
+    fn appending_an_op_the_peer_already_holds_reports_already_present() {
         // The outcome that still arrives, and the reason the view must keep
         // handling it: an op received from the network before this peer
         // publishes an identical one is still deduplicated, because two ops are
@@ -7666,6 +7823,16 @@ mod tests {
         //
         // **This has become uncommon and is NOT dropped on that account.** A
         // rarer branch is a branch that is harder to notice breaking.
+        //
+        // **Named for the LOG fact, because that is what it measures.** It was
+        // `re_publishing_an_op_the_peer_holds_says_it_was_not_new`, and in this
+        // file `wasNew` is the wire reply field and the only thing that reports
+        // newness to a caller — so the name read as a claim about the boundary's
+        // report. The second half calls `log.append` directly: it never calls
+        // `publish_post`, never produces a JSON reply, and never reads `wasNew`,
+        // so a change that dropped or inverted `wasNew` on the dedup path would
+        // leave it green. Its sibling above DOES assert `wasNew` on the wire,
+        // which is what made the pair read as two wire assertions.
         let mut log = MemoryOpLog::new();
         let key = publish_key();
         let request = publish_request(r#""body":"once""#);

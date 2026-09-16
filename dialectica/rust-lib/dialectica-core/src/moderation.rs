@@ -1275,13 +1275,23 @@ mod tests {
     }
 
     #[test]
-    fn a_forged_hide_does_not_win_against_a_binding_unhide_however_many_are_minted() {
-        // The minting freedom makes the unfiltered-search failure CHEAPER: an
-        // attacker can now produce unlimited distinct forged `hide` ops for one
-        // target rather than exactly one, so a preference that searched every op
-        // naming the target would find one with certainty rather than by chance.
+    fn an_unauthorised_hide_does_not_win_against_a_binding_unhide_however_many_are_minted() {
+        // **Named for the path it exercises, which is AUTHORITY and not
+        // authenticity.** It was `a_forged_hide_…`, and it bound its fixture to
+        // `let forged = …` and then asserted `forged.verify()` on the adjacent
+        // line — while this file's `a_forged_moderation` helper defines "forged"
+        // as the opposite, asserting `!forged.verify()`. Two contradictory
+        // meanings of one word in one file, with the suite reading as though
+        // forgery-under-minting were covered when the non-moderator case was.
+        // The assertions were right; only the name was wrong.
         //
-        // Twenty forgeries, every one authentic-looking and none binding, around
+        // The minting freedom makes the unfiltered-search failure CHEAPER: an
+        // attacker can now produce unlimited distinct unauthorised `hide` ops for
+        // one target rather than exactly one, so a preference that searched every
+        // op naming the target would find one with certainty rather than by
+        // chance.
+        //
+        // Twenty of them, every one a VALID signature by a non-moderator, around
         // one genuine unhide.
         let (mut log, target) = a_log_with_a_post();
         let unhide = a_moderation_at(
@@ -1295,16 +1305,22 @@ mod tests {
         log.append(unhide, Arrival::unordered()).unwrap();
 
         for counter in 2..=21u64 {
-            // Signed by an outsider: authentic, and carrying no authority.
-            let forged = a_moderation_at(
+            // Signed by an outsider: authentic, and carrying no authority. The
+            // binding is named for what it is, so that the assertion below reads
+            // as a statement rather than as a contradiction.
+            let unauthorised = a_moderation_at(
                 address_of(&agora()),
                 &outsider(),
                 target,
                 ModerationAction::Hide,
                 counter,
             );
-            assert!(forged.verify(), "the fixture must be authentic");
-            log.append(forged, Arrival::unordered()).unwrap();
+            assert!(
+                unauthorised.verify(),
+                "the fixture must be AUTHENTIC — this test is about authority, \
+                 and a signature failure would reject it on the other path"
+            );
+            log.append(unauthorised, Arrival::unordered()).unwrap();
         }
 
         let resolved = resolve(&log, &moderators_of(&agora()), &target).unwrap();
@@ -1318,85 +1334,142 @@ mod tests {
     #[test]
     fn a_later_hide_reverses_an_earlier_unhide() {
         // The other direction, which a resolver special-casing `Unhide` as
-        // "terminal" or treating `Hide` as sticky would fail. Same ops, opposite
-        // Lamport values.
+        // "terminal" would fail.
+        //
+        // **This test used to measure nothing, and the way it survived its own
+        // repair is the lesson.** It expressed "later" as `Arrival::ordered(2)`
+        // versus `Arrival::ordered(3)` — transport values that this change stopped
+        // anything reading, since `OpEntry` cannot name an `Arrival`. Both ops fell
+        // into the `(None, None)` arm and the `Hide` preference produced the
+        // asserted answer whatever the order; review measured it passing with the
+        // two arrival values INVERTED and again with every arrival deleted. Its
+        // sibling `a_later_unhide_reverses_an_earlier_hide` was re-aimed onto
+        // `a_moderation_at` when the counters arrived; this direction was not, and
+        // the `Hide` preference hid the omission because it yields the expected
+        // answer here for the wrong reason.
+        //
+        // So the counters are in the OPS and the arrivals say nothing — which is
+        // what production supplies, and which leaves the counter as the only thing
+        // that can be deciding this.
+        //
+        // **Measured, so the claim is not taken on trust.** Two mutations, and
+        // they answer differently, which is worth stating rather than hiding:
+        //   - ascending counter in `cmp_ops` — the unhide leads, the leading op
+        //     carries a clock so the counter branch decides it, and this test
+        //     FAILS. So the counter genuinely drives the answer here.
+        //   - deleting the counter branch entirely (`if false && …`) — this test
+        //     PASSES, because the `Hide` preference the read then falls back to
+        //     reaches the same op. That explanation cannot be removed from a
+        //     Hide/Unhide pair where the hide wins, and the sibling
+        //     `a_later_unhide_reverses_an_earlier_hide` is what covers it: the
+        //     preference fails that one outright.
         let (mut log, target) = a_log_with_a_post();
-        let unhide = a_moderation(
+        let unhide = a_moderation_at(
             address_of(&agora()),
             &creator(),
             target,
             ModerationAction::Unhide,
+            2,
         );
-        let hide = a_moderation(
+        let hide = a_moderation_at(
             address_of(&agora()),
             &creator(),
             target,
             ModerationAction::Hide,
+            3,
         );
         let hide_id = hide.op.id();
-        log.append(unhide, Arrival::ordered(2, a_message_id(1)))
-            .unwrap();
-        log.append(hide, Arrival::ordered(3, a_message_id(1)))
-            .unwrap();
+        log.append(unhide, Arrival::unordered()).unwrap();
+        log.append(hide, Arrival::unordered()).unwrap();
 
         let resolved = resolve(&log, &moderators_of(&agora()), &target).unwrap();
         assert!(resolved.is_hidden());
         assert_eq!(resolved.deciding_op().map(|e| e.id()), Some(hide_id));
+        assert_ne!(resolved, Moderation::Unmoderated);
     }
 
     #[test]
-    fn the_order_is_by_lamport_and_not_by_op_id() {
-        // The fixture trap, applied to this resolver. Both orders are live —
-        // `cmp_ops` uses Lamport values where it has them and falls back to
-        // ascending op id where it does not — so a test whose two ops agree under
-        // both proves neither.
+    fn the_op_counter_decides_and_not_the_op_id() {
+        // The fixture trap, applied to this resolver — and this test was the trap
+        // rather than the defence until now.
         //
-        // `cmp_ops` reads the LOWEST op id first when nothing is ordered, and the
-        // HIGHEST Lamport value first when things are. So the two rules disagree
-        // only when the op with the HIGHER op id carries the HIGHER Lamport
-        // value — which is how this fixture is built. Assigning them the other
-        // way round would make both rules name the same op, and the test would
-        // pass for a resolver that consulted no metadata at all.
+        // **It used to measure nothing, measured twice by review**: it expressed
+        // position as `Arrival::ordered(2)` against `Arrival::ordered(9)`, and this
+        // change stopped anything reading an `Arrival` — `OpEntry` carries a
+        // counter and an id and cannot name one. Both ops landed in the
+        // `(None, None)` arm and the `Hide` preference produced the asserted answer
+        // by itself: the test passed with the two arrival values INVERTED, and
+        // passed again with every arrival deleted. Its own name was the strongest
+        // false claim in the file, and the name is changed with the body because
+        // "Lamport" now means the counter in the op, not the transport's value.
+        //
+        // What it must do instead: put the counter rule and the op-id rule in
+        // genuine disagreement, and show the counter winning.
+        //
+        // `cmp_ops` leads with the HIGHEST counter; among counter-less ops it leads
+        // with the LOWEST op id. So the two disagree exactly when the op with the
+        // higher counter also has the higher op id — **searched for rather than
+        // hoped for**, in the shape `an_unhide_reverses_a_hide_whatever_the_two_
+        // op_ids_are` already uses here, because which of two SHA-256 outputs is
+        // larger is not a fact to take on trust and a fixture edit could silently
+        // flip it.
+        //
+        // The pair is Unhide-decides, which is also what rules out the third live
+        // explanation: the `Hide` preference. A resolver ignoring the counter would
+        // reach that preference and report Hidden.
         let (mut log, target) = a_log_with_a_post();
-        let one = a_moderation(
-            address_of(&agora()),
-            &creator(),
-            target,
-            ModerationAction::Hide,
-        );
-        let two = a_moderation(
-            address_of(&agora()),
-            &creator(),
-            target,
-            ModerationAction::Unhide,
-        );
-        // Determined, not assumed: which of two hashes is lower is not something
-        // a reader should take on trust.
-        let (low, high) = if one.op.id() < two.op.id() {
-            (one, two)
-        } else {
-            (two, one)
-        };
-        let high_action = match &high.op.kind {
-            OpKind::Moderate { action, .. } => *action,
-            _ => unreachable!(),
-        };
-        let high_id = high.op.id();
+        let (hide, unhide) = (0u64..1000)
+            .find_map(|n| {
+                let hide = a_moderation_at(
+                    address_of(&agora()),
+                    &creator(),
+                    target,
+                    ModerationAction::Hide,
+                    n * 2 + 1,
+                );
+                let unhide = a_moderation_at(
+                    address_of(&agora()),
+                    &creator(),
+                    target,
+                    ModerationAction::Unhide,
+                    n * 2 + 2,
+                );
+                // The unhide carries the higher counter by construction; require
+                // that it ALSO carries the higher op id, so ascending-op-id order
+                // would put the hide first and name it the decider.
+                (unhide.op.id() > hide.op.id()).then_some((hide, unhide))
+            })
+            .expect("a pair whose counter and op-id orders disagree exists within 1000 candidates");
 
-        // The HIGH op id gets the HIGH Lamport value, so it decides under §5.7
-        // and would NOT decide under the op-id fallback.
-        log.append(low, Arrival::ordered(2, a_message_id(1)))
-            .unwrap();
-        log.append(high, Arrival::ordered(9, a_message_id(1)))
-            .unwrap();
+        // Guarding the guard, at the point of use: the search above could be
+        // broken into always returning its first candidate and this test would
+        // otherwise go quietly vacuous.
+        assert!(
+            unhide.op.clock.unwrap().counter > hide.op.clock.unwrap().counter,
+            "the fixture must give the unhide the higher COUNTER"
+        );
+        assert!(
+            unhide.op.id() > hide.op.id(),
+            "and the higher OP ID, or the two rules agree and this test measures \
+             nothing"
+        );
+
+        let unhide_id = unhide.op.id();
+        // The arrivals say nothing, which is what production supplies.
+        log.append(hide, Arrival::unordered()).unwrap();
+        log.append(unhide, Arrival::unordered()).unwrap();
 
         let resolved = resolve(&log, &moderators_of(&agora()), &target).unwrap();
         assert_eq!(
             resolved.deciding_op().map(|e| e.id()),
-            Some(high_id),
-            "the higher Lamport value must decide, against op-id order"
+            Some(unhide_id),
+            "the higher counter must decide, against both ascending-op-id order \
+             and the degraded branch's Hide preference"
         );
-        assert_eq!(resolved.is_hidden(), high_action == ModerationAction::Hide);
+        assert!(
+            !resolved.is_hidden(),
+            "and the decision it reaches is the unhide's"
+        );
     }
 
     #[test]
