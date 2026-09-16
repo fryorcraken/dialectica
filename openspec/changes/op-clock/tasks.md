@@ -63,6 +63,72 @@
       > regardless. The screen's comment naming no bundle is correct as written
       > and was left untouched.
       >
+      > **Fifth pass, closing the four review boxes routed to this role.** No
+      > code and no tests; two spec deltas and one design entry.
+      >
+      > - **`findings/security.md:118`** — `op-ordering`'s clock requirement now
+      >   states the **intra-Stoa** reception oracle beside the cross-Stoa leak
+      >   its scoping sentence already named, so that sentence reads as bounding
+      >   the leak rather than enumerating it. A published counter states how many
+      >   of a Stoa's ops its author had accepted as advances; the trade-off is
+      >   stated with three bounds (a count and never *which* ops, nothing about
+      >   unreadable Stoas, and only a peer that *publishes* answers), and the
+      >   rejected alternative — suppressing or fuzzing the counter — is recorded
+      >   with why it is not available.
+      > - **`findings/spec-test.md:265`** — the unobservable clauses are gone.
+      >   *"The clock survives a restart"* asserts only the surviving value; the
+      >   replay scenario lost a clause that restated its own WHEN. The third site
+      >   the finding named was **kept and rephrased** rather than removed — it was
+      >   a weak phrasing of a real check, not a how-claim. The never-stored
+      >   property stays a requirement and is now explicitly a constraint
+      >   discharged structurally, with the reason no scenario can reach it.
+      > - **`findings/spec-test.md:288`** — `thread-read` now contracts
+      >   **`position` as an item's place in the whole thread and explicitly not
+      >   a sort key** (stable across page sizes, does not restart per page,
+      >   unique within a thread, no arithmetic, no adjacency, not comparable
+      >   across threads), and the **asserted time as exactly three members a read
+      >   hands out, with no fourth carrying the instant** — the shape `wire.rs`
+      >   pins in a test, lifted into the contract. Scenarios added for each. The
+      >   field *names* stay uncontracted on purpose, and that marker-stays
+      >   decision is recorded in the box rather than left as silence.
+      >
+      >   **This is the second thing on this branch to be caught by re-reading a
+      >   value instead of prose.** The draft contract said the position was
+      >   *"comparable for sequence"*, which is the proposal's Q5 phrasing and
+      >   sounds right. It is false: the position is `index.to_string()`,
+      >   unpadded, so `"10" < "2"` and a caller comparing them as text gets a
+      >   sequence that is not the returned one — invisible under the existing
+      >   five-item fixture. Three documents carried the false promise and all
+      >   three are corrected: the new requirement, `proposal.md`'s Q5 (which now
+      >   records the withdrawal rather than quietly dropping it), and
+      >   `thread-read`'s own pre-existing scenario *"Ordering the items requires
+      >   only the position field"*, which asserted precisely the property the
+      >   value lacks and is now *"Rendering the thread in order consults no
+      >   time"*. `thread.rs:197`'s doc comment makes the same claim and is
+      >   **routed to a `dev-writer`** — it is code, which this role does not
+      >   touch.
+      > - **`findings/architecture.md:242`** — `design.md`'s *"What this
+      >   deliberately does not do"* now records the `FeedRow`/`ThreadItem`
+      >   asymmetry as **two** decisions: the asserted time is **deferred** (scope,
+      >   plus an unanswered product question about *which* of a thread's times a
+      >   feed row should show), and a feed `position` is **declined for now**
+      >   because no feed ordering exists for it to index. The residual
+      >   source-independence cost is stated rather than implied, and
+      >   `feed-view`'s time-marking requirement now points at the entry.
+      >
+      > **Re-read for self-contradiction across all seven deltas**, because
+      > `openspec validate --strict` passes a spec that contradicts itself and
+      > this piece has already produced two such contradictions. It produced a
+      > third, and the sweep caught it before it landed — the position
+      > comparability claim above, which contradicted both the value and a
+      > scenario already in the same file. Also corrected from that sweep:
+      > `design.md`'s reason for deferring a feed `position` said no feed
+      > ordering exists for it to index, which `proposal.md`'s own spine bullet
+      > (*"feed position"* resolves on the Lamport value) and `feed-view`'s
+      > *"core returns the feed's rows already in the ordering rule's sequence"*
+      > both falsify — the honest reason is scope, and the false one is recorded
+      > beside it because it is the version that sounds right.
+      >
       > *Original routing note follows.*
       >
       > `feed-view` makes **"newest first"** the label this interface uses. The

@@ -239,7 +239,7 @@ integration).
       the module header's "`arrival::Arrival` says what orders it", which is the
       same claim one paragraph up from where anyone would look.
 
-- [ ] **`spec-writer`** — `feed.rs:106` vs `thread.rs:191`,`202` — `FeedRow` and
+- [x] **`spec-writer`** — `feed.rs:106` vs `thread.rs:191`,`202` — `FeedRow` and
       `ThreadItem` now answer the same question with two different contracts, and
       no document records that as a decision
       **The asymmetry:** `ThreadItem` gained `position` and `asserted_time`;
@@ -261,6 +261,44 @@ integration).
       change adds it on purpose or declines on purpose. Flagged to
       `spec-writer` rather than `dev-writer` because the answer belongs in a
       spec or in `design.md`'s "what this deliberately does not do", not in code.
+
+      **Fixed** in `design.md`'s *"What this deliberately does not do"*, which is
+      the second of the two homes this box offers. It goes there rather than into
+      a spec because what was missing is a *decision* — which alternative was
+      chosen and what ruled the others out — and that is `design.md`'s section by
+      this repo's own split. The spec side already carried the *fact*
+      (`specs/feed-view/spec.md`'s time-marking requirement, which states that
+      the feed's rows carry no time and that its positive half binds the moment
+      one arrives); that sentence now points at the design entry so a reader
+      meeting the fact can reach the reason.
+
+      **The decision, and it is two decisions rather than one** — which is the
+      part the box's framing did not anticipate and is worth stating plainly:
+
+      - **The asserted time is DEFERRED, not declined.** A feed row is meant to
+        carry one. Three reasons it is not in this change: the change's scope is
+        the thread read and widening the feed's separate reply shape is a second
+        interface change with its own tests; **which** time a feed row should
+        show is genuinely unanswered — a feed row is a thread *head*, and a
+        thread carries at least two candidate times (the head's, and its latest
+        reply's), so shipping the head's by default would have settled a product
+        question by accident, which is the box's own hypothesis promoted to the
+        stated reason; and the thing that must not happen — the field arriving
+        unmarked — is already closed by `feed-view` rather than deferred with the
+        rest.
+      - **The position is DECLINED for now**, and for a different reason. There
+        is no feed ordering for a feed position to be the position *of*:
+        `proposal.md` scopes a feed ordering out. Handing out a position before
+        the order it indexes exists would be a field whose meaning is whatever
+        the implementation happened to do — which is precisely the defect this
+        piece spent its `thread-read` delta closing for the thread case. It
+        follows the feed ordering whenever that lands.
+
+      The entry states the residual cost in terms rather than leaving it
+      implicit: until both land, a view rendering a post in the feed and in a
+      thread branches on the source for the time, and that is a known violation
+      of the source-independence convention this box cites, carried deliberately
+      so the next change closes it on purpose instead of rediscovering it.
 
 ---
 

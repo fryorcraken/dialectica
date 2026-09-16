@@ -352,3 +352,57 @@ the affordance belongs where the two acts are still distinguishable.
 It does not delete `Arrival`, does not touch `op-transport`, and does not add
 gap detection. A scalar counter says "I had seen something at N", never *which*;
 the parent pointer is the causal edge this forum acts on and it already exists.
+
+### It does not put `position` or `assertedTime` on a feed row, and that is a deferral rather than a settled shape
+
+`ThreadItem` gained both fields; `FeedRow` gained neither. So a view rendering
+a post inside a thread reads an asserted time, and the same view rendering that
+post's thread in the feed has none — which is the one thing CLAUDE.md's core-API
+section names: *"JSON shapes are source-independent, so a view renders without
+branching on where the data came from."* An asymmetry against that convention
+is a decision, and it needs to be recorded as one rather than inferred from a
+`grep` finding no field.
+
+**The decision: a feed row is meant to carry an asserted time, and does not yet.
+It is deferred, not declined.** The reasons it is deferred and not in this
+change:
+
+- **The change's scope is the thread read.** `thread-read`'s delta is where the
+  two fields are specified, and widening the feed's separate reply shape is a
+  second interface change with its own tests — the kind of bundling that makes
+  neither half reviewable.
+- **Which time a feed row should show is a real question and this change does
+  not answer it.** A feed row is a thread *head*, and the head's asserted time is
+  not obviously what a reader wants beside a thread whose latest activity is a
+  reply hours later. A thread carries at least two candidate times — the head's
+  and the most recent reply's — and picking one is a product decision that wants
+  the feed screen in front of it. Shipping the head's time by default would have
+  settled that question by accident.
+- **What must not happen is the field arriving unmarked**, and that is closed
+  now rather than deferred with the rest. `feed-view`'s time-marking requirement
+  is written to bind the moment a row carries a time, and its force today is the
+  prohibition on rendering one the view was not given — see
+  `specs/feed-view/spec.md`'s *"A displayed time is marked as the author's
+  assertion"*, which states the conditional bind in terms.
+
+**The position field is deferred on scope alone, and the tempting reason for it
+is false.** The tempting reason — written here first, and caught in the
+contradiction sweep — was that there is no feed ordering for a position to be
+the position *of*. That is wrong twice over: `proposal.md`'s own spine bullet
+names *"feed position"* among the things that resolve on the Lamport value, and
+`specs/feed-view/spec.md` requires the feed to render the sequence core returned
+because *"core returns the feed's rows already in the ordering rule's sequence"*.
+A feed ordering exists; it is `op-ordering`'s, applied to feed rows. What
+`proposal.md` scopes out is building a *new* one — a relevance ordering — which
+is a different question.
+
+So the honest reason is the same as the time's: scope. The field would be a
+second widening of the feed's reply shape, and it is the less urgent of the two,
+because a feed row's absent position costs a view only the ability to name where
+a row sits — while an absent *time* is the one whose arrival could go unmarked.
+Recorded with its false alternative rather than quietly corrected, because the
+false version is the one that sounds right.
+
+Until both land, a view rendering a post in both places branches on the source
+for the time. That is a known cost of the deferral, carried here so the next
+change closes it on purpose.

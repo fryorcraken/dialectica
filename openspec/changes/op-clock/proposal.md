@@ -76,11 +76,23 @@ place for the pressure to land.
    than hidden: a reader may be shown a clamped time that is not when the post was
    written, and the contract requires that the clamping be reported so a view can
    say so.
-5. **The view is handed a rank, and the wall-clock is not a number.** The
-   ordering position is an opaque token a view can only compare for sequence; the
-   wall-clock arrives as a pre-formatted display string alongside an explicit
-   untrusted marker. A view that wanted to sort on the wall-clock would have to
-   parse a string back into a time first — which is the point.
+5. **The view renders the sequence it was handed, and the wall-clock is not a
+   number.** The ordering position is an opaque token saying where an item sits in
+   the whole thread — stable across page sizes, unique within a thread, and
+   carrying no arithmetic — while the sequence a view renders is the one the read
+   returned. The wall-clock arrives as a pre-formatted display string alongside an
+   explicit untrusted marker. A view that wanted to sort on the wall-clock would
+   have to parse a string back into a time first — which is the point.
+
+   **This bullet previously read *"an opaque token a view can only compare for
+   sequence"*, and that half is withdrawn.** Writing it into `thread-read` as a
+   requirement is what exposed it: the position is an unpadded decimal string, so
+   comparing two of them as text gives `"10" < "2"` and a sequence that is not the
+   returned one — invisible in a thread of under ten items, which is what the
+   existing test uses. Promising comparability would have been a contract the
+   implementation fails at the tenth reply. The returned sequence was always the
+   thing to render, and the spec now says so rather than offering a second route
+   that does not work.
 6. **Migration: a version-2 op carries the fields, a version-1 op does not, and
    a version-1 op sorts below every version-2 op.** This reuses the degraded order
    already specified and already tested, so existing content is neither reordered

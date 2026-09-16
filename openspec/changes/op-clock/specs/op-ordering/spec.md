@@ -8,9 +8,17 @@ A peer SHALL have a Lamport clock for each Stoa, and that clock's value SHALL be
 
 This is what makes the clock monotone across a restart and across a rebuild-by-replay with no migration, recovery step, or high-water-mark record: the ops are the only input, so a peer that reopens its store, or reconstructs it entirely from ops it re-fetches, computes the value it had. A stored counter would be a second source of truth, and the two disagree in exactly the cases that matter — a store restored from a backup, a replay reaching further back than the counter, a crash between appending an op and updating the counter. In each, the stored value is the wrong one and the one a naive implementation would believe.
 
+**What a reader can check, and what only an implementation can.** The scenarios below assert the *consequences* of deriving on demand — the value survives a restart, survives a rebuild in a different append sequence, and lands in the same place after a rebuild as after the original ingest. They do not assert that no counter was recorded beside the ops, because no caller can observe that: a stored counter kept perfectly in step with the log is indistinguishable from a derivation through the read interface, and the cases where it would diverge (a restore from backup, a replay reaching further back, a crash between the append and the counter update) are not reachable through this contract's own operations. The "never stored" sentence above is therefore a **constraint on the implementation**, discharged structurally rather than by a scenario, and `design.md` carries how. Writing it as a scenario clause would be a requirement no test could distinguish from its negation.
+
 **The function is not simply "the highest counter held", and the difference is the subject of the advance requirement below.** An op whose counter is implausibly far above the rest does not raise this peer's clock, so the clock is the highest counter the peer has **accepted as an advance** rather than the highest it has stored. Stating it as a function of the ops held is what keeps the derivation property intact: the accept-or-not decision is itself computed from the ops, so two peers holding the same ops still reach the same clock, and a replay reaches the same answer as the original ingest.
 
 The clock SHALL be scoped per Stoa. Ops of one Stoa never order against ops of another, so a shared clock would leak one Stoa's activity into another's counters, letting a reader in a quiet Stoa infer that the peer is busy elsewhere.
+
+**Per-Stoa scoping bounds that leak; it does not remove the leak within a Stoa, and this contract states the remainder rather than leaving it to be discovered.** A published counter is one above the author's clock, and the clock is a function of the ops held — so the counter on an op **states how many of that Stoa's ops its author had accepted as advances at the moment of publishing**. Anyone who can read ops of that Stoa can read it. That makes a peer's next published op an **oracle for that peer's reception state within the Stoa**, and an observer who controls what a peer receives can query it: publish *n* ops, relay only some to a target, and the counter on the target's next post distinguishes how many arrived. Two peers publishing identical content after receiving different subsets are distinguishable by this value alone.
+
+**This is inherent to a Lamport counter and is accepted, with the cost bounded as follows.** It reveals a *count* of accepted advances and never *which* ops — the same limit the publish requirement below states for the positive claim — so it does not confirm receipt of any named op except where the observer has narrowed the possibilities by controlling delivery. It reveals nothing about Stoas the observer cannot read, which is what the scoping above buys. It is a property of a peer that **publishes**; a peer that only reads emits no counter and is not probed by this.
+
+**The alternative was rejected rather than overlooked.** Suppressing or fuzzing the counter would break the one property the counter exists for — that every peer computes the same order from the ops alone — since a counter a peer may distort is a counter two peers can disagree about. A forum that orders causally has to put the causal value on the wire. What follows for callers: a counter SHALL NOT be treated as private, and a peer SHALL NOT be told that publishing conceals what it has received.
 
 #### Scenario: A peer holding no ops has a zero clock
 
@@ -22,23 +30,21 @@ The clock SHALL be scoped per Stoa. Ops of one Stoa never order against ops of a
 - **WHEN** a peer holds ops of one Stoa carrying several different counters, all within the advance bound
 - **THEN** its clock for that Stoa equals the highest of them
 
-#### Scenario: The clock survives a restart without a stored counter
+#### Scenario: The clock survives a restart
 
 - **WHEN** a peer's store is closed and reopened
 - **THEN** its clock is the value it had before
-- **AND** the value was recomputed from the ops rather than read from a counter recorded beside them
 
 #### Scenario: The clock survives a rebuild by replay
 
 - **WHEN** a peer's store is discarded and rebuilt by appending the same ops in a different sequence
 - **THEN** its clock is the same value
-- **AND** the sequence the ops were appended in did not affect it
 
 #### Scenario: A rebuild reaches the same answer as the original ingest
 
 - **WHEN** a peer that received an op exceeding the advance bound rebuilds its store from the same ops
 - **THEN** its clock after the rebuild equals its clock before it
-- **AND** the op that exceeded the bound did not raise it in either case
+- **AND** both equal the highest counter within the bound, and neither equals the over-bound op's counter
 
 #### Scenario: One Stoa's ops do not advance another Stoa's clock
 
@@ -138,7 +144,7 @@ The author-asserted wall-clock SHALL NOT participate in any ordering, comparison
 
 - A read SHALL surface the wall-clock as **display text already formatted for rendering**, and SHALL NOT surface it as a bare number of milliseconds, seconds, or any other unit a comparison would accept.
 - Every item carrying it SHALL carry **an explicit marker that the value is the author's claim**, so a view has the fact available at the point of rendering rather than needing to have read this contract.
-- The **ordering position** a view needs SHALL be carried separately, as its own field, so a view that wants to place items in order has a field that is correct to use and never needs to reach for the time.
+- The **ordering position** a view needs SHALL be carried separately, as its own field, so a view placing items in order never needs to reach for the time. What that field promises is settled by the capability that carries it — `thread-read` contracts it as an item's place in the whole thread rather than as a sort key — and what this requirement fixes is only that it is not the time and is not derived from it.
 
 A view that nonetheless wished to sort by the wall-clock would have to parse a display string back into an instant first. That is the intent: it makes the wrong thing visibly a wrong thing in the diff, rather than a plausible-looking field access.
 

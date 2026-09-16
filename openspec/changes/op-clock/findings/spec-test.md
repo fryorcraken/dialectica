@@ -262,7 +262,7 @@ empty there and the suite is back to **972 + 30 passing**.
       floor assertion on the kind count. Verified by reading the current body, not
       inferred from the commit subject. Ticked here as that box instructs.
 
-- [ ] **`spec-writer`** — `op-ordering`'s scenario *"The clock survives a
+- [x] **`spec-writer`** — `op-ordering`'s scenario *"The clock survives a
       restart without a stored counter"* asserts something no test can check as
       written.
       **Where:** `openspec/changes/op-clock/specs/op-ordering/spec.md:25-29`:
@@ -285,7 +285,34 @@ empty there and the suite is back to **972 + 30 passing**.
       `design.md` already carries it.
       **Severity: low.**
 
-- [ ] **`spec-writer`** — three `NO SPEC:` markers are field *names*, and one of
+      **Fixed**, taking the option this box names: say what is observable, and
+      carry the derivation as a constraint rather than a SHALL a test cannot
+      distinguish from its negation.
+
+      The scenario is now *"The clock survives a restart"* and asserts only that
+      the value is the one it had before. *"The clock survives a rebuild by
+      replay"* lost *"AND the sequence the ops were appended in did not affect
+      it"* — a restatement of its own WHEN, not a second check.
+
+      The third site the box names, *"A rebuild reaches the same answer as the
+      original ingest"*, was **not** removed, because on reading it is
+      observable rather than a how-claim — it just was not phrased as the
+      observable. It now reads *"AND both equal the highest counter within the
+      bound, and neither equals the over-bound op's counter"*, which a fixture
+      can check by construction. Recorded rather than silently done: this box
+      listed three sites and two of them moved for the reason given; the third
+      was a weak phrasing of a real check, not an unobservable claim.
+
+      The derivation property is now stated once, in the requirement body, as
+      *"What a reader can check, and what only an implementation can"* — naming
+      why no caller can observe it (a stored counter kept in step is
+      indistinguishable through the read interface, and the cases where it
+      diverges are not reachable through this contract's operations) and
+      pointing at `design.md` for how it is discharged. The `SHALL NOT persist`
+      sentence above it stands; what changed is that it no longer masquerades as
+      something a scenario checks.
+
+- [x] **`spec-writer`** — three `NO SPEC:` markers are field *names*, and one of
       them is load-bearing in a way the spec does not acknowledge.
       **Where:** `wire.rs:1814` (`authorKey`, pre-existing), `wire.rs:1825`
       (`position`), `wire.rs:1859` (`assertedTime`, with its `text` /
@@ -307,6 +334,72 @@ empty there and the suite is back to **972 + 30 passing**.
       that shape deserves to be in the spec rather than discovered from a test.
       **Severity: low** for the names, **medium** for `position`'s opacity and
       the `assertedTime` shape being uncontracted.
+
+      **Fixed for the medium half; the low half is left as a `NO SPEC:` marker
+      on purpose**, and the split is deliberate rather than partial work.
+
+      `thread-read`'s added requirement now contracts both:
+
+      - **`position` identifies where an item sits in the whole thread and is
+        explicitly NOT a sort key.** What is contracted is what a caller may
+        *do* with it: the value is stable across page sizes, indexes the whole
+        thread rather than restarting per page, and is unique within a thread —
+        and nothing further. Not a number, no arithmetic, no adjacency or fixed
+        distance, not comparable against another thread's, **and not something a
+        caller may sort by**. A view doing arithmetic on it was within the old
+        spec's letter and is now outside it.
+
+        **The first draft of this contract said "comparable for sequence", and
+        it was wrong** — caught by re-reading the value rather than the prose,
+        and recorded because the wrong version is the plausible one. `position`
+        is `index.to_string()`, unpadded (`thread.rs:291`), so a caller
+        comparing positions as strings gets `"10" < "2"` and a sequence that is
+        not the returned one. The existing test uses a five-item thread
+        (`thread.rs:3044-3086`), so the defect is invisible today and a scenario
+        promising comparability would have been a requirement the implementation
+        fails at ten items. The proposal's Q5 phrasing — *"an opaque token a
+        view can only compare for sequence"* — is therefore **not** what the
+        spec now says, and the difference is deliberate: the sequence a caller
+        renders is the one the read returned, which is what `thread-read`
+        already required and what the implementation actually delivers.
+      - **The asserted time is a grouped value holding exactly three members** —
+        display text, author-assertion marker, clamped report — with **no fourth
+        member carrying the instant in any numeric or otherwise comparable
+        form**. That is the shape `wire.rs:6629-6636` pins, lifted out of the
+        test and into the contract, which is what the box asks for: the central
+        defence of this change should not be discoverable only from a test.
+
+      Four scenarios were added so each clause is checkable rather than prose:
+      positions reproduce the returned sequence; a position indexes the whole
+      thread and not the page; the position is not surfaced as a quantity; the
+      three members travel together and no fourth carries the instant.
+
+      **Two things this box's work uncovered, both routed on rather than closed
+      here, because they are not the `spec-writer`'s to touch:**
+
+      - **`thread.rs:197`'s doc comment makes the same false promise** — *"A
+        caller compares two of these for sequence"*. It is code, and this role
+        writes no code. It should read what the spec now says: a caller renders
+        the returned sequence, and the position says where an item sits in the
+        whole thread. **Routes to a `dev-writer`.**
+      - **The unpadded index is the underlying issue, and the spec was narrowed
+        to it rather than around it.** Zero-padding the position would make
+        comparison work and would let the stronger contract stand. That is a
+        behaviour change with its own tests, so it is not made here; the spec
+        now describes what the value does. If a later change pads it, the
+        comparability clause can be added back and this note is the record of
+        why it was absent.
+
+      **The field NAMES stay uncontracted, and that is the answer rather than an
+      omission.** `authorKey`, `position`, `assertedTime`, `text`,
+      `authorAsserted` and `clamped` remain the implementation's choice. Naming
+      them in the spec would pin the wire spelling without adding a property
+      anyone depends on — the properties that matter are opacity and the
+      three-member shape, and both are now stated in terms a rename cannot
+      falsify. Leaving a `NO SPEC:` marker in place is itself a decision, as the
+      brief for this role says, so it is recorded here: the markers at
+      `wire.rs:1818`, `:1829` and `:1863` are correct as they stand and should
+      not be removed by a later pass reading them as unfinished.
 
 ## Corroborating the correctness reviewer, without duplicating a box
 

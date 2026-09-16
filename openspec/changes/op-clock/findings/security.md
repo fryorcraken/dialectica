@@ -115,7 +115,7 @@ recorded trade-off.
 
 ---
 
-- [ ] **`spec-writer`** — `openspec/changes/op-clock/specs/op-ordering/spec.md:13`
+- [x] **`spec-writer`** — `openspec/changes/op-clock/specs/op-ordering/spec.md:13`
       — the counter is an intra-Stoa reception oracle, and the spec names only
       the cross-Stoa leak
 
@@ -146,6 +146,42 @@ recorded trade-off.
       What is being asked for is a stated trade-off in the `op-ordering`
       requirement beside line 13, in the register the rest of that spec already
       uses.
+
+      **Fixed** in the requirement *"A peer's Lamport clock is a function of the
+      ops it holds"*, directly after the per-Stoa scoping sentence this finding
+      cites, and written so the scoping sentence reads as bounding the leak
+      rather than enumerating it. Three paragraphs, doing three jobs:
+
+      - **What leaks.** A published counter is one above the author's clock and
+        the clock is a function of the ops held, so the counter **states how many
+        of that Stoa's ops its author had accepted as advances at publish time**,
+        and anyone who can read the Stoa can read it. The probe this finding
+        measured is stated as the scenario it is: control what a target receives,
+        then read the count off its next post. The finding's own measurement —
+        identical content, counters 6 and 3 — is what the paragraph describes in
+        words.
+      - **Why it is accepted, with the claim bounded rather than waved at.**
+        Three bounds, each of which a reader can check against the rest of the
+        spec: it reveals a **count** and never *which* ops (the same limit the
+        publish requirement already states for the positive claim, so the two
+        agree); it reveals nothing about Stoas the observer cannot read, which is
+        exactly what the scoping buys and is now visibly the scoping's job; and
+        it is a property of a peer that **publishes**, so a reading-only peer
+        emits no counter and is not probed. Naming the third was worth the line:
+        it is the difference between "everyone is probeable" and "publishing is
+        the act that answers".
+      - **What was rejected.** Suppressing or fuzzing the counter, because a
+        counter a peer may distort is a counter two peers can disagree about,
+        which destroys the one property the counter exists for. A forum that
+        orders causally has to put the causal value on the wire. That is the
+        trade-off stated as a trade-off rather than as an apology.
+
+      It closes with what follows for a caller — a counter SHALL NOT be treated
+      as private, and a peer SHALL NOT be told that publishing conceals what it
+      has received — so the paragraph is not purely descriptive.
+
+      **No code changed and none should**, which is this finding's own reading
+      and is why nothing routed to the `dev-writer`.
 
 ---
 
