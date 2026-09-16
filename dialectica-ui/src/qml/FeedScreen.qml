@@ -106,20 +106,31 @@ ScreenFrame {
     // appear or disappear without the layout changing around it.
     //
     // There is exactly ONE entry, because core implements exactly one ordering.
-    // Its label is "same order for everyone", and that label is true OF THIS
-    // ORDERING specifically: the order is computed from the ops themselves —
-    // each op's own Lamport counter, carried in its signed bytes, and its op id
-    // among ops carrying none — so every peer holding the same ops computes the
-    // same sequence. Nothing per-peer enters it.
+    // Its label is "newest first", which `feed-view` makes the label this
+    // interface uses. The word to read positionally: the order is descending
+    // Lamport counter, carried in each op's signed bytes, ties broken by
+    // ascending op id — so the post that orders first is the LATEST ONE THE
+    // FORUM'S ORDER KNOWS OF. That is a real claim and it is the claim a reader
+    // wants. What it is not is a claim about instants, which is what the denial
+    // below exists to say; "most recent first" would make that claim and
+    // `feed-view` forbids it by name.
     //
-    // It would NOT be true of the feed in general, and that distinction is why
-    // the label lives in the model rather than in the layout. Vouching is
-    // per-reader and never published, so a vote-weighted ordering would give two
-    // readers different orders over the identical op set, and both would be
-    // correct. When such an ordering arrives it joins this model with its own
-    // honest label; this one does not have to change.
+    // **This label gives up a property the old one asserted, and that was a
+    // deliberate trade.** "Same order for everyone" asserted CONVERGENCE —
+    // every peer holding the same ops computes the same sequence — which
+    // "newest first" does not say. The property is unchanged and is not lost:
+    // the denial's third sentence carries it, which is part of why that
+    // sentence must stay. What the old label lacked was any answer to the
+    // question a reader actually arrives with, which is what order this is.
+    //
+    // Convergence would NOT be true of the feed in general, and that
+    // distinction is why the label lives in the model rather than in the
+    // layout. Vouching is per-reader and never published, so a vote-weighted
+    // ordering would give two readers different orders over the identical op
+    // set, and both would be correct. When such an ordering arrives it joins
+    // this model with its own honest label; this one does not have to change.
     property var orderings: [
-        { key: "convergent", label: "same order for everyone" }
+        { key: "convergent", label: "newest first" }
     ]
     property string ordering: "convergent"
 
@@ -399,38 +410,51 @@ ScreenFrame {
     // caveats belong in the copy itself" — and the obligation is not, so the
     // sentence lives in the screen's own body, where a user can read it.
     //
-    // It is load-bearing in a way the ordering LABEL is not. "Same order for
-    // everyone" is honest, and avoids labelling an ordering "new", "latest" or
-    // "recent" when it is none of those — but it is NEUTRAL, and a reader
-    // meeting a forum feed assumes newest-first unless told otherwise. The
-    // denial is the part the label cannot carry, so removing it would leave the
+    // It is load-bearing in a way the ordering LABEL is not. A reader meeting a
+    // forum feed assumes a chronological one unless told otherwise, and no
+    // label can carry its own disclaimer — so removing this would leave the
     // interface silently relying on the reader not to make the ordinary
-    // assumption.
+    // assumption. `feed-view` requires the denial to be rendered rather than
+    // left implicit, for exactly that reason.
     //
-    // copy.json `feed.orderingNote` — the key the deleted MarginNote carried.
+    // **It denies the temporal READING, and must never negate the label.** This
+    // is the trap the wording fell into once and the reason the opening clause
+    // now reads as it does. "Newest first" and "latest by the clock" are two
+    // readings of the SAME superlative: one positional, which the ordering
+    // supports, one temporal, which it does not. A denial opening "Not newest
+    // first" asserts that the feed is not the thing its own label says it is,
+    // which leaves a reader no way to tell which of the two strings is live —
+    // an honest label and an honest denial that together contradict each other.
+    // So the clause names the forbidden READING ("not latest by the clock")
+    // instead of the superlative, and `feed-view` carries that as its own
+    // direction.
     //
-    // NO SPEC: **the exact wording of this sentence is not required by any
-    // spec**, and this revision of it was chosen by the `op-clock` change
-    // rather than contracted. `grep -rn "newest first"` over `openspec/specs/`
-    // returns nothing, and `stoa-navigation-view` explicitly puts the feed's
-    // ordering row outside its scope. The DENIAL is load-bearing and must stay
-    // (see below); the reason given for it is what changed and is unowned.
+    // **Sentences two and three are not to be touched.** Two discharges the
+    // hardest requirement verbatim: the reason the feed is not ordered by the
+    // displayed time is that the time is THE AUTHOR'S OWN CLAIM, explicitly not
+    // that no time is available. Three carries the convergence property the old
+    // "same order for everyone" label asserted and the new label does not.
     //
-    // What changed, and why the old wording had to go: it read "Timestamps do
-    // not reach this machine yet [...] When real times arrive this label changes
-    // and nothing else does." Both halves are now false. An op's signed bytes
-    // carry a Lamport counter AND an author-asserted wall-clock, and the feed is
-    // ordered by that counter today. The old sentence promised the reader a
-    // future in which the feed becomes newest-first, and that future is one core
-    // has now decided against rather than merely not reached: a counter is
-    // CAUSAL, not temporal — it says its author had seen something, never when —
-    // and the wall-clock is the author's own claim, so ordering by it would let
-    // anyone reach the top of a feed by lying. The denial therefore stops being
-    // a statement about a missing field and becomes a statement about a
-    // deliberate design limit, which is a stronger thing to tell a reader and
-    // must not be softened back into "not yet".
+    // Why the old wording had to go: it read "Timestamps do not reach this
+    // machine yet [...] When real times arrive this label changes and nothing
+    // else does." Both halves are now false. An op's signed bytes carry a
+    // Lamport counter AND an author-asserted wall-clock, and the feed is ordered
+    // by that counter today. The old sentence promised the reader a future in
+    // which the feed becomes chronological, and that future is one core has
+    // decided against rather than merely not reached: a counter is CAUSAL, not
+    // temporal — it says its author had seen something, never when — and the
+    // wall-clock is the author's own claim, so ordering by it would let anyone
+    // reach the top of a feed by lying. A denial phrased as a limitation
+    // awaiting a missing field promises the chronological feed this design has
+    // refused, so it must never be softened back into "not yet".
+    //
+    // **No copy.json citation, deliberately** — every other string on this
+    // screen carries one and this one cannot. Both strings here are the core
+    // contract's rather than the bundle's: `feed-view` overrules the bundle's
+    // ordering copy, and `proposal.md` records that. Citing a key here would
+    // imply the bundle sanctions this wording, and it does not.
     Text {
-        text: "Not newest first. Posts carry a time their author claimed, which anyone could set, so the feed is not ordered by it. The order used instead is one every peer computes identically from the posts they hold."
+        text: "Newest first means latest in this forum's order, not latest by the clock. Posts carry a time their author claimed, which anyone could set, so the feed is not ordered by it. The order used instead is one every peer computes identically from the posts they hold."
         font: DTheme.note
         color: DTheme.inkSoft
         wrapMode: Text.WordWrap
