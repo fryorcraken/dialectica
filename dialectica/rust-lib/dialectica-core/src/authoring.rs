@@ -718,10 +718,7 @@ mod tests {
             "under which name?".to_string(),
         )
         .unwrap();
-        assert_eq!(
-            stored(&log, &published.id).op.author.to_hex(),
-            reported
-        );
+        assert_eq!(stored(&log, &published.id).op.author.to_hex(), reported);
     }
 
     #[test]

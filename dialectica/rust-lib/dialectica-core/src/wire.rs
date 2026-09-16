@@ -4111,10 +4111,9 @@ mod tests {
         let dir = OnboardingDir::new("keep-signs");
         let nonce = SlateNonce::generate().unwrap();
         let kept = keep_through_the_wire(&dir, nonce, Some(nonce), 0, &Unlock::Unencrypted);
-        let reported = PublicKey::from_bytes(
-            &hex::decode(kept["publicKey"].as_str().unwrap()).expect("hex"),
-        )
-        .expect("a parseable public key");
+        let reported =
+            PublicKey::from_bytes(&hex::decode(kept["publicKey"].as_str().unwrap()).expect("hex"))
+                .expect("a parseable public key");
         let path = kept["path"].as_u64().unwrap() as u32;
 
         // Reopened from disk, not the in-memory keystore the keep used — the
@@ -5620,8 +5619,8 @@ mod tests {
             .expect("a path is recorded");
         let signing = a_master_key().stoa_key_at_path(&a_stoa(), recorded);
         let sig = crate::identity::sign_op_bytes(&signing, b"a post");
-        let reported_key = hex::decode(probe["identity"].as_str().unwrap())
-            .expect("the probe reports hex");
+        let reported_key =
+            hex::decode(probe["identity"].as_str().unwrap()).expect("the probe reports hex");
         assert!(
             crate::identity::PublicKey::from_bytes(&reported_key).is_ok(),
             "the probe must report a parseable public key, got {probe}"
@@ -6843,7 +6842,6 @@ mod tests {
                 "assertedTime",
                 "attachments",
                 "author",
-                "authorKey",
                 "body",
                 "currentVersion",
                 "id",
@@ -7047,11 +7045,20 @@ mod tests {
         // and names no field for it. `design.md` §4 carries the reasoning,
         // including that a caller still reading `authorKey` gets a missing field
         // rather than a wrong value.
-        let out = read_thread(&thread_request(""), &a_thread_log(), &feed_genesis(), A_TIME);
+        let out = read_thread(
+            &thread_request(""),
+            &a_thread_log(),
+            &feed_genesis(),
+            A_TIME,
+        );
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         let root = &v["items"][0];
 
-        assert_eq!(root["author"], feed_key(2).public_key().to_hex(), "got {out}");
+        assert_eq!(
+            root["author"],
+            feed_key(2).public_key().to_hex(),
+            "got {out}"
+        );
         // And NO name of any kind travels, nor a second author identifier: a name
         // and a mark are pure functions of the key, so sending one would put a
         // derivable value on the wire beside the material it is derived from,

@@ -1064,7 +1064,11 @@ mod tests {
         // rather than a panic.
         let sk = a_fresh_key();
         let sig = sign_op_bytes(&sk, b"a post");
-        assert!(!verify_authored_op(&not_a_point, b"a post", &sig.to_bytes()));
+        assert!(!verify_authored_op(
+            &not_a_point,
+            b"a post",
+            &sig.to_bytes()
+        ));
     }
 
     #[test]

@@ -2525,10 +2525,7 @@ fn a_store_seeded_from_two_identities_carries_exactly_those_two_authors() {
 
     // The expected pair, derived from the KEYS rather than from any op. This is
     // the operand the implementation did not produce.
-    let mut expected = vec![
-        founder.public_key().to_hex(),
-        visitor.public_key().to_hex(),
-    ];
+    let mut expected = vec![founder.public_key().to_hex(), visitor.public_key().to_hex()];
     expected.sort();
     assert_ne!(
         expected[0], expected[1],

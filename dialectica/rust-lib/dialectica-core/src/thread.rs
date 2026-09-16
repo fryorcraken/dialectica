@@ -271,7 +271,6 @@ struct Placed {
     current_version: String,
     parent: Option<String>,
     author: String,
-    author_key: String,
     body: Option<Sanitised>,
     attachments: Option<Vec<Sanitised>>,
     is_revised: bool,
@@ -288,7 +287,6 @@ impl Placed {
             current_version: self.current_version,
             parent: self.parent,
             author: self.author,
-            author_key: self.author_key,
             body: self.body,
             attachments: self.attachments,
             is_revised: self.is_revised,
@@ -1943,6 +1941,12 @@ mod tests {
             attachments: _,
             is_revised: _,
             moderation: _,
+            // Neither describes an author: `position` is the item's index in the
+            // sequence and `asserted_time` is the author's claimed wall-clock.
+            // They are named rather than swept under a `..`, because a `..` is
+            // what would let a future author field in without this test noticing.
+            position: _,
+            asserted_time: _,
         } = root_item;
     }
 
