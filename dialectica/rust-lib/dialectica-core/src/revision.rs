@@ -431,7 +431,19 @@ mod tests {
     ///
     /// THE forgery this module exists to stop: the author field names the
     /// victim, so an authorship check performed before verification passes.
-    /// Asserted to be a genuine forgery at every use, or the test proves nothing.
+    ///
+    /// **Asserted to be a genuine forgery here, in the helper.** That sentence
+    /// previously read "at every use" and was false: the helper asserted nothing
+    /// and one of its two callers carried no guard at all. Asserting in the
+    /// helper makes the claim true by construction rather than by every caller
+    /// remembering.
+    ///
+    /// Both halves are checked, and the second is the one that is easy to miss:
+    /// the signature must FAIL under the claimed key (it is a forgery) and must
+    /// SUCCEED under the signer's own (it is an authorship forgery rather than
+    /// junk bytes). A fabricated signature satisfies the first alone, which would
+    /// leave every caller demonstrating "a bad signature is refused" instead of
+    /// the attack they name.
     fn a_forged_revision(
         claimed: &PublicKey,
         signer: &SecretKey,
@@ -447,10 +459,21 @@ mod tests {
                 attachments: vec![],
             },
         };
-        SignedOp {
+        let forged = SignedOp {
             signature: sign_op_bytes(signer, &op.canonical_bytes()),
             op,
-        }
+        };
+        assert!(!forged.verify(), "the fixture must be an actual forgery");
+        assert!(
+            crate::identity::verify_authored_op(
+                &signer.public_key().to_bytes(),
+                &forged.op.canonical_bytes(),
+                &forged.signature.to_bytes()
+            ),
+            "the signature must be valid under the signer's own key, or this \
+             fixture is a junk signature rather than a forgery"
+        );
+        forged
     }
 
     /// Two revisions of `target` whose op ids are known to differ, lower first.

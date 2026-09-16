@@ -118,9 +118,16 @@
 //! The instance this file has to work hardest to avoid is asserting that
 //! something "came back" using a value that came from the same call that produced
 //! it. A read that returns what the write just handed us is the test agreeing
-//! with itself. Where an expected value can be derived independently — an address
-//! is a hash of a record, an author address is a hash of a key — it is derived
-//! that way; where it cannot, it is hardcoded.
+//! with itself. Where an expected value can be derived independently — a Stoa
+//! address is a hash of its genesis record, a per-Stoa signing key is derived
+//! from the master key and the Stoa — it is derived that way; where it cannot,
+//! it is hardcoded.
+//!
+//! This paragraph offered "an author address is a hash of a key" as its second
+//! example until issue #80 deleted that derivation. It is replaced rather than
+//! dropped because the paragraph needs two examples to make its point, and
+//! because a reader following the old one would have written
+//! `key.public_key().address()`, which no longer compiles.
 //!
 //! # Mutations run against this file, and what each killed
 //!
@@ -619,8 +626,18 @@ fn a_moderation(
 /// which is exactly what a hostile peer does. The log stores it deliberately
 /// (§3.3), so this is the fixture that proves the reader is the thing refusing
 /// it.
+///
+/// **Both halves of "forgery" are asserted here**, in the helper, so every
+/// caller inherits them. The first — that it does not verify — is the obvious
+/// one. The second is the one that was missing: that the signature IS valid
+/// under the signer's own key, which is what makes this an authorship forgery
+/// rather than 64 junk bytes. A refusal guard alone is satisfied identically by
+/// a fabricated signature, so callers would have been demonstrating "a bad
+/// signature is refused" instead of the attack they name — and since issue #80
+/// deleted the address guard, the signature check is the sole mechanism that
+/// tells those two apart.
 fn a_forged_post(stoa: &Address, claimed: &PublicKey, signer: &SecretKey, body: &str) -> SignedOp {
-    Op {
+    let forged = Op {
         stoa: *stoa,
         author: claimed.clone(),
         kind: OpKind::Post {
@@ -630,7 +647,18 @@ fn a_forged_post(stoa: &Address, claimed: &PublicKey, signer: &SecretKey, body: 
             attachments: vec![],
         },
     }
-    .sign(signer)
+    .sign(signer);
+    assert!(!forged.verify(), "the fixture must be an actual forgery");
+    assert!(
+        dialectica_core::identity::verify_authored_op(
+            &signer.public_key().to_bytes(),
+            &forged.op.canonical_bytes(),
+            &forged.signature.to_bytes()
+        ),
+        "the signature must be valid under the signer's own key, or this fixture \
+         is a junk signature rather than a forgery"
+    );
+    forged
 }
 
 /// The bodies a feed page renders, in order. The shape most assertions compare.
@@ -647,12 +675,18 @@ fn a_keystore_on_disk_signs_a_post_that_a_reopened_store_still_attributes_to_it(
     // post goes into a SQLite file, both connections are dropped, and both files
     // are reopened from their paths before anything is asserted.
     //
-    // The rival explanation this fixture excludes: that the author address came
-    // out of the row we just wrote. It does not — the expected address is
-    // re-derived from the keystore REOPENED FROM DISK, so the assertion compares
-    // two independent paths to the same value. A store that stashed the address
-    // as a column and handed it back would pass a weaker version of this test and
-    // fail this one, because the keystore half would still have to agree.
+    // The rival explanation this fixture excludes: that the author key came out
+    // of the row we just wrote. It does not — the expected key is re-derived from
+    // the keystore REOPENED FROM DISK, so the assertion compares two independent
+    // paths to the same value. A store that stashed the author as a column and
+    // handed it back would pass a weaker version of this test and fail this one,
+    // because the keystore half would still have to agree.
+    //
+    // This paragraph said "author address" until issue #80 deleted that value.
+    // The mechanism is unchanged — it is the re-derivation from disk that
+    // excludes the rival, not which value is re-derived — but note the Stoa
+    // address a few lines below is a DIFFERENT value that survives, so this
+    // comment and that one are not saying the same thing.
     let dir = TempDir::new("keystore-to-feed");
     let key_path = dir.file("identity.key");
 
@@ -1313,6 +1347,19 @@ fn a_forged_hide_does_not_displace_the_genuine_one_that_sorts_after_it() {
     assert!(
         !forged_unhide.verify(),
         "the fixture's forgery must not verify, or it is not a forgery"
+    );
+    // And it is an AUTHORSHIP forgery rather than junk bytes: the signature is
+    // genuinely valid under the attacker's own key, so the refusal is the
+    // founder's key not matching. Without this, a fabricated signature satisfies
+    // the guard above and the test would pass while demonstrating something
+    // weaker than the attack it describes.
+    assert!(
+        dialectica_core::identity::verify_authored_op(
+            &attacker.public_key().to_bytes(),
+            &forged_unhide.op.canonical_bytes(),
+            &forged_unhide.signature.to_bytes()
+        ),
+        "the attacker's signature must be valid under the attacker's own key"
     );
 
     let genuine_hide = a_moderation(&stoa, &founder, &post_id, ModerationAction::Hide);

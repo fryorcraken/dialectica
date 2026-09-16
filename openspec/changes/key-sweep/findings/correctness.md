@@ -108,7 +108,7 @@ Stated because a passing gate is not the same as a covered claim:
 
 ## Findings
 
-- [ ] **`closer`** — `openspec/changes/key-sweep/tasks.md:124` — task 5.2's
+- [x] **`closer`** — `openspec/changes/key-sweep/tasks.md:124` — task 5.2's
       claim is now true, but only because the tester repaired it; the task text
       still reads as the `dev-writer`'s own account and credits two corrections
       where three were made elsewhere.
@@ -122,8 +122,23 @@ Stated because a passing gate is not the same as a covered claim:
       provenance one. Severity: low, documentation-only. Confirm before archive
       that 5.2's wording is not carried into the archived change as though the
       dev-writer had verified it.
+      **Fixed at the source, so the `closer` has nothing left to confirm.**
+      Rather than leaving this as a pre-archive check, task 5.2's text is
+      rewritten now: it no longer reads as the `dev-writer`'s own account. It
+      states that four comments across three files were in scope, that the
+      `dev-writer` corrected `op.rs`'s two, and that **the `tester` found and
+      corrected `transport.rs:1441` and `revision.rs:42`** and measured the
+      mechanism by stubbing `verify_op_bytes`.
+      The readability reviewer filed the same line independently with the detail
+      that the original named *neither* of the two it missed; both boxes are
+      answered by the one rewrite.
+      Your "no code defect" holds — I re-read all four sites in the tree before
+      rewriting, and they are present. The wording is appended under a
+      **"Corrected after review"** heading rather than silently replaced, so the
+      overstatement and its repair are both in the archived record, which is the
+      opposite of the failure you were guarding against.
 
-- [ ] **`spec-writer`** — `feed.rs:118-143`, `wire.rs:1819` — the feed reply's
+- [x] **`spec-writer`** — `feed.rs:118-143`, `wire.rs:1819` — the feed reply's
       `author` field changes meaning with no requirement governing it, and the
       two `// NO SPEC:` markers are the only record.
       **Scenario:** a caller that stored a feed row's `author` before this
@@ -137,6 +152,24 @@ Stated because a passing gate is not the same as a covered claim:
       which I agree is the right call for this piece — this box exists so the
       deferral is tracked rather than lost. Severity: low for this merge,
       medium if it stays open past the next feed change.
+      **Deferred, to issue #91** —
+      *Specify what a feed row carries: the reply has no governing capability*
+      (https://github.com/fryorcraken/dialectica/issues/91), filed during this
+      review pass.
+      You wrote that the box exists so the deferral is tracked rather than lost,
+      and a ticked box in a directory that is **deleted at archive** would have
+      lost it — so the tracking needed somewhere durable before this could be
+      closed. The issue carries your framing: no `feed` capability exists,
+      `generated-names` only *forbids* a name while saying nothing about what a
+      row does carry, and the concrete risk is that a caller comparing a stored
+      `author` across this change gets a silent mismatch rather than an error
+      because both values are 64 hex characters. It also lists what the
+      capability would have to settle, so the next person does not restart from
+      the observation.
+      `design.md` §5 now names #91 as the deferral's home, so the pointer
+      survives in the archived change and not only in the tracker.
+      Your judgement that deferring is right for this piece is unchanged and
+      recorded as such.
 
 ## Areas reviewed and found clean
 

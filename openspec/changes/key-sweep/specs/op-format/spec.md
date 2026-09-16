@@ -107,3 +107,25 @@ This omission SHALL be enforced by the encoding rather than merely documented: t
 - **WHEN** the same op is encoded by two peers with different local histories
 - **THEN** both produce identical bytes
 - **AND** both compute the same id
+
+### Requirement: Valid text is never normalised or otherwise transformed
+
+Decoding SHALL NOT normalise, case-fold, reorder, strip or otherwise transform text that is valid UTF-8. Rejecting text that is *not* valid UTF-8 is already required by "A malformed op is rejected at the decoding boundary"; this requirement governs what happens to text that passes that check.
+
+Declining to transform valid text is a canonicality requirement, not an oversight. Any normalisation applied at decode would mean an accepted byte string re-encoding to something other than itself, which contradicts "An accepted encoding re-encodes to itself" and would break op-id agreement between peers — the property the whole encoding exists to provide. Two peers on builds with different Unicode tables would compute different ids for one op, silently.
+
+**The consequence is that display text is attacker-controlled and SHALL NOT be trusted for rendering or identification.** A title may contain bidirectional controls, zero-width characters, or homoglyphs of an established Stoa's name, and while no authority check exists any peer may sign such an op. Mitigation belongs to whoever renders: strip or visibly mark bidi and zero-width controls, show the Stoa address alongside any name, and never treat a title as an identifier. The Stoa address is the identity; a name never is.
+
+**Only the final sentence changes**, from "The address is the identity" to "The Stoa address is the identity". The requirement is about titles and its subject was always the Stoa — the preceding clause says "show the Stoa address alongside any name" — so nothing here changes meaning. The bare sentence is scoped because it is the one a later reader would cite out of context as authority for an author address, which this change deletes.
+
+#### Scenario: Valid text is returned exactly as it arrived
+
+- **WHEN** a text field carries valid UTF-8, including multi-byte sequences, bidirectional controls and zero-width characters
+- **THEN** decoding returns those characters unchanged
+- **AND** re-encoding reproduces the original bytes
+
+#### Scenario: Canonically-equivalent text stays distinct
+
+- **WHEN** two ops carry titles that differ only by Unicode normalisation form, such as a combining sequence against its precomposed equivalent
+- **THEN** their encodings differ
+- **AND** their ids differ, rather than collapsing onto one op

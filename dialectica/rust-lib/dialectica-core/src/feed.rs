@@ -418,6 +418,21 @@ mod tests {
             op,
         };
         assert!(!forged.verify(), "the fixture must actually be a forgery");
+        // And an AUTHORSHIP forgery rather than junk bytes: valid under the
+        // attacker's own key. `!verify()` is a refusal guard that fabricated
+        // bytes satisfy identically, so without this the test would show "a bad
+        // signature does not render" rather than "a forged author does not
+        // render" — the property it names, and the one the signature check is now
+        // solely responsible for since issue #80 deleted the address guard.
+        assert!(
+            crate::identity::verify_authored_op(
+                &attacker.public_key().to_bytes(),
+                &forged.op.canonical_bytes(),
+                &forged.signature.to_bytes()
+            ),
+            "the attacker's signature must be valid under the attacker's own key, \
+             or this fixture is a junk signature rather than a forgery"
+        );
 
         let genuine = a_thread(2, "genuine");
         let log = a_log(vec![forged, genuine.clone()]);

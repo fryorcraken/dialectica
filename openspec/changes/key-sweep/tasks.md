@@ -14,10 +14,19 @@
       286 QML assertions green, clippy clean, `nix build .#lgx` green so the
       `cfg(logos_scaffold)` adapter is known to compile.
 - [x] tests — `tester`. Test-list diff against `origin/main` verified name by
-      name: 13 gone, 13 new, 987 both sides — 11 renames, 2 deletions (both
-      properties OF the deleted derivation), 2 additions. The handover said "2
-      deleted, 2 added, 12 renamed"; the twelfth was a rename of a top-level
-      integration test, so the shape is right and the count of renames was one
+      name: 13 gone, 13 new, 987 both sides — 11 renames, then **a 2-for-1
+      collapse plus 1 genuinely new test**. The collapse:
+      `an_author_address_is_not_a_bare_hash_of_the_key` and
+      `an_author_address_and_a_stoa_address_never_collide` are both properties OF
+      the deleted derivation and merged into one successor,
+      `no_derivation_turns_a_public_key_into_an_address`; separately
+      `verification_takes_no_author_identifier_beside_the_key` is net new.
+      **This line said "2 deletions, 2 additions" until review.** The net count
+      is identical, so no gate could see the difference — but the shape a reader
+      would look for (two tests deleted and replaced by nothing, two additions
+      covering new ground) is not what happened. Corrected rather than re-ticked.
+      The handover said "2 deleted, 2 added, 12 renamed"; the twelfth was a
+      rename of a top-level integration test, so the count of renames was one
       over. Five mutations run and restored, each failing as predicted — the
       retired author-address pin proved to be the deleted derivation's real
       output (repointing `STOA_ADDRESS_PREFIX` makes
@@ -141,8 +150,16 @@ call site the compiler names once it is gone.
       dialectica-core` fails only at call sites, never inside `identity.rs`.
 - [x] 1.2 Rewrite `Address`'s doc comment to state the survivor positively — an
       address identifies a Stoa — and record that `derive_stoa_key`'s `Address`
-      parameter is an *input* rather than a leftover. Verify by reading: the
-      phrase "One type for both" appears nowhere.
+      parameter is an *input* rather than a leftover. Verify by reading: the doc
+      opens by saying what the type IS ("A 32-byte **Stoa** address") rather than
+      what it stopped being.
+      **Corrected after review.** This line read *"the phrase 'One type for both'
+      appears nowhere"*, which is false — `grep -rn -i "one type for both"` over
+      `dialectica/` returns `identity.rs:108`, where it sits in a past-tense
+      clause describing what the type used to be. That instance is correct prose
+      and was deliberately kept, so the recipe, not the code, was wrong. A
+      verification stated as the absence of a string fails whenever the string
+      has a legitimate historical use; state it over what the doc now asserts.
 - [x] 1.3 Drop `verify_authored_op`'s `author: &Address` parameter and the
       `key.address() != *author` guard. Verify: the new
       `verification_consults_the_key_the_op_carries_and_nothing_beside_it` binds
@@ -207,16 +224,42 @@ call site the compiler names once it is gone.
 - [x] 5.1 Correct `op.rs`' three claims that `verify_authored_op` "re-derives"
       an address or "binds the key to the claimed address", and `identity.rs`'
       paragraph saying the address check is why the function exists.
-- [x] 5.2 Correct the two test comments crediting the address check for a
-      refusal the SIGNATURE check produces — `op.rs`'s forged-op test and
-      `revision.rs`'s `a_forged_revision_is_dropped`. **These tests passed before
-      and pass now**; only the stated reason was wrong, and it was wrong before
-      this change too, since the only caller derived the claimed author from the
-      op's own key.
+- [x] 5.2 Correct the comments crediting the address check for a refusal the
+      SIGNATURE check produces. **These tests passed before and pass now**; only
+      the stated reason was wrong, and it was wrong before this change too, since
+      the only caller derived the claimed author from the op's own key.
+      **Corrected after review — this line overstated what the `dev-writer`
+      did.** It read *"the two test comments … `op.rs`'s forged-op test and
+      `revision.rs`'s `a_forged_revision_is_dropped`"*. There were **four such
+      comments across three files**, and this task, as written, named neither of
+      the two it missed. What the `dev-writer` corrected was `op.rs` (two test
+      comments, at 1427 and 1444). The **`tester` found and corrected the
+      remaining two**, `transport.rs:1441` and `revision.rs:42`, and measured the
+      mechanism by stubbing `verify_op_bytes` to return `true`. All four are
+      present in the tree today and were re-read at review time; the residue was
+      provenance, not code. Recorded this way because a ticked task is read as an
+      account of what its own stage measured, and the sibling tasks in section 5
+      inherit that trust.
 - [x] 5.3 Scope `stoa.rs`' bare "The address is the identity" to say Stoa, and
       correct `transport.rs`' `FailsVerification` doc, which described a binding
-      step that no longer exists. Verify: `grep -i "author address"` over
-      `dialectica*/src` returns only sentences about the deletion itself.
+      step that no longer exists.
+      Verify with **several spellings, over the whole tree including `tests/`**:
+      `grep -rn -i -E "author address|authoraddress|re-deriv[a-z]* the address|`
+      `rederiv[a-z]* the address|expected address|hash of a key|address is a`
+      `hash"` over `dialectica/` and `dialectica-ui/`. Every hit must be a Stoa
+      address, a spec quotation, or a past-tense clause carrying its own
+      "until issue #80" attribution.
+      **Corrected after review — the original recipe was the defect it was meant
+      to catch.** This line recorded `grep -i "author address"` over
+      `dialectica*/src`, and that check was **proved insufficient twice**. It
+      missed `transport.rs:1441` and `revision.rs:42`, which said *"re-deriving
+      the address"* and contain no such substring; and its `*/src` scope excluded
+      `dialectica-core/tests/`, where the last two false claims survived both the
+      `dev-writer`'s and the `tester`'s sweeps until the readability review
+      reached them. This is the repo's recorded **"a gate the defect satisfies"**
+      pattern, and it had been left in the document that teaches it. A sweep is
+      only ever complete against its own search: vary the phrasing, and never
+      scope to `src` when the claim can live in a test comment.
 - [x] 5.4 Put `names.rs`, `Identicon.qml`, `docs/PLAN.md` and `docs/IDENTICON.md`
       into the past tense — each said issue #80 "deletes" the address, and one
       said `FeedRow` "currently has" the address-only gap, which the same change

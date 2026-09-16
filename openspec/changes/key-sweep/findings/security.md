@@ -77,7 +77,7 @@ Recorded as a limit rather than papered over.
 
 ## Findings
 
-- [ ] **`tester`** — `moderation.rs:652`, `thread.rs:736`, `revision.rs:435`,
+- [x] **`tester`** — `moderation.rs:652`, `thread.rs:736`, `revision.rs:435`,
       `end_to_end.rs:622`, `op.rs:1462`, `feed.rs:416`, `transport.rs:1106`,
       `transport.rs:2527`, `thread.rs:2243`, `end_to_end.rs:1304` — the
       forged-authorship fixtures carry no control proving the forged signature was
@@ -118,8 +118,38 @@ Recorded as a limit rather than papered over.
       `revision.rs:435` and `end_to_end.rs:622` carry **no guard at all** despite
       `revision.rs:434`'s doc comment claiming *"Asserted to be a genuine forgery
       at every use"*.
+      **Fixed, taking your highest-leverage route.** The control — the signature
+      is genuinely valid under the *actual signer's* own key — is added at seven
+      sites, six of them **inside shared helpers** so every present and future
+      caller inherits it rather than each remembering:
+      `a_forged_moderation` (`moderation.rs`), `a_forged_revision`
+      (`revision.rs`), `a_forged_post` (`thread.rs` and, separately,
+      `end_to_end.rs`), `an_op_with_an_invalid_signature_is_stored_anyway`
+      (`log/contract.rs`), plus the two standalone fixtures at `thread.rs:2243`
+      and `transport.rs:1106`, and `op.rs`'s reference test.
+      **Each was proved to fail before it was trusted**, using your own mutation
+      — replacing the attacker signature with `Signature::from_bytes(&[7u8; 64])`
+      while leaving the author field naming the victim:
+      - `moderation.rs` helper mutated → **5 tests fail** where you measured
+        45/45 and 987/987 passing.
+      - `op.rs` reference test mutated → **fails**, where you measured 65/65
+        `op::tests` passing.
+      - the remaining five mutated together → **11 tests fail** across
+        `feed`, `revision` (4), `thread` (4), `transport` and `end_to_end`.
+      All mutations reverted; suite back to **987 green**, count unchanged since
+      these are clauses added to existing tests.
+      **`revision.rs:434`'s false doc comment is repaired rather than left**: the
+      claim "Asserted to be a genuine forgery at every use" was true of no caller,
+      since the helper asserted nothing. The assertion now lives *in* the helper,
+      so the sentence is true by construction, and it is rewritten to say so and
+      to record that it previously was not. `end_to_end.rs`'s `a_forged_post`
+      likewise gained both halves.
+      Each comment states the reasoning you gave: `!verify()` is a refusal guard
+      that junk satisfies identically, and since this piece deleted the address
+      guard the signature check is the sole mechanism, so a family that cannot
+      tell a forgery from junk cannot see what it depends on.
 
-- [ ] **`tester`** — `wire.rs:5491` —
+- [x] **`tester`** — `wire.rs:5491` —
       `the_probe_and_whoami_report_the_same_identity_for_one_user_and_stoa` omits
       the validity control its two sibling tests both carry
       **Scenario:** The test's negative clause (`wire.rs:5568-5575`) asserts that
@@ -137,6 +167,15 @@ Recorded as a limit rather than papered over.
       so this is consistency of evidence rather than a reachable weakness. It is a
       separate box from the one above because it is a one-line addition to a test
       this piece already edited, not part of the crate-wide helper family.
+      **Fixed.** `elsewhere`'s signature is now bound to a local and asserted
+      valid under `elsewhere.public_key()` after the negative clause, so the
+      refusal is a mismatch rather than a malformed signature — the same shape
+      and the same reasoning as its two siblings. The comment names both siblings
+      so the symmetry you measured is visible from this site, and states what the
+      test would otherwise be demonstrating ("garbage is refused" rather than
+      "the wrong path's identity is refused").
+      Agreed it is a separate box: it is a one-line addition here, where the
+      finding above is a family fixed at its helpers.
 
 ## Not findings
 

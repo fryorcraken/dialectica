@@ -122,7 +122,18 @@ Three shapes were considered:
 - **Keep the function taking only a key and rename it.** Rejected: the name
   `verify_authored_op` still says the true thing — it verifies an op against the
   author, and the author is now the key. A rename would churn every call site for
-  no gain, and the `op-transport` spec still calls this the verification step.
+  no gain.
+
+  This bullet carried a second ground — *"the `op-transport` spec still calls
+  this the verification step"* — which was **withdrawn after review as an
+  unsupported citation**. `grep -in "verify_authored_op\|verification step"`
+  over both `openspec/specs/op-transport/spec.md` and this change's delta
+  returns zero matches: the spec names no function and uses no such phrase. It
+  does describe the behaviour the name refers to — *"an op whose signature does
+  not verify under the public key that op carries"* is refused — but that
+  supports the name being accurate, not a claim about the spec's vocabulary.
+  The rejection stands on the churn argument alone, which was always the real
+  one.
 - **Delete the parameter (chosen).** The signature becomes
   `verify_authored_op(key_bytes, op_bytes, signature_bytes) -> bool`, and the
   three values it consults are exactly the three the `identity` spec's scenario
@@ -196,19 +207,29 @@ not in this piece. What this change owes is that the gap is **stated** rather
 than discovered later from a diff, and the test pinning the new behaviour carries
 a `// NO SPEC:` marker naming what was chosen.
 
+**The deferral now has a durable home: issue #91**, *Specify what a feed row
+carries: the reply has no governing capability*. Filed during the review pass,
+because this change's `findings/` directory is deleted at archive and a deferral
+that leaves without landing somewhere was dropped rather than deferred. The
+issue carries the concrete risk — a caller comparing a stored `author` across
+this change gets a silent mismatch rather than an error, both values being 64
+hex characters — and lists what a `feed` capability would have to settle.
+
 A side effect worth naming: the feed's display name becomes derivable, the row
 gaining the derivation's input by the same edit.
 
 ### 6. The pin is retired, not relaxed, and the retirement leaves a witness
 
-`identity.rs`'s known-answer test pinned four derivations in one function: the
-author address, the Stoa address, the signing digest, and the per-Stoa key.
-Deleting the requirement wholesale would silently take three live guarantees
-with it, which is the `hand-maintained sweep lists go stale silently` trap in
-its other direction.
+`identity.rs`'s known-answer test pinned five derivations in one function: the
+author address, the Stoa address, the signing digest, the per-Stoa key, and the
+per-Stoa key at an explicit path — the last of these pinned at two inputs, so
+six assertions covered five derivations. Deleting the requirement wholesale
+would silently take four live guarantees with it, which is the
+`hand-maintained sweep lists go stale silently` trap in its other direction.
 
-So three pins stay verbatim and the fourth is replaced by a **structural
-assertion of its absence**: nothing derives an address from a public key. This
+So four derivations stay pinned verbatim, across five assertions, and the author
+address is replaced by a **structural assertion of its absence**: nothing
+derives an address from a public key. This
 is what the `identity` spec's scenario *An author address derivation is pinned*
 now asks for — it pins the absence rather than the value, so that the next reader
 adding an author-side derivation finds evidence that one was removed on purpose
@@ -246,6 +267,84 @@ That last pair is the one worth being precise about. A test that passes for a
 reason other than the one it names is the defect family this repo has shipped
 most often; correcting the prose is what makes the next reader able to tell
 whether the test still covers what it claims.
+
+### 8. The rotation affordance is given up, and that is the change's one
+   irreversible choice
+
+**This is the largest thing this change forecloses, and it was not recorded as a
+decision until review asked for it.** The reasoning reached the `identity` spec
+and `identity.rs`; what was missing here is the half a Decisions section exists
+for — what else was available, and what ruled it out.
+
+`PLAN.md` §5.1 held a door open deliberately. An author address hashed a
+*record* containing the key rather than the bare key, and the record was the
+seam: it could have grown into a key log, so that an identity rotated its
+signing key while the identifier everything else referenced survived. Deleting
+the address closes that. After this change an author identity **is** the public
+key, with no indirection behind it, so rotation is not merely unimplemented — it
+has nowhere to live.
+
+Three shapes were available:
+
+- **Keep the address purely as a rotation anchor.** Rejected. The record it
+  hashed had exactly one key in it, so the anchor pointed at a single key and
+  rotating would have changed the address too — the affordance was *latent*, not
+  present, and would have needed the key-log design built before it did
+  anything. Meanwhile the address was live on the wire and in six replies,
+  carrying a second identifier for every identity and a second thing every
+  forgery check had to get right. Paying that in every reply and every test for
+  a capability no code could yet use is the "reserved a byte that reserved
+  nothing" shape this repo has shipped before.
+- **Defer #80 until a credential layer exists.** Rejected, and this is the one
+  that needed weighing rather than dismissing. §5.3's own argument is that
+  rotation waits until standing lives on a *revocable credential* (§5.5) rather
+  than on a keypair — so the credential layer, not the address, is what rotation
+  was ever going to hang from. Waiting would have kept a value whose stated
+  justification points somewhere else, and kept it while `generated-names` and
+  the identicon were being built directly on the key, which would have meant
+  building both against an identifier we intended to remove.
+- **Delete it and accept the foreclosure (chosen).** The address's benefit was
+  hypothetical and its cost was paid continuously.
+
+**Whether this is a permanent loss or a deferred one is now an open question
+rather than a settled answer**, and that changed after this change was designed.
+Issue #89 proposes **versioning the identity** — a scheme version carried
+alongside a public key's bytes, in the signed preimage — so that a future scheme
+can coexist with Ed25519 rather than replacing it. A version seam is a different
+and better indirection than the record hash was: it reaches rotation through
+"which scheme minted this identity" rather than through "which key does this
+record currently name". So the door this change closes may be reopened from the
+other side, and #89 is where that is decided. Recorded here because a reader
+finding this entry should not conclude rotation is impossible forever — only
+that nothing in *this* change preserves it.
+
+### 9. The slate's distinctness clause names the path the walk already checked
+
+`identity-onboarding` required that no two candidates in a slate share a public
+key **and** that no two share an address. The delta's second clause is now *no
+two share a derivation path*, which reads like a new property substituted for a
+deleted one. It is not, and the distinction is worth recording because the
+substituted-clause reading is the natural one and it is wrong.
+
+**The path clause is not new — only its presence in the spec is.** On
+`origin/main` the test already asserted all three of path, key and address, and
+`Slate::from_nonce`'s doc already explained that *"distinctness of paths is what
+is checked, and it gives distinctness of keys and addresses for free"*. The walk
+skips a path it already holds; that is the mechanism, and it predates this
+change. What this change does is delete the address assertion — an address being
+a pure function of the key, that clause could only ever have failed where the key
+clause already had — and then bring the spec into line with the two properties
+that remain and were always established.
+
+So the spec moved toward the code rather than the code toward a widened spec. The
+alternative was to state only the key clause, matching the old spec minus its
+dead half. Rejected: it would have left the requirement silent about the one
+property `Slate::from_nonce` is actually responsible for. A slate is built by
+walking paths and the keys are what the walk *produces*, so a key-only clause
+tests the derivation function — pinned elsewhere — rather than this function's
+own job. Two candidates at one path is a real defect of this walk, and it would
+reach a key-only assertion only by also breaking derivation: two explanations,
+one answer, which is the shape this repo keeps finding in its test failures.
 
 ## Risks / Trade-offs
 

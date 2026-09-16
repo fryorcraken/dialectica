@@ -9,7 +9,7 @@ green** (957 unit + 30 integration), matching `tasks.md`' claim exactly.
 
 ---
 
-- [ ] **`spec-writer`** — `openspec/changes/key-sweep/specs/op-format/spec.md`
+- [x] **`spec-writer`** — `openspec/changes/key-sweep/specs/op-format/spec.md`
       and the absent `specs/stoa-metadata/` — the proposal promises two bare
       "The address is the identity" sentences are scoped to say *Stoa*, and
       neither delta makes the edit
@@ -38,8 +38,28 @@ green** (957 unit + 30 integration), matching `tasks.md`' claim exactly.
       and says why — so the spec half is an omission against a stated intent
       rather than a decision. Either make the two edits, or amend the proposal to
       record that the preceding clause was judged sufficient scoping.
+      **Fixed — the edits are made, which was the better of your two options**
+      given the code half was already done and the proposal's reasoning was
+      sound. Confirmed your measurement first: `grep -rn "The address is the
+      identity" openspec/specs` returns exactly two hits, and
+      `key-sweep/specs/` had no `stoa-metadata` directory.
+      `op-format`: the `Valid text is never normalised or otherwise transformed`
+      requirement is now carried in the delta as MODIFIED, with the closing
+      sentence reading *"The **Stoa** address is the identity; a name never is."*
+      `stoa-metadata`: a delta now exists, carrying `A displayed title is never
+      an identifier` with *"The **Stoa** address is the identity."*
+      Both deltas state explicitly that **only that sentence changes** and that
+      the requirement's meaning is unaltered, since the preceding clause was
+      always Stoa-scoped — so a reader diffing them is not left hunting for a
+      substantive change that is not there. The reason is recorded in each: the
+      bare sentence is what a later reader would cite out of context as authority
+      for an author address.
+      The proposal's past-tense promise is also corrected to name where the edits
+      live, with a parenthetical recording that it had claimed the work as done
+      before it was.
+      `openspec validate key-sweep --strict` passes with the new capability.
 
-- [ ] **`spec-writer`** — `wire.rs:184`, `:734`, `:781`, `:1059`, `:1568`,
+- [x] **`spec-writer`** — `wire.rs:184`, `:734`, `:781`, `:1059`, `:1568`,
       `:1827` — one value, an Ed25519 public key's hex, is now reported under
       three different field names across six replies, and no capability owns the
       inconsistency
@@ -76,8 +96,25 @@ green** (957 unit + 30 integration), matching `tasks.md`' claim exactly.
       naming it and filing it, on the same standard the proposal sets for itself:
       *"what this change owes is that the gap is stated rather than discovered
       later from a diff."*
+      **Fixed as asked — filed, not fixed in code.** `proposal.md` gains a
+      section, *One value, three field names — created here, filed rather than
+      fixed*, which names all six sites, states that every one now carries the
+      same 64-hex public key, and reproduces your two strongest points: that the
+      three spellings named three genuinely different values before this change
+      (so the names were correct and this change is what made them redundant),
+      and that the inconsistency is **already live** in the shipped view, with
+      `DOnboardingScreen.qml` reading `publicKey` and `FeedScreen.qml` reading
+      `author` while both feed the same `Identicon.address`. The `display_name`
+      re-spelling is named as the concrete cost, against CLAUDE.md's
+      source-independence rule.
+      The deferral is argued on the same ground the proposal uses for the
+      feed-row contract — unifying six reply fields across four capabilities is a
+      breaking wire change of its own size, and bundling it into a deletion would
+      make neither half reviewable. Your point that `design.md` §4 reasons about
+      the spelling only *within* the thread/feed family and never across the six
+      sites is recorded as precisely the gap the section closes.
 
-- [ ] **`dev-writer`** — `Identicon.qml:102`, `AddressLabel.qml:48` — one
+- [x] **`dev-writer`** — `Identicon.qml:102`, `AddressLabel.qml:48` — one
       `address` property is now fed two different kinds of value by two groups of
       callers, and nothing at the property says which it is holding
       **Scenario:** `Identicon.address` and `AddressLabel.address` are each fed a
@@ -102,6 +139,26 @@ green** (957 unit + 30 integration), matching `tasks.md`' claim exactly.
       key; 32 bytes of hex either way"* — closes it. Flag if the reviewer holding
       **readability** has already raised this; it sits on that boundary and I do
       not want it double-counted.
+      **Not double-counted** — you asked, so: the readability reviewer examined
+      both components and passed them, explicitly calling `Identicon.qml`'s
+      retained `address` property "explained correctly and for the right reason"
+      and `AddressLabel.qml` as correctly keeping `address` "and says why". They
+      raised no box. So this is yours alone.
+      **Fixed at one of the two declarations, and here is why not both.** Reading
+      them showed the situation is asymmetric: `Identicon.qml:87-101` already
+      carries a fourteen-line comment **at the declaration itself**, stating that
+      for an author it holds the public key and for a Stoa the Stoa address, that
+      the name is "now only half right", and why renaming was rejected. Adding
+      your one-liner above that would restate it.
+      `AddressLabel.qml:48` was the bare one — its explanation sits ~20 lines up
+      in the file header, which is exactly the scroll you describe. It now
+      carries the line, close to your wording: *"A Stoa address or an author's
+      public key; 32 bytes of hex either way, and the name is only half right"*,
+      pointing at the header for the rest and recording that nine call sites
+      still pass a Stoa address.
+      Your accompanying judgement — keep the property generic — is untouched, and
+      your measurement of 6 key callers against 9 Stoa callers is what the new
+      comment cites.
 
 ---
 

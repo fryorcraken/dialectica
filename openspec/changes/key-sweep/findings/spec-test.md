@@ -9,7 +9,7 @@ Mutations run: 3 (two reported here, one baseline). Every one restored;
 
 ## Findings
 
-- [ ] **`tester`** — `openspec/changes/key-sweep/tasks.md:16-19`, the stage-block
+- [x] **`tester`** — `openspec/changes/key-sweep/tasks.md:16-19`, the stage-block
       accounting — the test-list shape is described as "2 deletions, 2 additions"
       when it is actually a **2-for-1 collapse plus 1 genuinely new test**.
       **Scenario:** a reader auditing the deletions looks for two deleted tests
@@ -29,6 +29,23 @@ Mutations run: 3 (two reported here, one baseline). Every one restored;
       tester's substantive claim holds; only the shape is mis-stated. Worth
       correcting because the next reader reconciling the count will otherwise
       re-derive this discrepancy from scratch.
+      **Fixed — the text, not the tick.** The stage row now describes "a 2-for-1
+      collapse plus 1 genuinely new test", naming all four tests involved: the
+      two properties OF the deleted derivation
+      (`an_author_address_is_not_a_bare_hash_of_the_key` and
+      `an_author_address_and_a_stoa_address_never_collide`) merged into
+      `no_derivation_turns_a_public_key_into_an_address`, with
+      `verification_takes_no_author_identifier_beside_the_key` net new.
+      Verified rather than transcribed: `grep -rn "fn <name>"` over `dialectica/`
+      confirms the two old tests are absent from the branch and both successors
+      present.
+      The row also now records **that it previously said "2 deletions, 2
+      additions"** and why that mattered — the net count is identical so no gate
+      could see it, but the shape a reader would look for is not what happened.
+      Your point about the next reader re-deriving the discrepancy is why the
+      correction is visible rather than a silent overwrite.
+      **The row's checkbox is untouched**, since the `## Stages` block belongs to
+      the `closer`; only the prose inside it is corrected.
 
 ## Verified clean, in prose
 

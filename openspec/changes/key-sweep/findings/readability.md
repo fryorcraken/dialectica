@@ -39,7 +39,7 @@ claim is **true**. The tree was restored and is clean.
 
 ---
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/tests/end_to_end.rs:121-123` —
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/tests/end_to_end.rs:121-123` —
       the module doc still teaches the deleted derivation as a live technique.
       It reads: *"Where an expected value can be derived independently — an
       address is a hash of a record, **an author address is a hash of a key** —
@@ -55,8 +55,17 @@ claim is **true**. The tree was restored and is clean.
       `stoa_public_key`/`public_key`, and left the paragraph that describes them.
       Severity: **defect** — this is the largest category of work the piece
       claims to have done, and this is a survivor of it.
+      **Fixed.** The second example is replaced rather than deleted — the
+      paragraph needs two to make its point — with "a per-Stoa signing key is
+      derived from the master key and the Stoa", which is a derivation this file
+      genuinely performs. A note below records what the clause used to say and
+      that a reader following it would have written
+      `key.public_key().address()`, which no longer compiles.
+      No test covers a module doc comment, so this is verified by reading, and by
+      the tree-wide sweep recorded under entry 6 — which found these two and
+      nothing else.
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/tests/end_to_end.rs:650-655` —
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/tests/end_to_end.rs:650-655` —
       the rival-explanation comment on
       `a_keystore_on_disk_signs_a_post_that_a_reopened_store_still_attributes_to_it`
       describes an author address three times over, for a test whose body the
@@ -76,8 +85,16 @@ claim is **true**. The tree was restored and is clean.
       record"* in the same function is **correct** — that one is the Stoa
       address — which is what makes this worth fixing rather than blanket-editing.
       Severity: **defect**.
+      **Fixed.** The three occurrences now say "author key", matching the body
+      and the assertion message. Your warning about line 672 was heeded: the
+      Stoa-address comment a few lines below is untouched, and the rewritten
+      paragraph now explicitly says the Stoa address nearby is a *different*
+      value that survives, so the next reader is not tempted to blanket-edit the
+      two together. A note records that the paragraph said "author address" until
+      issue #80 and that the exclusion mechanism — re-derivation from disk — is
+      unchanged by which value is re-derived.
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/identity.rs:863` —
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/identity.rs:863` —
       *"**THREE pins, where there were four.**"* Both numbers are wrong by two.
       `the_wire_constants_are_pinned_to_known_answers` contains **five**
       `assert_eq!` pins on this branch (lines 870, 875, 880, 906, 911 — Stoa
@@ -94,8 +111,24 @@ claim is **true**. The tree was restored and is clean.
       only the tally needs correcting, not the paragraph.
       Severity: **defect** — a fabricated count, the failure mode this repo has
       recorded.
+      **Fixed, and your count independently re-derived rather than taken on
+      trust.** I read both sides: this branch has five `assert_eq!` at 870, 875,
+      880, 906 and 911; `git show origin/main:…/identity.rs` has six at 858, 863,
+      868, 873, 899 and 904, the extra one being
+      `sk.public_key().address()` pinned to the retired hex. So "wrong by two" is
+      right in both directions.
+      The comment now reads **"FIVE pins over FOUR derivations, where there were
+      six over five"**, and — this is the part that stops the tally regenerating
+      — it says *why* the two numbers differ: `derive_stoa_key_at_path` is pinned
+      at two inputs. A bare count invites the next reader to recount and disagree;
+      a stated relation does not. The explanatory paragraph you judged "the good
+      kind" is untouched.
+      **Fixed in three places, not one** — see entry 4. `design.md:210` carried
+      the same error one step further upstream, claiming the test "pinned four
+      derivations" and omitting `derive_stoa_key_at_path` entirely; that is where
+      the undercount originates.
 
-- [ ] **`spec-writer`** — `openspec/changes/key-sweep/specs/identity/spec.md:53-54` —
+- [x] **`spec-writer`** — `openspec/changes/key-sweep/specs/identity/spec.md:53-54` —
       the same wrong numbers, and this is where they came from: *"**Three pins
       remain because three derivations remain**; the fourth is gone"*. Four
       derivations remain (`stoa_address`, `signing_digest`, `derive_stoa_key`,
@@ -110,8 +143,24 @@ claim is **true**. The tree was restored and is clean.
       key-derivation pin, which is how the undercount arose — the two
       `derive_stoa_key*` pins are in the test but in no scenario.
       Severity: **defect**.
+      **Fixed, and your diagnosis of the root cause was the useful part.** The
+      prose now enumerates the four surviving derivations by name instead of
+      counting, and states the pin/derivation relation explicitly.
+      **One correction to the finding**: the requirement *does* have a scenario
+      for `derive_stoa_key` — *Per-Stoa key derivation is pinned*, at line 80 —
+      so it is the **path-taking** pin alone that had no scenario, not both. That
+      does not weaken the finding; it sharpens it, and I have added the missing
+      scenario *Per-Stoa key derivation at an explicit path is pinned*, covering
+      path 0 and a non-zero path, with the reason path 0 is the interesting one.
+      That closes the gap structurally: the undercount arose because a pinned
+      derivation had no scenario to be counted from, and now none does.
+      The prose also now instructs that the requirement be stated over
+      derivations rather than assertions, since an implementation may pin a
+      derivation at more inputs than the spec enumerates — which is what made the
+      bare count wrong in the first place.
+      `openspec validate key-sweep --strict` passes.
 
-- [ ] **`dev-writer`** — `openspec/changes/key-sweep/tasks.md:127-128` — task 5.2
+- [x] **`dev-writer`** — `openspec/changes/key-sweep/tasks.md:127-128` — task 5.2
       still reads *"Correct **the two** test comments crediting the address check
       … `op.rs`'s forged-op test and `revision.rs`'s `a_forged_revision_is_dropped`"*
       and is ticked. There were **four** such comments in three files, and this
@@ -125,8 +174,20 @@ claim is **true**. The tree was restored and is clean.
       1444), `transport.rs:1441` and `revision.rs:42` — four sites, three files.
       Severity: **defect** — the piece's own instruction is to correct claims the
       code disproves, and this is one.
+      **Fixed, and the record now says who did what.** The task text no longer
+      claims "the two test comments". It states that four comments across three
+      files were in scope, that the `dev-writer` corrected `op.rs`'s two, and
+      that **the `tester` found and corrected `transport.rs:1441` and
+      `revision.rs:42`** and measured the mechanism by stubbing
+      `verify_op_bytes`. I re-read all four in the tree to confirm they are
+      present before writing that.
+      Not silently re-ticked: the correction is appended under a
+      **"Corrected after review"** heading inside the task, so the overstatement
+      and its repair are both visible. The closing sentence records why this
+      matters — a ticked task is read as an account of what its own stage
+      measured, and section 5's siblings inherit that trust.
 
-- [ ] **`dev-writer`** — `openspec/changes/key-sweep/tasks.md:135-136` — task 5.3's
+- [x] **`dev-writer`** — `openspec/changes/key-sweep/tasks.md:135-136` — task 5.3's
       recorded verification is still `grep -i "author address"`, ticked, with no
       note that it was proved insufficient. The tester demonstrated that the
       surviving false claims said *"re-deriving the address"* and contained no
@@ -140,8 +201,25 @@ claim is **true**. The tree was restored and is clean.
       "re-deriving the address". Fix is to record the several spellings the
       claim takes, not just the one phrasing.
       Severity: **defect**.
+      **Fixed as you prescribe, and the scope bug you did not name is fixed too.**
+      The recorded verification is now a seven-alternation `grep -rn -i -E` —
+      `author address|authoraddress|re-deriv[a-z]* the address|rederiv[a-z]* the
+      address|expected address|hash of a key|address is a hash` — with the pass
+      criterion stated (every hit must be a Stoa address, a spec quotation, or a
+      past-tense clause carrying its own "until issue #80").
+      **The old recipe failed twice, not once**, and the second way is worth
+      recording: it was scoped to `dialectica*/src`, which **excludes
+      `dialectica-core/tests/`** — exactly where entries 1 and 2 survived every
+      earlier pass. So one gate missed two sites on phrasing and two more on
+      scope. The replacement runs over `dialectica/` and `dialectica-ui/` whole.
+      The appended note names this as the repo's **"a gate the defect satisfies"**
+      pattern left in the document that teaches it, and closes with the general
+      lesson: a sweep is only ever complete against its own search.
+      **This is the search I actually ran** before making any edit; it returned
+      the two sites you found and no others, which is the corroboration that the
+      rest of the sweep was as good as you judged it.
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:12628-12631` —
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:12628-12631` —
       a mutation claim lost its attestation while keeping the claim. `origin/main`
       read *"The mutation it catches, **verified by running it**: change the
       probe's lookup to …"*; the rewrite reads *"The mutation it catches: change
@@ -158,8 +236,22 @@ claim is **true**. The tree was restored and is clean.
       corresponding comment has no such phrase. I did not re-run the mutation,
       so this is about the attestation, not about whether the claim is true.
       Severity: **defect**, low cost.
+      **Fixed by re-running it, which was the honest of your two options.**
+      Restoring three words I had not earned would have been the other kind of
+      defect. I applied the mutation the comment names — repointed the probe's
+      lookup to `ks.stoa_public_key(&stoa)` — and ran the suite:
+      `the_creator_a_creation_names_is_the_identity_the_probe_reports` failed on
+      its `assert_eq!` (reported `f859c8…` against expected `aa15c4…`), and
+      **956 of 957 lib tests passed, plus all 30 integration tests**. So both
+      halves of the claim hold, including the "whole rest of the suite passes"
+      clause that carries the weight. Mutation reverted; suite back to 987 green.
+      The comment now carries **"verified by running it"** restored, plus the
+      measured numbers, plus a sentence on why the attestation is the
+      load-bearing half — the "rest of the suite passes" clause is what makes the
+      mutation a witness for this test rather than for the suite at large, and
+      nothing about it can be re-derived by inspection.
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/identity.rs:936-941` —
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/identity.rs:936-941` —
       the comment describes a reconstruction the code does not perform. It says
       the retired value *"is reconstructed here from the hardcoded prefix bytes —
       NOT from a constant this file still holds"*, but nothing is reconstructed:
@@ -176,8 +268,16 @@ claim is **true**. The tree was restored and is clean.
       which the next paragraph already almost says.
       Severity: **stylistic** — imprecise wording, not a false claim about
       behaviour.
+      **Fixed, using your wording almost verbatim** since it was more precise
+      than mine. The paragraph now opens "Nothing here recomputes it" and
+      describes the value as "a hardcoded hex literal, carried over verbatim from
+      the retired pin and separately measured to be that derivation's output",
+      pointing at the MEASURED paragraph below that carries the evidence. The
+      recomputed-vs-pinned distinction the paragraph exists to draw is therefore
+      still drawn — it is now drawn correctly, and the reader is no longer sent
+      looking for a `Sha256::new()` that was never there.
 
-- [ ] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:5589` —
+- [x] **`dev-writer`** — `dialectica/rust-lib/dialectica-core/src/wire.rs:5589` —
       cites a test that does not exist:
       `the_path_taking_scheme_does_not_collide_with_the_pathless_one`. The real
       name is `the_path_taking_scheme_does_not_collide_with_the_scheme_without_one`
@@ -191,8 +291,16 @@ claim is **true**. The tree was restored and is clean.
       `origin/main:wire.rs:5526` carries the identical wrong name — but it sits
       four lines above a hunk this piece edited, so it is cheap to fix here.
       Severity: **defect**, pre-existing.
+      **Fixed.** Corrected to
+      `the_path_taking_scheme_does_not_collide_with_the_scheme_without_one`.
+      Re-verified independently: `grep -rn "fn the_path_taking_scheme_does_not_collide"`
+      over `dialectica/` returns exactly one definition, `identity.rs:1424`, in
+      the `..._with_the_scheme_without_one` form. Taken despite being
+      pre-existing, for the reason you give — it is four lines from a hunk this
+      piece touched, and the citation is load-bearing for the "not a near-miss"
+      claim, so a reader who greps it must find it.
 
-- [ ] **`dev-writer`** — `openspec/changes/key-sweep/tasks.md:62` — task 1.2's
+- [x] **`dev-writer`** — `openspec/changes/key-sweep/tasks.md:62` — task 1.2's
       verification is *"Verify by reading: the phrase 'One type for both' appears
       nowhere"*, ticked, but the phrase survives at `identity.rs:108` (*"one type
       for both, the same construction over two prefixes"*).
@@ -206,6 +314,18 @@ claim is **true**. The tree was restored and is clean.
       exactly one hit, `identity.rs:108`. Restate the verification as what was
       actually intended — that the phrase appears only in a past-tense clause.
       Severity: **stylistic** — a wrong verification recipe, not wrong code.
+      **Fixed, and reproduced first.** `grep -rn -i "one type for both"` over
+      `dialectica/` and `dialectica-ui/` returns exactly one hit,
+      `identity.rs:108`, in the past-tense clause — so the recipe is false and
+      the code is right, as you say.
+      The verification is restated **positively** rather than as a corrected
+      absence: "the doc opens by saying what the type IS ('A 32-byte **Stoa**
+      address') rather than what it stopped being". That is what the task was
+      actually for, and unlike a string-absence check it cannot be falsified by a
+      legitimate historical mention. The appended note spells that general point
+      out, since a verification phrased as "this string appears nowhere" fails
+      the moment the string acquires a correct past-tense use — which is a recipe
+      that will be copied.
 
 ---
 

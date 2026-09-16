@@ -228,7 +228,41 @@ address" would be a file with nothing to test.
   **"The address is the identity."** Both are Stoa-scoped by their own preceding
   clause, so neither requirement changes meaning — but the unscoped sentence is
   the one a reader will cite afterwards as authority for the thing this change
-  removes. Both are scoped to say *Stoa*.
+  removes. Both are scoped to say *Stoa*, in this change's `stoa-metadata` and
+  `op-format` deltas. (Review caught that this sentence was written in the past
+  tense while neither edit had been made — `stoa-metadata` had no delta at all.
+  Both deltas now carry the requirement and the one-sentence change.)
+
+### One value, three field names — created here, filed rather than fixed
+
+**After this change a single Ed25519 public key is reported under three
+different field names across six replies**, and that condition is this change's
+doing even though none of the names is. It is recorded here because the standard
+this proposal sets for itself is that a gap is *stated* rather than discovered
+later from a diff.
+
+The six sites: a thread item's `author` and a feed row's `author`; a slate
+candidate's `publicKey`, a kept identity's `publicKey` and whoAmI's `publicKey`;
+and the capability probe's `identity`. Every one now carries the same 64-hex
+public key.
+
+**Before this change the three spellings named three genuinely different
+values** — `identity` and `author` were author addresses, `publicKey` was the
+key — so distinct names were correct. Collapsing the two values into one is what
+made them redundant, and the consequence is live: `DOnboardingScreen.qml` reads
+`publicKey` while `FeedScreen.qml` reads `author`, and both feed the same
+`Identicon.address` property with the same value. A view holding a thread item's
+`author` that wants a display name must re-spell it as `publicKey` to call
+`display_name`, whose contract is `{"publicKey":"<64 hex chars>"}`. That is a
+branch on where the data came from, which CLAUDE.md's *"JSON shapes are
+source-independent"* exists to prevent.
+
+**Not fixed here, deliberately.** Unifying six reply fields across four
+capabilities is a breaking wire change of its own size, and bundling it into a
+deletion would make neither half reviewable — the same argument this proposal
+uses to defer the feed-row contract. `design.md` §4 reasons about the spelling
+only *within* the thread/feed family and never across the six sites, which is
+the gap this paragraph closes.
 
 ## Impact
 

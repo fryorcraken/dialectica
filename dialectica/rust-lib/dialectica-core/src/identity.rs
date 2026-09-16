@@ -860,8 +860,11 @@ mod tests {
         // If this fails, do NOT update the expected values to match. Work out
         // what changed and whether the network can survive it.
         //
-        // **THREE pins, where there were four.** The fourth guarded the author
-        // address, `SHA256(AUTHOR_ADDRESS_PREFIX || 0x01 || key)`, and it is
+        // **FIVE pins over FOUR derivations, where there were six over five.**
+        // The two counts differ because `derive_stoa_key_at_path` is pinned at
+        // two inputs, path 1 and path 0, for the collision reason set out below.
+        // The derivation that went is the author address,
+        // `SHA256(AUTHOR_ADDRESS_PREFIX || 0x01 || key)`, and it is
         // RETIRED rather than relaxed: issue #80 deleted the derivation, taking
         // the prefix and the record's key count with it. Its absence is asserted
         // in `no_derivation_turns_a_public_key_into_an_address`, so that a reader
@@ -934,11 +937,12 @@ mod tests {
         // them, there being no author address to pin".
         //
         // The deleted derivation was `SHA256(AUTHOR_ADDRESS_PREFIX || 0x01 ||
-        // key)`. That exact value is reconstructed here from the hardcoded prefix
-        // bytes — NOT from a constant this file still holds, because the constant
-        // is gone and a test recomputing an expectation from the thing it guards
-        // proves nothing anyway — and the assertion is that no surviving
-        // Stoa-address entry point produces it.
+        // key)`. Nothing here recomputes it: the constant is gone, and a test
+        // recomputing an expectation from the thing it guards proves nothing
+        // anyway. The value below is a hardcoded hex literal, carried over
+        // verbatim from the retired pin and separately measured to be that
+        // derivation's output — see the MEASURED paragraph below. The assertion
+        // is that no surviving Stoa-address entry point produces it.
         //
         // The pinned hex is the value the deleted derivation produced for
         // `SecretKey::from_bytes(&[7; 32])`, carried over verbatim from the

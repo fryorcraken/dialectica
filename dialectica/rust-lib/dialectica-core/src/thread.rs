@@ -755,6 +755,20 @@ mod tests {
             op,
         };
         assert!(!forged.verify(), "the fixture must be an actual forgery");
+        // And an AUTHORSHIP forgery rather than junk: the same signature must be
+        // valid under the signer's own key. `!verify()` alone is a refusal guard
+        // that fabricated bytes satisfy identically, which would leave every
+        // caller of this helper testing "a bad signature is refused" rather than
+        // the forgery it names. Asserted here so every caller inherits it.
+        assert!(
+            crate::identity::verify_authored_op(
+                &signer.public_key().to_bytes(),
+                &forged.op.canonical_bytes(),
+                &forged.signature.to_bytes()
+            ),
+            "the signature must be valid under the signer's own key, or this \
+             fixture is a junk signature rather than a forgery"
+        );
         forged
     }
 
@@ -2240,11 +2254,24 @@ mod tests {
                 action: ModerationAction::Hide,
             },
         };
+        let attacker = a_key(9);
         let forged = SignedOp {
-            signature: sign_op_bytes(&a_key(9), &op.canonical_bytes()),
+            signature: sign_op_bytes(&attacker, &op.canonical_bytes()),
             op,
         };
         assert!(!forged.verify(), "the fixture must be an actual forgery");
+        // And a forgery of AUTHORSHIP, not junk bytes: valid under the attacker's
+        // own key, so the refusal is the moderator's key not matching rather than
+        // a malformed signature. Without this, fabricated bytes would satisfy the
+        // guard above and the test would pass for the wrong reason.
+        assert!(
+            crate::identity::verify_authored_op(
+                &attacker.public_key().to_bytes(),
+                &forged.op.canonical_bytes(),
+                &forged.signature.to_bytes()
+            ),
+            "the attacker's signature must be valid under the attacker's own key"
+        );
         let log = a_log(vec![root.clone(), reply.clone(), forged]);
 
         let item = read(&log, &root, false)

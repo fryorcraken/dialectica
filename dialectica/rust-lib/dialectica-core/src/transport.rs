@@ -1103,14 +1103,31 @@ mod tests {
         let victim = a_key(2);
         let attacker = a_key(3);
         let op = a_post_in(stoa, "forged");
+        let signed_bytes = op.canonical_bytes();
         let forged = SignedOp {
-            signature: sign_op_bytes(&attacker, &op.canonical_bytes()),
+            signature: sign_op_bytes(&attacker, &signed_bytes),
             op: Op {
                 author: victim.public_key(),
                 ..op
             },
         };
         assert!(!forged.verify(), "the fixture must be an actual forgery");
+        // And an AUTHORSHIP forgery rather than junk bytes: the signature is
+        // genuinely valid under the attacker's own key, over the bytes the
+        // attacker actually signed. `!verify()` alone is satisfied by any 64
+        // fabricated bytes, so without this the test would demonstrate "a bad
+        // signature is refused" rather than "a forged author is refused" — and
+        // since issue #80 deleted the address guard, the signature check is the
+        // only mechanism left to distinguish them.
+        assert!(
+            crate::identity::verify_authored_op(
+                &attacker.public_key().to_bytes(),
+                &signed_bytes,
+                &forged.signature.to_bytes()
+            ),
+            "the attacker's signature must be valid under the attacker's own key, \
+             or this fixture is a junk signature rather than a forgery"
+        );
 
         let refusal = receive(
             InboundMessage {

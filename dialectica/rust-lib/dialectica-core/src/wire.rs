@@ -5565,13 +5565,31 @@ mod tests {
         // The negative, or the assertion above would hold for any reported value: a
         // signature from a different path must not verify under it.
         let elsewhere = a_master_key().stoa_key_at_path(&a_stoa(), recorded.wrapping_add(1));
+        let elsewhere_sig = crate::identity::sign_op_bytes(&elsewhere, b"a post");
         assert!(
             !crate::identity::verify_authored_op(
                 &reported_key,
                 b"a post",
-                &crate::identity::sign_op_bytes(&elsewhere, b"a post").to_bytes()
+                &elsewhere_sig.to_bytes()
             ),
             "another path's signature verified under the probe's reported identity"
+        );
+        // That signature is genuinely valid under its own key, so the refusal is a
+        // mismatch and not a malformed signature. Without this clause the negative
+        // above is satisfied by any 64 junk bytes, and the test would demonstrate
+        // "garbage is refused" rather than "the wrong path's identity is refused"
+        // — which is the property it names. Its two siblings,
+        // `the_reported_identity_is_the_one_an_op_is_actually_signed_under` and
+        // `a_kept_identity_can_sign_as_the_identity_it_reported`, both carry the
+        // same clause; this one was missing it.
+        assert!(
+            crate::identity::verify_authored_op(
+                &elsewhere.public_key().to_bytes(),
+                b"a post",
+                &elsewhere_sig.to_bytes()
+            ),
+            "the control signature is not valid under its own key, so the refusal \
+             above proves nothing"
         );
     }
 
@@ -5586,7 +5604,7 @@ mod tests {
         // The publish path signed with `keystore.stoa_key(&stoa)` — the
         // PATHLESS per-Stoa scheme — while the probe reports
         // `stoa_public_key_at_path`. `identity.rs`'s
-        // `the_path_taking_scheme_does_not_collide_with_the_pathless_one`
+        // `the_path_taking_scheme_does_not_collide_with_the_scheme_without_one`
         // asserts the two MUST disagree, so this is not a near-miss: every op a
         // user published was authored by an identity no method on the surface
         // would ever name.
@@ -12625,10 +12643,15 @@ mod tests {
         // mutation that actually shipped: pointing one of the two at a different
         // derivation while leaving the other alone.
         //
-        // The mutation it catches: change the probe's lookup to
-        // `ks.stoa_public_key(&stoa)` — the pathless per-Stoa scheme rather than
-        // the root key — and this test fails, where the whole rest of the suite
-        // passes.
+        // The mutation it catches, **verified by running it**: change the probe's
+        // lookup to `ks.stoa_public_key(&stoa)` — the pathless per-Stoa scheme
+        // rather than the root key — and this test fails, where the whole rest of
+        // the suite passes. Measured as 956 lib tests passed against this one
+        // failed, plus all 30 integration tests green; the mutation was then
+        // reverted. The attestation is the load-bearing half of this sentence:
+        // the "rest of the suite passes" clause is what makes the mutation a
+        // witness for THIS test rather than for the suite at large, and it is
+        // not something a reader can re-derive by inspection.
         //
         // **The pairing this reaches is now one value.** It was
         // `creator_and_poster_in`, returning `(PublicKey, Address)`; issue #80

@@ -50,10 +50,18 @@ matching every other peer's — with no error anywhere, because each peer remain
 internally consistent. A test that recomputes an expectation from the constant it
 is meant to guard cannot see this.
 
-**The author address pin is retired rather than relaxed.** Three pins remain
-because three derivations remain; the fourth is gone because the derivation it
-guarded is gone, not because it stopped mattering. The record's key count, which
-only the author-address preimage carried, goes with it.
+**The author address pin is retired rather than relaxed.** Four derivations
+remain pinned — the Stoa address, the signing digest, the per-Stoa key, and the
+per-Stoa key at an explicit path — and the derivation that is gone is gone
+because it no longer exists, not because it stopped mattering. The record's key
+count, which only the author-address preimage carried, goes with it.
+
+The count of *pins* is one higher than the count of derivations, because the
+path-taking derivation is pinned at two inputs: path 1, and path 0 where it
+would collide with the pathless scheme if the salt bump were reverted. State the
+requirement over derivations rather than over assertions — an implementation is
+free to pin a derivation at more inputs than this spec enumerates, and a bare
+count of `assert_eq!`s has already been got wrong here in both directions.
 
 #### Scenario: An author address derivation is pinned
 
@@ -81,6 +89,18 @@ only the author-address preimage carried, goes with it.
 
 - **WHEN** a key is derived from a fixed root and a fixed Stoa address
 - **THEN** it equals a value derived independently of this implementation
+
+#### Scenario: Per-Stoa key derivation at an explicit path is pinned
+
+- **WHEN** a key is derived from a fixed root, a fixed Stoa address and an
+  explicit path, at path 0 as well as at a non-zero path
+- **THEN** each equals a value derived independently of this implementation
+
+  Path 0 is named because it is where the path-taking scheme and the pathless
+  one would produce the same key if the salt separating them were reverted, so
+  it is the input at which a silent merge of the two schemes would first show.
+  This scenario was absent while the requirement's prose counted three pins, and
+  its absence is how that undercount survived review.
 
 ### Requirement: A Stoa address's display form parses strictly
 

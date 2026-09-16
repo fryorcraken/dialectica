@@ -1464,6 +1464,27 @@ mod tests {
             op,
         };
         assert!(!signed.verify());
+        // **The control, and this is the crate's REFERENCE forgery test** — the
+        // one other modules' fixtures are written against, so a gap here
+        // propagates. `!verify()` alone is a refusal guard that 64 fabricated
+        // bytes satisfy identically: with the signature replaced by junk, this
+        // test and all 65 in `op::tests` still passed. That version demonstrates
+        // "a bad signature is refused", never "a valid signature under the wrong
+        // key is refused" — and the latter is the attack the test is named for.
+        //
+        // It matters more after issue #80. The deleted address guard used to give
+        // a forged op a second, independent reason to be refused; the signature
+        // check is now the only one, so a test that cannot tell a forgery from
+        // junk cannot see the mechanism it depends on.
+        assert!(
+            crate::identity::verify_authored_op(
+                &attacker.public_key().to_bytes(),
+                &signed.op.canonical_bytes(),
+                &signed.signature.to_bytes()
+            ),
+            "the attacker's signature must be valid under the attacker's own key, \
+             or this fixture is a junk signature rather than a forgery"
+        );
     }
 
     #[test]

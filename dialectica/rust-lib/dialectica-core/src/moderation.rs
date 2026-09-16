@@ -666,6 +666,27 @@ mod tests {
             op,
         };
         assert!(!forged.verify(), "the fixture must be an actual forgery");
+        // **And an AUTHORSHIP forgery rather than junk bytes.** `!verify()` is a
+        // refusal guard, which a fabricated signature satisfies identically — so
+        // without the clause below every caller of this helper would demonstrate
+        // "a bad signature is refused" instead of "a valid signature under the
+        // wrong key is refused". That distinction is what the whole fixture is
+        // for, and it matters more since issue #80: the deleted address guard
+        // used to give a forged op a second independent reason to be refused, so
+        // the signature check is now the sole mechanism.
+        //
+        // Placed in the helper rather than at each call site so every present and
+        // future caller inherits it — the `hand-maintained sweep lists go stale
+        // silently` trap, avoided by construction.
+        assert!(
+            crate::identity::verify_authored_op(
+                &actual_signer.public_key().to_bytes(),
+                &forged.op.canonical_bytes(),
+                &forged.signature.to_bytes()
+            ),
+            "the signature must be valid under the actual signer's own key, or \
+             this fixture is a junk signature rather than a forgery"
+        );
         forged
     }
 
