@@ -262,12 +262,28 @@ jobs:
       - name: no QML type name collides with the host
         run: dialectica-ui/tests/check_qml_names.py dialectica-ui
 
+      # `sed` strips `//` comments before matching, for the same reason the
+      # `ToolTip` step below does it: a gate that fires on its own
+      # documentation gets deleted. This one learned it the expensive way —
+      # it went red on `FlatButton.qml`, whose only `RowLayout` is the word
+      # inside a comment explaining that a NaN-height button in one is
+      # invisible. The component instantiates no Layout type and needs no
+      # import, so the gate was reporting a defect that did not exist, and
+      # the tempting fix — reword the comment — teaches everyone that prose
+      # must dodge the linter rather than that the linter is wrong.
+      #
+      # Only the USAGE side is stripped. The `import QtQuick.Layouts` side
+      # deliberately still reads raw text: an import line cannot be a `//`
+      # comment and be an import, so stripping there could only ever turn a
+      # commented-out import into a missing one — which is exactly the
+      # reading this gate wants.
       - name: every QML file importing layouts declares the import
         run: |
           set -eu
           fail=0
           for f in dialectica-ui/src/qml/*.qml; do
-            if grep -qE '\b(ColumnLayout|RowLayout|GridLayout|StackLayout|Layout\.)' "$f" \
+            if sed 's://.*::' "$f" \
+                 | grep -qE '\b(ColumnLayout|RowLayout|GridLayout|StackLayout|Layout\.)' \
                && ! grep -q 'import QtQuick.Layouts' "$f"; then
               echo "::error file=$f::uses a Layout type without 'import QtQuick.Layouts'"
               fail=1
