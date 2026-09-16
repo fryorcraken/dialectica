@@ -2824,7 +2824,7 @@ Each item carries what a feed row must render without a second call:
   different things the moment the post has been edited
 - whether the root post has been revised (§5.7's "the UI can show that a post
   was edited")
-- the author, as the per-Stoa address (§5.2) — never a name, because the
+- the author, as the public key (§5.2) — never a name, because the
   `generated-names` capability's *The name SHALL NOT travel* forbids a reply
   carrying one. (The reason used to read "because there are no names", which was
   true when it was written and is not now: names are built, and a caller holding
@@ -2872,8 +2872,8 @@ parent, in the system's order with the root first; that pages tile with no gap
 and no repeat; that a hidden root is returned marked rather than dropped while a
 hidden reply is omitted by default; that an absent thread is refused where an
 empty one is served; that the moderation state is three-valued and names its
-deciding op; and that an author is reported as an address **and** a public key,
-because the generated name derives from the key and the mark from the address.
+deciding op; and that an author is reported as a public key, because the
+generated name and the mark both derive from that same key's bytes.
 The reasoning for each is in the `thread-read` change's `proposal.md` and
 `design.md`.
 
@@ -3105,9 +3105,9 @@ listThreads({stoa, order, page, perPage, includeHidden})
                                           author, isRevised, replyCount, lastReply}],
                                 page, hasMore}
 getThread  -- superseded; see the `thread-read` spec for the contracted shape.
-           -- Two departures from the sketch that was here: the author is an
-           -- address AND a public key, since the generated name derives from
-           -- the key; and there is no `order`, as for the feed.
+           -- Two departures from the sketch that was here: the author is
+           -- reported as a public key alone, since the generated name derives
+           -- from the key; and there is no `order`, as for the feed.
 ```
 
 `isGenesisFallback` is the field worth defending: §5.7 says a reader prefers

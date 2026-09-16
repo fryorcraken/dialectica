@@ -7,7 +7,7 @@ The boundary with three neighbouring capabilities is drawn deliberately, and the
 
 `op-format` owns what an op is, how it encodes, and what its decoder refuses. This capability requires that an inbound payload be put through that decoder before anything else looks at it, and does not repeat the decoder's own refusal list.
 
-`identity` owns authenticity — whether an op is from the author it claims, and the binding of the presented key to that claimed author. This capability requires that check on the receive path and names nothing about how it works.
+`identity` owns authenticity — whether an op verifies under the public key it carries as its author, since the key is the author's identity and there is no separate identifier for it to be bound to. This capability requires that check on the receive path and names nothing about how it works.
 
 `op-ordering` owns what orders two ops, including the degraded order that applies when the transport supplied no ordering metadata. This capability contracts only what a receiving peer records about an arrival, and that this transport supplies nothing to record.
 
