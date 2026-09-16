@@ -36,7 +36,23 @@
       `supplied` half of its second, and the old name claimed the `derived`
       half too. Both `// NO SPEC:` markers confirmed genuinely unspecified.
 - [ ] review: correctness — `code-reviewer`
-- [ ] review: security — `code-reviewer`
+- [x] review: security — `code-reviewer`. 2 findings, both for `tester`, both
+      test-evidence gaps rather than live defects. **The vacuity claim holds**:
+      on main `SignedOp::verify` computed the claimed author by calling
+      `.address()` on the op's own key, so the guard compared a value to itself,
+      and the probe/keystore round-trips now bind at least as tightly by
+      comparing the reported public key. Stubbing `verify_op_bytes` to `true`
+      fails **43 tests across nine modules**, so the signature check is pinned in
+      depth as the sole remaining mechanism, and `PublicKey::from_bytes` is
+      *stricter* than the `Address` parse it replaces. `OP_SIGNING_PREFIX`,
+      `STOA_ADDRESS_PREFIX`, `OP_ID_PREFIX` and both HKDF salts byte-identical to
+      main; `moderation.rs`, `membership.rs` and `log/` entirely untouched. The
+      gap: ~17 unspecified forgery fixtures carry no control proving the forged
+      signature was genuinely valid, so they cannot tell an authorship forgery
+      from a junk signature — replacing the attacker signature with fabricated
+      bytes leaves **987 of 987 passing**. It matters more after this change,
+      since the deleted guard used to give a forged op a second independent
+      reason to be refused.
 - [x] review: readability — `code-reviewer`. 10 findings in
       `findings/readability.md` — 8 defects, 2 stylistic. **Two false claims
       survived both earlier sweeps**, both in `tests/end_to_end.rs`, the one file
