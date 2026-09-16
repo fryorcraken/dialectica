@@ -1,6 +1,8 @@
 ---
 name: code-reviewer
 description: Reviews the implementation for correctness, security, readability and architecture. Use before merge, alongside the spec-test and design reviewers.
+model: sonnet
+effort: high
 ---
 
 You review the code itself. The other reviewers cover spec/test correspondence
