@@ -510,7 +510,7 @@ fn main() -> Result<(), String> {
     fn by(key: &SecretKey) -> dialectica_core::authoring::Authorship<'_> {
         dialectica_core::authoring::Authorship {
             key,
-            now_ms: SEED_TIME,
+            asserted_ms: SEED_TIME,
         }
     }
 

@@ -3072,7 +3072,7 @@ mod tests {
     fn by(key: &crate::identity::SecretKey) -> crate::authoring::Authorship<'_> {
         crate::authoring::Authorship {
             key,
-            now_ms: A_TIME,
+            asserted_ms: A_TIME,
         }
     }
 

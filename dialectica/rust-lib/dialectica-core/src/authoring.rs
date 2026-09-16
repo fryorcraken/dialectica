@@ -218,7 +218,18 @@ pub struct Authorship<'a> {
     ///
     /// It decides nothing — not here and not on any reader. It is carried
     /// because a reader is shown a time and expects one.
-    pub now_ms: u64,
+    ///
+    /// **Named `asserted_ms` and not `now_ms`, deliberately.** Every other
+    /// millisecond value in this crate is the *reading* peer's clock, used only
+    /// to clamp for display ([`crate::asserted_time`], `thread.rs`, `wire.rs`).
+    /// This one is the *author's*, and it enters the signed preimage — so it is
+    /// attacker-chosen data on every peer but the one that wrote it, which is
+    /// the opposite end of the mechanism. A shared name would let someone
+    /// threading a clock through a new publish path assume it is the reader's,
+    /// and this change's whole thesis is that the two must never be confusable.
+    /// It is assigned verbatim to [`crate::op::OpClock::asserted_ms`], which is
+    /// the name it should therefore carry.
+    pub asserted_ms: u64,
 }
 
 /// Sign, append, and report what the append did.
@@ -249,7 +260,7 @@ fn publish<L: OpLog>(log: &mut L, who: &Authorship<'_>, op: Op) -> Result<Publis
     let op = Op {
         clock: Some(OpClock {
             counter: next_counter(clock),
-            asserted_ms: who.now_ms,
+            asserted_ms: who.asserted_ms,
         }),
         ..op
     };
@@ -544,7 +555,7 @@ mod tests {
     fn by(key: &SecretKey) -> Authorship<'_> {
         Authorship {
             key,
-            now_ms: A_TIME,
+            asserted_ms: A_TIME,
         }
     }
 
@@ -1769,7 +1780,7 @@ mod tests {
         let absurd = u64::MAX;
         let who = Authorship {
             key: &key,
-            now_ms: absurd,
+            asserted_ms: absurd,
         };
         let published = post(&mut log, &who, stoa, "from 584 million AD".to_string()).unwrap();
 

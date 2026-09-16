@@ -288,6 +288,24 @@ impl SqliteOpLog {
     /// `LIMIT 0` reads no row: preparing and running the statement is what
     /// establishes the layout, and the cost does not grow with the store.
     ///
+    /// # THIS LIST IS PART OF THE LAYOUT: a column dropped from `CREATE TABLE`
+    /// must be dropped here in the same edit
+    ///
+    /// **This is addressed to whoever next changes the schema, and it is not a
+    /// formality — it was got wrong in the change that added the op clock.**
+    /// Four sort columns were deleted from `CREATE TABLE` and left named here,
+    /// so every reopen of a store this build had *just written* failed with
+    /// `LayoutDoesNotMatchItsVersion`. In production that is not a degraded
+    /// read: refusal is the whole behaviour, so it would have made every store
+    /// **permanently unopenable, with no migration path by design.**
+    ///
+    /// It recurs because the failure is invisible in a schema diff. The
+    /// `CREATE TABLE` above and this list are hundreds of lines apart, nothing
+    /// ties them together, and the person dropping a column has no reason to
+    /// open this function. The persistence tests are what caught it —
+    /// `a_store_this_build_wrote_passes_its_own_layout_check` exists for exactly
+    /// this — but a test catches it only after it is written.
+    ///
     /// # This is not a migration, and must not become one
     ///
     /// Refusing is the whole behaviour. `design.md` records that there is no

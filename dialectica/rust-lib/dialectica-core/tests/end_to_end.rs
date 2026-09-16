@@ -572,7 +572,7 @@ const A_TIME: u64 = 1_789_729_304_000;
 fn by(key: &SecretKey) -> authoring::Authorship<'_> {
     authoring::Authorship {
         key,
-        now_ms: A_TIME,
+        asserted_ms: A_TIME,
     }
 }
 

@@ -716,7 +716,7 @@ impl Dialectica {
             // rule below this function permits — not a decision.
             let who = core::authoring::Authorship {
                 key: &key,
-                now_ms: now_ms(),
+                asserted_ms: now_ms(),
             };
 
             handler(request, &mut log, &who, &mut |id| {
