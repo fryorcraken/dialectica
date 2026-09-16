@@ -35,7 +35,25 @@
       discharges the scenario's first clause structurally and only the
       `supplied` half of its second, and the old name claimed the `derived`
       half too. Both `// NO SPEC:` markers confirmed genuinely unspecified.
-- [ ] review: correctness — `code-reviewer`
+- [x] review: correctness — `code-reviewer`. 2 entries, **neither a code
+      defect** — one for `closer` (task 5.2's wording is true only because the
+      tester repaired it; all three corrections verified present) and one for
+      `spec-writer` (the feed reply's `author` changed meaning with no governing
+      requirement; the deferral is right, the box keeps it from being lost).
+      **The test-list accounting holds**, rebuilt independently from
+      `cargo test -- --list` on both sides: 987 identifiers each, each side
+      verified duplicate-free so the difference is exact rather than a multiset
+      artefact, 13 gone / 13 new matching name by name. Ran rather than read: the
+      retired pin reproduces the deleted derivation's hex exactly; the dropped
+      guard was genuinely vacuous on its only production path; every surviving
+      `Address` swept **by type, not name**, all Stoa. `cargo mutants` on
+      `identity.rs` — 28 caught, 5 missed, all five pre-existing `Display`/`Debug`
+      paths untouched here. Hand-mutating both re-pointed author fields to a
+      *same-shape wrong identifier* (`stoa_address(key)`, still 64 hex chars —
+      the failure a length check cannot see) is caught at core, wire and
+      end-to-end. **`nix build .#lgx` ran green from the worktree**, so the
+      `cfg(logos_scaffold)` adapter is independently confirmed to compile rather
+      than merely reported.
 - [x] review: security — `code-reviewer`. 2 findings, both for `tester`, both
       test-evidence gaps rather than live defects. **The vacuity claim holds**:
       on main `SignedOp::verify` computed the claimed author by calling
