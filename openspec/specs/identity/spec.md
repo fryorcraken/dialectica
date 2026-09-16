@@ -107,12 +107,12 @@ Parsing a public key SHALL reject a byte string that is not a valid key, and
 SHALL separately reject a well-formed key under which no signature can ever
 verify. The two SHALL be reported distinguishably.
 
-The second refusal is not defence in depth. Such a key parses, produces a stable
-address, and carries through any record that names it — so a Stoa genesis record
-naming one decodes, self-authenticates, and yields a forum whose sole moderator
-can never authorise anything, which no later check distinguishes from a
-legitimate Stoa. Refusing at the parse is what makes every key a caller holds
-one that could in principle sign.
+The second refusal is not defence in depth. Such a key parses and carries
+through any record that names it — so a Stoa genesis record naming one decodes,
+self-authenticates, and yields a forum whose sole moderator can never authorise
+anything, which no later check distinguishes from a legitimate Stoa. Refusing at
+the parse is what makes every key a caller holds one that could in principle
+sign.
 
 Refusal SHALL be confined to keys that can never verify: a key produced by
 ordinary generation SHALL always parse.
@@ -205,54 +205,41 @@ unambiguously typed, and belongs to the `op-format` capability.
 - **WHEN** a signature made by one key is checked under a different key
 - **THEN** verification fails
 
-### Requirement: An address is derived from a record, never from a bare key
-
-An author's address SHALL be a fixed-width domain-separated hash of a record
-containing the key, not of the key alone. The record SHALL carry its own key
-count, so that a record holding more than one key is a different preimage rather
-than an ambiguous one.
-
-Hashing a record rather than the key is what lets a key log be added later
-without every author's address changing. It costs nothing today and hashing the
-raw key would foreclose it permanently.
-
-An author address and a Stoa address SHALL be separated by their domain
-prefixes, so that no byte string is ever valid as both. Both are 32 bytes and
-appear in the same places, so without separation either could be presented as
-the other.
-
-#### Scenario: An address is not a bare hash of the key
-
-- **WHEN** an author's address is compared with the plain hash of that author's
-  public key
-- **THEN** they differ
-
-#### Scenario: Different keys get different addresses
-
-- **WHEN** two different public keys are converted to addresses
-- **THEN** the addresses differ
-
-#### Scenario: An author address and a Stoa address never collide
-
-- **WHEN** the exact preimage an author address is derived from is instead
-  hashed as a Stoa address
-- **THEN** the two results differ
-
 ### Requirement: The derivation constants are pinned against silent change
 
-Every constant participating in an address, a signing digest or a key derivation
-SHALL be pinned to an independently derived known answer.
+Every constant participating in a Stoa address, a signing digest or a key
+derivation SHALL be pinned to an independently derived known answer.
 
-Each is consensus-critical in the silent direction: change one byte of a prefix,
-of the record's key count, or of the derivation salt, and this peer's addresses
-and signatures stop matching every other peer's — with no error anywhere,
-because each peer remains internally consistent. A test that recomputes an
-expectation from the constant it is meant to guard cannot see this.
+Each is consensus-critical in the silent direction: change one byte of a prefix
+or of the derivation salt, and this peer's Stoa addresses and signatures stop
+matching every other peer's — with no error anywhere, because each peer remains
+internally consistent. A test that recomputes an expectation from the constant it
+is meant to guard cannot see this.
+
+**The author address pin is retired rather than relaxed.** Four derivations
+remain pinned — the Stoa address, the signing digest, the per-Stoa key, and the
+per-Stoa key at an explicit path — and the derivation that is gone is gone
+because it no longer exists, not because it stopped mattering. The record's key
+count, which only the author-address preimage carried, goes with it.
+
+The count of *pins* is one higher than the count of derivations, because the
+path-taking derivation is pinned at two inputs: path 1, and path 0 where it
+would collide with the pathless scheme if the salt bump were reverted. State the
+requirement over derivations rather than over assertions — an implementation is
+free to pin a derivation at more inputs than this spec enumerates, and a bare
+count of `assert_eq!`s has already been got wrong here in both directions.
 
 #### Scenario: An author address derivation is pinned
 
-- **WHEN** an address is derived from fixed key material
-- **THEN** it equals a value derived independently of this implementation
+- **WHEN** the values an author is identified by are enumerated
+- **THEN** no address derivation over a public key is among them, there being no
+  author address to pin
+
+  The author address is deleted by this change, so this scenario pins its
+  absence rather than its value. It is kept rather than dropped because a pin
+  that simply disappeared would leave no evidence that the constant it guarded
+  was retired on purpose, and the next reader adding an author-side derivation
+  would find nothing saying one had been removed.
 
 #### Scenario: A Stoa address derivation is pinned
 
@@ -269,9 +256,21 @@ expectation from the constant it is meant to guard cannot see this.
 - **WHEN** a key is derived from a fixed root and a fixed Stoa address
 - **THEN** it equals a value derived independently of this implementation
 
-### Requirement: An address's display form parses strictly
+#### Scenario: Per-Stoa key derivation at an explicit path is pinned
 
-An address SHALL have a display form a user can copy, and parsing that form
+- **WHEN** a key is derived from a fixed root, a fixed Stoa address and an
+  explicit path, at path 0 as well as at a non-zero path
+- **THEN** each equals a value derived independently of this implementation
+
+  Path 0 is named because it is where the path-taking scheme and the pathless
+  one would produce the same key if the salt separating them were reverted, so
+  it is the input at which a silent merge of the two schemes would first show.
+  This scenario was absent while the requirement's prose counted three pins, and
+  its absence is how that undercount survived review.
+
+### Requirement: A Stoa address's display form parses strictly
+
+A Stoa address SHALL have a display form a user can copy, and parsing that form
 SHALL accept only the exact form: correct alphabet and exact length, with a
 failure that distinguishes the two.
 
@@ -280,34 +279,45 @@ inside a post. A lenient parser that accepted a truncated or over-long address
 would let two different Stoas collide in what a reader sees, and would let a
 moderation action name something other than what it appears to name.
 
+**The requirement is stated over a Stoa address because that is the only kind
+there is.** It previously said "an address" while the same type served authors
+too; naming the Stoa explicitly is what stops a later reader taking the narrower
+scope for a case the requirement lost.
+
 #### Scenario: An address survives its display form
 
-- **WHEN** an address is rendered and parsed back
+- **WHEN** a Stoa address is rendered and parsed back
 - **THEN** the result equals the original
 
 #### Scenario: A wrong alphabet is refused
 
-- **WHEN** text outside the display form's alphabet is parsed as an address
+- **WHEN** text outside the display form's alphabet is parsed as a Stoa address
 - **THEN** parsing fails reporting the alphabet, not the length
 
 #### Scenario: A wrong length is refused on both sides
 
-- **WHEN** text one unit shorter or one unit longer than an address is parsed
+- **WHEN** text one unit shorter or one unit longer than a Stoa address is parsed
 - **THEN** parsing fails reporting the length it found
 
-### Requirement: Verification binds the key to the claimed author
+### Requirement: Verification establishes that the key carried by the op signed it
 
-Verifying an op that arrived over the wire SHALL check that the key presented
-belongs to the author being claimed, in addition to checking the signature. A
-valid signature under a key that is not the claimed author's SHALL be refused.
+Verifying an op that arrived over the wire SHALL establish that the op's bytes
+were signed by the secret half of the public key the op carries. An op whose
+signature does not verify under that key SHALL be refused.
 
-Verifying a signature proves that whoever holds a key's secret signed some
-bytes, and says nothing about who they are. An attacker can generate a key, sign
-anything with it, and attach whatever author address they like; only re-deriving
-the address from the key catches that. The check SHALL live in the same
-operation as the signature check rather than being left to a caller to perform
-separately — it is the step that goes missing, because the other steps are
-visibly load-bearing and this one looks like bookkeeping.
+**The author is the key.** An op names its author by carrying that author's
+public key, so there is no separate claimed identifier for a key to be checked
+against and no step that could bind one to the other. The forgery the previous
+contract described — sign with your own key while naming somebody else's
+identifier — is not expressible: naming a different author means carrying a
+different key, and the signature then fails under it.
+
+This is a narrowing of what verification claims, and it is stated rather than
+left implicit. The previous requirement obliged a re-derivation check in the same
+operation as the signature check, on the reasoning that the check was the step a
+caller doing the work by hand would forget. With one value doing both jobs there
+is nothing left to forget, and an implementation retaining a check would be
+comparing a value to itself.
 
 A failed verification SHALL report only that it failed. There is exactly one
 thing to do with an op that does not verify — drop it — so distinguishing why
@@ -315,21 +325,41 @@ would offer a choice that does not exist.
 
 #### Scenario: An op verifies when the key matches the claimed author
 
-- **WHEN** an op is verified with the key whose address is the claimed author's
+- **WHEN** an op signed by a key is verified, and the op carries that key
 - **THEN** verification succeeds
+
+  The op's carried key **is** the author it claims, so "matches" is satisfied by
+  construction rather than by a comparison. The scenario keeps its name because
+  it is the case this delta alters; what it checks is that an honestly signed op
+  verifies.
 
 #### Scenario: A validly signed op under the wrong key is refused
 
-- **WHEN** an op signed with a valid signature under one key claims a different
-  author
+- **WHEN** an op's carried public key is replaced with a different well-formed
+  key, leaving the signature as it was
 - **THEN** verification fails
-- **AND** the signature itself still verifies under its own key, so the refusal
-  is the address binding and not a broken signature
+- **AND** the same signature still verifies under the original key, so the
+  refusal is the signature not matching the carried key rather than a malformed
+  signature
+
+  **This is the one scenario whose mechanism changes.** It previously separated
+  a valid signature from a mismatched author identifier, and the refusal came
+  from the address binding. There is no identifier to mismatch now: substituting
+  the key *is* claiming a different author, and the signature check is what
+  refuses it. The scenario is testable exactly as written and its second clause
+  is what keeps it honest — without it, a build that refused every op would pass.
 
 #### Scenario: A tampered op does not verify
 
 - **WHEN** the bytes an op was signed over are changed after signing
 - **THEN** verification fails
+
+#### Scenario: Verification takes no author identifier beside the key
+
+- **WHEN** an op is verified
+- **THEN** the values consulted are the op's signed bytes, the public key the op
+  carries, and the signature
+- **AND** no separate author identifier is supplied or derived
 
 ### Requirement: Authenticity is not authority
 
@@ -357,14 +387,35 @@ identity. A per-Stoa identity is derived once and is permanent.
 A key that can be discarded at will is a key nothing can be attached to:
 rotation lets a user shed whatever has accumulated against their identity, and
 does so indistinguishably from a legitimate compromise. Rotation waits until
-standing attaches to a revocable credential rather than to a keypair, and the
-record-hashed address is what keeps that door open.
+standing attaches to a revocable credential rather than to a keypair.
+
+**The affordance that was being held open has been given up, deliberately.** The
+author address hashed a *record* containing the key rather than the key itself,
+so that the record could later grow into a key log and an identity could rotate
+while its identifier survived. With the author address deleted, an identity *is*
+its key and there is no identifier that could outlive one. Rotation, if it ever
+arrives, therefore arrives as a credential layer above the keypair rather than as
+a longer record beneath the same identifier. Nothing shipped depended on the
+affordance, and this requirement already forbids what it was reserved for; it is
+recorded because a reader finding rotation unbuilt should find the reason it is
+now harder, rather than infer that nobody considered it.
 
 #### Scenario: An identity is a pure function of its root and its Stoa
 
 - **WHEN** an identity is derived at any time from a given root and Stoa
 - **THEN** the result is the same key
 - **AND** no operation exists that yields a different key for the same pair
+
+#### Scenario: An identity is named by its key and by nothing beside it
+
+- **WHEN** the values by which an identity is reported are enumerated
+- **THEN** the public key is among them
+- **AND** it is the only identifier among them
+
+  Stated as "the only identifier" rather than as "no identifier that would
+  survive the key changing", because the key cannot change — this requirement
+  forbids it — so a scenario written over that counterfactual could never be
+  run. What is checkable is how many identifiers an identity is reported by.
 
 ### Requirement: A secret key cannot be copied, logged or serialised by accident
 

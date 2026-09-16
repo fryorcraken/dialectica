@@ -133,8 +133,19 @@
       clause was *replaced* with derivation-path rather than dropped, unrecorded;
       and `design.md:128` cites an `op-transport` "verification step" the spec
       does not contain — measured, zero grep matches either side.
-- [ ] findings all ticked, `findings/` deleted — `closer`
-- [ ] `openspec validate --strict`, then `archive` — `closer`
+- [x] findings all ticked, `findings/` deleted — `closer`. Both gates run:
+      `grep -rn "^- \[ \]"` returned nothing, and `grep -rc "^- \["` was
+      non-zero for all six files (10+3+2+3+1+2 = 21), so no findings file was
+      written in a shape the gate cannot see. The deferred finding's reasoning
+      had already moved to `design.md` §5, which names issue #91 as its home;
+      #91 verified OPEN before deleting.
+- [x] `openspec validate --strict`, then `archive` — `closer`. Every MODIFIED
+      and REMOVED heading checked character for character against the live
+      specs, and all three RENAMED pairs matched their FROM heading. Archive
+      applied 24 modified, 1 removed, 4 renamed across seven capabilities;
+      diffed the promotion rather than trusting it. The kept items survive:
+      the Stoa address, `OP_SIGNING_PREFIX`, both HKDF salts and the four
+      remaining derivation pins. `validate --strict --all`: 22 passed, 0 failed.
 - [ ] CI green, PR merged — `closer`
 
 ## Implementation

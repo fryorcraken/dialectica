@@ -40,7 +40,7 @@ count is a number that decides how much key derivation this module performs.
 
 - **WHEN** a slate is requested
 - **THEN** no two candidates in it share a public key
-- **AND** no two share an address
+- **AND** no two share a derivation path
 
 #### Scenario: Requesting another set yields different candidates
 
@@ -101,10 +101,13 @@ crossed the module boundary cannot be recalled. The asymmetry is the whole argum
 for starting narrow, and the requirement below that each reply's field set is closed
 is what keeps "later" meaning a decision rather than a side effect.
 
-A candidate's address SHALL be present, because an address is the only unforgeable
-way to tell two candidates apart. A candidate's public key SHALL be present,
-because the generated display name is derived from the public key rather than from
-the address.
+A candidate's public key SHALL be present. It is the only unforgeable way to tell
+two candidates apart, and it is what every value shown beside a candidate is
+derived from — the generated display name and the visual mark both read the key's
+own bytes. **No candidate SHALL carry an author address**: the public key is the
+sole author identifier, so an address would be a second identifier beside the one
+it was derived from, where the two could disagree and a reader could not tell
+which was wrong.
 
 #### Scenario: No secret appears in a slate reply
 
@@ -115,8 +118,14 @@ the address.
 #### Scenario: A candidate carries an address and a public key
 
 - **WHEN** a slate is generated
-- **THEN** each candidate carries an address
-- **AND** each carries a public key
+- **THEN** each candidate carries a public key
+- **AND** no candidate carries an author address
+
+  The scenario keeps its name while its content inverts, because the name is how
+  the delta addresses the scenario this change alters. What it asserts is now the
+  address's absence: the public key is the sole author identifier, and a
+  candidate carrying both would carry a derived value beside the material it was
+  derived from.
 
 #### Scenario: A slate reply value cannot sign
 
@@ -137,19 +146,18 @@ before a candidate is kept there is nothing to lose, and after it is kept there
 must be nothing missing.
 
 **The identity kept SHALL be the candidate the offering reply displayed at the
-position selected** — the same public key and the same address, not merely a
-candidate derived at the same position. A selection is made on what the user was
-shown, and an offering and a keep are two separate calls, so anything the offering
-depended on and the keep re-established can differ between them while every guard on
-the selection still passes. When it does, the user is given a working identity they
-never saw, which is the outcome the requirement on malformed input calls
-unrecoverable.
+position selected** — the same public key, not merely a candidate derived at the
+same position. A selection is made on what the user was shown, and an offering and
+a keep are two separate calls, so anything the offering depended on and the keep
+re-established can differ between them while every guard on the selection still
+passes. When it does, the user is given a working identity they never saw, which is
+the outcome the requirement on malformed input calls unrecoverable.
 
 The reply SHALL state whether the candidate was kept, and where it was, SHALL carry
-the identity kept — its address and its public key — and where it was not, SHALL
-carry a reason and no identity. This is the posting probe's shape rather than a
-second convention for the same job, and it is what makes a caller able to show the
-user the identity they now have without asking a second question.
+the identity kept — its public key — and where it was not, SHALL carry a reason and
+no identity. This is the posting probe's shape rather than a second convention for
+the same job, and it is what makes a caller able to show the user the identity they
+now have without asking a second question.
 
 #### Scenario: The identity kept is the candidate that was displayed
 
@@ -157,7 +165,6 @@ user the identity they now have without asking a second question.
   position
 - **THEN** the identity the keep reports has the public key the offering reply
   carried at that position
-- **AND** has the address the offering reply carried at that position
 - **AND** this holds for every position in the set
 
 #### Scenario: A kept identity survives a restart
@@ -179,7 +186,8 @@ user the identity they now have without asking a second question.
 
 - **WHEN** a candidate is kept
 - **THEN** the reply states that it was kept
-- **AND** carries that identity's address and public key
+- **AND** carries that identity's public key
+- **AND** carries no author address
 - **AND** carries no reason
 
 #### Scenario: A failed keep records nothing
@@ -389,14 +397,16 @@ The reply SHALL carry an identity or a reason, never both and never neither —
 matching the posting probe's shape rather than introducing a second convention for
 the same job.
 
-The reply SHALL carry the public key as well as the address, because the generated
-display name is derived from the public key.
+The reply SHALL name the identity by its public key and SHALL NOT carry an author
+address. The public key is the sole author identifier, and it is what the generated
+display name and the visual mark are both derived from.
 
 #### Scenario: An existing identity is reported
 
 - **WHEN** an identity is stored and readable
 - **THEN** the reply states that there is an identity
-- **AND** carries its address and its public key
+- **AND** carries its public key
+- **AND** carries no author address
 - **AND** carries no reason
 
 #### Scenario: No identity is reported with a reason
@@ -521,6 +531,14 @@ A closed set is what makes the requirement that no reply carry a display name or
 visual mark checkable at all: an obligation to carry *no* name cannot be met by a
 reply whose field set is open, because any later field is then admissible and a name
 is a later field. The same argument covers every field a separate contract owns.
+
+**The set narrows when a requirement above stops naming a field, and that is this
+requirement working rather than a separate obligation.** The author address was
+named by the requirements on slate contents, on keeping, and on reporting the
+identity in use; it is named by none of them now, so a reply still carrying one
+carries a field no contract names and fails this requirement. Nothing here has to
+forbid the address by name, which is the same reason nothing here forbids a display
+name by name.
 
 **Widening a reply remains available and remains cheap** — it is a change to this
 requirement, made deliberately, rather than a field that arrives as a side effect of
@@ -648,9 +666,11 @@ anything holding one. Which words, which wordlist, which denylist and which glyp
 are a separate contract, and a slate that specified them would make every change to
 either a change to this one.
 
-What this capability does require is that the values a name and a mark are derived
-from — the public key and the address — are present in a slate reply, which the
-requirement on reply contents states.
+What this capability does require is that the value a name and a mark are derived
+from — the public key — is present in a slate reply, which the requirement on reply
+contents states. **Both channels read the key**, so one field is sufficient to make
+both computable; this previously named the public key and the address as two inputs,
+which the capability owning the derivations no longer describes.
 
 A reply of this capability SHALL therefore carry no display name and no visual
 mark, for any candidate and for the identity in use. Carrying one would settle
@@ -669,5 +689,5 @@ much as the closed-set one, and the two are deliberately not independent.
 - **WHEN** a slate is generated, and separately the identity in use is asked for
 - **THEN** no candidate in the slate reply carries a display name or a visual mark
 - **AND** the reply describing the identity in use carries neither
-- **AND** both replies still carry the public key and the address a name and a
-  mark would be derived from
+- **AND** both replies still carry the public key a name and a mark would be
+  derived from

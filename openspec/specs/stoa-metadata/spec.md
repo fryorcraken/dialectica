@@ -116,8 +116,8 @@ any peer may sign such an op for any Stoa.
 
 Whoever renders a title SHALL therefore mitigate at the point of display:
 strip or visibly mark bidi and zero-width controls, show the Stoa address
-alongside any name, and never resolve or match a Stoa by title. The address is
-the identity.
+alongside any name, and never resolve or match a Stoa by title. The Stoa
+address is the identity.
 
 #### Scenario: Two Stoas may share a displayed title
 
