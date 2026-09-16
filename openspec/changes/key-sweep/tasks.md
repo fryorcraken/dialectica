@@ -38,7 +38,19 @@
 - [ ] review: correctness — `code-reviewer`
 - [ ] review: security — `code-reviewer`
 - [ ] review: readability — `code-reviewer`
-- [ ] review: architecture — `code-reviewer`
+- [x] review: architecture — `code-reviewer`. 3 findings, none blocking on
+      shape: 2 for `spec-writer` (the proposal promises two bare "The address is
+      the identity" sentences are scoped to say Stoa and neither delta makes the
+      edit — `stoa-metadata` has no delta at all; and one public key is now
+      reported under three field names across six replies, which this change
+      created by collapsing three values into one and records nowhere), 1 for
+      `dev-writer` (the shared `address` property's declaration says nothing
+      about now holding two kinds of value). **Leaving `Address` unenforced is
+      defensible** — every non-test `from_bytes` site is a Stoa address and
+      `OpId` is already its own type, so the newtype buys less than before;
+      the absence pin leaves a runtime witness. `verify_authored_op` still earns
+      its name and is not a pass-through — it owns the three parse refusals on
+      the attacker path and its arity is compile-gated. 987 Rust tests green.
 - [ ] review: spec-test — `spec-test-reviewer`
 - [ ] review: design — `design-reviewer`
 - [ ] findings all ticked, `findings/` deleted — `closer`
