@@ -55,7 +55,7 @@
 //! [`OpLogError`](super::OpLogError).
 
 use super::{Appended, Entry, OpLog, OpLogError};
-use crate::arrival::{Arrival, MessageId};
+use crate::arrival::{clock_from_counters, Arrival, MessageId};
 use crate::identity::Address;
 use crate::op::{OpId, SignedOp};
 use rusqlite::{Connection, OptionalExtension};
@@ -457,11 +457,25 @@ impl SqliteOpLog {
                  -- decision.
                  author            BLOB NOT NULL,
 
-                 -- ── Reserved for a relevance score (§7.2 rule 5) ──────────
-                 -- NO READ CONSULTS THIS YET.
-                 --
+                 -- ── The op's own counter (§7.2 rule 5, and the clock) ─────
                  -- The time a score decays FROM: the op's OWN Lamport counter,
                  -- or NULL where the op carries none.
+                 --
+                 -- TWO READERS, AND THE SECOND IS LIVE. No relevance score
+                 -- consults this yet — that is still reserved. But `clock`
+                 -- reads it today, as the cheap derivation of this peer's
+                 -- Lamport clock for a Stoa: the alternative was decoding every
+                 -- op body in the Stoa to take one `u64` from each, on the
+                 -- publish path, with the row count chosen by whoever floods
+                 -- the Stoa. See `SqliteOpLog::clock`.
+                 --
+                 -- That read does NOT make this a stored clock. Every row's
+                 -- value is a projection of that row's own op, written at
+                 -- append from the op's clock and never updated; there is no
+                 -- running total here to drift from the log. A restore or a
+                 -- replay recomputes each row and therefore recomputes the
+                 -- fold, which is what `OpLog::clock`'s "derived, never stored"
+                 -- requires.
                  --
                  -- It came from the recorded arrival before the op clock, and
                  -- now comes from the op, which is a strict improvement for
@@ -776,6 +790,59 @@ impl OpLog for SqliteOpLog {
             "WHERE target = ?1",
             &[&target.as_bytes().as_slice() as &dyn rusqlite::ToSql],
         )
+    }
+
+    /// The same fold as [`OpLog::clock`], over the stored counters rather than
+    /// over decoded ops.
+    ///
+    /// **This override exists because the default is O(N × body) on the publish
+    /// path, and N is attacker-chosen.** The trait default reads every op of the
+    /// Stoa through [`Self::iter_stoa`], which runs `SignedOp::from_bytes` over
+    /// each `op_bytes` blob — full bodies and attachment lists — to take one
+    /// `u64` from each. Publishing calls it once, so a peer flooded with
+    /// maximum-size ops pays a full decode of all of them every time it posts.
+    /// Measured on a store of 1000 ops with 140 KiB bodies: the default takes
+    /// ~100 ms and this takes ~35 ms, and the gap widens with the body size the
+    /// attacker picks, because only the default reads bodies at all. `guarded`
+    /// cannot help: the failure is slowness, and it degrades toward the SDK's
+    /// call timeout rather than toward an error the caller can read.
+    ///
+    /// **It answers the same question, and the doc on the trait method is the
+    /// definition this must agree with.** `score_epoch` holds exactly
+    /// `clock.counter` per row and `NULL` where the op carries none, written by
+    /// [`Self::append`] from the op's own clock — so `WHERE score_epoch IS NOT
+    /// NULL` is the same filter as `filter_map` over `op.clock`, and no value
+    /// reaches this fold that the default would not have folded.
+    ///
+    /// **Still derived, never stored.** `score_epoch` is a projection of the op,
+    /// recomputed for every row this build writes, not a running total kept
+    /// beside the log — so a restore, a replay or a rebuild recomputes the clock
+    /// exactly as the trait's doc requires. The property the trait defends is
+    /// "no second source of truth", and a column derived per-row from the op is
+    /// not one.
+    ///
+    /// No `ORDER BY`: [`clock_from_counters`] sorts, and its fold is a function
+    /// of the set rather than of the sequence.
+    fn clock(&self, stoa: &Address) -> Result<u64, OpLogError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT score_epoch FROM ops WHERE stoa = ?1 AND score_epoch IS NOT NULL")
+            .map_err(storage)?;
+        let rows = stmt
+            .query_map([&stoa.as_bytes().as_slice()], |row| {
+                row.get::<_, i64>(0)
+            })
+            .map_err(storage)?;
+
+        let mut counters = Vec::new();
+        for row in rows {
+            // Stored by the same `as i64` cast `append` writes, reversed here.
+            // Exact across the whole domain, `u64::MAX` (stored as `-1`)
+            // included — the same round trip `decode_entry` performs on
+            // `arrival_lamport`.
+            counters.push(row.map_err(storage)? as u64);
+        }
+        Ok(clock_from_counters(counters))
     }
 
     fn len(&self) -> Result<usize, OpLogError> {

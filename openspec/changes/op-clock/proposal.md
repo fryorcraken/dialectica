@@ -203,11 +203,14 @@ everything that reads it is `op-ordering`.
   feed-label bullet are resolved and struck through with pointers to the spec;
   §5.7's and §6's "no Lamport value reaches us" claims and the suspended-
   reversibility notes are corrected. Pruned in this change, per the repo rule.
-- **`docs/UI-BRIEF.md`** — fixed in this change, as the rule requires, because it
-  is designed against by someone who cannot read the code. Four places: the
-  ordering-honesty section, the irreversibility warning (obligation 2,
-  **withdrawn**), the duplicate-post obligation (**reversed**, and now the
-  composer's), and the moderation sequencing note.
+- **No brief to correct.** An earlier draft of this proposal listed four fixes to
+  `docs/UI-BRIEF.md`. That file was deleted by #83 under an owner ruling that it
+  was our own output being read back as input, so this change edits no such
+  document. The four obligations it would have carried are not lost: the
+  ordering-honesty and duplicate-post ones are contracted in `composer-view`'s
+  delta, and the clamped-time and moderation-sequencing ones in `thread-read`'s
+  and `moderation-resolution`'s — which is where a rendering obligation belongs
+  now that it has a spec to live in.
 - **Storage** — the SQLite projection derives its sort-key columns from the
   arrival at write time, so they must come from the op instead. That is a
   `LAYOUT_VERSION` bump, and the existing check refuses a layout a build does not
