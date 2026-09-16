@@ -42,17 +42,20 @@ wrong seam is paid for five or six times.
       screen author will look.
 
       **Fixed by the second of the two routes this box offers**, not the first.
-      `docs/UI-BRIEF.md` gains a section, *The three shared components, and what
-      each asks of you*, stating the rule in the box's own terms — bind
-      `capability.canPost === true`, never a raw probe field, with the reason
-      the `=== true` is not cosmetic (`"true"`, `1`, `null` and `undefined` are
-      all not-`true`, and the chip given any of them renders the identity-present
-      arm with every gate green).
+      `DIdentityChip.qml`'s own header states the rule in the box's own terms —
+      bind `capability.canPost === true`, never a raw probe field, with the
+      reason the `=== true` is not cosmetic (`"true"`, `1`, `null` and
+      `undefined` are all not-`true`, and the chip given any of them renders the
+      identity-present arm with every gate green).
 
-      It sits beside *What `ScreenFrame` gives you*, addressed to the same
-      reader, because that section's closing paragraph is the argument for why
-      this one exists: "a contract that can only be found by someone who already
-      knows to look for it is a contract the next screen will not meet."
+      The box offers that route as "stating the contract in the component ...
+      and in the brief". The component half is what landed, and it is now the
+      whole of it: **#83 deleted `docs/UI-BRIEF.md`** while this piece was in
+      review, ruling the brief was output the codebase should not read back as
+      input. The box's requirement — that this be closed "somewhere the screen
+      author will look" — is met better by the file being edited than by a
+      document that has to be found, which is the argument #83 made when it
+      moved `ScreenFrame`'s implementer contract into `ScreenFrame.qml`.
 
       **Not turned into a `capability` property**, and the judgement is worth
       stating rather than leaving as an omission. Changing the seam means
@@ -62,7 +65,7 @@ wrong seam is paid for five or six times.
       validate the shape against. The chip's two arms are already mutually
       exclusive on one boolean and tested in both directions plus the
       transition, so what is at risk is the *binding site*, which is where the
-      brief now speaks.
+      chip's header now speaks.
 
       Recorded in `design.md` D9 alongside the gate that **was** moved into a
       component (`DVouchStamp.hasIdentity`), so the two decisions are visible as
@@ -237,26 +240,44 @@ wrong seam is paid for five or six times.
       next five authors cannot discover by reading the code they are told to
       use.
 
-      **Fixed.** `docs/UI-BRIEF.md` gains *The three shared components, and what
-      each asks of you*, placed immediately after *What `ScreenFrame` gives
-      you* — the section whose closing paragraph is the argument for this one.
+      **Fixed** — in each component's own file header, not in a brief.
 
-      All three obligations this box names are stated: the fixed positional lamp
-      order, the capability-derived `hasIdentity` binding with the reason the
-      `=== true` matters, and that an unrecognised lamp state renders degraded
-      so a screen must not read the absence of orange as health.
+      This box was first answered by adding *The three shared components, and
+      what each asks of you* to `docs/UI-BRIEF.md`. **#83 then deleted that
+      file**, on the owner's ruling that the brief was OUTPUT — written from
+      this codebase to an external designer — so reading it back as input made
+      the codebase cite itself through a lossy round trip. The finding is sound
+      and survives its container; on the owner's ruling the obligations moved
+      into `DStatusBar.qml`, `DIdentityChip.qml` and `DVouchStamp.qml`, which
+      are the files a screen author already has open. Not a new document: that
+      would recreate the failure the brief itself diagnosed, which is the same
+      reasoning #83 used when it moved `ScreenFrame`'s implementer contract into
+      `ScreenFrame.qml`'s header.
 
-      Four more that a screen author cannot deduce from the property names and
-      would otherwise meet as a surprise: the `copy.json status.tooltips`
-      strings travel with the screen that computes the states and must be
-      verbatim; the DELIVERY lamp has no honest source and no heuristic should
-      be invented for it; `generatedName` cannot be filled by any caller until
-      issue #81; and `DVouchStamp.hasIdentity` defaults closed, which is the
-      component holding a rule for the caller rather than a property to work
-      around.
+      All three obligations this box names are stated. The fixed positional lamp
+      order was **already** in `DStatusBar.qml` (the comment above the three
+      `Lamp` instantiations, which this box cites) and was not restated. The
+      other two are new header text: the capability-derived `hasIdentity`
+      binding with the reason the `=== true` matters, in `DIdentityChip.qml`;
+      and that an unrecognised lamp state renders degraded so a screen must not
+      read the absence of orange as health, in `DStatusBar.qml`.
 
-      Plus one that is enforced rather than advisory: tooltips use `DTip`,
-      never `ToolTip.text:`, because CI now fails on the attached form.
+      Four more that a screen author cannot deduce from the property names:
+      `DStatusBar.qml` carries the `copy.json status.tooltips` strings
+      travelling with the screen verbatim (grounded on the handoff's
+      `SPEC.md:132` and `:135-136`, and on `copy.json` itself, both read rather
+      than assumed) and the DELIVERY lamp having no honest source (grounded on
+      `docs/PLAN.md:3471-3481`, which is what design.md D11 cites — **not** the
+      "Still not built" at `PLAN.md:735`, which is about the in-post Stoa
+      address affordance and was a misattribution in the deleted brief text).
+      `DIdentityChip.qml` carries `generatedName` being unfillable until issue
+      #81. `DVouchStamp.qml` carries `hasIdentity` defaulting closed, and the
+      `revealed`-from-the-post-row rule, which is silent when missed.
+
+      **Dropped:** the brief text's restatement of the `DTip` rule. It is not
+      lost — `DTip.qml`'s header states it more completely, including that CI's
+      `no bare ToolTip.text` step enforces it, and that file is where an author
+      writing a tooltip arrives. A second copy would be one to drift.
 
 - [x] **`dev-writer`** — `dialectica-ui/src/qml/FlatButton.qml:21` — `readonly
       property var kinds` exposes a per-instance, mutable copy of the table on

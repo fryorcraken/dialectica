@@ -503,9 +503,10 @@ already funnels the same question through a `capability` object, so each screen
 must independently write `capability.canPost === true` and independently get the
 `=== true` right. That is a real finding; the fix is a seam change across the
 chip and its consumers, and the chip's two arms are already mutually exclusive
-and tested in both directions. `docs/UI-BRIEF.md` now states the binding rule
-where a screen author will meet it, which is the half this piece can discharge
-without widening.
+and tested in both directions. `DIdentityChip.qml`'s own header now states the
+binding rule — `hasIdentity: <capability>.canPost === true`, with the three
+degenerate shapes named — where a screen author will meet it, which is the half
+this piece can discharge without widening.
 
 ### D10. `DVouchStamp` duplicates a chip `PostHeader` already renders
 

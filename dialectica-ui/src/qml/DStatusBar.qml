@@ -19,6 +19,46 @@ import QtQuick.Layouts
 // claim finds it contradicted in the file cited to support it. The marks are
 // not the interface palette (DTheme says so where they are declared) — an
 // identicon ink is picked by an address, never to signal a state.
+//
+// ---- FOR WHOEVER WIRES THIS INTO A SCREEN FOOTER ------------------------
+//
+// Two obligations that are NOT deducible from the property names, and that
+// fail silently when missed. They are stated here, in the file a screen author
+// already has open, rather than in a document that has to be found.
+//
+// **Green never means "probably fine".** An unrecognised state renders
+// `degraded`, and so does an unbound one (see `normalisedState` and the
+// property defaults below). So a screen MAY pass core's string through without
+// pre-checking it — but MUST NOT read the absence of orange as health. Green
+// means a state string this component recognised as `"ok"`.
+//
+// **The six tooltip strings travel with the screen that computes the states,
+// verbatim.** This component takes `deliveryText`/`storageText`/`zoneText` as
+// caller-supplied properties and invents nothing when they are unset — which
+// is the right split (computing a state is a screen's problem) but leaves the
+// strings owed by whoever wires the footer. They live in the bundle's
+// `copy.json` under `status.tooltips`; the handoff's `SPEC.md:132` requires
+// each lamp carry "a tooltip that says what the state means for this machine
+// (strings in copy.json)".
+//
+// Verbatim rather than paraphrased, because `deliveryNoPeers` reads "no peers
+// to reach — you have joined nothing yet", and it is the second clause that
+// tells an empty feed apart from an unreadable store. `SPEC.md:135-136`
+// requires exactly that distinction be forced; a paraphrase to "No peers"
+// loses it and nothing fails.
+//
+// NO TEST CHECKS THE SIX STRINGS AGAINST THE BUNDLE. `tst_status_bar.qml`
+// asserts only the negative — an unset explanation shows none. Whether the
+// verbatim obligation belongs in a spec is an open question for a spec-writer,
+// recorded at findings/spec-test.md.
+//
+// **The DELIVERY lamp has no honest source today**, and that is invisible from
+// here: this component is otherwise complete, and nothing about it says one of
+// its three lamps cannot currently be told the truth. `docs/PLAN.md:3471-3481`
+// records that the delivery outcome arrives asynchronously via delivery's
+// channel events, after the publish call has returned, so no synchronous call
+// produces a signal to bind. Do not invent a heuristic to fill it; design.md
+// D11 carries the argument.
 RowLayout {
     id: root
 

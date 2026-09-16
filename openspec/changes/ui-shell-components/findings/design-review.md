@@ -263,8 +263,8 @@ not carry.
 
       **Fixed** — recorded in `design.md` **D11** (beside the DELIVERY lamp,
       because the two are the same shape: a property whose value no caller can
-      currently supply) and in `docs/UI-BRIEF.md`'s new component section, which
-      is where a screen author binding it will actually be looking.
+      currently supply) and in `DIdentityChip.qml`'s own header, which is where a
+      screen author binding it will actually be looking.
 
       Both name issue #81 and say that passing `""` is correct until it lands,
       so the existing consumer's `generatedName: ""` reads as conformance rather
@@ -341,8 +341,11 @@ not carry.
       component, because `DStatusBar` is otherwise complete and nothing about it
       says one of its three lamps cannot currently be told the truth.
 
-      `docs/UI-BRIEF.md` carries it too, with the instruction that follows from
-      it: do not invent a heuristic to fill the lamp.
+      `DStatusBar.qml`'s own header carries it too, with the instruction that
+      follows from it: do not invent a heuristic to fill the lamp. (It was first
+      written into `docs/UI-BRIEF.md`, which #83 deleted while this piece was in
+      review; the obligation moved into the component rather than into a
+      replacement document.)
 
       The same paragraph covers `generatedName`/#81, which is the same shape.
 

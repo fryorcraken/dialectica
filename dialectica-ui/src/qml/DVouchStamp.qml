@@ -16,6 +16,19 @@ import QtQuick
 //
 // Vouching is not a vote direction. It does not enter ranking, and nothing on
 // this component reports to anyone but the viewer.
+//
+// ---- FOR WHOEVER PLACES A STAMP IN A POST ROW ---------------------------
+//
+// **Thread `revealed` from the POST ROW's hover, not from the stamp's own
+// bounds.** At `opacity: 0` the stamp has no bounds to hover, so a stamp asked
+// to reveal itself never reveals — the un-vouched arm becomes unreachable and
+// the failure is silent, since the vouched arm still draws.
+//
+// **Pass `hasIdentity`.** It defaults CLOSED (see the property below), so a
+// stamp you forget to tell about the identity renders nothing rather than
+// offering a vouch the machine cannot make. That is this component holding the
+// rule on your behalf; do not work around it by defaulting it true at the call
+// site.
 Rectangle {
     id: root
 

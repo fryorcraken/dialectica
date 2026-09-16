@@ -53,8 +53,8 @@ for strings — as `tasks.md` states.
         rather than the file's helper, which supplies `hasIdentity: true` on
         purpose so the other tests assert what their names say.
 
-      Recorded as `design.md` D9, and stated in `docs/UI-BRIEF.md` for the
-      screen author who must still pass the property.
+      Recorded as `design.md` D9, and stated in `DVouchStamp.qml`'s own header
+      for the screen author who must still pass the property.
 
 - [ ] **`spec-writer`** — `SPEC.md:133`, *"Green and orange appear nowhere else
       in the design"*
@@ -107,18 +107,24 @@ for strings — as `tasks.md` states.
       **`dev-writer` note — addressed to `spec-writer`, left OPEN, but the
       record this box asks for now exists.**
 
-      `docs/UI-BRIEF.md`'s new *three shared components* section states it in
-      the terms this box uses: the six `copy.json status.tooltips` strings
-      travel with the screen that computes the states, and must be **verbatim**
-      — with this box's own reason, that losing "you have joined nothing yet"
-      from `deliveryNoPeers` costs the distinction between an empty feed and an
-      unreadable store.
+      `DStatusBar.qml`'s own header states it in the terms this box uses: the
+      six `copy.json status.tooltips` strings travel with the screen that
+      computes the states, and must be **verbatim** — with this box's own
+      reason, that losing "you have joined nothing yet" from `deliveryNoPeers`
+      costs the distinction between an empty feed and an unreadable store. The
+      header also carries this box's own finding forward, that no test checks
+      the six strings against the bundle.
 
-      Left open because the box asks a spec-writer whether that obligation
-      belongs in a spec rather than a brief, and that is a question about the
-      contract, not about this piece. The brief is where a screen author looks;
-      whether it is also where the requirement should *live* is the judgement I
-      am not making on their behalf.
+      It was written into the component's header rather than a document of its
+      own because `docs/UI-BRIEF.md` was deleted by #83 while this piece was in
+      review, on the owner's ruling that the brief was OUTPUT and reading it
+      back as input made the codebase cite itself. The header is where a screen
+      author already looks.
+
+      Left open because the box asks a spec-writer whether the obligation
+      belongs in a **spec** — a contract a gate could enforce — rather than in a
+      comment. A comment is not a gate, and that judgement is about the
+      contract, not about this piece, so it is not mine to make on their behalf.
 
 ## The three `NO SPEC:` markers — my read on each
 

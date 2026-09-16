@@ -119,10 +119,13 @@ because several changed behaviour rather than prose.
       with required-field and NaN-dimension assertions the derivation makes
       free, and a corpus check so a missing table cannot make every sweep
       vacuous.
-- [x] 6.8 **`docs/UI-BRIEF.md` gains a section for the three components**, since
-      five or six screen pieces will be written against it. CLAUDE.md's rule is
-      that a change making the brief wrong fixes it in the same change; this one
-      made it *incomplete in the way that section exists to prevent*.
+- [x] 6.8 **Each component's file header states what it asks of a screen
+      author**, since five or six screen pieces will be written against a
+      contract that names none of these components. Written into
+      `DStatusBar.qml`, `DIdentityChip.qml` and `DVouchStamp.qml` — the files an
+      author already has open — rather than into a document of their own, which
+      is the shape #83 rejected when it deleted `docs/UI-BRIEF.md` and moved
+      `ScreenFrame`'s implementer contract into its own header.
 - [x] 6.9 **Four false or mis-scoped prose claims corrected**: the "ONLY green
       and orange" claim in two files, the `PlainText`-because-peer-supplied
       justification, D3's and D4's citations, and D4's overstatement about

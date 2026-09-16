@@ -18,6 +18,27 @@ import QtQuick.Layouts
 // The address is on screen and not one click away, which is the standing rule
 // wherever an identity is named: the mark is a recognition aid and a second
 // forgeable channel, never an identifier.
+//
+// ---- FOR WHOEVER PLACES THIS CHIP IN A FOOTER ---------------------------
+//
+// **Bind `hasIdentity: <capability>.canPost === true`, never a raw probe
+// field.** The `=== true` is not cosmetic. `"true"`, `1`, `null` and
+// `undefined` are all not-`true`, and each is truthy-or-falsy in a way that
+// does not match what it means: a chip handed any of them under a looser test
+// renders the IDENTITY PRESENT arm, claiming an identity the machine does not
+// have, with every gate green.
+//
+// `FeedScreen.qml` establishes the `capability` shape this binds to and
+// normalises at the boundary (`probe.ok && probe.value.canPost === true`), so
+// a screen that routes through it inherits the rule. One that reads a probe
+// reply directly does not. The three degenerate shapes are driven as fixtures
+// in `tst_gate_affordance.qml` and `tst_vote_and_gate.qml`.
+//
+// **`generatedName` cannot be filled by any caller yet.** The QML sandbox
+// holds no wordlists and cannot derive a name for itself; `generated-names`'
+// spec records the derivation as reachable by no caller until an entry point
+// exists, tracked as issue #81. Passing `""` is correct until it does, and is
+// what the existing consumer passes.
 Rectangle {
     id: root
 

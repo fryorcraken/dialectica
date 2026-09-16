@@ -80,7 +80,7 @@ writes no requirement; it does not say the behaviour is settled.
   `tst_identity_chip.qml`, `tst_identicon_muted.qml`.
 - **Modified:** `dialectica-ui/src/qml/DTheme.qml`, `FlatButton.qml`,
   `Identicon.qml`, `dialectica-ui/tests/tst_flat_button.qml`,
-  `.github/workflows/ci.yml`, `docs/UI-BRIEF.md`.
+  `.github/workflows/ci.yml`.
 - **No core change.** This is view-only.
 - **`PostHeader.qml` is deliberately untouched**, and it renders a rival
   `YOU VOUCHED` chip for the same fact `DVouchStamp` now stamps. The bundle
@@ -88,4 +88,5 @@ writes no requirement; it does not say the behaviour is settled.
   original standing, so `DVouchStamp` has no consumer yet. `design.md` D9 names
   who inherits the removal.
 - **The DELIVERY lamp has no honest source**, and `docs/PLAN.md` records the
-  signal as unbuilt rather than merely elsewhere. `design.md` D10.
+  signal as unbuilt rather than merely elsewhere. `design.md` D11, and
+  `DStatusBar.qml`'s header for the screen author who meets the property.
